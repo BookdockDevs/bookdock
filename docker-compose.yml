@@ -1,0 +1,11 @@
+services:
+  bookdock:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data
+    environment:
+      - AUTH_MODE=password
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - DEFAULT_USERNAME=admin

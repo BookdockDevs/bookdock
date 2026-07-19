@@ -1,0 +1,19 @@
+{
+  "name": "bookdock",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --recursive --parallel run dev",
+    "build": "pnpm --recursive run build",
+    "test": "pnpm --recursive --filter @bookdock/server --filter @bookdock/web run test",
+    "test:watch": "vitest",
+    "lint": "oxlint --deny-warnings",
+    "typecheck": "pnpm --recursive run typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "oxlint": "^1.74.0",
+    "vitest": "^4.1.10"
+  }
+}

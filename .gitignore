@@ -1,0 +1,44 @@
+node_modules/
+dist/
+dist-ssr/
+apps/web/node_modules/.tmp/
+*.tsbuildinfo
+data/
+.env
+.env.local
+.env.*
+
+# IDE and editors
+.vscode/
+.idea/
+.zed/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# CLI coding tools
+.agent/
+.codex/
+.opencode/
+.kilocode/
+.worktrees/
+
+# OS files
+**/.DS_Store
+
+# Logs and temporary files
+logs/
+logs
+*.log
+*.local
+
+# pnpm
+.pnpm-store/
+
+# Local docs (not tracked)
+docs/local/
+
+# Test coverage
+coverage/

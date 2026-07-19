@@ -1,0 +1,9 @@
+{
+  "plugins": ["react", "typescript", "oxc"],
+  "ignorePatterns": ["apps/web/public/foliate-js"],
+  "rules": {
+    "no-console": "off",
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
