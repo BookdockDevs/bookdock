@@ -1,9 +1,16 @@
 import { create } from 'zustand'
 
+export interface AuthUser {
+  id: string
+  username: string
+  role: string
+  /** True for guest-injected sessions (no real login); mirrors MeRes.guest. */
+  guest?: boolean
+}
+
 interface AuthState {
-  token: string | null
-  user: { id: string; username: string; role: string } | null
-  setAuth: (token: string | null, user: { id: string; username: string; role: string } | null) => void
+  user: AuthUser | null
+  setAuth: (user: AuthUser) => void
   clearAuth: () => void
 }
 
@@ -16,23 +23,20 @@ function readStoredUser(): AuthState['user'] {
   }
 }
 
+// JWT lives in an HttpOnly cookie; the store only mirrors the user profile for
+// UI display so a reload does not flash logged-out chrome before /auth/me resolves.
 export const useAuthStore = create<AuthState>((set) => ({
-  token: typeof window !== 'undefined' ? localStorage.getItem('bd-token') : null,
   user: readStoredUser(),
-  setAuth: (token, user) => {
+  setAuth: (user) => {
     if (typeof window !== 'undefined') {
-      if (token) localStorage.setItem('bd-token', token)
-      else localStorage.removeItem('bd-token')
-      if (user) localStorage.setItem('bd-user', JSON.stringify(user))
-      else localStorage.removeItem('bd-user')
+      localStorage.setItem('bd-user', JSON.stringify(user))
     }
-    set({ token, user })
+    set({ user })
   },
   clearAuth: () => {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('bd-token')
       localStorage.removeItem('bd-user')
     }
-    set({ token: null, user: null })
+    set({ user: null })
   },
 }))

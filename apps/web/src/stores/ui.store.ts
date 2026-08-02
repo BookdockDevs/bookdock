@@ -1,8 +1,25 @@
 import { create } from 'zustand'
-import type { PageWidth, FontFamily, ReadingMode, ChineseConversion, ContinuousScroll } from '../features/reader/types'
+import type { FontFamily, ReadingMode, ChineseConversion, ContinuousScroll } from '../features/reader/types'
 import type { CustomReadingTheme } from '../lib/reading-theme'
 
 export type UiTheme = 'system' | 'light' | 'dark'
+export type UiSection = 'font' | 'layout' | 'display' | 'theme'
+
+export const SETTINGS_VERSION = 1
+const VERSION_KEY = 'bd-settings-version'
+
+function migrateSettings(): number {
+  if (typeof window === 'undefined') return SETTINGS_VERSION
+  const currentVer = Number(localStorage.getItem(VERSION_KEY)) || 0
+  if (currentVer >= SETTINGS_VERSION) return currentVer
+
+  let v = currentVer
+  // Future migrations: while (v < SETTINGS_VERSION) { v = migrate_v${v}_to_${v + 1}() }
+  localStorage.setItem(VERSION_KEY, String(v))
+  return v
+}
+
+const initialSettingsVersion = migrateSettings()
 
 const CUSTOM_THEMES_KEY = 'bd-read-custom-themes'
 
@@ -31,6 +48,7 @@ function persistCustomThemes(themes: CustomReadingTheme[]) {
 }
 
 interface UiState {
+  settingsVersion: number
   uiTheme: UiTheme
   readingThemeId: string
   lightReadingThemeId: string
@@ -44,7 +62,7 @@ interface UiState {
   indent: number
 
   // Flat values (always reflect current readingMode)
-  pageWidth: PageWidth
+  pageWidth: number
   horizontalPadding: number
   verticalPadding: number
 
@@ -72,6 +90,23 @@ interface UiState {
   showWordCount: boolean
   continuousScroll: ContinuousScroll
   pageAnimation: boolean
+
+  // Library UI prefs
+  coverMode: boolean
+  coverFit: boolean
+  gridColumns: string
+  showRecentlyRead: boolean
+  setCoverMode: (v: boolean) => void
+  setCoverFit: (v: boolean) => void
+  setGridColumns: (v: string) => void
+  setShowRecentlyRead: (v: boolean) => void
+
+  // Reader sidebar prefs
+  toolbarLocked: boolean
+  sidebarWidth: number
+  setToolbarLocked: (v: boolean) => void
+  setSidebarWidth: (v: number) => void
+
   setUiTheme: (t: UiTheme) => void
   setReadingThemeId: (id: string) => void
   saveCustomTheme: (theme: CustomReadingTheme) => void
@@ -83,7 +118,7 @@ interface UiState {
   setParagraphSpacing: (n: number) => void
   setLetterSpacing: (n: number) => void
   setIndent: (n: number) => void
-  setPageWidth: (w: PageWidth) => void
+  setPageWidth: (w: number) => void
   setHorizontalPadding: (n: number) => void
   setVerticalPadding: (n: number) => void
   setTextAlignJustify: (v: boolean) => void
@@ -100,12 +135,11 @@ interface UiState {
   setPageAnimation: (v: boolean) => void
 }
 
-export function getEffectiveTheme(uiTheme: UiTheme): 'light' | 'dark' {
-  if (uiTheme === 'system') {
-    if (typeof window === 'undefined') return 'light'
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-  }
-  return uiTheme
+// UI theme is fixed to follow the system preference; the stored `uiTheme`
+// field remains only for settings-sync schema compatibility.
+export function getEffectiveTheme(): 'light' | 'dark' {
+  if (typeof window === 'undefined') return 'light'
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
 function getInitialNumber(key: string, fallback: number, min?: number, max?: number): number {
@@ -164,6 +198,7 @@ const initialHorizontalPadding = initialReadingMode === 'page' ? initialPageHori
 const initialVerticalPadding = initialReadingMode === 'page' ? initialPageVerticalPadding : initialScrollVerticalPadding
 
 export const useUiStore = create<UiState>((set, get) => ({
+  settingsVersion: initialSettingsVersion,
   uiTheme: getInitialUiTheme(),
   readingThemeId: getInitial<string>('bd-read-theme', 'paper'),
   lightReadingThemeId: getInitial<string>('bd-read-theme-light', 'paper'),
@@ -201,6 +236,39 @@ export const useUiStore = create<UiState>((set, get) => ({
   showWordCount: getInitialBoolean('bd-show-word-count', false),
   continuousScroll: getInitial<ContinuousScroll>('bd-continuous-scroll', 'off'),
   pageAnimation: getInitialBoolean('bd-page-animation', true),
+
+  coverMode: getInitialBoolean('bd-cover-mode', false),
+  coverFit: getInitialBoolean('bd-cover-fit', false),
+  gridColumns: getInitial<string>('bd-grid-columns', 'auto'),
+  showRecentlyRead: getInitialBoolean('bd-show-recently-read', false),
+  toolbarLocked: getInitialBoolean('bd-reader-toolbar-locked', false),
+  sidebarWidth: getInitialNumber('bd-sidebar-width', 288, 200, 500),
+
+  setCoverMode: (coverMode) => {
+    setStorage('bd-cover-mode', String(coverMode))
+    set({ coverMode })
+  },
+  setCoverFit: (coverFit) => {
+    setStorage('bd-cover-fit', String(coverFit))
+    set({ coverFit })
+  },
+  setGridColumns: (gridColumns) => {
+    setStorage('bd-grid-columns', gridColumns)
+    set({ gridColumns })
+  },
+  setToolbarLocked: (toolbarLocked) => {
+    setStorage('bd-reader-toolbar-locked', String(toolbarLocked))
+    set({ toolbarLocked })
+  },
+  setSidebarWidth: (sidebarWidth) => {
+    setStorage('bd-sidebar-width', String(sidebarWidth))
+    set({ sidebarWidth })
+  },
+  setShowRecentlyRead: (showRecentlyRead) => {
+    setStorage('bd-show-recently-read', String(showRecentlyRead))
+    set({ showRecentlyRead })
+  },
+
   setUiTheme: (uiTheme) => {
     setStorage('bd-ui-theme', uiTheme)
     set({ uiTheme })

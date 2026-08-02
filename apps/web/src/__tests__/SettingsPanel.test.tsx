@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import i18n from '../i18n/i18n'
 import { SettingsPanel } from '../features/reader/components/SettingsPanel'
 import { useUiStore } from '../stores/ui.store'
 
 describe('SettingsPanel', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('zh-CN')
     localStorage.removeItem('bd-settings-section')
     useUiStore.setState({
       fontFamily: 'serif',

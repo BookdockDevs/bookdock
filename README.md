@@ -11,11 +11,13 @@ Self-hosted web e-book library.
 pnpm install
 
 # Terminal 1: Server (http://localhost:3000)
-AUTH_MODE=off pnpm --filter @bookdock/server dev
+pnpm --filter @bookdock/server dev
 
 # Terminal 2: Web (http://localhost:5173)
 pnpm --filter @bookdock/web dev
 ```
+
+On first run, open the web UI and complete setup to create the owner account. The owner can later enable guest access (no-sign-in mode) or open registration in Settings.
 
 ### Production (Docker)
 
@@ -23,7 +25,7 @@ pnpm --filter @bookdock/web dev
 docker compose up -d
 ```
 
-Set `JWT_SECRET` environment variable for password auth. Use `AUTH_MODE=off` for no-password mode.
+`JWT_SECRET` is optional: when omitted, a random secret is generated and persisted to `/data/.jwt-secret`.
 
 ## Commands
 

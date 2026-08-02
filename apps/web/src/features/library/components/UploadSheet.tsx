@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { t } from '@/i18n'
+import { useTranslation } from '@/hooks/useTranslation'
 import { Button } from '@/components/ui/Button'
 
 import { useUploadBook } from '../hooks'
@@ -18,6 +18,7 @@ function isAccepted(file: File): boolean {
 }
 
 export default function UploadSheet({ open, onClose }: UploadSheetProps) {
+  const _ = useTranslation()
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -43,7 +44,7 @@ export default function UploadSheet({ open, onClose }: UploadSheetProps) {
 
   async function handleFile(file: File) {
     if (!isAccepted(file)) {
-      setError(t().library.unsupportedFormat)
+      setError(_('library.unsupportedFormat'))
       return
     }
     setError(null)
@@ -67,7 +68,7 @@ export default function UploadSheet({ open, onClose }: UploadSheetProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
-          {t().library.upload}
+          {_('library.upload')}
         </h2>
 
         <div
@@ -94,11 +95,11 @@ export default function UploadSheet({ open, onClose }: UploadSheetProps) {
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
           </svg>
           <div className="space-y-2 text-center">
-            <p className="text-sm text-stone-500">{t().library.uploadHint}</p>
+            <p className="text-sm text-stone-500">{_('library.uploadHint')}</p>
             {isUploading && (
               <div className="w-64 space-y-1">
                 <div className="flex justify-between text-xs text-stone-400">
-                  <span>{progress < 100 ? t().library.uploading : t().library.processing}</span>
+                  <span>{progress < 100 ? _('library.uploading') : _('library.processing')}</span>
                   <span>{progress}%</span>
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800">
@@ -115,10 +116,10 @@ export default function UploadSheet({ open, onClose }: UploadSheetProps) {
 
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="ghost" onClick={onClose} disabled={isUploading}>
-            {t().library.cancel}
+            {_('library.cancel')}
           </Button>
           <Button onClick={() => inputRef.current?.click()} disabled={isUploading}>
-            {t().library.upload}
+            {_('library.upload')}
           </Button>
         </div>
 

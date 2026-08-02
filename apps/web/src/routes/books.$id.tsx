@@ -1,9 +1,10 @@
-import { createRoute } from '@tanstack/react-router'
+import { createRoute, lazyRouteComponent } from '@tanstack/react-router'
 import { rootRoute } from './__root'
-import Reader from '@/features/reader/Reader'
 
 export const readerRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/books/$id',
-  component: Reader,
+  // Reader pulls in the whole foliate rendering stack — keep it out of the
+  // library bundle
+  component: lazyRouteComponent(() => import('@/features/reader/Reader')),
 })

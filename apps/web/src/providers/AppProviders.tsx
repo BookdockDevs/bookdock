@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
 import { useUiStore, getEffectiveTheme } from '../stores/ui.store'
 import { resolveReadingTheme } from '../lib/reading-theme'
+import '@/i18n/i18n'
 import { Toast } from '../components/ui/Toast'
 import { router } from '../router'
 import { SettingsSync } from './SettingsSync'
@@ -14,18 +15,14 @@ const queryClient = new QueryClient({
 })
 
 export default function AppProviders({ children }: { children?: ReactNode }) {
-  const uiTheme = useUiStore((s) => s.uiTheme)
-  const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>(() => getEffectiveTheme(uiTheme))
+  const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>(() => getEffectiveTheme())
 
   useEffect(() => {
-    setEffectiveTheme(getEffectiveTheme(uiTheme))
-    if (uiTheme !== 'system') return
-
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const handler = (e: MediaQueryListEvent) => setEffectiveTheme(e.matches ? 'dark' : 'light')
     media.addEventListener('change', handler)
     return () => media.removeEventListener('change', handler)
-  }, [uiTheme])
+  }, [])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', effectiveTheme === 'dark')

@@ -1,20 +1,39 @@
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { forwardRef, memo, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
-import { t } from '@/i18n'
+import { useTranslation } from '@/hooks/useTranslation'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useReaderState } from '../state/reader-state'
 import type { SearchResult } from '../types'
-import { useAnnotations, useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
+import { useAnnotations } from '../hooks/useAnnotations'
 import { useBookChapters } from '../hooks/useBookChapters'
-import { HIGHLIGHT_COLORS } from './annotation-colors'
+import { useNotesFilter, type ItemKind } from '../hooks/useNotesFilter'
+import { CloseIcon } from './annotation-icons'
+import { ExpandingSearchBar } from './ExpandingSearchBar'
+import { NotesFilterPanel } from './NotesFilterPanel'
+import { NotesPanel } from './NotesPanel'
+import StatsPanel from './StatsPanel'
 
 export interface NavigationPanelRef {
   saveScroll: () => void
 }
 
-interface NavigationPanelProps {
-  bookId: string
+const DISPLAY_TYPES_KEY = 'bd-notes-display-types'
+const ALL_KINDS: ItemKind[] = ['highlight', 'idea', 'bookmark']
+
+function loadDisplayTypes(): Set<ItemKind> {
+  try {
+    const raw = window.localStorage.getItem(DISPLAY_TYPES_KEY)
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter((k): k is ItemKind => ALL_KINDS.includes(k))
+        if (valid.length > 0) return new Set(valid)
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return new Set(ALL_KINDS)
 }
 
 interface TocNode {
@@ -22,12 +41,13 @@ interface TocNode {
   label: string
   href: string
   level: number
+  displayDepth: number
   children: number[]
   parent: number | null
 }
 
 function buildTocTree(items: { label: string; href: string; level: number }[]): TocNode[] {
-  const tree: TocNode[] = items.map((item, index) => ({ ...item, index, children: [], parent: null }))
+  const tree: TocNode[] = items.map((item, index) => ({ ...item, index, displayDepth: 0, children: [], parent: null }))
   const stack: number[] = []
   for (let i = 0; i < tree.length; i++) {
     const node = tree[i]
@@ -48,12 +68,10 @@ function buildTocTree(items: { label: string; href: string; level: number }[]): 
       stack.push(i)
     }
   }
+  for (const node of tree) {
+    node.displayDepth = node.parent === null ? 1 : tree[node.parent].displayDepth + 1
+  }
   return tree
-}
-
-function formatTime(ms: number) {
-  const d = new Date(ms)
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 interface NavigationPanelProps {
@@ -63,10 +81,11 @@ interface NavigationPanelProps {
   onClose?: () => void
 }
 
-export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelProps>(function NavigationPanel(
+export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPanelProps>(function NavigationPanel(
   { bookId, open, locked, onClose },
   ref,
 ) {
+  const _ = useTranslation()
   const tab = useReaderState((s) => s.activeNavTab)
   const tocItems = useReaderState((s) => s.tocItems)
   const currentChapter = useReaderState((s) => s.currentChapter)
@@ -74,9 +93,6 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
   const { renderer } = useReaderApi()
   const { data: annotations } = useAnnotations(bookId)
   const chaptersQuery = useBookChapters(bookId)
-  const queryClient = useQueryClient()
-  const deleteAnnotation = useDeleteAnnotation()
-  const updateAnnotation = useUpdateAnnotation()
 
   const listRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map())
@@ -92,9 +108,44 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
     },
   }))
 
-  const items = annotations?.data ?? []
-  const bookmarks = items.filter((a) => a.type === 'bookmark')
-  const notes = items.filter((a) => a.type === 'note' || a.type === 'highlight')
+  const annotationItems = useMemo(() => annotations?.data ?? [], [annotations?.data])
+  const [displayTypes, setDisplayTypes] = useState<Set<ItemKind>>(loadDisplayTypes)
+  const notesFilter = useNotesFilter(annotationItems, displayTypes)
+  const [notesSearchExpanded, setNotesSearchExpanded] = useState(false)
+  const [notesFilterOpen, setNotesFilterOpen] = useState(false)
+  const notesFilterBtnRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DISPLAY_TYPES_KEY, JSON.stringify(Array.from(displayTypes)))
+    } catch {
+      // ignore storage errors
+    }
+  }, [displayTypes])
+
+  function toggleDisplayType(kind: ItemKind) {
+    setDisplayTypes((prev) => {
+      const next = new Set(prev)
+      if (next.has(kind)) next.delete(kind)
+      else next.add(kind)
+      return next
+    })
+  }
+
+  function resetNotesFilter() {
+    notesFilter.reset()
+    setDisplayTypes(new Set(ALL_KINDS))
+  }
+
+  function toggleNotesSearchBar() {
+    if (notesSearchExpanded) {
+      setNotesSearchExpanded(false)
+      setNotesFilterOpen(false)
+      notesFilter.setQuery('')
+    } else {
+      setNotesSearchExpanded(true)
+    }
+  }
 
   const tocChapters = useMemo(() => {
     if (tocItems.length) {
@@ -107,6 +158,7 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
   }, [chaptersQuery.data, tocItems])
 
   const tree = useMemo(() => buildTocTree(tocChapters), [tocChapters])
+  const chapterOrder = useMemo(() => tocChapters.map((c) => c.label), [tocChapters])
   const rootNodes = useMemo(() => tree.filter((n) => n.parent === null), [tree])
 
   const currentIndex = useMemo(() => {
@@ -126,6 +178,21 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
   }, [currentChapter, currentChapterIndex, tree])
 
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+
+  const [query, setQuery] = useState('')
+  const [searchExpanded, setSearchExpanded] = useState(false)
+  /** Book-search mode: results overlay the TOC list while the bar is open with a query */
+  const searchActive = searchExpanded && query.trim().length > 0
+
+  // Collapsing only hides the bar — query and results survive the round trip,
+  // so reopening restores the search instantly instead of re-running it.
+  function toggleSearchBar() {
+    setSearchExpanded((v) => !v)
+  }
+
+  function collapseSearchBar() {
+    setSearchExpanded(false)
+  }
 
   const hasMultiLevel = useMemo(() => tree.some((n) => n.children.length > 0), [tree])
   const allParentCollapsed = useMemo(() => {
@@ -158,7 +225,18 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
     if (!locked) onClose?.()
   }
 
-  function toggleCollapse(index: number, e: React.MouseEvent) {
+  function handleItemClick(node: TocNode) {
+    goTo(node.href)
+    if (node.children.length > 0 && collapsed.has(node.index)) {
+      setCollapsed((prev) => {
+        const next = new Set(prev)
+        next.delete(node.index)
+        return next
+      })
+    }
+  }
+
+  function handleExpanderClick(e: React.MouseEvent, index: number) {
     e.stopPropagation()
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -186,7 +264,7 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
   // This lets us reopen at the same position without re-scrolling.
   function handleScroll() {
     const container = listRef.current
-    if (container && tab === 'toc') {
+    if (container && tab === 'toc' && !searchActive) {
       savedScrollTop.current = container.scrollTop
     }
   }
@@ -196,16 +274,16 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
   // useLayoutEffect restores before paint so the panel doesn't flash at the wrong position.
   useLayoutEffect(() => {
     const container = listRef.current
-    if (!container || !open || tab !== 'toc') return
+    if (!container || !open || tab !== 'toc' || searchActive) return
     if (savedScrollTop.current !== null && currentIndex === lastScrolledIndex.current) {
       container.scrollTop = savedScrollTop.current
     }
-  }, [open, tab, currentIndex])
+  }, [open, tab, currentIndex, searchActive])
 
   // Scroll the current chapter into view when the panel opens or current chapter changes.
   // Position the current item at roughly the top 1/4 of the panel viewport for better context.
   useEffect(() => {
-    if (tab !== 'toc' || !open || currentIndex < 0) return
+    if (tab !== 'toc' || !open || currentIndex < 0 || searchActive) return
     if (currentIndex === lastScrolledIndex.current) return
     const timer = setTimeout(() => {
       const item = itemRefs.current.get(currentIndex)
@@ -224,9 +302,8 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
       savedScrollTop.current = target
     }, 300)
     return () => clearTimeout(timer)
-  }, [tab, open, currentIndex, collapsed])
+  }, [tab, open, currentIndex, collapsed, searchActive])
 
-  const [query, setQuery] = useState('')
   const pendingSearchQuery = useReaderState((s) => s.pendingSearchQuery)
   const setPendingSearchQuery = useReaderState((s) => s.setPendingSearchQuery)
 
@@ -234,17 +311,32 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
   useEffect(() => {
     if (pendingSearchQuery == null) return
     setQuery(pendingSearchQuery)
+    setSearchExpanded(true)
     setPendingSearchQuery(null)
   }, [pendingSearchQuery, setPendingSearchQuery])
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
-  const [searchIndex, setSearchIndex] = useState(0)
   const [searching, setSearching] = useState(false)
+  const [searchProgress, setSearchProgress] = useState<number | null>(null)
+  const [searchIndex, setSearchIndex] = useState(0)
   const [searchScope, setSearchScope] = useState<'book' | 'chapter'>('book')
   const [searchMatchCase, setSearchMatchCase] = useState(false)
   const [searchMode, setSearchMode] = useState<'contains' | 'regex'>('contains')
   const [searchMenuOpen, setSearchMenuOpen] = useState(false)
   const [searchMenuPos, setSearchMenuPos] = useState<{ top: number; right: number } | null>(null)
   const searchMenuBtnRef = useRef<HTMLButtonElement>(null)
+  const searchGenRef = useRef(0)
+
+  // Consecutive matches from the same chapter collapse into one group, in book order
+  const resultGroups = useMemo(() => {
+    const groups: { chapter: string | null; items: SearchResult[] }[] = []
+    for (const r of searchResults) {
+      const chapter = r.chapter ?? null
+      const last = groups[groups.length - 1]
+      if (last && last.chapter === chapter) last.items.push(r)
+      else groups.push({ chapter, items: [r] })
+    }
+    return groups
+  }, [searchResults])
 
   // fixed-position menu: the panel's scroll container would clip an absolute one
   function toggleSearchMenu() {
@@ -254,57 +346,12 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
     }
     setSearchMenuOpen((v) => !v)
   }
-  const bookmarkGroups = useMemo(() => {
-    const groups = new Map<string, typeof bookmarks>()
-    for (const b of bookmarks) {
-      const key = b.chapter || t().reader.uncategorized
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(b)
-    }
-    return Array.from(groups.entries()).map(([chapter, items]) => ({ chapter, items }))
-  }, [bookmarks])
-
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(bookmarkGroups.map((g) => g.chapter)))
-  const prevBookmarkGroupsRef = useRef<string[]>([])
-  const [contextMenu, setContextMenu] = useState<{
-    x: number
-    y: number
-    type: 'group' | 'item'
-    chapter?: string
-    bookmarkId?: string
-    initialText?: string
-  } | null>(null)
-
-  // Auto-expand newly added bookmark groups while preserving user-collapsed existing ones.
-  useEffect(() => {
-    const current = bookmarkGroups.map((g) => g.chapter)
-    const added = current.filter((chapter) => !prevBookmarkGroupsRef.current.includes(chapter))
-    prevBookmarkGroupsRef.current = current
-    if (added.length === 0) return
-    setExpandedGroups((prev) => {
-      const next = new Set(prev)
-      for (const chapter of added) next.add(chapter)
-      return next
-    })
-  }, [bookmarkGroups])
-
-  useEffect(() => {
-    if (!contextMenu) return
-    function handle(e: MouseEvent) {
-      const target = e.target as Node
-      if (!document.getElementById('bookmark-context-menu')?.contains(target)) {
-        setContextMenu(null)
-      }
-    }
-    document.addEventListener('mousedown', handle)
-    return () => document.removeEventListener('mousedown', handle)
-  }, [contextMenu])
 
   useEffect(() => {
     if (!searchMenuOpen) return
     function handle(e: MouseEvent) {
       const target = e.target as Node
-      if (!document.getElementById('search-options-root')?.contains(target)) {
+      if (!document.getElementById('search-options-menu')?.contains(target) && !searchMenuBtnRef.current?.contains(target)) {
         setSearchMenuOpen(false)
       }
     }
@@ -314,98 +361,62 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
 
   async function doSearch() {
     if (!query.trim() || !renderer?.search) return
+    const gen = ++searchGenRef.current
     setSearching(true)
+    setSearchProgress(0)
+    setSearchResults([])
+    setSearchIndex(0)
     try {
-      const results = await renderer.search(query.trim(), { scope: searchScope, matchCase: searchMatchCase, mode: searchMode })
+      const results = await renderer.search(
+        query.trim(),
+        { scope: searchScope, matchCase: searchMatchCase, mode: searchMode },
+        (partial, progress) => {
+          if (gen !== searchGenRef.current) return
+          setSearchResults(partial)
+          setSearchProgress(progress)
+        },
+      )
+      if (gen !== searchGenRef.current) return
       setSearchResults(results)
-      setSearchIndex(0)
-      if (results.length > 0) {
-        renderer.display(results[0].cfi)
-      }
     } finally {
-      setSearching(false)
+      if (gen === searchGenRef.current) {
+        setSearching(false)
+        setSearchProgress(null)
+      }
     }
   }
 
-  // Readest-style: search as you type, debounced. Invalid regex just yields no results.
+  function clearSearch() {
+    setQuery('')
+    setSearchResults([])
+    searchGenRef.current++
+    setSearching(false)
+    setSearchProgress(null)
+    setSearchIndex(0)
+    renderer?.clearSearch()
+  }
+
+  // Navigate to a result — via list click or the prev/next card — keeping the
+  // pointer in sync so "next" always continues from what's on screen
+  function goToResult(index: number) {
+    const r = searchResults[index]
+    if (!r) return
+    setSearchIndex(index)
+    void renderer?.display(r.cfi)
+    if (!locked) onClose?.()
+  }
+
+  // Search as you type, debounced. Invalid regex just yields no results.
   useEffect(() => {
-    if (tab !== 'search' || !open) return
+    if (tab !== 'toc' || !open) return
     if (!query.trim()) {
       setSearchResults([])
-      setSearchIndex(0)
       return
     }
     const timer = setTimeout(() => void doSearch(), 400)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, searchScope, searchMode, searchMatchCase, tab, open])
-
-  function goToResult(delta: number) {
-    if (!searchResults.length) return
-    const next = (searchIndex + delta + searchResults.length) % searchResults.length
-    setSearchIndex(next)
-    renderer?.display(searchResults[next].cfi)
-  }
-
-  function refreshAnnotations() {
-    void queryClient.invalidateQueries({ queryKey: ['annotations', bookId] })
-  }
-
-  function clearBookmarks() {
-    if (!bookmarks.length) return
-    if (!window.confirm(t().reader.clearBookmarksConfirm)) return
-    for (const b of bookmarks) {
-      deleteAnnotation.mutate(b.id)
-    }
-  }
-
-  function toggleGroup(chapter: string) {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev)
-      if (next.has(chapter)) next.delete(chapter)
-      else next.add(chapter)
-      return next
-    })
-  }
-
-  function handleGroupContextMenu(e: React.MouseEvent, chapter: string) {
-    e.preventDefault()
-    setContextMenu({ x: e.clientX, y: e.clientY, type: 'group', chapter })
-  }
-
-  function handleItemContextMenu(e: React.MouseEvent, bookmark: typeof bookmarks[number]) {
-    e.preventDefault()
-    e.stopPropagation()
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      type: 'item',
-      bookmarkId: bookmark.id,
-      initialText: bookmark.text,
-    })
-  }
-
-  function deleteGroupBookmarks(chapter: string) {
-    setContextMenu(null)
-    const items = bookmarkGroups.find((g) => g.chapter === chapter)?.items ?? []
-    if (items.length === 0) return
-    if (!window.confirm(`确定删除 "${chapter}" 中的 ${items.length} 个书签吗？`)) return
-    for (const b of items) {
-      deleteAnnotation.mutate(b.id)
-    }
-  }
-
-  function deleteSingleBookmark(id: string) {
-    setContextMenu(null)
-    deleteAnnotation.mutate(id)
-  }
-
-  function startRename(id: string, currentText: string) {
-    setContextMenu(null)
-    const newText = window.prompt('重命名书签', currentText)
-    if (newText === null) return
-    updateAnnotation.mutate({ id, body: { text: newText.trim() || currentText } })
-  }
 
   function renderSubtree(nodes: number[]) {
     return (
@@ -419,43 +430,39 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
           if (hidden) return null
 
           return (
-            <li key={index} style={{ paddingLeft: `${Math.max(0, node.level - 1) * 0.75}rem` }}>
-              <div className="flex items-center">
+            <li key={index}>
+              <button
+                ref={(el) => {
+                  if (el) itemRefs.current.set(index, el)
+                  else itemRefs.current.delete(index)
+                }}
+                onClick={() => handleItemClick(node)}
+                className={cn(
+                  'flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-1.5 text-left text-sm transition-colors',
+                  isCurrent
+                    ? 'bg-stone-500/15 font-medium text-current ring-1 ring-inset ring-stone-500/20'
+                    : 'text-[var(--bd-read-sub)] hover:bg-stone-500/5 hover:text-current',
+                )}
+                style={{ paddingLeft: `${(node.displayDepth - 1) * 14 + 8}px` }}
+                title={node.label}
+              >
                 {hasChildren ? (
-                  <button
-                    onClick={(e) => toggleCollapse(index, e)}
-                    className="mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--bd-read-sub)] hover:bg-stone-500/10"
+                  <svg
+                    onClick={(e) => handleExpanderClick(e, node.index)}
+                    className={cn('h-3 w-3 shrink-0 cursor-pointer text-[var(--bd-read-sub)] transition-transform', isExpanded && 'rotate-90')}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
                     aria-label={isExpanded ? '折叠' : '展开'}
                   >
-                    <svg
-                      className={cn('h-3 w-3 transition-transform', isExpanded ? 'rotate-90' : 'rotate-0')}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <path d="M9 18l6-6-6-6" />
-                    </svg>
-                  </button>
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
                 ) : (
-                  <span className="mr-1 h-5 w-5 shrink-0" />
+                  <span className="w-3 shrink-0" />
                 )}
-                <button
-                  ref={(el) => {
-                    if (el) itemRefs.current.set(index, el)
-                    else itemRefs.current.delete(index)
-                  }}
-                  onClick={() => goTo(node.href)}
-                  className={cn(
-                    'flex-1 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
-                    isCurrent
-                      ? 'bg-stone-500/15 font-medium text-current ring-1 ring-inset ring-stone-500/20'
-                      : 'text-[var(--bd-read-sub)] hover:bg-stone-500/5 hover:text-current',
-                  )}
-                >
-                  {node.label}
-                </button>
-              </div>
+                <span className="flex-1 truncate">{node.label}</span>
+              </button>
               {hasChildren && isExpanded && renderSubtree(node.children)}
             </li>
           )
@@ -471,33 +478,44 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
         style={{ backgroundColor: 'var(--bd-read-bg)' }}
       >
         <span className="text-sm font-medium text-current">
-          {tab === 'toc' && t().reader.toc}
-          {tab === 'bookmarks' && t().reader.bookmarks}
-          {tab === 'notes' && t().reader.notes}
-          {tab === 'search' && t().reader.search}
+          {tab === 'toc' && _('reader.toc')}
+          {tab === 'notes' && _('reader.notes')}
+          {tab === 'stats' && _('reader.stats')}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          {tab === 'bookmarks' && bookmarks.length > 0 && (
-            <div className="flex items-center gap-1">
-              <button
-                onClick={refreshAnnotations}
-                className="flex h-7 w-7 items-center justify-center rounded text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current"
-                aria-label={t().reader.refresh}
-              >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-                </svg>
-              </button>
-              <button
-                onClick={clearBookmarks}
-                className="flex h-7 w-7 items-center justify-center rounded text-[var(--bd-read-sub)] hover:bg-red-500/10 hover:text-red-500"
-                aria-label={t().reader.clear}
-              >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            </div>
+          {tab !== 'stats' && (
+          <button
+            onClick={tab === 'toc' ? toggleSearchBar : toggleNotesSearchBar}
+            title={_('reader.search')}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded transition-colors',
+              (tab === 'toc' ? searchExpanded : notesSearchExpanded)
+                ? 'bg-stone-500/10 text-current'
+                : 'text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current',
+            )}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+          </button>
+          )}
+          {tab === 'notes' && (
+            <button
+              ref={notesFilterBtnRef}
+              onClick={() => setNotesFilterOpen((v) => !v)}
+              title={_('annotation.filter')}
+              className={cn(
+                'flex h-7 w-7 items-center justify-center rounded transition-colors',
+                notesFilterOpen || notesFilter.hasActiveFilter || displayTypes.size < ALL_KINDS.length
+                  ? 'bg-stone-500/10 text-current'
+                  : 'text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current',
+              )}
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+              </svg>
+            </button>
           )}
           {tab === 'toc' && hasMultiLevel && (
             <button
@@ -518,238 +536,189 @@ export const NavigationPanel = forwardRef<NavigationPanelRef, NavigationPanelPro
               )}
             </button>
           )}
-          <span className="text-xs text-[var(--bd-read-sub)]">
-            {tab === 'toc' && `${tree.length} ${t().reader.chapters ?? '章'}`}
-            {tab === 'bookmarks' && `${bookmarks.length}`}
-            {tab === 'notes' && `${notes.length}`}
-          </span>
+          {tab === 'toc' && (
+            <span className="text-xs text-[var(--bd-read-sub)]">{`${tree.length} ${_('reader.chapters')}`}</span>
+          )}
         </div>
       </div>
-      <div ref={listRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 text-sm">
-        {tab === 'toc' && (
+      {tab === 'toc' && (
+        <div className="px-4">
+          <ExpandingSearchBar
+            expanded={searchExpanded}
+            query={query}
+            placeholder={_('reader.searchPlaceholder')}
+            onQueryChange={(q) => (q.trim() ? setQuery(q) : clearSearch())}
+            onCollapse={collapseSearchBar}
+            progress={searchProgress}
+          >
+            <button
+              ref={searchMenuBtnRef}
+              onClick={toggleSearchMenu}
+              title={_('reader.searchOptions')}
+              className={cn(
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors',
+                searchMenuOpen
+                  ? 'border-current bg-current/10 text-current'
+                  : 'border-stone-200/60 text-[var(--bd-read-sub)] hover:bg-stone-500/5 hover:text-current dark:border-stone-800/60',
+              )}
+            >
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
+              </svg>
+            </button>
+          </ExpandingSearchBar>
+          {searchMenuOpen && searchMenuPos && (
+            <div
+              id="search-options-menu"
+              className="fixed z-50 w-44 rounded-lg border border-stone-200/60 bg-[var(--bd-read-page-bg)] p-1 shadow-lg dark:border-stone-800/60"
+              style={{ top: searchMenuPos.top, right: searchMenuPos.right }}
+            >
+              {(
+                [
+                  { type: 'scope' as const, key: 'book', label: _('reader.searchScopeBook'), active: searchScope === 'book', onClick: () => setSearchScope('book') },
+                  { type: 'scope' as const, key: 'chapter', label: _('reader.searchScopeChapter'), active: searchScope === 'chapter', onClick: () => setSearchScope('chapter') },
+                  { type: 'mode' as const, key: 'contains', label: _('reader.searchModeContains'), active: searchMode === 'contains', onClick: () => setSearchMode('contains') },
+                  { type: 'mode' as const, key: 'regex', label: _('reader.searchModeRegex'), active: searchMode === 'regex', onClick: () => setSearchMode('regex') },
+                  { type: 'toggle' as const, key: 'case', label: _('reader.searchMatchCase'), active: searchMatchCase, onClick: () => setSearchMatchCase((v) => !v) },
+                ]
+              ).map((item, i) => (
+                <div key={item.key}>
+                  {i === 2 || i === 4 ? <div className="mx-2 my-1 border-t border-stone-300 dark:border-stone-600" /> : null}
+                  <button
+                    onClick={item.onClick}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-current hover:bg-stone-500/5"
+                  >
+                    <span className="w-4 shrink-0 text-center text-xs">
+                      {item.active ? '✓' : ''}
+                    </span>
+                    {item.label}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {tab === 'notes' && (
+        <div className="px-4">
+          <ExpandingSearchBar
+            expanded={notesSearchExpanded}
+            query={notesFilter.query}
+            placeholder={_('reader.noteSearchPlaceholder')}
+            onQueryChange={notesFilter.setQuery}
+            onCollapse={toggleNotesSearchBar}
+          />
+          <NotesFilterPanel
+            open={notesFilterOpen}
+            anchorRef={notesFilterBtnRef}
+            onClose={() => setNotesFilterOpen(false)}
+            displayTypes={displayTypes}
+            onToggleType={toggleDisplayType}
+            sort={notesFilter.sort}
+            onSortChange={notesFilter.setSort}
+            styleFilter={notesFilter.styleFilter}
+            colorFilter={notesFilter.colorFilter}
+            onToggleStyle={notesFilter.toggleStyle}
+            onToggleColor={notesFilter.toggleColor}
+            onReset={resetNotesFilter}
+          />
+        </div>
+      )}
+      <div ref={listRef} onScroll={handleScroll} className="flex-1 overflow-y-auto pl-2 pr-4 py-4 text-sm">
+        {tab === 'toc' && (searchActive ? (
+          <div className="space-y-3">
+            {searchResults.length > 0 && (
+              <div className="px-1 text-xs text-[var(--bd-read-sub)]">
+                {searchResults.length} {_('reader.matches')}
+              </div>
+            )}
+            {searchResults.length === 0 && !searching && (
+              <p className="text-xs text-[var(--bd-read-sub)]">{_('reader.noMatches')}</p>
+            )}
+            {resultGroups.map((group, gi) => (
+              <div key={group.chapter ?? gi}>
+                {group.chapter && (
+                  <div className="mb-1.5 px-1 text-sm font-semibold text-current">{group.chapter}</div>
+                )}
+                <ul className="space-y-1">
+                  {group.items.map((r) => (
+                    <li key={r.index}>
+                      <button
+                        onClick={() => goToResult(r.index)}
+                        className="w-full rounded-lg px-2 py-2 text-left text-xs leading-relaxed text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/5 hover:text-current"
+                      >
+                        {r.excerpt ? (
+                          <>
+                            {r.excerpt.pre}
+                            <mark className="bg-yellow-500/30 text-current">{r.excerpt.match}</mark>
+                            {r.excerpt.post}
+                          </>
+                        ) : (
+                          r.text
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        ) : (
           <ul className="space-y-0.5">
             {renderSubtree(rootNodes.map((n) => n.index))}
           </ul>
-        )}
-        {tab === 'bookmarks' && (
-          <div className="h-full">
-            {bookmarks.length === 0 ? (
-              <p className="mt-8 text-center text-xs text-[var(--bd-read-sub)]">{t().reader.noBookmarks}</p>
-            ) : (
-              <ul className="space-y-3">
-                {bookmarkGroups.map((group) => {
-                  const isExpanded = expandedGroups.has(group.chapter)
-                  return (
-                    <li key={group.chapter} className="rounded-lg border border-stone-200/60 p-2 dark:border-stone-800/60">
-                      <button
-                        data-testid={`bookmark-group-${group.chapter}`}
-                        onClick={() => toggleGroup(group.chapter)}
-                        onContextMenu={(e) => handleGroupContextMenu(e, group.chapter)}
-                        className="flex w-full items-center justify-between px-2 py-1 text-left"
-                      >
-                        <span className="flex items-center gap-1 text-xs font-medium text-current">
-                          <svg
-                            className={cn('h-3 w-3 transition-transform', isExpanded ? 'rotate-90' : 'rotate-0')}
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <path d="M9 18l6-6-6-6" />
-                          </svg>
-                          {group.chapter}
-                        </span>
-                        <span className="text-xs text-[var(--bd-read-sub)]">{group.items.length}</span>
-                      </button>
-                      {isExpanded && (
-                        <ul className="mt-1 space-y-1">
-                          {group.items.map((b) => (
-                            <li
-                              key={b.id}
-                              className="rounded-lg p-2 hover:bg-stone-500/5"
-                              onContextMenu={(e) => handleItemContextMenu(e, b)}
-                            >
-                              <button
-                                onClick={() => goTo(b.cfiAnchor || b.cfiRange)}
-                                className="w-full text-left"
-                              >
-                                <p className="mb-1 text-xs text-current line-clamp-2">{b.text || t().reader.bookmark}</p>
-                                <p className="text-[10px] text-[var(--bd-read-sub)]">{formatTime(b.createdAt)}</p>
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-        )}
+        ))}
         {tab === 'notes' && (
-          notes.length === 0 ? (
-            <p className="mt-8 text-center text-xs text-[var(--bd-read-sub)]">{t().reader.noNotes}</p>
-          ) : (
-            <ul className="space-y-3">
-              {notes.map((n) => (
-                <li key={n.id}>
-                  <button
-                    onClick={() => {
-                      renderer?.display(n.cfiRange)
-                      if (!locked) onClose?.()
-                    }}
-                    className="w-full rounded-lg border border-stone-200/60 p-3 text-left transition-colors hover:bg-stone-500/5 dark:border-stone-800/60"
-                    style={{ borderLeft: `3px solid ${HIGHLIGHT_COLORS.find((c) => c.name === n.color)?.hex ?? '#eab308'}` }}
-                  >
-                    <p className="mb-1 line-clamp-2 text-xs opacity-80">{n.text || t().reader.notes}</p>
-                    {n.note && <p className="text-xs text-[var(--bd-read-sub)]">{n.note}</p>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )
+          <NotesPanel
+            items={notesFilter.filtered}
+            total={annotationItems.length}
+            sort={notesFilter.sort}
+            locked={locked}
+            onClose={onClose}
+            chapterOrder={chapterOrder}
+            bookId={bookId}
+          />
         )}
-        {tab === 'search' && (
-          <div className="space-y-3">
-            <div className="relative" id="search-options-root">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') goToResult(e.shiftKey ? -1 : 1)
-                  }}
-                  placeholder={t().reader.searchPlaceholder}
-                  className="min-w-0 flex-1 rounded-lg border border-stone-200/60 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-[var(--bd-read-sub)] dark:border-stone-800/60"
-                />
-                <button
-                  ref={searchMenuBtnRef}
-                  onClick={toggleSearchMenu}
-                  aria-label={t().reader.searchOptions}
-                  className={cn(
-                    'shrink-0 rounded-lg border px-2 py-2 text-sm transition-colors',
-                    searchMenuOpen
-                      ? 'border-current bg-current/10 text-current'
-                      : 'border-stone-200/60 text-[var(--bd-read-sub)] hover:bg-stone-500/5 hover:text-current dark:border-stone-800/60',
-                  )}
-                >
-                  <span aria-hidden>▾</span>
-                </button>
-              </div>
-              {searchMenuOpen && searchMenuPos && (
-                <div
-                  className="fixed z-50 w-44 rounded-lg border border-stone-200/60 bg-[var(--bd-read-page-bg)] p-1 shadow-lg dark:border-stone-800/60"
-                  style={{ top: searchMenuPos.top, right: searchMenuPos.right }}
-                >
-                  {(
-                    [
-                      { key: 'book', label: t().reader.searchScopeBook, active: searchScope === 'book', onClick: () => setSearchScope('book') },
-                      { key: 'chapter', label: t().reader.searchScopeChapter, active: searchScope === 'chapter', onClick: () => setSearchScope('chapter') },
-                      { key: 'contains', label: t().reader.searchModeContains, active: searchMode === 'contains', onClick: () => setSearchMode('contains') },
-                      { key: 'regex', label: t().reader.searchModeRegex, active: searchMode === 'regex', onClick: () => setSearchMode('regex') },
-                      { key: 'case', label: t().reader.searchMatchCase, active: searchMatchCase, onClick: () => setSearchMatchCase((v) => !v) },
-                    ] as const
-                  ).map((item, i) => (
-                    <div key={item.key}>
-                      {i === 2 || i === 4 ? <div className="mx-2 my-1 border-t border-stone-200/60 dark:border-stone-800/60" /> : null}
-                      <button
-                        onClick={item.onClick}
-                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-current hover:bg-stone-500/5"
-                      >
-                        <span className="w-4 shrink-0 text-center">{item.active ? '✓' : ''}</span>
-                        {item.label}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {searchResults.length > 0 && (
-              <div className="flex items-center justify-between text-xs text-[var(--bd-read-sub)]">
-                <span>{searchResults.length} {t().reader.matches}</span>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => goToResult(-1)}
-                    className="rounded px-2 py-1 hover:bg-stone-500/10"
-                  >
-                    {t().reader.prev}
-                  </button>
-                  <span className="px-1 py-1 tabular-nums">{searchIndex + 1} / {searchResults.length}</span>
-                  <button
-                    onClick={() => goToResult(1)}
-                    className="rounded px-2 py-1 hover:bg-stone-500/10"
-                  >
-                    {t().reader.next}
-                  </button>
-                </div>
-              </div>
-            )}
-            {searchResults.length === 0 && query.trim() && !searching && (
-              <p className="text-xs text-[var(--bd-read-sub)]">{t().reader.noMatches}</p>
-            )}
-            <ul className="space-y-2">
-              {searchResults.map((r, i) => (
-                <li key={i}>
-                  <button
-                    onClick={() => {
-                      setSearchIndex(i)
-                      renderer?.display(r.cfi)
-                    }}
-                    className={cn(
-                      'w-full rounded-lg px-2 py-2 text-left text-xs transition-colors',
-                      i === searchIndex ? 'bg-stone-500/10 font-medium text-current' : 'text-[var(--bd-read-sub)] hover:bg-stone-500/5 hover:text-current',
-                    )}
-                  >
-                    {r.excerpt ? (
-                      <>
-                        {r.excerpt.pre}
-                        <mark className="bg-yellow-500/30 text-current">{r.excerpt.match}</mark>
-                        {r.excerpt.post}
-                      </>
-                    ) : (
-                      r.text
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {tab === 'stats' && <StatsPanel bookId={bookId} />}
       </div>
-      {contextMenu && (
+      {searchActive && searchResults.length > 0 && (
         <div
-          id="bookmark-context-menu"
-          className="fixed z-50 min-w-[8rem] rounded-lg border border-stone-200/60 bg-[var(--bd-read-bg)] py-1 shadow-xl dark:border-stone-800/60"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          className="fixed bottom-16 left-1/2 z-50 flex h-11 -translate-x-1/2 items-center gap-0.5 rounded-full border border-stone-200/60 bg-[var(--bd-read-bg)] px-1.5 shadow-xl dark:border-stone-800/60"
+          style={{ animation: 'note-editor-in 140ms ease-out forwards', '--note-dx': '0px', '--note-dy': '8px' } as CSSProperties}
         >
-          {contextMenu.type === 'group' && (
-            <button
-              onClick={() => deleteGroupBookmarks(contextMenu.chapter!)}
-              className="block w-full px-3 py-1.5 text-left text-xs text-red-500 hover:bg-stone-500/5"
-            >
-              删除本章全部书签
-            </button>
-          )}
-          {contextMenu.type === 'item' && (
-            <>
-              <button
-                onClick={() => startRename(contextMenu.bookmarkId!, contextMenu.initialText ?? '')}
-                className="block w-full px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
-              >
-                重命名
-              </button>
-              <button
-                onClick={() => deleteSingleBookmark(contextMenu.bookmarkId!)}
-                className="block w-full px-3 py-1.5 text-left text-xs text-red-500 hover:bg-stone-500/5"
-              >
-                删除
-              </button>
-            </>
-          )}
+          <button
+            onClick={() => goToResult((searchIndex - 1 + searchResults.length) % searchResults.length)}
+            title={_('reader.prev')}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+          <span className="mx-1 max-w-52 truncate text-sm text-current">
+            {_('reader.searchResultsFor', { q: query.trim() })}
+          </span>
+          <span className="text-xs tabular-nums text-[var(--bd-read-sub)]">
+            {searchIndex + 1}/{searchResults.length}
+          </span>
+          <button
+            onClick={clearSearch}
+            title={_('annotation.cancel')}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+          >
+            <CloseIcon />
+          </button>
+          <button
+            onClick={() => goToResult((searchIndex + 1) % searchResults.length)}
+            title={_('reader.next')}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
         </div>
       )}
     </div>
   )
-})
+}))

@@ -29,7 +29,7 @@ interface ToolDockProps {
   activeNavTab: NavTab
   sidebarOpen: boolean
   locked: boolean
-  onNavTab: (tab: 'toc' | 'bookmarks' | 'notes' | 'search') => void
+  onNavTab: (tab: NavTab) => void
   onToggleLock: () => void
 }
 
@@ -41,27 +41,26 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, onNavTab, onToggle
       icon: <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 6h16M4 12h16M4 18h16" /></svg>,
     },
     {
-      id: 'bookmarks' as const,
-      title: '书签',
-      icon: (active: boolean) => active ? (
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M6 2h12a2 2 0 012 2v18l-8-4-8 4V4a2 2 0 012-2z" /></svg>
-      ) : (
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M6 4h12v16l-6-3-6 3V4z" /></svg>
-      ),
-    },
-    {
       id: 'notes' as const,
       title: '笔记',
-      icon: (active: boolean) => active ? (
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 2H8a2 2 0 00-2 2v16l3.5-1.75L12 20l2.5-1.75L18 20V4a2 2 0 00-2-2z" /></svg>
-      ) : (
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 12h6m-6 4h6m2-14H7a2 2 0 00-2 2v16l4-2 4 2 4-2V4a2 2 0 00-2-2z" /></svg>
+      icon: (
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z" />
+          <path d="M16 8 2 22" />
+          <path d="M17.5 15H9" />
+        </svg>
       ),
     },
     {
-      id: 'search' as const,
-      title: '搜索',
-      icon: <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>,
+      id: 'stats' as const,
+      title: '数据',
+      icon: (
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+          <path d="M6 20v-6" />
+          <path d="M12 20V9" />
+          <path d="M18 20V4" />
+        </svg>
+      ),
     },
   ]
 
@@ -75,7 +74,7 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, onNavTab, onToggle
             title={item.title}
             active={active}
             onClick={() => onNavTab(item.id)}
-            icon={typeof item.icon === 'function' ? item.icon(active) : item.icon}
+            icon={item.icon}
           />
         )
       })}

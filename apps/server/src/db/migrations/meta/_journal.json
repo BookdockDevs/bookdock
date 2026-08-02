@@ -36,6 +36,90 @@
       "when": 1784600000000,
       "tag": "0004_book_trash",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1785000000000,
+      "tag": "0005_read_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785200000000,
+      "tag": "0006_progress_col",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1786000000000,
+      "tag": "0007_content_hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1787000000000,
+      "tag": "0008_soft_delete_annotations",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1788000000000,
+      "tag": "0009_pinned_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789000000000,
+      "tag": "0010_last_read_at_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1790000000000,
+      "tag": "0011_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790100000000,
+      "tag": "0012_drop_unread_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1790200000000,
+      "tag": "0013_reading_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1790300000000,
+      "tag": "0014_reading_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1790400000000,
+      "tag": "0015_annotation_cfi_type_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1790500000000,
+      "tag": "0016_multiple_notes_per_range",
+      "breakpoints": true
     }
   ]
 }

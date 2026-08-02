@@ -19,21 +19,21 @@ export function useCreateAnnotation(bookId: string) {
   })
 }
 
-export function useUpdateAnnotation() {
+export function useUpdateAnnotation(bookId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: AnnotationUpdateReq }) =>
       apiPut<{ data: AnnotationRes }>(`/annotations/${id}`, body),
-    onSuccess: (_, _vars) => {
-      queryClient.invalidateQueries({ queryKey: ['annotations'] })
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['annotations', bookId] })
     },
   })
 }
 
-export function useDeleteAnnotation() {
+export function useDeleteAnnotation(bookId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => apiDelete(`/annotations/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['annotations'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['annotations', bookId] }),
   })
 }

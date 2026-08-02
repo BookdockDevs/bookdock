@@ -7,6 +7,7 @@ import { useReaderApi } from '../features/reader/hooks/useReaderApi'
 import { useAnnotations } from '../features/reader/hooks/useAnnotations'
 
 const display = vi.fn()
+const clearSearch = vi.fn()
 
 vi.mock('../features/reader/hooks/useReaderApi', () => ({
   useReaderApi: vi.fn(),
@@ -25,6 +26,11 @@ vi.mock('../features/reader/hooks/useBookChapters', () => ({
   useBookChapters: () => ({ data: undefined, isLoading: false }),
 }))
 
+vi.mock('@/api/hooks/reading-records', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/api/hooks/reading-records')>()
+  return { ...original, useBookReadingRecords: () => ({ data: undefined }) }
+})
+
 vi.mock('@tanstack/react-query', async () => {
   const actual = await vi.importActual('@tanstack/react-query')
   return {
@@ -35,8 +41,9 @@ vi.mock('@tanstack/react-query', async () => {
 
 describe('NavigationPanel', () => {
   beforeEach(() => {
-    vi.mocked(useReaderApi).mockReturnValue({ renderer: { display } })
+    vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, clearSearch } })
     vi.mocked(useAnnotations).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useAnnotations>)
+    window.localStorage.removeItem('bd-notes-display-types')
     display.mockClear()
     deleteMutate.mockClear()
     updateMutate.mockClear()
@@ -59,7 +66,7 @@ describe('NavigationPanel', () => {
 
     render(<NavigationPanel bookId="book-1" open />)
 
-    const currentButton = screen.getByText('第二章 续篇')
+    const currentButton = screen.getByRole('button', { name: '第二章 续篇' })
     expect(currentButton).toHaveClass('font-medium')
   })
 
@@ -127,7 +134,7 @@ describe('NavigationPanel', () => {
 
     render(<NavigationPanel bookId="book-1" open />)
 
-    const currentButton = screen.getByText('第二章 续篇')
+    const currentButton = screen.getByRole('button', { name: '第二章 续篇' })
     expect(currentButton).toHaveClass('font-medium')
   })
 
@@ -149,101 +156,12 @@ describe('NavigationPanel', () => {
 
     // The current chapter and its ancestor should be visible after auto-expansion.
     await new Promise((r) => setTimeout(r, 400))
-    expect(screen.getByText('第三章 深入')).toHaveClass('font-medium')
+    expect(screen.getByRole('button', { name: '第三章 深入' })).toHaveClass('font-medium')
     expect(screen.getByText('第二卷')).toBeInTheDocument()
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
   })
 
-  it('groups bookmarks by chapter', () => {
-    vi.mocked(useAnnotations).mockReturnValue({
-      data: {
-        data: [
-          { id: 'b1', type: 'bookmark', cfiRange: 'chapter:0', cfiAnchor: 'chapter:0', text: '第一章上下文', chapter: '第一章 开篇', createdAt: 1700000000000, updatedAt: 1700000000000 },
-          { id: 'b2', type: 'bookmark', cfiRange: 'chapter:1', cfiAnchor: 'chapter:1', text: '第二章上下文', chapter: '第二章 续篇', createdAt: 1700000000000, updatedAt: 1700000000000 },
-          { id: 'b3', type: 'bookmark', cfiRange: 'chapter:2', cfiAnchor: 'chapter:2', text: '第二章另一处', chapter: '第二章 续篇', createdAt: 1700000000000, updatedAt: 1700000000000 },
-        ],
-      },
-    } as ReturnType<typeof useAnnotations>)
-
-    useReaderState.setState({ activeNavTab: 'bookmarks' })
-    render(<NavigationPanel bookId="book-1" open />)
-
-    expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
-    expect(screen.getByText('第二章 续篇')).toBeInTheDocument()
-    expect(screen.getByText('第一章上下文')).toBeInTheDocument()
-    expect(screen.getByText('第二章上下文')).toBeInTheDocument()
-    expect(screen.getByText('第二章另一处')).toBeInTheDocument()
-    expect(screen.getByText('1')).toBeInTheDocument()
-    expect(screen.getByText('2')).toBeInTheDocument()
-  })
-
-  it('puts bookmarks without chapter into uncategorized group', () => {
-    vi.mocked(useAnnotations).mockReturnValue({
-      data: {
-        data: [
-          { id: 'b1', type: 'bookmark', cfiRange: 'chapter:0', cfiAnchor: 'chapter:0', text: '无章节上下文', chapter: null, createdAt: 1700000000000, updatedAt: 1700000000000 },
-        ],
-      },
-    } as ReturnType<typeof useAnnotations>)
-
-    useReaderState.setState({ activeNavTab: 'bookmarks' })
-    render(<NavigationPanel bookId="book-1" open />)
-
-    expect(screen.getByText('未分类')).toBeInTheDocument()
-    expect(screen.getByText('无章节上下文')).toBeInTheDocument()
-  })
-
-  it('toggles bookmark group expansion', async () => {
-    vi.mocked(useAnnotations).mockReturnValue({
-      data: {
-        data: [
-          { id: 'b1', type: 'bookmark', cfiRange: 'chapter:0', cfiAnchor: 'chapter:0', text: '第一章上下文', chapter: '第一章 开篇', createdAt: 1700000000000, updatedAt: 1700000000000 },
-        ],
-      },
-    } as ReturnType<typeof useAnnotations>)
-
-    useReaderState.setState({ activeNavTab: 'bookmarks' })
-    render(<NavigationPanel bookId="book-1" open />)
-
-    const groupButton = screen.getByTestId('bookmark-group-第一章 开篇')
-    expect(groupButton).toBeInTheDocument()
-    expect(screen.getByText('第一章上下文')).toBeInTheDocument()
-
-    fireEvent.click(groupButton)
-    await new Promise((r) => setTimeout(r, 0))
-    expect(screen.queryByText('第一章上下文')).not.toBeInTheDocument()
-
-    fireEvent.click(groupButton)
-    await new Promise((r) => setTimeout(r, 0))
-    expect(screen.getByText('第一章上下文')).toBeInTheDocument()
-  })
-
-  it('shows context menu to delete all bookmarks in a group', () => {
-    vi.mocked(useAnnotations).mockReturnValue({
-      data: {
-        data: [
-          { id: 'b1', type: 'bookmark', cfiRange: 'chapter:0', cfiAnchor: 'chapter:0', text: '第一章上下文', chapter: '第一章 开篇', createdAt: 1700000000000, updatedAt: 1700000000000 },
-          { id: 'b2', type: 'bookmark', cfiRange: 'chapter:1', cfiAnchor: 'chapter:1', text: '第一章另一处', chapter: '第一章 开篇', createdAt: 1700000000000, updatedAt: 1700000000000 },
-        ],
-      },
-    } as ReturnType<typeof useAnnotations>)
-
-    vi.stubGlobal('confirm', vi.fn(() => true))
-    useReaderState.setState({ activeNavTab: 'bookmarks' })
-    render(<NavigationPanel bookId="book-1" open />)
-
-    const groupButton = screen.getByTestId('bookmark-group-第一章 开篇')
-    fireEvent.contextMenu(groupButton)
-
-    expect(screen.getByText('删除本章全部书签')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('删除本章全部书签'))
-
-    expect(deleteMutate).toHaveBeenCalledTimes(2)
-    expect(deleteMutate).toHaveBeenCalledWith('b1')
-    expect(deleteMutate).toHaveBeenCalledWith('b2')
-  })
-
-  it('restores TOC scroll position after switching to bookmarks and back', async () => {
+  it('restores TOC scroll position after switching to notes and back', async () => {
     const originalGetBoundingClientRect = window.HTMLElement.prototype.getBoundingClientRect
     let callCount = 0
     window.HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
@@ -280,10 +198,10 @@ describe('NavigationPanel', () => {
         fireEvent.scroll(listContainer)
       })
 
-      // Switch to bookmarks and back to TOC through the imperative saveScroll API.
+      // Switch to notes and back to TOC through the imperative saveScroll API.
       await act(() => {
         panelRef.current?.saveScroll()
-        useReaderState.setState({ activeNavTab: 'bookmarks' })
+        useReaderState.setState({ activeNavTab: 'notes' })
       })
       await act(async () => {
         await new Promise((r) => setTimeout(r, 0))
@@ -303,30 +221,234 @@ describe('NavigationPanel', () => {
     }
   })
 
-  it('shows context menu to rename and delete a single bookmark', () => {
-    vi.mocked(useAnnotations).mockReturnValue({
-      data: {
-        data: [
-          { id: 'b1', type: 'bookmark', cfiRange: 'chapter:0', cfiAnchor: 'chapter:0', text: '第一章上下文', chapter: '第一章 开篇', createdAt: 1700000000000, updatedAt: 1700000000000 },
+  describe('book search overlay', () => {
+    const search = vi.fn(async () => [
+      { cfi: 'cfi:1', text: '一个高中生说', index: 0, chapter: '第二章 图穷匕见', excerpt: { pre: '一个', match: '高中', post: '生说' } },
+      { cfi: 'cfi:2', text: '总武高中一年级', index: 1, chapter: '第二章 图穷匕见', excerpt: { pre: '总武', match: '高中', post: '一年级' } },
+      { cfi: 'cfi:3', text: '出现在高中。', index: 2, chapter: '第五章 死鱼眼', excerpt: { pre: '出现在', match: '高中', post: '。' } },
+    ])
+
+    beforeEach(() => {
+      search.mockClear()
+      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search, clearSearch } })
+      useReaderState.setState({
+        tocItems: [
+          { label: '第一章 开篇', href: 'chapter:0' },
+          { label: '第二章 图穷匕见', href: 'chapter:1' },
         ],
-      },
-    } as ReturnType<typeof useAnnotations>)
+      })
+    })
 
-    vi.stubGlobal('prompt', vi.fn(() => '我的书签'))
-    useReaderState.setState({ activeNavTab: 'bookmarks' })
-    render(<NavigationPanel bookId="book-1" open />)
+    it('expands the search bar from the header icon and overlays grouped results', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
+      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-0')
+      fireEvent.click(screen.getByTitle('reader.search'))
+      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-16')
+      fireEvent.change(input, { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
 
-    const itemText = screen.getByText('第一章上下文')
-    fireEvent.contextMenu(itemText)
+      expect(search).toHaveBeenCalledWith('高中', { scope: 'book', matchCase: false, mode: 'contains' }, expect.any(Function))
+      // consecutive results from the same chapter collapse into one group
+      expect(screen.getByText('第二章 图穷匕见')).toBeInTheDocument()
+      expect(screen.getByText('第五章 死鱼眼')).toBeInTheDocument()
+      expect(screen.getAllByText('高中')).toHaveLength(3)
+      // TOC list is replaced by the overlay
+      expect(screen.queryByText('第一章 开篇')).toBeNull()
+    })
 
-    expect(screen.getByText('重命名')).toBeInTheDocument()
-    expect(screen.getByText('删除')).toBeInTheDocument()
+    it('navigates to a result and closes the panel on click', async () => {
+      const onClose = vi.fn()
+      render(<NavigationPanel bookId="book-1" open onClose={onClose} />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
 
-    fireEvent.click(screen.getByText('重命名'))
-    expect(updateMutate).toHaveBeenCalledWith({ id: 'b1', body: { text: '我的书签' } })
+      // click the highlighted match — the click bubbles up to the result button
+      fireEvent.click(screen.getAllByText('高中')[1])
+      expect(display).toHaveBeenCalledWith('cfi:2')
+      expect(onClose).toHaveBeenCalled()
+    })
 
-    fireEvent.contextMenu(itemText)
-    fireEvent.click(screen.getByText('删除'))
-    expect(deleteMutate).toHaveBeenCalledWith('b1')
+    it('returns to the TOC list after clearing the query', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+      expect(screen.queryByText('第一章 开篇')).toBeNull()
+
+      fireEvent.click(screen.getByLabelText('清除'))
+      expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
+    })
+
+    it('keeps the query and results when collapsing and reopening the bar', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(input, { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+      expect(search).toHaveBeenCalledTimes(1)
+      expect(screen.getAllByText('高中')).toHaveLength(3)
+
+      // collapse: the bar hides and the TOC returns, but nothing is discarded
+      fireEvent.click(screen.getByTitle('reader.search'))
+      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-0')
+      expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
+
+      // reopen: query and results are restored instantly, without re-searching
+      fireEvent.click(screen.getByTitle('reader.search'))
+      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-16')
+      expect(input).toHaveValue('高中')
+      expect(screen.getAllByText('高中')).toHaveLength(3)
+      expect(search).toHaveBeenCalledTimes(1)
+    })
+
+    it('streams partial results with a progress indicator while searching', async () => {
+      const partial = [
+        { cfi: 'cfi:1', text: '一个高中生说', index: 0, chapter: '第二章 图穷匕见', excerpt: { pre: '一个', match: '高中', post: '生说' } },
+      ]
+      const full = [
+        ...partial,
+        { cfi: 'cfi:2', text: '出现在高中。', index: 1, chapter: '第五章 死鱼眼', excerpt: { pre: '出现在', match: '高中', post: '。' } },
+      ]
+      let resolveSearch!: (value: unknown) => void
+      const streamingSearch = vi.fn(
+        (_query: string, _opts: unknown, onProgress?: (results: unknown[], progress: number | null) => void) => {
+          onProgress?.(partial, 0.5)
+          return new Promise((resolve) => {
+            resolveSearch = resolve
+          })
+        },
+      )
+      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search: streamingSearch, clearSearch } })
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+
+      // partial results and the progress bar are visible before completion
+      expect(screen.getAllByText('高中')).toHaveLength(1)
+      expect(screen.getByTestId('search-progress').style.width).toBe('50%')
+
+      await act(async () => {
+        resolveSearch(full)
+      })
+      expect(screen.getAllByText('高中')).toHaveLength(2)
+      expect(screen.queryByTestId('search-progress')).toBeNull()
+    })
+
+    it('closes the options menu when clicking the search input', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.click(screen.getByTitle('reader.searchOptions'))
+      expect(screen.getByText('reader.searchModeRegex')).toBeInTheDocument()
+
+      fireEvent.mouseDown(screen.getByPlaceholderText('reader.searchPlaceholder'))
+      expect(screen.queryByText('reader.searchModeRegex')).toBeNull()
+    })
+
+    it('enters search mode from a pending selection query', async () => {
+      useReaderState.setState({ pendingSearchQuery: '高中' })
+      render(<NavigationPanel bookId="book-1" open />)
+      await new Promise((r) => setTimeout(r, 500))
+
+      expect(screen.getByPlaceholderText('reader.searchPlaceholder')).toHaveValue('高中')
+      expect(search).toHaveBeenCalled()
+      expect(useReaderState.getState().pendingSearchQuery).toBeNull()
+    })
+
+    it('shows the result nav card and cycles results with prev/next', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+
+      expect(screen.getByText('reader.searchResultsFor')).toBeInTheDocument()
+      expect(screen.getByText('1/3')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTitle('reader.next'))
+      expect(display).toHaveBeenCalledWith('cfi:2')
+      expect(screen.getByText('2/3')).toBeInTheDocument()
+
+      // wraps around to the last result
+      fireEvent.click(screen.getByTitle('reader.prev'))
+      fireEvent.click(screen.getByTitle('reader.prev'))
+      expect(display).toHaveBeenCalledWith('cfi:3')
+      expect(screen.getByText('3/3')).toBeInTheDocument()
+    })
+
+    it('hides the nav card and resets the search via its close button', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+      expect(screen.getByText('reader.searchResultsFor')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTitle('annotation.cancel'))
+      expect(screen.queryByText('reader.searchResultsFor')).toBeNull()
+      expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
+    })
+  })
+
+  describe('notes tab search and filter', () => {
+    const notesAnnotations = [
+      { id: 'h1', bookId: 'book-1', type: 'highlight', color: 'yellow', style: 'underline', text: '直线划线甲', note: null, chapter: '第一章', cfiRange: 'cfi:1', cfiAnchor: null, createdAt: 1000, updatedAt: 1000 },
+      { id: 'n1', bookId: 'book-1', type: 'note', color: 'blue', style: 'highlight', text: '想法原文丙', note: '我的想法丙', chapter: '第一章', cfiRange: 'cfi:2', cfiAnchor: null, createdAt: 2000, updatedAt: 2000 },
+      { id: 'b1', bookId: 'book-1', type: 'bookmark', color: 'yellow', style: 'underline', text: '书签丁', chapter: '第二章', cfiRange: 'cfi:3', cfiAnchor: 'cfi:3', createdAt: 3000, updatedAt: 3000 },
+    ]
+
+    beforeEach(() => {
+      vi.mocked(useAnnotations).mockReturnValue({ data: { data: notesAnnotations } } as unknown as ReturnType<typeof useAnnotations>)
+      useReaderState.setState({ activeNavTab: 'notes' })
+    })
+
+    it('expands the search bar from the header icon and filters the list', () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      const input = screen.getByPlaceholderText('reader.noteSearchPlaceholder')
+      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-0')
+      fireEvent.click(screen.getByTitle('reader.search'))
+      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-16')
+      fireEvent.change(input, { target: { value: '想法丙' } })
+      expect(screen.getByText('我的想法丙')).toBeInTheDocument()
+      expect(screen.queryByText('直线划线甲')).toBeNull()
+    })
+
+    it('opens the filter panel from the header funnel and closes on outside click', () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('annotation.filter'))
+      expect(screen.getByText('annotation.filterColor')).toBeInTheDocument()
+      // sort options live inside the filter panel now
+      expect(screen.getByText('reader.sortChapter')).toBeInTheDocument()
+
+      fireEvent.mouseDown(document.body)
+      expect(screen.queryByText('annotation.filterColor')).toBeNull()
+    })
+
+    it('filters displayed kinds via the header funnel and persists the choice', () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('annotation.filter'))
+      fireEvent.click(screen.getByText('annotation.idea'))
+      expect(screen.queryByText('我的想法丙')).toBeNull()
+      expect(screen.getByText('直线划线甲')).toBeInTheDocument()
+      expect(window.localStorage.getItem('bd-notes-display-types')).toBe('["highlight","bookmark"]')
+
+      // toggle it back on
+      fireEvent.click(screen.getByText('annotation.idea'))
+      expect(screen.getByText('我的想法丙')).toBeInTheDocument()
+    })
+
+    it('collapses the bar, clears the query and closes the filter panel', () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      const input = screen.getByPlaceholderText('reader.noteSearchPlaceholder')
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(input, { target: { value: '想法丙' } })
+      fireEvent.click(screen.getByTitle('annotation.filter'))
+      expect(screen.getByText('annotation.filterColor')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTitle('reader.search'))
+      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-0')
+      expect(screen.queryByText('annotation.filterColor')).toBeNull()
+      expect(screen.getByText('直线划线甲')).toBeInTheDocument()
+    })
   })
 })

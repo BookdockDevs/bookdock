@@ -1295,9 +1295,12 @@ export class Paginator extends HTMLElement {
   }
   async #scrollToRect(rect, reason) {
     if (this.scrolled) {
-      const offset = this.#getRectMapper()(rect).left - this.#margin
+      // bookdock: land range anchors ~28% below the viewport top so preceding
+      // context stays visible (search results, notes, bookmarks)
+      const contextOffset = this.size * 0.28
+      const offset = this.#getRectMapper()(rect).left - this.#margin - contextOffset
         + (this.#continuous ? this.#getViewOffset(this.#index) : 0)
-      return this.#scrollTo(offset, reason)
+      return this.#scrollTo(Math.max(0, offset), reason)
     }
     const mappedRect = this.#getRectMapper()(rect)
     const left = mappedRect.left

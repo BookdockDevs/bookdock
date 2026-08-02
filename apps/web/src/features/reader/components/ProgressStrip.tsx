@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface ProgressStripProps {
@@ -13,7 +13,7 @@ interface ProgressStripProps {
   onSeek: (percent: number) => void
 }
 
-export function ProgressStrip({
+export const ProgressStrip = memo(function ProgressStrip({
   percent,
   pageInfo,
   visible,
@@ -158,4 +158,4 @@ export function ProgressStrip({
       </button>
     </div>
   )
-}
+})

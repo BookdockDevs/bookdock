@@ -1,4 +1,4 @@
-import type { BookFormat } from './constants'
+import type { BookFormat, ReadStatus } from './constants'
 
 export interface User {
   id: string
@@ -20,6 +20,8 @@ export interface Book {
   meta: Record<string, unknown>
   createdAt: number
   updatedAt: number
+  readStatus: ReadStatus
+  lastReadAt?: number | null
   deletedAt: number | null
 }
 
@@ -63,6 +65,15 @@ export interface Settings {
   userId: string
   key: string
   value: unknown
+}
+
+export interface ReadingRecord {
+  id: string
+  userId: string
+  bookId: string
+  /** Local calendar day of the session start, 'YYYY-MM-DD' */
+  date: string
+  durationSeconds: number
 }
 
 export type AnnotationType = 'highlight' | 'note' | 'bookmark'

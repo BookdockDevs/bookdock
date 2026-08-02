@@ -11,7 +11,7 @@ describe('UploadSheet', () => {
     render(<UploadSheet open onClose={vi.fn()} />)
     const input = document.querySelector('input[type="file"]') as HTMLInputElement
     const clickSpy = vi.spyOn(input, 'click')
-    const dropZone = screen.getByText('支持 EPUB、TXT').parentElement
+    const dropZone = screen.getByText('library.uploadHint').parentElement
     fireEvent.click(dropZone!)
     expect(clickSpy).toHaveBeenCalled()
   })

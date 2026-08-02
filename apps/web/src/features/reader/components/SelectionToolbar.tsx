@@ -1,15 +1,23 @@
 import { useEffect, useState } from 'react'
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
-import { t } from '@/i18n'
+import { useTranslation } from '@/hooks/useTranslation'
+import { useAuthStore } from '@/stores/auth.store'
 import { useToastStore } from '@/stores/toast.store'
 import { useReaderState } from '../state/reader-state'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useAnnotations, useCreateAnnotation, useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
+import { IdeaOverlay } from './IdeaOverlay'
+import type { IdeaEntry } from './IdeaOverlay'
+import { NoteEditorPopup } from './NoteEditorPopup'
 import {
+  COLOR_LABEL_KEYS,
   HIGHLIGHT_COLORS,
   HIGHLIGHT_STYLES,
+  STYLE_LABEL_KEYS,
   getLastHighlightStyle,
+  getStyleColor,
+  highlightHex,
   popupPosition,
   setLastHighlightStyle,
 } from './annotation-colors'
@@ -23,26 +31,39 @@ const STYLE_HEIGHT = 40
 const iconBtn = 'flex h-9 w-9 items-center justify-center rounded-full text-stone-200 transition-colors hover:bg-white/10 hover:text-white'
 
 export function SelectionToolbar({ bookId }: { bookId: string }) {
+  const _ = useTranslation()
   const selection = useReaderState((s) => s.selection)
   const setSelection = useReaderState((s) => s.setSelection)
-  const setAnnotationPopup = useReaderState((s) => s.setAnnotationPopup)
+  const currentChapter = useReaderState((s) => s.currentChapter)
   const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
   const setPendingSearchQuery = useReaderState((s) => s.setPendingSearchQuery)
   const { renderer } = useReaderApi()
   const addToast = useToastStore((s) => s.addToast)
   const create = useCreateAnnotation(bookId)
-  const update = useUpdateAnnotation()
-  const del = useDeleteAnnotation()
+  const update = useUpdateAnnotation(bookId)
+  const del = useDeleteAnnotation(bookId)
   const { data: annotations } = useAnnotations(bookId)
 
   const [createdLocal, setCreatedLocal] = useState<AnnotationRes | null>(null)
-  useEffect(() => setCreatedLocal(null), [selection?.cfiRange])
+  const [noteEditing, setNoteEditing] = useState(false)
+  const username = useAuthStore((s) => s.user?.username)
+  useEffect(() => {
+    setCreatedLocal(null)
+    setNoteEditing(false)
+  }, [selection?.cfiRange])
 
-  if (!selection || !selection.text) return null
+  if (!selection) return null
 
-  // Prefer fresh query data; fall back to the mutation snapshot before refetch lands
   const created = annotations?.data?.find((a) => a.id === createdLocal?.id) ?? createdLocal
+  // A range can hold a highlight and an idea at once; the highlight wins when
+  // both are clicked — the idea stays reachable from the notes side panel
+  const existing = !createdLocal && selection
+    ? (annotations?.data?.find((a) => a.cfiRange === selection.cfiRange && a.type === 'highlight')
+      ?? annotations?.data?.find((a) => a.cfiRange === selection.cfiRange && a.type === 'note')
+      ?? null)
+    : null
+  const target = created ?? existing
 
   function close() {
     renderer?.clearSelection()
@@ -60,37 +81,42 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         color: last.color,
         style: last.style,
         text: selection.text,
+        chapter: currentChapter ?? undefined,
       })
       setCreatedLocal(res.data)
+      renderer?.deselect()
     } catch {
-      addToast(t().annotation.saveFailed, 'error')
+      addToast(_('annotation.saveFailed'), 'error')
     }
   }
 
   async function restyle(patch: { color?: string; style?: AnnotationStyle }) {
-    if (!created) return
-    const color = patch.color ?? created.color
-    const style = patch.style ?? created.style
+    if (!target) return
+    const style = patch.style ?? target.style
+    // Each style remembers its own color: switching styles restores that style's color
+    const color = patch.color ?? (patch.style ? getStyleColor(style) : target.color)
     setLastHighlightStyle(color, style)
-    setCreatedLocal({ ...created, color, style })
+    if (createdLocal && created) setCreatedLocal({ ...created, color, style })
     try {
-      await update.mutateAsync({ id: created.id, body: patch })
+      await update.mutateAsync({ id: target.id, body: patch.color ? patch : { style, color } })
     } catch {
-      addToast(t().annotation.saveFailed, 'error')
+      addToast(_('annotation.saveFailed'), 'error')
     }
   }
 
-  async function removeHighlight() {
-    if (!created) return
+  async function removeAnnotation(id?: string) {
+    const annotationId = id ?? target?.id
+    if (!annotationId) return
     try {
-      await del.mutateAsync(created.id)
-      setCreatedLocal(null)
+      await del.mutateAsync(annotationId)
+      addToast(_('reader.deleted'), 'success')
+      close()
     } catch {
-      addToast(t().reader.deleteFailed, 'error')
+      addToast(_('reader.deleteFailed'), 'error')
     }
   }
 
-  async function note() {
+  async function createNote() {
     if (!selection) return
     const last = getLastHighlightStyle()
     try {
@@ -101,60 +127,155 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         color: last.color,
         style: last.style,
         text: selection.text,
+        chapter: currentChapter ?? undefined,
       })
-      const rect = selection.rect
-      renderer?.clearSelection()
-      setSelection(null)
-      setAnnotationPopup({ cfiRange: res.data.cfiRange, rect, editing: true })
+      setCreatedLocal(res.data)
+      renderer?.deselect()
+      setNoteEditing(true)
     } catch {
-      addToast(t().annotation.saveFailed, 'error')
+      addToast(_('annotation.saveFailed'), 'error')
     }
   }
 
-  async function copy() {
-    if (!selection?.text) return
+  async function handleSaveNote(note: string) {
+    if (!target) return
     try {
-      await navigator.clipboard.writeText(selection.text)
-      addToast(t().reader.copied, 'success')
+      await update.mutateAsync({ id: target.id, body: { note: note || undefined } })
+      close()
     } catch {
-      addToast(t().reader.copyFailed, 'error')
+      addToast(_('annotation.saveFailed'), 'error')
+    }
+  }
+
+  async function copyText() {
+    const text = selection?.rawText || selection?.text
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      addToast(_('reader.copied'), 'success')
+      // Keep the toolbar open only right after creating a highlight (restyle context)
+      if (!createdLocal) close()
+    } catch {
+      addToast(_('reader.copyFailed'), 'error')
+    }
+  }
+
+  async function copyNote(entry: IdeaEntry) {
+    const text = entry.annotation.note
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      addToast(_('reader.copied'), 'success')
+    } catch {
+      addToast(_('reader.copyFailed'), 'error')
+    }
+  }
+
+  // Copying inside the idea overlay never dismisses it — the user may copy
+  // several fragments from the quote and ideas in one go
+  async function copyQuoteText() {
+    const text = selection?.rawText || selection?.text
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      addToast(_('reader.copied'), 'success')
+    } catch {
+      addToast(_('reader.copyFailed'), 'error')
     }
   }
 
   function searchSelection() {
     if (!selection?.text) return
     setPendingSearchQuery(selection.text.slice(0, 50))
-    setActiveNavTab('search')
+    setActiveNavTab('toc')
     setSidebarOpen(true)
     close()
   }
 
   const bar = popupPosition(selection.rect, BAR_WIDTH, BAR_HEIGHT)
-  // Style submenu: centered on the main bar, stacked directly above it
   const styleLeft = Math.min(
     Math.max(8, bar.left + BAR_WIDTH / 2 - STYLE_WIDTH / 2),
     Math.max(8, window.innerWidth - STYLE_WIDTH - 8),
   )
-  const styleTop = Math.max(8, bar.top - STYLE_HEIGHT - 8)
+  const styleTop = bar.dir === 'above'
+    ? Math.max(8, bar.top - STYLE_HEIGHT - 8)
+    : bar.top + BAR_HEIGHT + 8
+
+  if (noteEditing) {
+    return (
+      <NoteEditorPopup
+        rect={selection.rect}
+        initialNote={target?.note ?? ''}
+        saving={update.isPending}
+        onSave={handleSaveNote}
+        onClose={() => setNoteEditing(false)}
+      />
+    )
+  }
+
+  // Ideas open the floating overlay (quote card + one entry card per idea,
+  // multiple entries are the seam for future circles); selections and
+  // highlights get the dark action bubble.
+  if (target?.type === 'note') {
+    const atRange = annotations?.data?.filter((a) => a.cfiRange === target.cfiRange && a.type === 'note') ?? []
+    const entries: IdeaEntry[] = (atRange.length > 0 ? atRange : [target]).map((a) => ({
+      annotation: a,
+      authorName: username ?? undefined,
+      own: true,
+    }))
+    return (
+      <IdeaOverlay
+        entries={entries}
+        quoteText={selection.text}
+        onCopyQuote={() => void copyQuoteText()}
+        onHighlight={() => void highlight()}
+        onWriteNote={() => void createNote()}
+        onSearch={searchSelection}
+        onCopyNote={(entry) => void copyNote(entry)}
+        onEdit={(entry) => {
+          setCreatedLocal(entry.annotation)
+          setNoteEditing(true)
+        }}
+        onDelete={(entry) => void removeAnnotation(entry.annotation.id)}
+        onClose={close}
+      />
+    )
+  }
+
+  // Same bubble for a fresh selection and an existing annotation — once a
+  // highlight exists the middle action just flips from 划线 to 删除划线.
+  const actions = [
+    { key: 'copy', label: _('annotation.copy'), icon: <CopyIcon />, danger: false, onClick: copyText },
+    target
+      ? { key: 'delete', label: _('annotation.deleteHighlight'), icon: <TrashIcon />, danger: true, onClick: () => removeAnnotation() }
+      : { key: 'highlight', label: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, danger: false, onClick: highlight },
+    { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
+    { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
+  ]
 
   return (
     <>
-      {created && (
+      {target && (
         <div
           className="fixed z-50 flex h-10 items-center gap-0.5 rounded-2xl bg-stone-900/95 px-2 shadow-xl backdrop-blur-md"
           style={{ left: styleLeft, top: styleTop }}
         >
           {HIGHLIGHT_STYLES.map((s) => (
-            <button key={s} onClick={() => restyle({ style: s })} className={iconBtn} title={s}>
-              <StyleGlyph style={s} active={created.style === s} />
+            <button
+              key={s}
+              onClick={() => restyle({ style: s })}
+              className={`${iconBtn} ${target.style === s ? 'bg-white/15 text-white' : ''}`}
+              title={_(STYLE_LABEL_KEYS[s])}
+            >
+              <StyleGlyph style={s} color={target.style === s ? highlightHex(target.color) : undefined} />
             </button>
           ))}
           <span className="mx-1 h-5 w-px bg-white/15" />
           {HIGHLIGHT_COLORS.map((c) => (
-            <button key={c.name} onClick={() => restyle({ color: c.name })} className="flex h-8 w-8 items-center justify-center rounded-full transition-transform hover:scale-110" title={c.name}>
+            <button key={c.name} onClick={() => restyle({ color: c.name })} className="flex h-8 w-8 items-center justify-center rounded-full transition-transform hover:scale-110" title={_(COLOR_LABEL_KEYS[c.name])}>
               <span className="flex h-4 w-4 items-center justify-center rounded-full" style={{ backgroundColor: c.hex }}>
-                {created.color === c.name && (
-                  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                {target.color === c.name && (
+                  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#1c1917" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="m5 13 4 4 10-10" />
                   </svg>
                 )}
@@ -167,16 +288,20 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         className="fixed z-50 flex h-11 items-center gap-0.5 rounded-2xl bg-stone-900/95 px-2 shadow-xl backdrop-blur-md"
         style={{ left: bar.left, top: bar.top }}
       >
-        <button onClick={copy} className={iconBtn} title={t().annotation.copy}><CopyIcon /></button>
-        {created ? (
-          <button onClick={removeHighlight} className={`${iconBtn} text-red-400 hover:text-red-300`} title={t().annotation.deleteHighlight}><TrashIcon /></button>
-        ) : (
-          <button onClick={highlight} className={iconBtn} title={t().annotation.drawHighlight}><StyleGlyph style={getLastHighlightStyle().style} /></button>
-        )}
-        <button onClick={note} className={iconBtn} title={t().annotation.writeNote}><BulbIcon /></button>
-        <button onClick={searchSelection} className={iconBtn} title={t().reader.search}><SearchIcon /></button>
+        {actions.map((a) => (
+          <button
+            key={a.key}
+            onClick={a.onClick}
+            title={a.label}
+            className={`${iconBtn} ${a.danger ? 'text-red-400 hover:text-red-300' : ''}`}
+          >
+            {a.icon}
+          </button>
+        ))}
         <span
-          className="absolute -bottom-1 h-3 w-3 rotate-45 bg-stone-900/95"
+          className={`absolute h-3 w-3 rotate-45 bg-stone-900/95 ${
+            bar.dir === 'above' ? '-bottom-1' : '-top-1'
+          }`}
           style={{ left: bar.caretLeft - 6 }}
         />
       </div>

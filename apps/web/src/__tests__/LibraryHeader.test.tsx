@@ -1,57 +1,75 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import LibraryHeader from '../features/library/components/LibraryHeader'
-import * as libraryState from '../features/library/state/library-state'
 
-const setSort = vi.fn()
-const setView = vi.fn()
-const setSearch = vi.fn()
-const setFormat = vi.fn()
+const navSearch = vi.fn()
 
 beforeEach(() => {
   vi.clearAllMocks()
 })
 
-vi.mock('../features/library/state/library-state', () => ({
-  useLibraryState: vi.fn(),
-}))
-
-function mockState() {
-  ;(libraryState.useLibraryState as ReturnType<typeof vi.fn>).mockReturnValue({
-    view: 'grid',
-    setView,
-    search: '',
-    setSearch,
-    sortBy: 'createdAt',
-    sortOrder: 'desc',
-    setSort,
-    format: null,
-    setFormat,
-  })
+function renderHeader(overrides = {}) {
+  return render(
+    <LibraryHeader
+      navSearch={navSearch}
+      view="grid"
+      query=""
+      sortBy="createdAt"
+      sortOrder="desc"
+      format={null}
+      readStatus={null}
+      onUploadClick={vi.fn()}
+      {...overrides}
+    />,
+  )
 }
 
 describe('LibraryHeader', () => {
-  it('changes sort via filter panel and calls setSort', () => {
-    mockState()
-    render(<LibraryHeader onUploadClick={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
-    fireEvent.click(screen.getByText('书名升序'))
-    expect(setSort).toHaveBeenCalledWith('title', 'asc')
+  it('debounces search input before calling navSearch', async () => {
+    renderHeader()
+    fireEvent.change(screen.getByPlaceholderText('library.searchPlaceholder'), { target: { value: 'dune' } })
+    expect(navSearch).not.toHaveBeenCalled()
+    await waitFor(() => expect(navSearch).toHaveBeenCalledWith({ q: 'dune' }))
   })
 
-  it('changes format via filter panel and calls setFormat', () => {
-    mockState()
-    render(<LibraryHeader onUploadClick={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: '筛选' }))
-    fireEvent.click(screen.getByText('EPUB'))
-    expect(setFormat).toHaveBeenCalledWith('epub')
+  it('reflects external query changes in the input', () => {
+    const { rerender } = renderHeader()
+    rerender(
+      <LibraryHeader
+        navSearch={navSearch}
+        view="grid"
+        query="dune"
+        sortBy="createdAt"
+        sortOrder="desc"
+        format={null}
+        readStatus={null}
+        onUploadClick={vi.fn()}
+      />,
+    )
+    expect(screen.getByPlaceholderText('library.searchPlaceholder')).toHaveValue('dune')
   })
 
   it('clicks upload button', () => {
-    mockState()
     const onUploadClick = vi.fn()
-    render(<LibraryHeader onUploadClick={onUploadClick} />)
-    screen.getByText('上传').click()
+    renderHeader({ onUploadClick })
+    screen.getByText('library.upload').click()
     expect(onUploadClick).toHaveBeenCalled()
+  })
+
+  it('toggles select mode via button', () => {
+    const onToggleSelectMode = vi.fn()
+    renderHeader({ onToggleSelectMode })
+    screen.getByRole('button', { name: 'library.selectMode' }).click()
+    expect(onToggleSelectMode).toHaveBeenCalled()
+  })
+
+  it('reflects selection state via aria-pressed', () => {
+    renderHeader({ selectionActive: true, onToggleSelectMode: vi.fn() })
+    expect(screen.getByRole('button', { name: 'library.selectMode' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('hides select mode button in trash', () => {
+    renderHeader({ trash: true, onToggleSelectMode: vi.fn() })
+    expect(screen.queryByRole('button', { name: 'library.selectMode' })).not.toBeInTheDocument()
   })
 })

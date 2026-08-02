@@ -1,48 +1,55 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useParams, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { apiGet, apiPut } from '@/api/client'
-import { t } from '@/i18n'
+import { useTranslation } from '@/hooks/useTranslation'
 import { useToastStore } from '@/stores/toast.store'
 import { useUiStore, getEffectiveTheme } from '@/stores/ui.store'
 
 import { cn } from '@/lib/utils'
 import { isPresetThemeId } from '@/lib/reading-theme'
+import ErrorBoundary from '@/components/ui/ErrorBoundary'
 
 import { useReaderRenderer } from './hooks/useReaderRenderer'
+import { useReadingTimer } from './hooks/useReadingTimer'
 import { useReaderState } from './state/reader-state'
 import { RendererContext } from './hooks/useReaderApi'
 import { useBookChapters } from './hooks/useBookChapters'
+import { createSegmentTracker, trackPosition } from './stats/reading-segments'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
+import { Ribbon } from './components/Ribbon'
 import { ToolDock } from './components/ToolDock'
 import { NavigationPanel, type NavigationPanelRef } from './components/NavigationPanel'
 import { SelectionToolbar } from './components/SelectionToolbar'
-import { AnnotationPopup } from './components/AnnotationPopup'
 import { ProgressStrip } from './components/ProgressStrip'
-import type { BookDetailRes, ReadingProgressRes } from '@bookdock/shared'
+import { getLastHighlightStyle } from './components/annotation-colors'
+import type { NavTab } from './types'
+import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq } from '@bookdock/shared'
 
 export default function Reader() {
+  const _ = useTranslation()
   const { id } = useParams({ from: '/books/$id' })
   const queryClient = useQueryClient()
   const [percent, setPercent] = useState(0)
   const [pageInfo, setPageInfo] = useState<{ page: number; total: number } | null>(null)
   const [currentOffset, setCurrentOffset] = useState<number | null>(null)
   const [currentCfi, setCurrentCfi] = useState<string | null>(null)
+  const [chapterFraction, setChapterFraction] = useState<number | undefined>(undefined)
   const [atChapterStart, setAtChapterStart] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const setSelection = useReaderState((s) => s.setSelection)
-  const setAnnotationPopup = useReaderState((s) => s.setAnnotationPopup)
   const setTocItems = useReaderState((s) => s.setTocItems)
   const currentChapter = useReaderState((s) => s.currentChapter)
+  const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setCurrentChapter = useReaderState((s) => s.setCurrentChapter)
   const setCurrentChapterIndex = useReaderState((s) => s.setCurrentChapterIndex)
   const addToast = useToastStore((s) => s.addToast)
   const showWordCount = useUiStore((s) => s.showWordCount)
   const readingMode = useUiStore((s) => s.readingMode)
   const createAnnotation = useCreateAnnotation(id)
-  const deleteAnnotation = useDeleteAnnotation()
+  const deleteAnnotation = useDeleteAnnotation(id)
   const { data: annotations } = useAnnotations(id)
 
   const currentBookmark = useMemo(() => {
@@ -50,20 +57,21 @@ export default function Reader() {
     return annotations?.data?.find((a) => a.type === 'bookmark' && a.cfiRange === currentCfi)
   }, [annotations?.data, currentCfi])
 
-  const { uiTheme, readingThemeId, lightReadingThemeId, setReadingThemeId } = useUiStore()
+  const readingThemeId = useUiStore((s) => s.readingThemeId)
+  const lightReadingThemeId = useUiStore((s) => s.lightReadingThemeId)
+  const setReadingThemeId = useUiStore((s) => s.setReadingThemeId)
   const syncedTheme = useRef(false)
   useEffect(() => {
     if (syncedTheme.current) return
     syncedTheme.current = true
     // only auto-switch presets — never yank a custom theme to 'night'
     if (!isPresetThemeId(readingThemeId)) return
-    const effective = getEffectiveTheme(uiTheme)
-    if (effective === 'dark') {
+    if (getEffectiveTheme() === 'dark') {
       if (readingThemeId !== 'night') setReadingThemeId('night')
     } else {
       if (readingThemeId === 'night') setReadingThemeId(lightReadingThemeId)
     }
-  }, [uiTheme, readingThemeId, lightReadingThemeId, setReadingThemeId])
+  }, [readingThemeId, lightReadingThemeId, setReadingThemeId])
 
   const bookQuery = useQuery({
     queryKey: ['book', id],
@@ -78,20 +86,22 @@ export default function Reader() {
   })
 
   const progressMutation = useMutation({
-    mutationFn: async (body: { cfi?: string; chapter?: string; percent: number }) => {
+    mutationFn: async (body: ReadingProgressUpdateReq) => {
       const result = await apiPut(`/progress/${id}`, body)
       void queryClient.invalidateQueries({ queryKey: ['progress', id], refetchType: 'none' })
       return result
     },
   })
 
-  const pendingProgress = useRef<{ cfi?: string; chapter?: string; percent: number } | null>(null)
+  const pendingProgress = useRef<ReadingProgressUpdateReq | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mutateProgressRef = useRef(progressMutation.mutate)
   mutateProgressRef.current = progressMutation.mutate
 
+  const segmentTrackerRef = useRef(createSegmentTracker())
+
   const scheduleProgressSave = useCallback(
-    (body: { cfi?: string; chapter?: string; percent: number }) => {
+    (body: ReadingProgressUpdateReq) => {
       pendingProgress.current = body
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => {
@@ -121,7 +131,7 @@ export default function Reader() {
 
   const chaptersQuery = useBookChapters(id)
 
-  const contentUrl = bookQuery.data?.data ? `/api/v1/books/${id}/epub` : ''
+  const contentUrl = id ? `/api/v1/books/${id}/file` : ''
 
   const [bookReady, setBookReady] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -139,17 +149,24 @@ export default function Reader() {
     return () => clearTimeout(timer)
   }, [bookReady, contentUrl])
 
+  // Count only time after the book has actually rendered
+  const { flush: flushReadingTimer } = useReadingTimer(bookReady ? id : undefined)
+
   const { containerRef, renderer } = useReaderRenderer({
-    url: contentUrl,
-    initialCfi: progressQuery.data?.data?.cfi ?? undefined,
+    url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
+    // so it navigates exactly once (to the saved CFI, or to the book start
+    // when progress resolved to none)
+    initialCfi: progressQuery.isPending ? undefined : (progressQuery.data?.data?.cfi ?? ''),
     onRendered: () => {
       setBookReady(true)
       setLoadError(null)
     },
     onError: (err) => setLoadError(err.message || '加载失败'),
     onRelocated: (e) => {
+      setSelection(null)
       setPercent(e.percent)
       setCurrentCfi(e.cfi)
+      setChapterFraction(e.chapterFraction)
       if (e.page !== undefined && e.total !== undefined) {
         setPageInfo({ page: e.page, total: e.total })
       }
@@ -176,17 +193,41 @@ export default function Reader() {
       if (e.chapterIndex !== undefined) {
         setCurrentChapterIndex(e.chapterIndex)
       }
-      scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, percent: e.percent })
+      const segmentStartFraction = e.fraction !== undefined
+        ? trackPosition(segmentTrackerRef.current, e.fraction)
+        : undefined
+      scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, percent: e.percent, fraction: e.fraction, segmentStartFraction })
     },
     onSelected: (e) => setSelection(e),
     onAnnotationClicked: (e) => {
-      // clicking the same highlight again closes its card
-      const current = useReaderState.getState().annotationPopup
-      if (current?.cfiRange === e.cfiRange) setAnnotationPopup(null)
-      else setAnnotationPopup({ cfiRange: e.cfiRange, rect: e.rect })
+      const current = useReaderState.getState().selection
+      const annotation = annotations?.data?.find((a) => a.cfiRange === e.cfiRange)
+      if (!annotation || current?.cfiRange === e.cfiRange) { setSelection(null); return }
+      setSelection({ cfiRange: e.cfiRange, text: annotation.text, rect: e.rect })
     },
     onTocReady: (items) => setTocItems(items),
+    onInstantAnnotation: (e) => {
+      const lastStyle = getLastHighlightStyle()
+      createAnnotation.mutate({
+        cfiRange: e.cfiRange,
+        type: 'highlight',
+        text: e.text,
+        color: lastStyle.color,
+        style: lastStyle.style,
+        chapter: currentChapter ?? undefined,
+      })
+      setSelection(null)
+    },
   })
+
+  // The loading/error/success branches each render their own container div, so
+  // the element identity changes when the book query resolves. Effects that
+  // attach listeners to the container must re-run on that swap, hence state.
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
+  const containerCallbackRef = useCallback((el: HTMLDivElement | null) => {
+    containerRef.current = el
+    setContainerEl(el)
+  }, [containerRef])
 
   // Push highlight/note annotations into the renderer's overlay layer
   useEffect(() => {
@@ -200,6 +241,7 @@ export default function Reader() {
   useEffect(() => {
     setCurrentChapter(null)
     setCurrentChapterIndex(null)
+    segmentTrackerRef.current = createSegmentTracker()
   }, [id, setCurrentChapter, setCurrentChapterIndex])
 
   useEffect(() => {
@@ -224,20 +266,51 @@ export default function Reader() {
 
   // content-click relayed from the renderer when the reading area is clicked
   useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
+    if (!containerEl) return
     const handler = () => {
       setSettingsOpen(false)
-      setAnnotationPopup(null)
+      setSelection(null)
     }
-    el.addEventListener('content-click', handler)
-    return () => el.removeEventListener('content-click', handler)
-  })
+    containerEl.addEventListener('content-click', handler)
+    return () => containerEl.removeEventListener('content-click', handler)
+  }, [containerEl, setSelection])
+
+  // Dismiss popups on scroll (scrolled mode)
+  useEffect(() => {
+    if (!containerEl) return
+    const onScroll = () => {
+      setSelection(null)
+    }
+    containerEl.addEventListener('scroll', onScroll, { passive: true })
+    return () => containerEl.removeEventListener('scroll', onScroll)
+  }, [containerEl, setSelection])
 
   const rendererRef = useRef(renderer)
   useEffect(() => {
     rendererRef.current = renderer
   }, [renderer])
+
+  // The stored selection rect goes stale when the reading area resizes
+  // (sidebar toggle/drag, window resize), so dismiss the bubble instead of
+  // leaving it floating at the old position
+  useEffect(() => {
+    if (!containerEl || typeof ResizeObserver === 'undefined') return
+    let width = containerEl.clientWidth
+    let height = containerEl.clientHeight
+    const ro = new ResizeObserver(() => {
+      if (containerEl.clientWidth === width && containerEl.clientHeight === height) return
+      width = containerEl.clientWidth
+      height = containerEl.clientHeight
+      rendererRef.current?.clearSelection()
+      setSelection(null)
+    })
+    ro.observe(containerEl)
+    return () => ro.disconnect()
+  }, [containerEl, setSelection])
+
+  // Stable context value: a fresh `{ renderer }` object per render would
+  // re-render every consumer on each relocate tick, defeating memo below
+  const rendererContextValue = useMemo(() => ({ renderer }), [renderer])
 
   const onPrevChapter = useCallback(() => {
     void rendererRef.current?.prev()
@@ -288,22 +361,31 @@ export default function Reader() {
     }
   }, [containerRef, readingMode])
 
-  const estimatedMinutes = useMemo(() => {
-    if (currentOffset == null || !chaptersQuery.data?.data?.length) return undefined
-    const chapters = chaptersQuery.data.data
-    const current = chapters.find((c) => currentOffset >= c.startOffset && currentOffset < c.endOffset)
-    if (!current) return undefined
-    const remaining = Math.max(0, current.endOffset - currentOffset)
-    return Math.ceil(remaining / 800)
-  }, [currentOffset, chaptersQuery.data])
-
   const chapterWordCount = useMemo(() => {
-    if (!chaptersQuery.data?.data?.length || currentOffset == null) return undefined
-    const chapters = chaptersQuery.data.data
-    const current = chapters.find((c) => currentOffset >= c.startOffset && currentOffset < c.endOffset)
+    const chapters = chaptersQuery.data?.data
+    if (!chapters?.length || currentChapterIndex == null) return undefined
+    const current = chapters[currentChapterIndex]
     if (!current) return undefined
+    if (current.wordCount != null) return current.wordCount
     return current.endOffset - (current.contentStartOffset ?? current.startOffset)
-  }, [currentOffset, chaptersQuery.data])
+  }, [currentChapterIndex, chaptersQuery.data])
+
+  const estimatedMinutes = useMemo(() => {
+    const chapters = chaptersQuery.data?.data
+    if (!chapters?.length || currentChapterIndex == null) return undefined
+    const current = chapters[currentChapterIndex]
+    if (!current) return undefined
+    if (current.wordCount != null) {
+      const remaining = chapterFraction != null
+        ? current.wordCount * (1 - chapterFraction)
+        : current.wordCount
+      return Math.ceil(remaining / 800)
+    }
+    // Legacy fallback: offset arithmetic only works for txt chapters, whose
+    // offsets are real positions; epub offsets are all 0.
+    if (currentOffset == null || current.endOffset <= current.startOffset) return undefined
+    return Math.ceil(Math.max(0, current.endOffset - currentOffset) / 800)
+  }, [currentChapterIndex, chapterFraction, currentOffset, chaptersQuery.data])
 
   const showWordCountBadge = showWordCount && chapterWordCount != null && atChapterStart
 
@@ -324,9 +406,9 @@ export default function Reader() {
     if (currentBookmark) {
       try {
         await deleteAnnotation.mutateAsync(currentBookmark.id)
-        addToast(t().reader.bookmarkRemoved, 'success')
+        addToast(_('reader.bookmarkRemoved'), 'success')
       } catch {
-        addToast(t().reader.bookmarkFailed, 'error')
+        addToast(_('reader.bookmarkFailed'), 'error')
       }
       return
     }
@@ -336,14 +418,14 @@ export default function Reader() {
         cfiRange: currentCfi,
         cfiAnchor: currentCfi,
         type: 'bookmark',
-        text: snippet?.trim() || currentChapter || t().reader.bookmark,
+        text: snippet?.trim() || currentChapter || _('reader.bookmark'),
         chapter: currentChapter ?? undefined,
       })
-      addToast(t().reader.bookmarkAdded, 'success')
+      addToast(_('reader.bookmarkAdded'), 'success')
     } catch {
-      addToast(t().reader.bookmarkFailed, 'error')
+      addToast(_('reader.bookmarkFailed'), 'error')
     }
-  }, [currentBookmark, currentChapter, currentCfi, createAnnotation, deleteAnnotation, addToast])
+  }, [currentBookmark, currentChapter, currentCfi, createAnnotation, deleteAnnotation, addToast, _])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -369,21 +451,53 @@ export default function Reader() {
     return () => window.removeEventListener('keydown', onKey)
   }, [readingMode])
 
-  if (bookQuery.isLoading) return <p className="p-6 text-stone-500">{t().reader.loading}</p>
-  if (bookQuery.isError) return <p className="p-6 text-red-500">加载失败: {(bookQuery.error as Error)?.message || '未知错误'}</p>
-  if (!bookQuery.data?.data) return <p className="p-6 text-stone-500">{t().reader.notFound}</p>
+  if (bookQuery.isLoading) {
+    return (
+      <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
+        <div ref={containerCallbackRef} />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2 text-sm text-[var(--bd-read-sub)]">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="animate-spin">
+              <path d="M21 12a9 9 0 11-6.219-8.56" />
+            </svg>
+            {_('reader.loading')}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (bookQuery.isError) {
+    return (
+      <div className="fixed inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
+        <div ref={containerCallbackRef} />
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+        <span className="font-medium text-red-500">加载失败: {(bookQuery.error as Error)?.message || '未知错误'}</span>
+      </div>
+    )
+  }
+
+  if (!bookQuery.data?.data) {
+    return (
+      <div className="fixed inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
+        <div ref={containerCallbackRef} />
+        <span className="text-sm text-[var(--bd-read-sub)]">{_('reader.notFound')}</span>
+      </div>
+    )
+  }
 
   const book = bookQuery.data.data
 
-  if (book.format === 'txt' && chaptersQuery.isLoading) {
-    return <p className="p-6 text-stone-500">{t().reader.loading}</p>
-  }
-
   return (
-    <RendererContext.Provider value={{ renderer }}>
+    <ErrorBoundary>
+      <RendererContext.Provider value={rendererContextValue}>
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div className="flex h-full w-full">
-          <ReaderSidebar bookId={id} />
+          <ReaderSidebar bookId={id} onStatsTabOpen={flushReadingTimer} />
           <div className="relative flex flex-1 flex-col">
             {/* Top hover zone: hot strip + header belong to the same group so hover is continuous. */}
             <div className="group absolute inset-x-0 top-0 z-40 pointer-events-none">
@@ -399,8 +513,9 @@ export default function Reader() {
                 bookmarkActive={!!currentBookmark}
               />
             </div>
+            <Ribbon visible={!!currentBookmark} />
             <div
-              ref={containerRef}
+              ref={containerCallbackRef}
               className={cn(
                 'flex-1',
                 readingMode === 'page' ? 'overflow-hidden' : 'overflow-y-auto',
@@ -410,16 +525,41 @@ export default function Reader() {
               <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 text-sm text-[var(--bd-read-sub)]">
                 {loadError ? (
                   <>
-                    <span className="text-red-500">{loadError}</span>
-                    <button
-                      className="pointer-events-auto rounded bg-stone-200 px-3 py-1 text-stone-700 hover:bg-stone-300 dark:bg-stone-700 dark:text-stone-200 dark:hover:bg-stone-600"
-                      onClick={() => window.location.reload()}
-                    >
-                      刷新
-                    </button>
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <span className="font-medium text-red-500">{loadError}</span>
+                    <p className="max-w-xs text-center text-xs text-[var(--bd-read-sub)]">
+                      该文件可能格式不支持或已损坏，请确认文件完整性后重新上传
+                    </p>
+                    <div className="pointer-events-auto mt-2 flex gap-3">
+                      <Link to="/">
+                        <button className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700">
+                          返回书库
+                        </button>
+                      </Link>
+                      <Link to="/">
+                        <button className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700">
+                          重新上传
+                        </button>
+                      </Link>
+                      <button
+                        className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+                        onClick={() => window.location.reload()}
+                      >
+                        刷新
+                      </button>
+                    </div>
                   </>
                 ) : (
-                  t().reader.loading
+                  <div className="flex flex-col items-center gap-2">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="animate-spin text-[var(--bd-read-sub)]">
+                      <path d="M21 12a9 9 0 11-6.219-8.56" />
+                    </svg>
+                    {_('reader.loading')}
+                  </div>
                 )}
               </div>
             )}
@@ -445,44 +585,89 @@ export default function Reader() {
           </div>
         </div>
         <SelectionToolbar bookId={id} />
-        <AnnotationPopup bookId={id} />
       </div>
     </RendererContext.Provider>
+    </ErrorBoundary>
   )
 }
 
-const TOOLBAR_LOCKED_KEY = 'bd-reader-toolbar-locked'
-
-function getInitialLocked() {
-  if (typeof window === 'undefined') return false
-  return window.localStorage.getItem(TOOLBAR_LOCKED_KEY) === 'true'
-}
-
-function setLockedStorage(value: boolean) {
-  try {
-    window.localStorage.setItem(TOOLBAR_LOCKED_KEY, String(value))
-  } catch {
-    // ignore
-  }
-}
-
-function ReaderSidebar({ bookId }: { bookId: string }) {
+const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen }: { bookId: string; onStatsTabOpen: () => void }) {
   const activeNavTab = useReaderState((s) => s.activeNavTab)
   const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
   const sidebarOpen = useReaderState((s) => s.sidebarOpen)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
-  const { readingThemeId, lightReadingThemeId, setReadingThemeId } = useUiStore()
+  const readingThemeId = useUiStore((s) => s.readingThemeId)
+  const lightReadingThemeId = useUiStore((s) => s.lightReadingThemeId)
+  const setReadingThemeId = useUiStore((s) => s.setReadingThemeId)
+  const toolbarLocked = useUiStore((s) => s.toolbarLocked)
+  const setToolbarLocked = useUiStore((s) => s.setToolbarLocked)
+  const sidebarWidth = useUiStore((s) => s.sidebarWidth)
+  const setSidebarWidth = useUiStore((s) => s.setSidebarWidth)
 
-  const [locked, setLocked] = useState(getInitialLocked)
+  const SIDEBAR_MIN = 200
+  const SIDEBAR_MAX = 500
+
+  const [locked, setLocked] = useState(toolbarLocked)
   const [hovered, setHovered] = useState(false)
   const toolbarVisible = locked || hovered || sidebarOpen
   const panelRef = useRef<NavigationPanelRef>(null)
 
-  useEffect(() => {
-    setLockedStorage(locked)
-  }, [locked])
+  const [panelWidth, setPanelWidth] = useState(sidebarWidth)
+  const [resizing, setResizing] = useState(false)
+  const resizingRef = useRef(false)
+  const panelRefWidth = useRef(panelWidth)
+  const panelContainerRef = useRef<HTMLDivElement>(null)
 
-  function handleNavTab(tab: 'toc' | 'bookmarks' | 'notes' | 'search') {
+  useEffect(() => {
+    setLocked(toolbarLocked)
+  }, [toolbarLocked])
+
+  useEffect(() => {
+    setToolbarLocked(locked)
+  }, [locked, setToolbarLocked])
+
+  useEffect(() => {
+    if (resizing) return
+    setSidebarWidth(panelWidth)
+  }, [panelWidth, resizing, setSidebarWidth])
+
+  // Settle the unreported reading segment so the stats tab shows fresh numbers
+  const statsTabActive = sidebarOpen && activeNavTab === 'stats'
+  useEffect(() => {
+    if (statsTabActive) onStatsTabOpen()
+  }, [statsTabActive, onStatsTabOpen])
+
+  const dragState = useRef({ clientX: 0, width: 0 })
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    resizingRef.current = true
+    dragState.current.width = panelContainerRef.current?.getBoundingClientRect().width ?? panelWidth
+    dragState.current.clientX = e.clientX
+    setResizing(true)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [panelWidth])
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!resizingRef.current) return
+    const delta = e.clientX - dragState.current.clientX
+    const next = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, dragState.current.width + delta))
+    setPanelWidth(next)
+    panelRefWidth.current = next
+  }, [])
+
+  const handlePointerUp = useCallback(() => {
+    if (!resizingRef.current) return
+    resizingRef.current = false
+    setResizing(false)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    setSidebarWidth(panelRefWidth.current)
+  }, [setSidebarWidth])
+
+  const handleNavTab = useCallback((tab: NavTab) => {
     if (sidebarOpen && activeNavTab === tab) {
       setSidebarOpen(false)
     } else {
@@ -490,7 +675,11 @@ function ReaderSidebar({ bookId }: { bookId: string }) {
       setActiveNavTab(tab)
       setSidebarOpen(true)
     }
-  }
+  }, [sidebarOpen, activeNavTab, setActiveNavTab, setSidebarOpen])
+
+  const handleClosePanel = useCallback(() => {
+    setSidebarOpen(false)
+  }, [setSidebarOpen])
 
   function toggleTheme() {
     setReadingThemeId(readingThemeId === 'night' ? lightReadingThemeId : 'night')
@@ -498,18 +687,26 @@ function ReaderSidebar({ bookId }: { bookId: string }) {
 
   const collapsed = !toolbarVisible
 
+  const totalWidth = collapsed
+    ? 8
+    : sidebarOpen
+      ? 56 + panelWidth
+      : 56
+
   return (
     <div
       className={cn(
-        'relative z-50 flex h-full shrink-0 overflow-hidden transition-all duration-200',
-        collapsed ? 'w-2' : sidebarOpen ? 'w-[21.5rem]' : 'w-14',
+        'relative z-50 flex h-full shrink-0 overflow-hidden',
+        !resizing && 'transition-all duration-200',
       )}
+      style={{ width: totalWidth }}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
     >
       <div
         className={cn(
-          'flex h-full w-14 shrink-0 flex-col items-center border-r py-3 transition-all duration-200',
+          'flex h-full w-14 shrink-0 flex-col items-center border-r py-3',
+          !resizing && 'transition-all duration-200',
           collapsed ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',
         )}
         style={{ backgroundColor: 'var(--bd-read-bg)', borderColor: 'var(--bd-read-accent)' }}
@@ -537,21 +734,29 @@ function ReaderSidebar({ bookId }: { bookId: string }) {
       </div>
       <div
         className={cn(
-          'h-full shrink-0 overflow-hidden transition-all duration-200',
-          sidebarOpen ? 'w-72' : 'w-0',
+          'relative h-full shrink-0 overflow-hidden',
+          !resizing && 'transition-all duration-200',
         )}
-        style={{ backgroundColor: 'var(--bd-read-bg)' }}
+        style={{ width: sidebarOpen ? panelWidth : 0, backgroundColor: 'var(--bd-read-bg)' }}
       >
-        <div className="h-full w-72">
+        <div className="h-full" style={{ width: panelWidth }}>
           <NavigationPanel
             ref={panelRef}
             bookId={bookId}
             open={sidebarOpen}
             locked={locked}
-            onClose={() => setSidebarOpen(false)}
+            onClose={handleClosePanel}
           />
         </div>
+        {sidebarOpen && (
+          <div
+            className="absolute right-0 top-0 z-50 h-full w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-500/40 active:w-1.5 active:bg-blue-500/60"
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+          />
+        )}
       </div>
     </div>
   )
-}
+})

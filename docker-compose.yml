@@ -6,6 +6,6 @@ services:
     volumes:
       - ./data:/data
     environment:
-      - AUTH_MODE=password
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      # Optional: when omitted, a random secret is generated and persisted to /data/.jwt-secret
+      # - JWT_SECRET=your-random-secret
       - DEFAULT_USERNAME=admin

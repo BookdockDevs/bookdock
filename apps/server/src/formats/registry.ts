@@ -1,12 +1,15 @@
 import type { Readable } from 'node:stream'
 
+import type { BookMetadata } from '@bookdock/shared'
+
 export interface ParsedBook {
   meta: {
     title: string
     author?: string
     cover?: Buffer
+    bookmeta?: BookMetadata
   }
-  chapters: { title: string; content: string }[]
+  chapters: { title: string; content: string; wordCount?: number }[]
 }
 
 export interface FormatParser {

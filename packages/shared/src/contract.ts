@@ -1,4 +1,4 @@
-import type { BookFormat } from './constants'
+import type { BookFormat, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
 import type { AnnotationStyle, AnnotationType } from './domain'
 
@@ -61,6 +61,53 @@ export interface MeRes {
   id: string
   username: string
   role: string
+  /** True when the server injected the default user for guest access (no real session). */
+  guest?: boolean
+}
+
+export interface InstanceInfoRes {
+  initialized: boolean
+  allowRegistration: boolean
+  allowGuestAccess: boolean
+}
+
+export interface UpdateInstanceReq {
+  allowRegistration?: boolean
+  allowGuestAccess?: boolean
+}
+
+export interface RegisterReq {
+  username: string
+  password: string
+}
+
+export interface RegisterRes {
+  token: string
+  user: {
+    id: string
+    username: string
+    role: string
+  }
+}
+
+export interface ChangePasswordReq {
+  oldPassword: string
+  newPassword: string
+}
+
+export interface AdminUserRes {
+  id: string
+  username: string
+  role: 'owner' | 'member' | 'guest'
+  disabled: boolean
+  createdAt: number
+  bookCount: number
+}
+
+export interface UpdateUserReq {
+  role?: 'owner' | 'member'
+  disabled?: boolean
+  newPassword?: string
 }
 
 export interface SettingsRes {
@@ -74,12 +121,26 @@ export interface SettingsRes {
   paragraphSpacing?: number
   letterSpacing?: number
   indent?: number
-  pageWidth?: 'auto' | 640 | 800 | 900 | 1000 | 1280
+  pageWidth?: number
   verticalPadding?: number
   horizontalPadding?: number
   textAlignJustify?: boolean
   overrideBookFont?: boolean
   overrideBookLayout?: boolean
+  coverMode?: boolean
+  coverFit?: boolean
+  gridColumns?: string
+  toolbarLocked?: boolean
+  sidebarWidth?: number
+  readingMode?: 'scroll' | 'page'
+  pageColumns?: number
+  columnGap?: number
+  showHeader?: boolean
+  showFooter?: boolean
+  chineseConversion?: 'off' | 'simplified' | 'traditional'
+  showWordCount?: boolean
+  continuousScroll?: 'off' | 'snap' | 'seamless'
+  pageAnimation?: boolean
 }
 
 export interface SettingsUpdateReq {
@@ -130,14 +191,37 @@ export interface BookListItem {
   format: BookFormat
   coverKey: string | null
   size: number
+  readStatus: ReadStatus
+  progress: number | null
+  pinnedAt?: number | null
+  lastReadAt?: number | null
   createdAt: number
   updatedAt: number
   deletedAt?: number | null
 }
 
+export interface BookMetadata {
+  publisher?: string
+  published?: string
+  isbn?: string
+  identifier?: string
+  language?: string
+  subjects?: string[]
+  description?: string
+  series?: string
+  seriesIndex?: number
+}
+
+export interface BookMeta {
+  chapters?: Chapter[]
+  bookmeta?: BookMetadata
+  /** Total word count of the book (sum of chapter word counts) */
+  wordCount?: number
+}
+
 export interface BookDetailRes extends BookListItem {
   filePath: string
-  meta: Record<string, unknown>
+  meta: BookMeta
 }
 
 export interface Chapter {
@@ -147,6 +231,7 @@ export interface Chapter {
   startOffset: number
   endOffset: number
   contentStartOffset?: number
+  wordCount?: number
 }
 
 export interface ChapterListRes {
@@ -164,6 +249,10 @@ export interface ReadingProgressUpdateReq {
   cfi?: string
   chapter?: string
   percent: number
+  /** Book-wide position 0-1 reported by the reader engine */
+  fraction?: number
+  /** Start fraction of the current uninterrupted reading segment */
+  segmentStartFraction?: number
 }
 
 export interface ReadingProgressRes {
@@ -172,7 +261,56 @@ export interface ReadingProgressRes {
   cfi: string | null
   chapter: string | null
   percent: number
+  fraction?: number | null
+  /** Total union length of read intervals, 0-1; absent for legacy progress not yet re-saved */
+  readFraction?: number
   updatedAt: number
+}
+
+export interface ReadingRecordCreateReq {
+  bookId: string
+  /** Local calendar day of the session start, 'YYYY-MM-DD' */
+  date: string
+  durationSeconds: number
+  /** Unix ms when the session block started; defaults to server receive time */
+  startedAt?: number
+}
+
+export interface ReadingRecordSummaryRes {
+  totalSeconds: number
+  totalBooks: number
+  totalDays: number
+  todaySeconds: number
+  currentStreak: number
+  longestStreak: number
+}
+
+export interface ReadingRecordDailyItem {
+  date: string
+  durationSeconds: number
+}
+
+export interface ReadingRecordHourlyItem {
+  /** Client-local hour of day, 0-23 */
+  hour: number
+  durationSeconds: number
+}
+
+export interface ReadingRecordBookItem {
+  bookId: string
+  title: string
+  author: string
+  coverKey: string | null
+  progress: number
+  durationSeconds: number
+  /** Distinct days with recorded reading in the range */
+  days: number
+  readStatus: ReadStatus
+}
+
+export interface ReadingRecordBookDetailRes {
+  totalSeconds: number
+  records: ReadingRecordDailyItem[]
 }
 
 export type AnnotationCreateReq = {
@@ -206,4 +344,5 @@ export interface AnnotationRes {
   chapter: string | null
   createdAt: number
   updatedAt: number
+  deletedAt?: number | null
 }

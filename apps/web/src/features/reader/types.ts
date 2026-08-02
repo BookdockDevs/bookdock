@@ -1,8 +1,12 @@
 export interface ReaderLocation {
   cfi: string
   percent: number
+  /** Book-wide position 0-1 from the engine, for read-interval tracking */
+  fraction?: number
   chapter?: string
   chapterIndex?: number
+  /** Position within the current chapter 0-1, when the engine exposes one */
+  chapterFraction?: number
   /** Chapter number (1-based) within the book, for the progress text */
   page?: number
   total?: number
@@ -21,6 +25,9 @@ export interface PopupRect {
 export interface SelectionInfo {
   cfiRange: string
   text: string
+  // Selection.toString() keeps block-level line breaks (Range.toString() does
+  // not) — used by copy so pasted text keeps its paragraphs
+  rawText?: string
   anchor?: string
   rect?: PopupRect
 }
@@ -29,6 +36,7 @@ export interface RendererEvents {
   relocated: (e: ReaderLocation) => void
   selected: (e: SelectionInfo | null) => void
   annotationClicked: (e: { cfiRange: string; rect?: PopupRect }) => void
+  instantAnnotation: (e: SelectionInfo) => void
   rendered: () => void
   tocReady: (items: { label: string; href: string; level?: number }[]) => void
 }
@@ -58,12 +66,24 @@ export interface BookReader {
   applyContinuousScroll(mode: ContinuousScroll): void
   scrollToPercent(percent: number): Promise<void>
   scrollByPages(delta: number): Promise<void>
-  search(query: string, opts?: SearchOptions): Promise<SearchResult[]>
+  /**
+   * Search the book. onProgress fires with partial results and the fraction of
+   * the book covered so far (throttled), so callers can stream them to the UI.
+   */
+  search(
+    query: string,
+    opts?: SearchOptions,
+    onProgress?: (results: SearchResult[], progress: number | null) => void,
+  ): Promise<SearchResult[]>
   getSnippet(cfi: string, maxLength?: number): string
   /** Render highlight/note annotations on the content and keep them in sync */
   setAnnotations(annotations: ReaderAnnotation[]): void
   /** Collapse any in-content text selection (e.g. after a toolbar action) */
   clearSelection(): void
+  /** Remove all search result highlights from the page */
+  clearSearch(): void
+  /** Clear the DOM selection without emitting events — keeps React toolbar state */
+  deselect(): void
   on<K extends keyof RendererEvents>(type: K, fn: RendererEvents[K]): () => void
   destroy(): void
 }
@@ -86,10 +106,12 @@ export interface SearchResult {
   cfi: string
   text: string
   index: number
+  /** Chapter title the match belongs to, when resolvable */
+  chapter?: string
   excerpt?: { pre: string; match: string; post: string }
 }
 
-export type NavTab = 'toc' | 'bookmarks' | 'notes' | 'search'
+export type NavTab = 'toc' | 'notes' | 'stats'
 export type PageWidth = number
 
 export type FontFamily = 'serif' | 'sans-serif' | 'kaiti' | 'fangsong'

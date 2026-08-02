@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 
-import { t } from '@/i18n'
+import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
 import { resolveReadingTheme, PRESET_READING_THEMES } from '@/lib/reading-theme'
 import { useUiStore } from '@/stores/ui.store'
@@ -26,20 +26,32 @@ interface SliderRowProps {
 }
 
 function SliderRow({ label, value, min, max, step = 1, suffix = '', onChange }: SliderRowProps) {
-  const pct = Math.round(((value - min) / (max - min)) * 100)
+  // While dragging, only the local draft moves — committing to the store on
+  // every input event would re-layout the whole book on every tick
+  const [draft, setDraft] = useState<number | null>(null)
+  const shown = draft ?? value
+  const commit = () => {
+    if (draft !== null && draft !== value) onChange(draft)
+    setDraft(null)
+  }
+  const pct = Math.round(((shown - min) / (max - min)) * 100)
   return (
     <div className="mb-5">
       <div className="mb-1.5 flex items-center justify-between text-xs">
         <span className="text-[var(--bd-read-sub)]">{label}</span>
-        <span className="tabular-nums text-current">{value}{suffix}</span>
+        <span className="tabular-nums text-current">{shown}{suffix}</span>
       </div>
       <input
         type="range"
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        value={shown}
+        onChange={(e) => setDraft(Number(e.target.value))}
+        onPointerUp={commit}
+        onPointerCancel={commit}
+        onKeyUp={commit}
+        onBlur={commit}
         className="bd-slider"
         style={{ '--slider-fill': `${pct}%` } as React.CSSProperties}
       />
@@ -149,7 +161,7 @@ export function SettingsPanel() {
     setSection(s)
     try { localStorage.setItem(SETTINGS_SECTION_KEY, s) } catch { /* ignore */ }
   }, [])
-  const tr = t().reader
+  const _ = useTranslation()
 
   const {
     fontFamily,
@@ -206,17 +218,17 @@ export function SettingsPanel() {
   const currentTheme = resolveReadingTheme(readingThemeId, customThemes)
   const [themeDraft, setThemeDraft] = useState<ThemeDraft | null>(null)
   const openThemeDraft = useCallback(() => {
-    setThemeDraft({ name: `${tr.customTheme}${customThemes.length + 1}`, bg: '#F4F4F4', fg: '#1c1917', primary: '#57534e' })
-  }, [tr.customTheme, customThemes.length])
+    setThemeDraft({ name: `${_('reader.customTheme')}${customThemes.length + 1}`, bg: '#F4F4F4', fg: '#1c1917', primary: '#57534e' })
+  }, [customThemes.length, _])
   const saveThemeDraft = useCallback(() => {
     if (!themeDraft) return
     saveCustomTheme({
       id: `custom-${Date.now()}`,
-      name: themeDraft.name.trim() || tr.customTheme,
+      name: themeDraft.name.trim() || _('reader.customTheme'),
       colors: { bg: themeDraft.bg, fg: themeDraft.fg, primary: themeDraft.primary },
     })
     setThemeDraft(null)
-  }, [themeDraft, saveCustomTheme, tr.customTheme])
+  }, [themeDraft, saveCustomTheme, _])
   const sliderVars = useMemo(() => {
     return {
       '--slider-accent': blendColors(currentTheme.bg, currentTheme.text, 0.55),
@@ -269,14 +281,14 @@ export function SettingsPanel() {
 }
 `}</style>
       <div className="mb-4 flex items-center justify-between border-b border-stone-200/60 pb-3 dark:border-stone-800/60">
-        <h3 className="font-medium">{tr.settings}</h3>
+        <h3 className="font-medium">{_('reader.settings')}</h3>
         <div className="flex items-center gap-2">
-          <SectionIcon active={section === 'font'} onClick={() => onSetSection('font')} label={tr.sectionFont}>
+          <SectionIcon active={section === 'font'} onClick={() => onSetSection('font')} label={_('reader.sectionFont')}>
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M4 7V4h16v3M9 20h6M12 4v16" />
             </svg>
           </SectionIcon>
-          <SectionIcon active={section === 'layout'} onClick={() => onSetSection('layout')} label={tr.sectionLayout}>
+          <SectionIcon active={section === 'layout'} onClick={() => onSetSection('layout')} label={_('reader.sectionLayout')}>
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="3" width="7" height="7" rx="1" />
               <rect x="14" y="3" width="7" height="7" rx="1" />
@@ -284,13 +296,13 @@ export function SettingsPanel() {
               <rect x="14" y="14" width="7" height="7" rx="1" />
             </svg>
           </SectionIcon>
-          <SectionIcon active={section === 'display'} onClick={() => onSetSection('display')} label={tr.sectionDisplay}>
+          <SectionIcon active={section === 'display'} onClick={() => onSetSection('display')} label={_('reader.sectionDisplay')}>
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
               <circle cx="12" cy="12" r="3" />
             </svg>
           </SectionIcon>
-          <SectionIcon active={section === 'theme'} onClick={() => onSetSection('theme')} label={tr.sectionTheme}>
+          <SectionIcon active={section === 'theme'} onClick={() => onSetSection('theme')} label={_('reader.sectionTheme')}>
             <svg className="h-4 w-4" viewBox="-1 -1 26 26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11.98 0C12.48 0 12.98 0 13.48 0C13.63 0.07 13.81 0.04 13.97 0.06C14.3 0.1 14.63 0.14 14.96 0.2C15.92 0.36 16.86 0.66 17.75 1.04C21 2.44 23.54 5.47 23.22 9.17C23.13 10.15 22.88 11.13 22.25 11.9C21.4 12.94 20.09 13.27 18.87 13.63C17.73 13.96 16.57 14.3 16 15.44C15.86 15.71 15.79 15.99 15.72 16.27C15.32 17.92 17 19.22 17.71 20.5C18.3 21.58 17.99 22.69 16.95 23.33C16.44 23.64 15.86 23.78 15.28 23.89C15.05 23.94 14.72 23.89 14.5 24C13.98 24 13.46 24 12.94 24C12.75 23.91 12.2 23.92 11.97 23.9C11.35 23.83 10.74 23.71 10.14 23.57C8.16 23.1 6.23 22.08 4.71 20.71C3.4 19.53 2.33 18.08 1.65 16.46C-0.39 11.58 1.14 6.01 5.17 2.68C6.49 1.59 8.06 0.83 9.7 0.39C10.17 0.26 10.66 0.16 11.15 0.1C11.37 0.07 11.79 0.09 11.98 0Z" />
               <circle cx="15.84" cy="5.48" r="1" fill="currentColor" stroke="none" />
@@ -305,7 +317,7 @@ export function SettingsPanel() {
       {section === 'font' && (
         <div>
           <div className="mb-5">
-            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{tr.sectionFont}</label>
+            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.sectionFont')}</label>
             <div className="grid grid-cols-2 gap-2">
               {FONT_OPTIONS.map((f) => (
                 <button
@@ -325,18 +337,18 @@ export function SettingsPanel() {
             </div>
           </div>
 
-          <SliderRow label={tr.fontSize} value={fontSize} min={12} max={64} suffix="px" onChange={setFontSize} />
-          <SliderRow label={tr.fontWeight} value={fontWeight} min={100} max={900} step={100} onChange={setFontWeight} />
+          <SliderRow label={_('reader.fontSize')} value={fontSize} min={12} max={64} suffix="px" onChange={setFontSize} />
+          <SliderRow label={_('reader.fontWeight')} value={fontWeight} min={100} max={900} step={100} onChange={setFontWeight} />
 
           <ToggleRow
-            label={tr.textAlignJustify}
-            hint={tr.textAlignJustifyHint}
+            label={_('reader.textAlignJustify')}
+            hint={_('reader.textAlignJustifyHint')}
             checked={textAlignJustify}
             onChange={setTextAlignJustify}
           />
           <ToggleRow
-            label={tr.overrideBookFont}
-            hint={tr.overrideBookFontHint}
+            label={_('reader.overrideBookFont')}
+            hint={_('reader.overrideBookFontHint')}
             checked={overrideBookFont}
             onChange={setOverrideBookFont}
           />
@@ -345,18 +357,18 @@ export function SettingsPanel() {
 
       {section === 'layout' && (
         <div>
-          <SliderRow label={tr.pageWidth} value={pageWidth} min={readingMode === 'page' ? 0 : 400} max={1800} step={50} suffix="px" onChange={setPageWidth} />
-          <SliderRow label={tr.horizontalPadding} value={horizontalPadding} min={0} max={120} step={4} suffix="px" onChange={setHorizontalPadding} />
-          <SliderRow label={tr.verticalPadding} value={verticalPadding} min={0} max={120} step={4} suffix="px" onChange={setVerticalPadding} />
+          <SliderRow label={_('reader.pageWidth')} value={pageWidth} min={readingMode === 'page' ? 0 : 400} max={1800} step={50} suffix="px" onChange={setPageWidth} />
+          <SliderRow label={_('reader.horizontalPadding')} value={horizontalPadding} min={0} max={120} step={4} suffix="px" onChange={setHorizontalPadding} />
+          <SliderRow label={_('reader.verticalPadding')} value={verticalPadding} min={0} max={120} step={4} suffix="px" onChange={setVerticalPadding} />
 
-          <SliderRow label={tr.paragraphSpacing} value={paragraphSpacing} min={0} max={3} step={0.1} onChange={setParagraphSpacing} />
-          <SliderRow label={tr.lineHeight} value={lineHeight} min={1.2} max={2.5} step={0.1} onChange={setLineHeight} />
-          <SliderRow label={tr.letterSpacing} value={letterSpacing} min={-1} max={3} step={0.5} suffix="px" onChange={setLetterSpacing} />
-          <SliderRow label={tr.indent} value={indent} min={0} max={4} step={0.5} suffix="em" onChange={setIndent} />
+          <SliderRow label={_('reader.paragraphSpacing')} value={paragraphSpacing} min={0} max={3} step={0.1} onChange={setParagraphSpacing} />
+          <SliderRow label={_('reader.lineHeight')} value={lineHeight} min={1.2} max={2.5} step={0.1} onChange={setLineHeight} />
+          <SliderRow label={_('reader.letterSpacing')} value={letterSpacing} min={-1} max={3} step={0.5} suffix="px" onChange={setLetterSpacing} />
+          <SliderRow label={_('reader.indent')} value={indent} min={0} max={4} step={0.5} suffix="em" onChange={setIndent} />
 
           <ToggleRow
-            label={tr.overrideBookLayout}
-            hint={tr.overrideBookLayoutHint}
+            label={_('reader.overrideBookLayout')}
+            hint={_('reader.overrideBookLayoutHint')}
             checked={overrideBookLayout}
             onChange={setOverrideBookLayout}
           />
@@ -366,11 +378,11 @@ export function SettingsPanel() {
       {section === 'display' && (
         <div>
           <div className="mb-5">
-            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{tr.readingMode}</label>
+            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.readingMode')}</label>
             <ButtonGroup
               options={[
-                { value: 'scroll', label: tr.readingModeScroll },
-                { value: 'page', label: tr.readingModePage },
+                { value: 'scroll', label: _('reader.readingModeScroll') },
+                { value: 'page', label: _('reader.readingModePage') },
               ]}
               value={readingMode}
               onChange={setReadingMode}
@@ -380,7 +392,7 @@ export function SettingsPanel() {
           {readingMode === 'page' && (
             <>
               <div className="mb-5">
-                <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{tr.columnCount}</label>
+                <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.columnCount')}</label>
                 <ButtonGroup
                   options={[
                     { value: 1, label: '1' },
@@ -392,7 +404,7 @@ export function SettingsPanel() {
                 />
               </div>
               <SliderRow
-                label={tr.columnGap}
+                label={_('reader.columnGap')}
                 value={columnGap}
                 min={0}
                 max={15}
@@ -401,7 +413,7 @@ export function SettingsPanel() {
                 onChange={setColumnGap}
               />
               <ToggleRow
-                label={tr.pageAnimation}
+                label={_('reader.pageAnimation')}
                 checked={pageAnimation}
                 onChange={setPageAnimation}
               />
@@ -410,11 +422,11 @@ export function SettingsPanel() {
 
           {readingMode === 'scroll' && (
             <div className="mb-5">
-              <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{tr.continuousScroll}</label>
+              <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.continuousScroll')}</label>
               <ButtonGroup
                 options={[
-                  { value: 'snap', label: tr.continuousScrollSnap },
-                  { value: 'seamless', label: tr.continuousScrollSeamless },
+                  { value: 'snap', label: _('reader.continuousScrollSnap') },
+                  { value: 'seamless', label: _('reader.continuousScrollSeamless') },
                 ]}
                 value={continuousScroll}
                 onChange={(v) => setContinuousScroll(v === continuousScroll ? 'off' : v)}
@@ -423,22 +435,22 @@ export function SettingsPanel() {
           )}
 
           <div className="mb-5">
-            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{tr.chineseConversion}</label>
+            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.chineseConversion')}</label>
             <ButtonGroup
               options={[
-                { value: 'simplified', label: tr.chineseConversionSimplified },
-                { value: 'traditional', label: tr.chineseConversionTraditional },
+                { value: 'simplified', label: _('reader.chineseConversionSimplified') },
+                { value: 'traditional', label: _('reader.chineseConversionTraditional') },
               ]}
               value={chineseConversion}
               onChange={(v) => setChineseConversion(v === chineseConversion ? 'off' : v)}
             />
           </div>
 
-          <ToggleRow label={tr.showWordCount} hint={tr.showWordCountHint} checked={showWordCount} onChange={setShowWordCount} />
+          <ToggleRow label={_('reader.showWordCount')} hint={_('reader.showWordCountHint')} checked={showWordCount} onChange={setShowWordCount} />
           {readingMode === 'page' && (
             <>
-              <ToggleRow label={tr.showHeader} hint={tr.showHeaderHint} checked={showHeader} onChange={setShowHeader} />
-              <ToggleRow label={tr.showFooter} hint={tr.showFooterHint} checked={showFooter} onChange={setShowFooter} />
+              <ToggleRow label={_('reader.showHeader')} hint={_('reader.showHeaderHint')} checked={showHeader} onChange={setShowHeader} />
+              <ToggleRow label={_('reader.showFooter')} hint={_('reader.showFooterHint')} checked={showFooter} onChange={setShowFooter} />
             </>
           )}
         </div>
@@ -446,7 +458,7 @@ export function SettingsPanel() {
 
       {section === 'theme' && (
         <div>
-          <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{tr.sectionTheme}</label>
+          <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.sectionTheme')}</label>
           <div className="grid grid-cols-2 gap-2">
             {PRESET_READING_THEMES.map((preset) => {
               const th = resolveReadingTheme(preset.id, customThemes)
@@ -476,7 +488,7 @@ export function SettingsPanel() {
                   </button>
                   <button
                     onClick={() => deleteCustomTheme(custom.id)}
-                    title={tr.deleteTheme}
+                    title={_('reader.deleteTheme')}
                     className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-stone-500 text-[10px] leading-none text-white group-hover:flex"
                   >
                     ×
@@ -486,7 +498,7 @@ export function SettingsPanel() {
             })}
             <button
               onClick={openThemeDraft}
-              title={tr.customTheme}
+              title={_('reader.customTheme')}
               className="flex items-center justify-center rounded-lg border border-dashed border-stone-300 px-2 py-2 text-[var(--bd-read-sub)] transition-colors hover:text-current dark:border-stone-700"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -499,13 +511,13 @@ export function SettingsPanel() {
               <input
                 value={themeDraft.name}
                 onChange={(e) => setThemeDraft({ ...themeDraft, name: e.target.value })}
-                placeholder={tr.themeName}
+                placeholder={_('reader.themeName')}
                 className="mb-3 w-full rounded-md border border-stone-200 bg-transparent px-2 py-1 text-xs outline-none dark:border-stone-700"
               />
               {([
-                ['bg', tr.themeBg],
-                ['fg', tr.themeText],
-                ['primary', tr.themePrimary],
+                ['bg', _('reader.themeBg')],
+                ['fg', _('reader.themeText')],
+                ['primary', _('reader.themePrimary')],
               ] as const).map(([key, label]) => (
                 <label key={key} className="mb-2 flex items-center justify-between text-xs text-[var(--bd-read-sub)]">
                   {label}
@@ -518,7 +530,7 @@ export function SettingsPanel() {
                 </label>
               ))}
               <div className="mb-3 flex items-center justify-between rounded-md px-2 py-1.5 text-xs" style={{ backgroundColor: themeDraft.bg, color: themeDraft.fg }}>
-                <span>{themeDraft.name || tr.customTheme}</span>
+                <span>{themeDraft.name || _('reader.customTheme')}</span>
                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: themeDraft.primary }} />
               </div>
               <div className="flex justify-end gap-2">
@@ -526,14 +538,14 @@ export function SettingsPanel() {
                   onClick={() => setThemeDraft(null)}
                   className="rounded-md px-2 py-1 text-xs text-[var(--bd-read-sub)] hover:text-current"
                 >
-                  {t().annotation.cancel}
+                  {_('annotation.cancel')}
                 </button>
                 <button
                   onClick={saveThemeDraft}
                   className="rounded-md px-2 py-1 text-xs"
                   style={{ backgroundColor: themeDraft.primary, color: themeDraft.bg }}
                 >
-                  {tr.saveTheme}
+                  {_('reader.saveTheme')}
                 </button>
               </div>
             </div>

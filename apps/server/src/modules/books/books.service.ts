@@ -1,17 +1,19 @@
 import type { Readable } from 'node:stream'
 
-import { eq, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
+import { eq, ne, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
 import { getDb } from '../../db/client'
-import { books, readingProgress, annotations, bookTags, bookShelves, shelves, tags } from '../../db/schema'
+import { books, annotations, bookTags, bookShelves, shelves, tags } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
 import { detectTxtChapters, normalizeText, decodeTextBuffer } from '../../formats/txt'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { convertTxtToEpub } from '../../lib/txt-to-epub'
-import type { BookFormat } from '@bookdock/shared'
+import { partialMD5 } from '../../lib/hash'
+import { countWords } from '../../lib/word-count'
+import type { BookFormat, BookMetadata, Chapter } from '@bookdock/shared'
 
-export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, trash?: boolean) {
+export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean) {
   const db = getDb()
   const conditions = [eq(books.userId, userId), trash ? isNotNull(books.deletedAt) : isNull(books.deletedAt)]
   if (search) {
@@ -19,6 +21,9 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   }
   if (format) {
     conditions.push(eq(books.format, format))
+  }
+  if (readStatus) {
+    conditions.push(eq(books.readStatus, readStatus as typeof books.$inferSelect.readStatus))
   }
   if (shelfId) {
     const sub = db.select({ bookId: bookShelves.bookId }).from(bookShelves).where(eq(bookShelves.shelfId, shelfId))
@@ -28,29 +33,58 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     const sub = db.select({ bookId: bookTags.bookId }).from(bookTags).where(eq(bookTags.tagId, tagId))
     conditions.push(sql`${books.id} IN ${sub}`)
   }
+  // sortBy=lastReadAt lists recently read books only: skip pin-first ordering and books never read.
+  if (sortBy === 'lastReadAt') {
+    conditions.push(isNotNull(books.lastReadAt))
+  }
   const orderBy = sortBy === 'title' ? (sortOrder === 'asc' ? asc(books.title) : desc(books.title)) :
     sortBy === 'author' ? (sortOrder === 'asc' ? asc(books.author) : desc(books.author)) :
     sortBy === 'size' ? (sortOrder === 'asc' ? asc(books.size) : desc(books.size)) :
+    sortBy === 'progress' ? (sortOrder === 'asc' ? asc(books.progress) : desc(books.progress)) :
+    sortBy === 'updatedAt' ? desc(books.updatedAt) :
     desc(books.createdAt)
   const offset = (page - 1) * pageSize
-  const items = db.select().from(books).where(and(...conditions)).orderBy(orderBy).limit(pageSize).offset(offset).all()
-  const total = db.select({ count: sql<number>`count(*)` }).from(books).where(and(...conditions)).get()
+  const where = and(...conditions)
+  const baseQuery = () => db.select({
+    id: books.id,
+    title: books.title,
+    author: books.author,
+    format: books.format,
+    coverKey: books.coverKey,
+    size: books.size,
+    readStatus: books.readStatus,
+    progress: books.progress,
+    pinnedAt: books.pinnedAt,
+    lastReadAt: books.lastReadAt,
+    createdAt: books.createdAt,
+    updatedAt: books.updatedAt,
+    deletedAt: books.deletedAt,
+  }).from(books).where(where)
+  const items = sortBy === 'lastReadAt'
+    ? baseQuery().orderBy(desc(books.lastReadAt)).limit(pageSize).offset(offset).all()
+    : baseQuery().orderBy(asc(sql`pinned_at IS NULL`), desc(books.pinnedAt), orderBy).limit(pageSize).offset(offset).all()
+  const total = db.select({ count: sql<number>`count(*)` }).from(books).where(where).get()
   return { data: items, page, pageSize, total: total?.count ?? 0 }
+}
+
+// Book rows returned to clients must not carry meta.chapters (huge payload);
+// chapters are served by the dedicated GET /:id/chapters endpoint.
+export function stripMetaChapters<T extends { meta: Record<string, unknown> }>(book: T): T {
+  const meta = { ...book.meta }
+  delete meta.chapters
+  return { ...book, meta }
 }
 
 function detectImageExtension(buffer: Buffer): string | null {
   if (buffer.length < 4) return null
   if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'png'
   if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpg'
+  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'webp'
   return null
 }
 
-export function getBookContentKey(bookId: string): string {
-  return `books/${bookId}/content.txt`
-}
-
-function getBookEpubCacheKey(bookId: string): string {
-  return `books/${bookId}/generated.epub`
+function blobKey(hash: string, ext: string): string {
+  return `blobs/${hash.slice(0, 2)}/${hash}${ext}`
 }
 
 async function bufferFromStream(stream: Readable): Promise<Buffer> {
@@ -74,9 +108,16 @@ export async function uploadBook(userId: string, file: File) {
   const parsed = await parser.parse(buffer)
   const format = fileName.endsWith('.txt') ? 'txt' : 'epub'
   const bookId = createId('book')
-  const fileKey = `books/${bookId}/${fileName}`
+  const db = getDb()
 
-  await storage.put(fileKey, buffer)
+  // Content-based dedup
+  const contentHash = partialMD5(buffer)
+  const existing = db.select({ id: books.id }).from(books).where(
+    and(eq(books.userId, userId), eq(books.contentHash, contentHash), isNull(books.deletedAt)),
+  ).get()
+  if (existing) {
+    return stripMetaChapters(db.select().from(books).where(eq(books.id, existing.id)).get()!)
+  }
 
   const title = parsed.meta.title || fileName.replace(/\.[^.]+$/, '')
   const author = parsed.meta.author ?? ''
@@ -84,11 +125,15 @@ export async function uploadBook(userId: string, file: File) {
   let coverKey: string | null = null
   if (parsed.meta.cover) {
     const ext = detectImageExtension(parsed.meta.cover) || 'jpg'
-    coverKey = `covers/${bookId}.${ext}`
+    coverKey = blobKey(contentHash, `.cover.${ext}`)
     await storage.put(coverKey, parsed.meta.cover)
   }
 
   const meta: Record<string, unknown> = {}
+  if (parsed.meta.bookmeta) meta.bookmeta = parsed.meta.bookmeta
+  let fileKey: string
+  let size = buffer.length
+
   if (format === 'txt') {
     const text = decodeTextBuffer(buffer)
     const normalized = normalizeText(text)
@@ -100,22 +145,47 @@ export async function uploadBook(userId: string, file: File) {
       startOffset: c.startOffset,
       endOffset: c.endOffset,
       contentStartOffset: c.contentStartOffset,
+      wordCount: countWords(normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)),
     }))
-    const contentKey = getBookContentKey(bookId)
-    await storage.put(contentKey, Buffer.from(normalized, 'utf-8'))
+
+    // Generate EPUB eagerly and save as the only file
+    const epubChapters = chapters.map((c) => {
+      const start = c.contentStartOffset ?? c.startOffset
+      const end = c.endOffset
+      return {
+        id: `ch-${c.startOffset}`,
+        title: c.title,
+        level: c.level,
+        content: normalized.slice(start, end),
+      }
+    })
+    const epubBuffer = await convertTxtToEpub(
+      { title, author: author || undefined, id: bookId },
+      epubChapters,
+    )
+    fileKey = blobKey(contentHash, '.epub')
+    await storage.put(fileKey, epubBuffer)
+    size = epubBuffer.length
+  } else {
+    fileKey = blobKey(contentHash, '.epub')
+    await storage.put(fileKey, buffer)
+    if (parsed.chapters.length > 0) {
+      meta.chapters = parsed.chapters.map((c, idx) => ({
+        id: `ch-${idx}`,
+        title: c.title,
+        level: 1,
+        startOffset: 0,
+        endOffset: 0,
+        wordCount: c.wordCount ?? 0,
+      }))
+    }
   }
 
-  if (format === 'epub' && parsed.chapters.length > 0) {
-    meta.chapters = parsed.chapters.map((c, idx) => ({
-      id: `ch-${idx}`,
-      title: c.title,
-      level: 1,
-      startOffset: 0,
-      endOffset: 0,
-    }))
+  const metaChapters = meta.chapters as Array<{ wordCount?: number }> | undefined
+  if (metaChapters && metaChapters.length > 0) {
+    meta.wordCount = metaChapters.reduce((sum, c) => sum + (c.wordCount ?? 0), 0)
   }
 
-  const db = getDb()
   const now = Date.now()
   const book = {
     id: bookId,
@@ -125,67 +195,112 @@ export async function uploadBook(userId: string, file: File) {
     format: format as BookFormat,
     filePath: fileKey,
     coverKey,
-    size: buffer.length,
+    contentHash,
+    size,
     meta,
+    readStatus: 'reading' as const,
     createdAt: now,
     updatedAt: now,
   }
   db.insert(books).values(book).run()
-  return book
+  return stripMetaChapters(book)
 }
 
-export async function getBook(bookId: string) {
+export async function getBook(userId: string, bookId: string) {
   const db = getDb()
-  const book = db.select().from(books).where(eq(books.id, bookId)).get()
+  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
+  if ((book.meta as Record<string, unknown>).bookmeta === undefined) {
+    return (await backfillBookmeta(book)) ?? book
+  }
   return book
 }
 
-export async function getActiveBook(bookId: string) {
-  const book = await getBook(bookId)
+async function backfillBookmeta(book: typeof books.$inferSelect) {
+  try {
+    const storage = getStorage()
+    const parser = getParser(book.filePath, '')
+    if (!parser) return null
+    const parsed = await parser.parse(await storage.get(book.filePath))
+    const meta = { ...(book.meta as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
+    getDb().update(books).set({ meta }).where(eq(books.id, book.id)).run()
+    return getDb().select().from(books).where(eq(books.id, book.id)).get()!
+  } catch {
+    return null
+  }
+}
+
+export async function getActiveBook(userId: string, bookId: string) {
+  const book = await getBook(userId, bookId)
   if (book.deletedAt) throw new AppError('BOOK_NOT_FOUND')
   return book
 }
 
-export async function getBookChapters(bookId: string) {
-  const book = await getBook(bookId)
-  let chapters = (book.meta?.chapters ?? []) as Array<{
-    id: string
-    title: string
-    level: number
-    startOffset: number
-    endOffset: number
-    contentStartOffset?: number
-  }>
+export async function getBookChapters(userId: string, bookId: string) {
+  const book = await getBook(userId, bookId)
+  let chapters = (book.meta?.chapters ?? []) as Chapter[]
 
   // Migrate old txt books that lack normalized chapter metadata.
   if (book.format === 'txt' && chapters.length > 0 && chapters[0]?.contentStartOffset === undefined) {
-    await regenerateTxtBookContent(bookId)
-    const updatedBook = await getBook(bookId)
-    chapters = (updatedBook.meta?.chapters ?? []) as Array<{
-      id: string
-      title: string
-      level: number
-      startOffset: number
-      endOffset: number
-      contentStartOffset?: number
-    }>
+    await regenerateTxtBookContent(userId, bookId)
+    const updatedBook = await getBook(userId, bookId)
+    chapters = (updatedBook.meta?.chapters ?? []) as Chapter[]
+  }
+
+  // Backfill word counts for books uploaded before the feature existed.
+  if (chapters.length > 0 && chapters[0]?.wordCount === undefined) {
+    chapters = (await backfillWordCounts(userId, bookId)) ?? chapters
   }
 
   return chapters
 }
 
-async function regenerateTxtBookContent(bookId: string): Promise<string> {
+async function backfillWordCounts(userId: string, bookId: string): Promise<Chapter[] | null> {
+  try {
+    const book = await getBook(userId, bookId)
+    const storage = getStorage()
+    const buffer = await bufferFromStream(await storage.get(book.filePath))
+    let chapters: Chapter[]
+    if (book.filePath.endsWith('.txt')) {
+      const normalized = normalizeText(decodeTextBuffer(buffer))
+      chapters = detectTxtChapters(normalized).map((c) => ({
+        id: `ch-${c.startOffset}`,
+        title: c.title,
+        level: c.level,
+        startOffset: c.startOffset,
+        endOffset: c.endOffset,
+        contentStartOffset: c.contentStartOffset,
+        wordCount: countWords(normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)),
+      }))
+    } else {
+      const parser = getParser(book.filePath, '')
+      if (!parser) return null
+      const parsed = await parser.parse(buffer)
+      // meta.chapters were built from the same parser output, in the same order
+      const existing = (book.meta?.chapters ?? []) as Chapter[]
+      if (existing.length !== parsed.chapters.length) return null
+      chapters = existing.map((c, idx) => ({ ...c, wordCount: parsed.chapters[idx].wordCount ?? 0 }))
+    }
+    const wordCount = chapters.reduce((sum, c) => sum + (c.wordCount ?? 0), 0)
+    const meta = { ...(book.meta as Record<string, unknown>), chapters, wordCount }
+    getDb().update(books).set({ meta }).where(eq(books.id, bookId)).run()
+    return chapters
+  } catch {
+    // Missing/corrupt file: serve chapters without counts, retry next time.
+    return null
+  }
+}
+
+async function regenerateTxtBookContent(userId: string, bookId: string): Promise<string> {
   const storage = getStorage()
-  const book = await getBook(bookId)
+  const book = await getBook(userId, bookId)
+
+  // Legacy: parse from original TXT file (pre-refactor books)
   const stream = await storage.get(book.filePath)
   const buffer = await bufferFromStream(stream)
   const text = decodeTextBuffer(buffer)
   const normalized = normalizeText(text)
   const chapters = detectTxtChapters(normalized)
-
-  const contentKey = getBookContentKey(bookId)
-  await storage.put(contentKey, Buffer.from(normalized, 'utf-8'))
 
   const db = getDb()
   const metaChapters = chapters.map((c) => ({
@@ -195,47 +310,50 @@ async function regenerateTxtBookContent(bookId: string): Promise<string> {
     startOffset: c.startOffset,
     endOffset: c.endOffset,
     contentStartOffset: c.contentStartOffset,
+    wordCount: countWords(normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)),
   }))
-  const meta = { ...book.meta, chapters: metaChapters }
+  const wordCount = metaChapters.reduce((sum, c) => sum + c.wordCount, 0)
+  const meta = { ...book.meta, chapters: metaChapters, wordCount }
   db.update(books).set({ meta, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
 
   return normalized
 }
 
-export async function getBookContent(bookId: string): Promise<string> {
+export async function getBookContent(userId: string, bookId: string): Promise<string> {
   const storage = getStorage()
-  const book = await getBook(bookId)
+  const book = await getBook(userId, bookId)
   if (book.format !== 'txt') {
     throw new AppError('UNSUPPORTED_FORMAT', 'Content endpoint only supports txt')
   }
-  const contentKey = getBookContentKey(bookId)
-  if (await storage.exists(contentKey)) {
-    const stream = await storage.get(contentKey)
-    const buffer = await bufferFromStream(stream)
-    return buffer.toString('utf-8')
+  // Legacy path (pre-refactor content.txt)
+  const legacyKey = `books/${bookId}/content.txt`
+  if (await storage.exists(legacyKey)) {
+    const stream = await storage.get(legacyKey)
+    return (await bufferFromStream(stream)).toString('utf-8')
   }
-  return regenerateTxtBookContent(bookId)
+  return regenerateTxtBookContent(userId, bookId)
 }
 
-export async function getBookEpubBuffer(bookId: string): Promise<Buffer> {
+export async function getBookEpubBuffer(userId: string, bookId: string): Promise<Buffer> {
   const storage = getStorage()
-  const book = await getBook(bookId)
+  const book = await getBook(userId, bookId)
 
-  if (book.format === 'epub') {
-    const stream = await storage.get(book.filePath)
-    return bufferFromStream(stream)
+  // New-style path: filePath points to an EPUB (hash-based or books/<id>/book.epub)
+  if (book.filePath.endsWith('.epub') && await storage.exists(book.filePath)) {
+    return bufferFromStream(await storage.get(book.filePath))
   }
 
   if (book.format === 'txt') {
-    const cacheKey = getBookEpubCacheKey(bookId)
+    // Legacy: check old generated.epub cache
+    const cacheKey = `books/${bookId}/generated.epub`
     if (await storage.exists(cacheKey)) {
-      const stream = await storage.get(cacheKey)
-      return bufferFromStream(stream)
+      return bufferFromStream(await storage.get(cacheKey))
     }
 
+    // Legacy: lazy-generate from normalized text
     const [content, chapters] = await Promise.all([
-      getBookContent(bookId),
-      getBookChapters(bookId),
+      getBookContent(userId, bookId),
+      getBookChapters(userId, bookId),
     ])
     const epubChapters = chapters.map((c) => {
       const text = content.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)
@@ -257,16 +375,74 @@ export async function getBookEpubBuffer(bookId: string): Promise<Buffer> {
   throw new AppError('UNSUPPORTED_FORMAT', 'EPUB export only supports txt and epub')
 }
 
-export async function trashBook(bookId: string) {
+export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata }) {
   const db = getDb()
-  const book = db.select().from(books).where(eq(books.id, bookId)).get()
+  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
+  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  const set: Record<string, unknown> = { updatedAt: Date.now() }
+  if (data.readStatus) set.readStatus = data.readStatus
+  if (data.progress !== undefined) set.progress = data.progress
+  if (data.pinned !== undefined) set.pinnedAt = data.pinned ? Date.now() : null
+  if (data.title) set.title = data.title
+  if (data.author !== undefined) set.author = data.author
+  if (data.bookmeta !== undefined) {
+    set.meta = { ...(book.meta as Record<string, unknown>), bookmeta: data.bookmeta }
+  }
+  db.update(books).set(set).where(eq(books.id, bookId)).run()
+  return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+}
+
+export async function updateBookCover(userId: string, bookId: string, file: File) {
+  const db = getDb()
+  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
+  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  const buffer = Buffer.from(await file.arrayBuffer())
+  if (buffer.length > 5 * 1024 * 1024) throw new AppError('UPLOAD_TOO_LARGE')
+  const ext = detectImageExtension(buffer)
+  if (!ext) throw new AppError('UNSUPPORTED_FORMAT', 'Cover must be a PNG, JPEG or WebP image')
+  const storage = getStorage()
+  const coverKey = blobKey(partialMD5(buffer), `.cover.${ext}`)
+  await storage.put(coverKey, buffer)
+  db.update(books).set({ coverKey, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
+  return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+}
+
+export async function removeBookCover(userId: string, bookId: string) {
+  const db = getDb()
+  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
+  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  db.update(books).set({ coverKey: null, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
+  return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+}
+
+export async function resetBookMetadata(userId: string, bookId: string) {
+  const db = getDb()
+  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
+  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  const storage = getStorage()
+  const parser = getParser(book.filePath, '')
+  if (!parser) throw new AppError('UNSUPPORTED_FORMAT')
+  const parsed = await parser.parse(await storage.get(book.filePath))
+  const meta = { ...(book.meta as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
+  db.update(books).set({
+    title: parsed.meta.title || book.title,
+    author: parsed.meta.author ?? '',
+    meta,
+    updatedAt: Date.now(),
+  }).where(eq(books.id, bookId)).run()
+  return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+}
+
+export async function trashBook(userId: string, bookId: string) {
+  const db = getDb()
+  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
   db.update(books).set({ deletedAt: Date.now(), updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
 }
 
-export async function restoreBook(bookId: string) {
+export async function restoreBook(userId: string, bookId: string) {
   const db = getDb()
-  const book = db.select().from(books).where(eq(books.id, bookId)).get()
+  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
   db.update(books).set({ deletedAt: null, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
 }
@@ -275,35 +451,49 @@ export async function emptyTrash(userId: string) {
   const db = getDb()
   const trashed = db.select({ id: books.id }).from(books).where(and(eq(books.userId, userId), isNotNull(books.deletedAt))).all()
   for (const row of trashed) {
-    await deleteBook(row.id)
+    await deleteBook(userId, row.id)
   }
   return trashed.length
 }
 
-export async function deleteBook(bookId: string) {
+export async function deleteBook(userId: string, bookId: string) {
   const db = getDb()
   const storage = getStorage()
-  const book = db.select().from(books).where(eq(books.id, bookId)).get()
+  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
 
-  db.delete(readingProgress).where(eq(readingProgress.bookId, bookId)).run()
   db.delete(annotations).where(eq(annotations.bookId, bookId)).run()
   db.delete(bookTags).where(eq(bookTags.bookId, bookId)).run()
   db.delete(bookShelves).where(eq(bookShelves.bookId, bookId)).run()
 
-  if (await storage.exists(book.filePath)) {
+  // Blobs are content-hash addressed and shared across users' book rows;
+  // delete the physical file only when no other row (including trashed) references it.
+  const fileRefs = db.select({ count: sql<number>`count(*)` }).from(books)
+    .where(and(eq(books.filePath, book.filePath), ne(books.id, bookId))).get()
+  if ((fileRefs?.count ?? 0) === 0 && await storage.exists(book.filePath)) {
     await storage.delete(book.filePath)
   }
-  const contentKey = getBookContentKey(bookId)
-  if (await storage.exists(contentKey)) {
-    await storage.delete(contentKey)
+  // Progress file
+  const progressKey = `progress/${bookId}.json`
+  if (await storage.exists(progressKey)) {
+    await storage.delete(progressKey)
   }
-  if (book.coverKey && (await storage.exists(book.coverKey))) {
-    await storage.delete(book.coverKey)
+  // Legacy content.txt (pre-refactor TXT books)
+  const oldContentKey = `books/${bookId}/content.txt`
+  if (await storage.exists(oldContentKey)) {
+    await storage.delete(oldContentKey)
   }
-  const cacheKey = getBookEpubCacheKey(bookId)
-  if (await storage.exists(cacheKey)) {
-    await storage.delete(cacheKey)
+  // Legacy generated.epub (pre-refactor TXT lazy cache)
+  const oldEpubKey = `books/${bookId}/generated.epub`
+  if (await storage.exists(oldEpubKey)) {
+    await storage.delete(oldEpubKey)
+  }
+  if (book.coverKey) {
+    const coverRefs = db.select({ count: sql<number>`count(*)` }).from(books)
+      .where(and(eq(books.coverKey, book.coverKey), ne(books.id, bookId))).get()
+    if ((coverRefs?.count ?? 0) === 0 && await storage.exists(book.coverKey)) {
+      await storage.delete(book.coverKey)
+    }
   }
   db.delete(books).where(eq(books.id, bookId)).run()
   return book

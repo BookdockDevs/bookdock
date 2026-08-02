@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/Button'
-import { t } from '@/i18n'
+import { useTranslation } from '@/hooks/useTranslation'
 
 interface DeleteConfirmProps {
   open: boolean
@@ -14,6 +14,7 @@ interface DeleteConfirmProps {
 }
 
 export default function DeleteConfirm({ open, bookTitle, title, message, confirmLabel, onConfirm, onCancel }: DeleteConfirmProps) {
+  const _ = useTranslation()
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -35,21 +36,17 @@ export default function DeleteConfirm({ open, bookTitle, title, message, confirm
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-2 font-serif text-base font-medium text-stone-900 dark:text-stone-100">
-          {title ?? '删除书籍'}
+          {title ?? _('library.deleteBook')}
         </h2>
         <p className="mb-6 text-sm text-stone-500">
-          {message ?? (
-            <>
-              确定要删除「<span className="inline-block max-w-full truncate align-bottom text-stone-700 dark:text-stone-200">{bookTitle ?? ''}</span>」吗？
-            </>
-          )}
+          {message ?? _('library.deleteConfirm', { title: bookTitle ?? '' })}
         </p>
         <div className="flex justify-end gap-3">
           <Button variant="ghost" onClick={onCancel}>
-            {t().library.cancel}
+            {_('library.cancel')}
           </Button>
           <Button variant="danger" onClick={onConfirm}>
-            {confirmLabel ?? '删除'}
+            {confirmLabel ?? _('library.delete')}
           </Button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { t } from '@/i18n'
+import { useTranslation } from '@/hooks/useTranslation'
 
 import { useCreateShelf, useRenameShelf } from '../hooks'
 
@@ -12,6 +12,7 @@ interface ShelfDialogProps {
 }
 
 export default function ShelfDialog({ open, shelfId, initialName = '', onClose }: ShelfDialogProps) {
+  const _ = useTranslation()
   const createShelf = useCreateShelf()
   const renameShelf = useRenameShelf()
   const [name, setName] = useState(initialName)
@@ -54,7 +55,7 @@ export default function ShelfDialog({ open, shelfId, initialName = '', onClose }
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-5 text-center font-serif text-base font-medium text-stone-900 dark:text-stone-100">
-          {isRename ? t().library.renameShelf : t().library.createShelf}
+          {isRename ? _('library.renameShelf') : _('library.createShelf')}
         </h2>
 
         <div className="mb-8 flex items-center gap-3">
@@ -71,7 +72,7 @@ export default function ShelfDialog({ open, shelfId, initialName = '', onClose }
             onKeyDown={(e) => {
               if (e.key === 'Enter') submit()
             }}
-            placeholder={t().library.shelfName}
+            placeholder={_('library.shelfName')}
             autoFocus
             className="h-11 min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 outline-none placeholder:text-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
           />
@@ -84,14 +85,14 @@ export default function ShelfDialog({ open, shelfId, initialName = '', onClose }
             disabled={!name.trim() || isPending}
             className="h-11 flex-1 rounded-xl bg-stone-900 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300"
           >
-            {isRename ? t().library.save : t().library.create}
+            {isRename ? _('library.save') : _('library.create')}
           </button>
           <button
             type="button"
             onClick={onClose}
             className="h-11 flex-1 rounded-xl bg-stone-100 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
           >
-            {t().library.cancel}
+            {_('library.cancel')}
           </button>
         </div>
       </div>

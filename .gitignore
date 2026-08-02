@@ -24,6 +24,7 @@ data/
 .opencode/
 .kilocode/
 .worktrees/
+opencode.json
 
 # OS files
 **/.DS_Store

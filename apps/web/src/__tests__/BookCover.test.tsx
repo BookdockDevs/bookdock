@@ -22,6 +22,6 @@ describe('BookCover', () => {
   it('renders img when coverKey is present', () => {
     render(<BookCover book={{ ...baseBook, coverKey: 'covers/book-1.jpg' }} />)
     const img = screen.getByRole('img')
-    expect(img).toHaveAttribute('src', '/api/v1/books/book-1/cover')
+    expect(img).toHaveAttribute('src', '/api/v1/books/book-1/cover?v=covers%2Fbook-1.jpg')
   })
 })

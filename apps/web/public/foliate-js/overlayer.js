@@ -125,6 +125,34 @@ export class Overlayer {
         }
         return g
     }
+    // bookdock: dashed underline for idea annotations (WeChat Reading style)
+    static dashedUnderline(rects, options = {}) {
+        const { color = 'red', width: strokeWidth = 1.5, padding = 0, writingMode } = options
+        const g = createSVGElement('g')
+        g.setAttribute('fill', 'none')
+        g.setAttribute('stroke', color)
+        g.setAttribute('stroke-width', strokeWidth)
+        g.setAttribute('stroke-dasharray', '4 3')
+        g.setAttribute('stroke-linecap', 'round')
+        if (writingMode === 'vertical-rl' || writingMode === 'vertical-lr')
+            for (const { right, top, height } of rects) {
+                const el = createSVGElement('line')
+                el.setAttribute('x1', right - strokeWidth / 2 + padding)
+                el.setAttribute('y1', top)
+                el.setAttribute('x2', right - strokeWidth / 2 + padding)
+                el.setAttribute('y2', top + height)
+                g.append(el)
+            }
+        else for (const { left, bottom, width } of rects) {
+            const el = createSVGElement('line')
+            el.setAttribute('x1', left)
+            el.setAttribute('y1', bottom + strokeWidth / 2 + padding)
+            el.setAttribute('x2', left + width)
+            el.setAttribute('y2', bottom + strokeWidth / 2 + padding)
+            g.append(el)
+        }
+        return g
+    }
     static strikethrough(rects, options = {}) {
         const { color = 'red', width: strokeWidth = 2, writingMode } = options
         const g = createSVGElement('g')

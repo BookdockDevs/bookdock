@@ -15,6 +15,5 @@ COPY --from=build /out ./
 RUN mkdir -p /data
 ENV NODE_ENV=production
 ENV DATA_DIR=/data
-ENV AUTH_MODE=password
 EXPOSE 3000
 CMD ["node", "apps/server/dist/index.js"]

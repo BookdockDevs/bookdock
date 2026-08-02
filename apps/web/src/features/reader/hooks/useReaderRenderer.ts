@@ -10,6 +10,7 @@ interface UseReaderRendererOptions {
   onRelocated?: (e: Parameters<RendererEvents['relocated']>[0]) => void
   onSelected?: (e: Parameters<RendererEvents['selected']>[0]) => void
   onAnnotationClicked?: (e: Parameters<RendererEvents['annotationClicked']>[0]) => void
+  onInstantAnnotation?: (e: Parameters<RendererEvents['instantAnnotation']>[0]) => void
   onRendered?: () => void
   onError?: (err: Error) => void
   onTocReady?: (items: { label: string; href: string; level?: number }[]) => void
@@ -21,6 +22,7 @@ export function useReaderRenderer({
   onRelocated,
   onSelected,
   onAnnotationClicked,
+  onInstantAnnotation,
   onRendered,
   onError,
   onTocReady,
@@ -56,10 +58,10 @@ export function useReaderRenderer({
   const onRelocatedRef = useRef(onRelocated)
   const onSelectedRef = useRef(onSelected)
   const onAnnotationClickedRef = useRef(onAnnotationClicked)
+  const onInstantAnnotationRef = useRef(onInstantAnnotation)
   const onRenderedRef = useRef(onRendered)
   const onErrorRef = useRef(onError)
   const onTocReadyRef = useRef(onTocReady)
-  const initialCfiRef = useRef(initialCfi)
   const theme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [readingThemeId, customThemes])
   const themeRef = useRef(theme)
   const fontRef = useRef({ fontFamily, size: fontSize, lineHeight, fontWeight, overrideBookFont })
@@ -77,10 +79,10 @@ export function useReaderRenderer({
   onRelocatedRef.current = onRelocated
   onSelectedRef.current = onSelected
   onAnnotationClickedRef.current = onAnnotationClicked
+  onInstantAnnotationRef.current = onInstantAnnotation
   onRenderedRef.current = onRendered
   onErrorRef.current = onError
   onTocReadyRef.current = onTocReady
-  initialCfiRef.current = initialCfi
   themeRef.current = theme
   fontRef.current = { fontFamily, size: fontSize, lineHeight, fontWeight, overrideBookFont }
   paragraphRef.current = { paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
@@ -98,16 +100,24 @@ export function useReaderRenderer({
 
   useEffect(() => {
     if (!containerRef.current || !url) return
+    // Wait until the start position is known ('' means "no saved progress")
+    // so mount navigates exactly once instead of goTo(0) then display(cfi).
+    // Safe in deps: queries have staleTime Infinity, so initialCfi only
+    // transitions undefined -> value once per book.
+    if (initialCfi === undefined) return
 
     const newRenderer = createRenderer()
     rendererRef.current = newRenderer
     const theme = themeRef.current
 
     let cancelled = false
-    newRenderer.mount(containerRef.current).then(async () => {
+    const initialTarget = initialCfi
+    newRenderer.mount(containerRef.current, initialTarget).then(async () => {
       // StrictMode double-invokes this effect: the loser must not become the
       // current renderer — its view already bailed out of mount
       if (cancelled) return
+      // mount already navigated (initialTarget may be '' for "book start")
+      lastDisplayedCfiRef.current = initialTarget
       setRenderer(newRenderer)
       newRenderer.applyReadingMode(readingModeRef.current)
       newRenderer.applyPageColumns(pageColumnsRef.current)
@@ -129,6 +139,7 @@ export function useReaderRenderer({
     const unsubRelocated = newRenderer.on('relocated', (e) => onRelocatedRef.current?.(e))
     const unsubSelected = newRenderer.on('selected', (e) => onSelectedRef.current?.(e))
     const unsubAnnotationClicked = newRenderer.on('annotationClicked', (e) => onAnnotationClickedRef.current?.(e))
+    const unsubInstantAnnotation = newRenderer.on('instantAnnotation', (e) => onInstantAnnotationRef.current?.(e))
     const unsubRendered = newRenderer.on('rendered', () => onRenderedRef.current?.())
     const unsubToc = newRenderer.on('tocReady', (items) => onTocReadyRef.current?.(items))
 
@@ -137,22 +148,24 @@ export function useReaderRenderer({
       unsubRelocated()
       unsubSelected()
       unsubAnnotationClicked()
+      unsubInstantAnnotation()
       unsubRendered()
       unsubToc()
       newRenderer.destroy()
       rendererRef.current = null
       setRenderer((current) => (current === newRenderer ? null : current))
     }
-  }, [url, createRenderer])
+  }, [url, createRenderer, initialCfi])
 
-  // Display the initial location once the renderer is up, and again when the
-  // progress query resolves after a cold open (never re-display the same cfi).
+  // Navigate to the saved position once both renderer and progress are ready.
+  // Skipping when initialCfi is undefined avoids a spurious goTo({ index: 0 })
+  // that would be immediately overwritten by the real CFI from progress.
   const lastDisplayedCfiRef = useRef<string | null>(null)
   useEffect(() => {
     if (!renderer) return
-    const cfi = initialCfi ?? ''
-    if (cfi === lastDisplayedCfiRef.current) return
-    lastDisplayedCfiRef.current = cfi
+    if (initialCfi === undefined) return
+    if (initialCfi === lastDisplayedCfiRef.current) return
+    lastDisplayedCfiRef.current = initialCfi
     void renderer.display(initialCfi)
   }, [renderer, initialCfi])
 

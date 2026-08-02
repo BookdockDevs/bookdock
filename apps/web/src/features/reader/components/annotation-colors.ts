@@ -6,37 +6,86 @@ export interface HighlightColor {
 }
 
 export const HIGHLIGHT_COLORS: HighlightColor[] = [
-  { name: 'yellow', hex: '#eab308' },
   { name: 'red', hex: '#ef4444' },
   { name: 'purple', hex: '#a855f7' },
   { name: 'blue', hex: '#3b82f6' },
   { name: 'green', hex: '#22c55e' },
+  { name: 'yellow', hex: '#eab308' },
 ]
 
-export const HIGHLIGHT_STYLES: AnnotationStyle[] = ['underline', 'squiggly', 'highlight']
+export const HIGHLIGHT_STYLES: AnnotationStyle[] = ['highlight', 'underline', 'squiggly']
+
+export const STYLE_LABEL_KEYS: Record<AnnotationStyle, string> = {
+  highlight: 'annotation.styleHighlight',
+  underline: 'annotation.styleUnderline',
+  squiggly: 'annotation.styleSquiggly',
+}
+
+export const COLOR_LABEL_KEYS: Record<string, string> = {
+  red: 'annotation.colorRed',
+  purple: 'annotation.colorPurple',
+  blue: 'annotation.colorBlue',
+  green: 'annotation.colorGreen',
+  yellow: 'annotation.colorYellow',
+}
+
+export function highlightHex(name: string): string | undefined {
+  return HIGHLIGHT_COLORS.find((c) => c.name === name)?.hex
+}
 
 export const DEFAULT_HIGHLIGHT_COLOR = 'yellow'
+export const DEFAULT_HIGHLIGHT_STYLE: AnnotationStyle = 'underline'
 
 const LAST_STYLE_KEY = 'bd-reader-highlight-style'
 
-export function getLastHighlightStyle(): { color: string; style: AnnotationStyle } {
+/** Persisted shape: each style remembers its own last-used color */
+interface StyleMemory {
+  style: AnnotationStyle
+  colors: Record<AnnotationStyle, string>
+}
+
+function defaultColors(): Record<AnnotationStyle, string> {
+  return { highlight: DEFAULT_HIGHLIGHT_COLOR, underline: DEFAULT_HIGHLIGHT_COLOR, squiggly: DEFAULT_HIGHLIGHT_COLOR }
+}
+
+function readMemory(): StyleMemory {
   try {
     const raw = window.localStorage.getItem(LAST_STYLE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      if (HIGHLIGHT_COLORS.some((c) => c.name === parsed.color) && HIGHLIGHT_STYLES.includes(parsed.style)) {
-        return parsed
+      const style: AnnotationStyle = HIGHLIGHT_STYLES.includes(parsed?.style) ? parsed.style : DEFAULT_HIGHLIGHT_STYLE
+      const colors = defaultColors()
+      if (parsed?.colors && typeof parsed.colors === 'object') {
+        for (const s of HIGHLIGHT_STYLES) {
+          if (HIGHLIGHT_COLORS.some((c) => c.name === parsed.colors[s])) colors[s] = parsed.colors[s]
+        }
+      } else if (HIGHLIGHT_COLORS.some((c) => c.name === parsed?.color)) {
+        // Legacy shape { color, style }: seed the remembered color for that style
+        colors[style] = parsed.color
       }
+      return { style, colors }
     }
   } catch {
     // ignore storage errors
   }
-  return { color: DEFAULT_HIGHLIGHT_COLOR, style: 'underline' }
+  return { style: DEFAULT_HIGHLIGHT_STYLE, colors: defaultColors() }
+}
+
+export function getLastHighlightStyle(): { color: string; style: AnnotationStyle } {
+  const memory = readMemory()
+  return { color: memory.colors[memory.style], style: memory.style }
+}
+
+export function getStyleColor(style: AnnotationStyle): string {
+  return readMemory().colors[style]
 }
 
 export function setLastHighlightStyle(color: string, style: AnnotationStyle) {
   try {
-    window.localStorage.setItem(LAST_STYLE_KEY, JSON.stringify({ color, style }))
+    const memory = readMemory()
+    memory.style = style
+    memory.colors[style] = color
+    window.localStorage.setItem(LAST_STYLE_KEY, JSON.stringify(memory))
   } catch {
     // ignore storage errors
   }
@@ -52,12 +101,13 @@ export function popupPosition(
   const vw = window.innerWidth
   const vh = window.innerHeight
   if (!rect) {
-    return { left: Math.max(8, (vw - popupWidth) / 2), top: 80, caretLeft: popupWidth / 2 }
+    return { left: Math.max(8, (vw - popupWidth) / 2), top: 80, caretLeft: popupWidth / 2, dir: 'above' as const }
   }
   const center = rect.left + rect.width / 2
   const left = Math.min(Math.max(8, center - popupWidth / 2), Math.max(8, vw - popupWidth - 8))
   const above = rect.top - popupHeight - gap
-  const top = above >= 56 ? above : Math.min(rect.top + rect.height + gap, Math.max(56, vh - popupHeight - 8))
+  const isAbove = above >= 56
+  const top = isAbove ? above : Math.min(rect.top + rect.height + gap, Math.max(56, vh - popupHeight - 8))
   const caretLeft = Math.min(Math.max(16, center - left), popupWidth - 16)
-  return { left, top, caretLeft }
+  return { left, top, caretLeft, dir: isAbove ? 'above' as const : 'below' as const }
 }

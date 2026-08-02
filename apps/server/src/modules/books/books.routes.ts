@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { paginationSchema, bookMembershipSchema, bookFormatSchema } from '@bookdock/shared'
+import { paginationSchema, bookMembershipSchema, bookFormatSchema, bookUpdateSchema } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
@@ -8,13 +8,17 @@ import {
   restoreBook,
   emptyTrash,
   uploadBook,
+  updateBook,
+  updateBookCover,
+  removeBookCover,
+  resetBookMetadata,
   getBookChapters,
   getBookContent,
-  getBookEpubBuffer,
   setBookShelves,
   setBookTags,
   getBookShelves,
   getBookTags,
+  stripMetaChapters,
 } from './books.service'
 import { getStorage } from '../../storage'
 import { config } from '../../config'
@@ -35,8 +39,9 @@ booksRoutes.get('/', async (c) => {
   const tagId = query['tagId']
   const formatParsed = bookFormatSchema.safeParse(query['format'])
   const format = formatParsed.success ? formatParsed.data : undefined
+  const readStatus = query['readStatus']
   const trash = query['trash'] === '1'
-  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, trash)
+  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash)
   return c.json(result)
 })
 
@@ -55,47 +60,74 @@ booksRoutes.post('/', async (c) => {
 })
 
 booksRoutes.get('/:id/file', async (c) => {
+  const user = c.get('user')
   const id = c.req.param('id')
-  const book = await getActiveBook(id)
+  const book = await getActiveBook(user.id, id)
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) {
     return c.json({ error: { code: 'BOOK_FILE_MISSING', message: 'Book file not found' } }, 404)
   }
   const stream = await storage.get(book.filePath)
-  return c.newResponse(stream as any)
+  const fileName = `${book.title.replace(/[^\w\u3000-\u303f\uff00-\uffef\u4e00-\u9fa5-]/g, '_')}.epub`
+  // filePath is content-hash addressed; the payload never changes under the same URL.
+  return c.newResponse(stream as any, 200, {
+    'Content-Type': 'application/epub+zip',
+    'Content-Length': String(await storage.size(book.filePath)),
+    'Cache-Control': 'private, immutable, max-age=31536000',
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+  })
 })
 
 booksRoutes.get('/:id/content', async (c) => {
+  const user = c.get('user')
   const id = c.req.param('id')
-  await getActiveBook(id)
-  const content = await getBookContent(id)
+  await getActiveBook(user.id, id)
+  const content = await getBookContent(user.id, id)
   return c.newResponse(content)
 })
 
 booksRoutes.get('/:id/epub', async (c) => {
+  const user = c.get('user')
   const id = c.req.param('id')
-  const book = await getActiveBook(id)
-  const buffer = await getBookEpubBuffer(id)
-  const safeTitle = book.title.replace(/[^\w\u4e00-\u9fa5-]/g, '_')
-  const fileName = `${safeTitle}.epub`
-  const asciiName = fileName.replace(/[^\x20-\x7e]/g, '_')
-  return c.newResponse(new Uint8Array(buffer), 200, {
+  const book = await getActiveBook(user.id, id)
+  const storage = getStorage()
+  if (!(await storage.exists(book.filePath))) {
+    return c.json({ error: { code: 'BOOK_FILE_MISSING', message: 'Book file not found' } }, 404)
+  }
+  const stream = await storage.get(book.filePath)
+  // filePath is content-hash addressed; the payload never changes under the same URL.
+  return c.newResponse(stream as any, 200, {
     'Content-Type': 'application/epub+zip',
-    'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    'Content-Length': String(await storage.size(book.filePath)),
+    'Cache-Control': 'private, immutable, max-age=31536000',
   })
 })
 
 booksRoutes.get('/:id', async (c) => {
+  const user = c.get('user')
   const id = c.req.param('id')
-  const book = await getActiveBook(id)
-  return c.json({ data: book })
+  const book = await getActiveBook(user.id, id)
+  return c.json({ data: stripMetaChapters(book) })
 })
 
 booksRoutes.get('/:id/chapters', async (c) => {
+  const user = c.get('user')
   const id = c.req.param('id')
-  await getActiveBook(id)
-  const chapters = await getBookChapters(id)
+  await getActiveBook(user.id, id)
+  const chapters = await getBookChapters(user.id, id)
   return c.json({ data: chapters })
+})
+
+booksRoutes.patch('/:id', async (c) => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const body = await c.req.json()
+  const parsed = bookUpdateSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  const book = await updateBook(user.id, id, parsed.data)
+  return c.json({ data: book })
 })
 
 booksRoutes.delete('/trash', async (c) => {
@@ -105,26 +137,30 @@ booksRoutes.delete('/trash', async (c) => {
 })
 
 booksRoutes.delete('/:id', async (c) => {
+  const user = c.get('user')
   const id = c.req.param('id')
-  await trashBook(id)
+  await trashBook(user.id, id)
   return c.json({ data: null })
 })
 
 booksRoutes.post('/:id/restore', async (c) => {
+  const user = c.get('user')
   const id = c.req.param('id')
-  await restoreBook(id)
+  await restoreBook(user.id, id)
   return c.json({ data: null })
 })
 
 booksRoutes.delete('/:id/permanent', async (c) => {
+  const user = c.get('user')
   const id = c.req.param('id')
-  await deleteBook(id)
+  await deleteBook(user.id, id)
   return c.json({ data: null })
 })
 
 booksRoutes.get('/:id/cover', async (c) => {
+  const user = c.get('user')
   const id = c.req.param('id')
-  const book = await getActiveBook(id)
+  const book = await getActiveBook(user.id, id)
   if (!book.coverKey) {
     return c.json({ error: { code: 'BOOK_NOT_FOUND', message: 'No cover' } }, 404)
   }
@@ -134,8 +170,34 @@ booksRoutes.get('/:id/cover', async (c) => {
   }
   const stream = await storage.get(book.coverKey)
   const ext = book.coverKey.split('.').pop()?.toLowerCase()
-  const contentType = ext === 'png' ? 'image/png' : 'image/jpeg'
-  return c.newResponse(stream as any, 200, { 'Content-Type': contentType })
+  const contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
+  return c.newResponse(stream as any, 200, { 'Content-Type': contentType, 'Cache-Control': 'private, immutable, max-age=31536000' })
+})
+
+booksRoutes.put('/:id/cover', async (c) => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const body = await c.req.parseBody()
+  const file = body['file']
+  if (!file || !(file instanceof File)) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'File is required' } }, 400)
+  }
+  const book = await updateBookCover(user.id, id, file)
+  return c.json({ data: book })
+})
+
+booksRoutes.delete('/:id/cover', async (c) => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const book = await removeBookCover(user.id, id)
+  return c.json({ data: book })
+})
+
+booksRoutes.post('/:id/reset-metadata', async (c) => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const book = await resetBookMetadata(user.id, id)
+  return c.json({ data: book })
 })
 
 booksRoutes.put('/:id/shelves', async (c) => {

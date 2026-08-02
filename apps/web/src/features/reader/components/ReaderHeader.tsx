@@ -1,5 +1,6 @@
+import { memo } from 'react'
 import { Link } from '@tanstack/react-router'
-import { t } from '@/i18n'
+import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { SettingsPopover } from './SettingsPopover'
 import { SettingsPanel } from './SettingsPanel'
@@ -16,7 +17,8 @@ interface ReaderHeaderProps {
   bookmarkActive?: boolean
 }
 
-export function ReaderHeader({ title, visible, className, estimatedMinutes, settingsOpen, onAddBookmark, onToggleSettings, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+export const ReaderHeader = memo(function ReaderHeader({ title, visible, className, estimatedMinutes, settingsOpen, onAddBookmark, onToggleSettings, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+  const _ = useTranslation()
   return (
     <header
       className={cn(
@@ -29,7 +31,7 @@ export function ReaderHeader({ title, visible, className, estimatedMinutes, sett
       <div className="flex items-center gap-3">
         <Link
           to="/"
-          aria-label={t().reader.back}
+          aria-label={_('reader.back')}
           className="pointer-events-auto inline-flex items-center text-[var(--bd-read-sub)] hover:text-current"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -100,4 +102,4 @@ export function ReaderHeader({ title, visible, className, estimatedMinutes, sett
       </div>
     </header>
   )
-}
+})

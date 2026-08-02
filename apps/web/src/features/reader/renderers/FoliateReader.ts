@@ -11,6 +11,7 @@ import type {
   RendererEvents,
   SearchOptions,
   SearchResult,
+  SelectionInfo,
 } from '../types'
 import { FONT_OPTIONS } from '../types'
 import { convertChinese } from '@/lib/chinese'
@@ -23,6 +24,61 @@ const ANNOTATION_COLORS: Record<string, string> = {
   green: '#22c55e',
 }
 const DEFAULT_ANNOTATION_COLOR = ANNOTATION_COLORS.yellow
+
+// Module-level parse cache: fetch + unzip + EPUB.init is the dominant cost of
+// entering the reader, and the parsed book is independent of the foliate view,
+// so it can be reused across view mounts (StrictMode double-mount, leaving and
+// re-entering the same book). Keyed by content URL. Rejected promises are
+// evicted so a transient failure is retried, and the map is capped because
+// each entry retains the whole book blob via loader closures.
+const PARSE_CACHE_MAX = 3
+const parseCache = new Map<string, Promise<any>>()
+
+function getParsedBook(url: string, foliate: any): Promise<any> {
+  const cached = parseCache.get(url)
+  if (cached) {
+    // refresh recency
+    parseCache.delete(url)
+    parseCache.set(url, cached)
+    return cached
+  }
+  const { EPUB, configure, ZipReader, BlobReader, TextWriter, BlobWriter } = foliate
+  const promise = (async () => {
+    const ac = new AbortController()
+    const timeoutId = setTimeout(() => ac.abort(), 60000)
+    const res = await fetch(url, { signal: ac.signal })
+    clearTimeout(timeoutId)
+    if (!res.ok) throw new Error(`fetch epub failed: ${res.status} ${res.statusText}`)
+    const file = await res.blob()
+    configure({ useWebWorkers: false })
+
+    const reader = new ZipReader(new BlobReader(file))
+    const entries: any[] = await reader.getEntries()
+    const map = new Map(entries.map((entry: any) => [entry.filename, entry]))
+
+    const load = (fn: (entry: any) => any) => (name: string) => {
+      const entry = map.get(name)
+      return entry ? fn(entry) : null
+    }
+
+    const loadText = load((entry: any) => entry.getData(new TextWriter()))
+    const loadBlob = load((entry: any, type?: string) => entry.getData(new BlobWriter(type)))
+    const getSize = (name: string) => map.get(name)?.uncompressedSize ?? 0
+
+    return new EPUB({ loadText, loadBlob, getSize }).init()
+  })()
+  // never cache a failure — the next mount must retry
+  promise.catch(() => {
+    if (parseCache.get(url) === promise) parseCache.delete(url)
+  })
+  parseCache.set(url, promise)
+  while (parseCache.size > PARSE_CACHE_MAX) {
+    const oldest = parseCache.keys().next().value
+    if (oldest === undefined) break
+    parseCache.delete(oldest)
+  }
+  return promise
+}
 
 export class FoliateReader implements BookReader {
   private url: string
@@ -53,12 +109,17 @@ export class FoliateReader implements BookReader {
   private theme: { bg: string; text: string } = { bg: '#ffffff', text: '#000000' }
   private pageWidth = 0
   private lastFraction: number | null = null
+  private lastRange: Range | null = null
   private currentDoc: Document | null = null
   private conversion: ChineseConversion = 'off'
   private currentSectionIndex = 0
+  private resizeObserver: ResizeObserver | null = null
+  private lastScrollVPad = -1
   private activeDocs = new Set<Document>()
-  private selectionDocs = new Map<Document, { index: number; handler: () => void }>()
+  private selectionDocs = new Map<Document, { index: number; handler: () => void; holdDown: () => void; holdMove: () => void; dblHandler: () => void }>()
   private selectionActive = false
+  private holdPending = false
+  private holdTimer: ReturnType<typeof setTimeout> | null = null
   private foliateOverlayer: any = null
   private annotationMap = new Map<string, ReaderAnnotation>()
   // cfiRange -> render key (`${type}|${color}`); a key change means remove + re-add
@@ -73,35 +134,13 @@ export class FoliateReader implements BookReader {
     this.url = url
   }
 
-  async mount(container: HTMLElement) {
+  async mount(container: HTMLElement, initialTarget?: string) {
     this.container = container
     try {
       const foliate = await this.loadFoliateScript()
-      const { EPUB, configure, ZipReader, BlobReader, TextWriter, BlobWriter } = foliate
       this.foliateOverlayer = foliate.Overlayer
 
-      const ac = new AbortController()
-      const timeoutId = setTimeout(() => ac.abort(), 60000)
-      const res = await fetch(this.url, { signal: ac.signal })
-      clearTimeout(timeoutId)
-      if (!res.ok) throw new Error(`fetch epub failed: ${res.status} ${res.statusText}`)
-      const file = await res.blob()
-      configure({ useWebWorkers: false })
-
-      const reader = new ZipReader(new BlobReader(file))
-      const entries: any[] = await reader.getEntries()
-      const map = new Map(entries.map((entry: any) => [entry.filename, entry]))
-
-      const load = (fn: (entry: any) => any) => (name: string) => {
-        const entry = map.get(name)
-        return entry ? fn(entry) : null
-      }
-
-      const loadText = load((entry: any) => entry.getData(new TextWriter()))
-      const loadBlob = load((entry: any, type?: string) => entry.getData(new BlobWriter(type)))
-      const getSize = (name: string) => map.get(name)?.uncompressedSize ?? 0
-
-      const epub = await new EPUB({ loadText, loadBlob, getSize }).init()
+      const epub = await getParsedBook(this.url, foliate)
       // StrictMode mounts twice: the first instance is destroyed while its
       // async mount is still in flight — bail out instead of becoming a
       // zombie view stacked on top of the surviving one
@@ -131,6 +170,11 @@ export class FoliateReader implements BookReader {
       })
 
       container.appendChild(view)
+      this.resizeObserver = new ResizeObserver(() => {
+        if (this.destroyed || this.readingMode !== 'scroll') return
+        if (this.scrollBlockPadding() !== this.lastScrollVPad) this.applyStyles()
+      })
+      this.resizeObserver.observe(container)
       await view.open(epub)
       if (this.destroyed) {
         try { view.close() } catch { /* partial init */ }
@@ -139,6 +183,15 @@ export class FoliateReader implements BookReader {
       }
 
       this.applyAllSettings()
+      // Navigate to saved position before mount completes, so the user never
+      // sees the default chapter
+      if (initialTarget) {
+        await this.display(initialTarget)
+        if (this.destroyed) return
+      } else {
+        // Ensure first section is visible after applyAllSettings re-render
+        try { await this.view?.renderer?.goTo?.({ index: 0 }) } catch {}
+      }
       this.syncAnnotations()
       this.emit('rendered')
       this.syncDoc()
@@ -174,7 +227,8 @@ export class FoliateReader implements BookReader {
   }
 
   private handleRelocate(detail: any) {
-    const { cfi, fraction, tocItem, section, chapterLocation } = detail
+    const { cfi, fraction, tocItem, section, chapterLocation, range } = detail
+    this.lastRange = range ?? null
     // fraction is NaN on transient relocate paths (section reload with zero viewSize)
     const frac = Number.isFinite(fraction) ? fraction : this.lastFraction
     if (frac != null) this.lastFraction = frac
@@ -183,21 +237,42 @@ export class FoliateReader implements BookReader {
     if (chapterIndex !== undefined) this.currentSectionIndex = chapterIndex
     const chapterTotal = Number.isFinite(section?.total) ? section.total : undefined
     let pageInChapter = chapterLocation?.current
+    let effectiveCfi = cfi ?? ''
+    let chapterFraction: number | undefined
     try {
       const r = this.view?.renderer
       if (r?.getAttribute?.('flow') === 'scrolled' && r.size > 0) {
         // in scrolled flow chapterLocation is the section index, not a page —
         // approximate pages-into-chapter by container screens instead
         pageInChapter = Math.floor(r.start / r.size)
+        // CFI-based restore pinpoints to an element's bounding rect, putting
+        // it at the viewport top — that shifts the position down vs. where the
+        // user actually was.  Encode the viewport-relative scroll fraction so
+        // goTo({ index, anchor }) restores the exact scrollTop.
+        if (chapterIndex !== undefined) {
+          // Use r.viewSize (iframe content height), not r.size (viewport height)
+          // — scrollToAnchor(anchor) does anchor * viewSize on restore.
+          const viewSize = r.viewSize
+          if (viewSize > 0) {
+            const scrollFrac = r.start / viewSize
+            chapterFraction = scrollFrac
+            effectiveCfi = `chapter:${chapterIndex}:${scrollFrac.toFixed(6)}`
+          }
+        }
       }
     } catch {
       // renderer not ready
     }
+    if (chapterFraction === undefined && chapterLocation && Number.isFinite(chapterLocation.current) && Number.isFinite(chapterLocation.total) && chapterLocation.total > 0) {
+      chapterFraction = chapterLocation.current / chapterLocation.total
+    }
     const location: ReaderLocation = {
-      cfi: cfi ?? '',
+      cfi: effectiveCfi,
       percent: frac != null ? Math.round(frac * 100) : 0,
+      fraction: frac ?? undefined,
       chapter: tocItem?.label,
       chapterIndex,
+      chapterFraction,
       page: chapterIndex != null ? chapterIndex + 1 : undefined,
       total: chapterTotal,
       pageInChapter,
@@ -221,8 +296,16 @@ export class FoliateReader implements BookReader {
       return this.view.goTo(0)
     }
     if (target.startsWith('chapter:')) {
-      const index = Number(target.split(':')[1])
-      if (!Number.isNaN(index) && renderer) return renderer.goTo({ index })
+      const parts = target.split(':')
+      const index = Number(parts[1])
+      if (Number.isNaN(index)) return
+      // chapter:{index}:{scrollFrac} — restore exact scroll proportion
+      if (parts[2] !== undefined) {
+        const anchor = Number(parts[2])
+        if (!Number.isNaN(anchor) && renderer) return renderer.goTo({ index, anchor })
+      }
+      // chapter:{index} — navigate to section start (backward compat)
+      if (renderer) return renderer.goTo({ index })
     }
 
     // CFI locations (search results, bookmarks, selections) go straight to
@@ -418,14 +501,19 @@ export class FoliateReader implements BookReader {
     try {
       const frame = doc.defaultView?.frameElement as HTMLElement | null
       if (!frame) return undefined
+      const transform = getComputedStyle(frame).transform
+      const matrix = transform?.match(/matrix\((.+)\)/)
+      const [sx, , , sy] = matrix?.[1]?.split(/\s*,\s*/)?.map(Number) ?? []
+      const scaleX = Number.isFinite(sx) ? sx! : 1
+      const scaleY = Number.isFinite(sy) ? sy! : 1
       const frameRect = frame.getBoundingClientRect()
       const rect = range.getBoundingClientRect()
       if (!rect || (rect.width === 0 && rect.height === 0)) return undefined
       return {
-        left: frameRect.left + rect.left,
-        top: frameRect.top + rect.top,
-        width: rect.width,
-        height: rect.height,
+        left: scaleX * rect.left + frameRect.left,
+        top: scaleY * rect.top + frameRect.top,
+        width: scaleX * rect.width,
+        height: scaleY * rect.height,
       }
     } catch {
       return undefined
@@ -439,6 +527,7 @@ export class FoliateReader implements BookReader {
         const sel = doc.defaultView?.getSelection?.()
         const range = sel && !sel.isCollapsed && sel.rangeCount > 0 ? sel.getRangeAt(0) : null
         const text = range?.toString().replace(/\s+/g, ' ').trim() ?? ''
+        const rawText = sel?.toString().trim() ?? ''
         if (!range || !text) {
           if (this.selectionActive) {
             this.selectionActive = false
@@ -449,19 +538,31 @@ export class FoliateReader implements BookReader {
         const cfiRange = this.view?.getCFI?.(index, range)
         if (!cfiRange) return
         this.selectionActive = true
-        this.emit('selected', {
+        const info: SelectionInfo = {
           cfiRange,
           text: text.slice(0, 500),
+          rawText,
           rect: this.popupRect(doc, range),
-        })
+        }
+        if (this.holdPending) {
+          this.holdPending = false
+          this.emit('instantAnnotation', info)
+          this.emit('selected', null)
+          return
+        }
+        this.emit('selected', info)
       } catch {
         // ignore selection errors
       }
     }, 0)
   }
 
-  clearSelection() {
+  deselect() {
     try { this.view?.deselect?.() } catch { /* view may be gone */ }
+  }
+
+  clearSelection() {
+    this.deselect()
     if (this.selectionActive) {
       this.selectionActive = false
       this.emit('selected', null)
@@ -498,54 +599,98 @@ export class FoliateReader implements BookReader {
     const { draw, annotation } = detail ?? {}
     if (!draw || !annotation?.value || !this.foliateOverlayer) return
     const ann = this.annotationMap.get(annotation.value)
-    const color = ANNOTATION_COLORS[ann?.color ?? ''] ?? DEFAULT_ANNOTATION_COLOR
-    const style = ann?.style ?? 'underline'
-    if (style === 'highlight') {
+    if (!ann) return // skip if annotation data isn't in map yet — syncAnnotations will re-trigger
+    const color = ANNOTATION_COLORS[ann.color ?? ''] ?? DEFAULT_ANNOTATION_COLOR
+    if (ann.type === 'note') {
+      // Ideas always render as a dashed underline in their theme color (WeChat Reading style)
+      draw(this.foliateOverlayer.dashedUnderline, { color })
+    } else if (ann.style === 'highlight') {
       draw(this.foliateOverlayer.highlight, { color: `${color}55` })
     } else {
-      draw(style === 'squiggly' ? this.foliateOverlayer.squiggly : this.foliateOverlayer.underline, { color })
+      draw(ann.style === 'squiggly' ? this.foliateOverlayer.squiggly : this.foliateOverlayer.underline, { color })
     }
   }
 
   private handleShowAnnotation(detail: any) {
-    const { value, index, range } = detail ?? {}
+    const { value, range } = detail ?? {}
     if (!value) return
     try {
-      const contents = this.view?.renderer?.getContents?.() ?? []
-      const match = contents.find((c: any) => c.index === index)
-      const rect = match?.doc && range ? this.popupRect(match.doc, range) : undefined
+      const doc = range && (range as Range).startContainer?.ownerDocument as Document | undefined
+      const rect = doc && range ? this.popupRect(doc, range as Range) : undefined
       this.emit('annotationClicked', { cfiRange: value, rect })
     } catch {
       this.emit('annotationClicked', { cfiRange: value })
     }
   }
 
-  async search(query: string, opts?: SearchOptions): Promise<SearchResult[]> {
+  async search(
+    query: string,
+    opts?: SearchOptions,
+    onProgress?: (results: SearchResult[], progress: number | null) => void,
+  ): Promise<SearchResult[]> {
     if (!query.trim() || !this.view) return []
     const index = opts?.scope === 'chapter' ? this.currentSectionIndex : undefined
     const matchRegex = opts?.mode === 'regex'
     const results: SearchResult[] = []
     let i = 0
+    let progress: number | null = null
+    let lastEmit = 0
+    // Throttle partial-result emits: hundreds of matches arrive in quick bursts
+    const emit = (force = false) => {
+      if (!onProgress) return
+      const now = Date.now()
+      if (!force && now - lastEmit < 80) return
+      lastEmit = now
+      onProgress([...results], progress)
+    }
     // foliate's excerpt is {pre, match, post}, not a plain string
     const toResult = (cfi: string, excerpt: any): SearchResult => ({
       cfi,
       text: excerpt ? `${excerpt.pre}${excerpt.match}${excerpt.post}` : '',
       index: i++,
       excerpt: excerpt ?? undefined,
+      chapter: this.chapterForCfi(cfi),
     })
     for await (const item of this.view.search({ query: query.trim(), index, matchCase: opts?.matchCase, matchRegex })) {
       if (item === 'done') break
       if (item.subitems) {
         for (const sub of item.subitems) results.push(toResult(sub.cfi, sub.excerpt))
+        emit()
       } else if (item.cfi) {
         results.push(toResult(item.cfi, item.excerpt))
+        emit()
+      } else if (typeof item.progress === 'number') {
+        progress = item.progress
+        emit()
       }
     }
+    emit(true)
     return results
+  }
+
+  clearSearch() {
+    this.view?.clearSearch?.()
+  }
+
+  /** Best-effort chapter label for a CFI: section index → TOC item label */
+  private chapterForCfi(cfi: string): string | undefined {
+    try {
+      const index = this.book?.resolveCFI?.(cfi)?.index
+      if (index == null) return undefined
+      return this.view?.getProgressOf?.(index)?.tocItem?.label ?? undefined
+    } catch {
+      return undefined
+    }
   }
 
   getSnippet(cfi: string, maxLength = 80): string {
     try {
+      // chapter:{index}:{fraction} — scrolled-mode TXT books
+      if (cfi.startsWith('chapter:')) {
+        const text = this.lastRange?.startContainer?.textContent
+        if (text) return text.slice(0, maxLength).replace(/\s+/g, ' ').trim().slice(0, maxLength)
+        return ''
+      }
       const resolved = this.book?.resolveCFI?.(cfi)
       if (!resolved) return ''
       const contents = this.view?.renderer?.getContents?.() ?? []
@@ -627,6 +772,9 @@ export class FoliateReader implements BookReader {
           if (sel) {
             doc.removeEventListener('mouseup', sel.handler)
             doc.removeEventListener('keyup', sel.handler)
+            doc.removeEventListener('pointerdown', sel.holdDown)
+            doc.removeEventListener('pointermove', sel.holdMove)
+            doc.removeEventListener('dblclick', sel.dblHandler)
             this.selectionDocs.delete(doc)
           }
         }
@@ -637,7 +785,47 @@ export class FoliateReader implements BookReader {
         const handler = () => this.handleSelection(doc, index)
         doc.addEventListener('mouseup', handler)
         doc.addEventListener('keyup', handler)
-        this.selectionDocs.set(doc, { index, handler })
+        const holdDown = () => {
+          this.holdPending = false
+          if (this.holdTimer !== null) { clearTimeout(this.holdTimer) }
+          this.holdTimer = setTimeout(() => { this.holdPending = true; this.holdTimer = null }, 300)
+        }
+        const holdMove = () => {
+          this.holdPending = false
+          if (this.holdTimer !== null) { clearTimeout(this.holdTimer); this.holdTimer = null }
+        }
+        doc.addEventListener('pointerdown', holdDown)
+        doc.addEventListener('pointermove', holdMove)
+        const dblHandler = () => {
+          this.holdPending = false
+          if (this.holdTimer !== null) { clearTimeout(this.holdTimer); this.holdTimer = null }
+          setTimeout(() => {
+            try {
+              const sel = doc.defaultView?.getSelection?.()
+              if (!sel || sel.isCollapsed || sel.rangeCount === 0 || typeof Intl.Segmenter !== 'function') return
+              const range = sel.getRangeAt(0)
+              const node = range.startContainer
+              if (node.nodeType !== Node.TEXT_NODE || range.startContainer !== range.endContainer) return
+              const text = node.textContent ?? ''
+              const lang = doc.documentElement.lang || undefined
+              const segmenter = new Intl.Segmenter(lang, { granularity: 'word' })
+              for (const seg of segmenter.segment(text)) {
+                if (!seg.isWordLike) continue
+                if (seg.index <= range.startOffset && seg.index + seg.segment.length >= range.endOffset) {
+                  const newRange = doc.createRange()
+                  newRange.setStart(node, seg.index)
+                  newRange.setEnd(node, seg.index + seg.segment.length)
+                  sel.removeAllRanges()
+                  sel.addRange(newRange)
+                  this.handleSelection(doc, index)
+                  break
+                }
+              }
+            } catch { /* segmenter may fail */ }
+          }, 0)
+        }
+        doc.addEventListener('dblclick', dblHandler)
+        this.selectionDocs.set(doc, { index, handler, holdDown, holdMove, dblHandler })
       }
       this.activeDocs = docs
 
@@ -654,6 +842,9 @@ export class FoliateReader implements BookReader {
 
   destroy() {
     this.destroyed = true
+    this.resizeObserver?.disconnect()
+    this.resizeObserver = null
+    if (this.holdTimer !== null) { clearTimeout(this.holdTimer); this.holdTimer = null }
     try { this.view?.close() } catch { /* view may be partially initialized */ }
     try { this.view?.remove() } catch { /* ignore */ }
     for (const doc of this.activeDocs) {
@@ -662,10 +853,14 @@ export class FoliateReader implements BookReader {
       if (sel) {
         doc.removeEventListener('mouseup', sel.handler)
         doc.removeEventListener('keyup', sel.handler)
+        doc.removeEventListener('pointerdown', sel.holdDown)
+        doc.removeEventListener('pointermove', sel.holdMove)
+        doc.removeEventListener('dblclick', sel.dblHandler)
       }
     }
     this.selectionDocs.clear()
     this.activeDocs.clear()
+    this.listeners = []
     this.view = null
     this.book = null
     this.container = null
@@ -680,9 +875,21 @@ export class FoliateReader implements BookReader {
     this.applyStyles()
   }
 
+  // Scrolled-flow chapter boundaries need breathing room proportional to the
+  // viewport, like the horizontal gap (a percentage of container width) — a
+  // fixed px value reads as cramped on large windows. Quantized to 8px steps
+  // so window drags don't re-apply styles every frame. The user's vertical
+  // padding setting is added on top.
+  private scrollBlockPadding(): number {
+    const height = this.container?.clientHeight ?? 0
+    return this.paragraph.verticalPadding + Math.round(height / 100) * 8
+  }
+
   private applyStyles() {
     if (!this.view?.renderer?.setStyles) return
     const font = FONT_OPTIONS.find((f) => f.id === this.font.fontFamily) ?? FONT_OPTIONS[0]
+    const vPad = this.readingMode === 'page' ? 0 : this.scrollBlockPadding()
+    this.lastScrollVPad = vPad
     const css = `
       html, body {
         font-family: ${font.value} !important;
@@ -694,14 +901,18 @@ export class FoliateReader implements BookReader {
         background: ${this.theme.bg} !important;
         background-color: ${this.theme.bg} !important;
       }
+      ::selection {
+        background: ${this.theme.text}19 !important;
+        color: inherit !important;
+      }
       p {
         text-indent: ${this.paragraph.indent}em !important;
         margin-bottom: ${this.paragraph.paragraphSpacing}em !important;
         text-align: ${this.paragraph.textAlignJustify ? 'justify' : 'start'} !important;
       }
       body {
-        padding-top: ${this.readingMode === 'page' ? 0 : this.paragraph.verticalPadding}px !important;
-        padding-bottom: ${this.readingMode === 'page' ? 0 : this.paragraph.verticalPadding}px !important;
+        padding-top: ${vPad}px !important;
+        padding-bottom: ${vPad}px !important;
         padding-left: ${this.readingMode === 'page' ? 0 : this.paragraph.horizontalPadding}px !important;
         padding-right: ${this.readingMode === 'page' ? 0 : this.paragraph.horizontalPadding}px !important;
       }

@@ -97,17 +97,32 @@ function buildTocNcx(metadata: TxtToEpubMetadata, chapters: TxtToEpubChapter[]):
   const title = metadata.title || 'Untitled'
   const maxLevel = Math.max(1, ...chapters.map((c) => c.level))
 
-  const navPoints = chapters
-    .map((chapter, index) => {
-      const playOrder = index + 1
-      return `    <navPoint id="navpoint-${playOrder}" playOrder="${playOrder}">
+  // Build tree: track stack of open navPoints per level
+  let navPoints = ''
+  const stack: { level: number }[] = []
+  for (let i = 0; i < chapters.length; i++) {
+    const chapter = chapters[i]
+    const playOrder = i + 1
+
+    // Close navPoints deeper than current chapter's level
+    while (stack.length > 0 && stack[stack.length - 1].level >= chapter.level) {
+      navPoints += '    </navPoint>\n'
+      stack.pop()
+    }
+
+    navPoints += `    <navPoint id="navpoint-${playOrder}" playOrder="${playOrder}">
       <navLabel>
         <text>${escapeXml(chapter.title)}</text>
       </navLabel>
-      <content src="${chapterFilename(index)}" />
-    </navPoint>`
-    })
-    .join('\n')
+      <content src="${chapterFilename(i)}" />
+`
+    stack.push({ level: chapter.level })
+  }
+  // Close remaining open navPoints
+  while (stack.length > 0) {
+    navPoints += '    </navPoint>\n'
+    stack.pop()
+  }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">

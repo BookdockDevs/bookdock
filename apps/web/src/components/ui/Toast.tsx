@@ -11,13 +11,7 @@ export function Toast() {
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`rounded-xl px-4 py-2.5 text-sm font-medium shadow-lg backdrop-blur-md transition-all ${
-            toast.type === 'success'
-              ? 'bg-emerald-600/95 text-white'
-              : toast.type === 'error'
-                ? 'bg-red-600/95 text-white'
-                : 'bg-stone-800/95 text-white'
-          }`}
+          className="rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-4 py-2.5 text-sm font-medium text-[var(--bd-read-text)] shadow-lg backdrop-blur-md transition-all"
           onClick={() => removeToast(toast.id)}
           role="alert"
         >

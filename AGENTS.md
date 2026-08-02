@@ -11,7 +11,7 @@ Authoritative architecture document: `docs/architecture.md`. Change the doc firs
 - Server organized by domain modules (`modules/{auth,books,shelves,tags,progress}`), thin routes, service orchestration, no cross-module service imports.
 - Key interfaces first: `StorageDriver` (storage/), `FormatRegistry` (formats/). New storage/format = implement interface + register, no service changes.
 - Don't extract `@bookdock/db` or `@bookdock/storage` yet. Cohesive modules + interfaces suffice. Extract when a second consumer (CLI/Tauri) appears.
-- DB schema pre-wired for multi-user (`users` table + `userId` FK). Single-user instance has a default user row. **Every new table must include `userId`**.
+- Multi-user is live: `users` table + `userId` FK on all user-data tables, per-user libraries, owner/member roles. **Every new table must include `userId`** (instance-level tables like `instance_settings` are the documented exception, see ADR-12). All single-entity queries must verify row ownership by `userId`; shared content-hash blobs must be reference-checked before physical deletion.
 
 ## Setup commands
 
@@ -81,7 +81,7 @@ Follow first principles: identify the real problem, required behavior, and small
 - Primary keys: nanoid strings (`server/lib/id.ts`), never auto-increment integers.
 - Timestamps: INTEGER unix ms.
 - Unstable/rarely-queried fields go into JSON columns (e.g. `books.meta`). Stable, frequently-queried fields get dedicated columns.
-- Auth: JWT by default. `AUTH_MODE=off` (single-instance no-password mode) lets auth.guard pass through and inject the default user.
+- Auth: JWT in HttpOnly Cookie `bd_token` (SameSite=Strict); guard verifies then loads the fresh user from DB (short-TTL cache) so role/disabled changes take effect immediately. First run always requires creating the owner via `/setup`; afterwards the owner can toggle open registration and guest access (stored in `instance_settings`, runtime-editable). Guest access injects the default user and is rejected by owner-only endpoints. See `docs/local/dev/accounts.md`.
 - Security: sensitive config (JWT_SECRET etc.) from env only, never committed. Server config validated via zod. Upload size limits enforced.
 
 ### API response shapes (authoritative)
@@ -190,9 +190,24 @@ import { booksService } from './books.service'
 
 ## Git & PR instructions
 
-- **Commit messages**: use conventional commits — `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, `perf:`. Example: `feat(server): add book upload endpoint`.
+### Branching strategy (GitHub Flow)
+
+| Branch | Purpose | Merge method |
+|--------|---------|:------------:|
+| `main` | Production-ready, always deployable | — |
+| `feature/<epic-name>` | New feature (e.g. `feature/read-status`) | Squash merge |
+| `fix/<brief-description>` | Bug fix (e.g. `fix/download-button`) | Squash merge |
+| `chore/<brief-description>` | Refactor / tooling / config (e.g. `chore/update-deps`) | Squash merge |
+
+- All branches merge into `main` via PR.
+- Squash merge keeps `main` history clean — one commit per feature/fix.
+- Branch names: kebab-case, all lowercase.
+
+### Commits & PRs
+
+- **Commit messages**: conventional commits — `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, `perf:`. Example: `feat(server): add book upload endpoint`.
 - **PR title format**: `[<project_name>] <Title>` (e.g. `[server] support book upload`).
-- Always run `pnpm lint` and `pnpm test` before committing.
+- Always run `pnpm lint`, `pnpm typecheck`, and `pnpm test` before committing.
 - Do not commit, push, or open PRs unless explicitly asked.
 
 ## Communication
