@@ -216,7 +216,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
 
   function searchSelection() {
     if (!selection?.text) return
-    setPendingSearchQuery(selection.text.slice(0, 50))
+    setPendingSearchQuery(selection.text)
     setActiveNavTab('toc')
     setSidebarOpen(true)
     close()

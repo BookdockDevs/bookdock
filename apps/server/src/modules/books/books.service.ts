@@ -87,7 +87,7 @@ function blobKey(hash: string, ext: string): string {
   return `blobs/${hash.slice(0, 2)}/${hash}${ext}`
 }
 
-async function bufferFromStream(stream: Readable): Promise<Buffer> {
+export async function bufferFromStream(stream: Readable): Promise<Buffer> {
   const chunks: Buffer[] = []
   for await (const chunk of stream) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))

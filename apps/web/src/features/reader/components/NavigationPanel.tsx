@@ -381,14 +381,20 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
 
   useEffect(() => {
     if (!searchMenuOpen) return
-    function handle(e: MouseEvent) {
+    function handle(e: Event) {
       const target = e.target as Node
       if (!document.getElementById('search-options-menu')?.contains(target) && !searchMenuBtnRef.current?.contains(target)) {
         setSearchMenuOpen(false)
       }
     }
+    // Clicks inside the foliate iframe never reach document; the renderer
+    // relays them as a bubbling `content-click` on the reader container
     document.addEventListener('mousedown', handle)
-    return () => document.removeEventListener('mousedown', handle)
+    document.addEventListener('content-click', handle)
+    return () => {
+      document.removeEventListener('mousedown', handle)
+      document.removeEventListener('content-click', handle)
+    }
   }, [searchMenuOpen])
 
   async function doSearch() {

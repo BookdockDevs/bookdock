@@ -51,14 +51,20 @@ export function NotesFilterPanel({
     if (!open) return
     const rect = anchorRef.current?.getBoundingClientRect()
     if (rect) setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
-    function handle(e: MouseEvent) {
+    function handle(e: Event) {
       const target = e.target as Node
       if (!rootRef.current?.contains(target) && !anchorRef.current?.contains(target)) {
         onClose()
       }
     }
+    // Clicks inside the foliate iframe never reach document; the renderer
+    // relays them as a bubbling `content-click` on the reader container
     document.addEventListener('mousedown', handle)
-    return () => document.removeEventListener('mousedown', handle)
+    document.addEventListener('content-click', handle)
+    return () => {
+      document.removeEventListener('mousedown', handle)
+      document.removeEventListener('content-click', handle)
+    }
   }, [open, anchorRef, onClose])
 
   if (!open || !pos) return null

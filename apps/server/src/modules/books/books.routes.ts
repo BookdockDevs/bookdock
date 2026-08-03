@@ -20,6 +20,7 @@ import {
   getBookShelves,
   getBookTags,
   stripMetaChapters,
+  bufferFromStream,
 } from './books.service'
 import { getTrashSettings } from '../settings/settings.service'
 import { getStorage } from '../../storage'
@@ -110,15 +111,19 @@ booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
     )
   }
   const isHead = c.req.method === 'HEAD'
+  // Buffered bodies instead of raw node streams: when the client aborts
+  // mid-transfer (zip.js range probes, navigation away), undici's stream
+  // bridging can close its ReadableStream twice, throwing ERR_INVALID_STATE
+  // as an uncaughtException that kills the whole server process
   if (range) {
     headers['Content-Range'] = `bytes ${range.start}-${range.end}/${size}`
     headers['Content-Length'] = String(range.end - range.start + 1)
-    const stream = isHead ? null : await storage.get(book.filePath, range)
-    return c.newResponse(stream as any, 206, headers)
+    const body = isHead ? null : new Uint8Array(await bufferFromStream(await storage.get(book.filePath, range)))
+    return c.newResponse(body, 206, headers)
   }
   headers['Content-Length'] = String(size)
-  const stream = isHead ? null : await storage.get(book.filePath)
-  return c.newResponse(stream as any, 200, headers)
+  const body = isHead ? null : new Uint8Array(await bufferFromStream(await storage.get(book.filePath)))
+  return c.newResponse(body, 200, headers)
 })
 
 booksRoutes.get('/:id/content', async (c) => {
@@ -137,9 +142,9 @@ booksRoutes.get('/:id/epub', async (c) => {
   if (!(await storage.exists(book.filePath))) {
     return c.json({ error: { code: 'BOOK_FILE_MISSING', message: 'Book file not found' } }, 404)
   }
-  const stream = await storage.get(book.filePath)
+  const body = new Uint8Array(await bufferFromStream(await storage.get(book.filePath)))
   // filePath is content-hash addressed; the payload never changes under the same URL.
-  return c.newResponse(stream as any, 200, {
+  return c.newResponse(body, 200, {
     'Content-Type': 'application/epub+zip',
     'Content-Length': String(await storage.size(book.filePath)),
     'Cache-Control': 'private, immutable, max-age=31536000',
@@ -211,10 +216,10 @@ booksRoutes.get('/:id/cover', async (c) => {
   if (!(await storage.exists(book.coverKey))) {
     return c.json({ error: { code: 'BOOK_NOT_FOUND', message: 'Cover file missing' } }, 404)
   }
-  const stream = await storage.get(book.coverKey)
+  const body = new Uint8Array(await bufferFromStream(await storage.get(book.coverKey)))
   const ext = book.coverKey.split('.').pop()?.toLowerCase()
   const contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
-  return c.newResponse(stream as any, 200, { 'Content-Type': contentType, 'Cache-Control': 'private, immutable, max-age=31536000' })
+  return c.newResponse(body, 200, { 'Content-Type': contentType, 'Cache-Control': 'private, immutable, max-age=31536000' })
 })
 
 booksRoutes.put('/:id/cover', async (c) => {

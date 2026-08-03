@@ -354,7 +354,11 @@ export class View extends HTMLElement {
       }
       return
     }
-    const { index, anchor } = await this.resolveNavigation(value)
+    // bookdock: annotation values carry a `|${type}` suffix to keep a highlight
+    // and an idea on the same range distinct; `|` never appears in a valid CFI,
+    // so strip it before resolving
+    const cfi = value.includes('|') ? value.slice(0, value.lastIndexOf('|')) : value
+    const { index, anchor } = await this.resolveNavigation(cfi)
     const obj = this.#getOverlayer(index)
     if (obj) {
       const { overlayer, doc } = obj
