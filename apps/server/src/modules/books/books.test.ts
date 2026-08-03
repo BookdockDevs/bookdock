@@ -19,6 +19,7 @@ import {
   trashBook,
   restoreBook,
   deleteBook,
+  purgeExpiredTrash,
 } from './books.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -200,5 +201,47 @@ describe('deleteBook blob reference protection', () => {
     expect(mem.files.has(sharedFile)).toBe(false)
     expect(mem.files.has(sharedCover)).toBe(false)
     expect(mem.files.has(progressKey)).toBe(false)
+  })
+})
+
+describe('purgeExpiredTrash', () => {
+  let db: ReturnType<typeof createTestDb>
+  let userId: string
+
+  const DAY_MS = 24 * 60 * 60 * 1000
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    userId = seedUser(db, 'owner')
+  })
+
+  it('should purge trash rows older than the configured days', async () => {
+    const expired = seedBook(db, userId, { deletedAt: Date.now() - 31 * DAY_MS })
+    const recent = seedBook(db, userId, { deletedAt: Date.now() - 2 * DAY_MS })
+
+    const purged = await purgeExpiredTrash(userId, 30)
+    expect(purged).toBe(1)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, expired.id)).get()).toBeUndefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, recent.id)).get()).toBeDefined()
+  })
+
+  it('should not touch active books or other users trash', async () => {
+    const otherId = seedUser(db, 'other')
+    const active = seedBook(db, userId)
+    const others = seedBook(db, otherId, { deletedAt: Date.now() - 90 * DAY_MS })
+
+    await purgeExpiredTrash(userId, 30)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, active.id)).get()).toBeDefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, others.id)).get()).toBeDefined()
+  })
+
+  it('should skip purging entirely when days is 0 (never auto-clean)', async () => {
+    const expired = seedBook(db, userId, { deletedAt: Date.now() - 365 * DAY_MS })
+
+    const purged = await purgeExpiredTrash(userId, 0)
+    expect(purged).toBe(0)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, expired.id)).get()).toBeDefined()
   })
 })

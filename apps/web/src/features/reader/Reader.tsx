@@ -17,6 +17,8 @@ import { useReaderState } from './state/reader-state'
 import { RendererContext } from './hooks/useReaderApi'
 import { useBookChapters } from './hooks/useBookChapters'
 import { createSegmentTracker, trackPosition } from './stats/reading-segments'
+import { createJumpHistory } from './jump-history'
+import { createHistoryAutoHide, type HistoryAutoHide } from './history-auto-hide'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
 import { Ribbon } from './components/Ribbon'
@@ -24,8 +26,9 @@ import { ToolDock } from './components/ToolDock'
 import { NavigationPanel, type NavigationPanelRef } from './components/NavigationPanel'
 import { SelectionToolbar } from './components/SelectionToolbar'
 import { ProgressStrip } from './components/ProgressStrip'
+import HistoryCapsule from './components/HistoryCapsule'
 import { getLastHighlightStyle } from './components/annotation-colors'
-import type { NavTab } from './types'
+import type { NavTab, ReaderAnnotation } from './types'
 import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq } from '@bookdock/shared'
 
 export default function Reader() {
@@ -100,6 +103,23 @@ export default function Reader() {
 
   const segmentTrackerRef = useRef(createSegmentTracker())
 
+  // Session-only jump history (browser semantics); cleared on book switch below
+  const jumpHistoryRef = useRef(createJumpHistory())
+  const [historyCaps, setHistoryCaps] = useState({ canBack: false, canForward: false })
+  const currentCfiRef = useRef<string | null>(null)
+  const syncHistoryCaps = useCallback(() => {
+    setHistoryCaps({ canBack: jumpHistoryRef.current.canBack(), canForward: jumpHistoryRef.current.canForward() })
+  }, [])
+  // Auto-hide drops the stack (and with it the capsule) once the user keeps
+  // reading or idles past the change-of-mind window
+  const historyAutoHideRef = useRef<HistoryAutoHide | null>(null)
+  if (historyAutoHideRef.current === null) {
+    historyAutoHideRef.current = createHistoryAutoHide(() => {
+      jumpHistoryRef.current.clear()
+      syncHistoryCaps()
+    })
+  }
+
   const scheduleProgressSave = useCallback(
     (body: ReadingProgressUpdateReq) => {
       pendingProgress.current = body
@@ -133,6 +153,18 @@ export default function Reader() {
 
   const contentUrl = id ? `/api/v1/books/${id}/file` : ''
 
+  // Latch initialCfi at first resolve: later refetches of ['progress'] (e.g.
+  // StatsPanel mounting) must not remount the renderer
+  const initialCfiRef = useRef<string | undefined>(undefined)
+  const initialCfiBookRef = useRef(id)
+  if (initialCfiBookRef.current !== id) {
+    initialCfiBookRef.current = id
+    initialCfiRef.current = undefined
+  }
+  if (initialCfiRef.current === undefined && !progressQuery.isPending) {
+    initialCfiRef.current = progressQuery.data?.data?.cfi ?? ''
+  }
+
   const [bookReady, setBookReady] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   useEffect(() => {
@@ -156,7 +188,7 @@ export default function Reader() {
     url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
     // so it navigates exactly once (to the saved CFI, or to the book start
     // when progress resolved to none)
-    initialCfi: progressQuery.isPending ? undefined : (progressQuery.data?.data?.cfi ?? ''),
+    initialCfi: initialCfiRef.current,
     onRendered: () => {
       setBookReady(true)
       setLoadError(null)
@@ -166,6 +198,7 @@ export default function Reader() {
       setSelection(null)
       setPercent(e.percent)
       setCurrentCfi(e.cfi)
+      currentCfiRef.current = e.cfi
       setChapterFraction(e.chapterFraction)
       if (e.page !== undefined && e.total !== undefined) {
         setPageInfo({ page: e.page, total: e.total })
@@ -193,6 +226,7 @@ export default function Reader() {
       if (e.chapterIndex !== undefined) {
         setCurrentChapterIndex(e.chapterIndex)
       }
+      historyAutoHideRef.current?.trackRelocate(e.movedScreens, e.chapterIndex)
       const segmentStartFraction = e.fraction !== undefined
         ? trackPosition(segmentTrackerRef.current, e.fraction)
         : undefined
@@ -206,6 +240,12 @@ export default function Reader() {
       setSelection({ cfiRange: e.cfiRange, text: annotation.text, rect: e.rect })
     },
     onTocReady: (items) => setTocItems(items),
+    onJumpConfirmed: (e) => {
+      if (!e.cfi) return
+      jumpHistoryRef.current.push(e.cfi)
+      syncHistoryCaps()
+      historyAutoHideRef.current?.reset()
+    },
     onInstantAnnotation: (e) => {
       const lastStyle = getLastHighlightStyle()
       createAnnotation.mutate({
@@ -230,19 +270,31 @@ export default function Reader() {
   }, [containerRef])
 
   // Push highlight/note annotations into the renderer's overlay layer
+  const noteEditorRange = useReaderState((s) => s.noteEditorRange)
   useEffect(() => {
     if (!renderer?.setAnnotations) return
-    const list = (annotations?.data ?? [])
+    const list: ReaderAnnotation[] = (annotations?.data ?? [])
       .filter((a) => a.type === 'highlight' || a.type === 'note')
       .map((a) => ({ cfiRange: a.cfiRange, type: a.type as 'highlight' | 'note', color: a.color, style: a.style, note: a.note }))
+    // An idea being composed has no row yet; a pseudo note keeps the dashed
+    // underline on its range while the editor is open
+    if (noteEditorRange) {
+      list.push({ cfiRange: noteEditorRange, type: 'note', color: 'yellow', style: 'underline' })
+    }
     renderer.setAnnotations(list)
-  }, [renderer, annotations?.data])
+  }, [renderer, annotations?.data, noteEditorRange])
 
   useEffect(() => {
     setCurrentChapter(null)
     setCurrentChapterIndex(null)
     segmentTrackerRef.current = createSegmentTracker()
-  }, [id, setCurrentChapter, setCurrentChapterIndex])
+    jumpHistoryRef.current.clear()
+    syncHistoryCaps()
+    historyAutoHideRef.current?.dispose()
+    currentCfiRef.current = null
+  }, [id, setCurrentChapter, setCurrentChapterIndex, syncHistoryCaps])
+
+  useEffect(() => () => historyAutoHideRef.current?.dispose(), [])
 
   useEffect(() => {
     if (progressQuery.data?.data?.chapter) {
@@ -289,6 +341,21 @@ export default function Reader() {
   useEffect(() => {
     rendererRef.current = renderer
   }, [renderer])
+
+  const onHistoryBack = useCallback(() => {
+    const target = jumpHistoryRef.current.back(currentCfiRef.current ?? '')
+    // internal: history navigation itself must not re-enter the back stack
+    if (target) void rendererRef.current?.display(target, { internal: true })
+    syncHistoryCaps()
+    historyAutoHideRef.current?.reset()
+  }, [syncHistoryCaps])
+
+  const onHistoryForward = useCallback(() => {
+    const target = jumpHistoryRef.current.forward(currentCfiRef.current ?? '')
+    if (target) void rendererRef.current?.display(target, { internal: true })
+    syncHistoryCaps()
+    historyAutoHideRef.current?.reset()
+  }, [syncHistoryCaps])
 
   // The stored selection rect goes stale when the reading area resizes
   // (sidebar toggle/drag, window resize), so dismiss the bubble instead of
@@ -564,7 +631,7 @@ export default function Reader() {
               </div>
             )}
             {/* Bottom hover zone: hot strip + footer + word count badge share the same group. */}
-            <div className="group absolute inset-x-0 bottom-0 z-40 pointer-events-none">
+            <div className="group peer/strip absolute inset-x-0 bottom-0 z-40 pointer-events-none">
               <div className="absolute inset-x-0 bottom-0 h-12 pointer-events-auto" />
               {showWordCountBadge && (
                 <div className="pointer-events-none absolute right-4 z-30 text-xs tabular-nums text-[var(--bd-read-sub)] transition-all duration-300 bottom-3 group-hover:bottom-[3.25rem]">
@@ -582,6 +649,12 @@ export default function Reader() {
                 onSeek={onSeek}
               />
             </div>
+            <HistoryCapsule
+              canBack={historyCaps.canBack}
+              canForward={historyCaps.canForward}
+              onBack={onHistoryBack}
+              onForward={onHistoryForward}
+            />
           </div>
         </div>
         <SelectionToolbar bookId={id} />

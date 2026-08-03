@@ -36,6 +36,7 @@ export type {
   UpdateUserReq,
   SettingsRes,
   SettingsUpdateReq,
+  TrashSettings,
   ShelfListItem,
   ShelfCreateReq,
   ShelfUpdateReq,

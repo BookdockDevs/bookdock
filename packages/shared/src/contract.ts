@@ -110,6 +110,11 @@ export interface UpdateUserReq {
   newPassword?: string
 }
 
+export interface TrashSettings {
+  /** Days a trashed book is kept before auto-purge; 0 disables auto-clean */
+  autoCleanDays: 0 | 7 | 30
+}
+
 export interface SettingsRes {
   uiTheme?: 'system' | 'light' | 'dark'
   readingThemeId?: 'paper' | 'sepia' | 'night' | 'cream'
@@ -124,6 +129,14 @@ export interface SettingsRes {
   pageWidth?: number
   verticalPadding?: number
   horizontalPadding?: number
+  // Per-mode backing values for the three layout settings above; the flat
+  // fields mirror whichever readingMode is active.
+  scrollPageWidth?: number
+  scrollHorizontalPadding?: number
+  scrollVerticalPadding?: number
+  pagePageWidth?: number
+  pageHorizontalPadding?: number
+  pageVerticalPadding?: number
   textAlignJustify?: boolean
   overrideBookFont?: boolean
   overrideBookLayout?: boolean
@@ -141,6 +154,7 @@ export interface SettingsRes {
   showWordCount?: boolean
   continuousScroll?: 'off' | 'snap' | 'seamless'
   pageAnimation?: boolean
+  trash?: TrashSettings
 }
 
 export interface SettingsUpdateReq {

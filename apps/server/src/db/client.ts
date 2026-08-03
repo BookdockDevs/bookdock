@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { fileURLToPath } from 'node:url'
 import * as schema from './schema'
 import { config } from '../config'
 
@@ -17,5 +18,7 @@ export function getDb() {
 
 export function runMigrations() {
   const db = getDb()
-  migrate(db, { migrationsFolder: './src/db/migrations' })
+  // Resolved relative to this module so it works from src/ (dev) and the
+  // bundled dist/ (production); the build copies migrations next to the bundle.
+  migrate(db, { migrationsFolder: fileURLToPath(new URL('./migrations', import.meta.url)) })
 }

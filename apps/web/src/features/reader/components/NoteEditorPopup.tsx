@@ -73,7 +73,7 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
   const anim = ANIMATION_OFFSET[pos.placement]
 
   function submit() {
-    if (!saving) onSave(draft.trim())
+    if (!saving && draft.trim()) onSave(draft.trim())
   }
 
   const textarea = (
@@ -97,7 +97,7 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
   const publishButton = (
     <button
       onClick={submit}
-      disabled={saving}
+      disabled={saving || draft.trim() === ''}
       className="rounded-full bg-blue-500 px-5 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-600 disabled:opacity-60"
     >
       {_('annotation.publish')}

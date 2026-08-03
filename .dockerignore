@@ -1,0 +1,17 @@
+# VCS & local state
+.git
+.github
+.opencode
+
+# Dependencies & build outputs (rebuilt inside the image)
+node_modules
+**/node_modules
+**/dist
+
+# Runtime data (mounted as a volume, never baked in)
+data
+
+# Local-only docs and scratch
+docs/local
+artifacts
+*.log

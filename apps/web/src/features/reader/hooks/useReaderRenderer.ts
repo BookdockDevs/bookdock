@@ -14,6 +14,7 @@ interface UseReaderRendererOptions {
   onRendered?: () => void
   onError?: (err: Error) => void
   onTocReady?: (items: { label: string; href: string; level?: number }[]) => void
+  onJumpConfirmed?: (e: { cfi: string }) => void
 }
 
 export function useReaderRenderer({
@@ -26,6 +27,7 @@ export function useReaderRenderer({
   onRendered,
   onError,
   onTocReady,
+  onJumpConfirmed,
 }: UseReaderRendererOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<BookReader | null>(null)
@@ -62,6 +64,7 @@ export function useReaderRenderer({
   const onRenderedRef = useRef(onRendered)
   const onErrorRef = useRef(onError)
   const onTocReadyRef = useRef(onTocReady)
+  const onJumpConfirmedRef = useRef(onJumpConfirmed)
   const theme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [readingThemeId, customThemes])
   const themeRef = useRef(theme)
   const fontRef = useRef({ fontFamily, size: fontSize, lineHeight, fontWeight, overrideBookFont })
@@ -83,6 +86,7 @@ export function useReaderRenderer({
   onRenderedRef.current = onRendered
   onErrorRef.current = onError
   onTocReadyRef.current = onTocReady
+  onJumpConfirmedRef.current = onJumpConfirmed
   themeRef.current = theme
   fontRef.current = { fontFamily, size: fontSize, lineHeight, fontWeight, overrideBookFont }
   paragraphRef.current = { paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
@@ -142,6 +146,7 @@ export function useReaderRenderer({
     const unsubInstantAnnotation = newRenderer.on('instantAnnotation', (e) => onInstantAnnotationRef.current?.(e))
     const unsubRendered = newRenderer.on('rendered', () => onRenderedRef.current?.())
     const unsubToc = newRenderer.on('tocReady', (items) => onTocReadyRef.current?.(items))
+    const unsubJumpConfirmed = newRenderer.on('jumpConfirmed', (e) => onJumpConfirmedRef.current?.(e))
 
     return () => {
       cancelled = true
@@ -151,6 +156,7 @@ export function useReaderRenderer({
       unsubInstantAnnotation()
       unsubRendered()
       unsubToc()
+      unsubJumpConfirmed()
       newRenderer.destroy()
       rendererRef.current = null
       setRenderer((current) => (current === newRenderer ? null : current))
@@ -166,7 +172,7 @@ export function useReaderRenderer({
     if (initialCfi === undefined) return
     if (initialCfi === lastDisplayedCfiRef.current) return
     lastDisplayedCfiRef.current = initialCfi
-    void renderer.display(initialCfi)
+    void renderer.display(initialCfi, { internal: true })
   }, [renderer, initialCfi])
 
   useEffect(() => {

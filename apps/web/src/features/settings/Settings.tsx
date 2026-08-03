@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import InstanceSettingsSection from './components/InstanceSettingsSection'
 import UserManagementSection from './components/UserManagementSection'
 import LanguageSwitcher from './components/LanguageSwitcher'
+import TrashSettingsRow from './components/TrashSettingsRow'
 
 type SectionId = 'general' | 'instance' | 'users'
 
@@ -67,6 +68,9 @@ export default function Settings() {
             <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
               <h2 className="mb-4 text-sm font-medium">{_('settings.general')}</h2>
               <LanguageSwitcher />
+              <div className="mt-4 border-t border-stone-200 pt-4 dark:border-stone-800">
+                <TrashSettingsRow />
+              </div>
             </section>
           )}
           {active === 'instance' && isOwner && <InstanceSettingsSection />}

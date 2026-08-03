@@ -80,6 +80,39 @@ function getParsedBook(url: string, foliate: any): Promise<any> {
   return promise
 }
 
+// Chinese conversion runs at the string level, before foliate parses a
+// section: the Loader dispatches a `data` event on book.transformTarget
+// before caching each resource URL (epub.js createURL), so replacing
+// detail.data with converted markup makes the converted string the cached
+// content. The parse cache reuses the same book object across view mounts —
+// track which books already carry the listener to avoid stacking duplicates.
+const transformedBooks = new WeakSet<object>()
+
+// The transform listener outlives any single FoliateReader (the parse cache
+// keeps the book alive after destroy), so the current mode is module-level;
+// chineseConversion is a global UI setting.
+let conversionMode: ChineseConversion = 'off'
+
+const CONVERTIBLE_MEDIA_TYPES = new Set(['application/xhtml+xml', 'text/html'])
+
+function attachChineseTransform(book: any) {
+  const target = book?.transformTarget as EventTarget | undefined
+  if (!target || transformedBooks.has(book)) return
+  transformedBooks.add(book)
+  target.addEventListener('data', (event: Event) => {
+    if (conversionMode === 'off') return
+    const detail = (event as CustomEvent).detail
+    // Section markup only — images, fonts and CSS pass through untouched.
+    if (!CONVERTIBLE_MEDIA_TYPES.has(detail?.type)) return
+    const mode = conversionMode
+    // detail.data may be a promise; the Loader awaits it either way.
+    // Whole-string conversion also rewrites script/style/attribute text —
+    // accepted, same trade-off as Readest.
+    detail.data = Promise.resolve(detail.data).then((data: unknown) =>
+      typeof data === 'string' ? convertChinese(data, mode) : data)
+  })
+}
+
 export class FoliateReader implements BookReader {
   private url: string
   private container: HTMLElement | null = null
@@ -109,9 +142,20 @@ export class FoliateReader implements BookReader {
   private theme: { bg: string; text: string } = { bg: '#ffffff', text: '#000000' }
   private pageWidth = 0
   private lastFraction: number | null = null
+  private lastCfi: string | null = null
+  // Position at the previous relocate, used to derive how many screens the
+  // user moved since — continuous scroll emits many small relocates, so the
+  // auto-hide tracker needs a mode-independent movement unit
+  private lastRelocatePos: { chapterIndex?: number; start?: number; page?: number } | null = null
+  // Departure point of an in-flight user jump, confirmed by handleRelocate
+  // once the position actually changed
+  private pendingJumpFrom: string | null = null
   private lastRange: Range | null = null
-  private currentDoc: Document | null = null
-  private conversion: ChineseConversion = 'off'
+  private conversion: ChineseConversion = conversionMode
+  private continuousScroll: ContinuousScroll = 'off'
+  private pageAnimation = true
+  private showHeader = true
+  private showFooter = true
   private currentSectionIndex = 0
   private resizeObserver: ResizeObserver | null = null
   private lastScrollVPad = -1
@@ -125,7 +169,9 @@ export class FoliateReader implements BookReader {
   // cfiRange -> render key (`${type}|${color}`); a key change means remove + re-add
   private renderedAnnotations = new Map<string, string>()
   private handleDocInteraction = () => {
-    this.container?.dispatchEvent(new CustomEvent('content-click'))
+    // Must bubble: listeners on document (e.g. popup dismiss handlers) rely on
+    // the event travelling up from the container
+    this.container?.dispatchEvent(new CustomEvent('content-click', { bubbles: true }))
   }
 
   private destroyed = false
@@ -146,6 +192,7 @@ export class FoliateReader implements BookReader {
       // zombie view stacked on top of the surviving one
       if (this.destroyed) return
       this.book = epub
+      attachChineseTransform(epub)
 
       const view = document.createElement('foliate-view') as any
       view.style.display = 'block'
@@ -184,9 +231,9 @@ export class FoliateReader implements BookReader {
 
       this.applyAllSettings()
       // Navigate to saved position before mount completes, so the user never
-      // sees the default chapter
+      // sees the default chapter. Internal: the initial open is not a "jump".
       if (initialTarget) {
-        await this.display(initialTarget)
+        await this.display(initialTarget, { internal: true })
         if (this.destroyed) return
       } else {
         // Ensure first section is visible after applyAllSettings re-render
@@ -239,9 +286,27 @@ export class FoliateReader implements BookReader {
     let pageInChapter = chapterLocation?.current
     let effectiveCfi = cfi ?? ''
     let chapterFraction: number | undefined
+    let movedScreens = 0
     try {
       const r = this.view?.renderer
-      if (r?.getAttribute?.('flow') === 'scrolled' && r.size > 0) {
+      const scrolled = r?.getAttribute?.('flow') === 'scrolled'
+      const start = scrolled && Number.isFinite(r.start) ? (r.start as number) : undefined
+      const page = !scrolled && Number.isFinite(chapterLocation?.current) ? (chapterLocation.current as number) : undefined
+      const prev = this.lastRelocatePos
+      if (prev) {
+        if (chapterIndex !== undefined && prev.chapterIndex !== undefined && chapterIndex !== prev.chapterIndex) {
+          // a cross-chapter move counts as one screen — the auto-hide tracker
+          // gates on the chapter change itself
+          movedScreens = 1
+        } else if (start !== undefined && prev.start !== undefined && r.size > 0) {
+          // renderer.size is the paginator's viewport size (height when scrolled)
+          movedScreens = Math.abs(start - prev.start) / r.size
+        } else if (page !== undefined && prev.page !== undefined) {
+          movedScreens = Math.abs(page - prev.page)
+        }
+      }
+      this.lastRelocatePos = { chapterIndex, start, page }
+      if (scrolled && r.size > 0) {
         // in scrolled flow chapterLocation is the section index, not a page —
         // approximate pages-into-chapter by container screens instead
         pageInChapter = Math.floor(r.start / r.size)
@@ -266,6 +331,17 @@ export class FoliateReader implements BookReader {
     if (chapterFraction === undefined && chapterLocation && Number.isFinite(chapterLocation.current) && Number.isFinite(chapterLocation.total) && chapterLocation.total > 0) {
       chapterFraction = chapterLocation.current / chapterLocation.total
     }
+    if (effectiveCfi) this.lastCfi = effectiveCfi
+    // Confirm a pending jump only when the position actually moved — a no-op
+    // navigation (target resolved to the current location) must not enter the
+    // history. Cleared either way so a failed navigation cannot leak into the
+    // next relocate.
+    if (this.pendingJumpFrom !== null) {
+      if (effectiveCfi && effectiveCfi !== this.pendingJumpFrom) {
+        this.emit('jumpConfirmed', { cfi: this.pendingJumpFrom })
+      }
+      this.pendingJumpFrom = null
+    }
     const location: ReaderLocation = {
       cfi: effectiveCfi,
       percent: frac != null ? Math.round(frac * 100) : 0,
@@ -276,6 +352,7 @@ export class FoliateReader implements BookReader {
       page: chapterIndex != null ? chapterIndex + 1 : undefined,
       total: chapterTotal,
       pageInChapter,
+      movedScreens,
     }
     try {
       this.view?.renderer?.setMarginals?.({
@@ -288,8 +365,13 @@ export class FoliateReader implements BookReader {
     this.emit('relocated', location)
   }
 
-  async display(target?: string) {
+  async display(target?: string, opts?: { internal?: boolean }) {
     if (!this.view) return
+    // Only explicit caller-driven navigation counts as a jump; internal
+    // re-displays (initial open, history back/forward) pass `internal: true`.
+    // The entry is not pushed yet — handleRelocate confirms it once the
+    // position actually changed.
+    if (!opts?.internal) this.pendingJumpFrom = this.lastCfi ?? ''
     const renderer = this.view.renderer
     if (!target) {
       if (renderer) return renderer.goTo({ index: 0 })
@@ -372,20 +454,23 @@ export class FoliateReader implements BookReader {
   applyColumnGap(gapPercent: number) {
     this.columnGap = Math.max(0, Math.min(15, gapPercent))
     if (!this.view?.renderer) return
-    this.view.renderer.setAttribute('gap', String(this.columnGap))
+    this.view.renderer.setAttribute('gap', `${this.columnGap}%`)
   }
 
   applyPageAnimation(enabled: boolean) {
+    this.pageAnimation = enabled
     if (!this.view?.renderer) return
     this.view.renderer.toggleAttribute('animated', enabled)
   }
 
   applyShowHeader(enabled: boolean) {
+    this.showHeader = enabled
     if (!this.view?.renderer) return
     this.view.renderer.toggleAttribute('show-header', enabled)
   }
 
   applyShowFooter(enabled: boolean) {
+    this.showFooter = enabled
     if (!this.view?.renderer) return
     this.view.renderer.toggleAttribute('show-footer', enabled)
   }
@@ -418,55 +503,66 @@ export class FoliateReader implements BookReader {
     this.updateLayout()
   }
 
-  // The paginator centers the column area (max-inline-size) inside the viewport, so in
-  // paginated mode side insets must come from shrinking that area — body padding inside
-  // the iframe only applies to the first/last page of the fragmented flow. Same for
-  // vertical insets, which the paginator supports via top/bottom-margin attributes.
+  // Width semantics are shared between modes: effective content width =
+  // min(pageWidth, viewport - 2 * horizontalPadding), pageWidth = 0 means
+  // "auto" (no cap). In page mode the paginator resolves this from two
+  // independent inputs — `max-inline-size` (the cap; a huge sentinel for
+  // auto) and `gutter` (the minimum distance to the viewport edges) —
+  // because body padding inside the iframe only applies to the first/last
+  // page of the fragmented flow. In scrolled mode the same formula falls
+  // out of body max-width + body padding (body stays content-box, so
+  // max-width caps the text and the padding sits outside it). Vertical
+  // insets in page mode go through the paginator's top/bottom-margin.
   private updateLayout() {
     if (!this.view?.renderer) return
-    const base = this.pageWidth > 0 ? this.pageWidth : 720
     const isPage = this.readingMode === 'page'
-    const inset = isPage ? this.paragraph.horizontalPadding * 2 : 0
-    this.view.renderer.setAttribute('max-inline-size', String(Math.max(320, base - inset)))
+    const cap = this.pageWidth > 0 ? Math.max(320, this.pageWidth) : 100000
+    this.view.renderer.setAttribute('max-inline-size', String(cap))
+    this.view.renderer.setAttribute('gutter', `${isPage ? this.paragraph.horizontalPadding : 0}px`)
     const vPad = isPage ? this.paragraph.verticalPadding : 0
     this.view.renderer.setAttribute('top-margin', `${vPad}px`)
     this.view.renderer.setAttribute('bottom-margin', `${vPad}px`)
   }
 
-  applyChineseConversion(mode: ChineseConversion) {
+  private conversionReload: Promise<void> = Promise.resolve()
+
+  applyChineseConversion(mode: ChineseConversion): Promise<void> {
+    if (mode === this.conversion) return this.conversionReload
     this.conversion = mode
-    if (!this.view?.renderer) return
-    for (const { doc } of this.view.renderer.getContents()) {
-      this.convertDocument(doc)
-    }
-    // Conversion rewrites every text node, killing foliate's range anchor. The native
-    // anchor restore can't run in that case, so re-anchor by book fraction instead.
-    const fraction = this.lastFraction
-    if (fraction != null) {
-      requestAnimationFrame(() => {
-        try {
-          void this.view?.goToFraction?.(fraction)
-        } catch {
-          // view may be mid-teardown
-        }
-      })
-    }
+    conversionMode = mode
+    if (!this.view || !this.book) return Promise.resolve()
+    // Serialize reloads: rapid toggles must not interleave close/open, or two
+    // renderer elements would stack inside the view.
+    this.conversionReload = this.conversionReload
+      .catch(() => {})
+      .then(() => this.reloadViewForConversion())
+    return this.conversionReload
   }
 
-  private async convertDocument(doc: Document) {
-    if (this.conversion === 'off') return
-    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
-    const nodes: Text[] = []
-    let n: Text | null
-    while ((n = walker.nextNode() as Text | null)) nodes.push(n)
-    for (const node of nodes) {
-      if (node.textContent) {
-        node.textContent = await convertChinese(node.textContent, this.conversion)
-      }
+  private async reloadViewForConversion() {
+    // Conversion is applied at load time and cached per section URL, so a
+    // mode switch only takes effect by tearing the view down — paginator
+    // destroy() unloads every loaded section (adjacent preloads in continuous
+    // mode included), clearing the loader cache — and reopening it.
+    const cfi = this.lastCfi
+    const fraction = this.lastFraction
+    try { this.view.close() } catch { /* partial init */ }
+    if (this.destroyed) return
+    await this.view.open(this.book)
+    if (this.destroyed) return
+    // close() drops the renderer element, so renderer-level attributes and
+    // styles must be re-applied.
+    this.applyAllSettings()
+    try {
+      if (cfi) await this.display(cfi, { internal: true })
+      else if (fraction != null) await this.view.goToFraction(fraction)
+    } catch {
+      // position may no longer resolve after conversion
     }
   }
 
   applyContinuousScroll(mode: ContinuousScroll) {
+    this.continuousScroll = mode
     if (mode === 'seamless') this.applyReadingMode('scroll')
     const renderer = this.view?.renderer
     if (!renderer) return
@@ -484,14 +580,22 @@ export class FoliateReader implements BookReader {
   }
 
   async scrollToPercent(percent: number) {
+    // The progress-strip drag is a user jump — record the position being left,
+    // confirmed by handleRelocate once the position actually changed
+    this.pendingJumpFrom = this.lastCfi ?? ''
     await this.view?.goToFraction(Math.max(0, Math.min(1, percent / 100)))
   }
 
   async scrollByPages(delta: number) {
+    // In scrolled mode a full-viewport jump drops the half line at the page
+    // edge; overlap 8% so the old page's last line reappears on the new one.
+    // renderer.size is the paginator's viewport size (height when scrolled).
+    const size = this.view?.renderer?.size
+    const distance = this.readingMode === 'scroll' && size ? Math.round(size * 0.92) : undefined
     const steps = Math.abs(delta)
     for (let i = 0; i < steps; i++) {
-      if (delta > 0) await this.view?.next()
-      else await this.view?.prev()
+      if (delta > 0) await this.view?.next(distance)
+      else await this.view?.prev(distance)
     }
   }
 
@@ -828,13 +932,6 @@ export class FoliateReader implements BookReader {
         this.selectionDocs.set(doc, { index, handler, holdDown, holdMove, dblHandler })
       }
       this.activeDocs = docs
-
-      const doc = contents[0].doc
-      if (!doc || doc === this.currentDoc) return
-      this.currentDoc = doc
-      if (this.conversion !== 'off') {
-        this.convertDocument(doc)
-      }
     } catch {
       // ignore sync errors — the renderer may not be fully initialized yet
     }
@@ -870,8 +967,13 @@ export class FoliateReader implements BookReader {
     this.applyReadingMode(this.readingMode)
     this.applyPageColumns(this.pageColumns)
     this.applyColumnGap(this.columnGap)
-    this.applyPageWidth(0)
+    // re-apply the current width — applyPageWidth(0) would mean "auto"
+    this.applyPageWidth(this.pageWidth)
     this.applyReadingTheme(this.theme)
+    this.applyPageAnimation(this.pageAnimation)
+    this.applyShowHeader(this.showHeader)
+    this.applyShowFooter(this.showFooter)
+    this.applyContinuousScroll(this.continuousScroll)
     this.applyStyles()
   }
 

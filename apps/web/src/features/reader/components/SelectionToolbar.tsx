@@ -38,6 +38,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
   const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
   const setPendingSearchQuery = useReaderState((s) => s.setPendingSearchQuery)
+  const setNoteEditorRange = useReaderState((s) => s.setNoteEditorRange)
   const { renderer } = useReaderApi()
   const addToast = useToastStore((s) => s.addToast)
   const create = useCreateAnnotation(bookId)
@@ -47,11 +48,16 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
 
   const [createdLocal, setCreatedLocal] = useState<AnnotationRes | null>(null)
   const [noteEditing, setNoteEditing] = useState(false)
+  // A brand-new idea stays local until published — nothing hits the server
+  // before the user commits, so cancels leave no placeholder row behind
+  const [noteDraft, setNoteDraft] = useState(false)
   const username = useAuthStore((s) => s.user?.username)
   useEffect(() => {
     setCreatedLocal(null)
     setNoteEditing(false)
-  }, [selection?.cfiRange])
+    setNoteDraft(false)
+    setNoteEditorRange(null)
+  }, [selection?.cfiRange, setNoteEditorRange])
 
   if (!selection) return null
 
@@ -68,6 +74,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
   function close() {
     renderer?.clearSelection()
     setSelection(null)
+    setNoteEditorRange(null)
   }
 
   async function highlight() {
@@ -110,41 +117,58 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     try {
       await del.mutateAsync(annotationId)
       addToast(_('reader.deleted'), 'success')
-      close()
+      if (createdLocal?.id === annotationId) setCreatedLocal(null)
+      // Deleting one of several ideas at the same range drops back to the
+      // overlay's list level; only the last remaining idea closes it
+      const remaining = id
+        ? (annotations?.data ?? []).filter(
+            (a) => a.id !== annotationId && a.type === 'note' && a.cfiRange === selection?.cfiRange,
+          )
+        : []
+      if (remaining.length === 0) close()
     } catch {
       addToast(_('reader.deleteFailed'), 'error')
     }
   }
 
-  async function createNote() {
+  function createNote() {
     if (!selection) return
-    const last = getLastHighlightStyle()
+    setNoteDraft(true)
+    renderer?.deselect()
+    setNoteEditorRange(selection.cfiRange)
+    setNoteEditing(true)
+  }
+
+  async function handleSaveNote(note: string) {
+    if (!selection) return
     try {
-      const res = await create.mutateAsync({
-        cfiRange: selection.cfiRange,
-        cfiAnchor: selection.anchor,
-        type: 'note',
-        color: last.color,
-        style: last.style,
-        text: selection.text,
-        chapter: currentChapter ?? undefined,
-      })
-      setCreatedLocal(res.data)
-      renderer?.deselect()
-      setNoteEditing(true)
+      if (noteDraft) {
+        const last = getLastHighlightStyle()
+        await create.mutateAsync({
+          cfiRange: selection.cfiRange,
+          cfiAnchor: selection.anchor,
+          type: 'note',
+          color: last.color,
+          style: last.style,
+          text: selection.text,
+          chapter: currentChapter ?? undefined,
+          note: note || undefined,
+        })
+      } else if (target) {
+        await update.mutateAsync({ id: target.id, body: { note: note || undefined } })
+      }
+      close()
     } catch {
       addToast(_('annotation.saveFailed'), 'error')
     }
   }
 
-  async function handleSaveNote(note: string) {
-    if (!target) return
-    try {
-      await update.mutateAsync({ id: target.id, body: { note: note || undefined } })
-      close()
-    } catch {
-      addToast(_('annotation.saveFailed'), 'error')
-    }
+  function handleCloseNoteEditor() {
+    setNoteEditing(false)
+    setNoteDraft(false)
+    // Without close() the stale selection rect would re-open the bubble once
+    // noteEditing resets
+    close()
   }
 
   async function copyText() {
@@ -205,10 +229,10 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     return (
       <NoteEditorPopup
         rect={selection.rect}
-        initialNote={target?.note ?? ''}
-        saving={update.isPending}
+        initialNote={noteDraft ? '' : (target?.note ?? '')}
+        saving={create.isPending || update.isPending}
         onSave={handleSaveNote}
-        onClose={() => setNoteEditing(false)}
+        onClose={handleCloseNoteEditor}
       />
     )
   }
@@ -234,6 +258,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         onCopyNote={(entry) => void copyNote(entry)}
         onEdit={(entry) => {
           setCreatedLocal(entry.annotation)
+          setNoteEditorRange(entry.annotation.cfiRange)
           setNoteEditing(true)
         }}
         onDelete={(entry) => void removeAnnotation(entry.annotation.id)}

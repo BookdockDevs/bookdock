@@ -5,9 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { BookListItem, BookMetadata } from '@bookdock/shared'
 
 import { apiPatch, apiPut } from '@/api/client'
-import { useBookReadingRecords } from '@/api/hooks/reading-records'
 import { useTranslation } from '@/hooks/useTranslation'
-import { formatDuration } from '@/lib/format-duration'
 import { formatBytes, formatDate } from '@/lib/utils'
 import { useToastStore } from '@/stores/toast.store'
 import { Button } from '@/components/ui/Button'
@@ -392,7 +390,9 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
               </div>
             </div>
           ) : (
-            <div>
+            // Keying by book id remounts the sections on book switch, so each
+            // Section's internal open state re-initializes from defaultOpen
+            <div key={displayBook.id}>
               <div className="flex gap-5">
                 <div className="w-28 shrink-0">
                   <BookCover book={displayBook} />
@@ -455,9 +455,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                 </dl>
               </Section>
 
-              <BookReadingSection bookId={book.id} />
-
-              <Section title={_('library.seriesSection')}>
+              <Section title={_('library.seriesSection')} defaultOpen={Boolean(bookmeta?.series)}>
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
                   <div className="min-w-0">
                     <dt className="text-xs text-stone-400 dark:text-stone-500">{_('library.seriesSection')}</dt>
@@ -472,13 +470,13 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                 </dl>
               </Section>
 
-              <Section title={_('library.descriptionSection')}>
+              <Section title={_('library.descriptionSection')} defaultOpen={Boolean(bookmeta?.description)}>
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-stone-600 dark:text-stone-300">
                   {bookmeta?.description || _('library.noDescription')}
                 </p>
               </Section>
 
-              <Section title={_('library.membershipSection')}>
+              <Section title={_('library.membershipSection')} defaultOpen={shelfNames.length > 0 || tagNames.length > 0}>
                 {shelfNames.length === 0 && tagNames.length === 0 ? (
                   <p className="text-sm text-stone-400">{_('library.unknown')}</p>
                 ) : (
@@ -602,8 +600,8 @@ function ActionIcon({ label, danger = false, onClick, children }: { label: strin
   )
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  const [open, setOpen] = useState(true)
+function Section({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <section className="mt-5">
       <button
@@ -632,39 +630,3 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-const MAX_RECORD_ROWS = 15
-
-function BookReadingSection({ bookId }: { bookId: string }) {
-  const _ = useTranslation()
-  const { data } = useBookReadingRecords(bookId)
-  const detail = data?.data
-  if (!detail || detail.totalSeconds === 0) return null
-  // records are sorted by date descending
-  const firstDate = detail.records[detail.records.length - 1].date
-  const lastDate = detail.records[0].date
-  const bestDay = detail.records.reduce((a, b) => (b.durationSeconds > a.durationSeconds ? b : a))
-  const fmtDay = (date: string) => `${Number(date.slice(5, 7))}.${Number(date.slice(8, 10))}`
-  return (
-    <Section title={_('stats.bookSection')}>
-      <p className="text-sm text-stone-700 dark:text-stone-200">
-        {_('stats.bookTotal', { time: formatDuration(detail.totalSeconds, _) })}
-        <span className="text-stone-400 dark:text-stone-500"> · {_('stats.bookDays', { n: detail.records.length })}</span>
-      </p>
-      <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">
-        {_('stats.bookSince', { date: fmtDay(firstDate) })}
-        {' · '}
-        {_('stats.bookBestDay', { time: formatDuration(bestDay.durationSeconds, _), date: fmtDay(bestDay.date) })}
-        {' · '}
-        {_('stats.bookLastRead', { date: fmtDay(lastDate) })}
-      </p>
-      <ul className="mt-2 space-y-1">
-        {detail.records.slice(0, MAX_RECORD_ROWS).map((r) => (
-          <li key={r.date} className="flex items-center justify-between text-sm">
-            <span className="tabular-nums text-stone-500 dark:text-stone-400">{r.date}</span>
-            <span className="tabular-nums text-stone-700 dark:text-stone-200">{formatDuration(r.durationSeconds, _)}</span>
-          </li>
-        ))}
-      </ul>
-    </Section>
-  )
-}

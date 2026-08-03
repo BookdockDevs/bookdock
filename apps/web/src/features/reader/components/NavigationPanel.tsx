@@ -1,4 +1,4 @@
-import { forwardRef, memo, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useReaderApi } from '../hooks/useReaderApi'
@@ -184,6 +184,42 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   /** Book-search mode: results overlay the TOC list while the bar is open with a query */
   const searchActive = searchExpanded && query.trim().length > 0
 
+  // Tracks whether the current-chapter TOC entry is inside the scroll
+  // viewport; drives the "locate current chapter" button in the header
+  const [currentInView, setCurrentInView] = useState(true)
+
+  useEffect(() => {
+    if (tab !== 'toc' || !open || currentIndex < 0 || searchActive) return
+    const item = itemRefs.current.get(currentIndex)
+    const container = listRef.current
+    if (!item || !container || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      (entries) => setCurrentInView(entries[0]?.isIntersecting ?? true),
+      { root: container },
+    )
+    observer.observe(item)
+    return () => observer.disconnect()
+  }, [tab, open, currentIndex, searchActive, collapsed, tree])
+
+  const showLocate = tab === 'toc' && currentIndex >= 0 && !searchActive && !currentInView
+
+  // Same landing spot as the chapter-change auto-scroll: item at top 1/4 of the viewport
+  const scrollToCurrentChapter = useCallback(() => {
+    const item = itemRefs.current.get(currentIndex)
+    const container = listRef.current
+    if (!item || !container) return
+    const containerRect = container.getBoundingClientRect()
+    const itemRect = item.getBoundingClientRect()
+    const target = Math.max(0, container.scrollTop + (itemRect.top - containerRect.top) - container.clientHeight * 0.25)
+    if (typeof container.scrollTo === 'function') {
+      container.scrollTo({ top: target, behavior: 'smooth' })
+    } else {
+      item.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }
+    lastScrolledIndex.current = currentIndex
+    savedScrollTop.current = target
+  }, [currentIndex])
+
   // Collapsing only hides the bar — query and results survive the round trip,
   // so reopening restores the search instantly instead of re-running it.
   function toggleSearchBar() {
@@ -286,23 +322,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     if (tab !== 'toc' || !open || currentIndex < 0 || searchActive) return
     if (currentIndex === lastScrolledIndex.current) return
     const timer = setTimeout(() => {
-      const item = itemRefs.current.get(currentIndex)
-      const container = listRef.current
-      if (!item || !container) return
-      const containerRect = container.getBoundingClientRect()
-      const itemRect = item.getBoundingClientRect()
-      const desired = container.scrollTop + (itemRect.top - containerRect.top) - container.clientHeight * 0.25
-      const target = Math.max(0, desired)
-      if (typeof container.scrollTo === 'function') {
-        container.scrollTo({ top: target, behavior: 'smooth' })
-      } else {
-        item.scrollIntoView({ block: 'start', behavior: 'smooth' })
-      }
-      lastScrolledIndex.current = currentIndex
-      savedScrollTop.current = target
+      scrollToCurrentChapter()
     }, 300)
     return () => clearTimeout(timer)
-  }, [tab, open, currentIndex, collapsed, searchActive])
+  }, [tab, open, currentIndex, collapsed, searchActive, scrollToCurrentChapter])
 
   const pendingSearchQuery = useReaderState((s) => s.pendingSearchQuery)
   const setPendingSearchQuery = useReaderState((s) => s.setPendingSearchQuery)
@@ -325,6 +348,15 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const [searchMenuPos, setSearchMenuPos] = useState<{ top: number; right: number } | null>(null)
   const searchMenuBtnRef = useRef<HTMLButtonElement>(null)
   const searchGenRef = useRef(0)
+  // Mirror of `open` for the debounced search: `open` is deliberately out of
+  // the effect deps (reopening must not re-run the search), so the timer
+  // checks this ref to avoid searching in the background while closed
+  const openRef = useRef(open)
+  openRef.current = open
+  // Same trick for `tab`: switching to notes and back must keep the cached
+  // results, so the debounced effect reads the tab through this ref instead
+  const tabRef = useRef(tab)
+  tabRef.current = tab
 
   // Consecutive matches from the same chapter collapse into one group, in book order
   const resultGroups = useMemo(() => {
@@ -407,16 +439,21 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   }
 
   // Search as you type, debounced. Invalid regex just yields no results.
+  // `open` and `tab` stay out of the deps: state survives while the panel is
+  // closed or another tab is active, so returning here renders the cached
+  // results instantly instead of re-searching.
   useEffect(() => {
-    if (tab !== 'toc' || !open) return
+    if (tabRef.current !== 'toc' || !open) return
     if (!query.trim()) {
       setSearchResults([])
       return
     }
-    const timer = setTimeout(() => void doSearch(), 400)
+    const timer = setTimeout(() => {
+      if (openRef.current) void doSearch()
+    }, 400)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, searchScope, searchMode, searchMatchCase, tab, open])
+  }, [query, searchScope, searchMode, searchMatchCase])
 
   function renderSubtree(nodes: number[]) {
     return (
@@ -483,6 +520,19 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           {tab === 'stats' && _('reader.stats')}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          {showLocate && (
+            <button
+              onClick={scrollToCurrentChapter}
+              title={_('reader.locateChapter')}
+              className="flex h-7 w-7 items-center justify-center rounded text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <circle cx="12" cy="12" r="7" />
+                <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+                <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+              </svg>
+            </button>
+          )}
           {tab !== 'stats' && (
           <button
             onClick={tab === 'toc' ? toggleSearchBar : toggleNotesSearchBar}
@@ -570,7 +620,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           {searchMenuOpen && searchMenuPos && (
             <div
               id="search-options-menu"
-              className="fixed z-50 w-44 rounded-lg border border-stone-200/60 bg-[var(--bd-read-page-bg)] p-1 shadow-lg dark:border-stone-800/60"
+              className="fixed z-[60] w-44 rounded-lg border border-stone-200/60 bg-[var(--bd-read-page-bg)] p-1 shadow-lg dark:border-stone-800/60"
               style={{ top: searchMenuPos.top, right: searchMenuPos.right }}
             >
               {(
@@ -683,35 +733,37 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       </div>
       {searchActive && searchResults.length > 0 && (
         <div
-          className="fixed bottom-16 left-1/2 z-50 flex h-11 -translate-x-1/2 items-center gap-0.5 rounded-full border border-stone-200/60 bg-[var(--bd-read-bg)] px-1.5 shadow-xl dark:border-stone-800/60"
+          className="fixed bottom-16 left-1/2 z-[60] flex h-11 -translate-x-1/2 items-center gap-0.5 rounded-full border border-stone-200/60 bg-[var(--bd-read-bg)] px-1.5 shadow-xl dark:border-stone-800/60"
           style={{ animation: 'note-editor-in 140ms ease-out forwards', '--note-dx': '0px', '--note-dy': '8px' } as CSSProperties}
         >
           <button
             onClick={() => goToResult((searchIndex - 1 + searchResults.length) % searchResults.length)}
             title={_('reader.prev')}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 18l-6-6 6-6" />
             </svg>
           </button>
-          <span className="mx-1 max-w-52 truncate text-sm text-current">
-            {_('reader.searchResultsFor', { q: query.trim() })}
+          <span className="mx-1 flex min-w-0 items-center text-sm text-current">
+            <span className="shrink-0">{_('reader.searchResultsPrefix')}</span>
+            <span className="max-w-40 truncate">{query.trim()}</span>
+            <span className="shrink-0">{_('reader.searchResultsSuffix')}</span>
           </span>
-          <span className="text-xs tabular-nums text-[var(--bd-read-sub)]">
+          <span className="shrink-0 text-xs tabular-nums text-[var(--bd-read-sub)]">
             {searchIndex + 1}/{searchResults.length}
           </span>
           <button
             onClick={clearSearch}
             title={_('annotation.cancel')}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
           >
             <CloseIcon />
           </button>
           <button
             onClick={() => goToResult((searchIndex + 1) % searchResults.length)}
             title={_('reader.next')}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 18l6-6-6-6" />

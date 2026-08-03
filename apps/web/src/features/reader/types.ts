@@ -12,6 +12,8 @@ export interface ReaderLocation {
   total?: number
   /** Page within the current chapter, for chapter-start detection */
   pageInChapter?: number
+  /** Viewport screens moved since the previous relocate (1 for a cross-chapter move), for jump-history auto-hide */
+  movedScreens?: number
 }
 
 /** Rect in main-viewport client coordinates, used to position popups */
@@ -39,6 +41,13 @@ export interface RendererEvents {
   instantAnnotation: (e: SelectionInfo) => void
   rendered: () => void
   tocReady: (items: { label: string; href: string; level?: number }[]) => void
+  /**
+   * Fired after a user-initiated jump (TOC/note/search/progress-drag) actually
+   * moved the position, carrying the position being left. Chokepoint for the
+   * jump-history back stack — internal navigation (initial open, history
+   * back/forward) opts out via `display(target, { internal: true })`.
+   */
+  jumpConfirmed: (e: { cfi: string }) => void
 }
 
 export interface TocItem {
@@ -49,7 +58,7 @@ export interface TocItem {
 
 export interface BookReader {
   mount(container: HTMLElement): Promise<void>
-  display(target?: string): Promise<void>
+  display(target?: string, opts?: { internal?: boolean }): Promise<void>
   next(): Promise<void>
   prev(): Promise<void>
   applyReadingMode(mode: ReadingMode): void
@@ -62,7 +71,7 @@ export interface BookReader {
   applyFont(cfg: FontConfig): void
   applyParagraphStyle(cfg: ParagraphStyle): void
   applyPageWidth(width: number): void
-  applyChineseConversion(mode: ChineseConversion): void
+  applyChineseConversion(mode: ChineseConversion): Promise<void>
   applyContinuousScroll(mode: ContinuousScroll): void
   scrollToPercent(percent: number): Promise<void>
   scrollByPages(delta: number): Promise<void>

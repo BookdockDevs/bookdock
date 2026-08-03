@@ -150,12 +150,12 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | Table | Key columns | Notes |
 |---|---|---|
 | `users` | id (text PK), username (unique), passwordHash?, role, disabled, createdAt, updatedAt? | role: owner\|member\|guest; disabled → deny |
-| `books` | id, userId FK, title, author, format (epub\|txt), filePath, coverKey?, size, meta (json), createdAt, updatedAt, **deletedAt** | deletedAt soft-delete (回收站) |
+| `books` | id, userId FK, title, author, format (epub\|txt), filePath, coverKey?, size, meta (json), createdAt, updatedAt, **deletedAt** | deletedAt soft-delete (回收站); auto-clean purges rows older than per-user `trash.autoCleanDays` (0=never/7/30, default 30) — full scan for all users at startup (fail-silent) + lazy per-user scan on `GET /books?trash=1`; purge reuses `deleteBook` (ref-counted blob deletion) |
 | `shelves` | id, userId FK, name, sortOrder, createdAt | |
 | `book_shelves` | bookId FK (cascade), shelfId FK (cascade) | composite PK, M2M |
 | `tags` | id, userId FK, name | |
 | `book_tags` | bookId FK (cascade), tagId FK (cascade) | composite PK, M2M |
-| `settings` | id, userId FK, key, value (json) | unique (userId, key) |
+| `settings` | id, userId FK, key, value (json) | unique (userId, key); keys: `ui` (reader/UI prefs), `trash` (`{ autoCleanDays }`) |
 | `instance_settings` | key (text PK), value | no userId (ADR-12) |
 | `annotations` | id, userId FK, bookId FK, cfiRange, cfiAnchor?, type, color, style, text, note?, chapter?, createdAt, updatedAt, **deletedAt?** | unique (userId, bookId, cfiRange); soft delete |
 | `reading_records` | id, userId FK, bookId FK (cascade), date (text), durationSeconds | unique (userId, bookId, date); upsert snapshot |
@@ -241,6 +241,7 @@ apps/web/src/
 - Rendering engine is vendored **foliate-js** (`public/foliate-js/`, not npm epubjs). `FoliateReader.ts` adapts the vendored engine: dynamic `import()` of `reader-entry.js`, manages reader lifecycle (render, pagination, annotations, progress). See `docs/local/reader/` for vendoring notes.
 - Creature devices: chapter list, TOC nav, progress persist to `books.progress` + `annotations`.
 - Reader sidebar has three tabs: TOC, notes, and stats (数据). The stats tab shows per-book reading stats sourced from `GET /reading-records/book/:bookId` (totalSeconds + full daily records, no pagination), derived client-side by pure functions in `features/reader/stats/`; opening the tab flushes the in-progress reading timer first so the numbers include the current session. Below the daily-duration chart it also renders a 24-hour distribution module from `GET /reading-records/hourly` with the optional `bookId` filter (from = book start date, to = today), skipped when the book has no records. A "已读字数" card shows `readFraction × meta.wordCount` (from `GET /progress/:bookId` + book detail), formatted as `X.X万字` for ≥10000, with a `全书 N` sub-line; the card shows `-` when word counts are not backfilled yet.
+- Jump history (后退/前进): browser-style session history, in-memory only and cleared on book switch. `FoliateReader.display`/`scrollToPercent` is the chokepoint — every user jump (TOC, note/bookmark, search result, progress drag) emits `willJump` with the position being left, which `Reader.tsx` pushes into `features/reader/jump-history.ts` (back/forward stacks, cap 50; a new jump clears the forward stack). Internal navigation opts out via `display(target, { internal: true })`: the initial open, saved-progress re-display, and the history back/forward buttons themselves. Page turns and scrolling never enter the history.
 
 ---
 

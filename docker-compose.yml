@@ -8,4 +8,6 @@ services:
     environment:
       # Optional: when omitted, a random secret is generated and persisted to /data/.jwt-secret
       # - JWT_SECRET=your-random-secret
+      # Only names the built-in guest account (used when guest access is enabled).
+      # The owner account is NOT auto-created — complete /setup on first run.
       - DEFAULT_USERNAME=admin

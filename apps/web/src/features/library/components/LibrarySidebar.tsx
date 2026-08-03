@@ -80,10 +80,10 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
           <button
             type="button"
             onClick={() => setShelfDialog({})}
-            className="flex h-5 w-5 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+            className="-mr-[3px] flex h-5 w-5 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
             title={_('library.newShelf')}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 5v14M5 12h14" />
             </svg>
           </button>
@@ -229,7 +229,7 @@ function NavItem({
         <span className="truncate">{label}</span>
       </span>
       {count !== undefined && count > 0 && (
-        <span className="ml-2 shrink-0 text-xs tabular-nums text-stone-400 transition-opacity group-hover:opacity-0 dark:text-stone-500">{count}</span>
+        <span className="ml-2 shrink-0 text-xs leading-none tabular-nums text-stone-400 transition-opacity group-hover:opacity-0 dark:text-stone-500">{count}</span>
       )}
     </button>
   )
@@ -271,7 +271,7 @@ function ShelfItem({
         }
         onClick={onClick}
       />
-      <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
+      <div className="absolute right-2 top-1/2 -translate-y-1/2">
         <button
           ref={menu.btnRef}
           type="button"

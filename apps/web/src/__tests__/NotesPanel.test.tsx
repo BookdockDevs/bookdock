@@ -128,6 +128,21 @@ describe('NotesPanel', () => {
     expect(deleteMutate).toHaveBeenCalledWith('h1')
   })
 
+  it('closes the context menu on a content-click relayed from the reading area', () => {
+    renderPanel()
+    fireEvent.contextMenu(screen.getByText('直线划线甲'))
+    expect(screen.getByText('annotation.copy')).toBeInTheDocument()
+    fireEvent(document, new CustomEvent('content-click', { bubbles: true }))
+    expect(screen.queryByText('annotation.copy')).toBeNull()
+  })
+
+  it('keeps the context menu open when clicking inside it', () => {
+    renderPanel()
+    fireEvent.contextMenu(screen.getByText('直线划线甲'))
+    fireEvent.mouseDown(screen.getByText('annotation.copy'))
+    expect(screen.getByText('annotation.copy')).toBeInTheDocument()
+  })
+
   it('offers copy in the context menu for any item', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })

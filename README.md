@@ -25,7 +25,10 @@ On first run, open the web UI and complete setup to create the owner account. Th
 docker compose up -d
 ```
 
-`JWT_SECRET` is optional: when omitted, a random secret is generated and persisted to `/data/.jwt-secret`.
+Then open `http://localhost:3000` (the server also serves the built web UI) and complete `/setup` to create the owner account — no account is created automatically on first boot.
+
+- `JWT_SECRET` is optional: when omitted, a random secret is generated and persisted to `/data/.jwt-secret`.
+- `DEFAULT_USERNAME` only names the built-in guest account used when guest access is enabled; it does not create an admin.
 
 ## Commands
 

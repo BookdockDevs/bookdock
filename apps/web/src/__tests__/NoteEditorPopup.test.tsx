@@ -82,4 +82,23 @@ describe('NoteEditorPopup', () => {
     renderPopup({ saving: true })
     expect(screen.getByRole('button', { name: 'annotation.publish' })).toBeDisabled()
   })
+
+  it('disables the publish button while the draft is blank', () => {
+    renderPopup()
+    const publish = screen.getByRole('button', { name: 'annotation.publish' })
+    expect(publish).toBeDisabled()
+    const textarea = screen.getByPlaceholderText('annotation.notePlaceholder')
+    fireEvent.change(textarea, { target: { value: '   ' } })
+    expect(publish).toBeDisabled()
+    fireEvent.change(textarea, { target: { value: '想法' } })
+    expect(publish).toBeEnabled()
+  })
+
+  it('ignores Ctrl+Enter when the draft is blank', () => {
+    const { onSave } = renderPopup()
+    const textarea = screen.getByPlaceholderText('annotation.notePlaceholder')
+    fireEvent.change(textarea, { target: { value: '  ' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
+    expect(onSave).not.toHaveBeenCalled()
+  })
 })

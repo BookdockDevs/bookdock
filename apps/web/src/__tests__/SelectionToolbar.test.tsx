@@ -49,7 +49,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  useReaderState.setState({ selection: null })
+  useReaderState.setState({ selection: null, noteEditorRange: null })
 })
 
 describe('SelectionToolbar', () => {
@@ -169,13 +169,22 @@ describe('SelectionToolbar', () => {
     expect(screen.queryByText('我的想法内容')).toBeNull()
   })
 
-  it('creates a separate idea annotation from the highlight bubble', async () => {
+  it('creates a separate idea annotation from the highlight bubble only on publish', async () => {
     annotationsData = [ANNOTATION]
     setSelection(ANNOTATION.cfiRange)
     render(<SelectionToolbar bookId="b1" />)
     fireEvent.click(screen.getByTitle('annotation.writeNote'))
+    await waitFor(() => expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument())
+    // opening the editor must not persist anything yet
+    expect(createMutate).not.toHaveBeenCalled()
+    // the editor marks its range so the reader can draw the dashed underline
+    expect(useReaderState.getState().noteEditorRange).toBe('epubcfi(/6/4!/2)')
+    fireEvent.change(screen.getByPlaceholderText('annotation.notePlaceholder'), { target: { value: '我的想法' } })
+    fireEvent.click(screen.getByRole('button', { name: 'annotation.publish' }))
     await waitFor(() => expect(createMutate).toHaveBeenCalledTimes(1))
-    expect(createMutate.mock.calls[0][0]).toMatchObject({ type: 'note', cfiRange: 'epubcfi(/6/4!/2)' })
+    expect(createMutate.mock.calls[0][0]).toMatchObject({ type: 'note', cfiRange: 'epubcfi(/6/4!/2)', note: '我的想法' })
+    expect(updateMutate).not.toHaveBeenCalled()
+    expect(useReaderState.getState().noteEditorRange).toBeNull()
   })
 
   it('creates a new idea from the idea overlay instead of editing the existing one', async () => {
@@ -183,8 +192,12 @@ describe('SelectionToolbar', () => {
     setSelection(ANNOTATION.cfiRange)
     render(<SelectionToolbar bookId="b1" />)
     fireEvent.click(screen.getByTitle('annotation.writeNote'))
+    await waitFor(() => expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument())
+    fireEvent.change(screen.getByPlaceholderText('annotation.notePlaceholder'), { target: { value: '再补一条' } })
+    fireEvent.click(screen.getByRole('button', { name: 'annotation.publish' }))
     await waitFor(() => expect(createMutate).toHaveBeenCalledTimes(1))
-    expect(createMutate.mock.calls[0][0]).toMatchObject({ type: 'note', cfiRange: 'epubcfi(/6/4!/2)' })
+    expect(createMutate.mock.calls[0][0]).toMatchObject({ type: 'note', cfiRange: 'epubcfi(/6/4!/2)', note: '再补一条' })
+    expect(updateMutate).not.toHaveBeenCalled()
   })
 
   it('keeps the idea overlay open after copying the quote', async () => {
@@ -205,5 +218,63 @@ describe('SelectionToolbar', () => {
     render(<SelectionToolbar bookId="b1" />)
     fireEvent.click(screen.getByTitle('annotation.copy'))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('划线文本'))
+  })
+
+  it('discards a brand-new idea on cancel without persisting anything', async () => {
+    setSelection()
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('annotation.writeNote'))
+    await waitFor(() => expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument())
+    expect(useReaderState.getState().noteEditorRange).toBe('epubcfi(/6/4!/2)')
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    // the draft was never sent, so cancel needs no delete either
+    expect(createMutate).not.toHaveBeenCalled()
+    expect(deleteMutate).not.toHaveBeenCalled()
+    // cancelling must dismiss the toolbar too, not just the editor
+    await waitFor(() => expect(useReaderState.getState().selection).toBeNull())
+    expect(useReaderState.getState().noteEditorRange).toBeNull()
+  })
+
+  it('keeps an existing idea when its editor is cancelled', async () => {
+    annotationsData = [{ ...ANNOTATION, type: 'note', note: '已有想法' }]
+    setSelection(ANNOTATION.cfiRange)
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByText('已有想法'))
+    fireEvent.click(screen.getByTitle('annotation.editNote'))
+    await waitFor(() => expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument())
+    expect(useReaderState.getState().noteEditorRange).toBe('epubcfi(/6/4!/2)')
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByPlaceholderText('annotation.notePlaceholder')).toBeNull())
+    expect(deleteMutate).not.toHaveBeenCalled()
+    await waitFor(() => expect(useReaderState.getState().selection).toBeNull())
+    expect(useReaderState.getState().noteEditorRange).toBeNull()
+  })
+
+  it('drops back to the idea list when other ideas remain at the range after deletion', async () => {
+    const note1 = { ...ANNOTATION, id: 'n1', type: 'note' as const, note: '想法一' }
+    const note2 = { ...ANNOTATION, id: 'n2', type: 'note' as const, note: '想法二' }
+    annotationsData = [note1, note2]
+    setSelection(ANNOTATION.cfiRange)
+    const { rerender } = render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByText('想法一'))
+    expect(screen.getByTitle('annotation.editNote')).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('annotation.deleteAnnotation'))
+    await waitFor(() => expect(deleteMutate).toHaveBeenCalledWith('n1'))
+    // Simulate the annotations refetch after deletion: the detail entry is gone
+    annotationsData = [note2]
+    rerender(<SelectionToolbar bookId="b1" />)
+    await waitFor(() => expect(screen.queryByTitle('annotation.editNote')).toBeNull())
+    expect(screen.getByText('想法二')).toBeInTheDocument()
+    expect(useReaderState.getState().selection).not.toBeNull()
+  })
+
+  it('closes the overlay when the last idea at the range is deleted', async () => {
+    annotationsData = [{ ...ANNOTATION, type: 'note', note: '唯一想法' }]
+    setSelection(ANNOTATION.cfiRange)
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByText('唯一想法'))
+    fireEvent.click(screen.getByTitle('annotation.deleteAnnotation'))
+    await waitFor(() => expect(deleteMutate).toHaveBeenCalledWith('a1'))
+    await waitFor(() => expect(useReaderState.getState().selection).toBeNull())
   })
 })

@@ -8,6 +8,8 @@
 
 Authoritative architecture document: `docs/architecture.md`. Change the doc first, then the code.
 
+Implementation map: `docs/local/implementation-map.md` — file/flow/pitfall index for the reader engine (foliate-js), settings system, and conversion pipeline. Consult it before diving into source; update its entries when you change architecture or discover a non-obvious pitfall.
+
 - Server organized by domain modules (`modules/{auth,books,shelves,tags,progress}`), thin routes, service orchestration, no cross-module service imports.
 - Key interfaces first: `StorageDriver` (storage/), `FormatRegistry` (formats/). New storage/format = implement interface + register, no service changes.
 - Don't extract `@bookdock/db` or `@bookdock/storage` yet. Cohesive modules + interfaces suffice. Extract when a second consumer (CLI/Tauri) appears.

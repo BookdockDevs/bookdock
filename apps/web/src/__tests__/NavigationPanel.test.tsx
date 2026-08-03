@@ -252,7 +252,8 @@ describe('NavigationPanel', () => {
       // consecutive results from the same chapter collapse into one group
       expect(screen.getByText('第二章 图穷匕见')).toBeInTheDocument()
       expect(screen.getByText('第五章 死鱼眼')).toBeInTheDocument()
-      expect(screen.getAllByText('高中')).toHaveLength(3)
+      // 3 result marks plus the keyword in the bottom nav card
+      expect(screen.getAllByText('高中')).toHaveLength(4)
       // TOC list is replaced by the overlay
       expect(screen.queryByText('第一章 开篇')).toBeNull()
     })
@@ -288,7 +289,7 @@ describe('NavigationPanel', () => {
       fireEvent.change(input, { target: { value: '高中' } })
       await new Promise((r) => setTimeout(r, 500))
       expect(search).toHaveBeenCalledTimes(1)
-      expect(screen.getAllByText('高中')).toHaveLength(3)
+      expect(screen.getAllByText('高中')).toHaveLength(4)
 
       // collapse: the bar hides and the TOC returns, but nothing is discarded
       fireEvent.click(screen.getByTitle('reader.search'))
@@ -299,8 +300,54 @@ describe('NavigationPanel', () => {
       fireEvent.click(screen.getByTitle('reader.search'))
       expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-16')
       expect(input).toHaveValue('高中')
-      expect(screen.getAllByText('高中')).toHaveLength(3)
+      expect(screen.getAllByText('高中')).toHaveLength(4)
       expect(search).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps the results and the pointer when the panel is closed and reopened', async () => {
+      const { rerender } = render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+      expect(search).toHaveBeenCalledTimes(1)
+
+      fireEvent.click(screen.getByTitle('reader.next'))
+      expect(screen.getByText('2/3')).toBeInTheDocument()
+
+      // closing and reopening the panel must not re-run the search or reset the pointer
+      rerender(<NavigationPanel bookId="book-1" open={false} />)
+      await new Promise((r) => setTimeout(r, 500))
+      rerender(<NavigationPanel bookId="book-1" open />)
+      await new Promise((r) => setTimeout(r, 500))
+
+      expect(search).toHaveBeenCalledTimes(1)
+      expect(screen.getAllByText('高中')).toHaveLength(4)
+      expect(screen.getByText('2/3')).toBeInTheDocument()
+    })
+
+    it('keeps the results and the pointer when switching to notes and back', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+      expect(search).toHaveBeenCalledTimes(1)
+
+      fireEvent.click(screen.getByTitle('reader.next'))
+      expect(screen.getByText('2/3')).toBeInTheDocument()
+
+      // switching tabs must not re-run the search or reset the pointer
+      await act(async () => {
+        useReaderState.setState({ activeNavTab: 'notes' })
+      })
+      await new Promise((r) => setTimeout(r, 500))
+      await act(async () => {
+        useReaderState.setState({ activeNavTab: 'toc' })
+      })
+      await new Promise((r) => setTimeout(r, 500))
+
+      expect(search).toHaveBeenCalledTimes(1)
+      expect(screen.getAllByText('高中')).toHaveLength(4)
+      expect(screen.getByText('2/3')).toBeInTheDocument()
     })
 
     it('streams partial results with a progress indicator while searching', async () => {
@@ -327,13 +374,13 @@ describe('NavigationPanel', () => {
       await new Promise((r) => setTimeout(r, 500))
 
       // partial results and the progress bar are visible before completion
-      expect(screen.getAllByText('高中')).toHaveLength(1)
+      expect(screen.getAllByText('高中')).toHaveLength(2)
       expect(screen.getByTestId('search-progress').style.width).toBe('50%')
 
       await act(async () => {
         resolveSearch(full)
       })
-      expect(screen.getAllByText('高中')).toHaveLength(2)
+      expect(screen.getAllByText('高中')).toHaveLength(3)
       expect(screen.queryByTestId('search-progress')).toBeNull()
     })
 
@@ -363,7 +410,7 @@ describe('NavigationPanel', () => {
       fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
       await new Promise((r) => setTimeout(r, 500))
 
-      expect(screen.getByText('reader.searchResultsFor')).toBeInTheDocument()
+      expect(screen.getByText('reader.searchResultsPrefix')).toBeInTheDocument()
       expect(screen.getByText('1/3')).toBeInTheDocument()
 
       fireEvent.click(screen.getByTitle('reader.next'))
@@ -382,10 +429,10 @@ describe('NavigationPanel', () => {
       fireEvent.click(screen.getByTitle('reader.search'))
       fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
       await new Promise((r) => setTimeout(r, 500))
-      expect(screen.getByText('reader.searchResultsFor')).toBeInTheDocument()
+      expect(screen.getByText('reader.searchResultsPrefix')).toBeInTheDocument()
 
       fireEvent.click(screen.getByTitle('annotation.cancel'))
-      expect(screen.queryByText('reader.searchResultsFor')).toBeNull()
+      expect(screen.queryByText('reader.searchResultsPrefix')).toBeNull()
       expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
     })
   })

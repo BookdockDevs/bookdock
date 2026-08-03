@@ -6,7 +6,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 
 import { getLastHighlightStyle } from './annotation-colors'
 import { BulbIcon, ChevronLeftIcon, CloseIcon, CopyIcon, PencilIcon, QuoteIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
-import { formatRelativeTime } from './format-relative-time'
+import { formatFullDateTime } from './format-relative-time'
 
 /**
  * One idea shown in the overlay. `authorName`/`own` are the seam for future
@@ -67,6 +67,12 @@ export function IdeaOverlay({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
+  // A deleted entry vanishes from `entries` once the annotations query refetches;
+  // drop back to the list level instead of showing a stale detail card
+  useEffect(() => {
+    if (detail && !entries.some((e) => e.annotation.id === detail.annotation.id)) setDetail(null)
+  }, [detail, entries])
+
   const quoteActions = [
     { key: 'copy', title: _('annotation.copy'), icon: <CopyIcon />, onClick: onCopyQuote },
     { key: 'highlight', title: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, onClick: onHighlight },
@@ -113,7 +119,7 @@ export function IdeaOverlay({
                 )}
                 <div className="flex items-center gap-2 pt-4 text-xs text-stone-400">
                   <span>
-                    {_('annotation.publishedAt')} {formatRelativeTime(_, detail.annotation.createdAt)}
+                    {_('annotation.publishedAt')} {formatFullDateTime(_, detail.annotation.createdAt)}
                   </span>
                   <div className="flex-1" />
                   <button onClick={() => onCopyNote(detail)} title={_('annotation.copy')} className={detailActionBtn}>

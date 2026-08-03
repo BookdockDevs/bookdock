@@ -410,7 +410,7 @@ class View {
 // NOTE: everything here assumes the so-called "negative scroll type" for RTL
 export class Paginator extends HTMLElement {
   static observedAttributes = [
-    'flow', 'gap', 'top-margin', 'bottom-margin', 'background-color',
+    'flow', 'gap', 'gutter', 'top-margin', 'bottom-margin', 'background-color',
     'max-inline-size', 'max-block-size', 'max-column-count', 'column-threshold', 'bgimg-url',
     'bgimg-blur', 'bgimg-opacity', 'bgimg-fit', 'snap-turn', 'continuous',
   ]
@@ -497,9 +497,9 @@ export class Paginator extends HTMLElement {
                 var(--_half-gap)
                 minmax(var(--_half-gap), 1fr);
             grid-template-rows:
-                var(--_top-margin)
+                max(var(--_top-margin), var(--_header-band, 0px))
                 1fr
-                var(--_bottom-margin);
+                max(var(--_bottom-margin), var(--_footer-band, 0px));
             &.vertical {
                 --_max-column-count-spread: var(--_max-column-count-portrait);
                 --_max-width: var(--_max-block-size);
@@ -579,6 +579,16 @@ export class Paginator extends HTMLElement {
         :host(:not([show-footer])) #footer {
             display: none;
         }
+        /* Bands keep a floor tall enough for the marginal text (.75em + 6px
+           padding) even when the user margin is 0, otherwise #top's
+           overflow:hidden clips the header/footer out of the window. Only in
+           paginated flow with the band actually shown. */
+        :host([show-header]:not([flow="scrolled"])) #top {
+            --_header-band: 28px;
+        }
+        :host([show-footer]:not([flow="scrolled"])) #top {
+            --_footer-band: 28px;
+        }
         </style>
         <div id="top">
             <div id="background" part="filter"></div>
@@ -650,13 +660,14 @@ export class Paginator extends HTMLElement {
       case 'flow':
         this.render()
         break
-      case 'top-margin':
       case 'max-block-size':
       case 'background-color':
         this.#top.style.setProperty('--_' + name, value)
         break
+      case 'top-margin':
       case 'bottom-margin':
       case 'gap':
+      case 'gutter':
       case 'max-column-count':
       case 'column-threshold':
       case 'max-inline-size':
@@ -944,12 +955,16 @@ export class Paginator extends HTMLElement {
       ? Math.min(2, Math.ceil(size / maxInlineSize))
       : maxColumnCount
 
-    // Page-width cap and horizontal padding arrive as --_max-inline-size. The
-    // paginated layout always fills the container (page advance = container
-    // size), so narrow the content by widening the column gap and side padding
-    // symmetrically — page alignment is preserved because column advance
-    // (columnWidth + gapEff) still equals size / divisor.
-    const inset = Math.max(0, Math.min(size - 320, size - maxInlineSize))
+    // Width semantics: effective content width = min(max-inline-size,
+    // size - 2 * gutter). max-inline-size is the page-width cap (a huge
+    // sentinel when "auto"), gutter is the minimum distance to the viewport
+    // edges. The paginated layout always fills the container (page advance =
+    // container size), so narrow the content by widening the column gap and
+    // side padding symmetrically — page alignment is preserved because
+    // column advance (columnWidth + gapEff) still equals size / divisor.
+    // min(size - 320, ...) keeps a 320px content floor on tiny viewports.
+    const gutter = parseFloat(style.getPropertyValue('--_gutter')) || 0
+    const inset = Math.max(0, Math.min(size - 320, Math.max(size - maxInlineSize, gutter * 2)))
     const gapEff = gap + inset / divisor
     const columnWidth = (size / divisor) - gapEff
     this.setAttribute('dir', rtl ? 'rtl' : 'ltr')

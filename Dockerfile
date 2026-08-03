@@ -1,5 +1,7 @@
 FROM node:22-alpine AS base
 RUN corepack enable && corepack prepare pnpm@latest --activate
+# Toolchain for native modules (better-sqlite3) when no musl prebuild is available
+RUN apk add --no-cache python3 make g++
 WORKDIR /app
 
 FROM base AS build

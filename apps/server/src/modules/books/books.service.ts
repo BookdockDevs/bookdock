@@ -1,6 +1,6 @@
 import type { Readable } from 'node:stream'
 
-import { eq, ne, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
+import { eq, ne, lt, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import { books, annotations, bookTags, bookShelves, shelves, tags } from '../../db/schema'
 import { getStorage } from '../../storage'
@@ -454,6 +454,20 @@ export async function emptyTrash(userId: string) {
     await deleteBook(userId, row.id)
   }
   return trashed.length
+}
+
+/** Purge trash rows whose deletedAt is older than `days`; 0 or negative disables auto-clean */
+export async function purgeExpiredTrash(userId: string, days: number) {
+  if (days <= 0) return 0
+  const db = getDb()
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+  const expired = db.select({ id: books.id }).from(books)
+    .where(and(eq(books.userId, userId), isNotNull(books.deletedAt), lt(books.deletedAt, cutoff)))
+    .all()
+  for (const row of expired) {
+    await deleteBook(userId, row.id)
+  }
+  return expired.length
 }
 
 export async function deleteBook(userId: string, bookId: string) {

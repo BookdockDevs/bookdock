@@ -66,7 +66,7 @@ export function NotesFilterPanel({
   return (
     <div
       ref={rootRef}
-      className="fixed z-50 w-64 rounded-xl border border-stone-200/60 bg-[var(--bd-read-bg)] p-3 shadow-xl dark:border-stone-800/60"
+      className="fixed z-[60] w-64 rounded-xl border border-stone-200/60 bg-[var(--bd-read-bg)] p-3 shadow-xl dark:border-stone-800/60"
       style={{ top: pos.top, right: pos.right }}
     >
       <div className="text-xs text-[var(--bd-read-sub)]">{_('annotation.filterType')}</div>

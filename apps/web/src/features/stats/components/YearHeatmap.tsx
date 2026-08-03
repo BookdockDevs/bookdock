@@ -13,10 +13,10 @@ interface YearHeatmapProps {
 function levelClass(seconds: number, max: number): string {
   if (seconds <= 0 || max <= 0) return 'bg-stone-200/60 dark:bg-stone-800'
   const ratio = seconds / max
-  if (ratio <= 0.25) return 'bg-amber-200 dark:bg-amber-900'
-  if (ratio <= 0.5) return 'bg-amber-400 dark:bg-amber-700'
-  if (ratio <= 0.75) return 'bg-amber-500 dark:bg-amber-500'
-  return 'bg-amber-600 dark:bg-amber-300'
+  if (ratio <= 0.25) return 'bg-stone-300 dark:bg-stone-700'
+  if (ratio <= 0.5) return 'bg-stone-500 dark:bg-stone-500'
+  if (ratio <= 0.75) return 'bg-stone-700 dark:bg-stone-300'
+  return 'bg-stone-800 dark:bg-stone-200'
 }
 
 export default function YearHeatmap({ selectedDate, onSelectDate }: YearHeatmapProps) {

@@ -10,6 +10,8 @@ interface ReaderState {
   sidebarOpen: boolean
   /** Set by "search selection" actions; NavigationPanel consumes and clears it */
   pendingSearchQuery: string | null
+  /** cfiRange of the idea currently being composed; draws a dashed underline while the editor is open */
+  noteEditorRange: string | null
   setActiveNavTab: (tab: NavTab) => void
   setTocItems: (items: { label: string; href: string }[]) => void
   setCurrentChapter: (chapter: string | null) => void
@@ -17,6 +19,7 @@ interface ReaderState {
   setSelection: (sel: SelectionInfo | null) => void
   setSidebarOpen: (open: boolean) => void
   setPendingSearchQuery: (query: string | null) => void
+  setNoteEditorRange: (range: string | null) => void
 }
 
 export const useReaderState = create<ReaderState>((set) => ({
@@ -27,6 +30,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   selection: null,
   sidebarOpen: false,
   pendingSearchQuery: null,
+  noteEditorRange: null,
   setActiveNavTab: (activeNavTab) => set({ activeNavTab }),
   setTocItems: (tocItems) => set({ tocItems }),
   setCurrentChapter: (currentChapter) => set({ currentChapter }),
@@ -34,4 +38,5 @@ export const useReaderState = create<ReaderState>((set) => ({
   setSelection: (selection) => set({ selection }),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
+  setNoteEditorRange: (noteEditorRange) => set({ noteEditorRange }),
 }))

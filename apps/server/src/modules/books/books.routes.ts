@@ -7,6 +7,7 @@ import {
   trashBook,
   restoreBook,
   emptyTrash,
+  purgeExpiredTrash,
   uploadBook,
   updateBook,
   updateBookCover,
@@ -20,6 +21,7 @@ import {
   getBookTags,
   stripMetaChapters,
 } from './books.service'
+import { getTrashSettings } from '../settings/settings.service'
 import { getStorage } from '../../storage'
 import { config } from '../../config'
 
@@ -41,6 +43,10 @@ booksRoutes.get('/', async (c) => {
   const format = formatParsed.success ? formatParsed.data : undefined
   const readStatus = query['readStatus']
   const trash = query['trash'] === '1'
+  // Opening the trash lazily purges the current user's expired rows
+  if (trash) {
+    await purgeExpiredTrash(user.id, getTrashSettings(user.id).autoCleanDays)
+  }
   const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash)
   return c.json(result)
 })

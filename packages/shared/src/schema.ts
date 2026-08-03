@@ -53,6 +53,12 @@ export const settingsUpdateSchema = z.object({
   pageWidth: z.number().min(0).max(1800).optional(),
   verticalPadding: z.number().min(0).max(120).optional(),
   horizontalPadding: z.number().min(0).max(120).optional(),
+  scrollPageWidth: z.number().min(0).max(1800).optional(),
+  scrollHorizontalPadding: z.number().min(0).max(120).optional(),
+  scrollVerticalPadding: z.number().min(0).max(120).optional(),
+  pagePageWidth: z.number().min(0).max(1800).optional(),
+  pageHorizontalPadding: z.number().min(0).max(120).optional(),
+  pageVerticalPadding: z.number().min(0).max(120).optional(),
   textAlignJustify: z.boolean().optional(),
   overrideBookFont: z.boolean().optional(),
   overrideBookLayout: z.boolean().optional(),
@@ -70,6 +76,9 @@ export const settingsUpdateSchema = z.object({
   showWordCount: z.boolean().optional(),
   continuousScroll: z.enum(['off', 'snap', 'seamless']).optional(),
   pageAnimation: z.boolean().optional(),
+  trash: z.object({
+    autoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]),
+  }).optional(),
 })
 
 export const annotationCreateSchema = z.object({
