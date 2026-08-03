@@ -22,6 +22,13 @@ import type {
   SelectionInfo,
 } from '../types'
 import { FONT_OPTIONS } from '../types'
+import {
+  findMatches,
+  getChapterText,
+  makeExcerpt,
+  offsetsToRange,
+  type SearchMatch,
+} from '../lib/book-search'
 import { convertChinese } from '@/lib/chinese'
 
 const ANNOTATION_COLORS: Record<string, string> = {
@@ -33,6 +40,10 @@ const ANNOTATION_COLORS: Record<string, string> = {
 }
 const DEFAULT_ANNOTATION_COLOR = ANNOTATION_COLORS.yellow
 
+// Must match SEARCH_PREFIX in foliate-js/view.js: values with this prefix are
+// drawn as transient search highlights and ignored by annotation click handling
+const SEARCH_ANNOTATION_PREFIX = 'foliate-search:'
+
 // Module-level parse cache: fetch + unzip + EPUB.init is the dominant cost of
 // entering the reader, and the parsed book is independent of the foliate view,
 // so it can be reused across view mounts (StrictMode double-mount, leaving and
@@ -42,16 +53,46 @@ const DEFAULT_ANNOTATION_COLOR = ANNOTATION_COLORS.yellow
 const PARSE_CACHE_MAX = 3
 const parseCache = new Map<string, Promise<any>>()
 
+// Books at or below this size are downloaded whole up front: foliate's
+// paginator unloads a section on every chapter switch in non-continuous mode,
+// so the Range path would pay one network RTT (100-300ms on slow networks)
+// per chapter switch — N chapters read = N RTTs, worse than one full
+// download. Above the threshold, Range loading keeps the first open fast and
+// the per-chapter cost is amortized by the text memo below.
+export const FULL_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024
+
+export type ZipLoadStrategy = 'full' | 'range'
+
+// Kept pure for unit tests: a known size at or under the threshold downloads
+// whole; an unknown size (HEAD missing/failed) keeps the Range-first default.
+export function selectZipLoadStrategy(size: number | null): ZipLoadStrategy {
+  return size !== null && size <= FULL_DOWNLOAD_MAX_BYTES ? 'full' : 'range'
+}
+
+// The URL is same-origin, so fetch sends the auth cookie by default.
+async function probeFileSize(url: string): Promise<number | null> {
+  try {
+    const res = await fetch(url, { method: 'HEAD' })
+    const length = Number(res.headers.get('content-length'))
+    return res.ok && Number.isFinite(length) && length > 0 ? length : null
+  } catch {
+    return null
+  }
+}
+
 // Opens the epub zip through HTTP range requests: zip.js probes the server,
 // reads the central directory from the file tail, and later pulls only the
-// bytes of each entry as foliate's loader lazily asks for sections. Falls back
-// to the legacy whole-file download when the server does not speak Range.
+// bytes of each entry as foliate's loader lazily asks for sections. Small
+// books skip Range entirely and download whole; the whole-file path is also
+// the fallback when the server does not speak Range.
 async function openZipEntryMap(url: string, foliate: any) {
+  if (selectZipLoadStrategy(await probeFileSize(url)) === 'full') {
+    return openZipFromWholeFile(url, foliate)
+  }
   try {
     zipConfigure({ useWebWorkers: false })
     // The init probe (Range: bytes=0-0) throws ERR_HTTP_RANGE when the server
-    // ignores Range, which lands us in the fallback below. The URL is
-    // same-origin, so fetch sends the auth cookie by default.
+    // ignores Range, which lands us in the fallback below.
     const reader = new ZipReader(new HttpReader(url, { useRangeHeader: true }))
     const entries: any[] = await reader.getEntries()
     return {
@@ -61,20 +102,84 @@ async function openZipEntryMap(url: string, foliate: any) {
     }
   } catch (err) {
     console.warn('[FoliateReader] range loading unavailable, falling back to full download:', err)
-    const { configure, ZipReader: VendoredZipReader, BlobReader, TextWriter, BlobWriter } = foliate
-    const ac = new AbortController()
-    const timeoutId = setTimeout(() => ac.abort(), 60000)
-    const res = await fetch(url, { signal: ac.signal })
-    clearTimeout(timeoutId)
-    if (!res.ok) throw new Error(`fetch epub failed: ${res.status} ${res.statusText}`)
-    const file = await res.blob()
-    configure({ useWebWorkers: false })
-    const reader = new VendoredZipReader(new BlobReader(file))
-    const entries: any[] = await reader.getEntries()
-    return {
-      map: new Map<string, any>(entries.map((entry) => [entry.filename, entry])),
-      TextWriter,
-      BlobWriter,
+    return openZipFromWholeFile(url, foliate)
+  }
+}
+
+async function openZipFromWholeFile(url: string, foliate: any) {
+  const { configure, ZipReader: VendoredZipReader, BlobReader, TextWriter, BlobWriter } = foliate
+  const ac = new AbortController()
+  const timeoutId = setTimeout(() => ac.abort(), 60000)
+  const res = await fetch(url, { signal: ac.signal })
+  clearTimeout(timeoutId)
+  if (!res.ok) throw new Error(`fetch epub failed: ${res.status} ${res.statusText}`)
+  const file = await res.blob()
+  configure({ useWebWorkers: false })
+  const reader = new VendoredZipReader(new BlobReader(file))
+  const entries: any[] = await reader.getEntries()
+  return {
+    map: new Map<string, any>(entries.map((entry) => [entry.filename, entry])),
+    TextWriter,
+    BlobWriter,
+  }
+}
+
+// Chapter text memo: the paginator clears the Loader's object-URL cache when
+// it unloads a section (paginator.js), so loadText is re-invoked for chapters
+// the user already read. Caching the resolved text per href makes revisits
+// local — no network on the Range path, no re-inflate on the whole-file path.
+// The memo stores raw (unconverted) text; Chinese conversion happens
+// downstream on the Loader's data event. Promises are stored to dedupe
+// concurrent loads, and the memo lives inside the book's loader closures, so
+// it is GC'd when the parse cache evicts the book.
+const TEXT_MEMO_MAX = 20
+
+export function memoizeLoadText(
+  loadText: (name: string) => Promise<string | null> | string | null,
+): (name: string) => Promise<string | null> {
+  const memo = new Map<string, Promise<string | null>>()
+  return (name: string) => {
+    const cached = memo.get(name)
+    if (cached) {
+      // refresh recency
+      memo.delete(name)
+      memo.set(name, cached)
+      return cached
+    }
+    const promise = Promise.resolve(loadText(name))
+    memo.set(name, promise)
+    while (memo.size > TEXT_MEMO_MAX) {
+      const oldest = memo.keys().next().value
+      if (oldest === undefined) break
+      memo.delete(oldest)
+    }
+    // never memo a failure — the next request must retry
+    promise.catch(() => {
+      if (memo.get(name) === promise) memo.delete(name)
+    })
+    return promise
+  }
+}
+
+// Attached once per book (the parse cache hands the same book object to
+// successive view mounts), mirroring the transformedBooks guard below.
+const prefetchAttachedBooks = new WeakSet<object>()
+
+// Pre-decompresses the sections adjacent to the current one so a chapter
+// switch is served from the text memo instead of the network/inflate path.
+// Also exposes the memoized loadText as `book.loadSectionText` so the book
+// search (lib/book-search.ts) reads raw section markup through the same memo.
+function attachTextPrefetch(book: any, loadText: (name: string) => Promise<unknown>) {
+  if (!book || prefetchAttachedBooks.has(book)) return
+  prefetchAttachedBooks.add(book)
+  book.loadSectionText = loadText
+  book.textPrefetch = (index: number) => {
+    for (const i of [index - 1, index + 1]) {
+      const section = book.sections?.[i]
+      // sections[i].id is the manifest href — the same key the Loader passes
+      // to loadText (epub.js loadItem); non-linear sections are skipped
+      if (!section || section.linear === 'no') continue
+      Promise.resolve(loadText(section.id)).catch(() => {})
     }
   }
 }
@@ -96,11 +201,13 @@ function getParsedBook(url: string, foliate: any): Promise<any> {
       return entry ? fn(entry) : null
     }
 
-    const loadText = load((entry: any) => entry.getData(new TextWriter()))
+    const loadText = memoizeLoadText(load((entry: any) => entry.getData(new TextWriter())))
     const loadBlob = load((entry: any, type?: string) => entry.getData(new BlobWriter(type)))
     const getSize = (name: string) => map.get(name)?.uncompressedSize ?? 0
 
-    return new EPUB({ loadText, loadBlob, getSize }).init()
+    const book = await new EPUB({ loadText, loadBlob, getSize }).init()
+    attachTextPrefetch(book, loadText)
+    return book
   })()
   // never cache a failure — the next mount must retry
   promise.catch(() => {
@@ -200,9 +307,21 @@ export class FoliateReader implements BookReader {
   private holdPending = false
   private holdTimer: ReturnType<typeof setTimeout> | null = null
   private foliateOverlayer: any = null
+  // `${cfiRange}|${type}` -> annotation; a range may hold a highlight and an
+  // idea at once, so the bare cfiRange cannot be the key
   private annotationMap = new Map<string, ReaderAnnotation>()
-  // cfiRange -> render key (`${type}|${color}`); a key change means remove + re-add
+  private prefetchTimer: ReturnType<typeof setTimeout> | null = null
+  // `${cfiRange}|${type}` value -> render key (`${type}|${color}|${style}`); a key change means remove + re-add
   private renderedAnnotations = new Map<string, string>()
+  // Generation token of the in-flight search: starting a new search, clearing
+  // or destroying bumps it, and the search loop stops at the next chapter
+  // boundary when its own generation goes stale
+  private searchGen = 0
+  // Latest search's matches per section (plain-text offsets), kept so
+  // highlights can be drawn lazily when a section gets rendered
+  private searchMatchOffsets = new Map<number, SearchMatch[]>()
+  // Search-highlight annotation values currently handed to the view, per section
+  private drawnSearchValues = new Map<number, string[]>()
   private handleDocInteraction = () => {
     // Must bubble: listeners on document (e.g. popup dismiss handlers) rely on
     // the event travelling up from the container
@@ -245,10 +364,14 @@ export class FoliateReader implements BookReader {
       view.addEventListener('show-annotation', (event: Event) =>
         this.handleShowAnnotation((event as CustomEvent).detail))
       // Newly rendered sections get their annotations re-applied
-      view.addEventListener('create-overlay', () => {
+      view.addEventListener('create-overlay', (event: Event) => {
         for (const value of this.renderedAnnotations.keys()) {
           Promise.resolve(this.view?.addAnnotation({ value })).catch(() => {})
         }
+        // …and any pending search highlights for that section
+        const index = (event as CustomEvent).detail?.index
+        const matches = this.searchMatchOffsets.get(index)
+        if (matches?.length) this.drawSearchHighlights(index, matches)
       })
 
       container.appendChild(view)
@@ -316,7 +439,10 @@ export class FoliateReader implements BookReader {
     if (frac != null) this.lastFraction = frac
     // chapter progress: foliate sections map 1:1 to the book's chapter list
     const chapterIndex = Number.isFinite(section?.current) ? section.current : undefined
-    if (chapterIndex !== undefined) this.currentSectionIndex = chapterIndex
+    if (chapterIndex !== undefined) {
+      this.currentSectionIndex = chapterIndex
+      this.scheduleTextPrefetch(chapterIndex)
+    }
     const chapterTotal = Number.isFinite(section?.total) ? section.total : undefined
     let pageInChapter = chapterLocation?.current
     let effectiveCfi = cfi ?? ''
@@ -400,6 +526,18 @@ export class FoliateReader implements BookReader {
     this.emit('relocated', location)
   }
 
+  // Debounced prefetch of the sections adjacent to the current one: rapid
+  // chapter hops restart the timer so only the section the user settles on
+  // gets its neighbors warmed in the text memo.
+  private scheduleTextPrefetch(chapterIndex: number) {
+    if (this.prefetchTimer !== null) clearTimeout(this.prefetchTimer)
+    this.prefetchTimer = setTimeout(() => {
+      this.prefetchTimer = null
+      if (this.destroyed) return
+      try { this.book?.textPrefetch?.(chapterIndex) } catch { /* prefetch is best-effort */ }
+    }, 300)
+  }
+
   async display(target?: string, opts?: { internal?: boolean }) {
     if (!this.view) return
     // Only explicit caller-driven navigation counts as a jump; internal
@@ -423,6 +561,22 @@ export class FoliateReader implements BookReader {
       }
       // chapter:{index} — navigate to section start (backward compat)
       if (renderer) return renderer.goTo({ index })
+    }
+
+    // search-hit:{index}:{start}:{end} — lazy jump target for search results.
+    // No CFI is computed at search time; the anchor resolves the plain-text
+    // span to a Range on the freshly loaded section document, so both reading
+    // modes land on the exact match (paginator treats Range anchors uniformly).
+    if (target.startsWith('search-hit:')) {
+      const parts = target.split(':')
+      const index = Number(parts[1])
+      const start = Number(parts[2])
+      const end = Number(parts[3])
+      if (![index, start, end].every(Number.isFinite)) return
+      if (renderer) {
+        return renderer.goTo({ index, anchor: (doc: Document) => offsetsToRange(doc, start, end) })
+      }
+      return
     }
 
     // CFI locations (search results, bookmarks, selections) go straight to
@@ -709,14 +863,15 @@ export class FoliateReader implements BookReader {
   }
 
   setAnnotations(annotations: ReaderAnnotation[]) {
-    this.annotationMap = new Map(annotations.map((a) => [a.cfiRange, a]))
+    performance.mark('bd:ann:set')
+    this.annotationMap = new Map(annotations.map((a) => [`${a.cfiRange}|${a.type}`, a]))
     this.syncAnnotations()
   }
 
   private syncAnnotations() {
     if (!this.view) return
-    const next = new Map(
-      Array.from(this.annotationMap.values(), (a) => [a.cfiRange, `${a.type}|${a.color}|${a.style ?? ''}`] as const),
+    const next = new Map<string, string>(
+      Array.from(this.annotationMap.values(), (a) => [`${a.cfiRange}|${a.type}`, `${a.type}|${a.color}|${a.style ?? ''}`] as const),
     )
     for (const value of Array.from(this.renderedAnnotations.keys())) {
       if (!next.has(value)) {
@@ -748,17 +903,42 @@ export class FoliateReader implements BookReader {
     } else {
       draw(ann.style === 'squiggly' ? this.foliateOverlayer.squiggly : this.foliateOverlayer.underline, { color })
     }
+    performance.mark('bd:ann:draw')
+    this.reportHighlightTiming()
+  }
+
+  // Segment timing for highlight creation: click → POST done → cache pushed
+  // into the renderer → drawn. Reports once per highlight click, then clears.
+  private reportHighlightTiming() {
+    if (!performance.getEntriesByName('bd:hl:click').length) return
+    const segments: string[] = []
+    const measure = (name: string, from: string, to: string) => {
+      try {
+        const m = performance.measure(name, from, to)
+        if (m.duration >= 0) segments.push(`${name}=${m.duration.toFixed(1)}ms`)
+      } catch { /* one of the marks is missing */ }
+    }
+    measure('bd:click→post', 'bd:hl:click', 'bd:hl:post-done')
+    measure('bd:click→set', 'bd:hl:click', 'bd:ann:set')
+    measure('bd:click→draw', 'bd:hl:click', 'bd:ann:draw')
+    if (segments.length) console.debug(`[bd] highlight ${segments.join(' ')}`)
+    for (const name of ['bd:hl:click', 'bd:hl:post-done', 'bd:ann:set', 'bd:ann:draw']) performance.clearMarks(name)
+    for (const name of ['bd:click→post', 'bd:click→set', 'bd:click→draw']) performance.clearMeasures(name)
   }
 
   private handleShowAnnotation(detail: any) {
     const { value, range } = detail ?? {}
     if (!value) return
+    // values are `${cfiRange}|${type}`; strip the type suffix before emitting
+    const cfiRange = typeof value === 'string' && value.includes('|')
+      ? value.slice(0, value.lastIndexOf('|'))
+      : value
     try {
       const doc = range && (range as Range).startContainer?.ownerDocument as Document | undefined
       const rect = doc && range ? this.popupRect(doc, range as Range) : undefined
-      this.emit('annotationClicked', { cfiRange: value, rect })
+      this.emit('annotationClicked', { cfiRange, rect })
     } catch {
-      this.emit('annotationClicked', { cfiRange: value })
+      this.emit('annotationClicked', { cfiRange })
     }
   }
 
@@ -767,11 +947,26 @@ export class FoliateReader implements BookReader {
     opts?: SearchOptions,
     onProgress?: (results: SearchResult[], progress: number | null) => void,
   ): Promise<SearchResult[]> {
-    if (!query.trim() || !this.view) return []
-    const index = opts?.scope === 'chapter' ? this.currentSectionIndex : undefined
-    const matchRegex = opts?.mode === 'regex'
+    const q = query.trim()
+    if (!q || !this.view || !this.book) return []
+    // New search supersedes any in-flight one: the old loop observes the
+    // generation bump and stops consuming chapters at the next boundary
+    const gen = ++this.searchGen
+    this.clearSearchHighlights()
+
+    const sections: any[] = this.book.sections ?? []
+    const indices: number[] = []
+    if (opts?.scope === 'chapter') {
+      if (sections[this.currentSectionIndex]?.id) indices.push(this.currentSectionIndex)
+    } else {
+      for (let i = 0; i < sections.length; i++) {
+        // sections[i].id is the manifest href — the loadSectionText key;
+        // non-linear sections (cover pages etc.) are skipped
+        if (sections[i]?.id && sections[i].linear !== 'no') indices.push(i)
+      }
+    }
+
     const results: SearchResult[] = []
-    let i = 0
     let progress: number | null = null
     let lastEmit = 0
     // Throttle partial-result emits: hundreds of matches arrive in quick bursts
@@ -782,40 +977,84 @@ export class FoliateReader implements BookReader {
       lastEmit = now
       onProgress([...results], progress)
     }
-    // foliate's excerpt is {pre, match, post}, not a plain string
-    const toResult = (cfi: string, excerpt: any): SearchResult => ({
-      cfi,
-      text: excerpt ? `${excerpt.pre}${excerpt.match}${excerpt.post}` : '',
-      index: i++,
-      excerpt: excerpt ?? undefined,
-      chapter: this.chapterForCfi(cfi),
-    })
-    for await (const item of this.view.search({ query: query.trim(), index, matchCase: opts?.matchCase, matchRegex })) {
-      if (item === 'done') break
-      if (item.subitems) {
-        for (const sub of item.subitems) results.push(toResult(sub.cfi, sub.excerpt))
-        emit()
-      } else if (item.cfi) {
-        results.push(toResult(item.cfi, item.excerpt))
-        emit()
-      } else if (typeof item.progress === 'number') {
-        progress = item.progress
-        emit()
+    const stale = () => gen !== this.searchGen || this.destroyed
+
+    for (let done = 0; done < indices.length; done++) {
+      if (stale()) break
+      const index = indices[done]!
+      const chapterText = await getChapterText(this.book, index)
+      if (stale()) break
+      if (chapterText?.text) {
+        const matches = findMatches(chapterText.text, q, { mode: opts?.mode, matchCase: opts?.matchCase })
+        if (matches.length) {
+          const chapter = this.chapterLabel(index)
+          for (const m of matches) {
+            const excerpt = makeExcerpt(chapterText.text, m.start, m.end)
+            results.push({
+              // not a CFI — a lazy jump target resolved by display()
+              cfi: `search-hit:${index}:${m.start}:${m.end}`,
+              text: `${excerpt.pre}${excerpt.match}${excerpt.post}`,
+              index: results.length,
+              chapter,
+              excerpt,
+            })
+          }
+          this.searchMatchOffsets.set(index, matches)
+          this.drawSearchHighlights(index, matches)
+        }
       }
+      progress = (done + 1) / indices.length
+      emit()
     }
-    emit(true)
+    if (!stale()) emit(true)
     return results
   }
 
-  clearSearch() {
-    this.view?.clearSearch?.()
+  // Search highlights are drawn only for currently rendered sections:
+  // computing a CFI needs a live Range, and the paginator drops sections it
+  // isn't showing. Best-effort — a section whose rendered text diverges from
+  // the searched raw text (Chinese conversion) may lose or misplace marks.
+  private drawSearchHighlights(index: number, matches: SearchMatch[]) {
+    try {
+      const contents = (this.view?.renderer?.getContents?.() ?? []) as Array<{ index: number; doc?: Document }>
+      const content = contents.find((c) => c.index === index && c.doc)
+      if (!content?.doc) return
+      const values: string[] = []
+      for (const m of matches) {
+        const range = offsetsToRange(content.doc, m.start, m.end)
+        if (!range) continue
+        const cfi = this.view.getCFI(index, range)
+        if (cfi) values.push(`${SEARCH_ANNOTATION_PREFIX}${cfi}`)
+      }
+      for (const value of values) {
+        Promise.resolve(this.view?.addAnnotation({ value })).catch(() => {})
+      }
+      this.drawnSearchValues.set(index, values)
+    } catch {
+      // highlight drawing is best-effort
+    }
   }
 
-  /** Best-effort chapter label for a CFI: section index → TOC item label */
-  private chapterForCfi(cfi: string): string | undefined {
+  private clearSearchHighlights() {
+    for (const values of this.drawnSearchValues.values()) {
+      for (const value of values) {
+        Promise.resolve(this.view?.deleteAnnotation?.({ value })).catch(() => {})
+      }
+    }
+    this.drawnSearchValues.clear()
+    this.searchMatchOffsets.clear()
+  }
+
+  clearSearch() {
+    // bump the generation so an in-flight search loop stops feeding results
+    this.searchGen++
+    this.clearSearchHighlights()
+    try { this.view?.clearSearch?.() } catch { /* view may be partially initialized */ }
+  }
+
+  /** Best-effort chapter label for a section index: TOC item label */
+  private chapterLabel(index: number): string | undefined {
     try {
-      const index = this.book?.resolveCFI?.(cfi)?.index
-      if (index == null) return undefined
       return this.view?.getProgressOf?.(index)?.tocItem?.label ?? undefined
     } catch {
       return undefined
@@ -974,9 +1213,15 @@ export class FoliateReader implements BookReader {
 
   destroy() {
     this.destroyed = true
+    // stop any in-flight search loop at the next chapter boundary; the
+    // highlight overlays die with the view, so only the bookkeeping is dropped
+    this.searchGen++
+    this.drawnSearchValues.clear()
+    this.searchMatchOffsets.clear()
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
     if (this.holdTimer !== null) { clearTimeout(this.holdTimer); this.holdTimer = null }
+    if (this.prefetchTimer !== null) { clearTimeout(this.prefetchTimer); this.prefetchTimer = null }
     try { this.view?.close() } catch { /* view may be partially initialized */ }
     try { this.view?.remove() } catch { /* ignore */ }
     for (const doc of this.activeDocs) {

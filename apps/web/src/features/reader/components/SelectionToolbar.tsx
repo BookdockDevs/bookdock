@@ -79,9 +79,10 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
 
   async function highlight() {
     if (!selection) return
+    performance.mark('bd:hl:click')
     const last = getLastHighlightStyle()
     try {
-      const res = await create.mutateAsync({
+      const promise = create.mutateAsync({
         cfiRange: selection.cfiRange,
         cfiAnchor: selection.anchor,
         type: 'highlight',
@@ -90,8 +91,13 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         text: selection.text,
         chapter: currentChapter ?? undefined,
       })
-      setCreatedLocal(res.data)
+      // The optimistic cache entry (inserted by the mutation's onMutate) is
+      // what renders the highlight, so the native selection can go away
+      // immediately instead of waiting for the POST round-trip
       renderer?.deselect()
+      const res = await promise
+      performance.mark('bd:hl:post-done')
+      setCreatedLocal(res.data)
     } catch {
       addToast(_('annotation.saveFailed'), 'error')
     }

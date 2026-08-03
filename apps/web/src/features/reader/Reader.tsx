@@ -257,7 +257,11 @@ export default function Reader() {
     onSelected: (e) => setSelection(e),
     onAnnotationClicked: (e) => {
       const current = useReaderState.getState().selection
-      const annotation = annotations?.data?.find((a) => a.cfiRange === e.cfiRange)
+      // A range can hold both a highlight and ideas; the highlight wins the
+      // click (same rule as SelectionToolbar), ideas stay reachable from the
+      // notes side panel
+      const annotation = annotations?.data?.find((a) => a.cfiRange === e.cfiRange && a.type === 'highlight')
+        ?? annotations?.data?.find((a) => a.cfiRange === e.cfiRange)
       if (!annotation || current?.cfiRange === e.cfiRange) { setSelection(null); return }
       setSelection({ cfiRange: e.cfiRange, text: annotation.text, rect: e.rect })
     },
