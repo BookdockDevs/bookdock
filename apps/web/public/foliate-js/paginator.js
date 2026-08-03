@@ -343,6 +343,9 @@ class View {
     }
   }
   expand() {
+    // The ResizeObserver fires on element resize before the iframe document
+    // exists (and after teardown) — bail instead of throwing on null document.
+    if (!this.document) return
     const { documentElement } = this.document
     if (this.#column) {
       const side = this.#vertical ? 'height' : 'width'

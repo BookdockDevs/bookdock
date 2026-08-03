@@ -43,8 +43,9 @@ export class LocalFsDriver implements StorageDriver {
     }
   }
 
-  async get(key: string): Promise<Readable> {
-    return createReadStream(this.resolve(key))
+  async get(key: string, range?: { start: number; end: number }): Promise<Readable> {
+    // createReadStream's end offset is inclusive, same as HTTP byte ranges
+    return createReadStream(this.resolve(key), range)
   }
 
   async delete(key: string): Promise<void> {

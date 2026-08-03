@@ -6,12 +6,15 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Hono } from 'hono'
 
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
+import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import booksRoutes from './books.routes'
 import {
   getBook,
   getActiveBook,
@@ -45,10 +48,10 @@ function createMemoryStorage() {
         files.set(key, Buffer.concat(chunks))
       }
     },
-    async get(key) {
+    async get(key, range) {
       const buf = files.get(key)
       if (!buf) throw new Error(`missing blob: ${key}`)
-      return Readable.from(buf)
+      return Readable.from(range ? buf.subarray(range.start, range.end + 1) : buf)
     },
     async delete(key) {
       files.delete(key)
@@ -243,5 +246,117 @@ describe('purgeExpiredTrash', () => {
     const purged = await purgeExpiredTrash(userId, 0)
     expect(purged).toBe(0)
     expect(db.select().from(schema.books).where(eq(schema.books.id, expired.id)).get()).toBeDefined()
+  })
+})
+
+describe('GET /api/v1/books/:id/file range requests', () => {
+  let db: ReturnType<typeof createTestDb>
+  let mem: ReturnType<typeof createMemoryStorage>
+  let userId: string
+  let book: ReturnType<typeof seedBook>
+
+  // 100 bytes, byte value = offset, so range slices are easy to assert
+  const blob = Buffer.from(Array.from({ length: 100 }, (_, i) => i))
+
+  function createFileApp() {
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('/api/v1/books/*', async (c, next) => {
+      c.set('user', { id: userId, username: 'owner', role: 'owner' })
+      return next()
+    })
+    app.route('/api/v1/books', booksRoutes)
+    return app
+  }
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    mem = createMemoryStorage()
+    vi.spyOn(storage, 'getStorage').mockReturnValue(mem.driver)
+    userId = seedUser(db, 'owner')
+    book = seedBook(db, userId)
+    mem.files.set(book.filePath, blob)
+  })
+
+  it('serves the whole file with Accept-Ranges when no Range header is sent', async () => {
+    const res = await createFileApp().request(`/api/v1/books/${book.id}/file`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Accept-Ranges')).toBe('bytes')
+    expect(res.headers.get('Content-Length')).toBe('100')
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(blob)
+  })
+
+  it('serves an explicit range with 206 and Content-Range', async () => {
+    const res = await createFileApp().request(`/api/v1/books/${book.id}/file`, {
+      headers: { Range: 'bytes=0-9' },
+    })
+    expect(res.status).toBe(206)
+    expect(res.headers.get('Content-Range')).toBe('bytes 0-9/100')
+    expect(res.headers.get('Content-Length')).toBe('10')
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(blob.subarray(0, 10))
+  })
+
+  it('serves an open-ended range (bytes=start-)', async () => {
+    const res = await createFileApp().request(`/api/v1/books/${book.id}/file`, {
+      headers: { Range: 'bytes=90-' },
+    })
+    expect(res.status).toBe(206)
+    expect(res.headers.get('Content-Range')).toBe('bytes 90-99/100')
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(blob.subarray(90))
+  })
+
+  it('serves a suffix range (bytes=-N)', async () => {
+    const res = await createFileApp().request(`/api/v1/books/${book.id}/file`, {
+      headers: { Range: 'bytes=-10' },
+    })
+    expect(res.status).toBe(206)
+    expect(res.headers.get('Content-Range')).toBe('bytes 90-99/100')
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(blob.subarray(90))
+  })
+
+  it('clamps an end beyond the blob size', async () => {
+    const res = await createFileApp().request(`/api/v1/books/${book.id}/file`, {
+      headers: { Range: 'bytes=95-999' },
+    })
+    expect(res.status).toBe(206)
+    expect(res.headers.get('Content-Range')).toBe('bytes 95-99/100')
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(blob.subarray(95))
+  })
+
+  it('rejects an out-of-bounds range with 416 and Content-Range */size', async () => {
+    const res = await createFileApp().request(`/api/v1/books/${book.id}/file`, {
+      headers: { Range: 'bytes=100-200' },
+    })
+    expect(res.status).toBe(416)
+    expect(res.headers.get('Content-Range')).toBe('bytes */100')
+  })
+
+  it('rejects a malformed range with 416', async () => {
+    const res = await createFileApp().request(`/api/v1/books/${book.id}/file`, {
+      headers: { Range: 'bytes=20-10' },
+    })
+    expect(res.status).toBe(416)
+    expect(res.headers.get('Content-Range')).toBe('bytes */100')
+  })
+
+  it('answers HEAD with the GET headers and no body', async () => {
+    const res = await createFileApp().request(`/api/v1/books/${book.id}/file`, { method: 'HEAD' })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Accept-Ranges')).toBe('bytes')
+    expect(res.headers.get('Content-Length')).toBe('100')
+    expect(res.headers.get('Content-Type')).toBe('application/epub+zip')
+    expect(Buffer.from(await res.arrayBuffer()).length).toBe(0)
+  })
+
+  it('answers HEAD with a Range header as 206 and no body', async () => {
+    const res = await createFileApp().request(`/api/v1/books/${book.id}/file`, {
+      method: 'HEAD',
+      headers: { Range: 'bytes=0-9' },
+    })
+    expect(res.status).toBe(206)
+    expect(res.headers.get('Content-Range')).toBe('bytes 0-9/100')
+    expect(res.headers.get('Content-Length')).toBe('10')
+    expect(Buffer.from(await res.arrayBuffer()).length).toBe(0)
   })
 })

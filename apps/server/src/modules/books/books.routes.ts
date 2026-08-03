@@ -65,7 +65,26 @@ booksRoutes.post('/', async (c) => {
   return c.json({ data: book }, 201)
 })
 
-booksRoutes.get('/:id/file', async (c) => {
+// Parses a single-range `Range: bytes=...` header against the blob size.
+// Returns null when the header is absent or not a simple bytes range (RFC 9110:
+// ignore and serve 200), 'invalid' for malformed or unsatisfiable ranges (416),
+// or the resolved inclusive byte range.
+function parseRangeHeader(header: string | undefined, size: number): { start: number; end: number } | 'invalid' | null {
+  if (!header || header.includes(',')) return null
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+  if (!match || (match[1] === '' && match[2] === '')) return 'invalid'
+  if (match[1] === '') {
+    const suffix = Number(match[2])
+    if (suffix <= 0) return 'invalid'
+    return { start: Math.max(0, size - suffix), end: size - 1 }
+  }
+  const start = Number(match[1])
+  const end = match[2] === '' ? size - 1 : Math.min(Number(match[2]), size - 1)
+  if (start >= size || start > end) return 'invalid'
+  return { start, end }
+}
+
+booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
   const book = await getActiveBook(user.id, id)
@@ -73,15 +92,33 @@ booksRoutes.get('/:id/file', async (c) => {
   if (!(await storage.exists(book.filePath))) {
     return c.json({ error: { code: 'BOOK_FILE_MISSING', message: 'Book file not found' } }, 404)
   }
-  const stream = await storage.get(book.filePath)
+  const size = await storage.size(book.filePath)
   const fileName = `${book.title.replace(/[^\w\u3000-\u303f\uff00-\uffef\u4e00-\u9fa5-]/g, '_')}.epub`
   // filePath is content-hash addressed; the payload never changes under the same URL.
-  return c.newResponse(stream as any, 200, {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/epub+zip',
-    'Content-Length': String(await storage.size(book.filePath)),
+    'Accept-Ranges': 'bytes',
     'Cache-Control': 'private, immutable, max-age=31536000',
     'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-  })
+  }
+  const range = parseRangeHeader(c.req.header('Range'), size)
+  if (range === 'invalid') {
+    return c.json(
+      { error: { code: 'RANGE_NOT_SATISFIABLE', message: 'Requested range not satisfiable' } },
+      416,
+      { 'Content-Range': `bytes */${size}`, 'Accept-Ranges': 'bytes' },
+    )
+  }
+  const isHead = c.req.method === 'HEAD'
+  if (range) {
+    headers['Content-Range'] = `bytes ${range.start}-${range.end}/${size}`
+    headers['Content-Length'] = String(range.end - range.start + 1)
+    const stream = isHead ? null : await storage.get(book.filePath, range)
+    return c.newResponse(stream as any, 206, headers)
+  }
+  headers['Content-Length'] = String(size)
+  const stream = isHead ? null : await storage.get(book.filePath)
+  return c.newResponse(stream as any, 200, headers)
 })
 
 booksRoutes.get('/:id/content', async (c) => {

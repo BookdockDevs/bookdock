@@ -90,9 +90,29 @@ export default function Reader() {
 
   const progressMutation = useMutation({
     mutationFn: async (body: ReadingProgressUpdateReq) => {
-      const result = await apiPut(`/progress/${id}`, body)
+      return apiPut<{ data: ReadingProgressRes | null }>(`/progress/${id}`, body)
+    },
+    onSuccess: (_result, body) => {
+      // The next reader entry latches initialCfi from this cache. If it holds
+      // a stale position while the server holds a newer one, the mount saves
+      // the stale position back and the background refetch flips the cache —
+      // the two positions then alternate on every exit/re-enter. Keep the
+      // cache in sync with what we just wrote; invalidate (no refetch) so the
+      // next mount still revalidates in the background.
+      queryClient.setQueryData(['progress', id], (old: { data: ReadingProgressRes | null } | undefined) =>
+        old?.data
+          ? {
+              data: {
+                ...old.data,
+                cfi: body.cfi ?? old.data.cfi,
+                chapter: body.chapter ?? old.data.chapter,
+                percent: body.percent,
+                fraction: body.fraction ?? old.data.fraction,
+              },
+            }
+          : old,
+      )
       void queryClient.invalidateQueries({ queryKey: ['progress', id], refetchType: 'none' })
-      return result
     },
   })
 
@@ -166,7 +186,9 @@ export default function Reader() {
   }
 
   const [bookReady, setBookReady] = useState(false)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  // kind=timeout: watchdog fired, likely network-related; kind=parse: renderer
+  // onError, the file itself failed to load
+  const [loadError, setLoadError] = useState<{ message: string; kind: 'timeout' | 'parse' } | null>(null)
   useEffect(() => {
     setBookReady(false)
     setLoadError(null)
@@ -176,7 +198,7 @@ export default function Reader() {
   useEffect(() => {
     if (bookReady || !contentUrl) return
     const timer = setTimeout(() => {
-      if (!bookReady) setLoadError('书籍加载超时，请刷新重试')
+      if (!bookReady) setLoadError({ message: '书籍加载超时', kind: 'timeout' })
     }, 30000)
     return () => clearTimeout(timer)
   }, [bookReady, contentUrl])
@@ -193,7 +215,7 @@ export default function Reader() {
       setBookReady(true)
       setLoadError(null)
     },
-    onError: (err) => setLoadError(err.message || '加载失败'),
+    onError: (err) => setLoadError({ message: err.message || '加载失败', kind: 'parse' }),
     onRelocated: (e) => {
       setSelection(null)
       setPercent(e.percent)
@@ -597,9 +619,11 @@ export default function Reader() {
                       <line x1="12" y1="8" x2="12" y2="12" />
                       <line x1="12" y1="16" x2="12.01" y2="16" />
                     </svg>
-                    <span className="font-medium text-red-500">{loadError}</span>
+                    <span className="font-medium text-red-500">{loadError.message}</span>
                     <p className="max-w-xs text-center text-xs text-[var(--bd-read-sub)]">
-                      该文件可能格式不支持或已损坏，请确认文件完整性后重新上传
+                      {loadError.kind === 'timeout'
+                        ? '加载可能受网络影响，请检查网络连接后刷新重试'
+                        : '该文件可能格式不支持或已损坏，请确认文件完整性后重新上传'}
                     </p>
                     <div className="pointer-events-auto mt-2 flex gap-3">
                       <Link to="/">
@@ -607,11 +631,13 @@ export default function Reader() {
                           返回书库
                         </button>
                       </Link>
-                      <Link to="/">
-                        <button className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700">
-                          重新上传
-                        </button>
-                      </Link>
+                      {loadError.kind === 'parse' && (
+                        <Link to="/">
+                          <button className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700">
+                            重新上传
+                          </button>
+                        </Link>
+                      )}
                       <button
                         className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
                         onClick={() => window.location.reload()}

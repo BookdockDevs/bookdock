@@ -1,3 +1,11 @@
+import {
+  BlobWriter as ZipBlobWriter,
+  HttpReader,
+  TextWriter as ZipTextWriter,
+  ZipReader,
+  configure as zipConfigure,
+} from '@zip.js/zip.js'
+
 import type {
   BookReader,
   ChineseConversion,
@@ -29,10 +37,47 @@ const DEFAULT_ANNOTATION_COLOR = ANNOTATION_COLORS.yellow
 // entering the reader, and the parsed book is independent of the foliate view,
 // so it can be reused across view mounts (StrictMode double-mount, leaving and
 // re-entering the same book). Keyed by content URL. Rejected promises are
-// evicted so a transient failure is retried, and the map is capped because
-// each entry retains the whole book blob via loader closures.
+// evicted so a transient failure is retried, and the map is capped because an
+// entry may retain the whole book blob via loader closures (fallback path).
 const PARSE_CACHE_MAX = 3
 const parseCache = new Map<string, Promise<any>>()
+
+// Opens the epub zip through HTTP range requests: zip.js probes the server,
+// reads the central directory from the file tail, and later pulls only the
+// bytes of each entry as foliate's loader lazily asks for sections. Falls back
+// to the legacy whole-file download when the server does not speak Range.
+async function openZipEntryMap(url: string, foliate: any) {
+  try {
+    zipConfigure({ useWebWorkers: false })
+    // The init probe (Range: bytes=0-0) throws ERR_HTTP_RANGE when the server
+    // ignores Range, which lands us in the fallback below. The URL is
+    // same-origin, so fetch sends the auth cookie by default.
+    const reader = new ZipReader(new HttpReader(url, { useRangeHeader: true }))
+    const entries: any[] = await reader.getEntries()
+    return {
+      map: new Map<string, any>(entries.map((entry) => [entry.filename, entry])),
+      TextWriter: ZipTextWriter,
+      BlobWriter: ZipBlobWriter,
+    }
+  } catch (err) {
+    console.warn('[FoliateReader] range loading unavailable, falling back to full download:', err)
+    const { configure, ZipReader: VendoredZipReader, BlobReader, TextWriter, BlobWriter } = foliate
+    const ac = new AbortController()
+    const timeoutId = setTimeout(() => ac.abort(), 60000)
+    const res = await fetch(url, { signal: ac.signal })
+    clearTimeout(timeoutId)
+    if (!res.ok) throw new Error(`fetch epub failed: ${res.status} ${res.statusText}`)
+    const file = await res.blob()
+    configure({ useWebWorkers: false })
+    const reader = new VendoredZipReader(new BlobReader(file))
+    const entries: any[] = await reader.getEntries()
+    return {
+      map: new Map<string, any>(entries.map((entry) => [entry.filename, entry])),
+      TextWriter,
+      BlobWriter,
+    }
+  }
+}
 
 function getParsedBook(url: string, foliate: any): Promise<any> {
   const cached = parseCache.get(url)
@@ -42,21 +87,11 @@ function getParsedBook(url: string, foliate: any): Promise<any> {
     parseCache.set(url, cached)
     return cached
   }
-  const { EPUB, configure, ZipReader, BlobReader, TextWriter, BlobWriter } = foliate
+  const { EPUB } = foliate
   const promise = (async () => {
-    const ac = new AbortController()
-    const timeoutId = setTimeout(() => ac.abort(), 60000)
-    const res = await fetch(url, { signal: ac.signal })
-    clearTimeout(timeoutId)
-    if (!res.ok) throw new Error(`fetch epub failed: ${res.status} ${res.statusText}`)
-    const file = await res.blob()
-    configure({ useWebWorkers: false })
+    const { map, TextWriter, BlobWriter } = await openZipEntryMap(url, foliate)
 
-    const reader = new ZipReader(new BlobReader(file))
-    const entries: any[] = await reader.getEntries()
-    const map = new Map(entries.map((entry: any) => [entry.filename, entry]))
-
-    const load = (fn: (entry: any) => any) => (name: string) => {
+    const load = (fn: (entry: any, type?: string) => any) => (name: string) => {
       const entry = map.get(name)
       return entry ? fn(entry) : null
     }
