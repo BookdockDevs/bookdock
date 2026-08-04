@@ -32,6 +32,9 @@ export interface SelectionInfo {
   rawText?: string
   anchor?: string
   rect?: PopupRect
+  /** When set on instantAnnotation, the selection toolbar stays open so the
+   * user can restyle right after auto-marking ("选中即划" mode). */
+  keepSelection?: boolean
 }
 
 export interface RendererEvents {
@@ -73,6 +76,10 @@ export interface BookReader {
   applyPageWidth(width: number): void
   applyChineseConversion(mode: ChineseConversion): Promise<void>
   applyContinuousScroll(mode: ContinuousScroll): void
+  applyClickSettings(mode: ClickAreaMode): void
+  applyMarginals(config: MarginalConfig): void
+  /** Per-chapter word counts, indexed by chapter (for the chapterWordCount field) */
+  setChapterWordCounts(counts: (number | undefined)[]): void
   scrollToPercent(percent: number): Promise<void>
   scrollByPages(delta: number): Promise<void>
   /**
@@ -155,3 +162,16 @@ export type ReadingMode = 'scroll' | 'page'
 export type ChineseConversion = 'off' | 'simplified' | 'traditional'
 
 export type ContinuousScroll = 'off' | 'snap' | 'seamless'
+
+// Fields available on the header/footer info bar (F4).
+export type MarginalField = 'none' | 'bookTitle' | 'chapter' | 'chapterProgress' | 'bookProgress' | 'chapterWordCount' | 'time'
+
+// Click-to-turn zone modes (F3): 'none' = no mode selected = disabled.
+export type ClickAreaMode = 'standard' | 'fullscreen' | 'swap' | 'none'
+
+export type MarginalConfig = {
+  header: [MarginalField, MarginalField, MarginalField]
+  footer: [MarginalField, MarginalField, MarginalField]
+  /** 0 = auto (.75em of the reading font) */
+  fontSize: number
+}

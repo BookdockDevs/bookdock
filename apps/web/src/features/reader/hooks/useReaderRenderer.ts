@@ -2,11 +2,17 @@ import { useEffect, useMemo, useRef, useCallback, useState } from 'react'
 import { useUiStore } from '@/stores/ui.store'
 import { resolveReadingTheme } from '@/lib/reading-theme'
 import { FoliateReader } from '../renderers/FoliateReader'
-import type { BookReader, RendererEvents } from '../types'
+import type { BookReader, ClickAreaMode, MarginalField, RendererEvents } from '../types'
+import type { EffectiveViewSettings } from '../lib/view-settings'
 
 interface UseReaderRendererOptions {
   url: string
   initialCfi?: string
+  /** Per-book merged values for the first-batch settings (F1). When omitted,
+   *  the global store values are used. */
+  settings?: EffectiveViewSettings
+  /** Per-chapter word counts, indexed by chapter (info-bar word count field) */
+  chapterWordCounts?: (number | undefined)[]
   onRelocated?: (e: Parameters<RendererEvents['relocated']>[0]) => void
   onSelected?: (e: Parameters<RendererEvents['selected']>[0]) => void
   onAnnotationClicked?: (e: Parameters<RendererEvents['annotationClicked']>[0]) => void
@@ -20,6 +26,8 @@ interface UseReaderRendererOptions {
 export function useReaderRenderer({
   url,
   initialCfi,
+  settings,
+  chapterWordCounts,
   onRelocated,
   onSelected,
   onAnnotationClicked,
@@ -36,26 +44,44 @@ export function useReaderRenderer({
   const readingThemeId = useUiStore((s) => s.readingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
   const fontFamily = useUiStore((s) => s.fontFamily)
-  const fontSize = useUiStore((s) => s.fontSize)
+  const storeFontSize = useUiStore((s) => s.fontSize)
   const fontWeight = useUiStore((s) => s.fontWeight)
-  const lineHeight = useUiStore((s) => s.lineHeight)
+  const storeLineHeight = useUiStore((s) => s.lineHeight)
   const paragraphSpacing = useUiStore((s) => s.paragraphSpacing)
   const letterSpacing = useUiStore((s) => s.letterSpacing)
   const indent = useUiStore((s) => s.indent)
-  const pageWidth = useUiStore((s) => s.pageWidth)
-  const verticalPadding = useUiStore((s) => s.verticalPadding)
-  const horizontalPadding = useUiStore((s) => s.horizontalPadding)
+  const storePageWidth = useUiStore((s) => s.pageWidth)
+  const storeVerticalPadding = useUiStore((s) => s.verticalPadding)
+  const storeHorizontalPadding = useUiStore((s) => s.horizontalPadding)
   const textAlignJustify = useUiStore((s) => s.textAlignJustify)
   const overrideBookFont = useUiStore((s) => s.overrideBookFont)
   const overrideBookLayout = useUiStore((s) => s.overrideBookLayout)
   const readingMode = useUiStore((s) => s.readingMode)
-  const pageColumns = useUiStore((s) => s.pageColumns)
-  const columnGap = useUiStore((s) => s.columnGap)
+  const storePageColumns = useUiStore((s) => s.pageColumns)
+  const storeColumnGap = useUiStore((s) => s.columnGap)
   const chineseConversion = useUiStore((s) => s.chineseConversion)
   const continuousScroll = useUiStore((s) => s.continuousScroll)
   const pageAnimation = useUiStore((s) => s.pageAnimation)
   const showHeader = useUiStore((s) => s.showHeader)
   const showFooter = useUiStore((s) => s.showFooter)
+  const clickAreaMode = useUiStore((s) => s.clickAreaMode)
+  const headerLeft = useUiStore((s) => s.headerLeft)
+  const headerCenter = useUiStore((s) => s.headerCenter)
+  const headerRight = useUiStore((s) => s.headerRight)
+  const footerLeft = useUiStore((s) => s.footerLeft)
+  const footerCenter = useUiStore((s) => s.footerCenter)
+  const footerRight = useUiStore((s) => s.footerRight)
+  const marginalFontSize = useUiStore((s) => s.marginalFontSize)
+
+  // Per-book overrides (F1) take precedence over the global store for the
+  // first-batch keys; everything else keeps reading the store directly.
+  const fontSize = settings?.fontSize ?? storeFontSize
+  const lineHeight = settings?.lineHeight ?? storeLineHeight
+  const pageWidth = settings?.pageWidth ?? storePageWidth
+  const verticalPadding = settings?.verticalPadding ?? storeVerticalPadding
+  const horizontalPadding = settings?.horizontalPadding ?? storeHorizontalPadding
+  const pageColumns = settings?.pageColumns ?? storePageColumns
+  const columnGap = settings?.columnGap ?? storeColumnGap
 
   const onRelocatedRef = useRef(onRelocated)
   const onSelectedRef = useRef(onSelected)
@@ -78,6 +104,12 @@ export function useReaderRenderer({
   const pageAnimationRef = useRef(pageAnimation)
   const showHeaderRef = useRef(showHeader)
   const showFooterRef = useRef(showFooter)
+  const clickAreaModeRef = useRef<ClickAreaMode>(clickAreaMode)
+  const marginalConfigRef = useRef({
+    header: [headerLeft, headerCenter, headerRight] as [MarginalField, MarginalField, MarginalField],
+    footer: [footerLeft, footerCenter, footerRight] as [MarginalField, MarginalField, MarginalField],
+    fontSize: marginalFontSize,
+  })
 
   onRelocatedRef.current = onRelocated
   onSelectedRef.current = onSelected
@@ -99,6 +131,12 @@ export function useReaderRenderer({
   pageAnimationRef.current = pageAnimation
   showHeaderRef.current = showHeader
   showFooterRef.current = showFooter
+  clickAreaModeRef.current = clickAreaMode
+  marginalConfigRef.current = {
+    header: [headerLeft, headerCenter, headerRight],
+    footer: [footerLeft, footerCenter, footerRight],
+    fontSize: marginalFontSize,
+  }
 
   const createRenderer = useCallback(() => new FoliateReader(url), [url])
 
@@ -135,6 +173,8 @@ export function useReaderRenderer({
       newRenderer.applyPageWidth(pageWidthRef.current)
       newRenderer.applyChineseConversion(chineseConversionRef.current)
       newRenderer.applyContinuousScroll(continuousScrollRef.current)
+      newRenderer.applyClickSettings(clickAreaModeRef.current)
+      newRenderer.applyMarginals(marginalConfigRef.current)
     }).catch((err) => {
       console.error('[FoliateReader] mount failed:', err)
       onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)))
@@ -246,6 +286,28 @@ export function useReaderRenderer({
     if (!current) return
     current.applyShowFooter(showFooter)
   }, [showFooter])
+
+  useEffect(() => {
+    const current = rendererRef.current
+    if (!current) return
+    current.applyClickSettings(clickAreaMode)
+  }, [clickAreaMode])
+
+  useEffect(() => {
+    const current = rendererRef.current
+    if (!current) return
+    current.applyMarginals({
+      header: [headerLeft, headerCenter, headerRight],
+      footer: [footerLeft, footerCenter, footerRight],
+      fontSize: marginalFontSize,
+    })
+  }, [headerLeft, headerCenter, headerRight, footerLeft, footerCenter, footerRight, marginalFontSize])
+
+  useEffect(() => {
+    const current = rendererRef.current
+    if (!current || !chapterWordCounts) return
+    current.setChapterWordCounts(chapterWordCounts)
+  }, [chapterWordCounts])
 
   return { containerRef, renderer }
 }

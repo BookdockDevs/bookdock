@@ -14,6 +14,7 @@ export type {
   AnnotationType,
   AnnotationStyle,
   Annotation,
+  ViewSettings,
 } from './domain'
 
 export type {
@@ -66,6 +67,8 @@ export type {
 
 export {
   bookFormatSchema,
+  marginalFieldSchema,
+  clickAreaModeSchema,
   loginSchema,
   paginationSchema,
   readingProgressUpdateSchema,
@@ -87,6 +90,7 @@ export {
   tagUpdateSchema,
   bookMembershipSchema,
   bookMetadataSchema,
+  viewSettingsSchema,
   bookUpdateSchema,
 } from './schema'
 

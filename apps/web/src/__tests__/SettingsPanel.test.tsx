@@ -27,7 +27,6 @@ describe('SettingsPanel', () => {
       showHeader: true,
       showFooter: true,
       chineseConversion: 'off',
-      showWordCount: false,
     })
   })
 
@@ -62,13 +61,12 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('阅读模式')).toBeInTheDocument()
     expect(screen.getByText('滚动')).toBeInTheDocument()
     expect(screen.getByText('翻页')).toBeInTheDocument()
-    // header/footer toggles are page-mode only
-    expect(screen.queryByText('显示页眉')).not.toBeInTheDocument()
-    expect(screen.queryByText('显示页脚')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByText('翻页'))
+    // header/footer info bar toggles show in both reading modes now
     expect(screen.getByText('显示页眉')).toBeInTheDocument()
     expect(screen.getByText('显示页脚')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('翻页'))
+    expect(screen.getByText('分栏数')).toBeInTheDocument()
   })
 
   it('switches to theme section', () => {
@@ -144,5 +142,35 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByText('翻页'))
 
     expect(useUiStore.getState().readingMode).toBe('page')
+  })
+
+  it('toggles the auto-mark selection switch', () => {
+    render(<SettingsPanel />)
+
+    fireEvent.click(screen.getByTitle('行为'))
+
+    const toggle = screen.getByRole('switch', { name: /选中即划线/ })
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+
+    fireEvent.click(toggle)
+    expect(useUiStore.getState().autoMarkSelection).toBe(true)
+    expect(localStorage.getItem('bd-auto-mark-selection')).toBe('true')
+  })
+
+  it('click-area mode toggles between modes and deselects to none', () => {
+    render(<SettingsPanel />)
+
+    fireEvent.click(screen.getByTitle('行为'))
+
+    expect(screen.getByRole('button', { name: /标准三区/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /任意侧翻下一页/ }))
+    expect(useUiStore.getState().clickAreaMode).toBe('fullscreen')
+
+    fireEvent.click(screen.getByRole('button', { name: /任意侧翻下一页/ }))
+    expect(useUiStore.getState().clickAreaMode).toBe('none')
+
+    fireEvent.click(screen.getByRole('button', { name: /左右交换/ }))
+    expect(useUiStore.getState().clickAreaMode).toBe('swap')
   })
 })

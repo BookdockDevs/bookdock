@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryObserverResult } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { BookDetailRes, BookFormat, BookListItem, BookMetadata, PaginatedResponse, ReadStatus, ShelfListItem, TagListItem } from '@bookdock/shared'
 
@@ -73,58 +73,162 @@ export function useInfiniteBooks(params: UseInfiniteBooksParams) {
   })
 }
 
-export function useUploadBook() {
+export type UploadItemStatus = 'pending' | 'queued' | 'uploading' | 'processing' | 'success' | 'duplicate' | 'error'
+
+export interface UploadItem {
+  id: string
+  name: string
+  file: File
+  status: UploadItemStatus
+  /** Upload progress 0-100; stays 100 while the server parses the book */
+  progress: number
+  message?: string
+}
+
+export const UPLOAD_ACCEPTED_EXTENSIONS = ['.epub', '.txt']
+
+export function isAcceptedUploadFile(file: File): boolean {
+  const name = file.name.toLowerCase()
+  return UPLOAD_ACCEPTED_EXTENSIONS.some((ext) => name.endsWith(ext))
+}
+
+const UPLOAD_CONCURRENCY = 3
+
+/**
+ * Multi-file upload with a small concurrency pool and per-file queue status.
+ * A single invalidate + summary toast fires when the whole queue settles.
+ */
+export function useUploadBooks() {
   const queryClient = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
   const _ = useTranslation()
-  const [progress, setProgress] = useState(0)
+  const [items, setItems] = useState<UploadItem[]>([])
+  const runningRef = useRef(0)
+  const settledRef = useRef(false)
+  const nextIdRef = useRef(0)
 
-  const mutation = useMutation({
-    mutationFn: (file: File) =>
-      new Promise<{ data: BookListItem }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        const formData = new FormData()
-        formData.append('file', file)
-        xhr.open('POST', `${BASE_URL}/books`)
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            setProgress(Math.round((e.loaded / e.total) * 100))
+  const patchItem = useCallback((id: string, patch: Partial<UploadItem>) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)))
+  }, [])
+
+  const uploadOne = useCallback(
+    (item: UploadItem) => {
+      runningRef.current += 1
+      patchItem(item.id, { status: 'uploading', progress: 0 })
+      const xhr = new XMLHttpRequest()
+      const formData = new FormData()
+      formData.append('file', item.file)
+      xhr.open('POST', `${BASE_URL}/books`)
+      xhr.upload.addEventListener('progress', (e) => {
+        if (!e.lengthComputable) return
+        const pct = Math.round((e.loaded / e.total) * 100)
+        // progress 100 means the bytes reached the server; the server may still
+        // be parsing/converting, which the UI shows as "processing"
+        patchItem(item.id, pct >= 100 ? { progress: 100, status: 'processing' } : { progress: pct })
+      })
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          let duplicated = false
+          try {
+            const body = JSON.parse(xhr.responseText) as { duplicated?: boolean }
+            duplicated = body.duplicated === true
+          } catch {
+            // keep false
           }
-        })
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText) as { data: BookListItem })
-            } catch {
-              reject(new Error('Invalid response'))
-            }
-          } else {
-            let message = xhr.statusText
-            try {
-              const body = JSON.parse(xhr.responseText)
-              message = body?.error?.message ?? message
-            } catch {
-              // ignore
-            }
-            reject(new Error(message))
+          patchItem(item.id, { status: duplicated ? 'duplicate' : 'success', progress: 100 })
+        } else {
+          let message = xhr.statusText
+          try {
+            const body = JSON.parse(xhr.responseText)
+            message = body?.error?.message ?? message
+          } catch {
+            // ignore
           }
-        })
-        xhr.addEventListener('error', () => reject(new Error('Upload failed')))
-        xhr.addEventListener('abort', () => reject(new Error('Upload aborted')))
-        xhr.send(formData)
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['books'] })
+          patchItem(item.id, { status: 'error', progress: 100, message })
+        }
+      })
+      xhr.addEventListener('error', () => {
+        patchItem(item.id, { status: 'error', progress: 100, message: _('library.uploadFailed') })
+      })
+      xhr.addEventListener('abort', () => {
+        patchItem(item.id, { status: 'error', progress: 100, message: 'Aborted' })
+      })
+      xhr.addEventListener('loadend', () => {
+        runningRef.current -= 1
+      })
+      xhr.send(formData)
+    },
+    [patchItem, _],
+  )
+
+  // Scheduler: each item state change starts at most one more queued upload
+  // while the concurrency pool has room; runningRef keeps the pool capped.
+  useEffect(() => {
+    if (runningRef.current >= UPLOAD_CONCURRENCY) return
+    const next = items.find((it) => it.status === 'queued')
+    if (!next) return
+    uploadOne(next)
+  }, [items, uploadOne])
+
+  // Settlement: once nothing is queued/uploading/processing, invalidate once
+  // and surface a summary toast.
+  useEffect(() => {
+    if (items.length === 0) {
+      settledRef.current = false
+      return
+    }
+    const active = items.some((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'processing')
+    if (active) {
+      settledRef.current = false
+      return
+    }
+    if (settledRef.current) return
+    settledRef.current = true
+    const succeeded = items.filter((it) => it.status === 'success').length
+    const duplicated = items.filter((it) => it.status === 'duplicate').length
+    const failed = items.filter((it) => it.status === 'error').length
+    queryClient.invalidateQueries({ queryKey: ['books'] })
+    if (failed > 0) {
+      addToast(_('library.uploadSummary', { succeeded, duplicated, failed }), 'error')
+    } else {
       addToast(_('library.uploadSuccess'), 'success')
-      setProgress(0)
-    },
-    onError: () => {
-      addToast(_('library.uploadFailed'), 'error')
-      setProgress(0)
-    },
-  })
+    }
+  }, [items, queryClient, addToast, _])
 
-  return { ...mutation, progress }
+  const addFiles = useCallback(
+    (files: FileList | File[], opts?: { autoStart?: boolean }) => {
+      const list = Array.from(files)
+      const accepted = list.filter(isAcceptedUploadFile)
+      const rejected = list.length - accepted.length
+      // Drag-dropped files start immediately; picker-selected files wait for
+      // an explicit "upload" click (pending -> queued via startUpload)
+      const status = opts?.autoStart ? ('queued' as const) : ('pending' as const)
+      setItems((prev) => [
+        ...prev,
+        ...accepted.map((file) => ({
+          id: `up-${Date.now()}-${nextIdRef.current++}`,
+          name: file.name,
+          file,
+          status,
+          progress: 0,
+        })),
+      ])
+      if (rejected > 0) addToast(_('library.uploadIgnored', { count: rejected }), 'info')
+    },
+    [addToast, _],
+  )
+
+  const startUpload = useCallback(() => {
+    setItems((prev) => prev.map((it) => (it.status === 'pending' ? { ...it, status: 'queued' as const } : it)))
+  }, [])
+
+  const isUploading = items.some((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'processing')
+
+  const clearQueue = useCallback(() => {
+    setItems((prev) => prev.filter((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'processing'))
+  }, [])
+
+  return { items, addFiles, startUpload, isUploading, clearQueue }
 }
 
 export function useDeleteBook() {

@@ -11,6 +11,7 @@ import type {
   ChineseConversion,
   ContinuousScroll,
   FontConfig,
+  MarginalConfig,
   ParagraphStyle,
   PopupRect,
   ReaderAnnotation,
@@ -22,6 +23,7 @@ import type {
   SelectionInfo,
 } from '../types'
 import { FONT_OPTIONS } from '../types'
+import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
 import {
   findMatches,
   getChapterText,
@@ -43,6 +45,27 @@ const DEFAULT_ANNOTATION_COLOR = ANNOTATION_COLORS.yellow
 // Must match SEARCH_PREFIX in foliate-js/view.js: values with this prefix are
 // drawn as transient search highlights and ignored by annotation click handling
 const SEARCH_ANNOTATION_PREFIX = 'foliate-search:'
+
+// Click-to-turn zone config (F3). Kept pure for unit tests.
+export type ClickAreaMode = 'standard' | 'fullscreen' | 'swap' | 'none'
+
+// Maps a viewport-relative click x to a page-turn direction. `containerLeft`/
+// `containerWidth` are the reader viewport bounds (click-view coordinates are
+// window-relative). 'none' disables click-to-turn entirely.
+export function resolveClickDirection(
+  clientX: number,
+  containerLeft: number,
+  containerWidth: number,
+  mode: ClickAreaMode,
+): 'prev' | 'next' | null {
+  if (mode === 'none' || containerWidth <= 0) return null
+  const frac = (clientX - containerLeft) / containerWidth
+  if (frac < 0 || frac > 1) return null
+  if (frac < 1 / 3) return mode === 'fullscreen' ? 'next' : (mode === 'swap' ? 'next' : 'prev')
+  if (frac > 2 / 3) return mode === 'fullscreen' ? 'next' : (mode === 'swap' ? 'prev' : 'next')
+  // middle zone never turns pages (menu/neutral)
+  return null
+}
 
 // Module-level parse cache: fetch + unzip + EPUB.init is the dominant cost of
 // entering the reader, and the parsed book is independent of the foliate view,
@@ -234,7 +257,13 @@ const transformedBooks = new WeakSet<object>()
 // keeps the book alive after destroy), so the current mode is module-level;
 // chineseConversion is a global UI setting.
 let conversionMode: ChineseConversion = 'off'
-
+// "选中即划": auto-create a highlight the moment a selection settles, keeping
+// the toolbar open for restyling. Module-level like conversionMode because the
+// selection handlers live on iframe documents owned by the renderer.
+let autoMarkSelectionMode = false
+export function setAutoMarkSelectionMode(enabled: boolean) {
+  autoMarkSelectionMode = enabled
+}
 const CONVERTIBLE_MEDIA_TYPES = new Set(['application/xhtml+xml', 'text/html'])
 
 function attachChineseTransform(book: any) {
@@ -253,6 +282,39 @@ function attachChineseTransform(book: any) {
     detail.data = Promise.resolve(detail.data).then((data: unknown) =>
       typeof data === 'string' ? convertChinese(data, mode) : data)
   })
+}
+
+// Spine part of a CFI (`epubcfi(/6/NN!...`), the bucketing key for annotations.
+// Returns null for non-EPUB CFIs (defensive; bookdock annotates via view.getCFI
+// which always produces `epubcfi(/6/...` from section cfis or fake.fromIndex).
+export function cfiSpinePrefix(cfi: string): string | null {
+  return /^epubcfi\((\/6\/\d+)/.exec(cfi)?.[1] ?? null
+}
+
+// Expected spine prefix of a section index: foliate fake CFIs are
+// `/6/` + (index + 1) * 2, and real section cfis follow the same mapping.
+export function sectionSpinePrefix(index: number): string {
+  return `/6/${2 * (index + 1)}`
+}
+
+export function buildAnnotationBuckets(annotations: ReaderAnnotation[]): {
+  buckets: Map<string, Set<string>>
+  uncategorized: Set<string>
+} {
+  const buckets = new Map<string, Set<string>>()
+  const uncategorized = new Set<string>()
+  for (const a of annotations) {
+    const value = `${a.cfiRange}|${a.type}`
+    const prefix = cfiSpinePrefix(a.cfiRange)
+    if (prefix) {
+      let bucket = buckets.get(prefix)
+      if (!bucket) buckets.set(prefix, (bucket = new Set()))
+      bucket.add(value)
+    } else {
+      uncategorized.add(value)
+    }
+  }
+  return { buckets, uncategorized }
 }
 
 export class FoliateReader implements BookReader {
@@ -313,6 +375,12 @@ export class FoliateReader implements BookReader {
   private prefetchTimer: ReturnType<typeof setTimeout> | null = null
   // `${cfiRange}|${type}` value -> render key (`${type}|${color}|${style}`); a key change means remove + re-add
   private renderedAnnotations = new Map<string, string>()
+  // Annotation values bucketed by CFI spine prefix (`epubcfi(/6/NN`); create-overlay
+  // re-applies only the current section's bucket instead of every annotation.
+  private annotationBuckets = new Map<string, Set<string>>()
+  // Values whose CFI has no extractable spine prefix (defensive fallback: re-applied
+  // on every create-overlay, same as the pre-bucketing behavior).
+  private uncategorizedAnnotations = new Set<string>()
   // Generation token of the in-flight search: starting a new search, clearing
   // or destroying bumps it, and the search loop stops at the next chapter
   // boundary when its own generation goes stale
@@ -326,6 +394,85 @@ export class FoliateReader implements BookReader {
     // Must bubble: listeners on document (e.g. popup dismiss handlers) rely on
     // the event travelling up from the container
     this.container?.dispatchEvent(new CustomEvent('content-click', { bubbles: true }))
+  }
+
+  // Click-to-turn (F3): the vendored view emits window-relative `click-view`
+  // coordinates on every click; map them to a page-turn direction. Page mode
+  // turns pages, scrolled mode scrolls by one viewport (same as the page-up/
+  // page-down buttons) — same zones, same direction semantics.
+  private clickAreaMode: ClickAreaMode = 'standard'
+  private handleClickView = (event: Event) => {
+    const rect = this.container?.getBoundingClientRect()
+    if (!rect) return
+    const detail = (event as CustomEvent).detail
+    const direction = resolveClickDirection(Number(detail?.x), rect.left, rect.width, this.clickAreaMode)
+    if (direction === 'prev') {
+      if (this.readingMode === 'page') void this.prev()
+      else void this.scrollByPages(-1)
+    } else if (direction === 'next') {
+      if (this.readingMode === 'page') void this.next()
+      else void this.scrollByPages(1)
+    }
+  }
+
+  applyClickSettings(mode: ClickAreaMode) {
+    this.clickAreaMode = mode
+  }
+
+  // Header/footer info bar (F4): fields per L/C/R position, composed from the
+  // latest relocate state; the time field refreshes on a minute-aligned timer.
+  private marginalConfig: MarginalConfig = DEFAULT_MARGINAL_CONFIG
+  private lastTocLabel = ''
+  private lastChapterFraction: number | undefined
+  private chapterWordCounts: (number | undefined)[] = []
+  private marginalTimer: ReturnType<typeof setTimeout> | null = null
+
+  applyMarginals(config: MarginalConfig) {
+    this.marginalConfig = config
+    this.updateMarginals()
+  }
+
+  setChapterWordCounts(counts: (number | undefined)[]) {
+    this.chapterWordCounts = counts
+    this.updateMarginals()
+  }
+
+  private updateMarginals() {
+    if (!this.view?.renderer?.setMarginals) return
+    const ctx = {
+      bookTitle: this.bookTitle(),
+      chapterTitle: this.lastTocLabel,
+      chapterFraction: this.lastChapterFraction,
+      bookFraction: this.lastFraction ?? undefined,
+      chapterWordCount: this.currentSectionIndex != null
+        ? this.chapterWordCounts[this.currentSectionIndex]
+        : undefined,
+    }
+    try {
+      this.view.renderer.setMarginals({
+        header: composeMarginalLine(this.marginalConfig.header, ctx),
+        footer: composeMarginalLine(this.marginalConfig.footer, ctx),
+        fontSize: this.marginalConfig.fontSize,
+      })
+    } catch {
+      // renderer not ready
+    }
+  }
+
+  // The first tick aligns to the next minute boundary so the displayed time
+  // doesn't lag by up to 60s after mount.
+  private scheduleMarginalTick() {
+    if (this.marginalTimer !== null) return
+    const msToNextMinute = (60 - new Date().getSeconds()) * 1000
+    this.marginalTimer = setTimeout(() => {
+      this.marginalTimer = null
+      if (this.destroyed) return
+      this.updateMarginals()
+      this.marginalTimer = setInterval(() => {
+        if (this.destroyed) return
+        this.updateMarginals()
+      }, 60000)
+    }, msToNextMinute)
   }
 
   private destroyed = false
@@ -359,17 +506,32 @@ export class FoliateReader implements BookReader {
         this.syncDoc()
       })
       view.addEventListener('load', () => this.syncDoc())
+      view.addEventListener('click-view', this.handleClickView)
       view.addEventListener('draw-annotation', (event: Event) =>
         this.handleDrawAnnotation((event as CustomEvent).detail))
       view.addEventListener('show-annotation', (event: Event) =>
         this.handleShowAnnotation((event as CustomEvent).detail))
-      // Newly rendered sections get their annotations re-applied
+      // Newly rendered sections get their annotations re-applied. Bucketed by
+      // spine prefix so only the current section's annotations are re-resolved
+      // (CFI parsing per annotation dominates once the note count grows).
       view.addEventListener('create-overlay', (event: Event) => {
-        for (const value of this.renderedAnnotations.keys()) {
+        const index = (event as CustomEvent).detail?.index
+        const reapply = new Set<string>()
+        if (typeof index === 'number') {
+          const bucket = this.annotationBuckets.get(sectionSpinePrefix(index))
+          if (bucket) {
+            for (const value of bucket) {
+              if (this.renderedAnnotations.has(value)) reapply.add(value)
+            }
+          }
+        }
+        for (const value of this.uncategorizedAnnotations) {
+          if (this.renderedAnnotations.has(value)) reapply.add(value)
+        }
+        for (const value of reapply) {
           Promise.resolve(this.view?.addAnnotation({ value })).catch(() => {})
         }
         // …and any pending search highlights for that section
-        const index = (event as CustomEvent).detail?.index
         const matches = this.searchMatchOffsets.get(index)
         if (matches?.length) this.drawSearchHighlights(index, matches)
       })
@@ -398,6 +560,7 @@ export class FoliateReader implements BookReader {
         try { await this.view?.renderer?.goTo?.({ index: 0 }) } catch {}
       }
       this.syncAnnotations()
+      this.scheduleMarginalTick()
       this.emit('rendered')
       this.syncDoc()
     } catch (err) {
@@ -515,14 +678,10 @@ export class FoliateReader implements BookReader {
       pageInChapter,
       movedScreens,
     }
-    try {
-      this.view?.renderer?.setMarginals?.({
-        header: this.bookTitle(),
-        footer: tocItem?.label ?? '',
-      })
-    } catch {
-      // renderer not ready
-    }
+    this.lastTocLabel = tocItem?.label ?? ''
+    this.lastChapterFraction = chapterFraction
+    if (frac != null) this.lastFraction = frac
+    this.updateMarginals()
     this.emit('relocated', location)
   }
 
@@ -843,6 +1002,10 @@ export class FoliateReader implements BookReader {
           this.emit('selected', null)
           return
         }
+        if (autoMarkSelectionMode) {
+          // 选中即划: create immediately but keep the toolbar open (restyle)
+          this.emit('instantAnnotation', { ...info, keepSelection: true })
+        }
         this.emit('selected', info)
       } catch {
         // ignore selection errors
@@ -865,6 +1028,9 @@ export class FoliateReader implements BookReader {
   setAnnotations(annotations: ReaderAnnotation[]) {
     performance.mark('bd:ann:set')
     this.annotationMap = new Map(annotations.map((a) => [`${a.cfiRange}|${a.type}`, a]))
+    const { buckets, uncategorized } = buildAnnotationBuckets(annotations)
+    this.annotationBuckets = buckets
+    this.uncategorizedAnnotations = uncategorized
     this.syncAnnotations()
   }
 
@@ -1222,6 +1388,7 @@ export class FoliateReader implements BookReader {
     this.resizeObserver = null
     if (this.holdTimer !== null) { clearTimeout(this.holdTimer); this.holdTimer = null }
     if (this.prefetchTimer !== null) { clearTimeout(this.prefetchTimer); this.prefetchTimer = null }
+    if (this.marginalTimer !== null) { clearTimeout(this.marginalTimer); this.marginalTimer = null }
     try { this.view?.close() } catch { /* view may be partially initialized */ }
     try { this.view?.remove() } catch { /* ignore */ }
     for (const doc of this.activeDocs) {

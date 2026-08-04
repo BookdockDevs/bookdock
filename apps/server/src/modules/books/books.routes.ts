@@ -25,6 +25,7 @@ import {
 import { getTrashSettings } from '../settings/settings.service'
 import { getStorage } from '../../storage'
 import { config } from '../../config'
+import { AppError } from '../../middleware/error'
 
 const booksRoutes = new Hono()
 
@@ -62,8 +63,8 @@ booksRoutes.post('/', async (c) => {
   if (file.size > config.uploadMaxBytes) {
     return c.json({ error: { code: 'UPLOAD_TOO_LARGE', message: 'File too large' } }, 413)
   }
-  const book = await uploadBook(user.id, file)
-  return c.json({ data: book }, 201)
+  const { book, duplicated } = await uploadBook(user.id, file)
+  return c.json({ data: book, duplicated }, 201)
 })
 
 // Parses a single-range `Range: bytes=...` header against the blob size.
@@ -91,7 +92,7 @@ booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
   const book = await getActiveBook(user.id, id)
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) {
-    return c.json({ error: { code: 'BOOK_FILE_MISSING', message: 'Book file not found' } }, 404)
+    throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
   }
   const size = await storage.size(book.filePath)
   const fileName = `${book.title.replace(/[^\w\u3000-\u303f\uff00-\uffef\u4e00-\u9fa5-]/g, '_')}.epub`
@@ -140,7 +141,7 @@ booksRoutes.get('/:id/epub', async (c) => {
   const book = await getActiveBook(user.id, id)
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) {
-    return c.json({ error: { code: 'BOOK_FILE_MISSING', message: 'Book file not found' } }, 404)
+    throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
   }
   const body = new Uint8Array(await bufferFromStream(await storage.get(book.filePath)))
   // filePath is content-hash addressed; the payload never changes under the same URL.

@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import type { ReadStatus } from '@bookdock/shared'
 
-import { apiDelete, apiPatch, apiPut } from '@/api/client'
+import { apiDelete, apiPatch, apiPost, apiPut } from '@/api/client'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { useToastStore } from '@/stores/toast.store'
@@ -14,6 +14,7 @@ import { useShelves, useTags } from '../hooks'
 interface SelectionBarProps {
   selectedIds: string[]
   onClear: () => void
+  trash?: boolean
 }
 
 const BATCH_STATUS_ACTIONS: { value: ReadStatus; labelKey: string }[] = [
@@ -24,16 +25,16 @@ const BATCH_STATUS_ACTIONS: { value: ReadStatus; labelKey: string }[] = [
   { value: 'abandoned', labelKey: 'library.markAbandoned' },
 ]
 
-export default function SelectionBar({ selectedIds, onClear }: SelectionBarProps) {
+export default function SelectionBar({ selectedIds, onClear, trash = false }: SelectionBarProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
-  const [dialog, setDialog] = useState<'classify' | 'delete' | null>(null)
+  const [dialog, setDialog] = useState<'classify' | 'delete' | 'permanent' | null>(null)
   const [marking, setMarking] = useState(false)
 
-  async function handleBatchStatus(value: ReadStatus) {
+  async function runBatch(action: (bookId: string) => Promise<unknown>) {
     setMarking(true)
-    const results = await Promise.allSettled(selectedIds.map((bookId) => apiPatch(`/books/${bookId}`, { readStatus: value })))
+    const results = await Promise.allSettled(selectedIds.map(action))
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
     void queryClient.invalidateQueries({ queryKey: ['books'] })
@@ -42,7 +43,17 @@ export default function SelectionBar({ selectedIds, onClear }: SelectionBarProps
       failed === 0 ? 'success' : 'error',
     )
     setMarking(false)
-    if (failed === 0) onClear()
+    return failed === 0
+  }
+
+  async function handleBatchStatus(value: ReadStatus) {
+    const ok = await runBatch((bookId) => apiPatch(`/books/${bookId}`, { readStatus: value }))
+    if (ok) onClear()
+  }
+
+  async function handleBatchRestore() {
+    const ok = await runBatch((bookId) => apiPost(`/books/${bookId}/restore`))
+    if (ok) onClear()
   }
 
   return (
@@ -52,24 +63,37 @@ export default function SelectionBar({ selectedIds, onClear }: SelectionBarProps
           <span className="mr-1 whitespace-nowrap text-xs font-medium text-stone-600 dark:text-stone-300">
             {_('library.selectionCount', { count: selectedIds.length })}
           </span>
-          {BATCH_STATUS_ACTIONS.map((action) => (
-            <Button
-              key={action.value}
-              variant="ghost"
-              size="sm"
-              disabled={marking}
-              onClick={() => void handleBatchStatus(action.value)}
-            >
-              {_(action.labelKey)}
-            </Button>
-          ))}
-          <span className="mx-1 h-4 w-px bg-stone-200 dark:bg-stone-700" />
-          <Button variant="secondary" size="sm" onClick={() => setDialog('classify')}>
-            {_('library.batchClassify')}
-          </Button>
-          <Button variant="danger" size="sm" onClick={() => setDialog('delete')}>
-            {_('library.batchDelete')}
-          </Button>
+          {trash ? (
+            <>
+              <Button variant="secondary" size="sm" disabled={marking} onClick={() => void handleBatchRestore()}>
+                {_('library.restore')}
+              </Button>
+              <Button variant="danger" size="sm" disabled={marking} onClick={() => setDialog('permanent')}>
+                {_('library.permanentDelete')}
+              </Button>
+            </>
+          ) : (
+            <>
+              {BATCH_STATUS_ACTIONS.map((action) => (
+                <Button
+                  key={action.value}
+                  variant="ghost"
+                  size="sm"
+                  disabled={marking}
+                  onClick={() => void handleBatchStatus(action.value)}
+                >
+                  {_(action.labelKey)}
+                </Button>
+              ))}
+              <span className="mx-1 h-4 w-px bg-stone-200 dark:bg-stone-700" />
+              <Button variant="secondary" size="sm" onClick={() => setDialog('classify')}>
+                {_('library.batchClassify')}
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => setDialog('delete')}>
+                {_('library.batchDelete')}
+              </Button>
+            </>
+          )}
           <button
             type="button"
             onClick={onClear}
@@ -93,6 +117,14 @@ export default function SelectionBar({ selectedIds, onClear }: SelectionBarProps
 
       {dialog === 'delete' && (
         <BatchDeleteDialog
+          ids={selectedIds}
+          onClose={() => setDialog(null)}
+          onDone={onClear}
+        />
+      )}
+
+      {dialog === 'permanent' && (
+        <BatchPermanentDeleteDialog
           ids={selectedIds}
           onClose={() => setDialog(null)}
           onDone={onClear}
@@ -290,6 +322,56 @@ function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: (
             onClick={() => void handleDelete()}
           >
             {_('library.batchDelete')}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BatchPermanentDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: () => void; onDone: () => void }) {
+  const _ = useTranslation()
+  const queryClient = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+  const [deleting, setDeleting] = useState(false)
+
+  async function handleDelete() {
+    setDeleting(true)
+    const results = await Promise.allSettled(ids.map((id) => apiDelete(`/books/${id}/permanent`)))
+    const failed = results.filter((r) => r.status === 'rejected').length
+    const succeeded = results.length - failed
+    void queryClient.invalidateQueries({ queryKey: ['books'] })
+    addToast(
+      failed === 0 ? _('library.batchSucceeded', { count: succeeded }) : _('library.batchPartial', { succeeded, failed }),
+      failed === 0 ? 'success' : 'error',
+    )
+    if (failed === 0) {
+      onDone()
+      onClose()
+    } else {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-stone-900">
+        <h2 className="mb-2 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
+          {_('library.permanentDelete')}
+        </h2>
+        <p className="mb-6 text-sm text-stone-500">
+          {_('library.batchPermanentDeleteConfirm', { count: ids.length })}
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose} disabled={deleting}>
+            {_('library.cancel')}
+          </Button>
+          <Button
+            variant="danger"
+            disabled={deleting}
+            onClick={() => void handleDelete()}
+          >
+            {_('library.permanentDelete')}
           </Button>
         </div>
       </div>

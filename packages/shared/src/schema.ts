@@ -3,6 +3,12 @@ import { PAGINATION } from './constants'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
 
+// Fields configurable per position on the header/footer info bar (F4).
+export const marginalFieldSchema = z.enum(['none', 'bookTitle', 'chapter', 'chapterProgress', 'bookProgress', 'chapterWordCount', 'time'])
+
+// Click-to-turn zones (F3 rework): 'none' = no mode selected = disabled.
+export const clickAreaModeSchema = z.enum(['standard', 'fullscreen', 'swap', 'none'])
+
 export const loginSchema = z.object({
   username: z.string().min(1).max(100),
   password: z.string().min(1).max(256),
@@ -73,9 +79,17 @@ export const settingsUpdateSchema = z.object({
   showHeader: z.boolean().optional(),
   showFooter: z.boolean().optional(),
   chineseConversion: z.enum(['off', 'simplified', 'traditional']).optional(),
-  showWordCount: z.boolean().optional(),
   continuousScroll: z.enum(['off', 'snap', 'seamless']).optional(),
   pageAnimation: z.boolean().optional(),
+  autoMarkSelection: z.boolean().optional(),
+  clickAreaMode: clickAreaModeSchema.optional(),
+  headerLeft: marginalFieldSchema.optional(),
+  headerCenter: marginalFieldSchema.optional(),
+  headerRight: marginalFieldSchema.optional(),
+  footerLeft: marginalFieldSchema.optional(),
+  footerCenter: marginalFieldSchema.optional(),
+  footerRight: marginalFieldSchema.optional(),
+  marginalFontSize: z.number().min(0).max(24).optional(),
   trash: z.object({
     autoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]),
   }).optional(),
@@ -150,6 +164,22 @@ export const bookMetadataSchema = z.object({
   seriesIndex: z.number().optional(),
 })
 
+export const viewSettingsSchema = z.object({
+  fontSize: z.number().min(12).max(64).optional(),
+  lineHeight: z.number().min(1.2).max(2.5).optional(),
+  pageWidth: z.number().min(0).max(1800).optional(),
+  horizontalPadding: z.number().min(0).max(120).optional(),
+  verticalPadding: z.number().min(0).max(120).optional(),
+  pageColumns: z.number().int().min(1).max(3).optional(),
+  columnGap: z.number().min(0).max(15).optional(),
+  scrollPageWidth: z.number().min(0).max(1800).optional(),
+  scrollHorizontalPadding: z.number().min(0).max(120).optional(),
+  scrollVerticalPadding: z.number().min(0).max(120).optional(),
+  pagePageWidth: z.number().min(0).max(1800).optional(),
+  pageHorizontalPadding: z.number().min(0).max(120).optional(),
+  pageVerticalPadding: z.number().min(0).max(120).optional(),
+})
+
 export const bookUpdateSchema = z.object({
   readStatus: z.enum(['wishlist', 'reading', 'idle', 'finished', 'abandoned']).optional(),
   progress: z.number().int().min(0).max(100).optional(),
@@ -157,4 +187,6 @@ export const bookUpdateSchema = z.object({
   title: z.string().min(1).max(500).optional(),
   author: z.string().max(500).optional(),
   bookmeta: bookMetadataSchema.optional(),
+  // null clears the per-book overrides (fall back to global)
+  viewSettings: viewSettingsSchema.nullable().optional(),
 })

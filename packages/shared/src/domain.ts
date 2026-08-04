@@ -76,6 +76,29 @@ export interface ReadingRecord {
   durationSeconds: number
 }
 
+/**
+ * Per-book reading-setting overrides (F1 layering). Stored as
+ * `books.meta.viewSettings`; only the first-batch core typography keys are
+ * supported so far. Dual-backing keys (pageWidth/horizontalPadding/
+ * verticalPadding) carry both the flat value and the mode-specific backing,
+ * mirroring the global ui.store model.
+ */
+export interface ViewSettings {
+  fontSize?: number
+  lineHeight?: number
+  pageWidth?: number
+  horizontalPadding?: number
+  verticalPadding?: number
+  pageColumns?: number
+  columnGap?: number
+  scrollPageWidth?: number
+  scrollHorizontalPadding?: number
+  scrollVerticalPadding?: number
+  pagePageWidth?: number
+  pageHorizontalPadding?: number
+  pageVerticalPadding?: number
+}
+
 export type AnnotationType = 'highlight' | 'note' | 'bookmark'
 
 export type AnnotationStyle = 'underline' | 'squiggly' | 'highlight'

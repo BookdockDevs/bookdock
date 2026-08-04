@@ -9,11 +9,13 @@ import SelectionBar from '../features/library/components/SelectionBar'
 
 const apiPatch = vi.fn()
 const apiPut = vi.fn()
+const apiPost = vi.fn()
 const apiDelete = vi.fn()
 
 vi.mock('@/api/client', () => ({
   apiPatch: (...args: unknown[]) => apiPatch(...args),
   apiPut: (...args: unknown[]) => apiPut(...args),
+  apiPost: (...args: unknown[]) => apiPost(...args),
   apiDelete: (...args: unknown[]) => apiDelete(...args),
 }))
 
@@ -30,6 +32,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   apiPatch.mockResolvedValue({})
   apiPut.mockResolvedValue({})
+  apiPost.mockResolvedValue({})
   apiDelete.mockResolvedValue({})
 })
 
@@ -85,5 +88,41 @@ describe('SelectionBar', () => {
     render(<SelectionBar selectedIds={['a']} onClear={onClear} />, { wrapper })
     screen.getByRole('button', { name: 'library.clearSelection' }).click()
     expect(onClear).toHaveBeenCalled()
+  })
+
+  it('trash mode shows restore/permanent actions instead of library batch actions', () => {
+    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} trash />, { wrapper })
+    expect(screen.getByText('library.restore')).toBeTruthy()
+    expect(screen.getByText('library.permanentDelete')).toBeTruthy()
+    expect(screen.queryByText('library.batchClassify')).toBeNull()
+    expect(screen.queryByText('library.batchDelete')).toBeNull()
+  })
+
+  it('trash mode batch restore calls the restore api per book and clears selection', async () => {
+    const onClear = vi.fn()
+    render(<SelectionBar selectedIds={['a', 'b']} onClear={onClear} trash />, { wrapper })
+
+    fireEvent.click(screen.getByText('library.restore'))
+
+    await waitFor(() => expect(onClear).toHaveBeenCalled())
+    expect(apiPost).toHaveBeenCalledTimes(2)
+    expect(apiPost).toHaveBeenCalledWith('/books/a/restore')
+    expect(apiPost).toHaveBeenCalledWith('/books/b/restore')
+  })
+
+  it('trash mode batch permanent delete confirms then calls the permanent api per book', async () => {
+    const onClear = vi.fn()
+    render(<SelectionBar selectedIds={['a', 'b']} onClear={onClear} trash />, { wrapper })
+
+    fireEvent.click(screen.getByText('library.permanentDelete'))
+    expect(screen.getByText('library.batchPermanentDeleteConfirm')).toBeTruthy()
+    expect(apiDelete).not.toHaveBeenCalled()
+
+    const confirmButtons = screen.getAllByRole('button', { name: 'library.permanentDelete' })
+    fireEvent.click(confirmButtons[confirmButtons.length - 1])
+
+    await waitFor(() => expect(onClear).toHaveBeenCalled())
+    expect(apiDelete).toHaveBeenCalledTimes(2)
+    expect(apiDelete).toHaveBeenCalledWith('/books/a/permanent')
   })
 })

@@ -56,29 +56,31 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
         </div>
 
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
-          <div className="relative min-w-40 flex-1 sm:max-w-64">
-            <svg
-              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="M21 21l-4.35-4.35" />
-            </svg>
-            <input
-              type="text"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder={_('library.searchPlaceholder')}
-              className="h-10 w-full appearance-none rounded-xl border border-stone-200 bg-white pl-10 pr-3 text-sm text-stone-700 outline-none transition-all placeholder:text-stone-400 focus:border-stone-400 focus:ring-4 focus:ring-stone-900/5 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-600 dark:focus:ring-white/5"
-            />
-          </div>
+          {!trash && (
+            <div className="relative min-w-40 flex-1 sm:max-w-64">
+              <svg
+                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="M21 21l-4.35-4.35" />
+              </svg>
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder={_('library.searchPlaceholder')}
+                className="h-10 w-full appearance-none rounded-xl border border-stone-200 bg-white pl-10 pr-3 text-sm text-stone-700 outline-none transition-all placeholder:text-stone-400 focus:border-stone-400 focus:ring-4 focus:ring-stone-900/5 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-600 dark:focus:ring-white/5"
+              />
+            </div>
+          )}
 
-          {!trash && onToggleSelectMode && (
+          {onToggleSelectMode && (
             <button
               type="button"
               aria-label={_('library.selectMode')}
@@ -98,18 +100,31 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
             </button>
           )}
 
-          <ViewMenu
-            navSearch={navSearch}
-            view={view}
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            format={format}
-            readStatus={readStatus}
-          />
+          {!trash && (
+            <ViewMenu
+              navSearch={navSearch}
+              view={view}
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              format={format}
+              readStatus={readStatus}
+            />
+          )}
 
           {trash ? (
             trashCount > 0 && (
-              <Button variant="danger" onClick={onEmptyTrash}>{_('library.emptyTrash')}</Button>
+              <button
+                type="button"
+                aria-label={_('library.emptyTrash')}
+                title={_('library.emptyTrash')}
+                onClick={onEmptyTrash}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-red-200 bg-white text-red-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-red-900/50 dark:bg-stone-900 dark:text-red-400 dark:hover:border-red-800 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+                  <path d="M10 11v6M14 11v6" />
+                </svg>
+              </button>
             )
           ) : (
             <Button onClick={onUploadClick}>{_('library.upload')}</Button>

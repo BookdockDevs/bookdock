@@ -1,6 +1,6 @@
 import type { BookFormat, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
-import type { AnnotationStyle, AnnotationType } from './domain'
+import type { AnnotationStyle, AnnotationType, ViewSettings } from './domain'
 
 export interface ApiResponse<T> {
   data: T
@@ -231,6 +231,8 @@ export interface BookMeta {
   bookmeta?: BookMetadata
   /** Total word count of the book (sum of chapter word counts) */
   wordCount?: number
+  /** Per-book reading-setting overrides (F1), see ViewSettings */
+  viewSettings?: ViewSettings
 }
 
 export interface BookDetailRes extends BookListItem {
@@ -257,6 +259,13 @@ export interface UploadBookRes {
   title: string
   format: BookFormat
   size: number
+}
+
+/** POST /books response: `duplicated` is true when the upload hit content-hash dedup
+ * and the existing book row was returned instead of creating a new one. */
+export interface BookUploadRes {
+  data: BookListItem
+  duplicated: boolean
 }
 
 export interface ReadingProgressUpdateReq {

@@ -4,9 +4,13 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
 import { resolveReadingTheme, PRESET_READING_THEMES } from '@/lib/reading-theme'
 import { useUiStore } from '@/stores/ui.store'
+import { useViewSettings } from '../view-settings-context'
+import { MARGINAL_FIELDS } from '../lib/marginals'
+import type { MarginalField } from '../types'
+import type { PerBookSettingKey } from '../lib/view-settings'
 import { FONT_OPTIONS } from '../types'
 
-type Section = 'font' | 'layout' | 'display' | 'theme'
+type Section = 'font' | 'layout' | 'display' | 'behavior' | 'theme'
 
 interface ThemeDraft {
   name: string
@@ -22,11 +26,13 @@ interface SliderRowProps {
   max: number
   step?: number
   suffix?: string
+  /** Overrides the trailing value text entirely (e.g. "自动" instead of "0自动") */
+  formatValue?: (value: number) => string
   onChange: (value: number) => void
 }
 
-function SliderRow({ label, value, min, max, step = 1, suffix = '', onChange }: SliderRowProps) {
-  // While dragging, only the local draft moves — committing to the store on
+function SliderRow({ label, value, min, max, step = 1, suffix = '', formatValue, onChange }: SliderRowProps) {
+  // While dragging, only the local draft moves �?committing to the store on
   // every input event would re-layout the whole book on every tick
   const [draft, setDraft] = useState<number | null>(null)
   const shown = draft ?? value
@@ -35,11 +41,12 @@ function SliderRow({ label, value, min, max, step = 1, suffix = '', onChange }: 
     setDraft(null)
   }
   const pct = Math.round(((shown - min) / (max - min)) * 100)
+  const shownText = formatValue ? formatValue(shown) : `${shown}${suffix}`
   return (
     <div className="mb-5">
       <div className="mb-1.5 flex items-center justify-between text-xs">
         <span className="text-[var(--bd-read-sub)]">{label}</span>
-        <span className="tabular-nums text-current">{shown}{suffix}</span>
+        <span className="tabular-nums text-current">{shownText}</span>
       </div>
       <input
         type="range"
@@ -93,9 +100,27 @@ function ToggleRow({ label, hint, checked, onChange }: ToggleRowProps) {
 }
 
 interface ButtonGroupProps<T extends string | number> {
-  options: { value: T; label: string }[]
+  options: { value: T; label: string; icon?: React.ReactNode }[]
   value: T
   onChange: (value: T) => void
+}
+
+function FieldSelect({ value, onChange }: { value: MarginalField; onChange: (v: MarginalField) => void }) {
+  const _ = useTranslation()
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as MarginalField)}
+      className="w-full rounded-md border border-stone-200 bg-transparent px-1 py-1 text-xs outline-none dark:border-stone-800"
+      aria-label={_('reader.marginalField')}
+    >
+      {MARGINAL_FIELDS.map((f) => (
+        <option key={f} value={f}>
+          {_(`reader.marginalField.${f}` as const)}
+        </option>
+      ))}
+    </select>
+  )
 }
 
 function ButtonGroup<T extends string | number>({ options, value, onChange }: ButtonGroupProps<T>) {
@@ -105,17 +130,38 @@ function ButtonGroup<T extends string | number>({ options, value, onChange }: Bu
         <button
           key={String(opt.value)}
           onClick={() => onChange(opt.value)}
+          title={opt.label}
+          aria-label={opt.label}
           className={cn(
-            'rounded-lg border px-2 py-1.5 text-xs transition-colors',
+            'flex items-center justify-center rounded-lg border px-2 py-1.5 text-xs transition-colors',
             value === opt.value
               ? 'border-current bg-current/10 text-current'
               : 'border-stone-200 text-[var(--bd-read-sub)] hover:text-current dark:border-stone-800',
           )}
         >
-          {opt.label}
+          {opt.icon ?? opt.label}
         </button>
       ))}
     </div>
+  )
+}
+
+// Click-area glyphs: two line arrows (matching the reader's stroke style)
+// whose relative positions imply the screen zones; the gap is the neutral
+// middle. standard: ← · →, fullscreen: → · →, swap: → · ←.
+const GLYPH_LEFT_PREV = 'M10.5 3.5l-7 2.5 7 2.5'
+const GLYPH_LEFT_NEXT = 'M3.5 3.5l7 2.5-7 2.5'
+const GLYPH_RIGHT_PREV = 'M24.5 3.5l-7 2.5 7 2.5'
+const GLYPH_RIGHT_NEXT = 'M17.5 3.5l7 2.5-7 2.5'
+
+function ClickAreaGlyph({ mode }: { mode: 'standard' | 'fullscreen' | 'swap' }) {
+  const left = mode === 'standard' ? GLYPH_LEFT_PREV : GLYPH_LEFT_NEXT
+  const right = mode === 'swap' ? GLYPH_RIGHT_PREV : GLYPH_RIGHT_NEXT
+  return (
+    <svg viewBox="0 0 28 12" className="h-3.5 w-8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={left} />
+      <path d={right} />
+    </svg>
   )
 }
 
@@ -151,7 +197,7 @@ const SETTINGS_SECTION_KEY = 'bd-settings-section'
 function getInitialSection(): Section {
   if (typeof window === 'undefined') return 'font'
   const stored = localStorage.getItem(SETTINGS_SECTION_KEY) as Section | null
-  if (stored === 'font' || stored === 'layout' || stored === 'display' || stored === 'theme') return stored
+  if (stored === 'font' || stored === 'layout' || stored === 'display' || stored === 'behavior' || stored === 'theme') return stored
   return 'font'
 }
 
@@ -207,13 +253,46 @@ export function SettingsPanel() {
     setShowFooter,
     chineseConversion,
     setChineseConversion,
-    showWordCount,
-    setShowWordCount,
     continuousScroll,
     setContinuousScroll,
+    autoMarkSelection,
+    setAutoMarkSelection,
+    clickAreaMode,
+    setClickAreaMode,
+    headerLeft,
+    setHeaderLeft,
+    headerCenter,
+    setHeaderCenter,
+    headerRight,
+    setHeaderRight,
+    footerLeft,
+    setFooterLeft,
+    footerCenter,
+    setFooterCenter,
+    footerRight,
+    setFooterRight,
+    marginalFontSize,
+    setMarginalFontSize,
     pageAnimation,
     setPageAnimation,
   } = useUiStore()
+
+  // Per-book layer (F1): when inside the reader, the first-batch settings
+  // display the merged effective values and writes route to the per-book diff
+  // (or the global store, depending on the "仅本�? switch). Outside the
+  // reader (no context) everything falls back to the global store.
+  const viewSettings = useViewSettings()
+  const bindSetting = (key: PerBookSettingKey, storeValue: number, storeSetter: (v: number) => void) => ({
+    value: viewSettings ? viewSettings.effective[key] : storeValue,
+    onChange: (v: number) => (viewSettings ? viewSettings.updateSetting(key, v) : storeSetter(v)),
+  })
+  const fontSizeBinding = bindSetting('fontSize', fontSize, setFontSize)
+  const lineHeightBinding = bindSetting('lineHeight', lineHeight, setLineHeight)
+  const pageWidthBinding = bindSetting('pageWidth', pageWidth, setPageWidth)
+  const horizontalPaddingBinding = bindSetting('horizontalPadding', horizontalPadding, setHorizontalPadding)
+  const verticalPaddingBinding = bindSetting('verticalPadding', verticalPadding, setVerticalPadding)
+  const pageColumnsBinding = bindSetting('pageColumns', pageColumns, setPageColumns)
+  const columnGapBinding = bindSetting('columnGap', columnGap, setColumnGap)
 
   const currentTheme = resolveReadingTheme(readingThemeId, customThemes)
   const [themeDraft, setThemeDraft] = useState<ThemeDraft | null>(null)
@@ -302,6 +381,11 @@ export function SettingsPanel() {
               <circle cx="12" cy="12" r="3" />
             </svg>
           </SectionIcon>
+          <SectionIcon active={section === 'behavior'} onClick={() => onSetSection('behavior')} label={_('reader.sectionBehavior')}>
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+          </SectionIcon>
           <SectionIcon active={section === 'theme'} onClick={() => onSetSection('theme')} label={_('reader.sectionTheme')}>
             <svg className="h-4 w-4" viewBox="-1 -1 26 26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11.98 0C12.48 0 12.98 0 13.48 0C13.63 0.07 13.81 0.04 13.97 0.06C14.3 0.1 14.63 0.14 14.96 0.2C15.92 0.36 16.86 0.66 17.75 1.04C21 2.44 23.54 5.47 23.22 9.17C23.13 10.15 22.88 11.13 22.25 11.9C21.4 12.94 20.09 13.27 18.87 13.63C17.73 13.96 16.57 14.3 16 15.44C15.86 15.71 15.79 15.99 15.72 16.27C15.32 17.92 17 19.22 17.71 20.5C18.3 21.58 17.99 22.69 16.95 23.33C16.44 23.64 15.86 23.78 15.28 23.89C15.05 23.94 14.72 23.89 14.5 24C13.98 24 13.46 24 12.94 24C12.75 23.91 12.2 23.92 11.97 23.9C11.35 23.83 10.74 23.71 10.14 23.57C8.16 23.1 6.23 22.08 4.71 20.71C3.4 19.53 2.33 18.08 1.65 16.46C-0.39 11.58 1.14 6.01 5.17 2.68C6.49 1.59 8.06 0.83 9.7 0.39C10.17 0.26 10.66 0.16 11.15 0.1C11.37 0.07 11.79 0.09 11.98 0Z" />
@@ -337,7 +421,18 @@ export function SettingsPanel() {
             </div>
           </div>
 
-          <SliderRow label={_('reader.fontSize')} value={fontSize} min={12} max={64} suffix="px" onChange={setFontSize} />
+          <SliderRow label={_('reader.fontSize')} value={fontSizeBinding.value} min={12} max={64} suffix="px" onChange={fontSizeBinding.onChange} />
+          <div className={cn(!showHeader && !showFooter && 'pointer-events-none opacity-40')}>
+            <SliderRow
+              label={_('reader.marginalFontSize')}
+              value={marginalFontSize}
+              min={0}
+              max={24}
+              step={1}
+              formatValue={(v) => (v === 0 ? _('reader.marginalFontSizeAuto') : `${v}px`)}
+              onChange={setMarginalFontSize}
+            />
+          </div>
           <SliderRow label={_('reader.fontWeight')} value={fontWeight} min={100} max={900} step={100} onChange={setFontWeight} />
 
           <ToggleRow
@@ -357,12 +452,12 @@ export function SettingsPanel() {
 
       {section === 'layout' && (
         <div>
-          <SliderRow label={_('reader.pageWidth')} value={pageWidth} min={readingMode === 'page' ? 0 : 400} max={1800} step={50} suffix="px" onChange={setPageWidth} />
-          <SliderRow label={_('reader.horizontalPadding')} value={horizontalPadding} min={0} max={120} step={4} suffix="px" onChange={setHorizontalPadding} />
-          <SliderRow label={_('reader.verticalPadding')} value={verticalPadding} min={0} max={120} step={4} suffix="px" onChange={setVerticalPadding} />
+          <SliderRow label={_('reader.pageWidth')} value={pageWidthBinding.value} min={readingMode === 'page' ? 0 : 400} max={1800} step={50} suffix="px" onChange={pageWidthBinding.onChange} />
+          <SliderRow label={_('reader.horizontalPadding')} value={horizontalPaddingBinding.value} min={0} max={120} step={4} suffix="px" onChange={horizontalPaddingBinding.onChange} />
+          <SliderRow label={_('reader.verticalPadding')} value={verticalPaddingBinding.value} min={0} max={120} step={4} suffix="px" onChange={verticalPaddingBinding.onChange} />
 
           <SliderRow label={_('reader.paragraphSpacing')} value={paragraphSpacing} min={0} max={3} step={0.1} onChange={setParagraphSpacing} />
-          <SliderRow label={_('reader.lineHeight')} value={lineHeight} min={1.2} max={2.5} step={0.1} onChange={setLineHeight} />
+          <SliderRow label={_('reader.lineHeight')} value={lineHeightBinding.value} min={1.2} max={2.5} step={0.1} onChange={lineHeightBinding.onChange} />
           <SliderRow label={_('reader.letterSpacing')} value={letterSpacing} min={-1} max={3} step={0.5} suffix="px" onChange={setLetterSpacing} />
           <SliderRow label={_('reader.indent')} value={indent} min={0} max={4} step={0.5} suffix="em" onChange={setIndent} />
 
@@ -399,18 +494,18 @@ export function SettingsPanel() {
                     { value: 2, label: '2' },
                     { value: 3, label: '3' },
                   ]}
-                  value={pageColumns}
-                  onChange={setPageColumns}
+                  value={pageColumnsBinding.value}
+                  onChange={pageColumnsBinding.onChange}
                 />
               </div>
               <SliderRow
                 label={_('reader.columnGap')}
-                value={columnGap}
+                value={columnGapBinding.value}
                 min={0}
                 max={15}
                 step={1}
                 suffix="%"
-                onChange={setColumnGap}
+                onChange={columnGapBinding.onChange}
               />
               <ToggleRow
                 label={_('reader.pageAnimation')}
@@ -445,13 +540,60 @@ export function SettingsPanel() {
               onChange={(v) => setChineseConversion(v === chineseConversion ? 'off' : v)}
             />
           </div>
+          <div className="mb-3 border-t border-stone-200/60 pt-3 dark:border-stone-800/60">
+            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.infoBar')}</label>
+            <ToggleRow label={_('reader.showHeader')} hint={_('reader.showHeaderHint')} checked={showHeader} onChange={setShowHeader} />
+            {showHeader && (
+              <div className="mb-4 flex items-center gap-2">
+                <span className="w-8 shrink-0 text-xs text-[var(--bd-read-sub)]">{_('reader.header')}</span>
+                <FieldSelect value={headerLeft} onChange={setHeaderLeft} />
+                <FieldSelect value={headerCenter} onChange={setHeaderCenter} />
+                <FieldSelect value={headerRight} onChange={setHeaderRight} />
+              </div>
+            )}
+            <ToggleRow label={_('reader.showFooter')} hint={_('reader.showFooterHint')} checked={showFooter} onChange={setShowFooter} />
+            {showFooter && (
+              <div className="mb-4 flex items-center gap-2">
+                <span className="w-8 shrink-0 text-xs text-[var(--bd-read-sub)]">{_('reader.footer')}</span>
+                <FieldSelect value={footerLeft} onChange={setFooterLeft} />
+                <FieldSelect value={footerCenter} onChange={setFooterCenter} />
+                <FieldSelect value={footerRight} onChange={setFooterRight} />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
-          <ToggleRow label={_('reader.showWordCount')} hint={_('reader.showWordCountHint')} checked={showWordCount} onChange={setShowWordCount} />
-          {readingMode === 'page' && (
-            <>
-              <ToggleRow label={_('reader.showHeader')} hint={_('reader.showHeaderHint')} checked={showHeader} onChange={setShowHeader} />
-              <ToggleRow label={_('reader.showFooter')} hint={_('reader.showFooterHint')} checked={showFooter} onChange={setShowFooter} />
-            </>
+      {section === 'behavior' && (
+        <div>
+          <ToggleRow
+            label={_('reader.autoMarkSelection')}
+            hint={_('reader.autoMarkSelectionHint')}
+            checked={autoMarkSelection}
+            onChange={setAutoMarkSelection}
+          />
+          <div className="mb-5">
+            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.clickArea')}</label>
+            <ButtonGroup
+              options={[
+                { value: 'standard', label: _('reader.clickAreaStandard'), icon: <ClickAreaGlyph mode="standard" /> },
+                { value: 'fullscreen', label: _('reader.clickAreaFullscreen'), icon: <ClickAreaGlyph mode="fullscreen" /> },
+                { value: 'swap', label: _('reader.clickAreaSwap'), icon: <ClickAreaGlyph mode="swap" /> },
+              ]}
+              value={clickAreaMode}
+              onChange={(v) => setClickAreaMode(v === clickAreaMode ? 'none' : v)}
+            />
+            {clickAreaMode === 'none' && (
+              <p className="mt-1 text-xs text-[var(--bd-read-sub)]">{_('reader.clickAreaDisabledHint')}</p>
+            )}
+          </div>
+          {viewSettings && (
+            <ToggleRow
+              label={_('reader.perBookOnly')}
+              hint={_('reader.perBookOnlyHint')}
+              checked={viewSettings.perBookActive}
+              onChange={viewSettings.setPerBookActive}
+            />
           )}
         </div>
       )}

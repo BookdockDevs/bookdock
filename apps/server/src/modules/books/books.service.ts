@@ -11,13 +11,17 @@ import { createId } from '../../lib/id'
 import { convertTxtToEpub } from '../../lib/txt-to-epub'
 import { partialMD5 } from '../../lib/hash'
 import { countWords } from '../../lib/word-count'
-import type { BookFormat, BookMetadata, Chapter } from '@bookdock/shared'
+import type { BookFormat, BookMetadata, Chapter, ViewSettings } from '@bookdock/shared'
 
 export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean) {
   const db = getDb()
   const conditions = [eq(books.userId, userId), trash ? isNotNull(books.deletedAt) : isNull(books.deletedAt)]
   if (search) {
-    conditions.push(sql`${books.title} LIKE ${'%' + search + '%'}`)
+    // Escape LIKE wildcards so user input is matched literally. The escape
+    // char is '!' (backslash would be mangled by drizzle's sql template) and
+    // must itself be escaped first.
+    const escaped = search.replace(/[!%_]/g, (m) => '!' + m)
+    conditions.push(sql`${books.title} LIKE ${'%' + escaped + '%'} ESCAPE '!'`)
   }
   if (format) {
     conditions.push(eq(books.format, format))
@@ -116,7 +120,7 @@ export async function uploadBook(userId: string, file: File) {
     and(eq(books.userId, userId), eq(books.contentHash, contentHash), isNull(books.deletedAt)),
   ).get()
   if (existing) {
-    return stripMetaChapters(db.select().from(books).where(eq(books.id, existing.id)).get()!)
+    return { book: stripMetaChapters(db.select().from(books).where(eq(books.id, existing.id)).get()!), duplicated: true }
   }
 
   const title = parsed.meta.title || fileName.replace(/\.[^.]+$/, '')
@@ -130,7 +134,11 @@ export async function uploadBook(userId: string, file: File) {
   }
 
   const meta: Record<string, unknown> = {}
-  if (parsed.meta.bookmeta) meta.bookmeta = parsed.meta.bookmeta
+  // Always persist bookmeta (empty object for formats that don't produce one,
+  // e.g. txt): leaving it undefined makes every getBook/getActiveBook call
+  // re-parse the whole stored file on first open (backfillBookmeta), and the
+  // reader fires 3-4 such requests concurrently -> first open hangs.
+  meta.bookmeta = parsed.meta.bookmeta ?? {}
   let fileKey: string
   let size = buffer.length
 
@@ -203,7 +211,7 @@ export async function uploadBook(userId: string, file: File) {
     updatedAt: now,
   }
   db.insert(books).values(book).run()
-  return stripMetaChapters(book)
+  return { book: stripMetaChapters(book), duplicated: false }
 }
 
 export async function getBook(userId: string, bookId: string) {
@@ -216,18 +224,35 @@ export async function getBook(userId: string, bookId: string) {
   return book
 }
 
+// One full-file re-parse per book at a time: the reader fires /books/:id,
+// /file and /chapters concurrently on first open, and each getBook call would
+// otherwise start its own parse of the whole stored file, blocking the event
+// loop. The first resolver writes bookmeta; waiters re-read the row.
+const bookmetaBackfills = new Map<string, Promise<unknown>>()
+
 async function backfillBookmeta(book: typeof books.$inferSelect) {
-  try {
-    const storage = getStorage()
-    const parser = getParser(book.filePath, '')
-    if (!parser) return null
-    const parsed = await parser.parse(await storage.get(book.filePath))
-    const meta = { ...(book.meta as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
-    getDb().update(books).set({ meta }).where(eq(books.id, book.id)).run()
-    return getDb().select().from(books).where(eq(books.id, book.id)).get()!
-  } catch {
-    return null
+  const inFlight = bookmetaBackfills.get(book.id)
+  if (inFlight) {
+    await inFlight
+    return getDb().select().from(books).where(eq(books.id, book.id)).get()
   }
+  const promise = (async () => {
+    try {
+      const storage = getStorage()
+      const parser = getParser(book.filePath, '')
+      if (!parser) return null
+      const parsed = await parser.parse(await storage.get(book.filePath))
+      const meta = { ...(book.meta as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
+      getDb().update(books).set({ meta }).where(eq(books.id, book.id)).run()
+      return getDb().select().from(books).where(eq(books.id, book.id)).get()
+    } catch {
+      return null
+    } finally {
+      bookmetaBackfills.delete(book.id)
+    }
+  })()
+  bookmetaBackfills.set(book.id, promise)
+  return promise
 }
 
 export async function getActiveBook(userId: string, bookId: string) {
@@ -375,7 +400,7 @@ export async function getBookEpubBuffer(userId: string, bookId: string): Promise
   throw new AppError('UNSUPPORTED_FORMAT', 'EPUB export only supports txt and epub')
 }
 
-export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata }) {
+export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata; viewSettings?: ViewSettings | null }) {
   const db = getDb()
   const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
@@ -387,6 +412,17 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
   if (data.author !== undefined) set.author = data.author
   if (data.bookmeta !== undefined) {
     set.meta = { ...(book.meta as Record<string, unknown>), bookmeta: data.bookmeta }
+  }
+  if (data.viewSettings !== undefined) {
+    // Diff semantics: shallow-merge into the existing per-book overrides;
+    // null removes the whole override so the book falls back to global.
+    const meta = { ...(book.meta as Record<string, unknown>) }
+    if (data.viewSettings === null) {
+      delete meta.viewSettings
+    } else {
+      meta.viewSettings = { ...((meta.viewSettings as ViewSettings | undefined) ?? {}), ...data.viewSettings }
+    }
+    set.meta = meta
   }
   db.update(books).set(set).where(eq(books.id, bookId)).run()
   return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)

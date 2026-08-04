@@ -88,6 +88,15 @@ export default function Library() {
     lastSelectIndexRef.current = null
   }
 
+  function deselect(id: string) {
+    setSelection((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+  }
+
   function toggleSelectionMode() {
     setSelectionMode((v) => !v)
     clearSelection()
@@ -218,7 +227,13 @@ export default function Library() {
           ) : trash ? (
             <TrashGrid
               books={allBooks}
-              onRestore={(b) => void restoreBook.mutateAsync(b.id).catch(() => undefined)}
+              selection={selection}
+              selectionActive={selectionActive}
+              onToggleSelect={(id, index, shiftKey) => toggleSelect(id, index, shiftKey)}
+              onRestore={(b) => {
+                deselect(b.id)
+                void restoreBook.mutateAsync(b.id).catch(() => undefined)
+              }}
               onPermanentDelete={setPermanentDeleteTarget}
             />
           ) : view === 'grid' ? (
@@ -303,7 +318,7 @@ export default function Library() {
       </main>
 
       {selection.size > 0 && (
-        <SelectionBar selectedIds={Array.from(selection)} onClear={clearSelection} />
+        <SelectionBar selectedIds={Array.from(selection)} onClear={clearSelection} trash={trash} />
       )}
 
       <UploadSheet open={uploadOpen} onClose={() => setUploadOpen(false)} />
@@ -344,6 +359,7 @@ export default function Library() {
           const target = permanentDeleteTarget
           if (!target) return
           setPermanentDeleteTarget(null)
+          deselect(target.id)
           void permanentDeleteBook.mutateAsync(target.id).catch(() => undefined)
         }}
       />
@@ -387,17 +403,26 @@ function EmptyTrash() {
   )
 }
 
-function TrashGrid({ books, onRestore, onPermanentDelete }: {
+function TrashGrid({ books, selection, selectionActive, onToggleSelect, onRestore, onPermanentDelete }: {
   books: BookListItem[]
+  selection: Set<string>
+  selectionActive: boolean
+  onToggleSelect: (id: string, index: number, shiftKey?: boolean) => void
   onRestore: (b: BookListItem) => void
   onPermanentDelete: (b: BookListItem) => void
 }) {
   return (
     <div className="grid grid-cols-3 gap-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-      {books.map((book) => (
-        <div key={book.id}>
+      {books.map((book, index) => (
+        <div
+          key={book.id}
+          className={`rounded-xl ${selectionActive && selection.has(book.id) ? 'ring-2 ring-stone-900 ring-offset-2 ring-offset-stone-50 dark:ring-stone-100 dark:ring-offset-stone-950' : ''}`}
+        >
           <BookCard
             book={book}
+            selected={selection.has(book.id)}
+            selectionActive={selectionActive}
+            onToggleSelect={(id, shiftKey) => onToggleSelect(id, index, shiftKey)}
             onRestore={onRestore}
             onPermanentDelete={onPermanentDelete}
           />

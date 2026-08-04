@@ -112,28 +112,38 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           </div>
         )}
         {trashCard && (
-          <div className="absolute inset-x-0 bottom-0 z-10 flex gap-1.5 rounded-b-xl bg-gradient-to-t from-black/70 via-black/40 to-transparent p-2 pt-6 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+          <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2.5 rounded-b-xl bg-gradient-to-t from-black/70 via-black/40 to-transparent p-2.5 pt-8 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
             <button
               type="button"
+              aria-label={_('library.restore')}
+              title={_('library.restore')}
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 onRestore?.(book)
               }}
-              className="flex h-7 flex-1 items-center justify-center rounded-md bg-white/90 text-xs font-medium text-stone-800 backdrop-blur-sm transition-colors hover:bg-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-stone-700 backdrop-blur-sm transition-colors hover:bg-white hover:text-emerald-600"
             >
-              {_('library.restore')}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+              </svg>
             </button>
             <button
               type="button"
+              aria-label={_('library.permanentDelete')}
+              title={_('library.permanentDelete')}
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 onPermanentDelete?.(book)
               }}
-              className="flex h-7 flex-1 items-center justify-center rounded-md bg-red-500/90 text-xs font-medium text-white backdrop-blur-sm transition-colors hover:bg-red-500"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-stone-700 backdrop-blur-sm transition-colors hover:bg-red-500 hover:text-white"
             >
-              {_('library.permanentDelete')}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+                <path d="M10 11v6M14 11v6" />
+              </svg>
             </button>
           </div>
         )}

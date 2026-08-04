@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { FontFamily, ReadingMode, ChineseConversion, ContinuousScroll } from '../features/reader/types'
+import type { FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField } from '../features/reader/types'
 import type { CustomReadingTheme } from '../lib/reading-theme'
 
 export type UiTheme = 'system' | 'light' | 'dark'
@@ -87,9 +87,31 @@ interface UiState {
   showHeader: boolean
   showFooter: boolean
   chineseConversion: ChineseConversion
-  showWordCount: boolean
   continuousScroll: ContinuousScroll
   pageAnimation: boolean
+  autoMarkSelection: boolean
+  setAutoMarkSelection: (v: boolean) => void
+
+  // Click-to-turn zones (page mode): single mode enum — 'none' = disabled.
+  clickAreaMode: ClickAreaMode
+  setClickAreaMode: (m: ClickAreaMode) => void
+
+  // Header/footer info bar fields (F4), one field per L/C/R position
+  headerLeft: MarginalField
+  headerCenter: MarginalField
+  headerRight: MarginalField
+  footerLeft: MarginalField
+  footerCenter: MarginalField
+  footerRight: MarginalField
+  /** 0 = auto (follow .75em of the reading font) */
+  marginalFontSize: number
+  setHeaderLeft: (v: MarginalField) => void
+  setHeaderCenter: (v: MarginalField) => void
+  setHeaderRight: (v: MarginalField) => void
+  setFooterLeft: (v: MarginalField) => void
+  setFooterCenter: (v: MarginalField) => void
+  setFooterRight: (v: MarginalField) => void
+  setMarginalFontSize: (v: number) => void
 
   // Library UI prefs
   coverMode: boolean
@@ -130,7 +152,6 @@ interface UiState {
   setShowHeader: (v: boolean) => void
   setShowFooter: (v: boolean) => void
   setChineseConversion: (v: ChineseConversion) => void
-  setShowWordCount: (v: boolean) => void
   setContinuousScroll: (v: ContinuousScroll) => void
   setPageAnimation: (v: boolean) => void
 }
@@ -183,6 +204,18 @@ function setStorage(key: string, value: string) {
 
 const initialReadingMode = getInitial<ReadingMode>('bd-reading-mode', 'scroll')
 
+// Click-area mode migrated from the pre-rework three booleans: the old keys
+// win while present, otherwise the mode defaults to the standard three zones.
+function getInitialClickAreaMode(): ClickAreaMode {
+  if (typeof window === 'undefined') return 'standard'
+  if (localStorage.getItem('bd-click-disable') === 'true') return 'none'
+  if (localStorage.getItem('bd-click-fullscreen-area') === 'true') return 'fullscreen'
+  if (localStorage.getItem('bd-click-swap-area') === 'true') return 'swap'
+  const stored = localStorage.getItem('bd-click-area-mode')
+  if (stored === 'standard' || stored === 'fullscreen' || stored === 'swap' || stored === 'none') return stored
+  return 'standard'
+}
+
 const initialScrollPageWidth = getInitialNumber('bd-page-width', 800, 400, 1800)
 const initialScrollHorizontalPadding = getInitialNumber('bd-horizontal-padding', 0, 0, 120)
 const initialScrollVerticalPadding = getInitialNumber('bd-vertical-padding', 0, 0, 120)
@@ -233,9 +266,17 @@ export const useUiStore = create<UiState>((set, get) => ({
   showHeader: getInitialBoolean('bd-show-header', true),
   showFooter: getInitialBoolean('bd-show-footer', true),
   chineseConversion: getInitial<ChineseConversion>('bd-chinese-conversion', 'off'),
-  showWordCount: getInitialBoolean('bd-show-word-count', false),
   continuousScroll: getInitial<ContinuousScroll>('bd-continuous-scroll', 'off'),
   pageAnimation: getInitialBoolean('bd-page-animation', true),
+  autoMarkSelection: getInitialBoolean('bd-auto-mark-selection', false),
+  clickAreaMode: getInitialClickAreaMode(),
+  headerLeft: getInitial<MarginalField>('bd-header-left', 'none'),
+  headerCenter: getInitial<MarginalField>('bd-header-center', 'bookTitle'),
+  headerRight: getInitial<MarginalField>('bd-header-right', 'none'),
+  footerLeft: getInitial<MarginalField>('bd-footer-left', 'none'),
+  footerCenter: getInitial<MarginalField>('bd-footer-center', 'chapter'),
+  footerRight: getInitial<MarginalField>('bd-footer-right', 'none'),
+  marginalFontSize: getInitialNumber('bd-marginal-font-size', 0, 0, 24),
 
   coverMode: getInitialBoolean('bd-cover-mode', false),
   coverFit: getInitialBoolean('bd-cover-fit', false),
@@ -267,6 +308,42 @@ export const useUiStore = create<UiState>((set, get) => ({
   setShowRecentlyRead: (showRecentlyRead) => {
     setStorage('bd-show-recently-read', String(showRecentlyRead))
     set({ showRecentlyRead })
+  },
+  setAutoMarkSelection: (autoMarkSelection) => {
+    setStorage('bd-auto-mark-selection', String(autoMarkSelection))
+    set({ autoMarkSelection })
+  },
+  setClickAreaMode: (clickAreaMode) => {
+    setStorage('bd-click-area-mode', clickAreaMode)
+    set({ clickAreaMode })
+  },
+  setHeaderLeft: (headerLeft) => {
+    setStorage('bd-header-left', headerLeft)
+    set({ headerLeft })
+  },
+  setHeaderCenter: (headerCenter) => {
+    setStorage('bd-header-center', headerCenter)
+    set({ headerCenter })
+  },
+  setHeaderRight: (headerRight) => {
+    setStorage('bd-header-right', headerRight)
+    set({ headerRight })
+  },
+  setFooterLeft: (footerLeft) => {
+    setStorage('bd-footer-left', footerLeft)
+    set({ footerLeft })
+  },
+  setFooterCenter: (footerCenter) => {
+    setStorage('bd-footer-center', footerCenter)
+    set({ footerCenter })
+  },
+  setFooterRight: (footerRight) => {
+    setStorage('bd-footer-right', footerRight)
+    set({ footerRight })
+  },
+  setMarginalFontSize: (marginalFontSize) => {
+    setStorage('bd-marginal-font-size', String(marginalFontSize))
+    set({ marginalFontSize })
   },
 
   setUiTheme: (uiTheme) => {
@@ -412,10 +489,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   setChineseConversion: (chineseConversion) => {
     setStorage('bd-chinese-conversion', chineseConversion)
     set({ chineseConversion })
-  },
-  setShowWordCount: (showWordCount) => {
-    setStorage('bd-show-word-count', String(showWordCount))
-    set({ showWordCount })
   },
   setContinuousScroll: (continuousScroll) => {
     setStorage('bd-continuous-scroll', continuousScroll)

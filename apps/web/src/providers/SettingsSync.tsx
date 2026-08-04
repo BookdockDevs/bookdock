@@ -43,9 +43,17 @@ const SETTINGS_KEYS = [
   'showHeader',
   'showFooter',
   'chineseConversion',
-  'showWordCount',
   'continuousScroll',
   'pageAnimation',
+  'autoMarkSelection',
+  'clickAreaMode',
+  'headerLeft',
+  'headerCenter',
+  'headerRight',
+  'footerLeft',
+  'footerCenter',
+  'footerRight',
+  'marginalFontSize',
 ]
 
 function pickSettings(state: ReturnType<typeof useUiStore.getState>): SettingsRes {

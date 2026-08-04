@@ -4,7 +4,50 @@ import {
   FULL_DOWNLOAD_MAX_BYTES,
   memoizeLoadText,
   selectZipLoadStrategy,
+  buildAnnotationBuckets,
+  cfiSpinePrefix,
+  sectionSpinePrefix,
 } from '../features/reader/renderers/FoliateReader'
+import type { ReaderAnnotation } from '../features/reader/types'
+
+function ann(cfiRange: string, type: ReaderAnnotation['type'] = 'highlight'): ReaderAnnotation {
+  return { cfiRange, type, color: 'yellow', style: 'underline', note: null }
+}
+
+describe('cfiSpinePrefix / sectionSpinePrefix', () => {
+  it('extracts the spine part of a standard EPUB CFI', () => {
+    expect(cfiSpinePrefix('epubcfi(/6/24!/4/2:58)')).toBe('/6/24')
+  })
+
+  it('returns null for non-EPUB cfis', () => {
+    expect(cfiSpinePrefix('txt:/42/100')).toBeNull()
+    expect(cfiSpinePrefix('chapter:3:0.5')).toBeNull()
+  })
+
+  it('maps a section index to its expected spine prefix', () => {
+    expect(sectionSpinePrefix(0)).toBe('/6/2')
+    expect(sectionSpinePrefix(11)).toBe('/6/24')
+  })
+})
+
+describe('buildAnnotationBuckets', () => {
+  it('groups annotations by spine prefix, keeping the cfi|type value', () => {
+    const { buckets, uncategorized } = buildAnnotationBuckets([
+      ann('epubcfi(/6/2!/4/2:0)'),
+      ann('epubcfi(/6/2!/4/5:1)', 'note'),
+      ann('epubcfi(/6/4!/4/1:3)'),
+    ])
+    expect(buckets.get('/6/2')).toEqual(new Set(['epubcfi(/6/2!/4/2:0)|highlight', 'epubcfi(/6/2!/4/5:1)|note']))
+    expect(buckets.get('/6/4')).toEqual(new Set(['epubcfi(/6/4!/4/1:3)|highlight']))
+    expect(uncategorized.size).toBe(0)
+  })
+
+  it('sends non-EPUB cfis to the uncategorized fallback set', () => {
+    const { buckets, uncategorized } = buildAnnotationBuckets([ann('txt:/12/30')])
+    expect(buckets.size).toBe(0)
+    expect(uncategorized).toEqual(new Set(['txt:/12/30|highlight']))
+  })
+})
 
 describe('selectZipLoadStrategy', () => {
   it('downloads whole books at or below the threshold', () => {

@@ -14,6 +14,8 @@ import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import { registerParser } from '../../formats/registry'
+import { TxtParser } from '../../formats/txt'
 import booksRoutes from './books.routes'
 import {
   getBook,
@@ -23,6 +25,8 @@ import {
   restoreBook,
   deleteBook,
   purgeExpiredTrash,
+  listBooks,
+  uploadBook,
 } from './books.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -101,6 +105,82 @@ function seedBook(
   return book
 }
 
+describe('uploadBook dedup flag', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeAll(() => {
+    // parsers are registered in app.ts at runtime; register here for service-level tests
+    registerParser(new TxtParser())
+  })
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  it('marks re-uploads as duplicated and returns the existing book', async () => {
+    const file = new File(['hello world 123'], 'book.txt', { type: 'text/plain' })
+    const first = await uploadBook(ownerId, file)
+    expect(first.duplicated).toBe(false)
+
+    const second = await uploadBook(ownerId, file)
+    expect(second.duplicated).toBe(true)
+    expect(second.book.id).toBe(first.book.id)
+  })
+
+  it('treats identical content from different users as separate rows but shared blob', async () => {
+    const otherId = seedUser(db, 'other')
+    const file = new File(['shared content abc'], 'book.txt', { type: 'text/plain' })
+    const a = await uploadBook(ownerId, file)
+    const b = await uploadBook(otherId, file)
+    expect(b.duplicated).toBe(false)
+    expect(b.book.id).not.toBe(a.book.id)
+    expect(b.book.filePath).toBe(a.book.filePath)
+  })
+
+  it('persists bookmeta (empty for txt) so getBook never re-parses on first open', async () => {
+    const file = new File(['chapter one text'], 'book.txt', { type: 'text/plain' })
+    const { book } = await uploadBook(ownerId, file)
+    expect((book.meta as Record<string, unknown>).bookmeta).toEqual({})
+
+    // getBook would trigger a full-file re-parse if bookmeta were undefined;
+    // with it persisted the row comes back as-is.
+    const loaded = await getBook(ownerId, book.id)
+    expect((loaded.meta as Record<string, unknown>).bookmeta).toEqual({})
+  })
+})
+
+describe('listBooks search escaping', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+    seedBook(db, ownerId, { title: 'Progress 100%' })
+    seedBook(db, ownerId, { title: 'Progress 100x' })
+    seedBook(db, ownerId, { title: 'under_score' })
+  })
+
+  it('matches LIKE wildcard characters literally', async () => {
+    const percent = await listBooks(ownerId, 1, 20, '100%')
+    expect(percent.data.map((b) => b.title)).toEqual(['Progress 100%'])
+
+    const underscore = await listBooks(ownerId, 1, 20, 'under_score')
+    expect(underscore.data.map((b) => b.title)).toEqual(['under_score'])
+  })
+
+  it('does not treat a lone wildcard as match-all', async () => {
+    const lonePercent = await listBooks(ownerId, 1, 20, '%')
+    expect(lonePercent.data.map((b) => b.title)).toEqual(['Progress 100%'])
+  })
+})
+
 describe('books ownership', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
@@ -146,6 +226,51 @@ describe('books ownership', () => {
     const stillThere = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()
     expect(stillThere).toBeDefined()
     expect(stillThere!.deletedAt).toBeNull()
+  })
+})
+
+describe('updateBook viewSettings (per-book reading settings)', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let book: ReturnType<typeof seedBook>
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+    book = seedBook(db, ownerId)
+  })
+
+  function metaOf() {
+    const row = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()!
+    return row.meta as Record<string, unknown>
+  }
+
+  it('stores the diff under meta.viewSettings, shallow-merging across calls', async () => {
+    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 24 } })
+    expect(metaOf().viewSettings).toEqual({ fontSize: 24 })
+
+    await updateBook(ownerId, book.id, { viewSettings: { lineHeight: 2.2 } })
+    expect(metaOf().viewSettings).toEqual({ fontSize: 24, lineHeight: 2.2 })
+
+    // Same key overwrites, others survive
+    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 28, pageWidth: 900, scrollPageWidth: 900 } })
+    expect(metaOf().viewSettings).toEqual({ fontSize: 28, lineHeight: 2.2, pageWidth: 900, scrollPageWidth: 900 })
+  })
+
+  it('keeps unrelated meta keys when writing viewSettings', async () => {
+    await updateBook(ownerId, book.id, { bookmeta: { publisher: 'ACME' } })
+    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 20 } })
+    const meta = metaOf()
+    expect(meta.viewSettings).toEqual({ fontSize: 20 })
+    expect(meta.bookmeta).toEqual({ publisher: 'ACME' })
+  })
+
+  it('clears the whole override with null so the book falls back to global', async () => {
+    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 24, lineHeight: 2.2 } })
+    await updateBook(ownerId, book.id, { viewSettings: null })
+    expect(metaOf().viewSettings).toBeUndefined()
   })
 })
 

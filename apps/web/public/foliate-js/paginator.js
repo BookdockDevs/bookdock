@@ -432,8 +432,8 @@ export class Paginator extends HTMLElement {
   #views = new Map()
   #filling = false
   #lastLayout = null
-  #headerText = ''
-  #footerText = ''
+  #headerText = ['']
+  #footerText = ['']
   #vertical = false
   #rtl = false
   #margin = 0
@@ -548,11 +548,13 @@ export class Paginator extends HTMLElement {
         }
         #header, #footer {
             display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
         }
         :is(#header, #footer) > * {
             display: flex;
             align-items: center;
             min-width: 0;
+            padding: 0 10px;
         }
         /* marginal text hugs the content side of its band: header bottom,
            footer top — keeping both equidistant from the screen edges */
@@ -570,12 +572,17 @@ export class Paginator extends HTMLElement {
             white-space: nowrap;
             text-overflow: ellipsis;
             text-align: center;
-            font-size: .75em;
+            font-size: var(--_marginal-font-size, .75em);
             opacity: .6;
         }
-        :host([flow="scrolled"]) :is(#header, #footer) {
-            display: none;
+        :is(#header, #footer) > :first-child > * {
+            text-align: left;
         }
+        :is(#header, #footer) > :last-child > * {
+            text-align: right;
+        }
+        /* scrolled flow keeps the bands (fixed top/bottom rows) — visibility
+           is controlled solely by the show-header/show-footer attributes */
         :host(:not([show-header])) #header {
             display: none;
         }
@@ -584,12 +591,11 @@ export class Paginator extends HTMLElement {
         }
         /* Bands keep a floor tall enough for the marginal text (.75em + 6px
            padding) even when the user margin is 0, otherwise #top's
-           overflow:hidden clips the header/footer out of the window. Only in
-           paginated flow with the band actually shown. */
-        :host([show-header]:not([flow="scrolled"])) #top {
+           overflow:hidden clips the header/footer out of the window. */
+        :host([show-header]) #top {
             --_header-band: 28px;
         }
-        :host([show-footer]:not([flow="scrolled"])) #top {
+        :host([show-footer]) #top {
             --_footer-band: 28px;
         }
         </style>
@@ -945,10 +951,16 @@ export class Paginator extends HTMLElement {
       this.#top.style.padding = '0'
       const columnWidth = maxInlineSize
 
-      this.heads = null
-      this.feet = null
-      this.#header.replaceChildren()
-      this.#footer.replaceChildren()
+      // Info bar bands are fixed at the viewport top/bottom in scrolled flow
+      // too (grid rows 1/3, content scrolls in row 2) — same marginal cells
+      // as paginated flow, only the flow/layout params differ.
+      const heads = makeMarginals(3, 'head')
+      const feet = makeMarginals(3, 'foot')
+      this.heads = heads.map(el => el.children[0])
+      this.feet = feet.map(el => el.children[0])
+      this.#header.replaceChildren(...heads)
+      this.#footer.replaceChildren(...feet)
+      this.#setMarginalTexts()
 
       this.#lastLayout = { flow, margin, gap, columnWidth, topMargin, bottomMargin }
       return this.#lastLayout
@@ -972,27 +984,33 @@ export class Paginator extends HTMLElement {
     const columnWidth = (size / divisor) - gapEff
     this.setAttribute('dir', rtl ? 'rtl' : 'ltr')
 
-    // One shared marginal across the whole page, centered — not one per column.
-    const heads = makeMarginals(1, 'head')
-    const feet = makeMarginals(1, 'foot')
+    // One shared marginal per band — three cells (left/center/right), each
+    // filled by setMarginals from the host app (F4 configurable info bar).
+    const heads = makeMarginals(3, 'head')
+    const feet = makeMarginals(3, 'foot')
     this.heads = heads.map(el => el.children[0])
     this.feet = feet.map(el => el.children[0])
     this.#header.replaceChildren(...heads)
     this.#footer.replaceChildren(...feet)
     // fresh marginal elements lose their text on every relayout
-    for (const el of this.heads) el.textContent = this.#headerText
-    for (const el of this.feet) el.textContent = this.#footerText
+    this.#setMarginalTexts()
 
     this.#lastLayout = { height, width, margin, gap: gapEff, columnWidth, topMargin, bottomMargin }
     return this.#lastLayout
   }
-  // Header shows the book title, footer the current chapter; only visible in
-  // paginated flow (CSS hides them in scrolled flow).
-  setMarginals({ header, footer }) {
-    if (header !== undefined) this.#headerText = header
-    if (footer !== undefined) this.#footerText = footer
-    if (this.heads) for (const el of this.heads) el.textContent = this.#headerText
-    if (this.feet) for (const el of this.feet) el.textContent = this.#footerText
+  // Header/footer info bar (F4): each band holds three cells (L/C/R); the
+  // host passes text arrays. fontSize 0 = auto (.75em of the reading font).
+  #setMarginalTexts() {
+    if (this.heads) for (const [i, el] of this.heads.entries()) el.textContent = this.#headerText[i] ?? ''
+    if (this.feet) for (const [i, el] of this.feet.entries()) el.textContent = this.#footerText[i] ?? ''
+  }
+  setMarginals({ header, footer, fontSize }) {
+    if (header !== undefined) this.#headerText = Array.isArray(header) ? header : [header]
+    if (footer !== undefined) this.#footerText = Array.isArray(footer) ? footer : [footer]
+    if (fontSize !== undefined) {
+      this.#top.style.setProperty('--_marginal-font-size', fontSize === 0 ? null : `${fontSize}px`)
+    }
+    this.#setMarginalTexts()
   }
   render() {
     if (!this.#view) return

@@ -2,7 +2,7 @@
   "name": "bookdock",
   "private": true,
   "scripts": {
-    "dev": "pnpm --recursive --parallel run dev",
+    "dev": "node scripts/dev.mjs",
     "build": "pnpm --recursive run build",
     "test": "pnpm --recursive --filter @bookdock/server --filter @bookdock/web run test",
     "test:watch": "vitest",

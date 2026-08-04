@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
-import { apiGet, apiPut } from '@/api/client'
+import { apiGet, apiPatch, apiPut } from '@/api/client'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useToastStore } from '@/stores/toast.store'
 import { useUiStore, getEffectiveTheme } from '@/stores/ui.store'
@@ -28,8 +28,12 @@ import { SelectionToolbar } from './components/SelectionToolbar'
 import { ProgressStrip } from './components/ProgressStrip'
 import HistoryCapsule from './components/HistoryCapsule'
 import { getLastHighlightStyle } from './components/annotation-colors'
+import { setAutoMarkSelectionMode } from './renderers/FoliateReader'
+import { ViewSettingsContext } from './view-settings-context'
+import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './lib/view-settings'
+import type { PerBookSettingKey, GlobalViewSettings } from './lib/view-settings'
 import type { NavTab, ReaderAnnotation } from './types'
-import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq } from '@bookdock/shared'
+import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 
 export default function Reader() {
   const _ = useTranslation()
@@ -49,7 +53,6 @@ export default function Reader() {
   const setCurrentChapter = useReaderState((s) => s.setCurrentChapter)
   const setCurrentChapterIndex = useReaderState((s) => s.setCurrentChapterIndex)
   const addToast = useToastStore((s) => s.addToast)
-  const showWordCount = useUiStore((s) => s.showWordCount)
   const readingMode = useUiStore((s) => s.readingMode)
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
@@ -63,6 +66,10 @@ export default function Reader() {
   const readingThemeId = useUiStore((s) => s.readingThemeId)
   const lightReadingThemeId = useUiStore((s) => s.lightReadingThemeId)
   const setReadingThemeId = useUiStore((s) => s.setReadingThemeId)
+  const autoMarkSelection = useUiStore((s) => s.autoMarkSelection)
+  useEffect(() => {
+    setAutoMarkSelectionMode(autoMarkSelection)
+  }, [autoMarkSelection])
   const syncedTheme = useRef(false)
   useEffect(() => {
     if (syncedTheme.current) return
@@ -81,6 +88,120 @@ export default function Reader() {
     queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${id}`),
     enabled: !!id,
   })
+
+  // --- Per-book reading settings (F1 layering) ---------------------------
+  const globalSettings: GlobalViewSettings = {
+    fontSize: useUiStore((s) => s.fontSize),
+    lineHeight: useUiStore((s) => s.lineHeight),
+    pageWidth: useUiStore((s) => s.pageWidth),
+    horizontalPadding: useUiStore((s) => s.horizontalPadding),
+    verticalPadding: useUiStore((s) => s.verticalPadding),
+    pageColumns: useUiStore((s) => s.pageColumns),
+    columnGap: useUiStore((s) => s.columnGap),
+    scrollPageWidth: useUiStore((s) => s.scrollPageWidth),
+    scrollHorizontalPadding: useUiStore((s) => s.scrollHorizontalPadding),
+    scrollVerticalPadding: useUiStore((s) => s.scrollVerticalPadding),
+    pagePageWidth: useUiStore((s) => s.pagePageWidth),
+    pageHorizontalPadding: useUiStore((s) => s.pageHorizontalPadding),
+    pageVerticalPadding: useUiStore((s) => s.pageVerticalPadding),
+    readingMode: useUiStore((s) => s.readingMode),
+  }
+  const setFontSize = useUiStore((s) => s.setFontSize)
+  const setLineHeight = useUiStore((s) => s.setLineHeight)
+  const setPageWidth = useUiStore((s) => s.setPageWidth)
+  const setHorizontalPadding = useUiStore((s) => s.setHorizontalPadding)
+  const setVerticalPadding = useUiStore((s) => s.setVerticalPadding)
+  const setPageColumns = useUiStore((s) => s.setPageColumns)
+  const setColumnGap = useUiStore((s) => s.setColumnGap)
+  const globalSetterForKey = useCallback(
+    (key: PerBookSettingKey, value: number) => {
+      switch (key) {
+        case 'fontSize': setFontSize(value); break
+        case 'lineHeight': setLineHeight(value); break
+        case 'pageWidth': setPageWidth(value); break
+        case 'horizontalPadding': setHorizontalPadding(value); break
+        case 'verticalPadding': setVerticalPadding(value); break
+        case 'pageColumns': setPageColumns(value); break
+        case 'columnGap': setColumnGap(value); break
+      }
+    },
+    [setFontSize, setLineHeight, setPageWidth, setHorizontalPadding, setVerticalPadding, setPageColumns, setColumnGap],
+  )
+
+  // Diff lives in books.meta.viewSettings (server state, fetched by bookQuery).
+  const perBook = (bookQuery.data?.data?.meta?.viewSettings as ViewSettings | undefined) ?? undefined
+  const effectiveSettings = useMemo(() => mergeViewSettings(globalSettings, perBook), [globalSettings, perBook])
+
+  // Optimistic cache update so the panel and renderer follow immediately;
+  // the PATCH itself is debounced and diffs are merged while pending.
+  const saveViewSettingsMutation = useMutation({
+    mutationFn: (viewSettings: ViewSettings | null) =>
+      apiPatch<{ data: BookDetailRes }>(`/books/${id}`, { viewSettings }),
+    onMutate: (viewSettings) => {
+      queryClient.setQueryData(['book', id], (old: { data: BookDetailRes } | undefined) => {
+        if (!old?.data) return old
+        const meta = { ...old.data.meta }
+        if (viewSettings === null) delete meta.viewSettings
+        else meta.viewSettings = { ...((meta.viewSettings as ViewSettings | undefined) ?? {}), ...viewSettings }
+        return { ...old, data: { ...old.data, meta } }
+      })
+    },
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: ['book', id] })
+    },
+  })
+  const mutateViewSettingsRef = useRef(saveViewSettingsMutation.mutate)
+  mutateViewSettingsRef.current = saveViewSettingsMutation.mutate
+  const pendingViewSettingsRef = useRef<ViewSettings | null>(null)
+  const viewSettingsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveViewSettings = useCallback((patch: ViewSettings | null) => {
+    if (patch === null) {
+      pendingViewSettingsRef.current = null
+    } else {
+      pendingViewSettingsRef.current = { ...(pendingViewSettingsRef.current ?? {}), ...patch }
+    }
+    if (viewSettingsTimerRef.current) clearTimeout(viewSettingsTimerRef.current)
+    viewSettingsTimerRef.current = setTimeout(() => {
+      const payload = pendingViewSettingsRef.current
+      pendingViewSettingsRef.current = null
+      mutateViewSettingsRef.current(payload)
+    }, 400)
+  }, [])
+  useEffect(() => () => {
+    if (viewSettingsTimerRef.current) clearTimeout(viewSettingsTimerRef.current)
+  }, [])
+
+  const [perBookActive, setPerBookActiveState] = useState(false)
+  const perBookActiveInitializedRef = useRef(false)
+  useEffect(() => {
+    if (perBookActiveInitializedRef.current) return
+    if (hasViewSettings(perBook)) {
+      perBookActiveInitializedRef.current = true
+      setPerBookActiveState(true)
+    }
+  }, [perBook])
+  const perBookActiveRef = useRef(perBookActive)
+  perBookActiveRef.current = perBookActive
+  const setPerBookActive = useCallback((active: boolean) => {
+    setPerBookActiveState(active)
+    if (!active) saveViewSettings(null)
+  }, [saveViewSettings])
+  const updateSetting = useCallback((key: PerBookSettingKey, value: number) => {
+    if (perBookActiveRef.current) {
+      saveViewSettings(viewSettingsDiffForKey(key, value, readingMode))
+    } else {
+      globalSetterForKey(key, value)
+    }
+  }, [saveViewSettings, globalSetterForKey, readingMode])
+  const viewSettingsContextValue = useMemo(
+    () => ({
+      effective: effectiveSettings,
+      perBookActive,
+      setPerBookActive,
+      updateSetting,
+    }),
+    [effectiveSettings, perBookActive, setPerBookActive, updateSetting],
+  )
 
   const progressQuery = useQuery({
     queryKey: ['progress', id],
@@ -206,11 +327,22 @@ export default function Reader() {
   // Count only time after the book has actually rendered
   const { flush: flushReadingTimer } = useReadingTimer(bookReady ? id : undefined)
 
+  // Per-chapter word counts for the info-bar field; must precede useReaderRenderer
+  const chapterWordCounts = useMemo(() => {
+    const chapters = chaptersQuery.data?.data
+    if (!chapters?.length) return undefined
+    return chapters.map((c) => (c.wordCount != null
+      ? c.wordCount
+      : c.endOffset - (c.contentStartOffset ?? c.startOffset)))
+  }, [chaptersQuery.data])
+
   const { containerRef, renderer } = useReaderRenderer({
     url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
     // so it navigates exactly once (to the saved CFI, or to the book start
     // when progress resolved to none)
     initialCfi: initialCfiRef.current,
+    settings: effectiveSettings,
+    chapterWordCounts,
     onRendered: () => {
       setBookReady(true)
       setLoadError(null)
@@ -282,7 +414,8 @@ export default function Reader() {
         style: lastStyle.style,
         chapter: currentChapter ?? undefined,
       })
-      setSelection(null)
+      // "选中即划" keeps the toolbar open so the fresh highlight can be restyled
+      if (!e.keepSelection) setSelection(null)
     },
   })
 
@@ -454,15 +587,6 @@ export default function Reader() {
     }
   }, [containerRef, readingMode])
 
-  const chapterWordCount = useMemo(() => {
-    const chapters = chaptersQuery.data?.data
-    if (!chapters?.length || currentChapterIndex == null) return undefined
-    const current = chapters[currentChapterIndex]
-    if (!current) return undefined
-    if (current.wordCount != null) return current.wordCount
-    return current.endOffset - (current.contentStartOffset ?? current.startOffset)
-  }, [currentChapterIndex, chaptersQuery.data])
-
   const estimatedMinutes = useMemo(() => {
     const chapters = chaptersQuery.data?.data
     if (!chapters?.length || currentChapterIndex == null) return undefined
@@ -479,8 +603,6 @@ export default function Reader() {
     if (currentOffset == null || current.endOffset <= current.startOffset) return undefined
     return Math.ceil(Math.max(0, current.endOffset - currentOffset) / 800)
   }, [currentChapterIndex, chapterFraction, currentOffset, chaptersQuery.data])
-
-  const showWordCountBadge = showWordCount && chapterWordCount != null && atChapterStart
 
   const onToggleSettings = useCallback(() => {
     setSettingsOpen((v) => !v)
@@ -587,6 +709,7 @@ export default function Reader() {
 
   return (
     <ErrorBoundary>
+      <ViewSettingsContext.Provider value={viewSettingsContextValue}>
       <RendererContext.Provider value={rendererContextValue}>
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div className="flex h-full w-full">
@@ -660,14 +783,9 @@ export default function Reader() {
                 )}
               </div>
             )}
-            {/* Bottom hover zone: hot strip + footer + word count badge share the same group. */}
+            {/* Bottom hover zone: hot strip + footer share the same group. */}
             <div className="group peer/strip absolute inset-x-0 bottom-0 z-40 pointer-events-none">
               <div className="absolute inset-x-0 bottom-0 h-12 pointer-events-auto" />
-              {showWordCountBadge && (
-                <div className="pointer-events-none absolute right-4 z-30 text-xs tabular-nums text-[var(--bd-read-sub)] transition-all duration-300 bottom-3 group-hover:bottom-[3.25rem]">
-                  {chapterWordCount} 字
-                </div>
-              )}
               <ProgressStrip
                 percent={percent}
                 pageInfo={pageInfo ?? undefined}
@@ -690,6 +808,7 @@ export default function Reader() {
         <SelectionToolbar bookId={id} />
       </div>
     </RendererContext.Provider>
+    </ViewSettingsContext.Provider>
     </ErrorBoundary>
   )
 }

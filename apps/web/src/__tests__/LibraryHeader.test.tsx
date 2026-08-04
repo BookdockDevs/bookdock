@@ -68,8 +68,10 @@ describe('LibraryHeader', () => {
     expect(screen.getByRole('button', { name: 'library.selectMode' })).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('hides select mode button in trash', () => {
-    renderHeader({ trash: true, onToggleSelectMode: vi.fn() })
-    expect(screen.queryByRole('button', { name: 'library.selectMode' })).not.toBeInTheDocument()
+  it('trash mode hides library search/filter controls but keeps select mode', () => {
+    renderHeader({ trash: true, trashCount: 3, onToggleSelectMode: vi.fn(), onEmptyTrash: vi.fn() })
+    expect(screen.queryByPlaceholderText('library.searchPlaceholder')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'library.selectMode' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'library.emptyTrash' })).toBeInTheDocument()
   })
 })
