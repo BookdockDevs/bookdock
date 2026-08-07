@@ -96,11 +96,16 @@ booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
   }
   const size = await storage.size(book.filePath)
   const fileName = `${book.title.replace(/[^\w\u3000-\u303f\uff00-\uffef\u4e00-\u9fa5-]/g, '_')}.epub`
-  // filePath is content-hash addressed; the payload never changes under the same URL.
+  // No HTTP caching on purpose: the URL is content-hash addressed (immutable
+  // by design), but when the browser caches the full file, zip.js's Range
+  // reads are served FROM that cached entry — Chrome's range reads over a
+  // multi-MB cache entry are ~300-400ms each and occasionally stall forever
+  // (first-open spin + 30s timeout). In-session reuse is handled by the
+  // client parseCache anyway, so always fetch fresh ranges from the server.
   const headers: Record<string, string> = {
     'Content-Type': 'application/epub+zip',
     'Accept-Ranges': 'bytes',
-    'Cache-Control': 'private, immutable, max-age=31536000',
+    'Cache-Control': 'private, no-store',
     'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
   }
   const range = parseRangeHeader(c.req.header('Range'), size)

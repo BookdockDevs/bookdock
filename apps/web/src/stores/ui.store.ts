@@ -113,15 +113,28 @@ interface UiState {
   setFooterRight: (v: MarginalField) => void
   setMarginalFontSize: (v: number) => void
 
+  // Reading-time accounting: automatic heuristics, the manual timer pill,
+  // or off — no reading data is recorded and the reader stats tab is hidden
+  readingTimerMode: 'auto' | 'manual' | 'off'
+  manualTimerGraceMinutes: 1 | 5 | 10 | 30
+  setReadingTimerMode: (v: 'auto' | 'manual' | 'off') => void
+  setManualTimerGraceMinutes: (v: 1 | 5 | 10 | 30) => void
+
   // Library UI prefs
   coverMode: boolean
   coverFit: boolean
   gridColumns: string
   showRecentlyRead: boolean
+  sortBy: string
+  sortOrder: 'asc' | 'desc'
+  view: 'grid' | 'list'
   setCoverMode: (v: boolean) => void
   setCoverFit: (v: boolean) => void
   setGridColumns: (v: string) => void
   setShowRecentlyRead: (v: boolean) => void
+  setSortBy: (v: string) => void
+  setSortOrder: (v: 'asc' | 'desc') => void
+  setView: (v: 'grid' | 'list') => void
 
   // Reader sidebar prefs
   toolbarLocked: boolean
@@ -185,6 +198,20 @@ function getInitialUiTheme(): UiTheme {
   const stored = localStorage.getItem('bd-ui-theme')
   if (stored === 'system' || stored === 'dark' || stored === 'light') return stored
   return 'system'
+}
+
+const MANUAL_GRACE_OPTIONS = [1, 5, 10, 30] as const
+
+function getInitialTimerMode(): 'auto' | 'manual' | 'off' {
+  if (typeof window === 'undefined') return 'auto'
+  const stored = localStorage.getItem('bd-reading-timer-mode')
+  return stored === 'manual' || stored === 'off' ? stored : 'auto'
+}
+
+function getInitialGraceMinutes(): 1 | 5 | 10 | 30 {
+  if (typeof window === 'undefined') return 5
+  const n = Number(localStorage.getItem('bd-manual-timer-grace'))
+  return (MANUAL_GRACE_OPTIONS as readonly number[]).includes(n) ? n as 1 | 5 | 10 | 30 : 5
 }
 
 function getInitialBoolean(key: string, fallback: boolean): boolean {
@@ -277,11 +304,16 @@ export const useUiStore = create<UiState>((set, get) => ({
   footerCenter: getInitial<MarginalField>('bd-footer-center', 'chapter'),
   footerRight: getInitial<MarginalField>('bd-footer-right', 'none'),
   marginalFontSize: getInitialNumber('bd-marginal-font-size', 0, 0, 24),
+  readingTimerMode: getInitialTimerMode(),
+  manualTimerGraceMinutes: getInitialGraceMinutes(),
 
   coverMode: getInitialBoolean('bd-cover-mode', false),
   coverFit: getInitialBoolean('bd-cover-fit', false),
   gridColumns: getInitial<string>('bd-grid-columns', 'auto'),
   showRecentlyRead: getInitialBoolean('bd-show-recently-read', false),
+  sortBy: getInitial<string>('bd-sort-by', 'createdAt'),
+  sortOrder: getInitial<string>('bd-sort-order', 'desc') === 'asc' ? ('asc' as const) : ('desc' as const),
+  view: getInitial<string>('bd-library-view', 'grid') === 'list' ? ('list' as const) : ('grid' as const),
   toolbarLocked: getInitialBoolean('bd-reader-toolbar-locked', false),
   sidebarWidth: getInitialNumber('bd-sidebar-width', 288, 200, 500),
 
@@ -296,6 +328,18 @@ export const useUiStore = create<UiState>((set, get) => ({
   setGridColumns: (gridColumns) => {
     setStorage('bd-grid-columns', gridColumns)
     set({ gridColumns })
+  },
+  setSortBy: (sortBy) => {
+    setStorage('bd-sort-by', sortBy)
+    set({ sortBy })
+  },
+  setSortOrder: (sortOrder) => {
+    setStorage('bd-sort-order', sortOrder)
+    set({ sortOrder })
+  },
+  setView: (view) => {
+    setStorage('bd-library-view', view)
+    set({ view })
   },
   setToolbarLocked: (toolbarLocked) => {
     setStorage('bd-reader-toolbar-locked', String(toolbarLocked))
@@ -344,6 +388,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   setMarginalFontSize: (marginalFontSize) => {
     setStorage('bd-marginal-font-size', String(marginalFontSize))
     set({ marginalFontSize })
+  },
+  setReadingTimerMode: (readingTimerMode) => {
+    setStorage('bd-reading-timer-mode', readingTimerMode)
+    set({ readingTimerMode })
+  },
+  setManualTimerGraceMinutes: (manualTimerGraceMinutes) => {
+    setStorage('bd-manual-timer-grace', String(manualTimerGraceMinutes))
+    set({ manualTimerGraceMinutes })
   },
 
   setUiTheme: (uiTheme) => {

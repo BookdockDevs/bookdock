@@ -4,7 +4,6 @@ export interface TxtToEpubChapter {
   id: string
   title: string
   level: number
-  content: string
 }
 
 export interface TxtToEpubMetadata {
@@ -165,13 +164,14 @@ p {
 
 export async function convertTxtToEpub(
   metadata: TxtToEpubMetadata,
-  chapters: TxtToEpubChapter[]
+  chapters: TxtToEpubChapter[],
+  contentFor: (index: number) => string,
 ): Promise<Buffer> {
   const zip = new JSZip()
 
   zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' })
   zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?>
-<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<container version="1.0" xmlns="urn:oasis:tc:names:tc:opendocument:xmlns:container">
   <rootfiles>
     <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml" />
   </rootfiles>
@@ -180,7 +180,8 @@ export async function convertTxtToEpub(
   const chapterFiles = chapters.map((_, index) => chapterFilename(index))
   for (let i = 0; i < chapters.length; i++) {
     const chapter = chapters[i]
-    const xhtml = buildChapterXhtml(chapter.title, chapter.content)
+    // content is sliced lazily so only one chapter's text is live at a time (B5)
+    const xhtml = buildChapterXhtml(chapter.title, contentFor(i))
     zip.file(`OEBPS/${chapterFiles[i]}`, xhtml)
   }
 

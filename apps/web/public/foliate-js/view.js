@@ -112,6 +112,17 @@ export class View extends HTMLElement {
       this.renderer = document.createElement('foliate-paginator')
     }
     this.renderer.setAttribute('exportparts', 'head,foot,filter')
+    // bookdock: the renderer-level click listener (clicks on margins/gaps
+    // outside the iframe views) must attach once per view lifecycle. It used
+    // to live in #handleClick, adding one listener per loaded section — every
+    // margin click emitted click-view N times and listeners leaked forever.
+    this.renderer.addEventListener('click', e => {
+      const { clientX, clientY } = e
+      while (clientX > window.innerWidth) {
+        clientX -= window.innerWidth
+      }
+      this.#emit('click-view', { x: clientX, y: clientY })
+    })
     this.renderer.addEventListener('load', e => this.#onLoad(e.detail))
     this.renderer.addEventListener('relocate', e => this.#onRelocate(e.detail))
     this.renderer.addEventListener('create-overlayer', e =>
@@ -329,13 +340,6 @@ export class View extends HTMLElement {
 
       this.#emit('click-view', { x: clientX, y: clientY })
     })
-    this.renderer.addEventListener('click', e => {
-      const { clientX, clientY } = e
-      while (clientX > window.innerWidth) {
-        clientX -= window.innerWidth
-      }
-      this.#emit('click-view', { x: clientX, y: clientY })
-    })
   }
   async addAnnotation(annotation, remove) {
     const { value } = annotation
@@ -350,6 +354,7 @@ export class View extends HTMLElement {
           return
         }
         const range = doc ? anchor(doc) : anchor
+        // bookdock: search hits draw as soft amber fill (upstream: cyan outline)
         overlayer.add(value, range, Overlayer.highlight, { color: '#fbbf2459' });
       }
       return

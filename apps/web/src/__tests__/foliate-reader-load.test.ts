@@ -123,4 +123,16 @@ describe('memoizeLoadText', () => {
     const loadText = memoizeLoadText((_name: string) => null)
     expect(await loadText('missing.xhtml')).toBeNull()
   })
+
+  it('has() reports warmth: requested-and-not-failed entries only', async () => {
+    const loadText = memoizeLoadText(async (name: string) => {
+      if (name === 'fail.xhtml') throw new Error('boom')
+      return name
+    })
+    expect(loadText.has('a.xhtml')).toBe(false)
+    await loadText('a.xhtml')
+    expect(loadText.has('a.xhtml')).toBe(true)
+    await expect(loadText('fail.xhtml')).rejects.toThrow('boom')
+    expect(loadText.has('fail.xhtml')).toBe(false)
+  })
 })

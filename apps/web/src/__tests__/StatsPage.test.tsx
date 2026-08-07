@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 
 import Stats from '../features/stats/Stats'
-import { localDateString, useReadingByBook, useReadingDaily, useReadingHourly, useReadingSummary } from '@/api/hooks/reading-records'
+import { localDateString, useReadingByBook, useReadingByTag, useReadingDaily, useReadingHourly, useReadingSummary } from '@/api/hooks/reading-records'
 import { eachDay, periodRange } from '../features/stats/date-utils'
 import type { ReadingRecordBookItem } from '@bookdock/shared'
 
@@ -14,6 +14,7 @@ vi.mock('@/api/hooks/reading-records', async (importOriginal) => {
     useReadingSummary: vi.fn(),
     useReadingDaily: vi.fn(),
     useReadingByBook: vi.fn(),
+    useReadingByTag: vi.fn(),
     useReadingHourly: vi.fn(),
   }
 })
@@ -34,6 +35,11 @@ const SUMMARY = {
   todaySeconds: 600,
   currentStreak: 4,
   longestStreak: 9,
+  weekSeconds: 3600,
+  prevWeekSeconds: 1800,
+  monthSeconds: 7200,
+  prevMonthSeconds: 5400,
+  totalWordsRead: 12345,
 }
 
 // The stats locale keys are managed separately; pin them to identity values so
@@ -105,6 +111,7 @@ describe('Stats page', () => {
     ;(useReadingHourly as Mock).mockImplementation(() => ({
       data: { data: [{ hour: 21, durationSeconds: 1200 }] },
     }))
+    ;(useReadingByTag as Mock).mockReturnValue({ data: { data: [] } })
   })
 
   it('renders the summary cards', () => {

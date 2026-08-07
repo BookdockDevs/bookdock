@@ -2,12 +2,15 @@ import { memo } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
+import { formatDuration } from '@/lib/format-duration'
 import { SettingsPopover } from './SettingsPopover'
 import { SettingsPanel } from './SettingsPanel'
 
 interface ReaderHeaderProps {
   title: string
   visible: boolean
+  /** Middle click-area tap forces the header down (mobile: no hover) */
+  pinned?: boolean
   className?: string
   estimatedMinutes?: number
   settingsOpen?: boolean
@@ -17,14 +20,14 @@ interface ReaderHeaderProps {
   bookmarkActive?: boolean
 }
 
-export const ReaderHeader = memo(function ReaderHeader({ title, visible, className, estimatedMinutes, settingsOpen, onAddBookmark, onToggleSettings, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, onAddBookmark, onToggleSettings, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
   const _ = useTranslation()
   return (
     <header
       className={cn(
         'pointer-events-none absolute left-0 right-0 top-0 z-40 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-4 text-[var(--bd-read-text)] transition-transform duration-300',
         visible ? 'group-hover:translate-y-0' : '',
-        settingsOpen ? 'translate-y-0' : '-translate-y-full',
+        settingsOpen || pinned ? 'translate-y-0' : '-translate-y-full',
         className,
       )}
     >
@@ -43,7 +46,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, classNa
       <div className="flex items-center gap-2">
         {estimatedMinutes !== undefined && (
           <span className="mr-2 text-xs tabular-nums text-[var(--bd-read-sub)]">
-            {estimatedMinutes < 1 ? '<1 分钟' : `约 ${estimatedMinutes} 分钟`}
+            {formatDuration(estimatedMinutes * 60, _)}
           </span>
         )}
         {onAddBookmark && (

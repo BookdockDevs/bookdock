@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { sqliteTable, text, integer, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -115,14 +115,27 @@ export const readingRecords = sqliteTable('reading_records', {
 
 // Fine-grained session detail: one row per reported reading block, kept for
 // hour-of-day distribution stats. reading_records stays the daily aggregate.
+// Manual-mode sessions (manual reading timer) fill the bounds below — the
+// exact start/end time (endedAt) and position recorded in every display unit:
+// cfi (precise anchor), fraction (0-1, percent is derived) and chapter index
+// (label resolved from books.meta at display time). Auto-mode blocks leave
+// them all NULL and are immutable.
 export const readingSessions = sqliteTable('reading_sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
   // Client-local calendar day of the session start ('YYYY-MM-DD')
   date: text('date').notNull(),
-  startedAt: integer('started_at').notNull(),
+  // Nullable for retroactive manual entries recorded without a start time
+  startedAt: integer('started_at'),
   durationSeconds: integer('duration_seconds').notNull().default(0),
+  endedAt: integer('ended_at'),
+  startCfi: text('start_cfi'),
+  endCfi: text('end_cfi'),
+  startFraction: real('start_fraction'),
+  endFraction: real('end_fraction'),
+  startChapterIndex: integer('start_chapter_index'),
+  endChapterIndex: integer('end_chapter_index'),
 }, (table) => ({
   userDateIdx: index('reading_sessions_user_date_idx').on(table.userId, table.date),
 }))

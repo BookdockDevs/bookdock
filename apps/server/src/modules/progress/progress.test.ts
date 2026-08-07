@@ -153,6 +153,25 @@ describe('progress service', () => {
     expect(loaded!.readFraction).toBeCloseTo(0.3)
   })
 
+  it('stores rate samples in a capped sliding window and returns them', async () => {
+    for (let i = 1; i <= 25; i++) {
+      await upsertProgress(ownerId, bookId, {
+        percent: i,
+        sample: { fraction: i / 100, at: 1_000_000 + i * 60_000 },
+      })
+    }
+    const loaded = await getProgress(ownerId, bookId)
+    expect(loaded!.rateSamples).toHaveLength(20)
+    expect(loaded!.rateSamples![0].fraction).toBeCloseTo(6 / 100)
+    expect(loaded!.rateSamples![19].fraction).toBeCloseTo(25 / 100)
+  })
+
+  it('keeps samples absent from progress files when none were reported', async () => {
+    await upsertProgress(ownerId, bookId, { percent: 10 })
+    const loaded = await getProgress(ownerId, bookId)
+    expect(loaded!.rateSamples).toBeUndefined()
+  })
+
   it('should swap reversed segment bounds', async () => {
     await upsertProgress(ownerId, bookId, { percent: 10, fraction: 0.1, segmentStartFraction: 0.2 })
     const loaded = await getProgress(ownerId, bookId)

@@ -21,6 +21,9 @@ interface UseReaderRendererOptions {
   onError?: (err: Error) => void
   onTocReady?: (items: { label: string; href: string; level?: number }[]) => void
   onJumpConfirmed?: (e: { cfi: string }) => void
+  onNavigatePending?: (e: { pending: boolean }) => void
+  onChromeToggle?: () => void
+  onUserJump?: () => void
 }
 
 export function useReaderRenderer({
@@ -36,6 +39,9 @@ export function useReaderRenderer({
   onError,
   onTocReady,
   onJumpConfirmed,
+  onNavigatePending,
+  onChromeToggle,
+  onUserJump,
 }: UseReaderRendererOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<BookReader | null>(null)
@@ -91,6 +97,9 @@ export function useReaderRenderer({
   const onErrorRef = useRef(onError)
   const onTocReadyRef = useRef(onTocReady)
   const onJumpConfirmedRef = useRef(onJumpConfirmed)
+  const onNavigatePendingRef = useRef(onNavigatePending)
+  const onChromeToggleRef = useRef(onChromeToggle)
+  const onUserJumpRef = useRef(onUserJump)
   const theme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [readingThemeId, customThemes])
   const themeRef = useRef(theme)
   const fontRef = useRef({ fontFamily, size: fontSize, lineHeight, fontWeight, overrideBookFont })
@@ -119,6 +128,9 @@ export function useReaderRenderer({
   onErrorRef.current = onError
   onTocReadyRef.current = onTocReady
   onJumpConfirmedRef.current = onJumpConfirmed
+  onNavigatePendingRef.current = onNavigatePending
+  onChromeToggleRef.current = onChromeToggle
+  onUserJumpRef.current = onUserJump
   themeRef.current = theme
   fontRef.current = { fontFamily, size: fontSize, lineHeight, fontWeight, overrideBookFont }
   paragraphRef.current = { paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
@@ -187,6 +199,9 @@ export function useReaderRenderer({
     const unsubRendered = newRenderer.on('rendered', () => onRenderedRef.current?.())
     const unsubToc = newRenderer.on('tocReady', (items) => onTocReadyRef.current?.(items))
     const unsubJumpConfirmed = newRenderer.on('jumpConfirmed', (e) => onJumpConfirmedRef.current?.(e))
+    const unsubNavigatePending = newRenderer.on('navigatePending', (e) => onNavigatePendingRef.current?.(e))
+    const unsubChromeToggle = newRenderer.on('chromeToggle', () => onChromeToggleRef.current?.())
+    const unsubUserJump = newRenderer.on('userJump', () => onUserJumpRef.current?.())
 
     return () => {
       cancelled = true
@@ -197,6 +212,9 @@ export function useReaderRenderer({
       unsubRendered()
       unsubToc()
       unsubJumpConfirmed()
+      unsubNavigatePending()
+      unsubChromeToggle()
+      unsubUserJump()
       newRenderer.destroy()
       rendererRef.current = null
       setRenderer((current) => (current === newRenderer ? null : current))

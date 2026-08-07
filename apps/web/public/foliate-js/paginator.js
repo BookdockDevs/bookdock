@@ -225,8 +225,23 @@ class View {
   }
   async load(src, afterLoad, beforeRender) {
     if (typeof src !== 'string') throw new Error(`${src} is not string`)
-    return new Promise(resolve => {
-      this.#iframe.addEventListener('load', () => {
+    // bookdock: the upstream promise waits only for the iframe load event —
+    // if it never fires (detached iframe, blob URL revoked, event lost) the
+    // reader hangs forever. Fall back after 10s: a loaded doc proceeds, a
+    // missing one rejects so the mount surfaces a real error instead.
+    return new Promise((resolve, reject) => {
+      let done = false
+      const timer = setTimeout(() => {
+        if (done) return
+        done = true
+        console.warn('[bd] view.load: timeout, isConnected=', this.#iframe.isConnected, 'doc=', !!this.document)
+        if (this.document) {
+          finish(); resolve()
+        } else {
+          reject(new Error('iframe load timeout'))
+        }
+      }, 10000)
+      const finish = () => {
         const doc = this.document
         afterLoad?.(doc)
 
@@ -251,6 +266,12 @@ class View {
         doc.fonts.ready.then(() => this.expand())
 
         resolve()
+      }
+      this.#iframe.addEventListener('load', () => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        finish()
       }, { once: true })
       this.#iframe.src = src
     })
@@ -343,7 +364,7 @@ class View {
     }
   }
   expand() {
-    // The ResizeObserver fires on element resize before the iframe document
+    // bookdock: The ResizeObserver fires on element resize before the iframe document
     // exists (and after teardown) — bail instead of throwing on null document.
     if (!this.document) return
     const { documentElement } = this.document
@@ -412,6 +433,8 @@ class View {
 
 // NOTE: everything here assumes the so-called "negative scroll type" for RTL
 export class Paginator extends HTMLElement {
+  // bookdock: 'gutter' is a bookdock extension — the horizontal page-mode
+  // padding, applied via the inset formula in the layout pass
   static observedAttributes = [
     'flow', 'gap', 'gutter', 'top-margin', 'bottom-margin', 'background-color',
     'max-inline-size', 'max-block-size', 'max-column-count', 'column-threshold', 'bgimg-url',
@@ -500,6 +523,8 @@ export class Paginator extends HTMLElement {
                 var(--_half-gap)
                 minmax(var(--_half-gap), 1fr);
             grid-template-rows:
+                // bookdock: header/footer bands get a 28px floor via
+                // --_header-band/--_footer-band (see the :host rules below)
                 max(var(--_top-margin), var(--_header-band, 0px))
                 1fr
                 max(var(--_bottom-margin), var(--_footer-band, 0px));
@@ -589,7 +614,7 @@ export class Paginator extends HTMLElement {
         :host(:not([show-footer])) #footer {
             display: none;
         }
-        /* Bands keep a floor tall enough for the marginal text (.75em + 6px
+        /* bookdock: Bands keep a floor tall enough for the marginal text (.75em + 6px
            padding) even when the user margin is 0, otherwise #top's
            overflow:hidden clips the header/footer out of the window. */
         :host([show-header]) #top {
@@ -676,6 +701,7 @@ export class Paginator extends HTMLElement {
       case 'top-margin':
       case 'bottom-margin':
       case 'gap':
+      // bookdock: gutter is a layout attribute — changing it re-renders
       case 'gutter':
       case 'max-column-count':
       case 'column-threshold':
@@ -970,7 +996,7 @@ export class Paginator extends HTMLElement {
       ? Math.min(2, Math.ceil(size / maxInlineSize))
       : maxColumnCount
 
-    // Width semantics: effective content width = min(max-inline-size,
+    // bookdock: Width semantics: effective content width = min(max-inline-size,
     // size - 2 * gutter). max-inline-size is the page-width cap (a huge
     // sentinel when "auto"), gutter is the minimum distance to the viewport
     // edges. The paginated layout always fills the container (page advance =
@@ -1573,12 +1599,31 @@ export class Paginator extends HTMLElement {
     this.#turnPage(dir)
   }
   // Key events inside the iframe never reach the top window, so page-mode
-  // keyboard turns are handled here.
+  // keyboard turns are handled here; scrolled flow mirrors the top-window
+  // handler's chapter-switch semantics (arrows switch sections) plus explicit
+  // screen scrolling — native arrow scroll dies when a chapter switch removes
+  // the focused iframe and focus falls back to the (non-scrollable) document.
   #onDocKey(e) {
-    if (this.scrolled) return
     const target = e.target
     if (target && (target.isContentEditable
       || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+    if (this.scrolled) {
+      const dist = Math.round(this.size * 0.92)
+      if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        this.nextSection()
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        this.prevSection()
+      } else if (e.key === 'ArrowDown' || e.key === 'PageDown') {
+        e.preventDefault()
+        this.next(dist)
+      } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+        e.preventDefault()
+        this.prev(dist)
+      }
+      return
+    }
     if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
       e.preventDefault()
       this.next()

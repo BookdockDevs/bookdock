@@ -34,10 +34,15 @@ export default function Library() {
   const search = useSearch({ from: indexRoute.id })
   const navigate = useNavigate()
 
-  const view = search.view ?? 'grid'
+  const viewPref = useUiStore((s) => s.view)
+  const sortByPref = useUiStore((s) => s.sortBy)
+  const sortOrderPref = useUiStore((s) => s.sortOrder)
+  // URL params win over the persisted preferences (bd-library-view/bd-sort-by/
+  // bd-sort-order), so a linked/shared URL still controls its own view
+  const view = search.view ?? viewPref
   const query = search.q ?? ''
-  const sortBy = search.sortBy ?? 'createdAt'
-  const sortOrder = search.sortOrder ?? 'desc'
+  const sortBy = search.sortBy ?? sortByPref
+  const sortOrder = search.sortOrder ?? sortOrderPref
   const shelfId = search.shelf ?? null
   const tagId = search.tag ?? null
   const format = search.format ?? null

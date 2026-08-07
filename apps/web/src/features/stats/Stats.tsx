@@ -8,6 +8,7 @@ import PeriodBarChart from './components/PeriodBarChart'
 import HourDistribution from './components/HourDistribution'
 import YearHeatmap from './components/YearHeatmap'
 import BookTimeList from './components/BookTimeList'
+import TagDistribution from './components/TagDistribution'
 import { periodRange, shiftPeriod } from './date-utils'
 import type { StatsPeriod } from './date-utils'
 
@@ -66,6 +67,8 @@ export default function Stats() {
       <HourDistribution date={selectedDate} period={period} range={range} />
 
       <BookTimeList date={selectedDate} period={period} range={range} />
+
+      <TagDistribution date={selectedDate} period={period} range={range} />
     </div>
   )
 }

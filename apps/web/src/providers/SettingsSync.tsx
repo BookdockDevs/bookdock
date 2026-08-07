@@ -54,6 +54,8 @@ const SETTINGS_KEYS = [
   'footerCenter',
   'footerRight',
   'marginalFontSize',
+  'readingTimerMode',
+  'manualTimerGraceMinutes',
 ]
 
 function pickSettings(state: ReturnType<typeof useUiStore.getState>): SettingsRes {

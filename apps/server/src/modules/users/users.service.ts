@@ -37,6 +37,12 @@ export async function updateUser(actorId: string, targetId: string, patch: Updat
     throw new AppError('CANNOT_MODIFY_SELF', 'Cannot change own role or disable own account')
   }
 
+  // The guest account is anonymous by design: a password would make it a
+  // login-capable account while its role stays 'guest' — broken semantics
+  if (target.role === 'guest' && patch.newPassword !== undefined) {
+    throw new AppError('CANNOT_MODIFY_GUEST', 'Guest is anonymous and cannot have a password')
+  }
+
   const newRole = patch.role ?? target.role
   const newDisabled = patch.disabled ?? target.disabled === 1
   const wasActiveOwner = target.role === 'owner' && target.disabled === 0

@@ -154,6 +154,9 @@ export interface SettingsRes {
   showWordCount?: boolean
   continuousScroll?: 'off' | 'snap' | 'seamless'
   pageAnimation?: boolean
+  /** Reading-time accounting: automatic heuristics, manual timer pill, or off (no reading data) */
+  readingTimerMode?: 'auto' | 'manual' | 'off'
+  manualTimerGraceMinutes?: 1 | 5 | 10 | 30
   trash?: TrashSettings
 }
 
@@ -268,6 +271,12 @@ export interface BookUploadRes {
   duplicated: boolean
 }
 
+/** A reading-speed sample: book-wide position at a wall-clock time (unix ms) */
+export interface RateSample {
+  fraction: number
+  at: number
+}
+
 export interface ReadingProgressUpdateReq {
   cfi?: string
   chapter?: string
@@ -276,6 +285,8 @@ export interface ReadingProgressUpdateReq {
   fraction?: number
   /** Start fraction of the current uninterrupted reading segment */
   segmentStartFraction?: number
+  /** Speed sample from a continuous reading stretch (client-side filtered) */
+  sample?: RateSample
 }
 
 export interface ReadingProgressRes {
@@ -287,6 +298,8 @@ export interface ReadingProgressRes {
   fraction?: number | null
   /** Total union length of read intervals, 0-1; absent for legacy progress not yet re-saved */
   readFraction?: number
+  /** Sliding window of reading-speed samples (most recent last) */
+  rateSamples?: RateSample[]
   updatedAt: number
 }
 
@@ -295,8 +308,48 @@ export interface ReadingRecordCreateReq {
   /** Local calendar day of the session start, 'YYYY-MM-DD' */
   date: string
   durationSeconds: number
-  /** Unix ms when the session block started; defaults to server receive time */
+  /** Unix ms when the session block started; defaults to server receive time.
+   * Explicit null = retroactive entry without a known start time (endedAt then required) */
+  startedAt?: number | null
+  /** Manual-mode sessions only: exact end time and bounds in every display unit */
+  endedAt?: number
+  startCfi?: string
+  endCfi?: string
+  /** Book-wide position 0-1 (percent is derived by ×100 at display time) */
+  startFraction?: number
+  endFraction?: number
+  startChapterIndex?: number
+  endChapterIndex?: number
+}
+
+/** One row of the per-book session list; auto-mode blocks have null bounds */
+export interface ReadingSessionItem {
+  id: string
+  bookId: string
+  /** Client-local calendar day of the session start, 'YYYY-MM-DD' */
+  date: string
+  startedAt: number
+  durationSeconds: number
+  endedAt: number | null
+  startCfi: string | null
+  endCfi: string | null
+  startFraction: number | null
+  endFraction: number | null
+  startChapterIndex: number | null
+  endChapterIndex: number | null
+}
+
+export interface ReadingSessionUpdateReq {
+  durationSeconds?: number
   startedAt?: number
+  endedAt?: number
+  date?: string
+  startFraction?: number
+  endFraction?: number
+  startChapterIndex?: number
+  endChapterIndex?: number
+  startCfi?: string
+  endCfi?: string
 }
 
 export interface ReadingRecordSummaryRes {
@@ -306,6 +359,14 @@ export interface ReadingRecordSummaryRes {
   todaySeconds: number
   currentStreak: number
   longestStreak: number
+  /** This calendar week (Mon–today) vs the previous full week, client-local days */
+  weekSeconds: number
+  prevWeekSeconds: number
+  /** This calendar month (1st–today) vs the previous full month, client-local days */
+  monthSeconds: number
+  prevMonthSeconds: number
+  /** Sum over books of readFraction × wordCount, rounded */
+  totalWordsRead: number
 }
 
 export interface ReadingRecordDailyItem {
@@ -334,6 +395,29 @@ export interface ReadingRecordBookItem {
 export interface ReadingRecordBookDetailRes {
   totalSeconds: number
   records: ReadingRecordDailyItem[]
+}
+
+/** Manual session row of the per-book mixed detail feed (same fields as the session list) */
+export interface ReadingDetailManualItem extends Omit<ReadingSessionItem, 'startedAt'> {
+  kind: 'manual'
+  /** Null for retroactive entries recorded without a start time */
+  startedAt: number | null
+}
+
+/** Auto-mode day row of the mixed detail feed: the day's total minus its manual sessions */
+export interface ReadingDetailAutoDayItem {
+  kind: 'autoDay'
+  /** Client-local calendar day, 'YYYY-MM-DD' */
+  date: string
+  durationSeconds: number
+}
+
+export type ReadingDetailItem = ReadingDetailManualItem | ReadingDetailAutoDayItem
+
+export interface ReadingRecordTagItem {
+  tagId: string
+  name: string
+  durationSeconds: number
 }
 
 export type AnnotationCreateReq = {

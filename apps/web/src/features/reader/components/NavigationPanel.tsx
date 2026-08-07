@@ -78,11 +78,12 @@ interface NavigationPanelProps {
   bookId: string
   open: boolean
   locked?: boolean
+  statsDisabled?: boolean
   onClose?: () => void
 }
 
 export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPanelProps>(function NavigationPanel(
-  { bookId, open, locked, onClose },
+  { bookId, open, locked, statsDisabled, onClose },
   ref,
 ) {
   const _ = useTranslation()
@@ -735,7 +736,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             bookId={bookId}
           />
         )}
-        {tab === 'stats' && <StatsPanel bookId={bookId} />}
+        {tab === 'stats' && !statsDisabled && <StatsPanel bookId={bookId} />}
       </div>
       {searchActive && searchResults.length > 0 && (
         <div

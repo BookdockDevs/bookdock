@@ -124,6 +124,16 @@ describe('users module', () => {
     expect(await verifyPassword('newpass6', row!.passwordHash!)).toBe(true)
   })
 
+  it('rejects setting a password on the guest account', async () => {
+    const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+    const guestId = await insertUser(db, { username: 'guest', role: 'guest' })
+    await expect(updateUser(ownerId, guestId, { newPassword: 'hack123' }))
+      .rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
+    // non-password updates on the guest still work
+    const disabled = await updateUser(ownerId, guestId, { disabled: true })
+    expect(disabled.disabled).toBe(true)
+  })
+
   it('rejects disabling or demoting oneself', async () => {
     const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
     await insertUser(db, { username: 'other', role: 'owner' })

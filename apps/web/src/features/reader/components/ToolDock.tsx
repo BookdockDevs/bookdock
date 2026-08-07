@@ -29,11 +29,12 @@ interface ToolDockProps {
   activeNavTab: NavTab
   sidebarOpen: boolean
   locked: boolean
+  statsDisabled?: boolean
   onNavTab: (tab: NavTab) => void
   onToggleLock: () => void
 }
 
-export function ToolDock({ activeNavTab, sidebarOpen, locked, onNavTab, onToggleLock }: ToolDockProps) {
+export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, onNavTab, onToggleLock }: ToolDockProps) {
   const icons = [
     {
       id: 'toc' as const,
@@ -51,7 +52,7 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, onNavTab, onToggle
         </svg>
       ),
     },
-    {
+    ...(statsDisabled ? [] : [{
       id: 'stats' as const,
       title: '数据',
       icon: (
@@ -61,7 +62,7 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, onNavTab, onToggle
           <path d="M18 20V4" />
         </svg>
       ),
-    },
+    }] as const),
   ]
 
   return (

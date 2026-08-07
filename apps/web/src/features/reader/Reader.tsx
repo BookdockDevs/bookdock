@@ -3,6 +3,7 @@ import { useParams, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { apiGet, apiPatch, apiPut } from '@/api/client'
+import { usePrefetchBookReadingStats } from '@/api/hooks/reading-records'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useToastStore } from '@/stores/toast.store'
 import { useUiStore, getEffectiveTheme } from '@/stores/ui.store'
@@ -16,7 +17,7 @@ import { useReadingTimer } from './hooks/useReadingTimer'
 import { useReaderState } from './state/reader-state'
 import { RendererContext } from './hooks/useReaderApi'
 import { useBookChapters } from './hooks/useBookChapters'
-import { createSegmentTracker, trackPosition } from './stats/reading-segments'
+import { createSegmentTracker, trackPosition, closeSegment } from './stats/reading-segments'
 import { createJumpHistory } from './jump-history'
 import { createHistoryAutoHide, type HistoryAutoHide } from './history-auto-hide'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
@@ -27,10 +28,12 @@ import { NavigationPanel, type NavigationPanelRef } from './components/Navigatio
 import { SelectionToolbar } from './components/SelectionToolbar'
 import { ProgressStrip } from './components/ProgressStrip'
 import HistoryCapsule from './components/HistoryCapsule'
+import TimerPill from './components/TimerPill'
 import { getLastHighlightStyle } from './components/annotation-colors'
 import { setAutoMarkSelectionMode } from './renderers/FoliateReader'
 import { ViewSettingsContext } from './view-settings-context'
 import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './lib/view-settings'
+import { readingRateOf, RATE_SAMPLE_MIN_INTERVAL_MS } from './lib/progress-model'
 import type { PerBookSettingKey, GlobalViewSettings } from './lib/view-settings'
 import type { NavTab, ReaderAnnotation } from './types'
 import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
@@ -44,8 +47,24 @@ export default function Reader() {
   const [currentOffset, setCurrentOffset] = useState<number | null>(null)
   const [currentCfi, setCurrentCfi] = useState<string | null>(null)
   const [chapterFraction, setChapterFraction] = useState<number | undefined>(undefined)
-  const [atChapterStart, setAtChapterStart] = useState(false)
+  const [_atChapterStart, setAtChapterStart] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Chapter-switch loading indicator (slow cross-chapter navigation)
+  const [navPending, setNavPending] = useState(false)
+  // Middle click-area tap reveals the top/bottom bars (mobile: no hover);
+  // any interaction (page turn, scroll, selection) hides them again
+  const [chromePinned, setChromePinned] = useState(false)
+  // Footer visibility state machine: the hot strip SUMMONS the footer; the
+  // corner zones (wrapping the capsules) can only SUSTAIN it — they stay
+  // pointer-inert while hidden, so approaching a capsule from the page never
+  // raises the footer and never moves the capsule under the cursor.
+  const [footerSummon, setFooterSummon] = useState(false)
+  const [cornerDwell, setCornerDwell] = useState(false)
+  const footerVisibleRef = useRef(false)
+  const footerVisible = chromePinned || footerSummon || (footerVisibleRef.current && cornerDwell)
+  useEffect(() => {
+    footerVisibleRef.current = footerVisible
+  }, [footerVisible])
   const setSelection = useReaderState((s) => s.setSelection)
   const setTocItems = useReaderState((s) => s.setTocItems)
   const currentChapter = useReaderState((s) => s.currentChapter)
@@ -90,22 +109,39 @@ export default function Reader() {
   })
 
   // --- Per-book reading settings (F1 layering) ---------------------------
-  const globalSettings: GlobalViewSettings = {
-    fontSize: useUiStore((s) => s.fontSize),
-    lineHeight: useUiStore((s) => s.lineHeight),
-    pageWidth: useUiStore((s) => s.pageWidth),
-    horizontalPadding: useUiStore((s) => s.horizontalPadding),
-    verticalPadding: useUiStore((s) => s.verticalPadding),
-    pageColumns: useUiStore((s) => s.pageColumns),
-    columnGap: useUiStore((s) => s.columnGap),
-    scrollPageWidth: useUiStore((s) => s.scrollPageWidth),
-    scrollHorizontalPadding: useUiStore((s) => s.scrollHorizontalPadding),
-    scrollVerticalPadding: useUiStore((s) => s.scrollVerticalPadding),
-    pagePageWidth: useUiStore((s) => s.pagePageWidth),
-    pageHorizontalPadding: useUiStore((s) => s.pageHorizontalPadding),
-    pageVerticalPadding: useUiStore((s) => s.pageVerticalPadding),
-    readingMode: useUiStore((s) => s.readingMode),
-  }
+  const fontSize = useUiStore((s) => s.fontSize)
+  const lineHeight = useUiStore((s) => s.lineHeight)
+  const pageWidth = useUiStore((s) => s.pageWidth)
+  const horizontalPadding = useUiStore((s) => s.horizontalPadding)
+  const verticalPadding = useUiStore((s) => s.verticalPadding)
+  const pageColumns = useUiStore((s) => s.pageColumns)
+  const columnGap = useUiStore((s) => s.columnGap)
+  const scrollPageWidth = useUiStore((s) => s.scrollPageWidth)
+  const scrollHorizontalPadding = useUiStore((s) => s.scrollHorizontalPadding)
+  const scrollVerticalPadding = useUiStore((s) => s.scrollVerticalPadding)
+  const pagePageWidth = useUiStore((s) => s.pagePageWidth)
+  const pageHorizontalPadding = useUiStore((s) => s.pageHorizontalPadding)
+  const pageVerticalPadding = useUiStore((s) => s.pageVerticalPadding)
+  const globalSettings: GlobalViewSettings = useMemo(() => ({
+    fontSize,
+    lineHeight,
+    pageWidth,
+    horizontalPadding,
+    verticalPadding,
+    pageColumns,
+    columnGap,
+    scrollPageWidth,
+    scrollHorizontalPadding,
+    scrollVerticalPadding,
+    pagePageWidth,
+    pageHorizontalPadding,
+    pageVerticalPadding,
+    readingMode,
+  }), [
+    fontSize, lineHeight, pageWidth, horizontalPadding, verticalPadding, pageColumns, columnGap,
+    scrollPageWidth, scrollHorizontalPadding, scrollVerticalPadding,
+    pagePageWidth, pageHorizontalPadding, pageVerticalPadding, readingMode,
+  ])
   const setFontSize = useUiStore((s) => s.setFontSize)
   const setLineHeight = useUiStore((s) => s.setLineHeight)
   const setPageWidth = useUiStore((s) => s.setPageWidth)
@@ -172,19 +208,36 @@ export default function Reader() {
   }, [])
 
   const [perBookActive, setPerBookActiveState] = useState(false)
-  const perBookActiveInitializedRef = useRef(false)
+  // The Reader component persists across /books/:id navigation, so the
+  // previous book's per-book state must not leak into the next one
+  const activeBookIdRef = useRef<string | null>(null)
+  // Set while the user manually turned "仅本书" off but the PATCH clearing the
+  // diff is still pending — the diff arriving must not flip the toggle back on
+  const suppressAutoEnableRef = useRef(false)
   useEffect(() => {
-    if (perBookActiveInitializedRef.current) return
-    if (hasViewSettings(perBook)) {
-      perBookActiveInitializedRef.current = true
-      setPerBookActiveState(true)
+    if (activeBookIdRef.current !== id) {
+      activeBookIdRef.current = id
+      suppressAutoEnableRef.current = false
+      setPerBookActiveState(hasViewSettings(perBook))
+      return
     }
-  }, [perBook])
+    if (hasViewSettings(perBook)) {
+      // diff arrived late (bookQuery) or a change created the first override
+      if (!suppressAutoEnableRef.current) setPerBookActiveState(true)
+    } else {
+      suppressAutoEnableRef.current = false
+    }
+  }, [id, perBook])
   const perBookActiveRef = useRef(perBookActive)
   perBookActiveRef.current = perBookActive
   const setPerBookActive = useCallback((active: boolean) => {
     setPerBookActiveState(active)
-    if (!active) saveViewSettings(null)
+    if (active) {
+      suppressAutoEnableRef.current = false
+    } else {
+      suppressAutoEnableRef.current = true
+      saveViewSettings(null)
+    }
   }, [saveViewSettings])
   const updateSetting = useCallback((key: PerBookSettingKey, value: number) => {
     if (perBookActiveRef.current) {
@@ -243,6 +296,11 @@ export default function Reader() {
   mutateProgressRef.current = progressMutation.mutate
 
   const segmentTrackerRef = useRef(createSegmentTracker())
+  // Reading-speed sampling (P2): a sample is taken only while the reading
+  // segment continues (same segmentStart as the previous relocate), throttled
+  // to one per minute so short bursts of fast scrolling don't dominate the rate
+  const lastSegmentStartRef = useRef<number | null>(null)
+  const lastSampleAtRef = useRef(0)
 
   // Session-only jump history (browser semantics); cleared on book switch below
   const jumpHistoryRef = useRef(createJumpHistory())
@@ -292,7 +350,11 @@ export default function Reader() {
 
   const chaptersQuery = useBookChapters(id)
 
-  const contentUrl = id ? `/api/v1/books/${id}/file` : ''
+  // Gated on bookQuery resolution: the reader mounts only once the success
+  // branch's container div exists — mounting earlier grabs the loading-branch
+  // div, which React replaces when bookQuery resolves, leaving the view
+  // appended to a detached subtree (iframe never loads -> first-open hang).
+  const contentUrl = id && bookQuery.data?.data ? `/api/v1/books/${id}/file` : ''
 
   // Latch initialCfi at first resolve: later refetches of ['progress'] (e.g.
   // StatsPanel mounting) must not remount the renderer
@@ -324,8 +386,14 @@ export default function Reader() {
     return () => clearTimeout(timer)
   }, [bookReady, contentUrl])
 
-  // Count only time after the book has actually rendered
-  const { flush: flushReadingTimer } = useReadingTimer(bookReady ? id : undefined)
+  // Count only time after the book has actually rendered; the manual timer
+  // mode disables auto recording entirely (sessions belong to the pill)
+  const readingTimerMode = useUiStore((s) => s.readingTimerMode)
+  const { flush: flushReadingTimer, ping: pingReadingTimer } = useReadingTimer(
+    readingTimerMode === 'auto' ? (bookReady ? id : undefined) : undefined,
+  )
+  // Warm the sidebar stats tab's queries so first open is instant
+  usePrefetchBookReadingStats(readingTimerMode === 'off' ? undefined : id)
 
   // Per-chapter word counts for the info-bar field; must precede useReaderRenderer
   const chapterWordCounts = useMemo(() => {
@@ -349,7 +417,9 @@ export default function Reader() {
     },
     onError: (err) => setLoadError({ message: err.message || '加载失败', kind: 'parse' }),
     onRelocated: (e) => {
+      setChromePinned(false)
       setSelection(null)
+      pingReadingTimer()
       setPercent(e.percent)
       setCurrentCfi(e.cfi)
       currentCfiRef.current = e.cfi
@@ -381,12 +451,25 @@ export default function Reader() {
         setCurrentChapterIndex(e.chapterIndex)
       }
       historyAutoHideRef.current?.trackRelocate(e.movedScreens, e.chapterIndex)
-      const segmentStartFraction = e.fraction !== undefined
+      // Manual timer mode owns the read intervals (one interval per manual
+      // session) — the auto SegmentTracker must not create its own
+      const segmentStartFraction = readingTimerMode === 'auto' && e.fraction !== undefined
         ? trackPosition(segmentTrackerRef.current, e.fraction)
         : undefined
-      scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, percent: e.percent, fraction: e.fraction, segmentStartFraction })
+      const now = Date.now()
+      const continuous = segmentStartFraction !== undefined
+        && segmentStartFraction === lastSegmentStartRef.current
+      lastSegmentStartRef.current = segmentStartFraction ?? null
+      const sample = continuous && now - lastSampleAtRef.current >= RATE_SAMPLE_MIN_INTERVAL_MS && e.fraction !== undefined
+        ? { fraction: e.fraction, at: now }
+        : undefined
+      if (sample) lastSampleAtRef.current = now
+      scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, percent: e.percent, fraction: e.fraction, segmentStartFraction, sample })
     },
-    onSelected: (e) => setSelection(e),
+    onSelected: (e) => {
+      if (e) setChromePinned(false)
+      setSelection(e)
+    },
     onAnnotationClicked: (e) => {
       const current = useReaderState.getState().selection
       // A range can hold both a highlight and ideas; the highlight wins the
@@ -404,6 +487,18 @@ export default function Reader() {
       syncHistoryCaps()
       historyAutoHideRef.current?.reset()
     },
+    onNavigatePending: ({ pending }) => setNavPending(pending),
+    onChromeToggle: () => {
+      // Tap-to-toggle: anything visible (pinned bars or the settings popover)
+      // dismisses on tap; nothing visible reveals the bars
+      if (chromePinned || settingsOpen) {
+        setChromePinned(false)
+        setSettingsOpen(false)
+      } else {
+        setChromePinned(true)
+      }
+    },
+    onUserJump: () => closeSegment(segmentTrackerRef.current),
     onInstantAnnotation: (e) => {
       const lastStyle = getLastHighlightStyle()
       createAnnotation.mutate({
@@ -418,6 +513,14 @@ export default function Reader() {
       if (!e.keepSelection) setSelection(null)
     },
   })
+
+  // Byte-weight section boundaries (foliate's own progress model) for the
+  // progress strip's drag preview — same model the seek lands by, so the
+  // previewed chapter always matches the landing chapter
+  const [sectionFractions, setSectionFractions] = useState<number[] | null>(null)
+  useEffect(() => {
+    setSectionFractions(renderer?.getSectionFractions?.() ?? null)
+  }, [renderer])
 
   // The loading/error/success branches each render their own container div, so
   // the element identity changes when the book query resolves. Effects that
@@ -446,12 +549,22 @@ export default function Reader() {
   useEffect(() => {
     setCurrentChapter(null)
     setCurrentChapterIndex(null)
+    // chapterCount starts empty; the effect below syncs it when chapters arrive
     segmentTrackerRef.current = createSegmentTracker()
+    lastSegmentStartRef.current = null
+    lastSampleAtRef.current = 0
     jumpHistoryRef.current.clear()
     syncHistoryCaps()
     historyAutoHideRef.current?.dispose()
     currentCfiRef.current = null
   }, [id, setCurrentChapter, setCurrentChapterIndex, syncHistoryCaps])
+
+  // The displacement threshold scales with the chapter count (big books cap it
+  // at two chapter widths); update it once the chapters arrive
+  useEffect(() => {
+    const count = chaptersQuery.data?.data?.length
+    if (count) segmentTrackerRef.current.chapterCount = count
+  }, [chaptersQuery.data])
 
   useEffect(() => () => historyAutoHideRef.current?.dispose(), [])
 
@@ -503,15 +616,20 @@ export default function Reader() {
 
   const onHistoryBack = useCallback(() => {
     const target = jumpHistoryRef.current.back(currentCfiRef.current ?? '')
-    // internal: history navigation itself must not re-enter the back stack
-    if (target) void rendererRef.current?.display(target, { internal: true })
+    if (!target) { syncHistoryCaps(); historyAutoHideRef.current?.reset(); return }
+    // internal: history navigation itself must not re-enter the back stack;
+    // showPending: the user did ask for it, so the indicator stays armed
+    closeSegment(segmentTrackerRef.current)
+    void rendererRef.current?.display(target, { internal: true, showPending: true })
     syncHistoryCaps()
     historyAutoHideRef.current?.reset()
   }, [syncHistoryCaps])
 
   const onHistoryForward = useCallback(() => {
     const target = jumpHistoryRef.current.forward(currentCfiRef.current ?? '')
-    if (target) void rendererRef.current?.display(target, { internal: true })
+    if (!target) { syncHistoryCaps(); historyAutoHideRef.current?.reset(); return }
+    closeSegment(segmentTrackerRef.current)
+    void rendererRef.current?.display(target, { internal: true, showPending: true })
     syncHistoryCaps()
     historyAutoHideRef.current?.reset()
   }, [syncHistoryCaps])
@@ -587,22 +705,35 @@ export default function Reader() {
     }
   }, [containerRef, readingMode])
 
+  // Chapter remaining time: measured reading speed when samples exist,
+  // otherwise the fixed 800 chars/min assumption.
+  const rateSamples = progressQuery.data?.data?.rateSamples
+  const rate = useMemo(() => readingRateOf(rateSamples), [rateSamples])
+  const totalChars = useMemo(
+    () => chapterWordCounts?.reduce((sum, n) => sum + (n ?? 0), 0) ?? 0,
+    [chapterWordCounts],
+  )
   const estimatedMinutes = useMemo(() => {
     const chapters = chaptersQuery.data?.data
     if (!chapters?.length || currentChapterIndex == null) return undefined
     const current = chapters[currentChapterIndex]
     if (!current) return undefined
+    let remainingChars: number | undefined
     if (current.wordCount != null) {
-      const remaining = chapterFraction != null
+      remainingChars = chapterFraction != null
         ? current.wordCount * (1 - chapterFraction)
         : current.wordCount
-      return Math.ceil(remaining / 800)
+    } else if (currentOffset != null && current.endOffset > current.startOffset) {
+      // Legacy fallback: offset arithmetic only works for txt chapters
+      remainingChars = Math.max(0, current.endOffset - currentOffset)
     }
-    // Legacy fallback: offset arithmetic only works for txt chapters, whose
-    // offsets are real positions; epub offsets are all 0.
-    if (currentOffset == null || current.endOffset <= current.startOffset) return undefined
-    return Math.ceil(Math.max(0, current.endOffset - currentOffset) / 800)
-  }, [currentChapterIndex, chapterFraction, currentOffset, chaptersQuery.data])
+    if (remainingChars == null) return undefined
+    if (rate != null && rate > 0 && totalChars > 0) {
+      // measured rate is book-fraction per ms; convert remaining chars to it
+      return Math.max(1, Math.ceil((remainingChars / totalChars) / rate / 60_000))
+    }
+    return Math.max(1, Math.ceil(remainingChars / 800))
+  }, [currentChapterIndex, chapterFraction, currentOffset, chaptersQuery.data, rate, totalChars])
 
   const onToggleSettings = useCallback(() => {
     setSettingsOpen((v) => !v)
@@ -660,6 +791,15 @@ export default function Reader() {
         } else {
           void rendererRef.current?.next()
         }
+      } else if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'ArrowUp' || e.key === 'PageUp') {
+        // scroll mode: one screen per key (0.92 viewport overlap, same as the
+        // bottom-bar buttons); page mode: PageUp/Down turn pages like the
+        // in-iframe handler, plain arrows stay unbound. Handled here so keys
+        // keep working after a keyboard chapter switch drops focus to body.
+        if (readingMode === 'page' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return
+        e.preventDefault()
+        const dir = (e.key === 'ArrowDown' || e.key === 'PageDown') ? 1 : -1
+        void rendererRef.current?.scrollByPages(dir)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -721,6 +861,7 @@ export default function Reader() {
               <ReaderHeader
                 title={currentChapter || book.title}
                 visible
+                pinned={chromePinned}
                 settingsOpen={settingsOpen}
                 estimatedMinutes={estimatedMinutes}
                 onAddBookmark={onAddBookmark}
@@ -737,6 +878,15 @@ export default function Reader() {
                 readingMode === 'page' ? 'overflow-hidden' : 'overflow-y-auto',
               )}
             />
+            {navPending && (
+              <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+                <div className="rounded-full bg-black/10 p-3 shadow-sm backdrop-blur-sm dark:bg-white/10">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="animate-spin text-[var(--bd-read-sub)]">
+                    <path d="M21 12a9 9 0 11-6.219-8.56" />
+                  </svg>
+                </div>
+              </div>
+            )}
             {!bookReady && (
               <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 text-sm text-[var(--bd-read-sub)]">
                 {loadError ? (
@@ -783,26 +933,64 @@ export default function Reader() {
                 )}
               </div>
             )}
-            {/* Bottom hover zone: hot strip + footer share the same group. */}
-            <div className="group peer/strip absolute inset-x-0 bottom-0 z-40 pointer-events-none">
-              <div className="absolute inset-x-0 bottom-0 h-12 pointer-events-auto" />
-              <ProgressStrip
-                percent={percent}
-                pageInfo={pageInfo ?? undefined}
-                visible
-                onPrevChapter={onPrevChapter}
-                onNextChapter={onNextChapter}
-                onPageUp={onPageUp}
-                onPageDown={onPageDown}
-                onSeek={onSeek}
-              />
+            {/* Bottom chrome: hot strip (carved out around the corners) summons
+                the footer; corner zones sustain it and carry the capsules, which
+                lift together with the footer via zone translate. Summon handlers
+                sit on the strip+footer wrapper so hovering footer controls (own
+                pointer targets) still counts as dwelling in the summon region. */}
+            <div className="absolute inset-x-0 bottom-0 z-40 pointer-events-none">
+              <div
+                onPointerEnter={() => setFooterSummon(true)}
+                onPointerLeave={() => setFooterSummon(false)}
+              >
+                <div
+                  className={cn(
+                    'absolute bottom-0 right-16 h-12 pointer-events-auto',
+                    (historyCaps.canBack || historyCaps.canForward) ? 'left-28' : 'left-0',
+                  )}
+                />
+                <ProgressStrip
+                  percent={percent}
+                  pageInfo={pageInfo ?? undefined}
+                  visible={footerVisible}
+                  pinned={chromePinned}
+                  chapters={chaptersQuery.data?.data}
+                  sectionFractions={sectionFractions}
+                  onPrevChapter={onPrevChapter}
+                  onNextChapter={onNextChapter}
+                  onPageUp={onPageUp}
+                  onPageDown={onPageDown}
+                  onSeek={onSeek}
+                />
+              </div>
+              {(historyCaps.canBack || historyCaps.canForward) && (
+                <div
+                  className={cn(
+                    'absolute bottom-0 left-0 h-24 w-28 transition-transform duration-300',
+                    footerVisible ? '-translate-y-10 pointer-events-auto' : 'pointer-events-none',
+                  )}
+                  onPointerEnter={() => setCornerDwell(true)}
+                  onPointerLeave={() => setCornerDwell(false)}
+                >
+                  <HistoryCapsule
+                    canBack={historyCaps.canBack}
+                    canForward={historyCaps.canForward}
+                    onBack={onHistoryBack}
+                    onForward={onHistoryForward}
+                  />
+                </div>
+              )}
+              <div
+                className={cn(
+                  'absolute bottom-0 right-0 h-24 w-16 transition-transform duration-300',
+                  footerVisible ? '-translate-y-10 pointer-events-auto' : 'pointer-events-none',
+                )}
+                onPointerEnter={() => setCornerDwell(true)}
+                onPointerLeave={() => setCornerDwell(false)}
+              >
+                {readingTimerMode === 'manual' && <TimerPill bookId={id} />}
+              </div>
             </div>
-            <HistoryCapsule
-              canBack={historyCaps.canBack}
-              canForward={historyCaps.canForward}
-              onBack={onHistoryBack}
-              onForward={onHistoryForward}
-            />
           </div>
         </div>
         <SelectionToolbar bookId={id} />
@@ -825,6 +1013,7 @@ const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen }: { 
   const setToolbarLocked = useUiStore((s) => s.setToolbarLocked)
   const sidebarWidth = useUiStore((s) => s.sidebarWidth)
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth)
+  const statsDisabled = useUiStore((s) => s.readingTimerMode) === 'off'
 
   const SIDEBAR_MIN = 200
   const SIDEBAR_MAX = 500
@@ -937,6 +1126,7 @@ const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen }: { 
           activeNavTab={activeNavTab}
           sidebarOpen={sidebarOpen}
           locked={locked}
+          statsDisabled={statsDisabled}
           onNavTab={handleNavTab}
           onToggleLock={() => setLocked(!locked)}
         />
@@ -967,6 +1157,7 @@ const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen }: { 
             bookId={bookId}
             open={sidebarOpen}
             locked={locked}
+            statsDisabled={statsDisabled}
             onClose={handleClosePanel}
           />
         </div>

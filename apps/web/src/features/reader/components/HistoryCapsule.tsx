@@ -14,7 +14,7 @@ export default function HistoryCapsule({ canBack, canForward, onBack, onForward 
   const _ = useTranslation()
   if (!canBack && !canForward) return null
   return (
-    <div className="absolute bottom-3 left-3 z-[60] flex h-11 items-center gap-0.5 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-1.5 shadow-xl transition-all duration-300 peer-hover/strip:bottom-[3.25rem]">
+    <div className="pointer-events-auto absolute bottom-3 left-3 z-[60] flex h-11 items-center gap-0.5 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-1.5 shadow-xl">
       {canBack && (
         <button onClick={onBack} title={_('reader.historyBack')} className={historyBtn}>
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

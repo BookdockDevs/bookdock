@@ -25,13 +25,70 @@ export const readingProgressUpdateSchema = z.object({
   percent: z.number().min(0).max(100),
   fraction: z.number().min(0).max(1).optional(),
   segmentStartFraction: z.number().min(0).max(1).optional(),
+  sample: z.object({
+    fraction: z.number().min(0).max(1),
+    at: z.number().int().positive(),
+  }).optional(),
 })
 
 export const readingRecordCreateSchema = z.object({
   bookId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  durationSeconds: z.number().int().min(1).max(4 * 3600),
+  durationSeconds: z.number().int().min(1).max(24 * 3600),
+  // Explicit null = retroactive manual entry without a known start time
+  // (hour-of-day stats skip it); omitted = server receive time
+  startedAt: z.number().int().positive().nullish(),
+  // Manual-mode sessions (manual reading timer) only: exact end time and the
+  // progress interval boundaries in every display unit — cfi anchor, fraction
+  // (0-1; percent is derived) and chapter index; auto-mode blocks leave them
+  // unset
+  endedAt: z.number().int().positive().optional(),
+  startCfi: z.string().min(1).optional(),
+  endCfi: z.string().min(1).optional(),
+  startFraction: z.number().min(0).max(1).optional(),
+  endFraction: z.number().min(0).max(1).optional(),
+  startChapterIndex: z.number().int().min(0).optional(),
+  endChapterIndex: z.number().int().min(0).optional(),
+}).refine((v) => v.startedAt !== null || v.endedAt !== undefined, {
+  // A retroactive entry without any time must still be an ended (editable,
+  // listed) manual session, not an immutable auto-mode block
+  message: 'endedAt is required when startedAt is null',
+  path: ['endedAt'],
+}).refine((v) => v.startFraction === undefined || v.endFraction === undefined || v.endFraction >= v.startFraction, {
+  message: 'endFraction must be >= startFraction',
+  path: ['endFraction'],
+})
+
+export const readingSessionUpdateSchema = z.object({
+  durationSeconds: z.number().int().min(1).max(24 * 3600).optional(),
   startedAt: z.number().int().positive().optional(),
+  endedAt: z.number().int().positive().optional(),
+  // Client-local calendar day of the (possibly new) session start; required
+  // when startedAt changes so the daily aggregate is re-attributed correctly
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  startFraction: z.number().min(0).max(1).optional(),
+  endFraction: z.number().min(0).max(1).optional(),
+  startChapterIndex: z.number().int().min(0).optional(),
+  endChapterIndex: z.number().int().min(0).optional(),
+  startCfi: z.string().min(1).optional(),
+  endCfi: z.string().min(1).optional(),
+}).refine((v) => v.startedAt === undefined || v.endedAt === undefined || v.endedAt >= v.startedAt, {
+  message: 'endedAt must be after startedAt',
+  path: ['endedAt'],
+}).refine((v) => v.startFraction === undefined || v.endFraction === undefined || v.endFraction >= v.startFraction, {
+  message: 'endFraction must be >= startFraction',
+  path: ['endFraction'],
+})
+
+export const readingSessionListSchema = z.object({
+  bookId: z.string().min(1),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+})
+
+export const readingDetailListSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
 })
 
 export const readingRecordRangeSchema = z.object({
@@ -90,6 +147,8 @@ export const settingsUpdateSchema = z.object({
   footerCenter: marginalFieldSchema.optional(),
   footerRight: marginalFieldSchema.optional(),
   marginalFontSize: z.number().min(0).max(24).optional(),
+  readingTimerMode: z.enum(['auto', 'manual', 'off']).optional(),
+  manualTimerGraceMinutes: z.union([z.literal(1), z.literal(5), z.literal(10), z.literal(30)]).optional(),
   trash: z.object({
     autoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]),
   }).optional(),

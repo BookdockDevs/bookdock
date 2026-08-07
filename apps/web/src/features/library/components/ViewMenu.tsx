@@ -24,7 +24,7 @@ const SORT_FIELDS: { field: string; defaultOrder: 'asc' | 'desc'; labelKey: stri
   { field: 'author', defaultOrder: 'asc', labelKey: 'library.sortBy.author' },
   { field: 'size', defaultOrder: 'desc', labelKey: 'library.sortBy.size' },
   { field: 'progress', defaultOrder: 'desc', labelKey: 'library.sortBy.progress' },
-  { field: 'updatedAt', defaultOrder: 'desc', labelKey: 'library.sortBy.lastRead' },
+  { field: 'lastReadAt', defaultOrder: 'desc', labelKey: 'library.sortBy.lastRead' },
 ]
 
 const menuDivider = <div className="mx-2 my-1.5 border-t border-stone-100 dark:border-stone-800" />
@@ -50,6 +50,9 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
   const setCoverFit = useUiStore((s) => s.setCoverFit)
   const setGridColumns = useUiStore((s) => s.setGridColumns)
   const setShowRecentlyRead = useUiStore((s) => s.setShowRecentlyRead)
+  const setSortBy = useUiStore((s) => s.setSortBy)
+  const setSortOrder = useUiStore((s) => s.setSortOrder)
+  const setView = useUiStore((s) => s.setView)
 
   useEffect(() => {
     if (!open) return
@@ -64,9 +67,13 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
 
   function handleSort(field: string, defaultOrder: 'asc' | 'desc') {
     if (sortBy === field) {
-      // Toggle direction
-      navSearch({ sortOrder: sortOrder === 'asc' ? 'desc' : 'asc' })
+      // Toggle direction; both the URL and the persisted preference update
+      const next = sortOrder === 'asc' ? 'desc' : 'asc'
+      setSortOrder(next)
+      navSearch({ sortOrder: next })
     } else {
+      setSortBy(field)
+      setSortOrder(defaultOrder)
       navSearch({ sortBy: field, sortOrder: defaultOrder })
     }
   }
@@ -122,7 +129,10 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
               <button
                 key={opt.value}
                 type="button"
-                onClick={() => navSearch({ view: opt.value })}
+                onClick={() => {
+                  setView(opt.value)
+                  navSearch({ view: opt.value })
+                }}
                 className={cn(
                   'flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md text-xs transition-colors',
                   view === opt.value

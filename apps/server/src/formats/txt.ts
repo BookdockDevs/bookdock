@@ -62,8 +62,9 @@ function isContinuationEnd(line: string): boolean {
  * - Separate paragraphs with a blank line (\n\n).
  */
 export function normalizeText(text: string): string {
-  let normalized = text.replace(/^\uFEFF/, '')
-  normalized = normalized.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  // single regex pass (B5): the previous three .replace() chains each copied
+  // the whole book — one pass keeps a single transient copy
+  const normalized = text.replace(/^\uFEFF|\r\n|\r/g, (m) => (m === '\uFEFF' ? '' : '\n'))
 
   const lines = normalized.split('\n')
   const paragraphs: string[] = []
@@ -103,7 +104,15 @@ export function normalizeText(text: string): string {
 }
 
 export function detectTxtChapters(text: string): TxtChapter[] {
-  const normalized = normalizeText(text)
+  return scanTxtChapters(normalizeText(text))
+}
+
+/**
+ * Chapter detection on already-normalized text (B5): the upload pipeline
+ * normalizes once and reuses it here — the public detectTxtChapters keeps
+ * normalizing internally for callers with raw input (tests, TxtParser).
+ */
+export function scanTxtChapters(normalized: string): TxtChapter[] {
   const titles: { offset: number; title: string; level: number }[] = []
   let lineStart = 0
 

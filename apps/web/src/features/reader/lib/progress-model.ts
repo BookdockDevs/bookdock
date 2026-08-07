@@ -4,6 +4,42 @@ import type { Chapter } from '@bookdock/shared'
 // book-level page counter treats 800 characters as one page.
 export const CHARS_PER_PAGE = 800
 
+// Reading-speed sampling (P2): the reader stores a sliding window of
+// {fraction, at} samples taken from continuous reading stretches; the rate is
+// derived client-side (see readingRateOf).
+export const RATE_SAMPLE_MIN_INTERVAL_MS = 60_000
+export const RATE_SAMPLE_PAIR_MIN_MS = 30_000
+export const RATE_SAMPLE_PAIR_MAX_MS = 10 * 60_000
+export const RATE_SAMPLE_MIN_PAIRS = 5
+
+export interface RateSample {
+  /** Book-wide position 0-1 at sample time */
+  fraction: number
+  /** Unix ms of the sample */
+  at: number
+}
+
+// Reading speed (fraction per ms) from the sample window: pairwise deltas of
+// adjacent samples, dropping pairs that span idle gaps (Δt too large — the
+// window endpoints would otherwise include the idle stretch) or noise (Δt too
+// small, backward movement), then the median — robust to fling bursts. Returns
+// null until enough valid pairs accumulated, so callers fall back to a fixed
+// chars-per-minute assumption.
+export function readingRateOf(samples: RateSample[] | undefined): number | null {
+  if (!samples || samples.length < RATE_SAMPLE_MIN_PAIRS + 1) return null
+  const rates: number[] = []
+  for (let i = 1; i < samples.length; i++) {
+    const dt = samples[i].at - samples[i - 1].at
+    if (dt < RATE_SAMPLE_PAIR_MIN_MS || dt > RATE_SAMPLE_PAIR_MAX_MS) continue
+    const df = samples[i].fraction - samples[i - 1].fraction
+    if (df <= 0) continue
+    rates.push(df / dt)
+  }
+  if (rates.length < RATE_SAMPLE_MIN_PAIRS) return null
+  rates.sort((a, b) => a - b)
+  return rates[Math.floor(rates.length / 2)]
+}
+
 export interface ChapterPercentRange {
   index: number
   title: string
@@ -38,6 +74,31 @@ export function chapterAtPercent(ranges: ChapterPercentRange[] | null, percent: 
   }
   // percent == 100 lands on the last chapter
   return ranges[ranges.length - 1]
+}
+
+// Cumulative byte-fraction boundaries of the book's sections, mirroring
+// foliate's SectionProgress sizes (`linear != 'no' && size > 0 ? size : 0`).
+// Seek, relocate and progress restore all speak this byte model, so the drag
+// preview must use it too — a word-count model drifts by up to ~4 chapters
+// mid-book (observed on a 1530-chapter book) and shows a different chapter
+// than the one the seek actually lands on.
+export function sectionFractionBoundaries(sizes: (number | undefined)[]): number[] | null {
+  if (!sizes.length) return null
+  const total = sizes.reduce<number>((sum, s) => sum + (s ?? 0), 0)
+  if (total <= 0) return null
+  let acc = 0
+  return sizes.map((s) => (acc += s ?? 0) / total)
+}
+
+// Chapter index at a book percent (0-100) under the byte model — mirrors
+// foliate's getSection landing semantics: fraction + epsilon, first boundary
+// strictly greater, 100% falls on the last chapter; zero-size sections are
+// skipped naturally by their duplicate boundaries.
+export function chapterIndexAtFraction(boundaries: number[] | null, percent: number): number | null {
+  if (!boundaries || boundaries.length === 0) return null
+  const frac = Math.max(0, Math.min(100, percent)) / 100
+  const idx = boundaries.findIndex((b) => b > frac + 1e-9)
+  return idx === -1 ? boundaries.length - 1 : idx
 }
 
 export function totalPagesOf(wordCount: number | undefined): number {

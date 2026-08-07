@@ -51,6 +51,22 @@ export interface RendererEvents {
    * back/forward) opts out via `display(target, { internal: true })`.
    */
   jumpConfirmed: (e: { cfi: string }) => void
+  /**
+   * A user-initiated navigation has been slow enough to show the chapter
+   * loading indicator (true), or the latest navigation has settled (false).
+   */
+  navigatePending: (e: { pending: boolean }) => void
+  /**
+   * Middle click-area zone tapped (tap-to-reveal the top/bottom chrome; the
+   * click-area setting only governs page turning, so this fires in every mode).
+   */
+  chromeToggle: () => void
+  /**
+   * An explicit user navigation is about to happen (TOC click, progress seek,
+   * search/bookmark jump, scroll-mode chapter switch) — the reader must close
+   * its reading segment so the jump stretch never counts as read coverage.
+   */
+  userJump: () => void
 }
 
 export interface TocItem {
@@ -61,7 +77,7 @@ export interface TocItem {
 
 export interface BookReader {
   mount(container: HTMLElement): Promise<void>
-  display(target?: string, opts?: { internal?: boolean }): Promise<void>
+  display(target?: string, opts?: { internal?: boolean; showPending?: boolean }): Promise<void>
   next(): Promise<void>
   prev(): Promise<void>
   applyReadingMode(mode: ReadingMode): void
@@ -80,6 +96,12 @@ export interface BookReader {
   applyMarginals(config: MarginalConfig): void
   /** Per-chapter word counts, indexed by chapter (for the chapterWordCount field) */
   setChapterWordCounts(counts: (number | undefined)[]): void
+  /**
+   * Cumulative byte-fraction boundaries of the book's sections (foliate's own
+   * progress model) — the drag preview must derive chapters from these so it
+   * matches where the seek actually lands.
+   */
+  getSectionFractions(): number[] | null
   scrollToPercent(percent: number): Promise<void>
   scrollByPages(delta: number): Promise<void>
   /**

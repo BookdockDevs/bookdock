@@ -1,18 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
 import { useUiStore, getEffectiveTheme } from '../stores/ui.store'
 import { resolveReadingTheme } from '../lib/reading-theme'
+import { queryClient } from '../lib/query-client'
 import '@/i18n/i18n'
 import { Toast } from '../components/ui/Toast'
 import { router } from '../router'
 import { SettingsSync } from './SettingsSync'
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { staleTime: Infinity, refetchOnWindowFocus: false },
-  },
-})
 
 export default function AppProviders({ children }: { children?: ReactNode }) {
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>(() => getEffectiveTheme())
@@ -27,6 +22,15 @@ export default function AppProviders({ children }: { children?: ReactNode }) {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', effectiveTheme === 'dark')
   }, [effectiveTheme])
+
+  // Preload the foliate engine (reader-entry.js + its module graph) at app
+  // boot so the reader's first open doesn't pay the download+eval on the
+  // critical path — loadFoliateScript finds the global already set and skips
+  // the dynamic import entirely. Same runtime-import pattern as FoliateReader.
+  useEffect(() => {
+    const dynamicImport = new Function('url', 'return import(url)') as (url: string) => Promise<unknown>
+    void dynamicImport('/foliate-js/reader-entry.js').catch(() => undefined)
+  }, [])
 
   return (
     <QueryClientProvider client={queryClient}>

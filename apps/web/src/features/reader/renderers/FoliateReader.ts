@@ -24,6 +24,8 @@ import type {
 } from '../types'
 import { FONT_OPTIONS } from '../types'
 import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
+import { NavigationPending } from '../lib/navigation-pending'
+import { sectionFractionBoundaries } from '../lib/progress-model'
 import {
   findMatches,
   getChapterText,
@@ -49,6 +51,11 @@ const SEARCH_ANNOTATION_PREFIX = 'foliate-search:'
 // Click-to-turn zone config (F3). Kept pure for unit tests.
 export type ClickAreaMode = 'standard' | 'fullscreen' | 'swap' | 'none'
 
+// Middle zone never turns pages: it toggles the top/bottom chrome (tap-to-
+// reveal, the mobile way to show the bars — no hover there). It stays active
+// in 'none' mode because the click-area setting governs page turning only.
+export type ClickDirection = 'prev' | 'next' | 'toggle' | null
+
 // Maps a viewport-relative click x to a page-turn direction. `containerLeft`/
 // `containerWidth` are the reader viewport bounds (click-view coordinates are
 // window-relative). 'none' disables click-to-turn entirely.
@@ -57,14 +64,40 @@ export function resolveClickDirection(
   containerLeft: number,
   containerWidth: number,
   mode: ClickAreaMode,
-): 'prev' | 'next' | null {
-  if (mode === 'none' || containerWidth <= 0) return null
+): ClickDirection {
+  if (containerWidth <= 0) return null
   const frac = (clientX - containerLeft) / containerWidth
   if (frac < 0 || frac > 1) return null
+  if (mode === 'none') return frac < 1 / 3 || frac > 2 / 3 ? null : 'toggle'
   if (frac < 1 / 3) return mode === 'fullscreen' ? 'next' : (mode === 'swap' ? 'next' : 'prev')
   if (frac > 2 / 3) return mode === 'fullscreen' ? 'next' : (mode === 'swap' ? 'prev' : 'next')
   // middle zone never turns pages (menu/neutral)
-  return null
+  return 'toggle'
+}
+
+// True when a page-mode turn from the current page will cross into the
+// adjacent section — mirroring the paginator's own math (`#scrollNext`:
+// `page + 1 >= pages - 1`, `#scrollPrev`: `page - 1 <= 0`). The paginator's
+// `atEnd`/`atStart` are NOT usable here: they mean book end, not chapter end.
+// Unknown page geometry defaults to arming the indicator.
+export function turnsCrossChapter(dir: 1 | -1, page: number | undefined, pages: number | undefined): boolean {
+  if (page === undefined || pages === undefined) return true
+  return dir === 1 ? page >= pages - 2 : page <= 1
+}
+
+// Whether an adjacent-chapter turn deserves the loading indicator: adjacent
+// sections are served from the text-prefetch memo (warm) in the normal case,
+// so arming the 200ms anti-flicker window would flash the spinner on every
+// chapter crossing. Only cold targets (memo miss — prefetch debounce skipped
+// the turn, LRU eviction) arm it; missing/non-linear targets never load.
+export function shouldArmPending(
+  dir: 1 | -1,
+  book: any,
+  currentSectionIndex: number,
+): boolean {
+  const target = book?.sections?.[currentSectionIndex + dir]
+  if (!target || target.linear === 'no') return false
+  return !book?.loadSectionText?.has?.(target.id)
 }
 
 // Module-level parse cache: fetch + unzip + EPUB.init is the dominant cost of
@@ -73,7 +106,9 @@ export function resolveClickDirection(
 // re-entering the same book). Keyed by content URL. Rejected promises are
 // evicted so a transient failure is retried, and the map is capped because an
 // entry may retain the whole book blob via loader closures (fallback path).
-const PARSE_CACHE_MAX = 3
+// Sized for typical home libraries (5+ books) so session-wide book hopping
+// never re-pays the open cost.
+const PARSE_CACHE_MAX = 6
 const parseCache = new Map<string, Promise<any>>()
 
 // Books at or below this size are downloaded whole up front: foliate's
@@ -85,6 +120,17 @@ const parseCache = new Map<string, Promise<any>>()
 export const FULL_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024
 
 export type ZipLoadStrategy = 'full' | 'range'
+
+// Search results per (book, query, mode): re-searching the same term in a
+// session skips the per-chapter matching pass. Keyed by content URL so it
+// survives leaving and re-entering the book (parseCache lifecycle), capped by
+// LRU — stale entries for evicted books only waste a slot.
+const SEARCH_CACHE_MAX = 20
+interface SearchCacheEntry {
+  results: SearchResult[]
+  matches: Map<number, SearchMatch[]>
+}
+const searchCache = new Map<string, SearchCacheEntry>()
 
 // Kept pure for unit tests: a known size at or under the threshold downloads
 // whole; an unknown size (HEAD missing/failed) keeps the Range-first default.
@@ -157,11 +203,15 @@ async function openZipFromWholeFile(url: string, foliate: any) {
 // it is GC'd when the parse cache evicts the book.
 const TEXT_MEMO_MAX = 20
 
+export type MemoizedLoadText = ((name: string) => Promise<string | null>) & {
+  has: (name: string) => boolean
+}
+
 export function memoizeLoadText(
   loadText: (name: string) => Promise<string | null> | string | null,
-): (name: string) => Promise<string | null> {
+): MemoizedLoadText {
   const memo = new Map<string, Promise<string | null>>()
-  return (name: string) => {
+  const memoized = (name: string) => {
     const cached = memo.get(name)
     if (cached) {
       // refresh recency
@@ -182,6 +232,11 @@ export function memoizeLoadText(
     })
     return promise
   }
+  // Warmth query for the loading indicator: a memo entry means the text was
+  // requested (prefetch counts) and hasn't failed — adjacent chapters are
+  // normally warm, so their turn doesn't need the spinner.
+  memoized.has = (name: string) => memo.has(name)
+  return memoized
 }
 
 // Attached once per book (the parse cache hands the same book object to
@@ -354,6 +409,11 @@ export class FoliateReader implements BookReader {
   // Departure point of an in-flight user jump, confirmed by handleRelocate
   // once the position actually changed
   private pendingJumpFrom: string | null = null
+  // Chapter-switch loading indicator: shows only for navigations that outlive
+  // the anti-flicker window; the newest navigation always wins
+  private navigationPending = new NavigationPending((pending) => {
+    this.emit('navigatePending', { pending })
+  })
   private lastRange: Range | null = null
   private conversion: ChineseConversion = conversionMode
   private continuousScroll: ContinuousScroll = 'off'
@@ -412,6 +472,8 @@ export class FoliateReader implements BookReader {
     } else if (direction === 'next') {
       if (this.readingMode === 'page') void this.next()
       else void this.scrollByPages(1)
+    } else if (direction === 'toggle') {
+      this.emit('chromeToggle')
     }
   }
 
@@ -435,6 +497,16 @@ export class FoliateReader implements BookReader {
   setChapterWordCounts(counts: (number | undefined)[]) {
     this.chapterWordCounts = counts
     this.updateMarginals()
+  }
+
+  // Byte-weight section boundaries mirroring foliate's SectionProgress sizes
+  // (`linear != 'no' && size > 0`), i.e. the exact model the seek and relocate
+  // use — the progress strip's drag preview must be consistent with it.
+  getSectionFractions(): number[] | null {
+    if (!this.book?.sections) return null
+    return sectionFractionBoundaries(
+      this.book.sections.map((s: any) => (s.linear !== 'no' && s.size > 0 ? s.size : 0)),
+    )
   }
 
   private updateMarginals() {
@@ -483,11 +555,17 @@ export class FoliateReader implements BookReader {
 
   async mount(container: HTMLElement, initialTarget?: string) {
     this.container = container
+    // [bd] mount timing: the first open pays the one-time costs below (module
+    // load, zip open, parse); re-entries hit the parse cache and only rebuild
+    // the view. Summary line below isolates a slow open.
+    const tMount0 = performance.now()
     try {
       const foliate = await this.loadFoliateScript()
       this.foliateOverlayer = foliate.Overlayer
+      const tMount1 = performance.now()
 
       const epub = await getParsedBook(this.url, foliate)
+      const tMount2 = performance.now()
       // StrictMode mounts twice: the first instance is destroyed while its
       // async mount is still in flight — bail out instead of becoming a
       // zombie view stacked on top of the surviving one
@@ -559,6 +637,12 @@ export class FoliateReader implements BookReader {
         // Ensure first section is visible after applyAllSettings re-render
         try { await this.view?.renderer?.goTo?.({ index: 0 }) } catch {}
       }
+      const tMount3 = performance.now()
+      console.debug(
+        `[bd] reader mount: foliate ${(tMount1 - tMount0).toFixed(0)}ms, ` +
+        `parse ${(tMount2 - tMount1).toFixed(0)}ms, view+display ${(tMount3 - tMount2).toFixed(0)}ms, ` +
+        `total ${(tMount3 - tMount0).toFixed(0)}ms`,
+      )
       this.syncAnnotations()
       this.scheduleMarginalTick()
       this.emit('rendered')
@@ -571,16 +655,19 @@ export class FoliateReader implements BookReader {
 
   private async loadFoliateScript(): Promise<any> {
     if (typeof window === 'undefined') throw new Error('FoliateReader requires a browser environment')
-    const existing = (window as any).FoliateReader
-    if (existing) return existing
-
-    // foliate-js expects these from the host app (desktop Foliate)
+    // foliate-js expects these from the host app (desktop Foliate); must be set
+    // even when the module was already preloaded at app boot — the early return
+    // below would otherwise skip them and every doc click would throw at
+    // view.js:298 before the click-view event is dispatched (click-to-turn and
+    // the middle-zone chrome toggle would be dead)
     if (typeof (window as any).isFootNoteOpen !== 'function') {
       (window as any).isFootNoteOpen = () => false
     }
     if (typeof (window as any).closeFootNote !== 'function') {
       (window as any).closeFootNote = () => {}
     }
+    const existing = (window as any).FoliateReader
+    if (existing) return existing
 
     try {
       const dynamicImport = new Function('url', 'return import(url)') as (url: string) => Promise<Record<string, unknown>>
@@ -697,13 +784,34 @@ export class FoliateReader implements BookReader {
     }, 300)
   }
 
-  async display(target?: string, opts?: { internal?: boolean }) {
+  async display(target?: string, opts?: { internal?: boolean; showPending?: boolean }) {
+    if (!this.view) return
+    // History back/forward is user-initiated but marks itself internal so it
+    // doesn't re-enter the back stack; showPending re-arms the indicator.
+    if (!opts?.internal || opts?.showPending) {
+      const gen = this.navigationPending.begin()
+      try {
+        await this.navigateTo(target, opts)
+      } finally {
+        this.navigationPending.end(gen)
+      }
+      return
+    }
+    return this.navigateTo(target, opts)
+  }
+
+  private async navigateTo(target?: string, opts?: { internal?: boolean; showPending?: boolean }) {
     if (!this.view) return
     // Only explicit caller-driven navigation counts as a jump; internal
     // re-displays (initial open, history back/forward) pass `internal: true`.
     // The entry is not pushed yet — handleRelocate confirms it once the
     // position actually changed.
-    if (!opts?.internal) this.pendingJumpFrom = this.lastCfi ?? ''
+    if (!opts?.internal) {
+      this.pendingJumpFrom = this.lastCfi ?? ''
+      // explicit jump: close the reading segment so the jump stretch never
+      // enters the read-union (history back/forward closes in Reader itself)
+      this.emit('userJump')
+    }
     const renderer = this.view.renderer
     if (!target) {
       if (renderer) return renderer.goTo({ index: 0 })
@@ -769,19 +877,55 @@ export class FoliateReader implements BookReader {
     return this.view.goTo(target)
   }
 
+  // Page turns only arm the indicator when they will cross a chapter
+  // boundary — an animated intra-chapter turn alone takes >200ms, which would
+  // flash the spinner on every page flip. Crossing turns arm it only when the
+  // adjacent chapter's text is cold (prefetch miss) — warm turns load too
+  // fast to need the spinner (see shouldArmPending).
   async next() {
-    if (this.readingMode === 'page') {
-      await this.view?.next()
-    } else {
-      await this.view?.renderer?.nextSection()
+    if (!this.view) return
+    if (this.readingMode === 'page'
+      && !turnsCrossChapter(1, this.view.renderer?.page, this.view.renderer?.pages)) {
+      await this.view.next()
+      return
+    }
+    // scroll-mode chapter switch skips the current chapter's tail — an explicit
+    // jump, so close the reading segment; a page-mode turn merely crossing the
+    // boundary is continuous reading (that page was read) and must not close
+    if (this.readingMode === 'scroll') this.emit('userJump')
+    const pending = shouldArmPending(1, this.book, this.currentSectionIndex)
+      ? this.navigationPending.begin()
+      : null
+    try {
+      if (this.readingMode === 'page') {
+        await this.view?.next()
+      } else {
+        await this.view?.renderer?.nextSection()
+      }
+    } finally {
+      if (pending !== null) this.navigationPending.end(pending)
     }
   }
 
   async prev() {
-    if (this.readingMode === 'page') {
-      await this.view?.prev()
-    } else {
-      await this.view?.renderer?.prevSection()
+    if (!this.view) return
+    if (this.readingMode === 'page'
+      && !turnsCrossChapter(-1, this.view.renderer?.page, this.view.renderer?.pages)) {
+      await this.view.prev()
+      return
+    }
+    if (this.readingMode === 'scroll') this.emit('userJump')
+    const pending = shouldArmPending(-1, this.book, this.currentSectionIndex)
+      ? this.navigationPending.begin()
+      : null
+    try {
+      if (this.readingMode === 'page') {
+        await this.view?.prev()
+      } else {
+        await this.view?.renderer?.prevSection()
+      }
+    } finally {
+      if (pending !== null) this.navigationPending.end(pending)
     }
   }
 
@@ -931,7 +1075,14 @@ export class FoliateReader implements BookReader {
     // The progress-strip drag is a user jump — record the position being left,
     // confirmed by handleRelocate once the position actually changed
     this.pendingJumpFrom = this.lastCfi ?? ''
-    await this.view?.goToFraction(Math.max(0, Math.min(1, percent / 100)))
+    // …and close the reading segment so the seek stretch never joins the union
+    this.emit('userJump')
+    const gen = this.navigationPending.begin()
+    try {
+      await this.view?.goToFraction(Math.max(0, Math.min(1, percent / 100)))
+    } finally {
+      this.navigationPending.end(gen)
+    }
   }
 
   async scrollByPages(delta: number) {
@@ -1120,6 +1271,26 @@ export class FoliateReader implements BookReader {
     const gen = ++this.searchGen
     this.clearSearchHighlights()
 
+    // Session cache hit: replay the results and restore highlight state for
+    // the currently rendered sections (chapter-scoped searches are instant and
+    // their key would need the section index, so they're never cached)
+    const cacheable = opts?.scope !== 'chapter'
+    const cacheKey = cacheable
+      ? `${this.url}|${opts?.scope ?? 'book'}|${opts?.mode ?? 'contains'}|${opts?.matchCase ?? false}|${q}`
+      : ''
+    const cached = cacheable ? searchCache.get(cacheKey) : undefined
+    if (cached) {
+      // refresh recency
+      searchCache.delete(cacheKey)
+      searchCache.set(cacheKey, cached)
+      for (const [index, matches] of cached.matches) {
+        this.searchMatchOffsets.set(index, matches)
+        this.drawSearchHighlights(index, matches)
+      }
+      if (onProgress) onProgress(cached.results, 1)
+      return cached.results
+    }
+
     const sections: any[] = this.book.sections ?? []
     const indices: number[] = []
     if (opts?.scope === 'chapter') {
@@ -1172,7 +1343,21 @@ export class FoliateReader implements BookReader {
       progress = (done + 1) / indices.length
       emit()
     }
-    if (!stale()) emit(true)
+    if (!stale()) {
+      if (cacheable) {
+        const entry: SearchCacheEntry = {
+          results: results.slice(),
+          matches: new Map(this.searchMatchOffsets),
+        }
+        searchCache.set(cacheKey, entry)
+        while (searchCache.size > SEARCH_CACHE_MAX) {
+          const oldest = searchCache.keys().next().value
+          if (oldest === undefined) break
+          searchCache.delete(oldest)
+        }
+      }
+      emit(true)
+    }
     return results
   }
 
@@ -1384,6 +1569,7 @@ export class FoliateReader implements BookReader {
     this.searchGen++
     this.drawnSearchValues.clear()
     this.searchMatchOffsets.clear()
+    this.navigationPending.dispose()
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
     if (this.holdTimer !== null) { clearTimeout(this.holdTimer); this.holdTimer = null }

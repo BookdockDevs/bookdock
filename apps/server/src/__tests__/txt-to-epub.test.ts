@@ -5,23 +5,15 @@ import { parseEpubBuffer } from '../formats/epub'
 describe('convertTxtToEpub', () => {
   it('produces a valid EPUB with chapters', async () => {
     const chapters = [
-      {
-        id: 'ch-1',
-        title: '第一章 启程',
-        level: 1,
-        content: '这是一个开始。\n\n第二段。',
-      },
-      {
-        id: 'ch-2',
-        title: '第二章 旅途',
-        level: 1,
-        content: '继续旅程。\n\n又一段。',
-      },
+      { id: 'ch-1', title: '第一章 启程', level: 1 },
+      { id: 'ch-2', title: '第二章 旅途', level: 1 },
     ]
+    const contentFor = (i: number) => (i === 0 ? '这是一个开始。\n\n第二段。' : '继续旅程。\n\n又一段。')
 
     const buffer = await convertTxtToEpub(
       { title: '测试之书', author: '测试作者', id: 'test-book-id' },
-      chapters
+      chapters,
+      contentFor,
     )
 
     expect(buffer.length).toBeGreaterThan(0)
@@ -37,7 +29,8 @@ describe('convertTxtToEpub', () => {
   it('handles a single chapter fallback', async () => {
     const buffer = await convertTxtToEpub(
       { title: 'Only' },
-      [{ id: 'ch-0', title: '全文', level: 1, content: '只有一段。' }]
+      [{ id: 'ch-0', title: '全文', level: 1 }],
+      () => '只有一段。',
     )
 
     const parsed = await parseEpubBuffer(buffer)

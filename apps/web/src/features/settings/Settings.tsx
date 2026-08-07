@@ -9,8 +9,9 @@ import InstanceSettingsSection from './components/InstanceSettingsSection'
 import UserManagementSection from './components/UserManagementSection'
 import LanguageSwitcher from './components/LanguageSwitcher'
 import TrashSettingsRow from './components/TrashSettingsRow'
+import ReadingDataSettingsSection from './components/ReadingDataSettingsSection'
 
-type SectionId = 'general' | 'instance' | 'users'
+type SectionId = 'general' | 'reading' | 'instance' | 'users'
 
 export default function Settings() {
   const _ = useTranslation()
@@ -20,6 +21,7 @@ export default function Settings() {
 
   const sections: { id: SectionId; label: string }[] = [
     { id: 'general', label: _('settings.general') },
+    { id: 'reading', label: _('settings.readingData') },
     ...(isOwner
       ? [
           { id: 'instance' as const, label: _('admin.instanceSettings') },
@@ -73,6 +75,7 @@ export default function Settings() {
               </div>
             </section>
           )}
+          {active === 'reading' && <ReadingDataSettingsSection />}
           {active === 'instance' && isOwner && <InstanceSettingsSection />}
           {active === 'users' && isOwner && <UserManagementSection />}
         </div>

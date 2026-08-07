@@ -14,6 +14,7 @@ import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import * as hashLib from '../../lib/hash'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
 import booksRoutes from './books.routes'
@@ -25,6 +26,7 @@ import {
   restoreBook,
   deleteBook,
   purgeExpiredTrash,
+  purgeAllExpiredTrash,
   listBooks,
   uploadBook,
 } from './books.service'
@@ -151,6 +153,43 @@ describe('uploadBook dedup flag', () => {
     const loaded = await getBook(ownerId, book.id)
     expect((loaded.meta as Record<string, unknown>).bookmeta).toEqual({})
   })
+
+  it('resolves a partial-hash collision with full sha256 instead of mis-deduping', async () => {
+    // Seed a legacy-style row whose contentHash is a partial value; forge
+    // partialMD5 to collide with it for a DIFFERENT file
+    const mem = createMemoryStorage()
+    vi.spyOn(storage, 'getStorage').mockReturnValue(mem.driver)
+    const legacyBytes = Buffer.from('legacy book bytes')
+    await mem.driver.put('blobs/legacy.epub', legacyBytes)
+    db.insert(schema.books).values({
+      id: createId('book'),
+      userId: ownerId,
+      title: 'Legacy',
+      format: 'epub',
+      filePath: 'blobs/legacy.epub',
+      size: legacyBytes.length,
+      meta: {},
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      contentHash: 'a'.repeat(32),
+    }).run()
+
+    vi.spyOn(hashLib, 'partialMD5').mockReturnValue('a'.repeat(32))
+
+    // different content, same sampled hash -> NOT a duplicate
+    const file = new File(['brand new content'], 'new.txt', { type: 'text/plain' })
+    const result = await uploadBook(ownerId, file)
+    expect(result.duplicated).toBe(false)
+    // the new row stores the full sha256 so future dedup matches exactly
+    const rows = db.select().from(schema.books).where(eq(schema.books.userId, ownerId)).all()
+    expect(rows).toHaveLength(2)
+    expect(rows[1].contentHash).toHaveLength(64)
+
+    // the legacy file itself still dedups against its own row
+    const legacyFile = new File(['legacy book bytes'], 'legacy.txt', { type: 'text/plain' })
+    const legacyAgain = await uploadBook(ownerId, legacyFile)
+    expect(legacyAgain.duplicated).toBe(true)
+  })
 })
 
 describe('listBooks search escaping', () => {
@@ -178,6 +217,65 @@ describe('listBooks search escaping', () => {
   it('does not treat a lone wildcard as match-all', async () => {
     const lonePercent = await listBooks(ownerId, 1, 20, '%')
     expect(lonePercent.data.map((b) => b.title)).toEqual(['Progress 100%'])
+  })
+})
+
+describe('listBooks lastReadAt sort', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+    // never-read books stay visible but sink below the read ones (NULLs last)
+    seedBook(db, ownerId, { title: 'Never Read' })
+    seedBook(db, ownerId, { title: 'Read First', lastReadAt: 1000 })
+    seedBook(db, ownerId, { title: 'Read Later', lastReadAt: 2000 })
+  })
+
+  it('orders by lastReadAt desc with never-read books at the bottom', async () => {
+    const result = await listBooks(ownerId, 1, 20, undefined, 'lastReadAt', 'desc')
+    expect(result.data.map((b) => b.title)).toEqual(['Read Later', 'Read First', 'Never Read'])
+  })
+
+  it('does not filter out never-read books', async () => {
+    const result = await listBooks(ownerId, 1, 20, undefined, 'lastReadAt', 'desc')
+    expect(result.total).toBe(3)
+  })
+
+  it('honors sortOrder asc for lastReadAt', async () => {
+    const result = await listBooks(ownerId, 1, 20, undefined, 'lastReadAt', 'asc')
+    expect(result.data.map((b) => b.title)).toEqual(['Never Read', 'Read First', 'Read Later'])
+  })
+})
+
+describe('listBooks createdAt sortOrder', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+    seedBook(db, ownerId, { title: 'Old', createdAt: 1000, updatedAt: 1000 })
+    seedBook(db, ownerId, { title: 'New', createdAt: 2000, updatedAt: 2000 })
+  })
+
+  it('toggles between asc and desc for createdAt', async () => {
+    const desc = await listBooks(ownerId, 1, 20, undefined, 'createdAt', 'desc')
+    expect(desc.data.map((b) => b.title)).toEqual(['New', 'Old'])
+    const asc = await listBooks(ownerId, 1, 20, undefined, 'createdAt', 'asc')
+    expect(asc.data.map((b) => b.title)).toEqual(['Old', 'New'])
+  })
+
+  it('toggles between asc and desc for updatedAt', async () => {
+    const desc = await listBooks(ownerId, 1, 20, undefined, 'updatedAt', 'desc')
+    expect(desc.data.map((b) => b.title)).toEqual(['New', 'Old'])
+    const asc = await listBooks(ownerId, 1, 20, undefined, 'updatedAt', 'asc')
+    expect(asc.data.map((b) => b.title)).toEqual(['Old', 'New'])
   })
 })
 
@@ -370,6 +468,46 @@ describe('purgeExpiredTrash', () => {
 
     const purged = await purgeExpiredTrash(userId, 0)
     expect(purged).toBe(0)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, expired.id)).get()).toBeDefined()
+  })
+})
+
+describe('purgeAllExpiredTrash (boot sweep)', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000
+  let db: ReturnType<typeof createTestDb>
+  let mem: ReturnType<typeof createMemoryStorage>
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    mem = createMemoryStorage()
+    vi.spyOn(storage, 'getStorage').mockReturnValue(mem.driver)
+  })
+
+  it('purges expired trash across users with different retention settings in one pass', async () => {
+    const a = seedUser(db, 'user-a')
+    const b = seedUser(db, 'user-b')
+    db.insert(schema.settings).values({ id: createId('setting'), userId: b, key: 'trash', value: { autoCleanDays: 7 } }).run()
+
+    const oldA = seedBook(db, a, { deletedAt: Date.now() - 90 * DAY_MS })
+    const oldB = seedBook(db, b, { deletedAt: Date.now() - 10 * DAY_MS })
+    const freshB = seedBook(db, b, { deletedAt: Date.now() - 1 * DAY_MS })
+    const activeA = seedBook(db, a)
+
+    await purgeAllExpiredTrash()
+
+    expect(db.select().from(schema.books).where(eq(schema.books.id, oldA.id)).get()).toBeUndefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, oldB.id)).get()).toBeUndefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, freshB.id)).get()).toBeDefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, activeA.id)).get()).toBeDefined()
+  })
+
+  it('respects auto-clean disabled (days <= 0) per user', async () => {
+    const a = seedUser(db, 'user-a')
+    db.insert(schema.settings).values({ id: createId('setting'), userId: a, key: 'trash', value: { autoCleanDays: 0 } }).run()
+    const expired = seedBook(db, a, { deletedAt: Date.now() - 365 * DAY_MS })
+
+    await purgeAllExpiredTrash()
     expect(db.select().from(schema.books).where(eq(schema.books.id, expired.id)).get()).toBeDefined()
   })
 })

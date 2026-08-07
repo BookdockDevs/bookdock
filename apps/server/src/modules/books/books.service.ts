@@ -2,16 +2,16 @@ import type { Readable } from 'node:stream'
 
 import { eq, ne, lt, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
 import { getDb } from '../../db/client'
-import { books, annotations, bookTags, bookShelves, shelves, tags } from '../../db/schema'
+import { books, annotations, bookTags, bookShelves, shelves, tags, settings, users as usersTable } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
-import { detectTxtChapters, normalizeText, decodeTextBuffer } from '../../formats/txt'
+import { scanTxtChapters, normalizeText, decodeTextBuffer } from '../../formats/txt'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { convertTxtToEpub } from '../../lib/txt-to-epub'
-import { partialMD5 } from '../../lib/hash'
+import { partialMD5, sha256 } from '../../lib/hash'
 import { countWords } from '../../lib/word-count'
-import type { BookFormat, BookMetadata, Chapter, ViewSettings } from '@bookdock/shared'
+import type { BookFormat, BookMetadata, Chapter, TrashSettings, ViewSettings } from '@bookdock/shared'
 
 export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean) {
   const db = getDb()
@@ -37,16 +37,16 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     const sub = db.select({ bookId: bookTags.bookId }).from(bookTags).where(eq(bookTags.tagId, tagId))
     conditions.push(sql`${books.id} IN ${sub}`)
   }
-  // sortBy=lastReadAt lists recently read books only: skip pin-first ordering and books never read.
-  if (sortBy === 'lastReadAt') {
-    conditions.push(isNotNull(books.lastReadAt))
-  }
+  // sortBy=lastReadAt: pure sort — read books first by last-read time (desc
+  // puts NULL lastReadAt at the bottom), never-read books stay visible; skips
+  // pin-first ordering like the other explicit sorts.
   const orderBy = sortBy === 'title' ? (sortOrder === 'asc' ? asc(books.title) : desc(books.title)) :
     sortBy === 'author' ? (sortOrder === 'asc' ? asc(books.author) : desc(books.author)) :
     sortBy === 'size' ? (sortOrder === 'asc' ? asc(books.size) : desc(books.size)) :
     sortBy === 'progress' ? (sortOrder === 'asc' ? asc(books.progress) : desc(books.progress)) :
-    sortBy === 'updatedAt' ? desc(books.updatedAt) :
-    desc(books.createdAt)
+    sortBy === 'lastReadAt' ? (sortOrder === 'asc' ? asc(books.lastReadAt) : desc(books.lastReadAt)) :
+    sortBy === 'updatedAt' ? (sortOrder === 'asc' ? asc(books.updatedAt) : desc(books.updatedAt)) :
+    sortOrder === 'asc' ? asc(books.createdAt) : desc(books.createdAt)
   const offset = (page - 1) * pageSize
   const where = and(...conditions)
   const baseQuery = () => db.select({
@@ -65,7 +65,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     deletedAt: books.deletedAt,
   }).from(books).where(where)
   const items = sortBy === 'lastReadAt'
-    ? baseQuery().orderBy(desc(books.lastReadAt)).limit(pageSize).offset(offset).all()
+    ? baseQuery().orderBy(orderBy).limit(pageSize).offset(offset).all()
     : baseQuery().orderBy(asc(sql`pinned_at IS NULL`), desc(books.pinnedAt), orderBy).limit(pageSize).offset(offset).all()
   const total = db.select({ count: sql<number>`count(*)` }).from(books).where(where).get()
   return { data: items, page, pageSize, total: total?.count ?? 0 }
@@ -114,13 +114,33 @@ export async function uploadBook(userId: string, file: File) {
   const bookId = createId('book')
   const db = getDb()
 
-  // Content-based dedup
-  const contentHash = partialMD5(buffer)
-  const existing = db.select({ id: books.id }).from(books).where(
-    and(eq(books.userId, userId), eq(books.contentHash, contentHash), isNull(books.deletedAt)),
+  // Content-based dedup. New rows store the FULL sha256 (64 hex) of the
+  // original upload as contentHash; legacy rows hold the sampled partialMD5
+  // (32 hex) — the query matches either. A sampled-hash hit is only a
+  // fingerprint, so duplicates are adjudicated by full hash:
+  // - new-style rows: string compare against the stored full hash (the stored
+  //   blob may be a converted artifact for txt books, so no blob read)
+  // - legacy epub rows: the blob IS the original — read and sha256-compare
+  // - legacy txt rows: the blob is the converted EPUB, incomparable to the
+  //   upload — the theoretical sampled-hash collision risk stays (B3 note)
+  const contentHash = sha256(buffer)
+  const partial = partialMD5(buffer)
+  const existing = db.select({ id: books.id, filePath: books.filePath, format: books.format, contentHash: books.contentHash }).from(books).where(
+    and(eq(books.userId, userId), inArray(books.contentHash, [contentHash, partial]), isNull(books.deletedAt)),
   ).get()
   if (existing) {
-    return { book: stripMetaChapters(db.select().from(books).where(eq(books.id, existing.id)).get()!), duplicated: true }
+    let isDuplicate: boolean
+    if (existing.contentHash?.length === 64) {
+      isDuplicate = existing.contentHash === contentHash
+    } else if (existing.format === 'epub') {
+      const existingBuffer = await bufferFromStream(await getStorage().get(existing.filePath))
+      isDuplicate = sha256(existingBuffer) === contentHash
+    } else {
+      isDuplicate = true
+    }
+    if (isDuplicate) {
+      return { book: stripMetaChapters(db.select().from(books).where(eq(books.id, existing.id)).get()!), duplicated: true }
+    }
   }
 
   const title = parsed.meta.title || fileName.replace(/\.[^.]+$/, '')
@@ -145,7 +165,7 @@ export async function uploadBook(userId: string, file: File) {
   if (format === 'txt') {
     const text = decodeTextBuffer(buffer)
     const normalized = normalizeText(text)
-    const chapters = detectTxtChapters(normalized)
+    const chapters = scanTxtChapters(normalized)
     meta.chapters = chapters.map((c) => ({
       id: `ch-${c.startOffset}`,
       title: c.title,
@@ -156,20 +176,23 @@ export async function uploadBook(userId: string, file: File) {
       wordCount: countWords(normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)),
     }))
 
-    // Generate EPUB eagerly and save as the only file
-    const epubChapters = chapters.map((c) => {
-      const start = c.contentStartOffset ?? c.startOffset
-      const end = c.endOffset
-      return {
-        id: `ch-${c.startOffset}`,
-        title: c.title,
-        level: c.level,
-        content: normalized.slice(start, end),
-      }
-    })
+    // Generate EPUB eagerly and save as the only file. Chapter content is
+    // sliced on demand (B5): holding every chapter's slice at once roughly
+    // doubles peak memory for large books — the getter keeps only metadata
+    // plus the single normalized string.
+    const epubChapters = chapters.map((c) => ({
+      id: `ch-${c.startOffset}`,
+      title: c.title,
+      level: c.level,
+    }))
+    const contentFor = (index: number) => {
+      const c = chapters[index]
+      return normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)
+    }
     const epubBuffer = await convertTxtToEpub(
       { title, author: author || undefined, id: bookId },
       epubChapters,
+      contentFor,
     )
     fileKey = blobKey(contentHash, '.epub')
     await storage.put(fileKey, epubBuffer)
@@ -288,7 +311,7 @@ async function backfillWordCounts(userId: string, bookId: string): Promise<Chapt
     let chapters: Chapter[]
     if (book.filePath.endsWith('.txt')) {
       const normalized = normalizeText(decodeTextBuffer(buffer))
-      chapters = detectTxtChapters(normalized).map((c) => ({
+      chapters = scanTxtChapters(normalized).map((c) => ({
         id: `ch-${c.startOffset}`,
         title: c.title,
         level: c.level,
@@ -325,7 +348,7 @@ async function regenerateTxtBookContent(userId: string, bookId: string): Promise
   const buffer = await bufferFromStream(stream)
   const text = decodeTextBuffer(buffer)
   const normalized = normalizeText(text)
-  const chapters = detectTxtChapters(normalized)
+  const chapters = scanTxtChapters(normalized)
 
   const db = getDb()
   const metaChapters = chapters.map((c) => ({
@@ -380,18 +403,19 @@ export async function getBookEpubBuffer(userId: string, bookId: string): Promise
       getBookContent(userId, bookId),
       getBookChapters(userId, bookId),
     ])
-    const epubChapters = chapters.map((c) => {
-      const text = content.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)
-      return {
-        id: c.id,
-        title: c.title,
-        level: c.level,
-        content: text,
-      }
-    })
+    const epubChapters = chapters.map((c) => ({
+      id: c.id,
+      title: c.title,
+      level: c.level,
+    }))
+    const contentFor = (i: number) => {
+      const c = chapters[i]
+      return content.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)
+    }
     const buffer = await convertTxtToEpub(
       { title: book.title, author: book.author || undefined, id: book.id },
-      epubChapters
+      epubChapters,
+      contentFor,
     )
     await storage.put(cacheKey, buffer)
     return buffer
@@ -504,6 +528,38 @@ export async function purgeExpiredTrash(userId: string, days: number) {
     await deleteBook(userId, row.id)
   }
   return expired.length
+}
+
+/** Boot-time sweep of every user's expired trash (B6): one settings read, one
+ * expired query per distinct retention cutoff, rows processed in chunks with
+ * event-loop yields so synchronous SQLite churn never stalls a busy server. */
+export async function purgeAllExpiredTrash() {
+  const db = getDb()
+  const allUsers = db.select({ id: usersTable.id }).from(usersTable).all()
+  if (allUsers.length === 0) return
+  const settingsRows = db.select({ userId: settings.userId, value: settings.value })
+    .from(settings).where(eq(settings.key, 'trash')).all()
+  const daysByUser = new Map(settingsRows.map((r) => [r.userId, (r.value as TrashSettings | undefined)?.autoCleanDays ?? 30]))
+
+  const now = Date.now()
+  const groups = new Map<number, string[]>()
+  for (const { id } of allUsers) {
+    const days = daysByUser.get(id) ?? 30
+    if (days <= 0) continue
+    const cutoff = now - days * 24 * 60 * 60 * 1000
+    const list = groups.get(cutoff) ?? []
+    list.push(id)
+    groups.set(cutoff, list)
+  }
+  for (const [cutoff, userIds] of groups) {
+    const expired = db.select({ id: books.id, userId: books.userId }).from(books)
+      .where(and(inArray(books.userId, userIds), isNotNull(books.deletedAt), lt(books.deletedAt, cutoff)))
+      .all()
+    for (let i = 0; i < expired.length; i++) {
+      await deleteBook(expired[i].userId, expired[i].id)
+      if (i % 10 === 9) await new Promise((resolve) => setImmediate(resolve))
+    }
+  }
 }
 
 export async function deleteBook(userId: string, bookId: string) {
