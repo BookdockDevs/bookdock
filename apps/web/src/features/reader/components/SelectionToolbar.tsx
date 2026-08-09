@@ -21,9 +21,9 @@ import {
   popupPosition,
   setLastHighlightStyle,
 } from './annotation-colors'
-import { BulbIcon, CopyIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
+import { BulbIcon, CopyIcon, ExcerptShareIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
 
-const BAR_WIDTH = 176
+const BAR_WIDTH = 214
 const BAR_HEIGHT = 44
 const STYLE_WIDTH = 236
 const STYLE_HEIGHT = 40
@@ -39,6 +39,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
   const setPendingSearchQuery = useReaderState((s) => s.setPendingSearchQuery)
   const setNoteEditorRange = useReaderState((s) => s.setNoteEditorRange)
+  const setShareTarget = useReaderState((s) => s.setShareTarget)
   const { renderer } = useReaderApi()
   const addToast = useToastStore((s) => s.addToast)
   const create = useCreateAnnotation(bookId)
@@ -222,6 +223,27 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     close()
   }
 
+  // Sharing is ephemeral: the card dialog takes the excerpt text and chapter,
+  // no annotation is created for a bare selection
+  function shareExcerpt() {
+    if (!selection) return
+    setShareTarget({
+      text: selection.rawText || selection.text,
+      chapter: target?.chapter ?? currentChapter ?? null,
+    })
+    close()
+  }
+
+  function shareIdea(entry: IdeaEntry) {
+    setShareTarget({
+      text: entry.annotation.text,
+      chapter: entry.annotation.chapter ?? currentChapter ?? null,
+      note: entry.annotation.note ?? undefined,
+      createdAt: entry.annotation.createdAt,
+    })
+    close()
+  }
+
   const bar = popupPosition(selection.rect, BAR_WIDTH, BAR_HEIGHT)
   const styleLeft = Math.min(
     Math.max(8, bar.left + BAR_WIDTH / 2 - STYLE_WIDTH / 2),
@@ -262,6 +284,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         onWriteNote={() => void createNote()}
         onSearch={searchSelection}
         onCopyNote={(entry) => void copyNote(entry)}
+        onShareNote={shareIdea}
         onEdit={(entry) => {
           setCreatedLocal(entry.annotation)
           setNoteEditorRange(entry.annotation.cfiRange)
@@ -281,6 +304,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
       ? { key: 'delete', label: _('annotation.deleteHighlight'), icon: <TrashIcon />, danger: true, onClick: () => removeAnnotation() }
       : { key: 'highlight', label: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, danger: false, onClick: highlight },
     { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
+    { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: shareExcerpt },
     { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
   ]
 

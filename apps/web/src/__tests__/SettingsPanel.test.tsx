@@ -1,13 +1,25 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import { SettingsPanel } from '../features/reader/components/SettingsPanel'
+import { useFontLoaderStore } from '../features/reader/fonts'
 import { useUiStore } from '../stores/ui.store'
+import { useFonts } from '@/api/hooks/useFonts'
+
+vi.mock('@/api/hooks/useFonts', () => ({
+  useFonts: vi.fn(() => ({ data: { data: [] } })),
+}))
+
+const mockUploadedFonts = (fonts: unknown[]) => {
+  vi.mocked(useFonts).mockReturnValue({ data: { data: fonts } } as ReturnType<typeof useFonts>)
+}
 
 describe('SettingsPanel', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
     localStorage.removeItem('bd-settings-section')
+    mockUploadedFonts([])
+    useFontLoaderStore.setState({ loadedIds: [], loadingIds: [] })
     useUiStore.setState({
       fontFamily: 'serif',
       fontSize: 18,
@@ -38,6 +50,74 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('字体粗细')).toBeInTheDocument()
     expect(screen.getByText('两端对齐')).toBeInTheDocument()
     expect(screen.getByText('覆盖书籍字体')).toBeInTheDocument()
+  })
+
+  it('renders a single font list without group labels', () => {
+    render(<SettingsPanel />)
+
+    expect(screen.getByText('霞鹜文楷')).toBeInTheDocument()
+    expect(screen.getByText('思源宋体')).toBeInTheDocument()
+    expect(screen.getByText('思源黑体')).toBeInTheDocument()
+    expect(screen.getByText('宋体')).toBeInTheDocument()
+    expect(screen.queryByText('在线字体')).not.toBeInTheDocument()
+    expect(screen.queryByText('系统字体')).not.toBeInTheDocument()
+    expect(screen.queryByText('我的字体')).not.toBeInTheDocument()
+    // 3 builtin + 4 system = exactly the visible window — no More chip
+    expect(screen.queryByText('更多')).not.toBeInTheDocument()
+  })
+
+  it('collapses to 7 chips plus More, and expands in place', () => {
+    mockUploadedFonts([
+      { id: 'up1', family: '我的手写体', fileName: 'a.ttf', format: 'ttf', size: 1024, scope: 'user', mine: true, createdAt: 0 },
+      { id: 'up2', family: '另一款字体', fileName: 'b.ttf', format: 'ttf', size: 1024, scope: 'user', mine: true, createdAt: 0 },
+    ])
+    render(<SettingsPanel />)
+
+    // 9 options total; the tail (楷体/仿宋) is hidden behind the More chip
+    expect(screen.getByText('我的手写体')).toBeInTheDocument()
+    expect(screen.getByText('更多')).toBeInTheDocument()
+    expect(screen.queryByText('楷体')).not.toBeInTheDocument()
+    expect(screen.queryByText('仿宋')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('更多'))
+    expect(screen.getByText('收起')).toBeInTheDocument()
+    expect(screen.getByText('楷体')).toBeInTheDocument()
+    expect(screen.getByText('仿宋')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('收起'))
+    expect(screen.queryByText('楷体')).not.toBeInTheDocument()
+    expect(screen.getByText('更多')).toBeInTheDocument()
+  })
+
+  it('promotes a hidden selected font into the last visible slot', () => {
+    mockUploadedFonts([
+      { id: 'up1', family: '我的手写体', fileName: 'a.ttf', format: 'ttf', size: 1024, scope: 'user', mine: true, createdAt: 0 },
+      { id: 'up2', family: '另一款字体', fileName: 'b.ttf', format: 'ttf', size: 1024, scope: 'user', mine: true, createdAt: 0 },
+    ])
+    useUiStore.setState({ fontFamily: 'fangsong' })
+    render(<SettingsPanel />)
+
+    // 仿宋 sits at index 8 (hidden); it is promoted while 黑体 (index 6) shifts out
+    expect(screen.getByText('仿宋')).toBeInTheDocument()
+    expect(screen.queryByText('黑体')).not.toBeInTheDocument()
+    expect(screen.queryByText('楷体')).not.toBeInTheDocument()
+  })
+
+  it('lists uploaded fonts first and selects them by id', () => {
+    mockUploadedFonts([
+      { id: 'up1', family: '我的手写体', fileName: 'hand.ttf', format: 'ttf', size: 1024, scope: 'user', mine: true, createdAt: 0 },
+    ])
+    render(<SettingsPanel />)
+
+    fireEvent.click(screen.getByText('我的手写体'))
+    expect(useUiStore.getState().fontFamily).toBe('up1')
+  })
+
+  it('selects a builtin font by id', () => {
+    render(<SettingsPanel />)
+
+    fireEvent.click(screen.getByText('霞鹜文楷'))
+    expect(useUiStore.getState().fontFamily).toBe('lxgw-wenkai')
   })
 
   it('switches to layout section', () => {

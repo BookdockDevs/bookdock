@@ -119,7 +119,8 @@ export interface SettingsRes {
   uiTheme?: 'system' | 'light' | 'dark'
   readingThemeId?: 'paper' | 'sepia' | 'night' | 'cream'
   lightReadingThemeId?: 'paper' | 'sepia' | 'night' | 'cream'
-  fontFamily?: 'serif' | 'sans-serif' | 'kaiti' | 'fangsong'
+  /** Open font id (system stack / builtin CDN / uploaded font id), resolved client-side */
+  fontFamily?: string
   fontSize?: number
   fontWeight?: number
   lineHeight?: number
@@ -162,6 +163,21 @@ export interface SettingsRes {
 
 export interface SettingsUpdateReq {
   settings: SettingsRes
+}
+
+export type FontScope = 'user' | 'instance'
+
+export interface FontListItem {
+  id: string
+  /** Family name parsed from the sfnt name table, falling back to the file name */
+  family: string
+  fileName: string
+  format: 'ttf' | 'otf' | 'woff' | 'woff2'
+  size: number
+  scope: FontScope
+  /** True when the requesting user uploaded this font */
+  mine: boolean
+  createdAt: number
 }
 
 export interface ShelfListItem {

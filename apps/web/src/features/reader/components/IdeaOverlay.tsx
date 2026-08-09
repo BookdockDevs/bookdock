@@ -5,7 +5,7 @@ import type { AnnotationRes } from '@bookdock/shared'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { getLastHighlightStyle } from './annotation-colors'
-import { BulbIcon, ChevronLeftIcon, CloseIcon, CopyIcon, PencilIcon, QuoteIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
+import { BulbIcon, ChevronLeftIcon, CloseIcon, CopyIcon, ExcerptShareIcon, PencilIcon, QuoteIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
 import { formatFullDateTime } from './format-relative-time'
 
 /**
@@ -27,6 +27,7 @@ interface IdeaOverlayProps {
   onWriteNote: () => void
   onSearch: () => void
   onCopyNote: (entry: IdeaEntry) => void
+  onShareNote: (entry: IdeaEntry) => void
   onEdit: (entry: IdeaEntry) => void
   onDelete: (entry: IdeaEntry) => void
   onClose: () => void
@@ -52,6 +53,7 @@ export function IdeaOverlay({
   onWriteNote,
   onSearch,
   onCopyNote,
+  onShareNote,
   onEdit,
   onDelete,
   onClose,
@@ -124,6 +126,9 @@ export function IdeaOverlay({
                   <div className="flex-1" />
                   <button onClick={() => onCopyNote(detail)} title={_('annotation.copy')} className={detailActionBtn}>
                     <CopyIcon />
+                  </button>
+                  <button onClick={() => onShareNote(detail)} title={_('annotation.share')} className={detailActionBtn}>
+                    <ExcerptShareIcon />
                   </button>
                   {detail.own && (
                     <>

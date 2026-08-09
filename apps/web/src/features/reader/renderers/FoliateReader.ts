@@ -461,7 +461,17 @@ export class FoliateReader implements BookReader {
   // turns pages, scrolled mode scrolls by one viewport (same as the page-up/
   // page-down buttons) — same zones, same direction semantics.
   private clickAreaMode: ClickAreaMode = 'standard'
+  // Floating UIs (selection bubble, note editor, notes context menu) push this
+  // while open; a guarded click only dismisses the float, never turns pages
+  private popupGuardCount = 0
+  pushPopupGuard() {
+    this.popupGuardCount += 1
+  }
+  popPopupGuard() {
+    this.popupGuardCount = Math.max(0, this.popupGuardCount - 1)
+  }
   private handleClickView = (event: Event) => {
+    if (this.popupGuardCount > 0) return
     const rect = this.container?.getBoundingClientRect()
     if (!rect) return
     const detail = (event as CustomEvent).detail
@@ -1622,12 +1632,15 @@ export class FoliateReader implements BookReader {
 
   private applyStyles() {
     if (!this.view?.renderer?.setStyles) return
-    const font = FONT_OPTIONS.find((f) => f.id === this.font.fontFamily) ?? FONT_OPTIONS[0]
+    const fontStack = this.font.fontStack ?? FONT_OPTIONS[0].value
     const vPad = this.readingMode === 'page' ? 0 : this.scrollBlockPadding()
     this.lastScrollVPad = vPad
+    // fontCss (@import/@font-face) must precede all rules or the at-rules
+    // are ignored; the paginator re-lays out on document.fonts.ready
     const css = `
+      ${this.font.fontCss ?? ''}
       html, body {
-        font-family: ${font.value} !important;
+        font-family: ${fontStack} !important;
         font-size: ${this.font.size}px !important;
         line-height: ${this.font.lineHeight} !important;
         font-weight: ${this.font.fontWeight} !important;

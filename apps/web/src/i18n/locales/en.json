@@ -200,6 +200,8 @@
     "perBookOnly": "This Book Only",
     "perBookOnlyHint": "When on, typography and layout changes below apply only to this book",
     "sectionFont": "Font",
+    "fontsMore": "More",
+    "fontsCollapse": "Collapse",
     "sectionLayout": "Layout",
     "sectionDisplay": "Display",
     "sectionBehavior": "Behavior",
@@ -363,6 +365,9 @@
     "back": "Back to library",
     "title": "Settings",
     "general": "General",
+    "reading": "Reading",
+    "library": "Library",
+    "admin": "Admin",
     "trash": "Trash",
     "trashAutoClean": "Auto-clean",
     "trashCleanNever": "Never",
@@ -379,7 +384,16 @@
     "readingTimerGrace1": "1 minute",
     "readingTimerGrace5": "5 minutes",
     "readingTimerGrace10": "10 minutes",
-    "readingTimerGrace30": "30 minutes"
+    "readingTimerGrace30": "30 minutes",
+    "fonts": "Fonts",
+    "fontsUpload": "Upload fonts",
+    "fontsEmpty": "No uploaded fonts yet — .ttf / .otf / .woff / .woff2 supported",
+    "fontsScopeInstance": "Instance",
+    "fontsScopeUser": "Personal",
+    "fontsToInstance": "Make instance",
+    "fontsToUser": "Make personal",
+    "fontsDelete": "Delete",
+    "fontsDeleteConfirm": "Delete font \"{{name}}\"?"
   },
   "admin": {
     "instanceSettings": "Instance Settings",
@@ -462,7 +476,47 @@
     "colorPurple": "Purple",
     "colorBlue": "Blue",
     "colorGreen": "Green",
-    "colorYellow": "Yellow"
+    "colorYellow": "Yellow",
+    "share": "Share",
+    "shareExcerpt": "Excerpt"
+  },
+  "share": {
+    "saveImage": "Save Image",
+    "copyImage": "Copy Image",
+    "copied": "Copied to clipboard",
+    "copyFailedDownloaded": "Copy failed — image saved instead",
+    "exportFailed": "Failed to export image",
+    "close": "Close",
+    "writtenAt": "Written on {{date}}",
+    "writtenAtCn": "Written on {{date}}",
+    "changeTemplate": "Change Template",
+    "back": "Back",
+    "templateLabel": "Theme",
+    "font": "Font",
+    "background": "Background",
+    "brandLabel": "Brand",
+    "brand": {
+      "off": "Hidden",
+      "en": "Bookdock",
+      "zh": "书坞"
+    },
+    "template": {
+      "classic": "Classic",
+      "calendar": "Calendar",
+      "ink": "Ink",
+      "letter": "Letter",
+      "brocade": "Brocade"
+    },
+    "bg": {
+      "white": "White",
+      "cream": "Cream",
+      "pink": "Pink",
+      "green": "Green",
+      "blue": "Blue",
+      "black": "Black",
+      "navy": "Navy",
+      "slate": "Slate"
+    }
   },
   "stats": {
     "title": "Reading Stats",

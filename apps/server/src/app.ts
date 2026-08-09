@@ -18,6 +18,7 @@ import settingsRoutes from './modules/settings/settings.routes'
 import annotationRoutes from './modules/annotations/annotations.routes'
 import shelvesRoutes from './modules/shelves/shelves.routes'
 import tagsRoutes from './modules/tags/tags.routes'
+import fontsRoutes from './modules/fonts/fonts.routes'
 
 registerParser(new EpubParser())
 registerParser(new TxtParser())
@@ -39,6 +40,7 @@ app.route('/api/v1/settings', settingsRoutes)
 app.route('/api/v1/annotations', annotationRoutes)
 app.route('/api/v1/shelves', shelvesRoutes)
 app.route('/api/v1/tags', tagsRoutes)
+app.route('/api/v1/fonts', fontsRoutes)
 
 // Serve the built web client (apps/web/dist) in production. Skipped in dev,
 // where the dist directory may not exist and Vite serves the client instead.

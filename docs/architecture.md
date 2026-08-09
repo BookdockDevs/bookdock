@@ -54,6 +54,7 @@ Conventions:
 - `Settings(id, userId, key, value)`
 - `InstanceSettings(key, value)` — instance-level KV, no userId (see ADR-12)
 - `Annotation(id, userId, bookId, cfiRange, cfiAnchor?, type, color, style, text, note?, chapter?, createdAt, updatedAt)`
+- `Font(id, userId, scope, family, fileName, format, contentHash, size, createdAt)` — uploaded fonts; `scope: user|instance` (instance = owner-shared, visible to all users); physical file content-hash deduped, ref-counted on delete (see ADR-13)
 - `ReadingRecord(id, userId, bookId, date, durationSeconds)` — per-day per-book accumulated reading seconds; `date` is the client-local calendar day `YYYY-MM-DD` (sessions bucket to the start-day)
 
 (The `ReadingProgress` table was dropped in migration 0011; progress fields moved into the `books.progress` column.)
@@ -90,6 +91,7 @@ apps/server/src/
     progress.routes.ts      # reading position
     settings.routes.ts      # user-level KV
     annotations.routes.ts   # highlight/note/comment CRUD
+    fonts/                  # custom font upload/list/delete/scope + immutable file serving
     reading-records.routes.ts # duration upsert + aggregation
   middleware/
     error.ts               # AppError + errorHandler (ErrorCode → HTTP status)
@@ -145,7 +147,7 @@ Registered in `app.ts` (EpubParser + TxtParser). Adding PDF/MOBI/CBZ means only 
 
 SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instance seeds one "default user" row. Future multi-user/permissions/sharing only adds tables + policy logic, never touching existing columns.
 
-**Current tables** (9):
+**Current tables** (11):
 
 | Table | Key columns | Notes |
 |---|---|---|
@@ -160,6 +162,7 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | `annotations` | id, userId FK, bookId FK, cfiRange, cfiAnchor?, type, color, style, text, note?, chapter?, createdAt, updatedAt, **deletedAt?** | unique (userId, bookId, cfiRange); soft delete |
 | `reading_records` | id, userId FK, bookId FK (cascade), date (text), durationSeconds | unique (userId, bookId, date); upsert snapshot |
 | `reading_sessions` | id, userId FK, bookId FK (cascade), date (text), startedAt, durationSeconds | per-session detail for hourly distribution |
+| `fonts` | id, userId FK, scope (user\|instance), family, fileName, format, contentHash, size, createdAt | unique (userId, contentHash); file at `fonts/<hash>` in storage, ref-counted delete |
 
 `meta` is a JSON column for "may grow" metadata; frequently-queried stable fields are promoted to dedicated columns.
 
@@ -299,3 +302,4 @@ Each ADR is a short standalone file. They live in `docs/local/adr/` (private wor
 | ADR-10 | annotations table + full CRUD in P0 | `docs/local/adr/0010-annotations-table-write.md` |
 | ADR-11 | HttpOnly cookie JWT + guard fresh DB user | `docs/local/adr/0011-http-only-cookie-jwt.md` |
 | ADR-12 | instance_settings has no userId (exception) | `docs/local/adr/0012-instance-settings-no-userid.md` |
+| ADR-13 | fonts table two-scope ownership (user/instance) | `docs/local/adr/0013-fonts-two-scope.md` |

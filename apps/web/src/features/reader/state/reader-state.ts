@@ -12,6 +12,9 @@ interface ReaderState {
   pendingSearchQuery: string | null
   /** cfiRange of the idea currently being composed; draws a dashed underline while the editor is open */
   noteEditorRange: string | null
+  /** Excerpt being shared as a card image; non-null opens ShareCardDialog. Ephemeral by design — sharing never persists an annotation.
+   *  `note`/`createdAt` are set when sharing an idea (想法) instead of a plain excerpt */
+  shareTarget: { text: string; chapter: string | null; note?: string; createdAt?: number } | null
   setActiveNavTab: (tab: NavTab) => void
   setTocItems: (items: { label: string; href: string }[]) => void
   setCurrentChapter: (chapter: string | null) => void
@@ -20,6 +23,7 @@ interface ReaderState {
   setSidebarOpen: (open: boolean) => void
   setPendingSearchQuery: (query: string | null) => void
   setNoteEditorRange: (range: string | null) => void
+  setShareTarget: (target: { text: string; chapter: string | null; note?: string; createdAt?: number } | null) => void
 }
 
 export const useReaderState = create<ReaderState>((set) => ({
@@ -31,6 +35,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   sidebarOpen: false,
   pendingSearchQuery: null,
   noteEditorRange: null,
+  shareTarget: null,
   setActiveNavTab: (activeNavTab) => set({ activeNavTab }),
   setTocItems: (tocItems) => set({ tocItems }),
   setCurrentChapter: (currentChapter) => set({ currentChapter }),
@@ -39,4 +44,5 @@ export const useReaderState = create<ReaderState>((set) => ({
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
   setNoteEditorRange: (noteEditorRange) => set({ noteEditorRange }),
+  setShareTarget: (shareTarget) => set({ shareTarget }),
 }))

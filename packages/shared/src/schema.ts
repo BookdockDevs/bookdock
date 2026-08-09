@@ -106,7 +106,9 @@ export const settingsUpdateSchema = z.object({
   uiTheme: z.enum(['system', 'light', 'dark']).optional(),
   readingThemeId: z.enum(['paper', 'sepia', 'night', 'cream']).optional(),
   lightReadingThemeId: z.enum(['paper', 'sepia', 'night', 'cream']).optional(),
-  fontFamily: z.enum(['serif', 'sans-serif', 'kaiti', 'fangsong']).optional(),
+  // Open font id: system stack ids (serif/sans-serif/kaiti/fangsong), builtin CDN
+  // font ids, or uploaded font ids — resolved client-side against the font registry.
+  fontFamily: z.string().min(1).max(100).optional(),
   fontSize: z.number().min(12).max(64).optional(),
   fontWeight: z.number().min(100).max(900).optional(),
   lineHeight: z.number().min(1.2).max(2.5).optional(),

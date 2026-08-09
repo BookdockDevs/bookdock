@@ -2,11 +2,11 @@
 
 > 维护约定：**每次修改本目录内任何文件，必须同步更新本清单**（新增/变更条目 + 提交 hash）。升级 foliate 上游时以此为基线重放。
 >
-> 识别方式：§1 全部补丁均带 `// bookdock:` 注释标记（grep 可定位，每处改动位置都有标记）；§2 基线机制无标记，只能按功能定位。历史可追溯于 `git log -- apps/web/public/foliate-js/`（初始 vendored `a8e48f2`，后续触碰：`2161acf` / `5981470` / `927b9f8` / `901d83f` / `9e36c55`）。
+> 识别方式：§1 全部补丁均带 `bookdock:` 注释标记（grep 可定位，每处改动位置都有标记；JS 用 `// bookdock:`，CSS/样式模板内必须写 `/* bookdock: */`，见 §1.10）；§2 基线机制无标记，只能按功能定位。历史可追溯于 `git log -- apps/web/public/foliate-js/`（初始 vendored `a8e48f2`，后续触碰：`2161acf` / `5981470` / `927b9f8` / `901d83f` / `9e36c55`）。
 >
 > 行号基于 2026-08-06 working tree（`9e36c55` 之后，未提交），升级后先 grep 标记再核对。
 
-## 1. 可追溯补丁（9 处）
+## 1. 可追溯补丁（10 处）
 
 ### 1.1 `overlayer.js:128-151` — `Overlayer.dashedUnderline`（想法标注）
 
@@ -42,7 +42,7 @@
 - **行为**：**`horizontalPadding` 在 page 模式的作用点**——有效宽度语义 = `min(max-inline-size, size − 2×gutter)`；`min(size−320, …)` 保证小视口 320px 内容下限。`max-inline-size` 仅承担 pageWidth 上限（哨兵 100000 = auto）。
 - **上游对照**：上游无 gutter 概念。
 
-### 1.6 `paginator.js:526-531, 616-625` — 页眉/页脚带下限
+### 1.6 `paginator.js:525-532, 618-627` — 页眉/页脚带下限
 
 - **提交**：`901d83f`
 - **行为**：grid 行改 `max(var(--_top-margin), var(--_header-band, 0px))`（底部对称）；`:host([show-header]) #top { --_header-band: 28px }`——保证 `verticalPadding = 0` 时页眉页脚文字不被 `#top` 的 `overflow: hidden` 裁掉（scrolled flow 同样生效，见 §2.4）。`verticalPadding` 语义 = 正文与页眉页脚带的间距。
@@ -66,6 +66,13 @@
 - **行为**：页边距/间隙点击（iframe 之外落在 paginator 上的 click）产生的 `click-view` 事件，监听器从 `#handleClick`（每次 view load 各挂一条，共享 renderer 上**无限累积**——读 N 章后点一次边距翻 N 页 + 监听器泄漏）上提到 `open()` 创建 renderer 后**只挂一次**。
 - **验证**：page 模式翻 ~6 章后点击右侧空白边距只触发 1 次 `click-view`；正文内点击/中区 tap-to-toggle/continuous 间隙点击均正常。
 - **上游对照**：上游原实现即 per-view 挂载（有同样问题），升级时确认上游是否已修复，未修复则重放。
+
+### 1.10 `paginator.js` shadow `<style>` 内禁用 `//` 注释（2026-08-09）
+
+- **提交**：`6768bcb` 在 `grid-template-rows` 声明**值内部**写了两行 `// bookdock:` 注释——CSS 没有行注释，整条 `grid-template-rows` 声明被静默丢弃。
+- **行为后果**：行模板缺失 → 行退化为 auto + 默认 stretch 均分自由空间 → scrolled flow 下**内容不足一屏的短章被垂直居中**（长章节自由空间为负不受影响，page 模式 `#container` 跨全部行也不受影响，故只有短章中招）。
+- **修复**：改为 `/* bookdock: */` 块注释（`#top` 规则里上游遗留的 `// --_gap: 7%;` 一并改为块注释）。**教训：本目录 shadow DOM `<style>` 模板里只能写 `/* */`，写 `//` 浏览器不报错、整条声明静默失效。**升级重放时同样禁止带入 `//`。
+- **验证**：短章（序章）`gridTemplateRows` 从 `298px 701px`（均分）恢复为 `0px 1000px 0px`，内容回顶。
 
 ## 2. vendored 基线专属机制（初始 vendored 自带，上游 main 没有，升级全部需要重放）
 
@@ -111,7 +118,7 @@
 ## 4. 升级 foliate 操作流程
 
 1. 以上游对应版本为基线整体替换未改动文件（§3）；
-2. 对 §1 的 9 处补丁逐条重放（grep `// bookdock:` 核对，优先迁移到上游新抽象，如 1.3 的搜索配置项）；
+2. 对 §1 的 10 处补丁逐条重放（grep `bookdock:` 核对，优先迁移到上游新抽象，如 1.3 的搜索配置项）；
 3. 对 §2 的 4 项基线机制按功能重放（无标记，靠行为测试验证：滚轮翻页、iframe 键盘、continuous 无缝翻章、三格信息栏）；
 4. 跑阅读器相关测试 + 手动验证：搜索跳转锚点位置（28%）、想法虚线下划线、页眉页脚 padding=0 可见性、同 range 一划一想法渲染、页边距点击单次翻页；
 5. 更新本清单的行号与上游版本号。

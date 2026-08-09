@@ -101,6 +101,21 @@ export const annotations = sqliteTable('annotations', {
     .where(sql`${table.type} != 'note'`),
 }))
 
+export const fonts = sqliteTable('fonts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  scope: text('scope', { enum: ['user', 'instance'] }).notNull().default('user'),
+  family: text('family').notNull(),
+  fileName: text('file_name').notNull(),
+  format: text('format', { enum: ['ttf', 'otf', 'woff', 'woff2'] }).notNull(),
+  contentHash: text('content_hash').notNull(),
+  size: integer('size').notNull(),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  userContentHashIdx: uniqueIndex('fonts_user_content_hash_idx').on(table.userId, table.contentHash),
+  contentHashIdx: index('fonts_content_hash_idx').on(table.contentHash),
+}))
+
 export const readingRecords = sqliteTable('reading_records', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

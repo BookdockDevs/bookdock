@@ -505,7 +505,7 @@ export class Paginator extends HTMLElement {
         }
         #top {
             height: 100%;
-            // --_gap: 7%;
+            /* --_gap: 7%; */
             background-color: var(--_background-color);
             --_max-inline-size: 720px;
             --_max-block-size: 1440px;
@@ -523,8 +523,10 @@ export class Paginator extends HTMLElement {
                 var(--_half-gap)
                 minmax(var(--_half-gap), 1fr);
             grid-template-rows:
-                // bookdock: header/footer bands get a 28px floor via
-                // --_header-band/--_footer-band (see the :host rules below)
+                /* bookdock: header/footer bands get a 28px floor via
+                   --_header-band/--_footer-band (see the :host rules below).
+                   NOTE: CSS has no line comments — a "//" comment here drops
+                   the whole declaration, so keep this block comment style. */
                 max(var(--_top-margin), var(--_header-band, 0px))
                 1fr
                 max(var(--_bottom-margin), var(--_footer-band, 0px));

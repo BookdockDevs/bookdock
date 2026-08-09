@@ -8,8 +8,9 @@ import { useToastStore } from '@/stores/toast.store'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { kindOf, type NoteSort } from '../hooks/useNotesFilter'
+import { useReaderState } from '../state/reader-state'
 import { HIGHLIGHT_COLORS } from './annotation-colors'
-import { BookmarkIcon, BulbIcon, CopyIcon, PencilIcon, StyleGlyph, TrashIcon } from './annotation-icons'
+import { BookmarkIcon, BulbIcon, CopyIcon, PencilIcon, ShareIcon, StyleGlyph, TrashIcon } from './annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from './format-relative-time'
 
 function hexOf(a: AnnotationRes): string {
@@ -66,6 +67,7 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
   const deleteAnnotation = useDeleteAnnotation(bookId)
   const updateAnnotation = useUpdateAnnotation(bookId)
   const addToast = useToastStore((s) => s.addToast)
+  const setShareTarget = useReaderState((s) => s.setShareTarget)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: AnnotationRes } | null>(null)
 
   /** Chapter-grouped view, or null when a flat time-sorted list should render */
@@ -111,6 +113,13 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
     }
   }, [contextMenu])
 
+  // The click that dismisses the context menu must not also turn a page
+  useEffect(() => {
+    if (!contextMenu || !renderer) return
+    renderer.pushPopupGuard()
+    return () => renderer.popPopupGuard()
+  }, [contextMenu, renderer])
+
   function goTo(item: AnnotationRes) {
     renderer?.display(item.type === 'bookmark' ? item.cfiAnchor || item.cfiRange : item.cfiRange)
     if (!locked) onClose?.()
@@ -139,6 +148,15 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
 
   function deleteItem(item: AnnotationRes) {
     deleteAnnotation.mutate(item.id)
+  }
+
+  function shareItem(item: AnnotationRes) {
+    setShareTarget({
+      text: item.text,
+      chapter: item.chapter,
+      note: kindOf(item) === 'idea' ? (item.note ?? undefined) : undefined,
+      createdAt: item.createdAt,
+    })
   }
 
   function renderCard(a: AnnotationRes) {
@@ -195,6 +213,11 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
           <button onClick={() => copyItem(a)} title={_('annotation.copy')} className={actionBtn}>
             <CopyIcon />
           </button>
+          {a.type !== 'bookmark' && (
+            <button onClick={() => shareItem(a)} title={_('annotation.share')} className={actionBtn}>
+              <ShareIcon />
+            </button>
+          )}
           {a.type === 'bookmark' && (
             <button onClick={() => renameItem(a)} title={_('annotation.rename')} className={actionBtn}>
               <PencilIcon />
@@ -247,6 +270,15 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
             <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><CopyIcon /></span>
             {_('annotation.copy')}
           </button>
+          {contextMenu.item.type !== 'bookmark' && (
+            <button
+              onClick={() => { shareItem(contextMenu.item); setContextMenu(null) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+            >
+              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><ShareIcon /></span>
+              {_('annotation.share')}
+            </button>
+          )}
           {contextMenu.item.type === 'bookmark' && (
             <button
               onClick={() => { renameItem(contextMenu.item); setContextMenu(null) }}

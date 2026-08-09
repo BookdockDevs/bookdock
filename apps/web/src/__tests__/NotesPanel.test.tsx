@@ -59,7 +59,9 @@ function renderPanel(onClose = vi.fn(), sort: 'chapter' | 'time-desc' | 'time-as
 
 describe('NotesPanel', () => {
   beforeEach(() => {
-    vi.mocked(useReaderApi).mockReturnValue({ renderer: { display } })
+    vi.mocked(useReaderApi).mockReturnValue({
+      renderer: { display, pushPopupGuard: vi.fn(), popPopupGuard: vi.fn() },
+    })
     display.mockClear()
     deleteMutate.mockClear()
     updateMutate.mockClear()

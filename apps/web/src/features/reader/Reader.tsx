@@ -26,6 +26,7 @@ import { Ribbon } from './components/Ribbon'
 import { ToolDock } from './components/ToolDock'
 import { NavigationPanel, type NavigationPanelRef } from './components/NavigationPanel'
 import { SelectionToolbar } from './components/SelectionToolbar'
+import ShareCardDialog from './components/share/ShareCardDialog'
 import { ProgressStrip } from './components/ProgressStrip'
 import HistoryCapsule from './components/HistoryCapsule'
 import TimerPill from './components/TimerPill'
@@ -599,6 +600,17 @@ export default function Reader() {
     return () => containerEl.removeEventListener('content-click', handler)
   }, [containerEl, setSelection])
 
+  // While a floating UI is open (selection bubble / note editor / settings
+  // popover), the click that dismisses it must not also turn a page or toggle
+  // chrome — the renderer swallows click-to-turn while the guard is held
+  const selection = useReaderState((s) => s.selection)
+  const popupOpen = !!selection || settingsOpen
+  useEffect(() => {
+    if (!popupOpen || !renderer) return
+    renderer.pushPopupGuard()
+    return () => renderer.popPopupGuard()
+  }, [popupOpen, renderer])
+
   // Dismiss popups on scroll (scrolled mode)
   useEffect(() => {
     if (!containerEl) return
@@ -994,6 +1006,7 @@ export default function Reader() {
           </div>
         </div>
         <SelectionToolbar bookId={id} />
+        <ShareCardDialog bookId={id} />
       </div>
     </RendererContext.Provider>
     </ViewSettingsContext.Provider>

@@ -17,6 +17,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().optional(),
   DEFAULT_USERNAME: z.string().default('admin'),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(104857600),
+  FONT_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
   STORAGE_DRIVER: z.enum(['localfs']).default('localfs'),
 })
 

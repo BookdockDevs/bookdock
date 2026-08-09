@@ -82,6 +82,25 @@ export function QuoteIcon({ size = 20 }: { size?: number }) {
   )
 }
 
+/** Opening-quote glyph (“) for idea cards. Shape pixel-traced from the 微信读书
+ *  reference card (ball r15.5 + short tapered tail whose left edge is the
+ *  tangent extension of the ball's left contour, native 72×53, IoU 0.90 vs ref);
+ *  a font “ is too thin-stroked and a hand-drawn teardrop misses the geometry */
+export function QuoteLeftIcon({ height = 24 }: { height?: number }) {
+  return (
+    <svg viewBox="0 0 72 53" width={(height * 72) / 53} height={height} fill="currentColor" stroke="none">
+      <g>
+        <circle cx="16" cy="37" r="15.5" />
+        <path d="M2.2 30 L17 2.2 L20.2 3.4 C16.8 10 14 17 12.5 23.5 Z" />
+      </g>
+      <g transform="translate(40 0)">
+        <circle cx="16" cy="37" r="15.5" />
+        <path d="M2.2 30 L17 2.2 L20.2 3.4 C16.8 10 14 17 12.5 23.5 Z" />
+      </g>
+    </svg>
+  )
+}
+
 export function ChevronLeftIcon() {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -94,6 +113,56 @@ export function BookmarkIcon() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="none">
       <path d="M6 2h12a2 2 0 012 2v18l-8-4-8 4V4a2 2 0 012-2z" />
+    </svg>
+  )
+}
+
+export function ShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v12M8 6.5 12 3l4 3.5" />
+      <path d="M5 12v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
+    </svg>
+  )
+}
+
+/** Card-with-quote glyph for the "书摘" (excerpt card) action — distinct from
+ * the generic outbound ShareIcon used in the notes panel and dialog */
+export function ExcerptShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+      <g fill="currentColor" stroke="none" transform="translate(3.9 5.6) scale(0.68)">
+        <path d="M6 17h3l2-4V7H5v6h3l-2 4zm8 0h3l2-4V7h-6v6h3l-2 4z" />
+      </g>
+    </svg>
+  )
+}
+
+export function TemplateIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="4" width="7" height="7" rx="1.5" />
+      <rect x="13" y="4" width="7" height="7" rx="1.5" />
+      <rect x="4" y="13" width="7" height="7" rx="1.5" />
+      <rect x="13" y="13" width="7" height="7" rx="1.5" />
+    </svg>
+  )
+}
+
+export function DownloadIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 4v11M7.5 11 12 15.5 16.5 11" />
+      <path d="M4 19h16" />
+    </svg>
+  )
+}
+
+export function SpinnerIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" className="animate-spin">
+      <path d="M12 3a9 9 0 1 1-9 9" />
     </svg>
   )
 }

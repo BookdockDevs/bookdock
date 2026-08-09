@@ -38,6 +38,8 @@ export type {
   SettingsRes,
   SettingsUpdateReq,
   TrashSettings,
+  FontScope,
+  FontListItem,
   ShelfListItem,
   ShelfCreateReq,
   ShelfUpdateReq,

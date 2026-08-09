@@ -1,14 +1,16 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
 import { resolveReadingTheme, PRESET_READING_THEMES } from '@/lib/reading-theme'
 import { useUiStore } from '@/stores/ui.store'
+import { useFonts } from '@/api/hooks/useFonts'
 import { useViewSettings } from '../view-settings-context'
 import { MARGINAL_FIELDS } from '../lib/marginals'
 import type { MarginalField } from '../types'
 import type { PerBookSettingKey } from '../lib/view-settings'
-import { FONT_OPTIONS } from '../types'
+import { buildFontOptions, ensureBuiltinFontLoaded, ensureUploadedFontLoaded, useFontLoaderStore, type FontOption } from '../fonts'
+import { DownloadIcon, SpinnerIcon } from './annotation-icons'
 
 type Section = 'font' | 'layout' | 'display' | 'behavior' | 'theme'
 
@@ -165,6 +167,17 @@ function ClickAreaGlyph({ mode }: { mode: 'standard' | 'fullscreen' | 'swap' }) 
   )
 }
 
+const FONT_CHIPS_VISIBLE = 7
+
+function fontChipClass(active: boolean) {
+  return cn(
+    'flex items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-xs transition-colors',
+    active
+      ? 'border-current bg-current/10 text-current'
+      : 'border-stone-200 text-[var(--bd-read-sub)] hover:text-current dark:border-stone-800',
+  )
+}
+
 function SectionIcon({
   active,
   onClick,
@@ -208,6 +221,11 @@ export function SettingsPanel() {
     try { localStorage.setItem(SETTINGS_SECTION_KEY, s) } catch { /* ignore */ }
   }, [])
   const _ = useTranslation()
+
+  const { data: fontsData } = useFonts()
+  const uploadedFonts = useMemo(() => fontsData?.data ?? [], [fontsData])
+  const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
+  const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
 
   const {
     fontFamily,
@@ -276,6 +294,39 @@ export function SettingsPanel() {
     pageAnimation,
     setPageAnimation,
   } = useUiStore()
+
+  const fontOptions = useMemo(
+    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds }),
+    // loaded/loading ids feed a builtin option's status icon
+    [uploadedFonts, fontLoadedIds, fontLoadingIds],
+  )
+  const [fontsExpanded, setFontsExpanded] = useState(false)
+
+  // Selecting applies immediately (font-display: swap renders the fallback
+  // first); the click only kicks off the download as visual feedback
+  function onSelectFont(opt: FontOption) {
+    setFontFamily(opt.id)
+    if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
+  }
+
+  // Uploaded previews load eagerly; the selected builtin loads too so its
+  // chip preview is accurate — idle builtins stay untouched behind the icon
+  useEffect(() => {
+    if (section !== 'font') return
+    uploadedFonts.forEach((f) => void ensureUploadedFontLoaded(f))
+    const selected = fontOptions.find((o) => o.id === fontFamily)
+    if (selected?.source === 'builtin') ensureBuiltinFontLoaded(selected.id)
+  }, [section, uploadedFonts, fontOptions, fontFamily])
+
+  let visibleFontOptions = fontsExpanded ? fontOptions : fontOptions.slice(0, FONT_CHIPS_VISIBLE)
+  if (!fontsExpanded) {
+    const selectedIndex = fontOptions.findIndex((o) => o.id === fontFamily)
+    if (selectedIndex >= FONT_CHIPS_VISIBLE) {
+      // The selection must stay visible: it takes the last visible slot and
+      // the original occupant shifts into the hidden tail
+      visibleFontOptions = [...fontOptions.slice(0, FONT_CHIPS_VISIBLE - 1), fontOptions[selectedIndex]]
+    }
+  }
 
   // Per-book layer (F1): when inside the reader, the first-batch settings
   // display the merged effective values and writes route to the per-book diff
@@ -403,21 +454,23 @@ export function SettingsPanel() {
           <div className="mb-5">
             <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.sectionFont')}</label>
             <div className="grid grid-cols-2 gap-2">
-              {FONT_OPTIONS.map((f) => (
+              {visibleFontOptions.map((opt) => (
                 <button
-                  key={f.id}
-                  onClick={() => setFontFamily(f.id)}
-                  className={cn(
-                    'rounded-lg border px-2 py-1.5 text-xs transition-colors',
-                    fontFamily === f.id
-                      ? 'border-current bg-current/10 text-current'
-                      : 'border-stone-200 text-[var(--bd-read-sub)] hover:text-current dark:border-stone-800',
-                  )}
-                  style={{ fontFamily: f.value }}
+                  key={opt.id}
+                  onClick={() => onSelectFont(opt)}
+                  className={fontChipClass(fontFamily === opt.id)}
+                  style={{ fontFamily: opt.stack }}
                 >
-                  {f.name}
+                  {opt.name}
+                  {opt.status === 'idle' && <DownloadIcon size={12} />}
+                  {opt.status === 'loading' && <SpinnerIcon size={12} />}
                 </button>
               ))}
+              {fontOptions.length > FONT_CHIPS_VISIBLE && (
+                <button onClick={() => setFontsExpanded((v) => !v)} className={fontChipClass(false)}>
+                  {_(fontsExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
+                </button>
+              )}
             </div>
           </div>
 

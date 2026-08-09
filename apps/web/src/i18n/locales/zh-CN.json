@@ -194,6 +194,8 @@
     "perBookOnly": "仅本书",
     "perBookOnlyHint": "开启后字号/行距/页宽/边距/分栏等排版设置只应用于当前书籍",
     "sectionFont": "字体",
+    "fontsMore": "更多",
+    "fontsCollapse": "收起",
     "sectionLayout": "布局",
     "sectionDisplay": "显示",
     "sectionBehavior": "行为",
@@ -357,6 +359,9 @@
     "back": "返回书库",
     "title": "设置",
     "general": "通用",
+    "reading": "阅读",
+    "library": "书库",
+    "admin": "管理",
     "trash": "回收站",
     "trashAutoClean": "自动清理",
     "trashCleanNever": "从不",
@@ -373,7 +378,16 @@
     "readingTimerGrace1": "1 分钟",
     "readingTimerGrace5": "5 分钟",
     "readingTimerGrace10": "10 分钟",
-    "readingTimerGrace30": "30 分钟"
+    "readingTimerGrace30": "30 分钟",
+    "fonts": "字体",
+    "fontsUpload": "上传字体",
+    "fontsEmpty": "还没有上传的字体，支持 .ttf / .otf / .woff / .woff2",
+    "fontsScopeInstance": "实例",
+    "fontsScopeUser": "个人",
+    "fontsToInstance": "转为实例",
+    "fontsToUser": "转为个人",
+    "fontsDelete": "删除",
+    "fontsDeleteConfirm": "确定删除字体「{{name}}」吗？"
   },
   "admin": {
     "instanceSettings": "实例设置",
@@ -456,7 +470,47 @@
     "colorPurple": "紫色",
     "colorBlue": "蓝色",
     "colorGreen": "绿色",
-    "colorYellow": "黄色"
+    "colorYellow": "黄色",
+    "share": "分享",
+    "shareExcerpt": "书摘"
+  },
+  "share": {
+    "saveImage": "保存图片",
+    "copyImage": "复制图片",
+    "copied": "已复制到剪贴板",
+    "copyFailedDownloaded": "复制失败，已改为保存图片",
+    "exportFailed": "导出图片失败",
+    "close": "关闭",
+    "writtenAt": "写于 {{date}}",
+    "writtenAtCn": "写于{{date}}",
+    "changeTemplate": "更换模板",
+    "back": "返回",
+    "templateLabel": "主题",
+    "font": "字体",
+    "background": "背景",
+    "brandLabel": "署名",
+    "brand": {
+      "off": "不显示",
+      "en": "Bookdock",
+      "zh": "书坞"
+    },
+    "template": {
+      "classic": "经典",
+      "calendar": "日历",
+      "ink": "墨白",
+      "letter": "手札",
+      "brocade": "锦书"
+    },
+    "bg": {
+      "white": "白色",
+      "cream": "米色",
+      "pink": "粉色",
+      "green": "绿色",
+      "blue": "蓝色",
+      "black": "黑色",
+      "navy": "藏青",
+      "slate": "蓝灰"
+    }
   },
   "stats": {
     "title": "阅读统计",

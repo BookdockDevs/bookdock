@@ -93,6 +93,11 @@ export interface BookReader {
   applyChineseConversion(mode: ChineseConversion): Promise<void>
   applyContinuousScroll(mode: ContinuousScroll): void
   applyClickSettings(mode: ClickAreaMode): void
+  /** While >0, click-to-turn and chrome-toggle are swallowed: the click that
+   *  dismisses a floating UI (selection bubble, context menu…) must not also
+   *  turn a page or toggle the header. Push/pop in pairs. */
+  pushPopupGuard(): void
+  popPopupGuard(): void
   applyMarginals(config: MarginalConfig): void
   /** Per-chapter word counts, indexed by chapter (for the chapterWordCount field) */
   setChapterWordCounts(counts: (number | undefined)[]): void
@@ -152,7 +157,9 @@ export interface SearchResult {
 export type NavTab = 'toc' | 'notes' | 'stats'
 export type PageWidth = number
 
-export type FontFamily = 'serif' | 'sans-serif' | 'kaiti' | 'fangsong'
+// Font ids: the four system stacks below, builtin CDN ids (fonts.ts), or
+// uploaded font ids — the registry resolves any id to a concrete stack
+export type FontFamily = string
 
 export const FONT_OPTIONS: { id: FontFamily; name: string; value: string }[] = [
   { id: 'serif', name: '宋体', value: '"Noto Serif SC", "Source Han Serif SC", "Source Han Serif", "Songti SC", "SimSun", serif' },
@@ -163,6 +170,11 @@ export const FONT_OPTIONS: { id: FontFamily; name: string; value: string }[] = [
 
 export interface FontConfig {
   fontFamily: FontFamily
+  /** Pre-resolved CSS font stack (registry lookup happens at the hook boundary,
+   *  the renderer never sees font ids); falls back to FONT_OPTIONS[0] when unset */
+  fontStack?: string
+  /** @font-face / @import snippet injected at the top of the iframe stylesheet */
+  fontCss?: string
   size: number
   lineHeight: number
   fontWeight: number

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from 'react'
 import { useUiStore } from '@/stores/ui.store'
+import { useFonts } from '@/api/hooks/useFonts'
 import { resolveReadingTheme } from '@/lib/reading-theme'
 import { FoliateReader } from '../renderers/FoliateReader'
+import { fontCssFor, resolveFont } from '../fonts'
 import type { BookReader, ClickAreaMode, MarginalField, RendererEvents } from '../types'
 import type { EffectiveViewSettings } from '../lib/view-settings'
 
@@ -89,6 +91,15 @@ export function useReaderRenderer({
   const pageColumns = settings?.pageColumns ?? storePageColumns
   const columnGap = settings?.columnGap ?? storeColumnGap
 
+  // Registry resolution lives at this boundary: the renderer only ever
+  // receives a concrete stack + optional @font-face/@import css. While the
+  // fonts query is still loading an uploaded id resolves to the system
+  // fallback; fontCss changing re-triggers the applyFont effect below.
+  const { data: fontsData } = useFonts()
+  const resolvedFont = resolveFont(fontFamily, fontsData?.data ?? [])
+  const fontStack = resolvedFont.stack
+  const fontCss = fontCssFor(resolvedFont)
+
   const onRelocatedRef = useRef(onRelocated)
   const onSelectedRef = useRef(onSelected)
   const onAnnotationClickedRef = useRef(onAnnotationClicked)
@@ -102,7 +113,7 @@ export function useReaderRenderer({
   const onUserJumpRef = useRef(onUserJump)
   const theme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [readingThemeId, customThemes])
   const themeRef = useRef(theme)
-  const fontRef = useRef({ fontFamily, size: fontSize, lineHeight, fontWeight, overrideBookFont })
+  const fontRef = useRef({ fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
   const paragraphRef = useRef({ paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout })
   const pageWidthRef = useRef(pageWidth)
   const chineseConversionRef = useRef(chineseConversion)
@@ -132,7 +143,7 @@ export function useReaderRenderer({
   onChromeToggleRef.current = onChromeToggle
   onUserJumpRef.current = onUserJump
   themeRef.current = theme
-  fontRef.current = { fontFamily, size: fontSize, lineHeight, fontWeight, overrideBookFont }
+  fontRef.current = { fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont }
   paragraphRef.current = { paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
   pageWidthRef.current = pageWidth
   chineseConversionRef.current = chineseConversion
@@ -242,8 +253,8 @@ export function useReaderRenderer({
   useEffect(() => {
     const current = rendererRef.current
     if (!current) return
-    current.applyFont({ fontFamily, size: fontSize, lineHeight, fontWeight, overrideBookFont })
-  }, [fontFamily, fontSize, lineHeight, fontWeight, overrideBookFont])
+    current.applyFont({ fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
+  }, [fontFamily, fontStack, fontCss, fontSize, lineHeight, fontWeight, overrideBookFont])
 
   useEffect(() => {
     const current = rendererRef.current

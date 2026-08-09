@@ -1,6 +1,24 @@
 import { describe, it, expect } from 'vitest'
+import JSZip from 'jszip'
+import { DOMParser } from '@xmldom/xmldom'
+
 import { convertTxtToEpub } from '../lib/txt-to-epub'
 import { parseEpubBuffer } from '../formats/epub'
+
+// The reader (foliate-js) resolves the OPF via a namespace-aware lookup, so a
+// wrong container namespace passes our lenient parser but breaks the reader.
+const OCF_CONTAINER_NS = 'urn:oasis:names:tc:opendocument:xmlns:container'
+
+async function expectReaderCompatibleContainer(buffer: Buffer) {
+  const zip = await JSZip.loadAsync(buffer)
+  const xml = await zip.file('META-INF/container.xml')!.async('text')
+  const doc = new DOMParser().parseFromString(xml, 'application/xml')
+  const rootfiles = Array.from(doc.getElementsByTagNameNS(OCF_CONTAINER_NS, 'rootfile'))
+  const opf = rootfiles.find(
+    (el) => el.getAttribute('media-type') === 'application/oebps-package+xml',
+  )
+  expect(opf?.getAttribute('full-path')).toBe('OEBPS/content.opf')
+}
 
 describe('convertTxtToEpub', () => {
   it('produces a valid EPUB with chapters', async () => {
@@ -17,6 +35,7 @@ describe('convertTxtToEpub', () => {
     )
 
     expect(buffer.length).toBeGreaterThan(0)
+    await expectReaderCompatibleContainer(buffer)
 
     const parsed = await parseEpubBuffer(buffer)
     expect(parsed.meta.title).toBe('测试之书')
@@ -36,5 +55,6 @@ describe('convertTxtToEpub', () => {
     const parsed = await parseEpubBuffer(buffer)
     expect(parsed.chapters.length).toBe(1)
     expect(parsed.chapters[0].title).toBe('全文')
+    await expectReaderCompatibleContainer(buffer)
   })
 })

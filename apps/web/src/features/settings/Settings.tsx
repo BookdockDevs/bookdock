@@ -10,8 +10,9 @@ import UserManagementSection from './components/UserManagementSection'
 import LanguageSwitcher from './components/LanguageSwitcher'
 import TrashSettingsRow from './components/TrashSettingsRow'
 import ReadingDataSettingsSection from './components/ReadingDataSettingsSection'
+import FontsSettingsSection from './components/FontsSettingsSection'
 
-type SectionId = 'general' | 'reading' | 'instance' | 'users'
+type SectionId = 'general' | 'reading' | 'library' | 'admin'
 
 export default function Settings() {
   const _ = useTranslation()
@@ -21,13 +22,9 @@ export default function Settings() {
 
   const sections: { id: SectionId; label: string }[] = [
     { id: 'general', label: _('settings.general') },
-    { id: 'reading', label: _('settings.readingData') },
-    ...(isOwner
-      ? [
-          { id: 'instance' as const, label: _('admin.instanceSettings') },
-          { id: 'users' as const, label: _('admin.userManagement') },
-        ]
-      : []),
+    { id: 'reading', label: _('settings.reading') },
+    { id: 'library', label: _('settings.library') },
+    ...(isOwner ? [{ id: 'admin' as const, label: _('settings.admin') }] : []),
   ]
 
   return (
@@ -70,14 +67,26 @@ export default function Settings() {
             <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
               <h2 className="mb-4 text-sm font-medium">{_('settings.general')}</h2>
               <LanguageSwitcher />
-              <div className="mt-4 border-t border-stone-200 pt-4 dark:border-stone-800">
-                <TrashSettingsRow />
-              </div>
             </section>
           )}
-          {active === 'reading' && <ReadingDataSettingsSection />}
-          {active === 'instance' && isOwner && <InstanceSettingsSection />}
-          {active === 'users' && isOwner && <UserManagementSection />}
+          {active === 'reading' && (
+            <div className="flex flex-col gap-6">
+              <ReadingDataSettingsSection />
+              <FontsSettingsSection />
+            </div>
+          )}
+          {active === 'library' && (
+            <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+              <h2 className="mb-4 text-sm font-medium">{_('settings.trash')}</h2>
+              <TrashSettingsRow />
+            </section>
+          )}
+          {active === 'admin' && isOwner && (
+            <div className="flex flex-col gap-6">
+              <InstanceSettingsSection />
+              <UserManagementSection />
+            </div>
+          )}
         </div>
       </div>
     </div>
