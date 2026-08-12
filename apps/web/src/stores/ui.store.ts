@@ -1,9 +1,34 @@
 import { create } from 'zustand'
 import type { FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField } from '../features/reader/types'
 import type { CustomReadingTheme } from '../lib/reading-theme'
+import {
+  CONFIG_STORAGE_KEY,
+  READING_PROFILE_KEYS,
+  activeSnapshot,
+  createReadingPreset as createPreset,
+  deleteReadingPreset as deletePreset,
+  emptyConfig,
+  foldReadingChange,
+  parseReadingConfig,
+  pickReadingSnapshot,
+  renameReadingPreset as renamePreset,
+  serializeReadingConfig,
+  type ReadingConfig,
+} from '../features/reader/lib/reading-profiles'
 
 export type UiTheme = 'system' | 'light' | 'dark'
 export type UiSection = 'font' | 'layout' | 'display' | 'theme'
+
+/** Cover fill mode inside the grid card: object-cover vs object-contain. */
+export type CoverFit = 'crop' | 'full'
+
+/** Recently-read strip presentation: hidden, large cover row, or card carousel. */
+export type RecentlyReadStyle = 'off' | 'covers' | 'cards'
+
+/** Optional info items on the right side of a list-view row */
+export type ListInfoItem = 'progress' | 'size' | 'lastRead' | 'shelf' | 'tags' | 'createdAt'
+/** Fixed display order: the row renders enabled items in this sequence */
+export const LIST_INFO_ITEMS: ListInfoItem[] = ['progress', 'size', 'lastRead', 'shelf', 'tags', 'createdAt']
 
 export const SETTINGS_VERSION = 1
 const VERSION_KEY = 'bd-settings-version'
@@ -120,18 +145,30 @@ interface UiState {
   setReadingTimerMode: (v: 'auto' | 'manual' | 'off') => void
   setManualTimerGraceMinutes: (v: 1 | 5 | 10 | 30) => void
 
+  // Named reading-setting profiles (阅读设置预设): serialized JSON of the
+  // whole multi-config state (`{ global, presets[], active }`). The flat
+  // fields above always hold the ACTIVE config's values; this blob owns the
+  // global + preset snapshots.
+  readingConfig: string
+  createReadingPreset: (name: string, perBookOverlay?: Record<string, unknown>) => void
+  renameReadingPreset: (id: string, name: string) => void
+  deleteReadingPreset: (id: string) => void
+  activateReadingPreset: (id: string | null) => void
+
   // Library UI prefs
-  coverMode: boolean
-  coverFit: boolean
+  coverText: boolean
+  coverFit: CoverFit
   gridColumns: string
-  showRecentlyRead: boolean
+  recentlyReadStyle: RecentlyReadStyle
+  listInfoItems: ListInfoItem[]
   sortBy: string
   sortOrder: 'asc' | 'desc'
   view: 'grid' | 'list'
-  setCoverMode: (v: boolean) => void
-  setCoverFit: (v: boolean) => void
+  setCoverText: (v: boolean) => void
+  setCoverFit: (v: CoverFit) => void
   setGridColumns: (v: string) => void
-  setShowRecentlyRead: (v: boolean) => void
+  setRecentlyReadStyle: (v: RecentlyReadStyle) => void
+  setListInfoItems: (v: ListInfoItem[]) => void
   setSortBy: (v: string) => void
   setSortOrder: (v: 'asc' | 'desc') => void
   setView: (v: 'grid' | 'list') => void
@@ -221,6 +258,19 @@ function getInitialBoolean(key: string, fallback: boolean): boolean {
   return raw === 'true'
 }
 
+function getInitialListInfoItems(): ListInfoItem[] {
+  if (typeof window === 'undefined') return ['progress']
+  try {
+    const raw = localStorage.getItem('bd-list-info-items')
+    if (raw === null) return ['progress']
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return ['progress']
+    return parsed.filter((v): v is ListInfoItem => (LIST_INFO_ITEMS as string[]).includes(v as string))
+  } catch {
+    return ['progress']
+  }
+}
+
 function setStorage(key: string, value: string) {
   try {
     window.localStorage.setItem(key, value)
@@ -228,6 +278,15 @@ function setStorage(key: string, value: string) {
     // ignore localStorage errors in private/incognito modes
   }
 }
+
+// Reading-profile config from a previous session; the flat getInitial* values
+// below are overridden by the active snapshot right after store creation
+// (config is authoritative for the reading keys once it exists).
+function getInitialReadingConfig(): ReadingConfig | null {
+  if (typeof window === 'undefined') return null
+  return parseReadingConfig(localStorage.getItem(CONFIG_STORAGE_KEY))
+}
+const initialReadingConfig = getInitialReadingConfig()
 
 const initialReadingMode = getInitial<ReadingMode>('bd-reading-mode', 'scroll')
 
@@ -244,6 +303,36 @@ function getInitialClickAreaMode(): ClickAreaMode {
 }
 
 const initialScrollPageWidth = getInitialNumber('bd-page-width', 800, 400, 1800)
+
+// Cover prefs migrated from the merged tri-state enum (bd-cover-style) and,
+// before that, the boolean pair (bd-cover-mode=true meant cover-only,
+// bd-cover-fit='true' meant object-contain). New keys win while present.
+function getInitialCoverText(): boolean {
+  if (typeof window === 'undefined') return true
+  const stored = localStorage.getItem('bd-cover-text')
+  if (stored !== null) return stored === 'true'
+  const style = localStorage.getItem('bd-cover-style')
+  if (style !== null) return style !== 'none'
+  if (localStorage.getItem('bd-cover-mode') === 'true') return false
+  return true
+}
+
+function getInitialCoverFit(): CoverFit {
+  if (typeof window === 'undefined') return 'crop'
+  const stored = localStorage.getItem('bd-cover-fit')
+  if (stored === 'crop' || stored === 'full') return stored
+  if (stored === 'true') return 'full' // legacy boolean form
+  if (localStorage.getItem('bd-cover-style') === 'full') return 'full'
+  return 'crop'
+}
+
+function getInitialRecentlyReadStyle(): RecentlyReadStyle {
+  if (typeof window === 'undefined') return 'off'
+  const stored = localStorage.getItem('bd-recently-read-style')
+  if (stored === 'off' || stored === 'covers' || stored === 'cards') return stored
+  if (localStorage.getItem('bd-show-recently-read') === 'true') return 'cards'
+  return 'off'
+}
 const initialScrollHorizontalPadding = getInitialNumber('bd-horizontal-padding', 0, 0, 120)
 const initialScrollVerticalPadding = getInitialNumber('bd-vertical-padding', 0, 0, 120)
 
@@ -306,23 +395,27 @@ export const useUiStore = create<UiState>((set, get) => ({
   marginalFontSize: getInitialNumber('bd-marginal-font-size', 0, 0, 24),
   readingTimerMode: getInitialTimerMode(),
   manualTimerGraceMinutes: getInitialGraceMinutes(),
+  // Seeded right after store creation (initialReadingConfig, or a fresh config
+  // picked from the flat values); '' only during that same module tick.
+  readingConfig: '',
 
-  coverMode: getInitialBoolean('bd-cover-mode', false),
-  coverFit: getInitialBoolean('bd-cover-fit', false),
+  coverText: getInitialCoverText(),
+  coverFit: getInitialCoverFit(),
   gridColumns: getInitial<string>('bd-grid-columns', 'auto'),
-  showRecentlyRead: getInitialBoolean('bd-show-recently-read', false),
+  recentlyReadStyle: getInitialRecentlyReadStyle(),
+  listInfoItems: getInitialListInfoItems(),
   sortBy: getInitial<string>('bd-sort-by', 'createdAt'),
   sortOrder: getInitial<string>('bd-sort-order', 'desc') === 'asc' ? ('asc' as const) : ('desc' as const),
   view: getInitial<string>('bd-library-view', 'grid') === 'list' ? ('list' as const) : ('grid' as const),
   toolbarLocked: getInitialBoolean('bd-reader-toolbar-locked', false),
   sidebarWidth: getInitialNumber('bd-sidebar-width', 288, 200, 500),
 
-  setCoverMode: (coverMode) => {
-    setStorage('bd-cover-mode', String(coverMode))
-    set({ coverMode })
+  setCoverText: (coverText) => {
+    setStorage('bd-cover-text', String(coverText))
+    set({ coverText })
   },
   setCoverFit: (coverFit) => {
-    setStorage('bd-cover-fit', String(coverFit))
+    setStorage('bd-cover-fit', coverFit)
     set({ coverFit })
   },
   setGridColumns: (gridColumns) => {
@@ -349,9 +442,13 @@ export const useUiStore = create<UiState>((set, get) => ({
     setStorage('bd-sidebar-width', String(sidebarWidth))
     set({ sidebarWidth })
   },
-  setShowRecentlyRead: (showRecentlyRead) => {
-    setStorage('bd-show-recently-read', String(showRecentlyRead))
-    set({ showRecentlyRead })
+  setRecentlyReadStyle: (recentlyReadStyle) => {
+    setStorage('bd-recently-read-style', recentlyReadStyle)
+    set({ recentlyReadStyle })
+  },
+  setListInfoItems: (listInfoItems) => {
+    setStorage('bd-list-info-items', JSON.stringify(listInfoItems))
+    set({ listInfoItems })
   },
   setAutoMarkSelection: (autoMarkSelection) => {
     setStorage('bd-auto-mark-selection', String(autoMarkSelection))
@@ -550,4 +647,92 @@ export const useUiStore = create<UiState>((set, get) => ({
     setStorage('bd-page-animation', String(pageAnimation))
     set({ pageAnimation })
   },
+
+  createReadingPreset: (name, perBookOverlay) => {
+    const cfg = parseReadingConfig(get().readingConfig)
+    if (!cfg) return
+    // Creation activates immediately: the snapshot is picked from the current
+    // values, so the flat fields stay as-is and only the active pointer moves.
+    // An active 仅本书 diff is overlaid key-by-key so the preset captures the
+    // effective (WYSIWYG) values; per-book edits never touch the config itself.
+    const snapshot = pickReadingSnapshot(get())
+    if (perBookOverlay) {
+      for (const [key, value] of Object.entries(perBookOverlay)) {
+        if ((READING_PROFILE_KEYS as readonly string[]).includes(key)) {
+          ;(snapshot as Record<string, unknown>)[key] = value
+        }
+      }
+    }
+    persistReadingConfig(createPreset(cfg, name.trim(), snapshot))
+  },
+  renameReadingPreset: (id, name) => {
+    const cfg = parseReadingConfig(get().readingConfig)
+    if (!cfg) return
+    persistReadingConfig(renamePreset(cfg, id, name.trim()))
+  },
+  deleteReadingPreset: (id) => {
+    const cfg = parseReadingConfig(get().readingConfig)
+    if (!cfg) return
+    const next = deletePreset(cfg, id)
+    if (cfg.active === id) {
+      // Fell back to the global config: reload its values into the flat fields
+      applyReadingSnapshot(next)
+    } else {
+      persistReadingConfig(next)
+    }
+  },
+  activateReadingPreset: (id) => {
+    const cfg = parseReadingConfig(get().readingConfig)
+    if (!cfg || id === cfg.active) return
+    if (id !== null && !cfg.presets.some((p) => p.id === id)) return
+    applyReadingSnapshot({ ...cfg, active: id })
+  },
 }))
+
+// Persist + publish the config; the routing subscription skips the update
+// (readingConfig changed) so transitions never fold their own values back.
+function persistReadingConfig(config: ReadingConfig) {
+  const raw = serializeReadingConfig(config)
+  setStorage(CONFIG_STORAGE_KEY, raw)
+  useUiStore.setState({ readingConfig: raw })
+}
+
+// Switch the flat profile-key fields to the (new) active snapshot. The single
+// setState carries readingConfig too, so the routing subscription below skips
+// this transition as one atomic update.
+function applyReadingSnapshot(config: ReadingConfig) {
+  const snapshot = activeSnapshot(config)
+  const flat: Partial<ReturnType<typeof useUiStore.getState>> = {}
+  for (const key of READING_PROFILE_KEYS) {
+    ;(flat as Record<string, unknown>)[key] = snapshot[key]
+  }
+  const raw = serializeReadingConfig(config)
+  setStorage(CONFIG_STORAGE_KEY, raw)
+  useUiStore.setState({ ...flat, readingConfig: raw })
+}
+
+// Seed the config once: an existing blob wins (its active snapshot also
+// overrides the flat getInitial* values — the config is authoritative for the
+// reading keys), otherwise a fresh config is picked from the current values.
+{
+  const existing = initialReadingConfig
+  if (existing) {
+    applyReadingSnapshot(existing)
+  } else {
+    persistReadingConfig(emptyConfig(pickReadingSnapshot(useUiStore.getState())))
+  }
+}
+
+// Route reading-setting edits into the active config target (preset or
+// global): every profile-key change folds into the persisted snapshot, so
+// activation switches are always backed by a complete, current config.
+useUiStore.subscribe((state, prevState) => {
+  if (state.readingConfig !== prevState.readingConfig) return
+  const changed = READING_PROFILE_KEYS.filter((key) => state[key] !== prevState[key])
+  if (changed.length === 0) return
+  const cfg = parseReadingConfig(prevState.readingConfig)
+  if (!cfg) return
+  let next = cfg
+  for (const key of changed) next = foldReadingChange(next, key, state[key])
+  persistReadingConfig(next)
+})

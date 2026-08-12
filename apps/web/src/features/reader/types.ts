@@ -28,7 +28,8 @@ export interface SelectionInfo {
   cfiRange: string
   text: string
   // Selection.toString() keeps block-level line breaks (Range.toString() does
-  // not) — used by copy so pasted text keeps its paragraphs
+  // not) — preferred over `text` for annotation excerpts and copy so quotes
+  // keep their paragraphs
   rawText?: string
   anchor?: string
   rect?: PopupRect

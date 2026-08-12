@@ -53,6 +53,39 @@ afterEach(() => {
 })
 
 describe('SelectionToolbar', () => {
+  it('stores the raw selection text with paragraph breaks when creating a highlight', async () => {
+    act(() => useReaderState.setState({
+      selection: { cfiRange: 'epubcfi(/6/4!/2)', text: '第一段 第二段', rawText: '第一段\n\n第二段', rect: RECT },
+    }))
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('annotation.drawHighlight'))
+    await waitFor(() => expect(createMutate).toHaveBeenCalledTimes(1))
+    expect(createMutate.mock.calls[0][0].text).toBe('第一段\n\n第二段')
+  })
+
+  it('slices overlong rawText to the same 500-char cap as before', async () => {
+    act(() => useReaderState.setState({
+      selection: { cfiRange: 'epubcfi(/6/4!/2)', text: 'x'.repeat(500), rawText: 'y'.repeat(600), rect: RECT },
+    }))
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('annotation.drawHighlight'))
+    await waitFor(() => expect(createMutate).toHaveBeenCalledTimes(1))
+    expect(createMutate.mock.calls[0][0].text).toBe('y'.repeat(500))
+  })
+
+  it('stores the raw selection text when creating a note', async () => {
+    act(() => useReaderState.setState({
+      selection: { cfiRange: 'epubcfi(/6/4!/2)', text: '第一段 第二段', rawText: '第一段\n\n第二段', rect: RECT },
+    }))
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('annotation.writeNote'))
+    await waitFor(() => expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument())
+    fireEvent.change(screen.getByPlaceholderText('annotation.notePlaceholder'), { target: { value: '我的想法' } })
+    fireEvent.click(screen.getByRole('button', { name: 'annotation.publish' }))
+    await waitFor(() => expect(createMutate).toHaveBeenCalledTimes(1))
+    expect(createMutate.mock.calls[0][0].text).toBe('第一段\n\n第二段')
+  })
+
   it('shows highlight actions for a fresh selection', async () => {
     setSelection()
     render(<SelectionToolbar bookId="b1" />)

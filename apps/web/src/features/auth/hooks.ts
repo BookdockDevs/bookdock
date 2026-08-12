@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 
 import type {
+  AccountRes,
   AdminUserRes,
   ChangePasswordReq,
   InstanceInfoRes,
@@ -11,9 +12,10 @@ import type {
   RegisterRes,
   UpdateInstanceReq,
   UpdateUserReq,
+  UpdateUsernameReq,
 } from '@bookdock/shared'
 
-import { apiGet, apiPatch, apiPost } from '@/api/client'
+import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from '@/api/client'
 import { useAuthStore } from '@/stores/auth.store'
 
 export const INSTANCE_QUERY_KEY = ['auth', 'instance'] as const
@@ -62,6 +64,42 @@ export function useLogout() {
 export function useChangePassword() {
   return useMutation({
     mutationFn: (body: ChangePasswordReq) => apiPost<{ data: { ok: true } }>('/auth/password', body),
+  })
+}
+
+export function useUpdateUsername() {
+  const updateUser = useAuthStore((s) => s.updateUser)
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: UpdateUsernameReq) => apiPost<{ data: AccountRes }>('/auth/username', body),
+    onSuccess: (res) => {
+      updateUser({ username: res.data.username })
+      void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+    },
+  })
+}
+
+export function useUploadAvatar() {
+  const updateUser = useAuthStore((s) => s.updateUser)
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => apiUpload<{ data: AccountRes }>('/avatars', file),
+    onSuccess: (res) => {
+      updateUser({ avatarKey: res.data.avatarKey })
+      void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+    },
+  })
+}
+
+export function useDeleteAvatar() {
+  const updateUser = useAuthStore((s) => s.updateUser)
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiDelete<{ data: null }>('/avatars'),
+    onSuccess: () => {
+      updateUser({ avatarKey: null })
+      void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+    },
   })
 }
 

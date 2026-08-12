@@ -1,5 +1,10 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 
+import { useTranslation } from '@/hooks/useTranslation'
+
+import { markEscConsumed } from '../lib/esc-consumed'
+import { TrashIcon } from './annotation-icons'
+
 interface ExpandingSearchBarProps {
   expanded: boolean
   query: string
@@ -11,11 +16,30 @@ interface ExpandingSearchBarProps {
   progress?: number | null
   /** Trailing controls rendered at the right of the input (e.g. options button) */
   children?: ReactNode
+  /** Search-history chips shown while the input is empty (Readest parity) */
+  history?: string[]
+  onHistoryClick?: (term: string) => void
+  onClearHistory?: () => void
 }
 
 /** Search bar that slides down from the top of its container and collapses away */
-export function ExpandingSearchBar({ expanded, query, placeholder, onQueryChange, onCollapse, progress, children }: ExpandingSearchBarProps) {
+export function ExpandingSearchBar({
+  expanded,
+  query,
+  placeholder,
+  onQueryChange,
+  onCollapse,
+  progress,
+  children,
+  history,
+  onHistoryClick,
+  onClearHistory,
+}: ExpandingSearchBarProps) {
+  const _ = useTranslation()
   const inputRef = useRef<HTMLInputElement>(null)
+  // The chips row only renders while the input is empty; the collapse
+  // container's max-height must grow with it or overflow-hidden clips it
+  const showHistory = !!history && history.length > 0 && !query
 
   useEffect(() => {
     if (expanded) inputRef.current?.focus()
@@ -24,7 +48,7 @@ export function ExpandingSearchBar({ expanded, query, placeholder, onQueryChange
   return (
     <div
       className={`overflow-hidden transition-[max-height,opacity,visibility] duration-200 ease-out ${
-        expanded ? 'visible max-h-16 opacity-100' : 'invisible max-h-0 opacity-0'
+        expanded ? `visible opacity-100 ${showHistory ? 'max-h-28' : 'max-h-16'}` : 'invisible max-h-0 opacity-0'
       }`}
     >
       <div className="flex items-center gap-2 py-2">
@@ -47,6 +71,7 @@ export function ExpandingSearchBar({ expanded, query, placeholder, onQueryChange
             onChange={(e) => onQueryChange(e.target.value)}
             onKeyDown={(e) => {
               if (e.key !== 'Escape') return
+              markEscConsumed()
               if (query) onQueryChange('')
               else onCollapse()
             }}
@@ -68,6 +93,29 @@ export function ExpandingSearchBar({ expanded, query, placeholder, onQueryChange
         </div>
         {children}
       </div>
+      {showHistory && (
+        <div className="flex items-center gap-1.5 pb-1.5">
+          <div className="flex flex-1 gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {history.map((term) => (
+              <button
+                key={term}
+                onClick={() => onHistoryClick?.(term)}
+                title={term}
+                className="max-w-[55%] shrink-0 truncate rounded-full border border-stone-500/20 px-3 py-0.5 text-xs text-[var(--bd-read-sub)] transition-colors hover:border-stone-500/40 hover:text-current dark:border-stone-700 dark:hover:border-stone-500"
+              >
+                {term}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={onClearHistory}
+            title={_('reader.clearSearchHistory')}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+          >
+            <TrashIcon />
+          </button>
+        </div>
+      )}
       {progress != null && progress < 1 && (
         <div className="pb-1.5">
           <div className="h-0.5 w-full overflow-hidden rounded-full bg-stone-500/15">

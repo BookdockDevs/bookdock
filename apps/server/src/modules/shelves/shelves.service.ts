@@ -1,7 +1,7 @@
 import { eq, and, inArray, sql, asc } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
-import { books, shelves, bookShelves } from '../../db/schema'
+import { books, shelves } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 
@@ -10,10 +10,10 @@ export async function listShelves(userId: string) {
   const rows = db
     .select({
       shelf: shelves,
-      bookCount: sql<number>`count(${bookShelves.bookId})`,
+      bookCount: sql<number>`count(${books.id})`,
     })
     .from(shelves)
-    .leftJoin(bookShelves, eq(shelves.id, bookShelves.shelfId))
+    .leftJoin(books, eq(shelves.id, books.shelfId))
     .where(eq(shelves.userId, userId))
     .groupBy(shelves.id)
     .orderBy(asc(shelves.sortOrder), asc(shelves.createdAt))
@@ -25,8 +25,36 @@ export async function createShelf(userId: string, name: string) {
   const db = getDb()
   const now = Date.now()
   const id = createId('shelf')
-  db.insert(shelves).values({ id, userId, name, sortOrder: 0, createdAt: now }).run()
-  return { id, userId, name, sortOrder: 0, createdAt: now, bookCount: 0 }
+  // New shelves always land last: the list orders by (sortOrder, createdAt), so
+  // a default 0 would jump to the front once a reorder has written dense ranks.
+  const max = db
+    .select({ max: sql<number>`max(${shelves.sortOrder})` })
+    .from(shelves)
+    .where(eq(shelves.userId, userId))
+    .get()
+  const sortOrder = (max?.max ?? -1) + 1
+  db.insert(shelves).values({ id, userId, name, sortOrder, createdAt: now }).run()
+  return { id, userId, name, sortOrder, createdAt: now, bookCount: 0 }
+}
+
+export async function reorderShelves(userId: string, shelfIds: string[]) {
+  const db = getDb()
+  // The submitted list must be the user's full shelf set — anything less would
+  // leave stragglers on stale ranks that collide with the rewritten ones.
+  const existing = db
+    .select({ id: shelves.id })
+    .from(shelves)
+    .where(eq(shelves.userId, userId))
+    .all()
+  const owned = new Set(existing.map((s) => s.id))
+  if (shelfIds.length !== owned.size || shelfIds.some((id) => !owned.has(id))) {
+    throw new AppError('SHELF_NOT_FOUND')
+  }
+  db.transaction((tx) => {
+    for (const [index, id] of shelfIds.entries()) {
+      tx.update(shelves).set({ sortOrder: index }).where(eq(shelves.id, id)).run()
+    }
+  })
 }
 
 export async function updateShelf(userId: string, shelfId: string, name: string) {
@@ -41,26 +69,29 @@ export async function deleteShelf(userId: string, shelfId: string) {
   const db = getDb()
   const existing = await getShelf(userId, shelfId)
   if (!existing) throw new AppError('SHELF_NOT_FOUND')
-  db.delete(bookShelves).where(eq(bookShelves.shelfId, shelfId)).run()
+  // books.shelfId FK is ON DELETE SET NULL: books become uncategorized
   db.delete(shelves).where(eq(shelves.id, shelfId)).run()
   return existing
 }
 
-export async function addBooksToShelf(userId: string, shelfId: string, bookIds: string[]) {
+export async function moveBooksToShelf(userId: string, shelfId: string, bookIds: string[]) {
   const db = getDb()
   await verifyShelfOwnership(userId, shelfId)
   await verifyBookOwnership(userId, bookIds)
   if (bookIds.length === 0) return
-  const values = bookIds.map((bookId) => ({ bookId, shelfId, sortOrder: 0 }))
-  db.insert(bookShelves).values(values).onConflictDoNothing().run()
+  db.update(books)
+    .set({ shelfId })
+    .where(and(eq(books.userId, userId), inArray(books.id, bookIds)))
+    .run()
 }
 
 export async function removeBooksFromShelf(userId: string, shelfId: string, bookIds: string[]) {
   const db = getDb()
   await verifyShelfOwnership(userId, shelfId)
   if (bookIds.length === 0) return
-  db.delete(bookShelves)
-    .where(and(eq(bookShelves.shelfId, shelfId), inArray(bookShelves.bookId, bookIds)))
+  db.update(books)
+    .set({ shelfId: null })
+    .where(and(eq(books.userId, userId), eq(books.shelfId, shelfId), inArray(books.id, bookIds)))
     .run()
 }
 

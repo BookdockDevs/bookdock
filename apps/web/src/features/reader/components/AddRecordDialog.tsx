@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/Button'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useToastStore } from '@/stores/toast.store'
 
+import { markEscConsumed } from '../lib/esc-consumed'
+
 interface AddRecordDialogProps {
   bookId: string
   onClose: () => void
@@ -34,7 +36,10 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        markEscConsumed()
+        onClose()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

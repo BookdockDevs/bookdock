@@ -164,24 +164,26 @@ export function ensureBuiltinFontLoaded(id: string): void {
   document.head.appendChild(link)
 }
 
-const loadedUploadedIds = new Set<string>()
+const injectedUploadedIds = new Set<string>()
 
-/** Idempotently register an uploaded font in the main document via the
- *  FontFace API (a <link> cannot express the aliased family name) */
+/** Idempotently register an uploaded font in the main document via an inline
+ *  @font-face rule (settings panel / share card previews live outside the
+ *  reader iframe). Injected as CSS rather than the FontFace API on purpose:
+ *  html-to-image only embeds fonts it finds in document.styleSheets, so a
+ *  FontFace-registered family would bake fallback glyphs into exported card
+ *  PNGs */
 export async function ensureUploadedFontLoaded(font: FontListItem): Promise<void> {
-  if (loadedUploadedIds.has(font.id)) return
-  loadedUploadedIds.add(font.id)
+  if (injectedUploadedIds.has(font.id)) return
+  injectedUploadedIds.add(font.id)
   try {
-    const face = new FontFace(
-      uploadedFontAlias(font.id),
-      `url("${uploadedFontFileUrl(font)}") format("${FONT_FORMAT_MAP[font.format]}")`,
-    )
-    await face.load()
-    document.fonts.add(face)
+    const style = document.createElement('style')
+    style.dataset.bdUploadedFont = font.id
+    style.textContent = uploadedFaceCss(font)
+    document.head.appendChild(style)
+    await document.fonts.load(`16px "${uploadedFontAlias(font.id)}"`)
   } catch (err) {
-    // A failed load must not break the UI — the stack falls back to serif;
     // drop the marker so a later attempt can retry
-    loadedUploadedIds.delete(font.id)
+    injectedUploadedIds.delete(font.id)
     console.warn(`[fonts] failed to load uploaded font ${font.id}:`, err)
   }
 }

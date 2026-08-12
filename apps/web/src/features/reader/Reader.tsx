@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, Link } from '@tanstack/react-router'
+import { useParams, Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { apiGet, apiPatch, apiPut } from '@/api/client'
@@ -20,6 +20,7 @@ import { useBookChapters } from './hooks/useBookChapters'
 import { createSegmentTracker, trackPosition, closeSegment } from './stats/reading-segments'
 import { createJumpHistory } from './jump-history'
 import { createHistoryAutoHide, type HistoryAutoHide } from './history-auto-hide'
+import { consumeEscFlag } from './lib/esc-consumed'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
 import { Ribbon } from './components/Ribbon'
@@ -42,6 +43,7 @@ import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq, ViewS
 export default function Reader() {
   const _ = useTranslation()
   const { id } = useParams({ from: '/books/$id' })
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [percent, setPercent] = useState(0)
   const [pageInfo, setPageInfo] = useState<{ page: number; total: number } | null>(null)
@@ -253,8 +255,9 @@ export default function Reader() {
       perBookActive,
       setPerBookActive,
       updateSetting,
+      perBookDiff: perBook,
     }),
-    [effectiveSettings, perBookActive, setPerBookActive, updateSetting],
+    [effectiveSettings, perBookActive, setPerBookActive, updateSetting, perBook],
   )
 
   const progressQuery = useQuery({
@@ -505,7 +508,8 @@ export default function Reader() {
       createAnnotation.mutate({
         cfiRange: e.cfiRange,
         type: 'highlight',
-        text: e.text,
+        // Same rawText preference as the toolbar — see SelectionToolbar.highlight
+        text: (e.rawText ?? e.text).slice(0, 500),
         color: lastStyle.color,
         style: lastStyle.style,
         chapter: currentChapter ?? undefined,
@@ -788,7 +792,28 @@ export default function Reader() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        // A focused input's own Esc handler (or a window-level popup handler)
+        // marks the consumed flag synchronously. Consume it in the next tick so
+        // a stale mark cannot swallow the boss key on the following press.
+        if (e.key === 'Escape') {
+          setTimeout(() => {
+            consumeEscFlag()
+          }, 0)
+        }
+        return
+      }
+      if (e.key === 'Escape') {
+        // Boss key: popups mark the consumed flag synchronously in their own
+        // Esc branches; listeners run in registration order (ours first), so
+        // defer the decision and exit the reader only when nothing else
+        // handled the press. Progress is flushed on unmount.
+        setTimeout(() => {
+          if (consumeEscFlag()) return
+          navigate({ to: '/' })
+        }, 0)
+        return
+      }
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
         if (readingMode === 'page' && rendererRef.current?.scrollByPages) {
@@ -816,7 +841,14 @@ export default function Reader() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [readingMode])
+  }, [readingMode, navigate])
+
+  // Belt-and-braces: a stale "consumed" mark from a previous session (Esc
+  // closed a popup, then the reader was left without another Esc) must not
+  // swallow the first boss-key press of this session.
+  useEffect(() => {
+    consumeEscFlag()
+  }, [])
 
   if (bookQuery.isLoading) {
     return (
@@ -900,7 +932,10 @@ export default function Reader() {
               </div>
             )}
             {!bookReady && (
-              <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 text-sm text-[var(--bd-read-sub)]">
+              // Solid theme background: the foliate iframe behind is blank
+              // white until its theme styles are injected — without this the
+              // loading overlay would flash white on every reader open
+              <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-[var(--bd-read-page-bg)] text-sm text-[var(--bd-read-sub)]">
                 {loadError ? (
                   <>
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">

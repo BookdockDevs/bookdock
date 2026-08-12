@@ -364,6 +364,31 @@ export function useDeleteShelf() {
   })
 }
 
+export function useReorderShelves() {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+  const _ = useTranslation()
+
+  return useMutation({
+    mutationFn: (shelfIds: string[]) => apiPut<{ data: null }>('/shelves/order', { shelfIds }),
+    onMutate: (shelfIds) => {
+      const prev = queryClient.getQueryData<{ data: ShelfListItem[] }>(['shelves'])
+      if (prev) {
+        const byId = new Map(prev.data.map((s) => [s.id, s]))
+        const next = shelfIds
+          .map((id) => byId.get(id))
+          .filter((s): s is ShelfListItem => Boolean(s))
+        queryClient.setQueryData(['shelves'], { data: next })
+      }
+      return { prev }
+    },
+    onError: (_error, _shelfIds, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['shelves'], ctx.prev)
+      addToast(_('toast.reorderShelvesFailed'), 'error')
+    },
+  })
+}
+
 export function useUpdateBook() {
   const queryClient = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
@@ -459,15 +484,50 @@ export function useCreateTag() {
   })
 }
 
+export function useRenameTag() {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+  const _ = useTranslation()
+
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => apiPut<{ data: TagListItem }>(`/tags/${id}`, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] })
+      addToast(_('toast.tagRenamed'), 'success')
+    },
+    onError: () => {
+      addToast(_('toast.renameTagFailed'), 'error')
+    },
+  })
+}
+
+export function useDeleteTag() {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+  const _ = useTranslation()
+
+  return useMutation({
+    mutationFn: (id: string) => apiDelete<{ data: null }>(`/tags/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] })
+      queryClient.invalidateQueries({ queryKey: ['books'] })
+      addToast(_('toast.tagDeleted'), 'success')
+    },
+    onError: () => {
+      addToast(_('toast.deleteTagFailed'), 'error')
+    },
+  })
+}
+
 export function useUpdateBookMembership() {
   const queryClient = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
   const _ = useTranslation()
 
   return useMutation({
-    mutationFn: async ({ bookId, shelfIds, tagIds }: { bookId: string; shelfIds?: string[]; tagIds?: string[] }) => {
+    mutationFn: async ({ bookId, shelfId, tagIds }: { bookId: string; shelfId?: string | null; tagIds?: string[] }) => {
       await Promise.all([
-        apiPut<{ data: null }>(`/books/${bookId}/shelves`, { shelfIds: shelfIds ?? [] }),
+        shelfId !== undefined ? apiPut<{ data: null }>(`/books/${bookId}/shelves`, { shelfId }) : Promise.resolve(),
         apiPut<{ data: null }>(`/books/${bookId}/tags`, { tagIds: tagIds ?? [] }),
       ])
     },
@@ -487,7 +547,7 @@ export function useBookMembership(bookId: string | null) {
   return {
     shelves: useQuery({
       queryKey: ['books', bookId, 'shelves'],
-      queryFn: () => apiGet<{ data: string[] }>(`/books/${bookId}/shelves`),
+      queryFn: () => apiGet<{ data: string | null }>(`/books/${bookId}/shelves`),
       enabled: Boolean(bookId),
     }),
     tags: useQuery({
@@ -496,4 +556,29 @@ export function useBookMembership(bookId: string | null) {
       enabled: Boolean(bookId),
     }),
   }
+}
+
+export function useMoveBooksToShelf() {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+  const _ = useTranslation()
+
+  return useMutation({
+    mutationFn: ({ bookIds, shelfId }: { bookIds: string[]; shelfId: string | null }) =>
+      Promise.allSettled(
+        bookIds.map((bookId) => apiPut<{ data: null }>(`/books/${bookId}/shelves`, { shelfId })),
+      ),
+    onSuccess: (results, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['books'] })
+      queryClient.invalidateQueries({ queryKey: ['shelves'] })
+      const failed = results.filter((r) => r.status === 'rejected').length
+      if (failed > 0) {
+        addToast(_('toast.updateMembershipFailed'), 'error')
+        return
+      }
+      const shelves = queryClient.getQueryData<{ data: ShelfListItem[] }>(['shelves'])
+      const name = shelves?.data.find((s) => s.id === variables.shelfId)?.name
+      addToast(name ? _('toast.movedToShelf', { name }) : _('toast.movedOutOfShelf'), 'success')
+    },
+  })
 }

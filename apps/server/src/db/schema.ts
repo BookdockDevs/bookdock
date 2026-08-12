@@ -7,6 +7,7 @@ export const users = sqliteTable('users', {
   passwordHash: text('password_hash'),
   role: text('role', { enum: ['owner', 'member', 'guest'] }).notNull().default('owner'),
   disabled: integer('disabled').notNull().default(0),
+  avatarKey: text('avatar_key'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at'),
 })
@@ -29,9 +30,12 @@ export const books = sqliteTable('books', {
   pinnedAt: integer('pinned_at'),
   lastReadAt: integer('last_read_at'),
   deletedAt: integer('deleted_at'),
+  // Single-shelf membership; null = uncategorized (legitimate state)
+  shelfId: text('shelf_id').references(() => shelves.id, { onDelete: 'set null' }),
 }, (table) => ({
   userDeletedIdx: index('books_user_deleted_idx').on(table.userId, table.deletedAt),
   contentHashIdx: index('books_content_hash_idx').on(table.contentHash),
+  shelfIdx: index('books_shelf_idx').on(table.shelfId),
 }))
 
 export const shelves = sqliteTable('shelves', {
@@ -41,15 +45,6 @@ export const shelves = sqliteTable('shelves', {
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: integer('created_at').notNull(),
 })
-
-export const bookShelves = sqliteTable('book_shelves', {
-  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
-  shelfId: text('shelf_id').notNull().references(() => shelves.id, { onDelete: 'cascade' }),
-  sortOrder: integer('sort_order').notNull().default(0),
-}, (table) => ({
-  pk: primaryKey({ columns: [table.bookId, table.shelfId] }),
-  shelfIdx: index('book_shelves_shelf_idx').on(table.shelfId),
-}))
 
 export const tags = sqliteTable('tags', {
   id: text('id').primaryKey(),

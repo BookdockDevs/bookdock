@@ -5,6 +5,8 @@ export interface User {
   username: string
   passwordHash: string | null
   role: 'owner' | 'member' | 'guest'
+  /** Content-hash addressed avatar blob key (`<hh>/<sha256>.<ext>`), null when unset */
+  avatarKey: string | null
   createdAt: number
 }
 
@@ -23,6 +25,8 @@ export interface Book {
   readStatus: ReadStatus
   lastReadAt?: number | null
   deletedAt: number | null
+  /** Single-shelf membership; null = uncategorized */
+  shelfId: string | null
 }
 
 export interface Shelf {
@@ -31,12 +35,6 @@ export interface Shelf {
   name: string
   sortOrder: number
   createdAt: number
-}
-
-export interface BookShelf {
-  bookId: string
-  shelfId: string
-  sortOrder: number
 }
 
 export interface Tag {

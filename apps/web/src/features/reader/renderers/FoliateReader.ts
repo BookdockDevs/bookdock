@@ -424,10 +424,8 @@ export class FoliateReader implements BookReader {
   private resizeObserver: ResizeObserver | null = null
   private lastScrollVPad = -1
   private activeDocs = new Set<Document>()
-  private selectionDocs = new Map<Document, { index: number; handler: () => void; holdDown: () => void; holdMove: () => void; dblHandler: () => void }>()
+  private selectionDocs = new Map<Document, { index: number; handler: () => void; dblHandler: () => void; escHandler: (e: KeyboardEvent) => void }>()
   private selectionActive = false
-  private holdPending = false
-  private holdTimer: ReturnType<typeof setTimeout> | null = null
   private foliateOverlayer: any = null
   // `${cfiRange}|${type}` -> annotation; a range may hold a highlight and an
   // idea at once, so the bare cfiRange cannot be the key
@@ -1157,12 +1155,6 @@ export class FoliateReader implements BookReader {
           rawText,
           rect: this.popupRect(doc, range),
         }
-        if (this.holdPending) {
-          this.holdPending = false
-          this.emit('instantAnnotation', info)
-          this.emit('selected', null)
-          return
-        }
         if (autoMarkSelectionMode) {
           // 选中即划: create immediately but keep the toolbar open (restyle)
           this.emit('instantAnnotation', { ...info, keepSelection: true })
@@ -1511,9 +1503,8 @@ export class FoliateReader implements BookReader {
           if (sel) {
             doc.removeEventListener('mouseup', sel.handler)
             doc.removeEventListener('keyup', sel.handler)
-            doc.removeEventListener('pointerdown', sel.holdDown)
-            doc.removeEventListener('pointermove', sel.holdMove)
             doc.removeEventListener('dblclick', sel.dblHandler)
+            doc.removeEventListener('keydown', sel.escHandler)
             this.selectionDocs.delete(doc)
           }
         }
@@ -1524,20 +1515,7 @@ export class FoliateReader implements BookReader {
         const handler = () => this.handleSelection(doc, index)
         doc.addEventListener('mouseup', handler)
         doc.addEventListener('keyup', handler)
-        const holdDown = () => {
-          this.holdPending = false
-          if (this.holdTimer !== null) { clearTimeout(this.holdTimer) }
-          this.holdTimer = setTimeout(() => { this.holdPending = true; this.holdTimer = null }, 300)
-        }
-        const holdMove = () => {
-          this.holdPending = false
-          if (this.holdTimer !== null) { clearTimeout(this.holdTimer); this.holdTimer = null }
-        }
-        doc.addEventListener('pointerdown', holdDown)
-        doc.addEventListener('pointermove', holdMove)
         const dblHandler = () => {
-          this.holdPending = false
-          if (this.holdTimer !== null) { clearTimeout(this.holdTimer); this.holdTimer = null }
           setTimeout(() => {
             try {
               const sel = doc.defaultView?.getSelection?.()
@@ -1564,7 +1542,21 @@ export class FoliateReader implements BookReader {
           }, 0)
         }
         doc.addEventListener('dblclick', dblHandler)
-        this.selectionDocs.set(doc, { index, handler, holdDown, holdMove, dblHandler })
+        // Focus lives inside the section iframe, so parent-window keydown
+        // listeners (popup Esc handlers, the boss key) never fire. Re-dispatch
+        // Escape on a deep parent element with bubbles: dispatching on
+        // `document` directly would NOT reach window-level listeners — the
+        // event path is built from the parentNode chain, which stops at the
+        // document (document.parentNode is null, window is never appended).
+        const escHandler = (e: KeyboardEvent) => {
+          if (e.key !== 'Escape') return
+          const host = this.container ?? document.body
+          if (host) {
+            host.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+          }
+        }
+        doc.addEventListener('keydown', escHandler)
+        this.selectionDocs.set(doc, { index, handler, dblHandler, escHandler })
       }
       this.activeDocs = docs
     } catch {
@@ -1582,7 +1574,6 @@ export class FoliateReader implements BookReader {
     this.navigationPending.dispose()
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
-    if (this.holdTimer !== null) { clearTimeout(this.holdTimer); this.holdTimer = null }
     if (this.prefetchTimer !== null) { clearTimeout(this.prefetchTimer); this.prefetchTimer = null }
     if (this.marginalTimer !== null) { clearTimeout(this.marginalTimer); this.marginalTimer = null }
     try { this.view?.close() } catch { /* view may be partially initialized */ }
@@ -1593,8 +1584,6 @@ export class FoliateReader implements BookReader {
       if (sel) {
         doc.removeEventListener('mouseup', sel.handler)
         doc.removeEventListener('keyup', sel.handler)
-        doc.removeEventListener('pointerdown', sel.holdDown)
-        doc.removeEventListener('pointermove', sel.holdMove)
         doc.removeEventListener('dblclick', sel.dblHandler)
       }
     }

@@ -69,7 +69,7 @@ function createUsersApp(user: { id: string; username: string; role: string }) {
   const app = new Hono()
   app.onError(errorHandler)
   app.use('/api/v1/users/*', async (c, next) => {
-    c.set('user', user)
+    c.set('user', { ...user, avatarKey: null })
     return next()
   })
   app.route('/api/v1/users', usersRoutes)

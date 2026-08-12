@@ -1,9 +1,23 @@
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { Virtuoso, VirtuosoGrid, type Components, type GridComponents, type GridItemProps, type GridListProps, type ItemProps } from 'react-virtuoso'
 
-import type { BookListItem, ReadStatus } from '@bookdock/shared'
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  pointerWithin,
+  useDraggable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
+import { restrictToWindowEdges, snapCenterToCursor } from '@dnd-kit/modifiers'
+import { arrayMove } from '@dnd-kit/sortable'
+
+import type { BookListItem } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore } from '@/stores/ui.store'
@@ -21,11 +35,13 @@ import DeleteConfirm from './components/DeleteConfirm'
 import EmptyLibrary from './components/EmptyLibrary'
 import LibraryHeader from './components/LibraryHeader'
 import LibrarySidebar from './components/LibrarySidebar'
+import ListItemInfo from './components/ListItemInfo'
 import ReadingStatsCard from './components/ReadingStatsCard'
 import RecentlyRead from './components/RecentlyRead'
 import SelectionBar from './components/SelectionBar'
 import UploadSheet from './components/UploadSheet'
-import { useInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves } from './hooks'
+import { applyShelfOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
+import { useInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useMoveBooksToShelf, useReorderShelves } from './hooks'
 
 const PAGE_SIZE = 20
 
@@ -115,6 +131,110 @@ export default function Library() {
     void queryClient.invalidateQueries({ queryKey: ['books'] })
   }, [queryClient])
 
+  // Book drag-to-shelf: the in-flight drag payload drives the overlay and the
+  // sidebar drop hints; dragJustEndedRef swallows the click that fires after a
+  // completed drag so the dragged card does not navigate into the reader.
+  const [dragBookIds, setDragBookIds] = useState<string[] | null>(null)
+  const dragJustEndedRef = useRef(false)
+  const moveBooksToShelf = useMoveBooksToShelf()
+  const reorderShelves = useReorderShelves()
+  // Which drag is in flight: drives the manual autoscroll (page for book
+  // drags, sidebar nav for shelf drags) and the overlay shape.
+  const [dragKind, setDragKind] = useState<'book' | 'shelf' | null>(null)
+  // The shelf row that was just released: its transform reset gets a short
+  // transition so it glides from the release position into its slot instead
+  // of snapping (a snapped reset reads as a flicker).
+  const [settleShelfId, setSettleShelfId] = useState<string | null>(null)
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+  }, [])
+  const sidebarNavRef = useRef<HTMLDivElement | null>(null)
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  function handleDragStart(event: DragStartEvent) {
+    const payload = event.active.data.current as unknown
+    if (isBookDrag(payload)) {
+      setDragBookIds(payload.bookIds)
+      setDragKind('book')
+    } else {
+      setDragKind('shelf')
+    }
+  }
+
+  function endDrag() {
+    setDragBookIds(null)
+    setDragKind(null)
+    dragJustEndedRef.current = true
+    setTimeout(() => {
+      dragJustEndedRef.current = false
+    }, 0)
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    endDrag()
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const payload = active.data.current as unknown
+    if (isBookDrag(payload)) {
+      const targetShelfId = resolveDropShelfId(String(over.id))
+      // No-op when every dragged book already sits in the target shelf.
+      const moved = payload.bookIds.filter((id) => {
+        const book = allBooks.find((b) => b.id === id)
+        return book ? book.shelfId !== targetShelfId : false
+      })
+      if (moved.length === 0) return
+      moveBooksToShelf.mutate({ bookIds: moved, shelfId: targetShelfId })
+      return
+    }
+    // Shelf drag: active/over are shelf row ids (sortable); over may be the
+    // uncategorized droppable or empty space, both of which reorder to no-op.
+    const ordered = shelves.map((s) => s.id)
+    const oldIndex = ordered.indexOf(String(active.id))
+    const newIndex = ordered.indexOf(String(over.id))
+    if (oldIndex < 0 || newIndex < 0) return
+    const next = arrayMove(ordered, oldIndex, newIndex)
+    setShelfOrderOverride(next)
+    setSettleShelfId(String(active.id))
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+    settleTimerRef.current = setTimeout(() => {
+      settleTimerRef.current = null
+      setSettleShelfId(null)
+    }, 160)
+    reorderShelves.mutate(next)
+  }
+
+  function handleDragCancel() {
+    endDrag()
+  }
+
+  // dnd-kit autoscroll is disabled: it scrolls the document too, which looks
+  // broken when dragging a shelf near the sidebar bottom. Manual autoscroll
+  // instead — the page for book drags, the sidebar nav for shelf drags.
+  useEffect(() => {
+    if (dragKind === null) return
+    let lastScroll = 0
+    const onPointerMove = (e: PointerEvent) => {
+      const now = Date.now()
+      if (now - lastScroll < 50) return
+      lastScroll = now
+      if (dragKind === 'book') {
+        const vh = window.innerHeight
+        if (e.clientY < vh * 0.15) window.scrollBy({ top: -12 })
+        else if (e.clientY > vh * 0.85) window.scrollBy({ top: 12 })
+      } else {
+        const nav = sidebarNavRef.current
+        if (!nav) return
+        const rect = nav.getBoundingClientRect()
+        if (e.clientY < rect.top + 48) nav.scrollBy({ top: -12 })
+        else if (e.clientY > rect.bottom - 48) nav.scrollBy({ top: 12 })
+      }
+    }
+    window.addEventListener('pointermove', onPointerMove)
+    return () => window.removeEventListener('pointermove', onPointerMove)
+  }, [dragKind])
+
   const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage } = useInfiniteBooks({
     pageSize: PAGE_SIZE,
     search: query,
@@ -133,10 +253,25 @@ export default function Library() {
   const total = data?.pages[0]?.total ?? 0
 
   const { data: shelvesData } = useShelves()
+  // Local mirror of the shelf order: dnd-kit clears its drag state in the same
+  // event as our onDragEnd, but the react-query cache update lands a render
+  // later — without this the rows would flash back to the old order for a
+  // frame. The override is applied synchronously on drag end and dropped once
+  // the query catches up.
+  const [shelfOrderOverride, setShelfOrderOverride] = useState<string[] | null>(null)
+  useEffect(() => {
+    setShelfOrderOverride(null)
+  }, [shelvesData])
+  const shelves = useMemo(
+    () => applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride),
+    [shelvesData, shelfOrderOverride],
+  )
   const activeShelfName = shelfId ? shelvesData?.data.find((s) => s.id === shelfId)?.name : undefined
   const viewTitle = trash
     ? _('library.trash')
-    : (activeShelfName ?? _('library.allBooks'))
+    : shelfId === 'none'
+      ? _('library.uncategorized')
+      : (activeShelfName ?? _('library.allBooks'))
 
   useEffect(() => {
     if (!selectionActive) return
@@ -162,9 +297,9 @@ export default function Library() {
     [navigate, search],
   )
 
-  const coverMode = useUiStore((s) => s.coverMode)
+  const coverText = useUiStore((s) => s.coverText)
   const gridColumns = useUiStore((s) => s.gridColumns)
-  const showRecentlyRead = useUiStore((s) => s.showRecentlyRead)
+  const recentlyReadStyle = useUiStore((s) => s.recentlyReadStyle)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [dynColumns, setDynColumns] = useState(4)
@@ -190,13 +325,17 @@ export default function Library() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
   return (
-    <div className="flex min-h-screen bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-      <LibrarySidebar
-        navSearch={navSearch}
-        shelfId={shelfId}
-        tagId={tagId}
-        trash={trash}
-      />
+    <DndContext sensors={sensors} collisionDetection={pointerWithin} autoScroll={false} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
+      <div className="flex min-h-screen bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={shelfId}
+          tagId={tagId}
+          trash={trash}
+          navRef={sidebarNavRef}
+          shelfOrderOverride={shelfOrderOverride}
+          settleShelfId={settleShelfId}
+        />
 
       <main className="flex min-w-0 flex-1 flex-col px-4 py-8 md:px-8">
         <LibraryHeader
@@ -217,8 +356,8 @@ export default function Library() {
           bookCount={total}
         />
 
-        {showRecentlyRead && !trash && !query && !selectionActive && <ReadingStatsCard />}
-        {showRecentlyRead && !trash && !query && !selectionActive && <RecentlyRead />}
+        {recentlyReadStyle !== 'off' && !trash && !query && !selectionActive && <ReadingStatsCard />}
+        {recentlyReadStyle !== 'off' && !trash && !query && !selectionActive && <RecentlyRead style={recentlyReadStyle} />}
 
         <div ref={containerRef} className={`min-h-0 flex-1 ${selection.size > 0 ? 'pb-16' : ''}`}>
           {isLoading ? (
@@ -254,41 +393,52 @@ export default function Library() {
                 if (!book) return null
                 if (selectionActive) {
                   return (
-                    <div
-                      className={`rounded-xl ${selection.has(book.id) ? 'ring-2 ring-stone-900 ring-offset-2 ring-offset-stone-50 dark:ring-stone-100 dark:ring-offset-stone-950' : ''}`}
+                    <DraggableBookCard book={book} selection={selection} selectionActive>
+                      <div
+                        className={`rounded-xl ${selection.has(book.id) ? 'ring-2 ring-stone-900 ring-offset-2 ring-offset-stone-50 dark:ring-stone-100 dark:ring-offset-stone-950' : ''}`}
+                      >
+                        <BookCard
+                          book={book}
+                          selected={selection.has(book.id)}
+                          selectionActive={true}
+                          coverText={coverText}
+                          onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                          onDelete={setDeleteTarget}
+                          onShowDetails={setDetailTarget}
+                        />
+                      </div>
+                    </DraggableBookCard>
+                  )
+                }
+                return (
+                  <DraggableBookCard book={book} selection={selection} selectionActive={false}>
+                    <Link
+                      to="/books/$id"
+                      params={{ id: book.id }}
+                      onClick={(e) => {
+                        // dnd-kit does not suppress the click after a drag;
+                        // the flag is set by handleDragEnd and cleared on the
+                        // next macrotask, so this runs only for genuine clicks.
+                        if (dragJustEndedRef.current) {
+                          e.preventDefault()
+                          return
+                        }
+                        if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                          e.preventDefault()
+                          toggleSelect(book.id, index, e.shiftKey)
+                        }
+                      }}
+                      className="block rounded-xl"
                     >
                       <BookCard
                         book={book}
-                        selected={selection.has(book.id)}
-                        selectionActive={true}
-                        coverMode={coverMode}
+                        coverText={coverText}
                         onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
                         onDelete={setDeleteTarget}
                         onShowDetails={setDetailTarget}
                       />
-                    </div>
-                  )
-                }
-                return (
-                  <Link
-                    to="/books/$id"
-                    params={{ id: book.id }}
-                    onClick={(e) => {
-                      if (e.ctrlKey || e.metaKey || e.shiftKey) {
-                        e.preventDefault()
-                        toggleSelect(book.id, index, e.shiftKey)
-                      }
-                    }}
-                    className="block rounded-xl"
-                  >
-                    <BookCard
-                      book={book}
-                      coverMode={coverMode}
-                      onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
-                      onDelete={setDeleteTarget}
-                      onShowDetails={setDetailTarget}
-                    />
-                  </Link>
+                    </Link>
+                  </DraggableBookCard>
                 )
               }}
             />
@@ -307,6 +457,7 @@ export default function Library() {
                     book={book}
                     selection={selection}
                     selectionActive={selectionActive}
+                    dragJustEndedRef={dragJustEndedRef}
                     onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
                     onDelete={setDeleteTarget}
                     onShowDetails={setDetailTarget}
@@ -380,6 +531,68 @@ export default function Library() {
           void emptyTrash.mutateAsync().catch(() => undefined)
         }}
       />
+      </div>
+
+      {/* The DragOverlay mounts only during book drags: dnd-kit auto-detects
+          useDragOverlay from its rect, and a mounted (even empty) overlay would
+          freeze the dragged shelf row in place instead of letting it follow
+          the pointer for the native drag feel. */}
+      {dragBookIds !== null && (
+        <DragOverlay modifiers={[snapCenterToCursor, restrictToWindowEdges]}>
+          <BookDragPreview bookIds={dragBookIds} books={allBooks} />
+        </DragOverlay>
+      )}
+    </DndContext>
+  )
+}
+
+function BookDragPreview({ bookIds, books }: { bookIds: string[]; books: BookListItem[] }) {
+  const first = books.find((b) => b.id === bookIds[0])
+  if (!first) return null
+  const count = bookIds.length
+  // The DragOverlay wrapper is sized to the measuring node and centered on the
+  // cursor (official snapCenterToCursor); flex-centering the preview inside it
+  // puts the cursor exactly at the preview's center. shrink-0 keeps the cover
+  // at its own size when the measuring node is small (list-view cover thumb).
+  return (
+    <div className="flex h-full w-full items-center justify-center">
+      <div className="relative w-24 shrink-0 overflow-hidden rounded-xl shadow-xl shadow-stone-900/20 ring-1 ring-stone-900/10 dark:ring-white/10">
+        <BookCover book={first} size="md" />
+        {count > 1 && (
+          <span className="absolute right-1 top-1 rounded-full bg-stone-900/90 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+            {count}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DraggableBookCard({
+  book,
+  selection,
+  selectionActive,
+  children,
+}: {
+  book: BookListItem
+  selection: Set<string>
+  selectionActive: boolean
+  children: ReactNode
+}) {
+  // Dragging a selected card in selection mode carries the whole selection.
+  const bookIds = selectionActive && selection.has(book.id) ? Array.from(selection) : [book.id]
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `book:${book.id}`,
+    data: { bookIds } satisfies BookDragPayload,
+  })
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      className={isDragging ? 'rounded-xl opacity-60' : 'rounded-xl'}
+    >
+      {children}
     </div>
   )
 }
@@ -437,10 +650,11 @@ function TrashGrid({ books, selection, selectionActive, onToggleSelect, onRestor
   )
 }
 
-function ListItemWrapper({ book, selection, selectionActive, onToggleSelect, onDelete, onShowDetails }: {
+export function ListItemWrapper({ book, selection, selectionActive, dragJustEndedRef, onToggleSelect, onDelete, onShowDetails }: {
   book: BookListItem
   selection: Set<string>
   selectionActive: boolean
+  dragJustEndedRef: React.MutableRefObject<boolean>
   onToggleSelect: (id: string, shiftKey?: boolean) => void
   onDelete: (b: BookListItem) => void
   onShowDetails: (b: BookListItem) => void
@@ -448,6 +662,14 @@ function ListItemWrapper({ book, selection, selectionActive, onToggleSelect, onD
   const _ = useTranslation()
   const menu = useContextMenu()
   const selected = selection.has(book.id)
+  const bookIds = selectionActive && selected ? Array.from(selection) : [book.id]
+  // The measuring node is the cover thumbnail (small rect), not the full-width
+  // row: the drag overlay wrapper is sized from it, so the preview follows the
+  // cursor and edge-clamping keeps it on screen. Listeners still span the row.
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `book:${book.id}`,
+    data: { bookIds } satisfies BookDragPayload,
+  })
 
   function handleContextMenu(e: React.MouseEvent) {
     e.preventDefault()
@@ -457,18 +679,7 @@ function ListItemWrapper({ book, selection, selectionActive, onToggleSelect, onD
 
   const meta = (
     <div className="flex shrink-0 items-center gap-3">
-      {book.progress != null && book.progress > 0 && (
-        book.progress < 100 ? (
-          <div className="flex items-center gap-1.5">
-            <div className="h-1 w-16 overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-700">
-              <div className="h-full rounded-full bg-stone-700 dark:bg-stone-400" style={{ width: `${book.progress}%` }} />
-            </div>
-            <span className="w-7 text-right text-[10px] tabular-nums text-stone-400">{Math.round(book.progress)}%</span>
-          </div>
-        ) : (
-          <span className="text-[10px] font-medium text-emerald-500">{_('library.finished')}</span>
-        )
-      )}
+      <ListItemInfo book={book} />
       <span className="rounded border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500">
         {book.format}
       </span>
@@ -476,13 +687,20 @@ function ListItemWrapper({ book, selection, selectionActive, onToggleSelect, onD
   )
 
   return (
-    <div onContextMenu={handleContextMenu}>
+    <div
+      {...listeners}
+      {...attributes}
+      onContextMenu={handleContextMenu}
+      className={isDragging ? 'select-none opacity-60' : 'select-none'}
+    >
       {selectionActive ? (
         <div
           onClick={(e) => onToggleSelect(book.id, e.shiftKey)}
           className={`group flex cursor-pointer items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
         >
-          <BookCover book={book} size="sm" />
+          <div ref={setNodeRef} className="shrink-0">
+            <BookCover book={book} size="sm" />
+          </div>
           <ListItemContent book={book} />
           {meta}
           <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
@@ -502,6 +720,10 @@ function ListItemWrapper({ book, selection, selectionActive, onToggleSelect, onD
           to="/books/$id"
           params={{ id: book.id }}
           onClick={(e) => {
+            if (dragJustEndedRef.current) {
+              e.preventDefault()
+              return
+            }
             if (e.ctrlKey || e.metaKey || e.shiftKey) {
               e.preventDefault()
               onToggleSelect(book.id, e.shiftKey)
@@ -509,7 +731,9 @@ function ListItemWrapper({ book, selection, selectionActive, onToggleSelect, onD
           }}
           className="group flex items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900"
         >
-          <BookCover book={book} size="sm" />
+          <div ref={setNodeRef} className="shrink-0">
+            <BookCover book={book} size="sm" />
+          </div>
           <ListItemContent book={book} />
           {meta}
           <div className="flex w-7 shrink-0 items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
@@ -547,19 +771,10 @@ function ListItemWrapper({ book, selection, selectionActive, onToggleSelect, onD
   )
 }
 
-const STATUS_DOT: Record<ReadStatus, string> = {
-  wishlist: 'bg-violet-500',
-  reading: 'bg-blue-500',
-  idle: 'bg-stone-400',
-  finished: 'bg-emerald-500',
-  abandoned: 'bg-amber-500',
-}
-
 function ListItemContent({ book }: { book: BookListItem }) {
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2">
-        <span className={`block h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[book.readStatus]}`} />
         <span className="truncate font-serif text-sm font-medium text-stone-900 dark:text-stone-100">
           {book.title}
         </span>
@@ -571,7 +786,7 @@ function ListItemContent({ book }: { book: BookListItem }) {
         )}
       </div>
       {book.author && (
-        <div className="ml-3.5 mt-0.5 truncate text-xs text-stone-500 dark:text-stone-400">{book.author}</div>
+        <div className="mt-0.5 truncate text-xs text-stone-500 dark:text-stone-400">{book.author}</div>
       )}
     </div>
   )

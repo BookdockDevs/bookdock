@@ -50,7 +50,7 @@ export default function BookCover({ book, size = 'md' }: BookCoverProps) {
         alt={book.title}
         className={cn(
           'block overflow-hidden rounded-xl border border-stone-200/70 dark:border-stone-800/60',
-          coverFit
+          coverFit === 'full'
             ? 'bg-stone-100 object-contain p-1 dark:bg-stone-800'
             : 'object-cover',
           isSm ? 'h-16 w-12' : 'aspect-[2/3] w-full',
@@ -81,7 +81,7 @@ export default function BookCover({ book, size = 'md' }: BookCoverProps) {
   return (
     <div
       className={cn(
-        'relative flex aspect-[2/3] w-full flex-col overflow-hidden rounded-xl border border-stone-200/70 dark:border-stone-800/60',
+        'relative flex aspect-[2/3] w-full select-none flex-col overflow-hidden rounded-xl border border-stone-200/70 dark:border-stone-800/60',
         palette,
       )}
     >

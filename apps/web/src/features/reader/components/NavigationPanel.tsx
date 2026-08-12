@@ -9,6 +9,7 @@ import { useBookChapters } from '../hooks/useBookChapters'
 import { useNotesFilter, type ItemKind } from '../hooks/useNotesFilter'
 import { CloseIcon } from './annotation-icons'
 import { ExpandingSearchBar } from './ExpandingSearchBar'
+import { clearSearchHistory, loadSearchHistory, pushSearchTerm, saveSearchHistory } from '../lib/search-history'
 import { NotesFilterPanel } from './NotesFilterPanel'
 import { NotesPanel } from './NotesPanel'
 import StatsPanel from './StatsPanel'
@@ -349,6 +350,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const [searchMenuPos, setSearchMenuPos] = useState<{ top: number; right: number } | null>(null)
   const searchMenuBtnRef = useRef<HTMLButtonElement>(null)
   const searchGenRef = useRef(0)
+  // Search-history chips (Readest parity): per-book, deduped, capped at 10;
+  // only completed searches with hits are recorded
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => loadSearchHistory(bookId))
   // Mirror of `open` for the debounced search: `open` is deliberately out of
   // the effect deps (reopening must not re-run the search), so the timer
   // checks this ref to avoid searching in the background while closed
@@ -417,6 +421,13 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       )
       if (gen !== searchGenRef.current) return
       setSearchResults(results)
+      if (results.length > 0) {
+        setSearchHistory((prev) => {
+          const next = pushSearchTerm(prev, query.trim())
+          saveSearchHistory(bookId, next)
+          return next
+        })
+      }
     } finally {
       if (gen === searchGenRef.current) {
         setSearching(false)
@@ -607,6 +618,12 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             onQueryChange={(q) => (q.trim() ? setQuery(q) : clearSearch())}
             onCollapse={collapseSearchBar}
             progress={searchProgress}
+            history={searchHistory}
+            onHistoryClick={setQuery}
+            onClearHistory={() => {
+              clearSearchHistory(bookId)
+              setSearchHistory([])
+            }}
           >
             <button
               ref={searchMenuBtnRef}

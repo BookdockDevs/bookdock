@@ -32,6 +32,8 @@ interface ShareCardProps {
   /** Identity rows for idea cards: author name + preformatted "写于 …" lines.
    *  `writtenAtCn` (Chinese numerals) is used by the ink template */
   authorName?: string
+  /** Resolved avatar image URL for idea cards; absent falls back to the first-char circle */
+  avatarUrl?: string
   writtenAt?: string
   writtenAtCn?: string
   /** Points at the untransformed card node — the export target for html-to-image */
@@ -39,10 +41,13 @@ interface ShareCardProps {
 }
 
 /** Body line-height is uniform 1.9 across all five reference templates
- *  (measured: advance/ink ≈ 1.82–1.93) */
+ *  (measured: advance/ink ≈ 1.82–1.93). Left-aligned bodies are justified —
+ *  CJK justifies cleanly, killing the ragged right edge (wrap slack of up to
+ *  one glyph per line read as asymmetric padding); centered bodies (calendar)
+ *  stay centered */
 function Body({ paragraphs, fontSize, center }: { paragraphs: string[]; fontSize: number; center?: boolean }) {
   return (
-    <div style={{ fontSize, lineHeight: 1.9 }} className={`tracking-wide ${center ? 'text-center' : ''}`}>
+    <div style={{ fontSize, lineHeight: 1.9 }} className={`tracking-wide ${center ? 'text-center' : 'text-justify'}`}>
       {paragraphs.map((p, i) => (
         <p key={i} style={i > 0 ? { marginTop: '0.6em' } : undefined}>
           {p}
@@ -65,10 +70,10 @@ function QuoteBlock({ quote, colors, center }: { quote: string; colors: CardColo
   )
 }
 
-/** First-char circle is the placeholder until avatar support lands; the plain
- *  variant (ink/brocade idea cards) drops the circle per the reference shots.
- *  `stacked` puts the avatar on its own row above the name (classic idea card) */
-function IdentityHeader({ authorName, writtenAt, colors, avatar = true, stacked }: { authorName?: string; writtenAt?: string; colors: CardColors; avatar?: boolean; stacked?: boolean }) {
+/** The plain variant (ink/brocade idea cards) drops the avatar per the
+ *  reference shots. `stacked` puts the avatar on its own row above the name
+ *  (classic idea card); without an avatarUrl the first-char circle is shown */
+function IdentityHeader({ authorName, avatarUrl, writtenAt, colors, avatar = true, stacked }: { authorName?: string; avatarUrl?: string; writtenAt?: string; colors: CardColors; avatar?: boolean; stacked?: boolean }) {
   if (!avatar) {
     return (
       <div>
@@ -77,7 +82,9 @@ function IdentityHeader({ authorName, writtenAt, colors, avatar = true, stacked 
       </div>
     )
   }
-  const circle = (
+  const circle = avatarUrl ? (
+    <img src={avatarUrl} alt={authorName ?? ''} className="h-13 w-13 shrink-0 rounded-full object-cover" />
+  ) : (
     <span
       className="flex h-13 w-13 shrink-0 items-center justify-center rounded-full text-xl"
       style={{ background: `${colors.watermark}4d`, color: colors.sub }}
@@ -187,6 +194,7 @@ export default function ShareCard({
   brand = 'en',
   note,
   authorName,
+  avatarUrl,
   writtenAt,
   writtenAtCn,
   ref,
@@ -217,7 +225,7 @@ export default function ShareCard({
     >
       {template === 'classic' && (
         <>
-          {isIdea && <div className="mb-12"><IdentityHeader authorName={authorName} writtenAt={writtenAt} colors={colors} stacked /></div>}
+          {isIdea && <div className="mb-12"><IdentityHeader authorName={authorName} avatarUrl={avatarUrl} writtenAt={writtenAt} colors={colors} stacked /></div>}
           <Body paragraphs={paragraphs} fontSize={fontSize} />
           {quote && <QuoteBlock quote={quote} colors={colors} />}
           <div className={`${isIdea ? 'mt-6' : 'mt-9'} text-lg`} style={{ color: colors.sub }}>
@@ -286,7 +294,7 @@ export default function ShareCard({
       {template === 'letter' && (
         <div className="border-2 p-1.5" style={{ borderColor: colors.accent }}>
           <div className="border px-7 py-11" style={{ borderColor: colors.accent }}>
-            {isIdea && <IdentityHeader authorName={authorName} writtenAt={writtenAt} colors={colors} />}
+            {isIdea && <IdentityHeader authorName={authorName} avatarUrl={avatarUrl} writtenAt={writtenAt} colors={colors} />}
             {isIdea && <Divider colors={colors} className="my-10" />}
             <Body paragraphs={paragraphs} fontSize={fontSize} />
             {quote && <QuoteBlock quote={quote} colors={colors} />}

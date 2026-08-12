@@ -81,18 +81,18 @@ export default function ShelfDialog({ open, shelfId, initialName = '', onClose }
         <div className="flex gap-3">
           <button
             type="button"
+            onClick={onClose}
+            className="h-11 flex-1 rounded-xl bg-stone-100 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+          >
+            {_('library.cancel')}
+          </button>
+          <button
+            type="button"
             onClick={submit}
             disabled={!name.trim() || isPending}
             className="h-11 flex-1 rounded-xl bg-stone-900 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300"
           >
             {isRename ? _('library.save') : _('library.create')}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-11 flex-1 rounded-xl bg-stone-100 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
-          >
-            {_('library.cancel')}
           </button>
         </div>
       </div>

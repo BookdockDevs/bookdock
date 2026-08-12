@@ -1,11 +1,10 @@
-import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
 import { useTranslation } from '@/hooks/useTranslation'
+import { avatarUrl } from '@/lib/avatar'
 import { useAuthStore } from '@/stores/auth.store'
-import ChangePasswordDialog from './ChangePasswordDialog'
 import { useInstanceInfo, useLogout } from './hooks'
 
 const menuItemClass = 'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-stone-700 transition-colors hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800'
@@ -47,7 +46,6 @@ export default function AccountMenu() {
   const { data: instanceData } = useInstanceInfo()
   const logout = useLogout()
   const menu = useContextMenu()
-  const [changePasswordOpen, setChangePasswordOpen] = useState(false)
 
   const instance = instanceData?.data
   // Guest = server injected the default passwordless user: the me payload is
@@ -57,7 +55,7 @@ export default function AccountMenu() {
   if (!user && !isGuest) return null
 
   const username = user?.username ?? _('auth.guest')
-  const menuHeight = isGuest ? 88 : 116
+  const menuHeight = 88
 
   return (
     <>
@@ -71,9 +69,13 @@ export default function AccountMenu() {
         }}
         className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
       >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-300/80 text-xs font-semibold uppercase text-stone-700 dark:bg-stone-700 dark:text-stone-200">
-          {username.slice(0, 1)}
-        </span>
+        {avatarUrl(user?.avatarKey) ? (
+          <img src={avatarUrl(user?.avatarKey)} alt={username} className="h-7 w-7 shrink-0 rounded-full object-cover" />
+        ) : (
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-300/80 text-xs font-semibold uppercase text-stone-700 dark:bg-stone-700 dark:text-stone-200">
+            {username.slice(0, 1)}
+          </span>
+        )}
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-stone-700 dark:text-stone-200">
           {username}
         </span>
@@ -118,34 +120,19 @@ export default function AccountMenu() {
             </button>
           )
         ) : (
-          <>
-            <button
-              type="button"
-              onClick={() => {
-                menu.close()
-                setChangePasswordOpen(true)
-              }}
-              className={menuItemClass}
-            >
-              <KeyIcon />
-              {_('auth.changePassword')}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                menu.close()
-                logout.mutate()
-              }}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-            >
-              <SignOutIcon />
-              {_('auth.signOut')}
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => {
+              menu.close()
+              logout.mutate()
+            }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+          >
+            <SignOutIcon />
+            {_('auth.signOut')}
+          </button>
         )}
       </SmartMenu>
-
-      <ChangePasswordDialog open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
     </>
   )
 }

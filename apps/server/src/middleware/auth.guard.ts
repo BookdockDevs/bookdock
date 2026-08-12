@@ -12,6 +12,7 @@ export interface AuthUser {
   id: string
   username: string
   role: string
+  avatarKey: string | null
 }
 
 declare module 'hono' {
@@ -64,7 +65,7 @@ function getFreshUser(userId: string): CachedUser | null {
   }
   const db = getDb()
   const row = db
-    .select({ id: users.id, username: users.username, role: users.role, disabled: users.disabled })
+    .select({ id: users.id, username: users.username, role: users.role, disabled: users.disabled, avatarKey: users.avatarKey })
     .from(users)
     .where(eq(users.id, userId))
     .get()
@@ -72,7 +73,7 @@ function getFreshUser(userId: string): CachedUser | null {
     userCache.delete(userId)
     return null
   }
-  const user: CachedUser = { id: row.id, username: row.username, role: row.role, disabled: row.disabled === 1 }
+  const user: CachedUser = { id: row.id, username: row.username, role: row.role, disabled: row.disabled === 1, avatarKey: row.avatarKey }
   userCache.set(userId, { user, at: Date.now() })
   return user
 }
@@ -119,7 +120,7 @@ export function authGuard(): MiddlewareHandler {
       if (user.disabled) {
         return c.json({ error: { code: 'ACCOUNT_DISABLED', message: 'Account is disabled' } }, 403)
       }
-      c.set('user', { id: user.id, username: user.username, role: user.role })
+      c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
       return next()
     }
 
@@ -130,7 +131,7 @@ export function authGuard(): MiddlewareHandler {
       }
       const user = getFreshUser(cachedDefaultUserId)
       if (user && !user.disabled) {
-        c.set('user', { id: user.id, username: user.username, role: user.role })
+        c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
         c.set('guest', true)
         return next()
       }

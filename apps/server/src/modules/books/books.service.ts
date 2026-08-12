@@ -2,7 +2,7 @@ import type { Readable } from 'node:stream'
 
 import { eq, ne, lt, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
 import { getDb } from '../../db/client'
-import { books, annotations, bookTags, bookShelves, shelves, tags, settings, users as usersTable } from '../../db/schema'
+import { books, annotations, bookTags, shelves, tags, settings, users as usersTable } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
 import { scanTxtChapters, normalizeText, decodeTextBuffer } from '../../formats/txt'
@@ -21,7 +21,8 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     // char is '!' (backslash would be mangled by drizzle's sql template) and
     // must itself be escaped first.
     const escaped = search.replace(/[!%_]/g, (m) => '!' + m)
-    conditions.push(sql`${books.title} LIKE ${'%' + escaped + '%'} ESCAPE '!'`)
+    const pattern = '%' + escaped + '%'
+    conditions.push(sql`(${books.title} LIKE ${pattern} ESCAPE '!' OR ${books.author} LIKE ${pattern} ESCAPE '!')`)
   }
   if (format) {
     conditions.push(eq(books.format, format))
@@ -29,17 +30,20 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   if (readStatus) {
     conditions.push(eq(books.readStatus, readStatus as typeof books.$inferSelect.readStatus))
   }
-  if (shelfId) {
-    const sub = db.select({ bookId: bookShelves.bookId }).from(bookShelves).where(eq(bookShelves.shelfId, shelfId))
-    conditions.push(sql`${books.id} IN ${sub}`)
+  // 'none' sentinel filters uncategorized books (shelfId IS NULL)
+  if (shelfId === 'none') {
+    conditions.push(isNull(books.shelfId))
+  } else if (shelfId) {
+    conditions.push(eq(books.shelfId, shelfId))
   }
   if (tagId) {
     const sub = db.select({ bookId: bookTags.bookId }).from(bookTags).where(eq(bookTags.tagId, tagId))
     conditions.push(sql`${books.id} IN ${sub}`)
   }
-  // sortBy=lastReadAt: pure sort — read books first by last-read time (desc
-  // puts NULL lastReadAt at the bottom), never-read books stay visible; skips
-  // pin-first ordering like the other explicit sorts.
+  // Pin-first is universal (user decision 2026-08-12): pinned books lead in
+  // every sort — including lastReadAt — and the pinned group itself follows
+  // the chosen sort, not the pin time (reads first by last-read time, desc
+  // puts NULL lastReadAt at the bottom, never-read books stay visible).
   const orderBy = sortBy === 'title' ? (sortOrder === 'asc' ? asc(books.title) : desc(books.title)) :
     sortBy === 'author' ? (sortOrder === 'asc' ? asc(books.author) : desc(books.author)) :
     sortBy === 'size' ? (sortOrder === 'asc' ? asc(books.size) : desc(books.size)) :
@@ -63,12 +67,30 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     createdAt: books.createdAt,
     updatedAt: books.updatedAt,
     deletedAt: books.deletedAt,
-  }).from(books).where(where)
-  const items = sortBy === 'lastReadAt'
-    ? baseQuery().orderBy(orderBy).limit(pageSize).offset(offset).all()
-    : baseQuery().orderBy(asc(sql`pinned_at IS NULL`), desc(books.pinnedAt), orderBy).limit(pageSize).offset(offset).all()
+    shelfId: books.shelfId,
+    shelfName: shelves.name,
+  }).from(books).leftJoin(shelves, eq(books.shelfId, shelves.id)).where(where)
+  const items = baseQuery()
+    .orderBy(asc(sql`pinned_at IS NULL`), orderBy)
+    .limit(pageSize).offset(offset).all()
   const total = db.select({ count: sql<number>`count(*)` }).from(books).where(where).get()
-  return { data: items, page, pageSize, total: total?.count ?? 0 }
+  // Tag names are fetched per page in a second query: joining book_tags into
+  // the paginated query would multiply rows per book and break LIMIT/OFFSET.
+  const tagRows = items.length > 0
+    ? db.select({ bookId: bookTags.bookId, name: tags.name })
+      .from(bookTags)
+      .innerJoin(tags, eq(bookTags.tagId, tags.id))
+      .where(inArray(bookTags.bookId, items.map((b) => b.id)))
+      .all()
+    : []
+  const tagsByBook = new Map<string, string[]>()
+  for (const row of tagRows) {
+    const list = tagsByBook.get(row.bookId) ?? []
+    list.push(row.name)
+    tagsByBook.set(row.bookId, list)
+  }
+  const data = items.map((b) => ({ ...b, tags: tagsByBook.get(b.id) ?? [] }))
+  return { data, page, pageSize, total: total?.count ?? 0 }
 }
 
 // Book rows returned to clients must not carry meta.chapters (huge payload);
@@ -570,7 +592,6 @@ export async function deleteBook(userId: string, bookId: string) {
 
   db.delete(annotations).where(eq(annotations.bookId, bookId)).run()
   db.delete(bookTags).where(eq(bookTags.bookId, bookId)).run()
-  db.delete(bookShelves).where(eq(bookShelves.bookId, bookId)).run()
 
   // Blobs are content-hash addressed and shared across users' book rows;
   // delete the physical file only when no other row (including trashed) references it.
@@ -605,37 +626,22 @@ export async function deleteBook(userId: string, bookId: string) {
   return book
 }
 
-export async function setBookShelves(userId: string, bookId: string, shelfIds: string[]) {
+export async function setBookShelf(userId: string, bookId: string, shelfId: string | null) {
   const db = getDb()
   const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
-  if (shelfIds.length > 0) {
-    const existing = db
-      .select({ count: sql<number>`count(*)` })
-      .from(shelves)
-      .where(and(eq(shelves.userId, userId), inArray(shelves.id, shelfIds)))
-      .get()
-    if ((existing?.count ?? 0) !== shelfIds.length) {
-      throw new AppError('SHELF_NOT_FOUND')
-    }
+  if (shelfId !== null) {
+    const shelf = db.select({ id: shelves.id }).from(shelves).where(and(eq(shelves.id, shelfId), eq(shelves.userId, userId))).get()
+    if (!shelf) throw new AppError('SHELF_NOT_FOUND')
   }
-  db.delete(bookShelves).where(eq(bookShelves.bookId, bookId)).run()
-  if (shelfIds.length > 0) {
-    const values = shelfIds.map((shelfId) => ({ bookId, shelfId, sortOrder: 0 }))
-    db.insert(bookShelves).values(values).onConflictDoNothing().run()
-  }
+  db.update(books).set({ shelfId }).where(eq(books.id, bookId)).run()
 }
 
-export async function getBookShelves(userId: string, bookId: string) {
+export async function getBookShelf(userId: string, bookId: string) {
   const db = getDb()
   const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
-  const rows = db
-    .select({ shelfId: bookShelves.shelfId })
-    .from(bookShelves)
-    .where(eq(bookShelves.bookId, bookId))
-    .all()
-  return rows.map((r) => r.shelfId)
+  return book.shelfId
 }
 
 export async function setBookTags(userId: string, bookId: string, tagIds: string[]) {

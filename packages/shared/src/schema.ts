@@ -151,6 +151,8 @@ export const settingsUpdateSchema = z.object({
   marginalFontSize: z.number().min(0).max(24).optional(),
   readingTimerMode: z.enum(['auto', 'manual', 'off']).optional(),
   manualTimerGraceMinutes: z.union([z.literal(1), z.literal(5), z.literal(10), z.literal(30)]).optional(),
+  // Named reading-setting profiles; JSON serialized by the web client, server passes it through.
+  readingConfig: z.string().optional(),
   trash: z.object({
     autoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]),
   }).optional(),
@@ -193,6 +195,10 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(6).max(256),
 })
 
+export const updateUsernameSchema = z.object({
+  username: z.string().min(1).max(30),
+})
+
 export const updateInstanceSchema = z.object({
   allowRegistration: z.boolean().optional(),
   allowGuestAccess: z.boolean().optional(),
@@ -206,10 +212,11 @@ export const updateUserSchema = z.object({
 
 export const shelfCreateSchema = z.object({ name: z.string().min(1).max(100) })
 export const shelfUpdateSchema = z.object({ name: z.string().min(1).max(100) })
+export const shelfReorderSchema = z.object({ shelfIds: z.array(z.string().min(1)) })
 export const tagCreateSchema = z.object({ name: z.string().min(1).max(100) })
 export const tagUpdateSchema = z.object({ name: z.string().min(1).max(100) })
 export const bookMembershipSchema = z.object({
-  shelfIds: z.array(z.string().min(1)).optional(),
+  shelfId: z.string().min(1).nullable().optional(),
   tagIds: z.array(z.string().min(1)).optional(),
 })
 

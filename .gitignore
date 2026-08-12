@@ -34,6 +34,7 @@ logs/
 logs
 *.log
 *.local
+artifacts/
 
 # pnpm
 .pnpm-store/

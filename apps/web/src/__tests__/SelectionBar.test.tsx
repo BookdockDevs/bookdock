@@ -19,8 +19,10 @@ vi.mock('@/api/client', () => ({
   apiDelete: (...args: unknown[]) => apiDelete(...args),
 }))
 
+let mockShelves: { id: string; name: string; bookCount: number }[] = []
+
 vi.mock('../features/library/hooks', () => ({
-  useShelves: () => ({ data: { data: [] } }),
+  useShelves: () => ({ data: { data: mockShelves } }),
   useTags: () => ({ data: { data: [] } }),
 }))
 
@@ -30,6 +32,7 @@ function wrapper({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockShelves = []
   apiPatch.mockResolvedValue({})
   apiPut.mockResolvedValue({})
   apiPost.mockResolvedValue({})
@@ -81,6 +84,33 @@ describe('SelectionBar', () => {
     render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
     fireEvent.click(screen.getByText('library.batchClassify'))
     expect(screen.getByText('library.batchClassifyConfirm')).toBeInTheDocument()
+  })
+
+  it('moves selected books into a single shelf', async () => {
+    mockShelves = [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }]
+    const onClear = vi.fn()
+    render(<SelectionBar selectedIds={['a', 'b']} onClear={onClear} />, { wrapper })
+
+    fireEvent.click(screen.getByText('library.batchClassify'))
+    fireEvent.click(screen.getByText('Favorites'))
+    fireEvent.click(screen.getByText('library.save'))
+
+    await waitFor(() => expect(onClear).toHaveBeenCalled())
+    expect(apiPut).toHaveBeenCalledWith('/books/a/shelves', { shelfId: 'shelf-1' })
+    expect(apiPut).toHaveBeenCalledWith('/books/b/shelves', { shelfId: 'shelf-1' })
+  })
+
+  it('moves selected books out of shelves via the uncategorized option', async () => {
+    mockShelves = [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }]
+    const onClear = vi.fn()
+    render(<SelectionBar selectedIds={['a']} onClear={onClear} />, { wrapper })
+
+    fireEvent.click(screen.getByText('library.batchClassify'))
+    fireEvent.click(screen.getByText('library.uncategorized'))
+    fireEvent.click(screen.getByText('library.save'))
+
+    await waitFor(() => expect(onClear).toHaveBeenCalled())
+    expect(apiPut).toHaveBeenCalledWith('/books/a/shelves', { shelfId: null })
   })
 
   it('clears selection via clear button', () => {

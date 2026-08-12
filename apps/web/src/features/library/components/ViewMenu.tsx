@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { useUiStore } from '@/stores/ui.store'
+import { useUiStore, LIST_INFO_ITEMS, type CoverFit, type ListInfoItem, type RecentlyReadStyle } from '@/stores/ui.store'
 import { cn } from '@/lib/utils'
 
 import type { LibrarySearch } from '@/routes/index'
@@ -37,19 +37,41 @@ const STATUS_FILTER_KEYS: Record<ReadStatus, string> = {
   abandoned: 'library.readStatusAbandoned',
 }
 
+const COVER_FITS: { value: CoverFit; labelKey: string }[] = [
+  { value: 'crop', labelKey: 'library.coverFitCrop' },
+  { value: 'full', labelKey: 'library.coverFitFull' },
+]
+
+const RECENTLY_READ_STYLES: { value: RecentlyReadStyle; labelKey: string }[] = [
+  { value: 'off', labelKey: 'library.recentlyReadOff' },
+  { value: 'covers', labelKey: 'library.recentlyReadCovers' },
+  { value: 'cards', labelKey: 'library.recentlyReadCards' },
+]
+
+const LIST_INFO_LABEL_KEYS: Record<ListInfoItem, string> = {
+  progress: 'library.sortBy.progress',
+  size: 'library.sortBy.size',
+  lastRead: 'library.sortBy.lastRead',
+  shelf: 'library.shelves',
+  tags: 'library.tags',
+  createdAt: 'library.sortBy.createdAt',
+}
+
 export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, readStatus }: ViewMenuProps) {
   const _ = useTranslation()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  const coverMode = useUiStore((s) => s.coverMode)
+  const coverText = useUiStore((s) => s.coverText)
   const coverFit = useUiStore((s) => s.coverFit)
   const gridColumns = useUiStore((s) => s.gridColumns)
-  const showRecentlyRead = useUiStore((s) => s.showRecentlyRead)
-  const setCoverMode = useUiStore((s) => s.setCoverMode)
+  const recentlyReadStyle = useUiStore((s) => s.recentlyReadStyle)
+  const listInfoItems = useUiStore((s) => s.listInfoItems)
+  const setCoverText = useUiStore((s) => s.setCoverText)
   const setCoverFit = useUiStore((s) => s.setCoverFit)
   const setGridColumns = useUiStore((s) => s.setGridColumns)
-  const setShowRecentlyRead = useUiStore((s) => s.setShowRecentlyRead)
+  const setRecentlyReadStyle = useUiStore((s) => s.setRecentlyReadStyle)
+  const setListInfoItems = useUiStore((s) => s.setListInfoItems)
   const setSortBy = useUiStore((s) => s.setSortBy)
   const setSortOrder = useUiStore((s) => s.setSortOrder)
   const setView = useUiStore((s) => s.setView)
@@ -122,7 +144,7 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
       </button>
 
       {open && (
-        <div className="absolute right-0 top-11 z-30 w-64 rounded-xl border border-stone-200/80 bg-white/95 p-1.5 shadow-xl shadow-stone-900/8 backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95">
+        <div className="absolute right-0 top-11 z-30 w-72 rounded-xl border border-stone-200/80 bg-white/95 p-1.5 shadow-xl shadow-stone-900/8 backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95">
           <SectionLabel>{_('library.view')}</SectionLabel>
           <div className="mx-1 flex gap-1 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
             {viewOptions.map((opt) => (
@@ -148,23 +170,51 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
             ))}
           </div>
 
-          <ToggleRow
-            label={_('library.showRecentShelf')}
-            checked={showRecentlyRead}
-            onChange={() => setShowRecentlyRead(!showRecentlyRead)}
-          />
+          <div className="px-2.5 pb-1 pt-1 text-[11px] text-stone-400 dark:text-stone-500">{_('library.showRecentShelf')}</div>
+          <div className="mx-1 flex gap-1 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
+            {RECENTLY_READ_STYLES.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                aria-pressed={recentlyReadStyle === opt.value}
+                onClick={() => setRecentlyReadStyle(opt.value)}
+                className={cn(
+                  'h-7 flex-1 rounded-md text-xs transition-colors',
+                  recentlyReadStyle === opt.value
+                    ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                    : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
+                )}
+              >
+                {_(opt.labelKey)}
+              </button>
+            ))}
+          </div>
           {view === 'grid' && (
             <>
               <ToggleRow
-                label={_('library.coverMode')}
-                checked={coverMode}
-                onChange={() => setCoverMode(!coverMode)}
+                label={_('library.coverText')}
+                checked={coverText}
+                onChange={() => setCoverText(!coverText)}
               />
-              <ToggleRow
-                label={_('library.coverFit')}
-                checked={coverFit}
-                onChange={() => setCoverFit(!coverFit)}
-              />
+              <div className="px-2.5 pb-1 pt-1 text-[11px] text-stone-400 dark:text-stone-500">{_('library.coverFit')}</div>
+              <div className="mx-1 mb-0.5 flex gap-1 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
+                {COVER_FITS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    aria-pressed={coverFit === opt.value}
+                    onClick={() => setCoverFit(opt.value)}
+                    className={cn(
+                      'h-7 flex-1 rounded-md text-xs transition-colors',
+                      coverFit === opt.value
+                        ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                        : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
+                    )}
+                  >
+                    {_(opt.labelKey)}
+                  </button>
+                ))}
+              </div>
               <div className="flex items-center justify-between px-2.5 py-1.5">
                 <span className="text-[13px] text-stone-700 dark:text-stone-300">{_('library.columns')}</span>
                 <select
@@ -182,33 +232,61 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
             </>
           )}
 
+          {view === 'list' && (
+            <>
+              <div className="px-2.5 pb-1 pt-1 text-[11px] text-stone-400 dark:text-stone-500">{_('library.listInfo')}</div>
+              <div className="mx-1 mb-0.5 grid grid-cols-3 gap-1 rounded-lg bg-stone-100 p-1 dark:bg-stone-800">
+                {LIST_INFO_ITEMS.map((item) => {
+                  const active = listInfoItems.includes(item)
+                  return (
+                    <button
+                      key={item}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setListInfoItems(
+                        active
+                          ? listInfoItems.filter((v) => v !== item)
+                          : [...listInfoItems, item],
+                      )}
+                      className={cn(
+                        'h-7 whitespace-nowrap rounded-md text-xs transition-colors',
+                        active
+                          ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                          : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
+                      )}
+                    >
+                      {_(LIST_INFO_LABEL_KEYS[item])}
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )}
+
           {menuDivider}
 
           <SectionLabel>{_('library.sort')}</SectionLabel>
-          <div className="space-y-0.5">
+          <div className="mx-1 mb-0.5 grid grid-cols-3 gap-1 rounded-lg bg-stone-100 p-1 dark:bg-stone-800">
             {SORT_FIELDS.map((opt) => {
               const active = sortBy === opt.field
               return (
                 <button
                   key={opt.field}
                   type="button"
+                  aria-pressed={active}
                   onClick={() => handleSort(opt.field, opt.defaultOrder)}
                   className={cn(
-                    'flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-[13px] transition-colors',
+                    'flex h-7 items-center justify-center gap-0.5 rounded-md text-xs transition-colors',
                     active
-                      ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                      : 'text-stone-500 hover:bg-stone-50 hover:text-stone-900 dark:hover:bg-stone-800/60 dark:hover:text-stone-200',
+                      ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                      : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
                   )}
                 >
                   {_(opt.labelKey)}
                   {active && (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-auto shrink-0 text-stone-400 dark:text-stone-500">
-                      {sortOrder === 'asc' ? (
-                        <path d="M12 19V5M5 12l7-7 7 7" />
-                      ) : (
-                        <path d="M12 5v14M19 12l-7 7-7-7" />
-                      )}
-                    </svg>
+                    <span className="text-stone-400 dark:text-stone-500" aria-hidden>
+                      {sortOrder === 'asc' ? '↑' : '↓'}
+                    </span>
                   )}
                 </button>
               )
@@ -274,6 +352,7 @@ function ToggleRow({ label, checked, onChange }: { label: string; checked: boole
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-label={label}
         onClick={onChange}
         className={cn(
           'relative h-5 w-9 shrink-0 rounded-full transition-colors',

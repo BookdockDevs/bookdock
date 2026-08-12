@@ -4,6 +4,8 @@ export interface AuthUser {
   id: string
   username: string
   role: string
+  /** Content-hash addressed avatar key; see avatarUrl() in lib/avatar */
+  avatarKey?: string | null
   /** True for guest-injected sessions (no real login); mirrors MeRes.guest. */
   guest?: boolean
 }
@@ -11,6 +13,7 @@ export interface AuthUser {
 interface AuthState {
   user: AuthUser | null
   setAuth: (user: AuthUser) => void
+  updateUser: (patch: Partial<AuthUser>) => void
   clearAuth: () => void
 }
 
@@ -32,6 +35,16 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem('bd-user', JSON.stringify(user))
     }
     set({ user })
+  },
+  updateUser: (patch) => {
+    set((state) => {
+      if (!state.user) return state
+      const user = { ...state.user, ...patch }
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('bd-user', JSON.stringify(user))
+      }
+      return { user }
+    })
   },
   clearAuth: () => {
     if (typeof window !== 'undefined') {

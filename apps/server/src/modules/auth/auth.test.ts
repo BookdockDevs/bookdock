@@ -71,7 +71,7 @@ function createAuthApp(user: { id: string; username: string; role: string } | nu
   const app = new Hono()
   app.onError(errorHandler)
   app.use('/api/v1/auth/*', async (c, next) => {
-    if (user) c.set('user', user)
+    if (user) c.set('user', { ...user, avatarKey: null })
     return next()
   })
   app.route('/api/v1/auth', authRoutes)
@@ -169,7 +169,7 @@ describe('auth module', () => {
       const app = new Hono()
       app.onError(errorHandler)
       app.use('/api/v1/auth/*', async (c, next) => {
-        c.set('user', { id: 'u1', username: 'admin', role: 'guest' })
+        c.set('user', { id: 'u1', username: 'admin', role: 'guest', avatarKey: null })
         c.set('guest', true)
         return next()
       })
@@ -228,13 +228,73 @@ describe('auth module', () => {
     })
   })
 
+  describe('changeUsername', () => {
+    it('renames the user and returns the fresh account', async () => {
+      const id = await insertUser(db, { username: 'frank', password: 'secret6' })
+      const app = createAuthApp({ id, username: 'frank', role: 'member' })
+      const res = await app.request('/api/v1/auth/username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'frank2' }),
+      })
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.data.username).toBe('frank2')
+      expect(body.data.avatarKey).toBeNull()
+      const row = db.select().from(schema.users).where(eq(schema.users.id, id)).get()
+      expect(row?.username).toBe('frank2')
+    })
+
+    it('rejects a taken username with 409', async () => {
+      await insertUser(db, { username: 'grace', password: 'secret6' })
+      const id = await insertUser(db, { username: 'heidi', password: 'secret6' })
+      const app = createAuthApp({ id, username: 'heidi', role: 'member' })
+      const res = await app.request('/api/v1/auth/username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'grace' }),
+      })
+      expect(res.status).toBe(409)
+      const body = await res.json()
+      expect(body.error.code).toBe('USERNAME_TAKEN')
+    })
+
+    it('keeps the current username when unchanged', async () => {
+      const id = await insertUser(db, { username: 'ivan', password: 'secret6' })
+      const app = createAuthApp({ id, username: 'ivan', role: 'member' })
+      const res = await app.request('/api/v1/auth/username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'ivan' }),
+      })
+      expect(res.status).toBe(200)
+    })
+
+    it('rejects guest-injected sessions', async () => {
+      const app = new Hono()
+      app.onError(errorHandler)
+      app.use('/api/v1/auth/*', async (c, next) => {
+        c.set('user', { id: 'u1', username: 'admin', role: 'guest', avatarKey: null })
+        c.set('guest', true)
+        return next()
+      })
+      app.route('/api/v1/auth', authRoutes)
+      const res = await app.request('/api/v1/auth/username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'newname' }),
+      })
+      expect(res.status).toBe(401)
+    })
+  })
+
   describe('me route', () => {
     it('flags guest-injected sessions', async () => {
       seedInstanceSettings(db, false, true)
       const app = new Hono()
       app.onError(errorHandler)
       app.use('/api/v1/auth/*', async (c, next) => {
-        c.set('user', { id: 'u1', username: 'admin', role: 'owner' })
+        c.set('user', { id: 'u1', username: 'admin', role: 'owner', avatarKey: null })
         c.set('guest', true)
         return next()
       })

@@ -332,11 +332,15 @@ export function useReaderRenderer({
     })
   }, [headerLeft, headerCenter, headerRight, footerLeft, footerCenter, footerRight, marginalFontSize])
 
+  // Re-runs when the renderer mounts: chapter counts often arrive while the
+  // async mount is still in flight (rendererRef.current null then), and the
+  // mount block above does not apply them — without the renderer dep they
+  // would be dropped and the chapterWordCount marginal stays empty.
   useEffect(() => {
     const current = rendererRef.current
     if (!current || !chapterWordCounts) return
     current.setChapterWordCounts(chapterWordCounts)
-  }, [chapterWordCounts])
+  }, [chapterWordCounts, renderer])
 
   return { containerRef, renderer }
 }

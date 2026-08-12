@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 
+import { markEscConsumed } from '../lib/esc-consumed'
+
 interface SettingsPopoverProps {
   open: boolean
   onClose: () => void
@@ -19,7 +21,10 @@ export function SettingsPopover({ open, onClose, children }: SettingsPopoverProp
       onClose()
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        markEscConsumed()
+        onClose()
+      }
     }
     document.addEventListener('click', handleClickCapture, true)
     document.addEventListener('keydown', handleKey)

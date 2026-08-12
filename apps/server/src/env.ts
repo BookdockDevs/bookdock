@@ -18,6 +18,7 @@ const envSchema = z.object({
   DEFAULT_USERNAME: z.string().default('admin'),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(104857600),
   FONT_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
+  AVATAR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(2097152),
   STORAGE_DRIVER: z.enum(['localfs']).default('localfs'),
 })
 

@@ -1,12 +1,13 @@
-import { eq, isNotNull } from 'drizzle-orm'
+import { and, eq, isNotNull, ne } from 'drizzle-orm'
 import { SignJWT } from 'jose'
 
-import type { InstanceInfoRes, UpdateInstanceReq } from '@bookdock/shared'
+import type { AccountRes, InstanceInfoRes, UpdateInstanceReq } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { instanceSettings, users } from '../../db/schema'
 import { config } from '../../config'
 import { AppError } from '../../middleware/error'
+import { invalidateUserCache } from '../../middleware/auth.guard'
 import { createId } from '../../lib/id'
 import { hashPassword, verifyPassword } from '../../lib/password'
 
@@ -131,6 +132,24 @@ export async function changePassword(userId: string, oldPassword: string, newPas
     .set({ passwordHash: await hashPassword(newPassword), updatedAt: Date.now() })
     .where(eq(users.id, userId))
     .run()
+}
+
+export function changeUsername(userId: string, username: string): AccountRes {
+  const db = getDb()
+  const taken = db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.username, username), ne(users.id, userId)))
+    .get()
+  if (taken) {
+    throw new AppError('USERNAME_TAKEN', 'Username is already taken')
+  }
+  db.update(users).set({ username, updatedAt: Date.now() }).where(eq(users.id, userId)).run()
+  // The guard caches username/avatarKey for /me; drop the stale entry
+  invalidateUserCache(userId)
+  const row = db.select().from(users).where(eq(users.id, userId)).get()
+  if (!row) throw new AppError('USER_NOT_FOUND')
+  return { id: row.id, username: row.username, role: row.role, avatarKey: row.avatarKey }
 }
 
 export async function setupUser(username: string, password: string) {

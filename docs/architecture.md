@@ -46,10 +46,9 @@ Conventions:
 - API paths are uniformly prefixed `/api/v1` (see §5).
 
 **Current domain model**:
-- `User(id, username, passwordHash?, role, disabled, createdAt, updatedAt?)`
-- `Book(id, userId, title, author, format, filePath, coverKey?, size, meta, createdAt, updatedAt, deletedAt?)`
+- `User(id, username, passwordHash?, role, disabled, avatarKey?, createdAt, updatedAt?)` — `avatarKey` is the content-hash addressed avatar blob key (`<hh>/<sha256>.<ext>`, stored at `avatars/<key>`); physical file ref-checked across users before delete, same pattern as fonts/books
+- `Book(id, userId, title, author, format, filePath, coverKey?, size, meta, createdAt, updatedAt, deletedAt?, shelfId?)` — `shelfId` is the book's single shelf (FK `shelves.id`, `ON DELETE SET NULL`); `null` = 未分类 (a legitimate state). A book belongs to at most one shelf (migration 0021; the M2M `book_shelves` table was dropped, backfilling each multi-shelf book to the shelf with lowest sortOrder, then lowest createdAt, then lowest id)
 - `Shelf(id, userId, name, sortOrder, createdAt)`
-- `ShelfBook(id, userId, shelfId, bookId, sortOrder?)` (M2M join via `book_shelves`)
 - `Tag(id, userId, name)`
 - `Settings(id, userId, key, value)`
 - `InstanceSettings(key, value)` — instance-level KV, no userId (see ADR-12)
@@ -84,13 +83,14 @@ apps/server/src/
     epub.ts                # EpubParser (OPF/NCX/nav parsing + spine order)
     txt.ts                 # TxtParser (encoding detect + chapter heuristics)
   modules/
-    auth.routes.ts          # JWT (jose), instance settings, /setup, /login, /logout, /register, /password
+    auth.routes.ts          # JWT (jose), instance settings, /setup, /login, /logout, /register, /password, /username
     books.routes.ts         # books CRUD + upload + cover
-    shelves.routes.ts       # shelves CRUD + m2m book membership
+    shelves.routes.ts       # shelves CRUD + batch move books in/out of a shelf
     tags.routes.ts          # tags CRUD + m2m book membership
     progress.routes.ts      # reading position
     settings.routes.ts      # user-level KV
     annotations.routes.ts   # highlight/note/comment CRUD
+    avatars/                # user avatar upload/delete + immutable content-hash file serving
     fonts/                  # custom font upload/list/delete/scope + immutable file serving
     reading-records.routes.ts # duration upsert + aggregation
   middleware/
@@ -147,14 +147,13 @@ Registered in `app.ts` (EpubParser + TxtParser). Adding PDF/MOBI/CBZ means only 
 
 SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instance seeds one "default user" row. Future multi-user/permissions/sharing only adds tables + policy logic, never touching existing columns.
 
-**Current tables** (11):
+**Current tables** (10):
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `users` | id (text PK), username (unique), passwordHash?, role, disabled, createdAt, updatedAt? | role: owner\|member\|guest; disabled → deny |
-| `books` | id, userId FK, title, author, format (epub\|txt), filePath, coverKey?, size, meta (json), createdAt, updatedAt, **deletedAt** | deletedAt soft-delete (回收站); auto-clean purges rows older than per-user `trash.autoCleanDays` (0=never/7/30, default 30) — full scan for all users at startup (fail-silent) + lazy per-user scan on `GET /books?trash=1`; purge reuses `deleteBook` (ref-counted blob deletion) |
-| `shelves` | id, userId FK, name, sortOrder, createdAt | |
-| `book_shelves` | bookId FK (cascade), shelfId FK (cascade) | composite PK, M2M |
+| `users` | id (text PK), username (unique), passwordHash?, role, disabled, avatarKey?, createdAt, updatedAt? | role: owner\|member\|guest; disabled → deny; avatarKey = content-hash blob key under `avatars/`, ref-checked before physical delete |
+| `books` | id, userId FK, title, author, format (epub\|txt), filePath, coverKey?, size, meta (json), createdAt, updatedAt, **deletedAt**, **shelfId?** | deletedAt soft-delete (回收站); auto-clean purges rows older than per-user `trash.autoCleanDays` (0=never/7/30, default 30) — full scan for all users at startup (fail-silent) + lazy per-user scan on `GET /books?trash=1`; purge reuses `deleteBook` (ref-counted blob deletion). shelfId FK → shelves (SET NULL): single-shelf membership, NULL = 未分类; `GET /books?shelfId=<id>` filters by shelf, `shelfId=none` filters uncategorized books |
+| `shelves` | id, userId FK, name, sortOrder, createdAt | deleting a shelf sets its books' shelfId to NULL (books become 未分类, never deleted) |
 | `tags` | id, userId FK, name | |
 | `book_tags` | bookId FK (cascade), tagId FK (cascade) | composite PK, M2M |
 | `settings` | id, userId FK, key, value (json) | unique (userId, key); keys: `ui` (reader/UI prefs), `trash` (`{ autoCleanDays }`) |
@@ -187,10 +186,11 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | Prefix | Module | Key endpoints |
 |---|---|---|
 | `/api/v1/health` | — | `GET /` |
-| `/api/v1/auth` | auth | `GET /instance` `PATCH /instance`(owner) `POST /login` `POST /logout` `POST /setup` `GET /setup-required` `POST /register` `POST /password` `GET /me` |
+| `/api/v1/auth` | auth | `GET /instance` `PATCH /instance`(owner) `POST /login` `POST /logout` `POST /setup` `GET /setup-required` `POST /register` `POST /password` `POST /username` `GET /me` |
 | `/api/v1/users` | users | `GET /`(owner) `PATCH /:id`(owner) |
-| `/api/v1/books` | books | `GET /` `POST /` `GET /:id` `DELETE /:id` `GET /:id/file` `GET /:id/cover` `PUT /:id/membership` `GET /:id/chapters` |
-| `/api/v1/shelves` | shelves | `GET /` `POST /` `PUT /:id` `DELETE /:id` |
+| `/api/v1/avatars` | avatars | `POST /`(multipart, jpeg/png/webp/gif ≤ 2MB) `DELETE /` `GET /<hh>/<sha256>.<ext>` (immutable content-hash blob) |
+| `/api/v1/books` | books | `GET /` `POST /` `GET /:id` `DELETE /:id` `GET /:id/file` `GET /:id/cover` `PUT /:id/shelves` (set single shelf, `{shelfId: string|null}`) `GET /:id/shelves` `PUT /:id/tags` `GET /:id/tags` `GET /:id/chapters` |
+| `/api/v1/shelves` | shelves | `GET /` `POST /` `PUT /:id` `DELETE /:id` `POST /:id/books` (batch move in) `DELETE /:id/books` (batch move out) |
 | `/api/v1/tags` | tags | `GET /` `POST /` `PUT /:id` `DELETE /:id` |
 | `/api/v1/annotations` | annotations | `GET /`(?bookId=) `POST /` `PUT /:id` `DELETE /:id` |
 | `/api/v1/progress` | reading | `GET /:bookId` `PUT /:bookId` |

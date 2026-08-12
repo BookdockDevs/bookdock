@@ -111,7 +111,7 @@ describe('fonts routes', () => {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('/api/v1/fonts/*', async (c, next) => {
-      c.set('user', { id: currentUser.id, username: currentUser.username, role: currentUser.role })
+      c.set('user', { id: currentUser.id, username: currentUser.username, role: currentUser.role, avatarKey: null })
       return next()
     })
     app.route('/api/v1/fonts', fontsRoutes)

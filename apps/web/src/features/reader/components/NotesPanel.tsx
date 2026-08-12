@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
@@ -8,6 +8,7 @@ import { useToastStore } from '@/stores/toast.store'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { kindOf, type NoteSort } from '../hooks/useNotesFilter'
+import { markEscConsumed } from '../lib/esc-consumed'
 import { useReaderState } from '../state/reader-state'
 import { HIGHLIGHT_COLORS } from './annotation-colors'
 import { BookmarkIcon, BulbIcon, CopyIcon, PencilIcon, ShareIcon, StyleGlyph, TrashIcon } from './annotation-icons'
@@ -50,6 +51,96 @@ function BookOverviewStrip({ total }: { total: number }) {
   )
 }
 
+function autoGrow(el: HTMLTextAreaElement): void {
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
+
+/** Inline card editor replacing the prompt-based rename: auto-growing
+ *  textarea, Ctrl+Enter saves, Escape / outside click cancels (mirrors the
+ *  selection-toolbar NoteEditorPopup interaction) */
+function InlineEditor({
+  initial,
+  placeholder,
+  onSave,
+  onCancel,
+}: {
+  initial: string
+  placeholder: string
+  onSave: (value: string) => void
+  onCancel: () => void
+}) {
+  const _ = useTranslation()
+  const [draft, setDraft] = useState(initial)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        markEscConsumed()
+        onCancel()
+      }
+    }
+    function onPointerDown(e: globalThis.MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onCancel()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('mousedown', onPointerDown)
+    textareaRef.current?.focus()
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('mousedown', onPointerDown)
+    }
+  }, [onCancel])
+
+  function submit() {
+    const value = draft.trim()
+    if (value) onSave(value)
+    else onCancel()
+  }
+
+  return (
+    <div ref={rootRef} className="p-3" onContextMenu={(e) => e.stopPropagation()}>
+      <textarea
+        ref={textareaRef}
+        rows={1}
+        value={draft}
+        onChange={(e) => {
+          setDraft(e.target.value)
+          autoGrow(e.target)
+        }}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            e.preventDefault()
+            submit()
+          } else if (e.key === 'Escape') {
+            e.stopPropagation()
+            onCancel()
+          }
+        }}
+        placeholder={placeholder}
+        className="w-full resize-none bg-transparent text-sm leading-relaxed text-current outline-none placeholder:text-[var(--bd-read-sub)]"
+      />
+      <div className="mt-2 flex items-center justify-end gap-2">
+        <button
+          onClick={onCancel}
+          className="rounded-md px-2 py-1 text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+        >
+          {_('annotation.cancel')}
+        </button>
+        <button
+          onClick={submit}
+          disabled={!draft.trim()}
+          className="rounded-md bg-blue-500 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-60"
+        >
+          {_('annotation.save')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface NotesPanelProps {
   items: AnnotationRes[]
   total: number
@@ -69,6 +160,7 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
   const addToast = useToastStore((s) => s.addToast)
   const setShareTarget = useReaderState((s) => s.setShareTarget)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: AnnotationRes } | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   /** Chapter-grouped view, or null when a flat time-sorted list should render */
   const groups = useMemo(() => {
@@ -139,11 +231,12 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
     }
   }
 
-  function renameItem(item: AnnotationRes) {
-    const newText = window.prompt('重命名书签', item.text)
-    if (newText !== null) {
-      updateAnnotation.mutate({ id: item.id, body: { text: newText.trim() || item.text } })
-    }
+  function saveEdit(item: AnnotationRes, value: string) {
+    updateAnnotation.mutate({
+      id: item.id,
+      body: item.type === 'bookmark' ? { text: value } : { note: value },
+    })
+    setEditingId(null)
   }
 
   function deleteItem(item: AnnotationRes) {
@@ -167,66 +260,81 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
         onContextMenu={(e) => handleContextMenu(e, a)}
         className="group rounded-lg border border-stone-200/60 transition-colors hover:bg-stone-500/5 dark:border-stone-800/60"
       >
-        <button onClick={() => goTo(a)} className="w-full p-3 text-left">
-          {kind === 'bookmark' && (
-            <div className="flex items-start gap-2">
-              <span className="mt-0.5 shrink-0 text-stone-400 dark:text-stone-500">
-                <BookmarkIcon />
-              </span>
-              <p className="line-clamp-2 flex-1 text-sm text-current">{a.text || _('reader.bookmark')}</p>
-            </div>
-          )}
-          {kind === 'idea' && (
-            <>
-              <div className="flex items-start gap-2">
-                <span className="mt-0.5 shrink-0 text-[var(--bd-read-sub)]">
-                  <BulbIcon />
-                </span>
-                <p className="line-clamp-3 flex-1 whitespace-pre-wrap text-sm text-current">{a.note}</p>
-              </div>
-              {a.text && (
-                <div className="ml-7 mt-2 border-l-2 border-stone-300 pl-2 dark:border-stone-600">
-                  <p className="line-clamp-2 text-xs text-[var(--bd-read-sub)]">{a.text}</p>
+        {editingId === a.id ? (
+          <InlineEditor
+            initial={a.type === 'bookmark' ? a.text : (a.note ?? '')}
+            placeholder={a.type === 'bookmark' ? _('annotation.renamePlaceholder') : _('annotation.notePlaceholder')}
+            onSave={(value) => saveEdit(a, value)}
+            onCancel={() => setEditingId(null)}
+          />
+        ) : (
+          <>
+            <button onClick={() => goTo(a)} className="w-full p-3 text-left">
+              {kind === 'bookmark' && (
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 shrink-0 text-stone-400 dark:text-stone-500">
+                    <BookmarkIcon />
+                  </span>
+                  <p className="line-clamp-2 flex-1 text-sm text-current">{a.text || _('reader.bookmark')}</p>
                 </div>
               )}
-            </>
-          )}
-          {kind === 'highlight' && (
-            <div className="flex items-start gap-2">
-              <span className="mt-0.5 shrink-0" style={{ color: hex }}>
-                <StyleGlyph style={a.style} />
+              {kind === 'idea' && (
+                <>
+                  <div className="flex items-start gap-2">
+                    <span className="mt-0.5 shrink-0 text-[var(--bd-read-sub)]">
+                      <BulbIcon />
+                    </span>
+                    <p className="line-clamp-3 flex-1 whitespace-pre-wrap text-sm text-current">{a.note}</p>
+                  </div>
+                  {a.text && (
+                    <div className="ml-7 mt-2 border-l-2 border-stone-300 pl-2 dark:border-stone-600">
+                      <p className="line-clamp-2 text-xs text-[var(--bd-read-sub)]">{a.text}</p>
+                    </div>
+                  )}
+                </>
+              )}
+              {kind === 'highlight' && (
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 shrink-0" style={{ color: hex }}>
+                    <StyleGlyph style={a.style} />
+                  </span>
+                  <p className="line-clamp-3 flex-1 text-sm leading-relaxed text-current">
+                    <span style={highlightDecoration(a.style, hex)}>{a.text}</span>
+                  </p>
+                </div>
+              )}
+            </button>
+            <div className="flex max-h-0 items-center gap-0.5 overflow-hidden px-3 opacity-0 transition-all duration-200 group-hover:max-h-8 group-hover:pb-2 group-hover:opacity-100">
+              <span
+                title={formatFullDateTime(_, a.createdAt)}
+                className="text-[11px] text-[var(--bd-read-sub)]"
+              >
+                {formatRelativeTime(_, a.createdAt)}
               </span>
-              <p className="line-clamp-3 flex-1 text-sm leading-relaxed text-current">
-                <span style={highlightDecoration(a.style, hex)}>{a.text}</span>
-              </p>
+              <div className="flex-1" />
+              <button onClick={() => copyItem(a)} title={_('annotation.copy')} className={actionBtn}>
+                <CopyIcon />
+              </button>
+              {a.type !== 'bookmark' && (
+                <button onClick={() => shareItem(a)} title={_('annotation.share')} className={actionBtn}>
+                  <ShareIcon />
+                </button>
+              )}
+              {a.type === 'bookmark' ? (
+                <button onClick={() => setEditingId(a.id)} title={_('annotation.rename')} className={actionBtn}>
+                  <PencilIcon />
+                </button>
+              ) : kind === 'idea' ? (
+                <button onClick={() => setEditingId(a.id)} title={_('annotation.editNote')} className={actionBtn}>
+                  <PencilIcon />
+                </button>
+              ) : null}
+              <button onClick={() => deleteItem(a)} title={_('annotation.deleteHighlight')} className={`${actionBtn} text-red-500 hover:bg-red-500/10 hover:text-red-500`}>
+                <TrashIcon />
+              </button>
             </div>
-          )}
-        </button>
-        <div className="flex max-h-0 items-center gap-0.5 overflow-hidden px-3 opacity-0 transition-all duration-200 group-hover:max-h-8 group-hover:pb-2 group-hover:opacity-100">
-          <span
-            title={formatFullDateTime(_, a.createdAt)}
-            className="text-[11px] text-[var(--bd-read-sub)]"
-          >
-            {formatRelativeTime(_, a.createdAt)}
-          </span>
-          <div className="flex-1" />
-          <button onClick={() => copyItem(a)} title={_('annotation.copy')} className={actionBtn}>
-            <CopyIcon />
-          </button>
-          {a.type !== 'bookmark' && (
-            <button onClick={() => shareItem(a)} title={_('annotation.share')} className={actionBtn}>
-              <ShareIcon />
-            </button>
-          )}
-          {a.type === 'bookmark' && (
-            <button onClick={() => renameItem(a)} title={_('annotation.rename')} className={actionBtn}>
-              <PencilIcon />
-            </button>
-          )}
-          <button onClick={() => deleteItem(a)} title={_('annotation.deleteHighlight')} className={`${actionBtn} text-red-500 hover:bg-red-500/10 hover:text-red-500`}>
-            <TrashIcon />
-          </button>
-        </div>
+          </>
+        )}
       </div>
     )
   }
@@ -281,11 +389,20 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
           )}
           {contextMenu.item.type === 'bookmark' && (
             <button
-              onClick={() => { renameItem(contextMenu.item); setContextMenu(null) }}
+              onClick={() => { setEditingId(contextMenu.item.id); setContextMenu(null) }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
             >
               <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><PencilIcon /></span>
               {_('annotation.rename')}
+            </button>
+          )}
+          {kindOf(contextMenu.item) === 'idea' && (
+            <button
+              onClick={() => { setEditingId(contextMenu.item.id); setContextMenu(null) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+            >
+              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><PencilIcon /></span>
+              {_('annotation.editNote')}
             </button>
           )}
           <button

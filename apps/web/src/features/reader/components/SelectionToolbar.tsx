@@ -53,6 +53,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
   // before the user commits, so cancels leave no placeholder row behind
   const [noteDraft, setNoteDraft] = useState(false)
   const username = useAuthStore((s) => s.user?.username)
+  const avatarKey = useAuthStore((s) => s.user?.avatarKey)
   useEffect(() => {
     setCreatedLocal(null)
     setNoteEditing(false)
@@ -89,7 +90,9 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         type: 'highlight',
         color: last.color,
         style: last.style,
-        text: selection.text,
+        // rawText keeps block-level line breaks; `text` is whitespace-collapsed
+        // and would squash the quote into one paragraph on the idea/share cards
+        text: (selection.rawText ?? selection.text).slice(0, 500),
         chapter: currentChapter ?? undefined,
       })
       // The optimistic cache entry (inserted by the mutation's onMutate) is
@@ -157,7 +160,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
           type: 'note',
           color: last.color,
           style: last.style,
-          text: selection.text,
+          text: (selection.rawText ?? selection.text).slice(0, 500),
           chapter: currentChapter ?? undefined,
           note: note || undefined,
         })
@@ -273,6 +276,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     const entries: IdeaEntry[] = (atRange.length > 0 ? atRange : [target]).map((a) => ({
       annotation: a,
       authorName: username ?? undefined,
+      authorAvatarKey: avatarKey,
       own: true,
     }))
     return (
@@ -282,6 +286,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         onCopyQuote={() => void copyQuoteText()}
         onHighlight={() => void highlight()}
         onWriteNote={() => void createNote()}
+        onShareQuote={shareExcerpt}
         onSearch={searchSelection}
         onCopyNote={(entry) => void copyNote(entry)}
         onShareNote={shareIdea}

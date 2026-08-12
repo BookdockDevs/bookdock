@@ -28,6 +28,8 @@ import {
   purgeExpiredTrash,
   purgeAllExpiredTrash,
   listBooks,
+  setBookShelf,
+  getBookShelf,
   uploadBook,
 } from './books.service'
 
@@ -218,6 +220,12 @@ describe('listBooks search escaping', () => {
     const lonePercent = await listBooks(ownerId, 1, 20, '%')
     expect(lonePercent.data.map((b) => b.title)).toEqual(['Progress 100%'])
   })
+
+  it('matches author names too', async () => {
+    seedBook(db, ownerId, { title: 'Dune', author: 'Frank Herbert' })
+    const byAuthor = await listBooks(ownerId, 1, 20, 'frank')
+    expect(byAuthor.data.map((b) => b.title)).toEqual(['Dune'])
+  })
 })
 
 describe('listBooks lastReadAt sort', () => {
@@ -248,6 +256,26 @@ describe('listBooks lastReadAt sort', () => {
   it('honors sortOrder asc for lastReadAt', async () => {
     const result = await listBooks(ownerId, 1, 20, undefined, 'lastReadAt', 'asc')
     expect(result.data.map((b) => b.title)).toEqual(['Never Read', 'Read First', 'Read Later'])
+  })
+
+  it('leads with pinned books in lastReadAt sort; the pinned group follows last-read time', async () => {
+    seedBook(db, ownerId, { title: 'Pinned Read First', lastReadAt: 1000, pinnedAt: 3000 })
+    seedBook(db, ownerId, { title: 'Pinned Never Read', pinnedAt: 4000 })
+    const result = await listBooks(ownerId, 1, 20, undefined, 'lastReadAt', 'desc')
+    expect(result.data.map((b) => b.title)).toEqual([
+      'Pinned Read First',
+      'Pinned Never Read',
+      'Read Later',
+      'Read First',
+      'Never Read',
+    ])
+  })
+
+  it('orders the pinned group by the chosen sort, not the pin time', async () => {
+    seedBook(db, ownerId, { title: 'Pinned Old', createdAt: 100, pinnedAt: 5000 })
+    seedBook(db, ownerId, { title: 'Pinned New', createdAt: 200, pinnedAt: 1000 })
+    const result = await listBooks(ownerId, 1, 20, undefined, 'createdAt', 'desc')
+    expect(result.data.slice(0, 2).map((b) => b.title)).toEqual(['Pinned New', 'Pinned Old'])
   })
 })
 
@@ -525,7 +553,7 @@ describe('GET /api/v1/books/:id/file range requests', () => {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('/api/v1/books/*', async (c, next) => {
-      c.set('user', { id: userId, username: 'owner', role: 'owner' })
+      c.set('user', { id: userId, username: 'owner', role: 'owner', avatarKey: null })
       return next()
     })
     app.route('/api/v1/books', booksRoutes)
@@ -621,5 +649,116 @@ describe('GET /api/v1/books/:id/file range requests', () => {
     expect(res.headers.get('Content-Range')).toBe('bytes 0-9/100')
     expect(res.headers.get('Content-Length')).toBe('10')
     expect(Buffer.from(await res.arrayBuffer()).length).toBe(0)
+  })
+})
+
+describe('book shelf membership (single shelf)', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  function seedShelf(name: string, userId = ownerId) {
+    const id = createId('shelf')
+    db.insert(schema.shelves).values({ id, userId, name, sortOrder: 0, createdAt: Date.now() }).run()
+    return id
+  }
+
+  it('sets, reads, and clears a book shelf', async () => {
+    const book = seedBook(db, ownerId)
+    const shelfId = seedShelf('A')
+    expect(await getBookShelf(ownerId, book.id)).toBeNull()
+
+    await setBookShelf(ownerId, book.id, shelfId)
+    expect(await getBookShelf(ownerId, book.id)).toBe(shelfId)
+
+    await setBookShelf(ownerId, book.id, null)
+    expect(await getBookShelf(ownerId, book.id)).toBeNull()
+  })
+
+  it('rejects a shelf owned by another user', async () => {
+    const book = seedBook(db, ownerId)
+    const otherId = seedUser(db, 'other')
+    const foreignShelf = seedShelf('Foreign', otherId)
+    await expect(setBookShelf(ownerId, book.id, foreignShelf)).rejects.toMatchObject({ code: 'SHELF_NOT_FOUND' })
+  })
+
+  it('filters listBooks by shelfId and by the none sentinel', async () => {
+    const shelfId = seedShelf('A')
+    const onShelf = seedBook(db, ownerId, { shelfId })
+    const uncategorized = seedBook(db, ownerId)
+
+    const byShelf = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, shelfId)
+    expect(byShelf.total).toBe(1)
+    expect(byShelf.data[0].id).toBe(onShelf.id)
+
+    const byNone = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, 'none')
+    expect(byNone.total).toBe(1)
+    expect(byNone.data[0].id).toBe(uncategorized.id)
+  })
+})
+
+describe('listBooks shelfName and tags', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  function seedShelf(name: string) {
+    const id = createId('shelf')
+    db.insert(schema.shelves).values({ id, userId: ownerId, name, sortOrder: 0, createdAt: Date.now() }).run()
+    return id
+  }
+
+  function seedTag(name: string) {
+    const id = createId('tag')
+    db.insert(schema.tags).values({ id, userId: ownerId, name }).run()
+    return id
+  }
+
+  it('returns shelfName following shelfId and aggregates multiple tag names', async () => {
+    const shelfId = seedShelf('Novels')
+    const book = seedBook(db, ownerId, { shelfId })
+    const tagA = seedTag('科幻')
+    const tagB = seedTag('小说')
+    db.insert(schema.bookTags).values([
+      { bookId: book.id, tagId: tagA },
+      { bookId: book.id, tagId: tagB },
+    ]).run()
+
+    const res = await listBooks(ownerId, 1, 20)
+    const row = res.data.find((b) => b.id === book.id)!
+    expect(row.shelfName).toBe('Novels')
+    expect([...row.tags].sort()).toEqual(['小说', '科幻'])
+  })
+
+  it('returns null shelfName and empty tags for an uncategorized untagged book', async () => {
+    seedBook(db, ownerId)
+
+    const res = await listBooks(ownerId, 1, 20)
+    expect(res.data[0].shelfName).toBeNull()
+    expect(res.data[0].tags).toEqual([])
+  })
+
+  it('keeps one row per book when a book has multiple tags', async () => {
+    const book = seedBook(db, ownerId)
+    const tagA = seedTag('a')
+    const tagB = seedTag('b')
+    db.insert(schema.bookTags).values([
+      { bookId: book.id, tagId: tagA },
+      { bookId: book.id, tagId: tagB },
+    ]).run()
+
+    const res = await listBooks(ownerId, 1, 20)
+    expect(res.total).toBe(1)
+    expect(res.data).toHaveLength(1)
   })
 })

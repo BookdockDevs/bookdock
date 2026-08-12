@@ -15,9 +15,9 @@ import {
   resetBookMetadata,
   getBookChapters,
   getBookContent,
-  setBookShelves,
+  setBookShelf,
   setBookTags,
-  getBookShelves,
+  getBookShelf,
   getBookTags,
   stripMetaChapters,
   bufferFromStream,
@@ -262,7 +262,7 @@ booksRoutes.put('/:id/shelves', async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  await setBookShelves(user.id, bookId, parsed.data.shelfIds ?? [])
+  await setBookShelf(user.id, bookId, parsed.data.shelfId ?? null)
   return c.json({ data: null })
 })
 
@@ -281,8 +281,8 @@ booksRoutes.put('/:id/tags', async (c) => {
 booksRoutes.get('/:id/shelves', async (c) => {
   const user = c.get('user')
   const bookId = c.req.param('id')
-  const shelfIds = await getBookShelves(user.id, bookId)
-  return c.json({ data: shelfIds })
+  const shelfId = await getBookShelf(user.id, bookId)
+  return c.json({ data: shelfId })
 })
 
 booksRoutes.get('/:id/tags', async (c) => {

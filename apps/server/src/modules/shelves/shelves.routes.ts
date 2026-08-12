@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import {
   shelfCreateSchema,
   shelfUpdateSchema,
+  shelfReorderSchema,
   type ShelfListItem,
 } from '@bookdock/shared'
 
@@ -11,7 +12,8 @@ import {
   createShelf,
   updateShelf,
   deleteShelf,
-  addBooksToShelf,
+  reorderShelves,
+  moveBooksToShelf,
   removeBooksFromShelf,
 } from './shelves.service'
 
@@ -34,6 +36,18 @@ shelvesRoutes.post('/', async (c) => {
   }
   const shelf = await createShelf(user.id, parsed.data.name)
   return c.json({ data: shelf }, 201)
+})
+
+// Registered before '/:id' so 'order' never matches as a shelf id.
+shelvesRoutes.put('/order', async (c) => {
+  const user = c.get('user')
+  const body = await c.req.json()
+  const parsed = shelfReorderSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  await reorderShelves(user.id, parsed.data.shelfIds)
+  return c.json({ data: null })
 })
 
 shelvesRoutes.put('/:id', async (c) => {
@@ -63,7 +77,7 @@ shelvesRoutes.post('/:id/books', async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  await addBooksToShelf(user.id, shelfId, parsed.data.bookIds)
+  await moveBooksToShelf(user.id, shelfId, parsed.data.bookIds)
   return c.json({ data: null })
 })
 

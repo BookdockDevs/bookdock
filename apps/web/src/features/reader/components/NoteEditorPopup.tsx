@@ -4,6 +4,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore } from '@/stores/ui.store'
 
 import type { PopupRect } from '../types'
+import { markEscConsumed } from '../lib/esc-consumed'
 import { BulbIcon, CloseIcon } from './annotation-icons'
 import { noteEditorPosition, type NotePlacement } from './note-editor-position'
 
@@ -50,7 +51,10 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        markEscConsumed()
+        onClose()
+      }
     }
     function onPointerDown(e: MouseEvent) {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) onClose()

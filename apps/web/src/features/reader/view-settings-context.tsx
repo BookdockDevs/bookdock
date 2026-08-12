@@ -1,5 +1,7 @@
 import { createContext, useContext } from 'react'
 
+import type { ViewSettings } from '@bookdock/shared'
+
 import type { EffectiveViewSettings, PerBookSettingKey } from './lib/view-settings'
 
 // Per-book reading-settings layer (F1). Provided by Reader.tsx; consumed by
@@ -11,6 +13,12 @@ export interface ViewSettingsContextValue {
   perBookActive: boolean
   setPerBookActive: (active: boolean) => void
   updateSetting: (key: PerBookSettingKey, value: number) => void
+  /**
+   * Raw per-book override diff (book.meta.viewSettings). Preset creation
+   * overlays it onto the snapshot so a preset made while 仅本书 is on captures
+   * the effective (WYSIWYG) values.
+   */
+  perBookDiff?: ViewSettings
 }
 
 export const ViewSettingsContext = createContext<ViewSettingsContextValue | null>(null)

@@ -43,8 +43,12 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
       eq(annotations.type, data.type),
     )).get()
   if (existing) {
+    // `annotation` carries a fresh id — spreading it would rewrite the row's
+    // primary key and the select below would miss the old id (returning
+    // undefined and an empty `{}` response).
+    const { id: _ignored, ...patch } = annotation
     db.update(annotations).set({
-      ...annotation,
+      ...patch,
       deletedAt: null,
       updatedAt: now,
     }).where(eq(annotations.id, existing.id)).run()

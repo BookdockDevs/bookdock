@@ -67,7 +67,14 @@ export function useCreateAnnotation(bookId: string) {
     },
     onSuccess: (res, _body, context) => {
       queryClient.setQueryData<AnnotationsCache>(key, (old) =>
-        old ? { data: old.data.map((a) => (a.id === context?.optimisticId ? res.data : a)) } : old,
+        old
+          ? {
+              // A malformed create response must not replace the optimistic
+              // entry with undefined (a stale server used to return `{}` on
+              // restore); the onSettled refetch self-heals the entry.
+              data: old.data.map((a) => (a.id === context?.optimisticId ? (res.data ?? a) : a)),
+            }
+          : old,
       )
     },
     // Not awaited on purpose: mutateAsync resolves as soon as the POST does,

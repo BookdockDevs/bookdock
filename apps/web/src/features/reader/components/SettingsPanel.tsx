@@ -11,6 +11,7 @@ import type { MarginalField } from '../types'
 import type { PerBookSettingKey } from '../lib/view-settings'
 import { buildFontOptions, ensureBuiltinFontLoaded, ensureUploadedFontLoaded, useFontLoaderStore, type FontOption } from '../fonts'
 import { DownloadIcon, SpinnerIcon } from './annotation-icons'
+import ReadingPresetPicker from './ReadingPresetPicker'
 
 type Section = 'font' | 'layout' | 'display' | 'behavior' | 'theme'
 
@@ -619,6 +620,7 @@ export function SettingsPanel() {
 
       {section === 'behavior' && (
         <div>
+          <ReadingPresetPicker />
           <ToggleRow
             label={_('reader.autoMarkSelection')}
             hint={_('reader.autoMarkSelectionHint')}

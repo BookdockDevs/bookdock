@@ -115,11 +115,57 @@ describe('NotesPanel', () => {
   })
 
   it('renames a bookmark via the context menu', () => {
-    vi.stubGlobal('prompt', vi.fn(() => '我的书签'))
     renderPanel()
     fireEvent.contextMenu(screen.getByText('书签丁'))
     fireEvent.click(screen.getByText('annotation.rename'))
+    const textarea = screen.getByPlaceholderText('annotation.renamePlaceholder')
+    fireEvent.change(textarea, { target: { value: '我的书签' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
     expect(updateMutate).toHaveBeenCalledWith({ id: 'b1', body: { text: '我的书签' } })
+  })
+
+  it('renames a bookmark via the hover pencil and the save button', () => {
+    renderPanel()
+    fireEvent.click(screen.getByTitle('annotation.rename'))
+    const textarea = screen.getByPlaceholderText('annotation.renamePlaceholder')
+    fireEvent.change(textarea, { target: { value: '新书签' } })
+    fireEvent.click(screen.getByText('annotation.save'))
+    expect(updateMutate).toHaveBeenCalledWith({ id: 'b1', body: { text: '新书签' } })
+  })
+
+  it('edits an idea note inline via the hover pencil', () => {
+    renderPanel()
+    fireEvent.click(screen.getByTitle('annotation.editNote'))
+    const textarea = screen.getByPlaceholderText('annotation.notePlaceholder')
+    fireEvent.change(textarea, { target: { value: '新的想法' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
+    expect(updateMutate).toHaveBeenCalledWith({ id: 'n1', body: { note: '新的想法' } })
+  })
+
+  it('cancels an inline edit on Escape without mutating', () => {
+    renderPanel()
+    fireEvent.click(screen.getByTitle('annotation.editNote'))
+    fireEvent.keyDown(screen.getByPlaceholderText('annotation.notePlaceholder'), { key: 'Escape' })
+    expect(updateMutate).not.toHaveBeenCalled()
+    expect(screen.getByText('我的想法丙')).toBeInTheDocument()
+  })
+
+  it('does not save an emptied inline edit', () => {
+    renderPanel()
+    fireEvent.click(screen.getByTitle('annotation.rename'))
+    const textarea = screen.getByPlaceholderText('annotation.renamePlaceholder')
+    fireEvent.change(textarea, { target: { value: '   ' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
+    expect(updateMutate).not.toHaveBeenCalled()
+    expect(screen.getByText('书签丁')).toBeInTheDocument()
+  })
+
+  it('cancels the inline editor on an outside click', () => {
+    renderPanel()
+    fireEvent.click(screen.getByTitle('annotation.rename'))
+    fireEvent.mouseDown(document.body)
+    expect(updateMutate).not.toHaveBeenCalled()
+    expect(screen.getByText('书签丁')).toBeInTheDocument()
   })
 
   it('deletes any item via the context menu', () => {
@@ -170,5 +216,13 @@ describe('NotesPanel', () => {
     renderPanel()
     const bookmarkCard = screen.getByText('书签丁').closest('.group')!
     expect(bookmarkCard.querySelector('[title="annotation.rename"]')).not.toBeNull()
+  })
+
+  it('shows the edit pencil on idea cards but not on plain highlights', () => {
+    renderPanel()
+    const ideaCard = screen.getByText('我的想法丙').closest('.group')!
+    expect(ideaCard.querySelector('[title="annotation.editNote"]')).not.toBeNull()
+    const highlightCard = screen.getByText('直线划线甲').closest('.group')!
+    expect(highlightCard.querySelector('[title="annotation.editNote"]')).toBeNull()
   })
 })

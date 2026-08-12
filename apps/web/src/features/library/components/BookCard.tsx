@@ -14,7 +14,7 @@ interface BookCardProps {
   book: BookListItem
   selected?: boolean
   selectionActive?: boolean
-  coverMode?: boolean
+  coverText?: boolean
   onToggleSelect?: (id: string, shiftKey?: boolean) => void
   onDelete?: (book: BookListItem) => void
   onShowDetails?: (book: BookListItem) => void
@@ -25,7 +25,7 @@ interface BookCardProps {
 const MENU_W = 184
 const MENU_H = 250
 
-const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, coverMode = false, onToggleSelect, onDelete, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
+const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, coverText = true, onToggleSelect, onDelete, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
   const trashCard = Boolean(onRestore && onPermanentDelete)
@@ -58,7 +58,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
     <article
       onClick={handleClick}
       onContextMenu={handleContextMenu}
-      className={`group relative flex min-w-0 flex-col gap-1.5 ${selectable ? 'cursor-pointer' : ''}`}
+      className={`group relative flex min-w-0 select-none flex-col gap-1.5 ${selectable ? 'cursor-pointer' : ''}`}
     >
       <div className="relative rounded-xl transition-all duration-200 group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-stone-900/10 dark:group-hover:shadow-black/40">
         <BookCover book={book} />
@@ -89,7 +89,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
             )}
           </div>
         )}
-        {!coverMode && book.progress != null && book.progress > 0 && (
+        {coverText && book.progress != null && book.progress > 0 && (
           <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden rounded-b-xl bg-black/25 backdrop-blur-sm">
             <div className="h-full rounded-b-xl bg-white/95 transition-all" style={{ width: `${book.progress}%` }} />
           </div>
@@ -148,7 +148,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           </div>
         )}
       </div>
-      {!coverMode && (
+      {coverText && (
         <div className="min-w-0 px-0.5">
           <h3 className="truncate font-serif text-[13px] font-medium leading-snug text-stone-900 dark:text-stone-100">
             {book.title}

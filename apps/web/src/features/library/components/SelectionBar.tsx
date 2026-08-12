@@ -141,19 +141,19 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()
   const [activeTab, setActiveTab] = useState<'shelves' | 'tags'>('shelves')
-  const [selectedShelves, setSelectedShelves] = useState<Set<string>>(new Set())
+  // undefined = untouched (no shelf PUT), null = move out of shelf (uncategorized)
+  const [selectedShelf, setSelectedShelf] = useState<string | null | undefined>(undefined)
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
 
   const shelves = shelvesData?.data ?? []
   const tags = tagsData?.data ?? []
 
   async function handleApply() {
-    const shelfIds = Array.from(selectedShelves)
     const tagIds = Array.from(selectedTags)
     const results = await Promise.allSettled(ids.map((bookId) =>
       Promise.all([
-        apiPut(`/books/${bookId}/shelves`, { shelfIds }),
-        apiPut(`/books/${bookId}/tags`, { tagIds }),
+        selectedShelf !== undefined ? apiPut(`/books/${bookId}/shelves`, { shelfId: selectedShelf }) : Promise.resolve(),
+        tagIds.length > 0 ? apiPut(`/books/${bookId}/tags`, { tagIds }) : Promise.resolve(),
       ]),
     ))
     const failed = results.filter((r) => r.status === 'rejected').length
@@ -171,7 +171,7 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
     }
   }
 
-  const showSave = selectedShelves.size > 0 || selectedTags.size > 0
+  const showSave = selectedShelf !== undefined || selectedTags.size > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -215,27 +215,19 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
             <div className="py-4 text-center text-sm text-stone-400">{_('library.noShelves')}</div>
           ) : (
             <div className="flex max-h-60 flex-col gap-1 overflow-y-auto">
+              <ShelfRadio
+                label={_('library.uncategorized')}
+                checked={selectedShelf === null}
+                onChange={() => setSelectedShelf(null)}
+              />
               {shelves.map((shelf) => (
-                <label
+                <ShelfRadio
                   key={shelf.id}
-                  className="flex cursor-pointer items-center justify-between rounded-lg px-2 py-2 hover:bg-stone-50 dark:hover:bg-stone-800"
-                >
-                  <span className="flex items-center gap-2 text-sm text-stone-700 dark:text-stone-200">
-                    <input
-                      type="checkbox"
-                      checked={selectedShelves.has(shelf.id)}
-                      onChange={() => {
-                        const next = new Set(selectedShelves)
-                        if (next.has(shelf.id)) next.delete(shelf.id)
-                        else next.add(shelf.id)
-                        setSelectedShelves(next)
-                      }}
-                      className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-500 dark:border-stone-700"
-                    />
-                    <span className="truncate">{shelf.name}</span>
-                  </span>
-                  <span className="text-xs text-stone-400">{shelf.bookCount}</span>
-                </label>
+                  label={shelf.name}
+                  count={shelf.bookCount}
+                  checked={selectedShelf === shelf.id}
+                  onChange={() => setSelectedShelf(shelf.id)}
+                />
               ))}
             </div>
           )
@@ -274,6 +266,23 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
         </div>
       </div>
     </div>
+  )
+}
+
+function ShelfRadio({ label, count, checked, onChange }: { label: string; count?: number; checked: boolean; onChange: () => void }) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between rounded-lg px-2 py-2 hover:bg-stone-50 dark:hover:bg-stone-800">
+      <span className="flex items-center gap-2 text-sm text-stone-700 dark:text-stone-200">
+        <input
+          type="radio"
+          checked={checked}
+          onChange={onChange}
+          className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-500 dark:border-stone-700"
+        />
+        <span className="truncate">{label}</span>
+      </span>
+      {count !== undefined && <span className="text-xs text-stone-400">{count}</span>}
+    </label>
   )
 }
 

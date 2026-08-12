@@ -11,17 +11,21 @@ import LanguageSwitcher from './components/LanguageSwitcher'
 import TrashSettingsRow from './components/TrashSettingsRow'
 import ReadingDataSettingsSection from './components/ReadingDataSettingsSection'
 import FontsSettingsSection from './components/FontsSettingsSection'
+import AccountSection from './components/AccountSection'
 
-type SectionId = 'general' | 'reading' | 'library' | 'admin'
+type SectionId = 'general' | 'account' | 'reading' | 'library' | 'admin'
 
 export default function Settings() {
   const _ = useTranslation()
   const user = useAuthStore((s) => s.user)
   const isOwner = user?.role === 'owner' && user.guest !== true
+  const isGuest = user?.role === 'guest' || user?.guest === true
   const [active, setActive] = useState<SectionId>('general')
 
   const sections: { id: SectionId; label: string }[] = [
     { id: 'general', label: _('settings.general') },
+    // The guest account is shared and anonymous: no personal profile to edit
+    ...(!isGuest && user ? [{ id: 'account' as const, label: _('settings.account') }] : []),
     { id: 'reading', label: _('settings.reading') },
     { id: 'library', label: _('settings.library') },
     ...(isOwner ? [{ id: 'admin' as const, label: _('settings.admin') }] : []),
@@ -69,6 +73,7 @@ export default function Settings() {
               <LanguageSwitcher />
             </section>
           )}
+          {active === 'account' && !isGuest && <AccountSection />}
           {active === 'reading' && (
             <div className="flex flex-col gap-6">
               <ReadingDataSettingsSection />

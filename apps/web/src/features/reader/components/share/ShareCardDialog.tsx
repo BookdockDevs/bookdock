@@ -7,15 +7,18 @@ import type { BookDetailRes } from '@bookdock/shared'
 import { apiGet } from '@/api/client'
 import { useFonts } from '@/api/hooks/useFonts'
 import { useTranslation } from '@/hooks/useTranslation'
+import { avatarUrl } from '@/lib/avatar'
 import { useAuthStore } from '@/stores/auth.store'
 import { useToastStore } from '@/stores/toast.store'
+
+import { markEscConsumed } from '../../lib/esc-consumed'
 
 import { useReaderState } from '../../state/reader-state'
 import { buildFontOptions, ensureBuiltinFontLoaded, ensureUploadedFontLoaded, resolveFont, useFontLoaderStore, type FontOption } from '../../fonts'
 import { ChevronLeftIcon, CloseIcon, DownloadIcon, ShareIcon, SpinnerIcon, TemplateIcon } from '../annotation-icons'
 import ShareCard, { SHARE_CARD_WIDTH } from './ShareCard'
 import { BACKGROUND_OPTIONS, SHARE_CARD_TEMPLATES, loadShareCardPrefs, nextBrand, saveShareCardPrefs, type ShareCardPrefs } from './card-prefs'
-import { copyCardImage, downloadCardImage } from './export-image'
+import { copyCardBlob, downloadCardBlob, getCardBlob } from './export-image'
 import { formatChineseDate, formatShareDate, shareFileName } from './share-text'
 
 interface ShareCardDialogProps {
@@ -39,6 +42,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const setShareTarget = useReaderState((s) => s.setShareTarget)
   const addToast = useToastStore((s) => s.addToast)
   const username = useAuthStore((s) => s.user?.username)
+  const avatarKey = useAuthStore((s) => s.user?.avatarKey)
   const { data: bookData } = useQuery({
     queryKey: ['book', bookId],
     queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
@@ -62,11 +66,35 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
 
   const book = bookData?.data
 
+  /** Snapshot of everything the exported image depends on — any change
+   *  invalidates the cached render */
+  const renderKey = useMemo(
+    () =>
+      JSON.stringify({
+        template: prefs.template,
+        font: prefs.font,
+        background: prefs.background,
+        brand: prefs.brand,
+        note: shareTarget?.note ?? null,
+        text: shareTarget?.text ?? '',
+        title: book?.title ?? '',
+        author: book?.author ?? '',
+        chapter: shareTarget?.chapter ?? null,
+        user: username ?? null,
+        avatar: avatarKey ?? null,
+        writtenAt: shareTarget?.createdAt ?? null,
+      }),
+    [prefs, shareTarget, book, username, avatarKey],
+  )
+
   useLayoutEffect(() => {
     if (!shareTarget) return
     setCustomizing(false)
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setShareTarget(null)
+      if (e.key === 'Escape') {
+        markEscConsumed()
+        setShareTarget(null)
+      }
     }
     window.addEventListener('keydown', onKeyDown)
 
@@ -101,6 +129,19 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     fonts.forEach((f) => void ensureUploadedFontLoaded(f))
   }, [shareTarget, prefs.font, customizing, fontsData])
 
+  // Warm the export cache in the background while the user reads the preview,
+  // so copy/save resolve from cache instead of paying the render cost on
+  // click; debounced so rapid template/font/background switching collapses
+  // into one render
+  useEffect(() => {
+    if (!shareTarget) return
+    const timer = setTimeout(() => {
+      const node = cardRef.current
+      if (node) void getCardBlob(node, renderKey).catch(() => {})
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [shareTarget, renderKey])
+
   if (!shareTarget || !book) return null
 
   const fileName = shareFileName(book.title)
@@ -126,7 +167,8 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     if (!node) return
     setExporting(true)
     try {
-      await downloadCardImage(node, fileName)
+      const blob = await getCardBlob(node, renderKey)
+      downloadCardBlob(blob, fileName)
     } catch {
       addToast(_('share.exportFailed'), 'error')
     } finally {
@@ -139,12 +181,12 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     if (!node) return
     setExporting(true)
     try {
-      if (await copyCardImage(node)) {
+      const blob = await getCardBlob(node, renderKey)
+      if (await copyCardBlob(blob)) {
         addToast(_('share.copied'), 'success')
         return
       }
-      await downloadCardImage(node, fileName)
-      addToast(_('share.copyFailedDownloaded'), 'success')
+      addToast(_('share.copyFailed'), 'error')
     } catch {
       addToast(_('share.exportFailed'), 'error')
     } finally {
@@ -185,6 +227,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
                 brand={prefs.brand}
                 note={shareTarget.note}
                 authorName={username ?? undefined}
+                avatarUrl={avatarUrl(avatarKey)}
                 writtenAt={shareTarget.createdAt ? _('share.writtenAt', { date: formatShareDate(shareTarget.createdAt) }) : undefined}
                 writtenAtCn={shareTarget.createdAt ? _('share.writtenAtCn', { date: formatChineseDate(shareTarget.createdAt) }) : undefined}
               />

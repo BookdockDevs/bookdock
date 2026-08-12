@@ -8,11 +8,14 @@ import {
   registerSchema,
   setupSchema,
   updateInstanceSchema,
+  updateUsernameSchema,
+  type AccountRes,
   type SetupRequiredRes,
 } from '@bookdock/shared'
 
 import {
   changePassword,
+  changeUsername,
   getInstanceInfo,
   isSetupRequired,
   login,
@@ -104,6 +107,20 @@ authRoutes.post('/password', async (c) => {
   }
   await changePassword(user.id, parsed.data.oldPassword, parsed.data.newPassword)
   return c.json({ data: { ok: true } })
+})
+
+authRoutes.post('/username', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest')) {
+    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
+  }
+  const body = await c.req.json()
+  const parsed = updateUsernameSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  const account = changeUsername(user.id, parsed.data.username)
+  return c.json({ data: account } satisfies { data: AccountRes })
 })
 
 authRoutes.get('/me', (c) => {

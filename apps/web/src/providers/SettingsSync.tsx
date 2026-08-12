@@ -4,6 +4,7 @@ import { useMutation } from '@tanstack/react-query'
 import { apiGet, apiPut } from '@/api/client'
 import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
+import { activeSnapshot, parseReadingConfig, READING_PROFILE_KEYS } from '@/features/reader/lib/reading-profiles'
 import type { SettingsRes } from '@bookdock/shared'
 
 const SYNC_CHANNEL = 'bd-settings'
@@ -32,8 +33,6 @@ const SETTINGS_KEYS = [
   'textAlignJustify',
   'overrideBookFont',
   'overrideBookLayout',
-  'coverMode',
-  'coverFit',
   'gridColumns',
   'toolbarLocked',
   'sidebarWidth',
@@ -56,6 +55,7 @@ const SETTINGS_KEYS = [
   'marginalFontSize',
   'readingTimerMode',
   'manualTimerGraceMinutes',
+  'readingConfig',
 ]
 
 function pickSettings(state: ReturnType<typeof useUiStore.getState>): SettingsRes {
@@ -64,13 +64,27 @@ function pickSettings(state: ReturnType<typeof useUiStore.getState>): SettingsRe
     // @ts-expect-error dynamic settings keys
     settings[key] = state[key]
   }
+  // Cover prefs are mapped back to the legacy boolean pair — the shared
+  // settings schema has no coverText/coverFit field and cannot be extended
+  // from web. The pair is lossless: coverMode = text hidden, coverFit = contain.
+  settings.coverMode = !state.coverText
+  settings.coverFit = state.coverFit === 'full'
   return settings
+}
+
+// Inverse of the pickSettings mapping; returns undefined when the payload
+// carries neither legacy key so an unrelated sync doesn't clobber cover prefs.
+function coverPrefsFromLegacy(data: { coverMode?: boolean; coverFit?: boolean }): { coverText: boolean; coverFit: 'crop' | 'full' } | undefined {
+  if (data.coverMode === undefined && data.coverFit === undefined) return undefined
+  return { coverText: data.coverMode !== true, coverFit: data.coverFit === true ? 'full' : 'crop' }
 }
 
 function settingsChanged(
   state: ReturnType<typeof useUiStore.getState>,
   prevState: ReturnType<typeof useUiStore.getState>,
 ): boolean {
+  if (state.coverText !== prevState.coverText) return true
+  if (state.coverFit !== prevState.coverFit) return true
   return SETTINGS_KEYS.some((key) => {
     // @ts-expect-error dynamic settings keys
     return state[key] !== prevState[key]
@@ -104,6 +118,21 @@ export function SettingsSync() {
               patch[key] = res.data[key]
             }
           }
+          const coverPrefs = coverPrefsFromLegacy(res.data)
+          if (coverPrefs) {
+            patch.coverText = coverPrefs.coverText
+            patch.coverFit = coverPrefs.coverFit
+          }
+          // The profiles blob is authoritative for the reading keys: re-apply
+          // its active snapshot over the flat fields so both stay consistent
+          // even when the server's flat values trail a preset transition.
+          const cfg = parseReadingConfig(patch.readingConfig ?? res.data.readingConfig)
+          if (cfg) {
+            for (const key of READING_PROFILE_KEYS) {
+              // @ts-expect-error dynamic settings keys
+              patch[key] = activeSnapshot(cfg)[key]
+            }
+          }
           return patch
         })
       })
@@ -123,6 +152,18 @@ export function SettingsSync() {
             if (key in data) {
               // @ts-expect-error dynamic settings keys
               patch[key] = data[key]
+            }
+          }
+          const coverPrefs = coverPrefsFromLegacy(data as { coverMode?: boolean; coverFit?: boolean })
+          if (coverPrefs) {
+            patch.coverText = coverPrefs.coverText
+            patch.coverFit = coverPrefs.coverFit
+          }
+          const cfg = parseReadingConfig(patch.readingConfig)
+          if (cfg) {
+            for (const key of READING_PROFILE_KEYS) {
+              // @ts-expect-error dynamic settings keys
+              patch[key] = activeSnapshot(cfg)[key]
             }
           }
           return patch

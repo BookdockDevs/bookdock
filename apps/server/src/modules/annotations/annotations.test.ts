@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
-import { createAnnotation, listAnnotations } from './annotations.service'
+import { createAnnotation, listAnnotations, deleteAnnotation } from './annotations.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -117,5 +117,23 @@ describe('annotations service', () => {
     const items = await listAnnotations(ownerId, bookId)
     expect(items).toHaveLength(1)
     expect(items[0].color).toBe('red')
+  })
+
+  it('keeps the row id stable when restoring a soft-deleted highlight', async () => {
+    const first = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/2)',
+      type: 'highlight',
+      text: 'hello',
+    })
+    await deleteAnnotation(ownerId, first.id)
+    const restored = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/2)',
+      type: 'highlight',
+      text: 'restored text',
+    })
+    expect(restored).toBeDefined()
+    expect(restored.id).toBe(first.id)
+    expect(restored.text).toBe('restored text')
+    expect(restored.deletedAt).toBeNull()
   })
 })

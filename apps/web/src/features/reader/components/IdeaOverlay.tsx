@@ -1,21 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { AnnotationRes } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { avatarUrl } from '@/lib/avatar'
 
 import { getLastHighlightStyle } from './annotation-colors'
-import { BulbIcon, ChevronLeftIcon, CloseIcon, CopyIcon, ExcerptShareIcon, PencilIcon, QuoteIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
+import { BulbIcon, ChevronDownIcon, ChevronLeftIcon, CloseIcon, CopyIcon, ExcerptShareIcon, PencilIcon, QuoteLeftIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
 import { formatFullDateTime } from './format-relative-time'
+import { markEscConsumed } from '../lib/esc-consumed'
 
 /**
- * One idea shown in the overlay. `authorName`/`own` are the seam for future
- * private-circle sharing: entries from other readers render without the
- * 我的笔记 badge and without edit/delete actions.
+ * One idea shown in the overlay. `authorName`/`authorAvatarKey`/`own` are the
+ * seam for future private-circle sharing: entries from other readers render
+ * without the 我的笔记 badge and without edit/delete actions.
  */
 export interface IdeaEntry {
   annotation: AnnotationRes
   authorName?: string
+  authorAvatarKey?: string | null
   own?: boolean
 }
 
@@ -25,6 +28,7 @@ interface IdeaOverlayProps {
   onCopyQuote: () => void
   onHighlight: () => void
   onWriteNote: () => void
+  onShareQuote: () => void
   onSearch: () => void
   onCopyNote: (entry: IdeaEntry) => void
   onShareNote: (entry: IdeaEntry) => void
@@ -51,6 +55,7 @@ export function IdeaOverlay({
   onCopyQuote,
   onHighlight,
   onWriteNote,
+  onShareQuote,
   onSearch,
   onCopyNote,
   onShareNote,
@@ -60,10 +65,16 @@ export function IdeaOverlay({
 }: IdeaOverlayProps) {
   const _ = useTranslation()
   const [detail, setDetail] = useState<IdeaEntry | null>(null)
+  const quoteRef = useRef<HTMLParagraphElement>(null)
+  const [quoteExpanded, setQuoteExpanded] = useState(false)
+  const [quoteClamped, setQuoteClamped] = useState(false)
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        markEscConsumed()
+        onClose()
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -75,10 +86,18 @@ export function IdeaOverlay({
     if (detail && !entries.some((e) => e.annotation.id === detail.annotation.id)) setDetail(null)
   }, [detail, entries])
 
+  // While line-clamped, scrollHeight exceeding clientHeight means the quote
+  // overflows three lines — only then is the expand chevron shown
+  useEffect(() => {
+    const el = quoteRef.current
+    if (el) setQuoteClamped(el.scrollHeight > el.clientHeight + 1)
+  }, [quoteText])
+
   const quoteActions = [
     { key: 'copy', title: _('annotation.copy'), icon: <CopyIcon />, onClick: onCopyQuote },
     { key: 'highlight', title: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, onClick: onHighlight },
     { key: 'note', title: _('annotation.writeNote'), icon: <BulbIcon />, onClick: onWriteNote },
+    { key: 'share', title: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, onClick: onShareQuote },
     { key: 'search', title: _('reader.search'), icon: <SearchIcon />, onClick: onSearch },
   ]
 
@@ -105,18 +124,22 @@ export function IdeaOverlay({
               </div>
               <div className="px-5 pb-4">
                 <div className="flex items-center gap-2.5">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-stone-300">
-                    <BulbIcon size={16} />
-                  </span>
+                  {avatarUrl(detail.authorAvatarKey) ? (
+                    <img src={avatarUrl(detail.authorAvatarKey)} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+                  ) : (
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-stone-300">
+                      <BulbIcon size={16} />
+                    </span>
+                  )}
                   <span className="truncate text-sm font-medium">{detail.authorName ?? _('annotation.myNote')}</span>
                 </div>
-                <p className="whitespace-pre-wrap pt-3 text-base leading-relaxed">{detail.annotation.note}</p>
+                <p className="whitespace-pre-wrap pt-4 text-base leading-7">{detail.annotation.note}</p>
                 {quoteText && (
-                  <div className="mt-4 border-t border-white/10 pt-3">
+                  <div className="mt-5 border-t border-white/10 pt-3">
                     <span className="text-stone-500">
-                      <QuoteIcon size={16} />
+                      <QuoteLeftIcon height={14} />
                     </span>
-                    <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-sm leading-relaxed text-stone-300">{quoteText}</p>
+                    <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-stone-400">{quoteText}</p>
                   </div>
                 )}
                 <div className="flex items-center gap-2 pt-4 text-xs text-stone-400">
@@ -150,11 +173,28 @@ export function IdeaOverlay({
           ) : (
             <div className="w-full max-w-md">
               <div className={card}>
-                <div className="px-5 pt-4">
+                <div className="relative px-5 pt-4">
                   <span className="text-stone-500">
-                    <QuoteIcon size={18} />
+                    <QuoteLeftIcon height={20} />
                   </span>
-                  <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-base leading-relaxed">{quoteText}</p>
+                  {quoteClamped && (
+                    <button
+                      onClick={() => setQuoteExpanded((v) => !v)}
+                      title={_(quoteExpanded ? 'annotation.collapseQuote' : 'annotation.expandQuote')}
+                      aria-expanded={quoteExpanded}
+                      className="absolute right-2 top-3 flex h-8 w-8 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-white/10 hover:text-stone-200"
+                    >
+                      <span className={`transition-transform ${quoteExpanded ? 'rotate-180' : ''}`}>
+                        <ChevronDownIcon />
+                      </span>
+                    </button>
+                  )}
+                  <p
+                    ref={quoteRef}
+                    className={`mt-2 whitespace-pre-wrap text-base leading-relaxed ${quoteExpanded ? '' : 'line-clamp-3'}`}
+                  >
+                    {quoteText}
+                  </p>
                 </div>
                 <div className="mt-3 flex items-center justify-around border-t border-white/10 px-2 py-1.5">
                   {quoteActions.map((a) => (
@@ -171,9 +211,13 @@ export function IdeaOverlay({
                   className={`${card} mt-3 block w-full p-4 text-left transition-colors hover:bg-stone-600`}
                 >
                   <div className="flex items-center gap-2.5">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-stone-300">
-                      <BulbIcon size={16} />
-                    </span>
+                    {avatarUrl(entry.authorAvatarKey) ? (
+                      <img src={avatarUrl(entry.authorAvatarKey)} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+                    ) : (
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-stone-300">
+                        <BulbIcon size={16} />
+                      </span>
+                    )}
                     <span className="truncate text-sm font-medium">{entry.authorName ?? _('annotation.myNote')}</span>
                     {entry.own && (
                       <span className="ml-auto shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-xs text-stone-300">

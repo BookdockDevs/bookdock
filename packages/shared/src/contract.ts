@@ -61,8 +61,22 @@ export interface MeRes {
   id: string
   username: string
   role: string
+  /** Content-hash addressed avatar blob key; the client builds the file URL as `/api/v1/avatars/<avatarKey>` */
+  avatarKey: string | null
   /** True when the server injected the default user for guest access (no real session). */
   guest?: boolean
+}
+
+export interface UpdateUsernameReq {
+  username: string
+}
+
+/** Account-mutation responses (username change, avatar upload): the fresh self profile */
+export interface AccountRes {
+  id: string
+  username: string
+  role: string
+  avatarKey: string | null
 }
 
 export interface InstanceInfoRes {
@@ -159,6 +173,11 @@ export interface SettingsRes {
   readingTimerMode?: 'auto' | 'manual' | 'off'
   manualTimerGraceMinutes?: 1 | 5 | 10 | 30
   trash?: TrashSettings
+  /**
+   * Named reading-setting profiles (global config + presets + active pointer),
+   * serialized as JSON by the web client and passed through by the server.
+   */
+  readingConfig?: string
 }
 
 export interface SettingsUpdateReq {
@@ -197,6 +216,11 @@ export interface ShelfUpdateReq {
   name: string
 }
 
+/** Full ordered shelf id list; the server rewrites each shelf's sortOrder to its index. */
+export interface ShelfReorderReq {
+  shelfIds: string[]
+}
+
 export interface TagListItem {
   id: string
   userId: string
@@ -213,7 +237,8 @@ export interface TagUpdateReq {
 }
 
 export interface BookMembershipReq {
-  shelfIds?: string[]
+  /** Single-shelf membership: string = move into shelf, null = remove from shelf, absent = unchanged */
+  shelfId?: string | null
   tagIds?: string[]
 }
 
@@ -231,6 +256,12 @@ export interface BookListItem {
   createdAt: number
   updatedAt: number
   deletedAt?: number | null
+  /** Single-shelf membership; null = uncategorized. Drives drag-to-shelf no-op checks. */
+  shelfId: string | null
+  /** Resolved shelf name (null when uncategorized); list view info line only */
+  shelfName?: string | null
+  /** Tag names attached to the book; list view info line only */
+  tags?: string[]
 }
 
 export interface BookMetadata {
