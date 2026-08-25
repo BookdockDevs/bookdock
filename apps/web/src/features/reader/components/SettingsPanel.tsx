@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
 import { resolveReadingTheme, PRESET_READING_THEMES } from '@/lib/reading-theme'
 import { useUiStore } from '@/stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
+import { useBookTransforms } from '@/api/hooks/useTransforms'
 import { useViewSettings } from '../view-settings-context'
 import { MARGINAL_FIELDS } from '../lib/marginals'
 import type { MarginalField } from '../types'
 import type { PerBookSettingKey } from '../lib/view-settings'
 import { buildFontOptions, ensureBuiltinFontLoaded, ensureUploadedFontLoaded, useFontLoaderStore, type FontOption } from '../fonts'
+import { useReaderState } from '../state/reader-state'
 import { DownloadIcon, SpinnerIcon } from './annotation-icons'
 import ReadingPresetPicker from './ReadingPresetPicker'
+import BookTransformsDialog from './BookTransformsDialog'
 
 type Section = 'font' | 'layout' | 'display' | 'behavior' | 'theme'
 
@@ -35,7 +39,7 @@ interface SliderRowProps {
 }
 
 function SliderRow({ label, value, min, max, step = 1, suffix = '', formatValue, onChange }: SliderRowProps) {
-  // While dragging, only the local draft moves �?committing to the store on
+  // While dragging, only the local draft moves — committing to the store on
   // every input event would re-layout the whole book on every tick
   const [draft, setDraft] = useState<number | null>(null)
   const shown = draft ?? value
@@ -215,7 +219,7 @@ function getInitialSection(): Section {
   return 'font'
 }
 
-export function SettingsPanel() {
+export function SettingsPanel({ bookId }: { bookId?: string }) {
   const [section, setSection] = useState<Section>(getInitialSection)
   const onSetSection = useCallback((s: Section) => {
     setSection(s)
@@ -331,7 +335,7 @@ export function SettingsPanel() {
 
   // Per-book layer (F1): when inside the reader, the first-batch settings
   // display the merged effective values and writes route to the per-book diff
-  // (or the global store, depending on the "仅本�? switch). Outside the
+  // (or the global store, depending on the "This book only" switch). Outside the
   // reader (no context) everything falls back to the global store.
   const viewSettings = useViewSettings()
   const bindSetting = (key: PerBookSettingKey, storeValue: number, storeSetter: (v: number) => void) => ({
@@ -650,6 +654,7 @@ export function SettingsPanel() {
               onChange={viewSettings.setPerBookActive}
             />
           )}
+          {bookId && <TransformsEntryRow bookId={bookId} />}
         </div>
       )}
 
@@ -750,5 +755,45 @@ export function SettingsPanel() {
         </div>
       )}
     </div>
+  )
+}
+
+// 正文变换 entry (P2): low-frequency per-book management lives behind a row in
+// the behavior section instead of a dedicated tab — the badge shows how many
+// rules are active for this book plus any invalid point patches, and the
+// dialog reuses the book-detail per-book view.
+function TransformsEntryRow({ bookId }: { bookId: string }) {
+  const _ = useTranslation()
+  const [open, setOpen] = useState(false)
+  const { data } = useBookTransforms(bookId)
+  const invalidCount = useReaderState((s) => s.invalidTransformIds.length)
+  const effectiveCount = useMemo(
+    () => (data?.data ?? []).filter((r) => (r.effectiveEnabled ?? r.enabled)).length,
+    [data],
+  )
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-stone-200/80 px-3 py-2 text-left transition-colors hover:bg-stone-500/5 dark:border-stone-800/80"
+      >
+        <span className="text-sm text-current">{_('reader.transforms')}</span>
+        <span className="flex shrink-0 items-center gap-1.5 text-xs">
+          <span className="tabular-nums text-[var(--bd-read-sub)]">
+            {_('reader.transformsEffectiveCount', { count: effectiveCount })}
+          </span>
+          {invalidCount > 0 && (
+            <span className="tabular-nums text-red-500">
+              {_('reader.transformsInvalidCount', { count: invalidCount })}
+            </span>
+          )}
+          <span className="text-[var(--bd-read-sub)]">{_('reader.transformsView')}</span>
+        </span>
+      </button>
+      {open && createPortal(
+        <BookTransformsDialog bookId={bookId} onClose={() => setOpen(false)} />,
+        document.body,
+      )}
+    </>
   )
 }

@@ -13,7 +13,12 @@ export type {
   AnnotationType,
   AnnotationStyle,
   Annotation,
+  TransformMatchType,
+  TransformScope,
+  TextTransform,
   ViewSettings,
+  TocRulePattern,
+  TocRule,
 } from './domain'
 
 export type {
@@ -74,6 +79,15 @@ export type {
   AnnotationCreateReq,
   AnnotationUpdateReq,
   AnnotationRes,
+  TransformCreateReq,
+  TransformUpdateReq,
+  TransformOverrideReq,
+  TextTransformRes,
+  TocRuleCreateReq,
+  TocRuleUpdateReq,
+  TocRuleReorderReq,
+  TocRuleRes,
+  TocRuleListRes,
 } from './contract'
 
 export {
@@ -92,6 +106,13 @@ export {
   settingsUpdateSchema,
   annotationCreateSchema,
   annotationUpdateSchema,
+  transformCreateSchema,
+  transformUpdateSchema,
+  transformOverrideSchema,
+  tocRulePatternSchema,
+  tocRuleCreateSchema,
+  tocRuleUpdateSchema,
+  tocRuleReorderSchema,
   setupSchema,
   setupRequiredSchema,
   registerSchema,
@@ -111,3 +132,11 @@ export {
 } from './schema'
 
 export { ErrorCode, ErrorHttpStatus } from './errors'
+
+export {
+  applyRuleToText,
+  countRuleInText,
+  findPointMatch,
+  type TransformRuleLike,
+  type TextRun,
+} from './text-transform-engine'

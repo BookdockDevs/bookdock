@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useUiStore } from '@/stores/ui.store'
-import { parseReadingConfig, READING_PROFILE_KEYS } from '@/features/reader/lib/reading-profiles'
+import { parseReadingConfig, serializeReadingConfig, READING_PROFILE_KEYS } from '@/features/reader/lib/reading-profiles'
 
 // Snapshot the store right after module load (jsdom defaults + seeded config);
 // tests restore this baseline to stay independent of each other.
@@ -21,14 +21,16 @@ describe('ui.store reading preset routing', () => {
     useUiStore.setState(baseline)
   })
 
-  it('creating a preset activates a snapshot of the current values', () => {
+  it('creating a preset snapshots the current values and activates it on this device', () => {
     const before = useUiStore.getState().fontSize
     useUiStore.getState().createReadingPreset('护眼')
     const cfg = currentConfig()
     expect(cfg.presets).toHaveLength(1)
-    expect(cfg.active).toBe(cfg.presets[0].id)
     expect(cfg.presets[0].name).toBe('护眼')
     expect(cfg.presets[0].snapshot.fontSize).toBe(before)
+    // Activation is device-local: the blob carries no pointer
+    expect('active' in cfg).toBe(false)
+    expect(useUiStore.getState().activePresetId).toBe(cfg.presets[0].id)
   })
 
   it('creating a preset snapshots every current setting (all 40 keys)', () => {
@@ -53,7 +55,7 @@ describe('ui.store reading preset routing', () => {
     const cfg = currentConfig()
     const b = cfg.presets.find((p) => p.name === 'B')!
     expect(b.snapshot.fontSize).toBe(30)
-    expect(cfg.active).toBe(b.id)
+    expect(useUiStore.getState().activePresetId).toBe(b.id)
   })
 
   it('creating with an active 仅本书 diff captures the overridden values', () => {
@@ -71,7 +73,7 @@ describe('ui.store reading preset routing', () => {
   it('edits while a preset is active fold into the preset, not the global config', () => {
     useUiStore.getState().createReadingPreset('护眼')
     const globalSizeBefore = currentConfig().global.fontSize
-    const presetId = currentConfig().active!
+    const presetId = useUiStore.getState().activePresetId!
     const nextSize = useUiStore.getState().fontSize + 4
     useUiStore.getState().setFontSize(nextSize)
     const cfg = currentConfig()
@@ -82,7 +84,7 @@ describe('ui.store reading preset routing', () => {
   it('activate/deactivate switches the flat values between preset and global', () => {
     const globalSize = useUiStore.getState().fontSize
     useUiStore.getState().createReadingPreset('护眼')
-    const presetId = currentConfig().active!
+    const presetId = useUiStore.getState().activePresetId!
     useUiStore.getState().setFontSize(30)
     expect(useUiStore.getState().fontSize).toBe(30)
 
@@ -93,13 +95,22 @@ describe('ui.store reading preset routing', () => {
     expect(useUiStore.getState().fontSize).toBe(30)
   })
 
+  it('persists the device active pointer in its own localStorage key', () => {
+    useUiStore.getState().createReadingPreset('护眼')
+    const presetId = useUiStore.getState().activePresetId!
+    expect(localStorage.getItem('bd-reading-active-preset')).toBe(presetId)
+
+    useUiStore.getState().activateReadingPreset(null)
+    expect(localStorage.getItem('bd-reading-active-preset')).toBeNull()
+  })
+
   it('deleting the active preset falls back to the global values', () => {
     const globalSize = useUiStore.getState().fontSize
     useUiStore.getState().createReadingPreset('护眼')
     useUiStore.getState().setFontSize(30)
-    useUiStore.getState().deleteReadingPreset(currentConfig().active!)
+    useUiStore.getState().deleteReadingPreset(useUiStore.getState().activePresetId!)
     expect(useUiStore.getState().fontSize).toBe(globalSize)
-    expect(currentConfig().active).toBeNull()
+    expect(useUiStore.getState().activePresetId).toBeNull()
     expect(currentConfig().presets).toHaveLength(0)
   })
 
@@ -109,7 +120,58 @@ describe('ui.store reading preset routing', () => {
     expect(currentConfig().global.fontSize).toBe(cfgBefore.global.fontSize + 2)
   })
 
-  it('reloads the last active preset state after a config-driven boot', () => {
+  it('a bound preset heads the resolution chain while its book is open', () => {
+    const globalSize = useUiStore.getState().fontSize
+    useUiStore.getState().createReadingPreset('护眼')
+    const presetId = useUiStore.getState().activePresetId!
+    useUiStore.getState().setFontSize(30)
+    useUiStore.getState().activateReadingPreset(null)
+    expect(useUiStore.getState().fontSize).toBe(globalSize)
+
+    // Opening a book bound to the preset applies its snapshot
+    useUiStore.getState().setBoundPresetId(presetId)
+    useUiStore.getState().applyReadingResolution()
+    expect(useUiStore.getState().fontSize).toBe(30)
+
+    // Edits while bound fold into the bound preset even without a device active
+    useUiStore.getState().setFontSize(34)
+    expect(currentConfig().presets.find((p) => p.id === presetId)!.snapshot.fontSize).toBe(34)
+
+    // Leaving the book falls back to the device chain (no active → global)
+    useUiStore.getState().setBoundPresetId(null)
+    useUiStore.getState().applyReadingResolution()
+    expect(useUiStore.getState().fontSize).toBe(globalSize)
+  })
+
+  it('a dangling binding falls back to the device active at resolution', () => {
+    useUiStore.getState().createReadingPreset('A')
+    const aId = useUiStore.getState().activePresetId!
+    useUiStore.getState().setFontSize(30)
+    useUiStore.getState().createReadingPreset('B')
+    useUiStore.getState().setFontSize(22)
+
+    // Book bound to A while B is the device active: A wins
+    useUiStore.getState().setBoundPresetId(aId)
+    useUiStore.getState().applyReadingResolution()
+    expect(useUiStore.getState().fontSize).toBe(30)
+
+    // A is deleted on another device: the binding dangles and B applies
+    useUiStore.getState().deleteReadingPreset(aId)
+    expect(useUiStore.getState().fontSize).toBe(22)
+  })
+
+  it('clears a device active whose preset was deleted elsewhere', () => {
+    useUiStore.getState().createReadingPreset('护眼')
+    useUiStore.getState().setFontSize(30)
+    const cfg = currentConfig()
+    // Simulate a sync payload with the preset removed (deleted on another device)
+    useUiStore.setState({ readingConfig: serializeReadingConfig({ global: cfg.global, presets: [] }) })
+    useUiStore.getState().applyReadingResolution()
+    expect(useUiStore.getState().activePresetId).toBeNull()
+    expect(useUiStore.getState().fontSize).toBe(cfg.global.fontSize)
+  })
+
+  it('reloads the persisted blob after a config-driven boot', () => {
     useUiStore.getState().createReadingPreset('护眼')
     useUiStore.getState().setFontSize(30)
     const savedRaw = useUiStore.getState().readingConfig
@@ -117,7 +179,7 @@ describe('ui.store reading preset routing', () => {
     localStorage.clear()
     localStorage.setItem('bd-reading-config', savedRaw)
     const cfg = parseReadingConfig(localStorage.getItem('bd-reading-config'))!
-    expect(cfg.active).not.toBeNull()
     expect(cfg.presets[0].snapshot.fontSize).toBe(30)
+    expect('active' in cfg).toBe(false)
   })
 })

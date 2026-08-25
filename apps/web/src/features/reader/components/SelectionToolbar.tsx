@@ -21,7 +21,7 @@ import {
   popupPosition,
   setLastHighlightStyle,
 } from './annotation-colors'
-import { BulbIcon, CopyIcon, ExcerptShareIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
+import { BulbIcon, CopyIcon, ExcerptShareIcon, ReplaceIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
 
 const BAR_WIDTH = 214
 const BAR_HEIGHT = 44
@@ -40,6 +40,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
   const setPendingSearchQuery = useReaderState((s) => s.setPendingSearchQuery)
   const setNoteEditorRange = useReaderState((s) => s.setNoteEditorRange)
   const setShareTarget = useReaderState((s) => s.setShareTarget)
+  const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const { renderer } = useReaderApi()
   const addToast = useToastStore((s) => s.addToast)
   const create = useCreateAnnotation(bookId)
@@ -311,6 +312,15 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
     { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: shareExcerpt },
     { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
+    // Low-frequency text-editing action sits last so the common actions stay put.
+    // The replace dialog lives in Reader (via replaceTarget): opening it must
+    // collapse this toolbar, but clearing the selection unmounts this
+    // component — so only the target is handed off here.
+    { key: 'replace', label: _('annotation.replace'), icon: <ReplaceIcon />, danger: false, onClick: () => {
+      if (!selection) return
+      setReplaceTarget(selection)
+      close()
+    } },
   ]
 
   return (

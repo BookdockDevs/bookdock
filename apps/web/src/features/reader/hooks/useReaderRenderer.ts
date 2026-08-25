@@ -10,6 +10,9 @@ import type { EffectiveViewSettings } from '../lib/view-settings'
 interface UseReaderRendererOptions {
   url: string
   initialCfi?: string
+  /** Fallback start position (0-1) when initialCfi is stale (re-TOC): the
+   *  renderer navigates by fraction instead of CFI. */
+  initialFraction?: number
   /** Per-book merged values for the first-batch settings (F1). When omitted,
    *  the global store values are used. */
   settings?: EffectiveViewSettings
@@ -26,11 +29,14 @@ interface UseReaderRendererOptions {
   onNavigatePending?: (e: { pending: boolean }) => void
   onChromeToggle?: () => void
   onUserJump?: () => void
+  onTransformInvalid?: (e: Parameters<RendererEvents['transformInvalid']>[0]) => void
+  onAnnotationOrphaned?: (e: Parameters<RendererEvents['annotationOrphaned']>[0]) => void
 }
 
 export function useReaderRenderer({
   url,
   initialCfi,
+  initialFraction,
   settings,
   chapterWordCounts,
   onRelocated,
@@ -44,6 +50,8 @@ export function useReaderRenderer({
   onNavigatePending,
   onChromeToggle,
   onUserJump,
+  onTransformInvalid,
+  onAnnotationOrphaned,
 }: UseReaderRendererOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<BookReader | null>(null)
@@ -111,6 +119,8 @@ export function useReaderRenderer({
   const onNavigatePendingRef = useRef(onNavigatePending)
   const onChromeToggleRef = useRef(onChromeToggle)
   const onUserJumpRef = useRef(onUserJump)
+  const onTransformInvalidRef = useRef(onTransformInvalid)
+  const onAnnotationOrphanedRef = useRef(onAnnotationOrphaned)
   const theme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [readingThemeId, customThemes])
   const themeRef = useRef(theme)
   const fontRef = useRef({ fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
@@ -142,6 +152,8 @@ export function useReaderRenderer({
   onNavigatePendingRef.current = onNavigatePending
   onChromeToggleRef.current = onChromeToggle
   onUserJumpRef.current = onUserJump
+  onTransformInvalidRef.current = onTransformInvalid
+  onAnnotationOrphanedRef.current = onAnnotationOrphaned
   themeRef.current = theme
   fontRef.current = { fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont }
   paragraphRef.current = { paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
@@ -177,7 +189,7 @@ export function useReaderRenderer({
 
     let cancelled = false
     const initialTarget = initialCfi
-    newRenderer.mount(containerRef.current, initialTarget).then(async () => {
+    newRenderer.mount(containerRef.current, initialTarget, initialFraction).then(async () => {
       // StrictMode double-invokes this effect: the loser must not become the
       // current renderer — its view already bailed out of mount
       if (cancelled) return
@@ -213,6 +225,8 @@ export function useReaderRenderer({
     const unsubNavigatePending = newRenderer.on('navigatePending', (e) => onNavigatePendingRef.current?.(e))
     const unsubChromeToggle = newRenderer.on('chromeToggle', () => onChromeToggleRef.current?.())
     const unsubUserJump = newRenderer.on('userJump', () => onUserJumpRef.current?.())
+    const unsubTransformInvalid = newRenderer.on('transformInvalid', (e) => onTransformInvalidRef.current?.(e))
+    const unsubAnnotationOrphaned = newRenderer.on('annotationOrphaned', (e) => onAnnotationOrphanedRef.current?.(e))
 
     return () => {
       cancelled = true
@@ -226,11 +240,13 @@ export function useReaderRenderer({
       unsubNavigatePending()
       unsubChromeToggle()
       unsubUserJump()
+      unsubTransformInvalid()
+      unsubAnnotationOrphaned()
       newRenderer.destroy()
       rendererRef.current = null
       setRenderer((current) => (current === newRenderer ? null : current))
     }
-  }, [url, createRenderer, initialCfi])
+  }, [url, createRenderer, initialCfi, initialFraction])
 
   // Navigate to the saved position once both renderer and progress are ready.
   // Skipping when initialCfi is undefined avoids a spurious goTo({ index: 0 })

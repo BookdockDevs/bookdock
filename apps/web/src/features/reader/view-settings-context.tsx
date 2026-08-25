@@ -19,6 +19,10 @@ export interface ViewSettingsContextValue {
    * the effective (WYSIWYG) values.
    */
   perBookDiff?: ViewSettings
+  /** Reading preset bound to this book (book.meta.boundPresetId); null when unbound */
+  boundPresetId: string | null
+  /** Bind/unbind a reading preset to this book (PATCH books.meta.boundPresetId) */
+  setBoundPreset: (presetId: string | null) => void
 }
 
 export const ViewSettingsContext = createContext<ViewSettingsContextValue | null>(null)

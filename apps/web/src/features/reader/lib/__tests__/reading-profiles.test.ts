@@ -2,15 +2,16 @@ import { describe, expect, it } from 'vitest'
 
 import {
   READING_PROFILE_KEYS,
-  activeSnapshot,
   createReadingPreset,
   deleteReadingPreset,
   emptyConfig,
   foldReadingChange,
+  legacyActiveId,
   nextPresetName,
   parseReadingConfig,
   pickReadingSnapshot,
   renameReadingPreset,
+  resolveSnapshot,
   serializeReadingConfig,
   type ReadingConfig,
   type ReadingPreset,
@@ -21,7 +22,7 @@ function snapshot(overrides: Record<string, unknown> = {}): ReturnType<typeof pi
 }
 
 function configWith(preset: ReadingPreset): ReadingConfig {
-  return { global: snapshot({ fontSize: 16 }), presets: [preset], active: null }
+  return { global: snapshot({ fontSize: 16 }), presets: [preset] }
 }
 
 describe('reading profiles', () => {
@@ -50,16 +51,35 @@ describe('reading profiles', () => {
     const cfg = parseReadingConfig(JSON.stringify({
       global: snapshot(),
       presets: [{ id: 'ok', name: '好', snapshot: snapshot() }, { id: 'bad' }, null],
-      active: 'ok',
     }))
     expect(cfg?.presets).toHaveLength(1)
-    expect(cfg?.active).toBe('ok')
+    expect(cfg?.presets[0].id).toBe('ok')
   })
 
-  it('creates a preset from a snapshot and activates it', () => {
-    const next = createReadingPreset(configWith({ id: 'p1', name: 'x', snapshot: snapshot() }), '护眼', snapshot({ fontSize: 20 }))
-    expect(next.presets).toHaveLength(2)
-    expect(next.active).toBe(next.presets[1].id)
+  it('the blob carries no active pointer; legacy payloads migrate it out', () => {
+    const raw = JSON.stringify({
+      global: snapshot(),
+      presets: [{ id: 'p1', name: 'x', snapshot: snapshot() }],
+      active: 'p1',
+    })
+    const cfg = parseReadingConfig(raw)!
+    expect('active' in cfg).toBe(false)
+    expect(legacyActiveId(raw)).toBe('p1')
+    expect(legacyActiveId(serializeReadingConfig(cfg))).toBeNull()
+    expect(legacyActiveId('not json')).toBeNull()
+    expect(legacyActiveId(null)).toBeNull()
+  })
+
+  it('creates a preset without touching activation state', () => {
+    const { config, preset } = createReadingPreset(
+      configWith({ id: 'p1', name: 'x', snapshot: snapshot() }),
+      '护眼',
+      snapshot({ fontSize: 20 }),
+    )
+    expect(config.presets).toHaveLength(2)
+    expect(config.presets[1]).toEqual(preset)
+    expect(preset.name).toBe('护眼')
+    expect('active' in config).toBe(false)
   })
 
   it('renames a preset in place', () => {
@@ -67,45 +87,42 @@ describe('reading profiles', () => {
     expect(next.presets[0].name).toBe('new')
   })
 
-  it('deleting the active preset falls back to global', () => {
-    const cfg = { ...configWith({ id: 'p1', name: 'x', snapshot: snapshot() }), active: 'p1' }
-    const next = deleteReadingPreset(cfg, 'p1')
-    expect(next.presets).toHaveLength(0)
-    expect(next.active).toBeNull()
-  })
-
-  it('deleting an inactive preset keeps the active pointer', () => {
-    const cfg = {
+  it('deletes a preset without touching activation state', () => {
+    const cfg: ReadingConfig = {
       global: snapshot(),
       presets: [
         { id: 'p1', name: 'a', snapshot: snapshot() },
         { id: 'p2', name: 'b', snapshot: snapshot() },
       ],
-      active: 'p1',
     }
     const next = deleteReadingPreset(cfg, 'p2')
-    expect(next.active).toBe('p1')
     expect(next.presets.map((p) => p.id)).toEqual(['p1'])
+    expect('active' in next).toBe(false)
   })
 
-  it('folds changes into the active preset when one is active', () => {
+  it('folds changes into the target preset when one is given', () => {
     const preset = { id: 'p1', name: 'x', snapshot: snapshot({ fontSize: 20 }) }
-    const cfg = { ...configWith(preset), active: 'p1' }
-    const next = foldReadingChange(cfg, 'fontSize', 24)
+    const next = foldReadingChange(configWith(preset), 'fontSize', 24, 'p1')
     expect(next.presets[0].snapshot.fontSize).toBe(24)
     expect(next.global.fontSize).toBe(16)
   })
 
-  it('folds changes into the global config otherwise', () => {
-    const next = foldReadingChange(configWith({ id: 'p1', name: 'x', snapshot: snapshot() }), 'fontSize', 19)
+  it('folds changes into the global config without a target', () => {
+    const next = foldReadingChange(configWith({ id: 'p1', name: 'x', snapshot: snapshot() }), 'fontSize', 19, null)
     expect(next.global.fontSize).toBe(19)
     expect(next.presets[0].snapshot.fontSize).toBe(18)
   })
 
-  it('resolves the active snapshot from the preset or the global config', () => {
+  it('folds a dangling target into the global config (resolution fallback)', () => {
+    const next = foldReadingChange(configWith({ id: 'p1', name: 'x', snapshot: snapshot() }), 'fontSize', 19, 'gone')
+    expect(next.global.fontSize).toBe(19)
+  })
+
+  it('resolves the snapshot from the preset or the global config', () => {
     const preset = { id: 'p1', name: 'x', snapshot: snapshot({ fontSize: 20 }) }
-    expect(activeSnapshot({ ...configWith(preset), active: 'p1' }).fontSize).toBe(20)
-    expect(activeSnapshot(configWith(preset)).fontSize).toBe(16)
+    expect(resolveSnapshot(configWith(preset), 'p1').fontSize).toBe(20)
+    expect(resolveSnapshot(configWith(preset), null).fontSize).toBe(16)
+    expect(resolveSnapshot(configWith(preset), 'gone').fontSize).toBe(16)
   })
 
   it('auto-names new presets without collision', () => {
@@ -116,7 +133,6 @@ describe('reading profiles', () => {
   it('starts with an empty config', () => {
     const cfg = emptyConfig(snapshot({ fontSize: 15 }))
     expect(cfg.presets).toEqual([])
-    expect(cfg.active).toBeNull()
     expect(cfg.global.fontSize).toBe(15)
   })
 })

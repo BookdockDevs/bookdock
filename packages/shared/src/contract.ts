@@ -1,6 +1,6 @@
 import type { BookFormat, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
-import type { AnnotationStyle, AnnotationType, ViewSettings } from './domain'
+import type { AnnotationStyle, AnnotationType, TocRulePattern, TransformMatchType, TransformScope, ViewSettings } from './domain'
 
 export interface ApiResponse<T> {
   data: T
@@ -178,6 +178,11 @@ export interface SettingsRes {
    * serialized as JSON by the web client and passed through by the server.
    */
   readingConfig?: string
+  /**
+   * User-created reading themes, serialized as JSON by the web client.
+   * Synced because reading configs reference custom themes by id.
+   */
+  customThemes?: string
 }
 
 export interface SettingsUpdateReq {
@@ -283,6 +288,14 @@ export interface BookMeta {
   wordCount?: number
   /** Per-book reading-setting overrides (F1), see ViewSettings */
   viewSettings?: ViewSettings
+  /** Reading preset bound to this book (reading-profile id); a dangling id
+   * (preset deleted) falls back to the device resolution chain */
+  boundPresetId?: string
+  /** TOC rule pinned to this book (id); dangling id falls back to auto-scoring
+   * then the legacy hardcoded patterns. `tocRuleAuto` records that the pin was
+   * chosen by auto-scoring (titled + lazy-reprocessed), not by the user. */
+  tocRuleId?: string
+  tocRuleAuto?: boolean
 }
 
 export interface BookDetailRes extends BookListItem {
@@ -465,6 +478,107 @@ export interface ReadingRecordTagItem {
   tagId: string
   name: string
   durationSeconds: number
+}
+
+export type TransformCreateReq = {
+  /**
+   * Pattern rules with a bookId are book-scoped ("all matches in this book");
+   * without it they are user-global. Point patches are inherently
+   * single-book: bookId is required.
+   */
+  bookId?: string | null
+  matchType?: TransformMatchType
+  pattern?: string
+  /** Null/empty = delete (hide) the matched content */
+  replacement?: string | null
+  isRegex?: boolean
+  caseSensitive?: boolean
+  enabled?: boolean
+  name?: string
+  group?: string
+  spineHref?: string
+  textOffset?: number
+  originalText?: string
+}
+
+export type TransformUpdateReq = {
+  name?: string | null
+  group?: string | null
+  pattern?: string
+  replacement?: string | null
+  isRegex?: boolean
+  caseSensitive?: boolean
+  enabled?: boolean
+  /** Type conversion: point → pattern only (the snapshot becomes the pattern).
+   *  pattern → point is rejected — point patches need anchors from a selection. */
+  matchType?: TransformMatchType
+  /** Scope conversion: null = user-global; a value = bind to a book */
+  bookId?: string | null
+  /** Point-patch snapshot edit (anchor offset is kept where the user selected) */
+  originalText?: string
+}
+
+export interface TextTransformRes {
+  id: string
+  /** Null = user-global pattern rule; set = book-scoped (point patches always carry their book) */
+  bookId: string | null
+  scope: TransformScope
+  matchType: TransformMatchType
+  pattern: string | null
+  replacement: string | null
+  isRegex: boolean
+  caseSensitive: boolean
+  /** Global default switch: applies to every book unless overridden per book */
+  enabled: boolean
+  /** Effective value for the queried book after applying its override; only set on `GET /transforms?bookId=` */
+  effectiveEnabled?: boolean | null
+  /** Whether a per-book override row exists; only set on `GET /transforms?bookId=` */
+  hasOverride?: boolean
+  name: string | null
+  group: string | null
+  spineHref: string | null
+  textOffset: number | null
+  originalText: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** Per-book override for a pattern rule: boolean upserts the override, null deletes it (restore inheritance) */
+export type TransformOverrideReq = {
+  bookId: string
+  enabled: boolean | null
+}
+
+export type TocRuleCreateReq = {
+  name: string
+  enabled?: boolean
+  sortOrder?: number
+  patterns: TocRulePattern[]
+}
+
+export type TocRuleUpdateReq = {
+  name?: string
+  enabled?: boolean
+  sortOrder?: number
+  patterns?: TocRulePattern[]
+}
+
+export type TocRuleReorderReq = {
+  tocRuleIds: string[]
+}
+
+export interface TocRuleRes {
+  id: string
+  name: string
+  enabled: boolean
+  sortOrder: number
+  patterns: TocRulePattern[]
+  createdAt: number
+  updatedAt: number
+}
+
+export interface TocRuleListRes {
+  data: TocRuleRes[]
 }
 
 export type AnnotationCreateReq = {

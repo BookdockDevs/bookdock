@@ -15,6 +15,14 @@ interface ReaderState {
   /** Excerpt being shared as a card image; non-null opens ShareCardDialog. Ephemeral by design — sharing never persists an annotation.
    *  `note`/`createdAt` are set when sharing an idea (想法) instead of a plain excerpt */
   shareTarget: { text: string; chapter: string | null; note?: string; createdAt?: number } | null
+  /** Point patches that failed to apply on a loaded section — deduped, so a rule-set reload never re-toasts */
+  invalidTransformIds: string[]
+  /** Annotation keys (`${cfiRange}|${type}`) whose CFI no longer resolves — orphaned, shown as badges in NotesPanel */
+  orphanedAnnotationKeys: string[]
+  /** 正文变换 create-from-selection target: opening it collapses the selection
+   *  toolbar, so the dialog state must live outside SelectionToolbar (which
+   *  unmounts when the selection clears). Rendered by Reader. */
+  replaceTarget: SelectionInfo | null
   setActiveNavTab: (tab: NavTab) => void
   setTocItems: (items: { label: string; href: string }[]) => void
   setCurrentChapter: (chapter: string | null) => void
@@ -24,6 +32,9 @@ interface ReaderState {
   setPendingSearchQuery: (query: string | null) => void
   setNoteEditorRange: (range: string | null) => void
   setShareTarget: (target: { text: string; chapter: string | null; note?: string; createdAt?: number } | null) => void
+  addInvalidTransformIds: (ids: string[]) => void
+  addOrphanedAnnotationKeys: (keys: string[]) => void
+  setReplaceTarget: (target: SelectionInfo | null) => void
 }
 
 export const useReaderState = create<ReaderState>((set) => ({
@@ -36,6 +47,9 @@ export const useReaderState = create<ReaderState>((set) => ({
   pendingSearchQuery: null,
   noteEditorRange: null,
   shareTarget: null,
+  invalidTransformIds: [],
+  orphanedAnnotationKeys: [],
+  replaceTarget: null,
   setActiveNavTab: (activeNavTab) => set({ activeNavTab }),
   setTocItems: (tocItems) => set({ tocItems }),
   setCurrentChapter: (currentChapter) => set({ currentChapter }),
@@ -45,4 +59,9 @@ export const useReaderState = create<ReaderState>((set) => ({
   setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
   setNoteEditorRange: (noteEditorRange) => set({ noteEditorRange }),
   setShareTarget: (shareTarget) => set({ shareTarget }),
+  addInvalidTransformIds: (ids) =>
+    set((s) => ({ invalidTransformIds: Array.from(new Set([...s.invalidTransformIds, ...ids])) })),
+  addOrphanedAnnotationKeys: (keys) =>
+    set((s) => ({ orphanedAnnotationKeys: Array.from(new Set([...s.orphanedAnnotationKeys, ...keys])) })),
+  setReplaceTarget: (replaceTarget) => set({ replaceTarget }),
 }))

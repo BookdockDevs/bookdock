@@ -1,8 +1,11 @@
 import type { Readable } from 'node:stream'
 import type { FormatParser, ParsedBook } from './registry'
+import type { TocPatternLike } from './toc'
 
 import chardet from 'chardet'
 import iconv from 'iconv-lite'
+
+import { applyTitleReplacement } from './toc'
 
 export interface TxtChapter {
   title: string
@@ -25,22 +28,23 @@ export function decodeTextBuffer(buffer: Buffer): string {
   }
 }
 
-const chapterPatterns = [
-  { re: /^第[一二三四五六七八九十百千万零\d]+章\s*[：:]?\s*(.+)?$/, level: 1 },
-  { re: /^第[一二三四五六七八九十百千万零\d]+回\s*[：:]?\s*(.+)?$/, level: 1 },
-  { re: /^第[一二三四五六七八九十百千万零\d]+节\s*[：:]?\s*(.+)?$/, level: 2 },
-  { re: /^Chapter\s+\d+\s*[：:]?\s*(.+)?$/i, level: 1 },
-  { re: /^Volume\s+\d+\s*[：:]?\s*(.+)?$/i, level: 0 },
-  { re: /^第[一二三四五六七八九十百千万零\d]+卷\s*[：:]?\s*(.+)?$/, level: 0 },
-  { re: /^#{1,2}\s+(.+)$/, level: 1 },
-  { re: /^\d+\.\s+(.+)$/, level: 1 },
+/** Legacy hardcoded default patterns (used when no TOC rule is pinned/scored). */
+export const legacyTocPatterns: TocPatternLike[] = [
+  { level: 1, regex: '^第[一二三四五六七八九十百千万零\\d]+章\\s*[：:]?\\s*(.+)?$' },
+  { level: 1, regex: '^第[一二三四五六七八九十百千万零\\d]+回\\s*[：:]?\\s*(.+)?$' },
+  { level: 2, regex: '^第[一二三四五六七八九十百千万零\\d]+节\\s*[：:]?\\s*(.+)?$' },
+  { level: 1, regex: '^[Cc]hapter\\s+\\d+\\s*[：:]?\\s*(.+)?$' },
+  { level: 0, regex: '^[Vv]olume\\s+\\d+\\s*[：:]?\\s*(.+)?$' },
+  { level: 0, regex: '^第[一二三四五六七八九十百千万零\\d]+卷\\s*[：:]?\\s*(.+)?$' },
+  { level: 1, regex: '^#{1,2}\\s+(.+)$' },
+  { level: 1, regex: '^\\d+\\.\\s+(.+)$' },
 ]
 
 const continuationMarks = new Set(['，', '；', '：', '、', '—', '–', '~', '～'])
 
 function isChapterTitle(line: string): boolean {
   const trimmed = line.trim()
-  return chapterPatterns.some((pattern) => pattern.re.test(trimmed))
+  return legacyTocPatterns.some((pattern) => new RegExp(pattern.regex, 'm').test(trimmed))
 }
 
 function isContinuationEnd(line: string): boolean {
@@ -111,45 +115,57 @@ export function detectTxtChapters(text: string): TxtChapter[] {
  * Chapter detection on already-normalized text (B5): the upload pipeline
  * normalizes once and reuses it here — the public detectTxtChapters keeps
  * normalizing internally for callers with raw input (tests, TxtParser).
+ *
+ * `patterns` is an optional TOC-rule preset (TocPatternLike[]); when omitted
+ * the legacy hardcoded patterns are used. Matching runs against the WHOLE text
+ * with 'g' + 'm' flags (not per trimmed line): this keeps lookbehinds like
+ * `(?<=[　\s])` — common in legado rules — functional. Patterns are applied in
+ * order and each line is claimed by the first pattern that hits it; every
+ * matched line is pinned to that pattern's level. Titles go through the
+ * pattern's $1-style replacement when present. With no matches at all the book
+ * falls back to ~10KB chunks aligned on newlines (never a single "全文"
+ * chapter), matching legado.
  */
-export function scanTxtChapters(normalized: string): TxtChapter[] {
+export function scanTxtChapters(normalized: string, patterns?: TocPatternLike[]): TxtChapter[] {
+  const active = patterns && patterns.length > 0 ? patterns.filter((p) => p.enabled !== false) : legacyTocPatterns
+
+  const claimed = new Set<number>()
   const titles: { offset: number; title: string; level: number }[] = []
-  let lineStart = 0
 
-  for (let i = 0; i < normalized.length; i++) {
-    if (normalized[i] === '\n') {
-      const line = normalized.slice(lineStart, i).trim()
-      for (const pattern of chapterPatterns) {
-        const m = line.match(pattern.re)
-        if (m) {
-          titles.push({ offset: lineStart, title: line.trim().slice(0, 120), level: pattern.level })
-          break
-        }
+  for (const pattern of active) {
+    let re: RegExp
+    let lineRe: RegExp
+    try {
+      re = new RegExp(pattern.regex, 'gm')
+      lineRe = new RegExp(pattern.regex, 'm')
+    } catch {
+      continue
+    }
+    for (let m = re.exec(normalized); m !== null; m = re.exec(normalized)) {
+      const matchLen = m[0].length
+      if (matchLen === 0) {
+        re.lastIndex++
+        continue
       }
-      lineStart = i + 1
+      const lineStart = normalized.lastIndexOf('\n', m.index - 1) + 1
+      if (claimed.has(lineStart)) continue
+      claimed.add(lineStart)
+      // Detection runs on the whole text (lookbehinds need the preceding char),
+      // but a title is a single line: `\s*` / `\s{n,m}` in a rule can span the
+      // \n\n separator, so m[0] may run past the line end. Re-match against the
+      // isolated line for the per-line match array the replacement expects.
+      const lineEnd = normalized.indexOf('\n', lineStart)
+      const line = lineEnd === -1 ? normalized.slice(lineStart) : normalized.slice(lineStart, lineEnd)
+      const lineMatch = lineRe.exec(line)
+      const title = (lineMatch ? applyTitleReplacement(lineMatch, pattern.replacement) : line.trim()).trim().slice(0, 120)
+      if (title) titles.push({ offset: lineStart, title, level: pattern.level })
     }
   }
 
-  if (lineStart < normalized.length) {
-    const line = normalized.slice(lineStart).trim()
-    for (const pattern of chapterPatterns) {
-      const m = line.match(pattern.re)
-      if (m) {
-        titles.push({ offset: lineStart, title: line.trim().slice(0, 120), level: pattern.level })
-      }
-    }
-  }
+  titles.sort((a, b) => a.offset - b.offset)
 
   if (titles.length === 0) {
-    return [
-      {
-        title: '全文',
-        level: 1,
-        startOffset: 0,
-        endOffset: normalized.length,
-        contentStartOffset: 0,
-      },
-    ]
+    return fallbackChapters(normalized)
   }
 
   const chapters: TxtChapter[] = []
@@ -187,6 +203,34 @@ export function scanTxtChapters(normalized: string): TxtChapter[] {
   }
 
   return chapters
+}
+
+/** legado fallback: split into ~10KB blocks aligned to the previous newline. */
+export function fallbackChapters(normalized: string): TxtChapter[] {
+  const blockSize = 10 * 1024
+  const chapters: TxtChapter[] = []
+  let block = 0
+  let start = 0
+
+  while (start < normalized.length) {
+    let end = Math.min(start + blockSize, normalized.length)
+    if (end < normalized.length) {
+      const nl = normalized.lastIndexOf('\n', end)
+      if (nl >= start) end = nl
+    }
+
+    chapters.push({
+      title: `第${block + 1}章(1)`,
+      level: 1,
+      startOffset: start,
+      endOffset: end,
+      contentStartOffset: start,
+    })
+    block++
+    start = end
+  }
+
+  return chapters.length > 0 ? chapters : [{ title: '全文', level: 1, startOffset: 0, endOffset: 0, contentStartOffset: 0 }]
 }
 
 export class TxtParser implements FormatParser {

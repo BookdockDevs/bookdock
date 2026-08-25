@@ -153,6 +153,7 @@ export const settingsUpdateSchema = z.object({
   manualTimerGraceMinutes: z.union([z.literal(1), z.literal(5), z.literal(10), z.literal(30)]).optional(),
   // Named reading-setting profiles; JSON serialized by the web client, server passes it through.
   readingConfig: z.string().optional(),
+  customThemes: z.string().optional(),
   trash: z.object({
     autoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]),
   }).optional(),
@@ -174,6 +175,106 @@ export const annotationUpdateSchema = z.object({
   style: z.enum(['underline', 'squiggly', 'highlight']).optional(),
   note: z.string().optional(),
   text: z.string().optional(),
+})
+
+const transformFields = {
+  // Null = user-global pattern rule; set = book-scoped (pattern "all matches in
+  // this book"). Point patches require it.
+  bookId: z.string().min(1).nullish(),
+  matchType: z.enum(['pattern', 'point']).optional().default('pattern'),
+  pattern: z.string().optional(),
+  // Null/empty = delete (hide) the matched content
+  replacement: z.string().nullish(),
+  isRegex: z.boolean().optional().default(false),
+  caseSensitive: z.boolean().optional().default(false),
+  enabled: z.boolean().optional().default(true),
+  name: z.string().max(200).optional(),
+  group: z.string().max(200).optional(),
+  // Point-patch anchors (matchType 'point' only)
+  spineHref: z.string().min(1).optional(),
+  textOffset: z.number().int().min(0).optional(),
+  originalText: z.string().optional(),
+}
+
+function isValidRegex(pattern: string): boolean {
+  try {
+    new RegExp(pattern)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const transformCreateSchema = z.object(transformFields)
+  .refine((v) => v.matchType !== 'pattern' || (v.pattern !== undefined && v.pattern.length > 0), {
+    message: 'pattern is required for pattern transforms',
+    path: ['pattern'],
+  })
+  .refine((v) => v.matchType !== 'point' || (v.spineHref !== undefined && v.textOffset !== undefined && v.originalText !== undefined), {
+    message: 'spineHref, textOffset and originalText are required for point transforms',
+    path: ['spineHref'],
+  })
+  .refine((v) => v.matchType !== 'point' || (v.bookId !== undefined && v.bookId !== null), {
+    message: 'bookId is required for point transforms',
+    path: ['bookId'],
+  })
+  .refine((v) => !v.isRegex || v.pattern === undefined || isValidRegex(v.pattern), {
+    message: 'pattern is not a valid regular expression',
+    path: ['pattern'],
+  })
+
+export const transformUpdateSchema = z.object({
+  name: z.string().max(200).nullable().optional(),
+  group: z.string().max(200).nullable().optional(),
+  pattern: z.string().min(1).optional(),
+  replacement: z.string().nullable().optional(),
+  isRegex: z.boolean().optional(),
+  caseSensitive: z.boolean().optional(),
+  enabled: z.boolean().optional(),
+  // Type conversion: only pattern is reachable via update — point patches need
+  // anchors from a text selection and are never created through this path
+  matchType: z.enum(['pattern', 'point']).optional(),
+  // Scope conversion: null = promote to user-global; a value = bind to a book
+  bookId: z.string().min(1).nullable().optional(),
+  // Point-patch snapshot edit (the anchor offset stays where the user selected)
+  originalText: z.string().min(1).optional(),
+})
+
+export const transformOverrideSchema = z.object({
+  bookId: z.string().min(1),
+  // boolean = upsert the per-book override; null = delete it (restore inheritance)
+  enabled: z.boolean().nullable(),
+})
+
+export const tocRulePatternSchema = z.object({
+  level: z.number().int().min(1),
+  regex: z.string().min(1),
+  replacement: z.string().nullable().default(null),
+  enabled: z.boolean().default(true),
+})
+
+export const tocRuleCreateSchema = z.object({
+  name: z.string().min(1).max(200),
+  enabled: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+  patterns: z.array(tocRulePatternSchema).min(1),
+}).refine((v) => v.patterns.every((p) => p.regex === undefined || isValidRegex(p.regex)), {
+  message: 'pattern is not a valid regular expression',
+  path: ['patterns'],
+})
+
+export const tocRuleUpdateSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  enabled: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+  patterns: z.array(tocRulePatternSchema).min(1).optional(),
+}).refine((v) => v.patterns === undefined || v.patterns.every((p) => p.regex === undefined || isValidRegex(p.regex)), {
+  message: 'pattern is not a valid regular expression',
+  path: ['patterns'],
+})
+
+export const tocRuleReorderSchema = z.object({
+  tocRuleIds: z.array(z.string().min(1)),
 })
 
 export const setupSchema = z.object({
@@ -257,4 +358,8 @@ export const bookUpdateSchema = z.object({
   bookmeta: bookMetadataSchema.optional(),
   // null clears the per-book overrides (fall back to global)
   viewSettings: viewSettingsSchema.nullable().optional(),
+  // null removes the preset binding (fall back to the device resolution chain)
+  boundPresetId: z.string().nullable().optional(),
+  // null removes the pinned TOC rule (fall back to auto-scoring, then legacy)
+  tocRuleId: z.string().nullable().optional(),
 })

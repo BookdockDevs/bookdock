@@ -1,8 +1,16 @@
-// Named reading-setting profiles (grill 定案 2026-08-12): a full-snapshot
-// config set layered above the flat global store fields. The store keeps the
-// active config's values in its flat fields; this module owns the persistent
-// multi-config state: `{ global, presets[], active }`, serialized as one JSON
-// string (`readingConfig`) in localStorage + the server sync payload.
+// Named reading-setting profiles (grill 定案 2026-08-12, activation/sync
+// rework 2026-08-13): a full-snapshot config set layered above the flat
+// global store fields. The store keeps the resolved config's values in its
+// flat fields; this module owns the persistent multi-config state:
+// `{ global, presets[] }`, serialized as one JSON string (`readingConfig`) in
+// localStorage + the server sync payload.
+//
+// Activation is deliberately NOT part of the synced blob (intents sync,
+// outcomes stay local): the device-local active preset lives in the ui.store
+// (`bd-reading-active-preset`), per-book bindings in `book.meta.boundPresetId`.
+// Resolution chain: bound preset > device active > global. Legacy blobs
+// carried `active` inside the payload — parseReadingConfig drops it and
+// legacyActiveId lets callers adopt it as the device pointer.
 
 // Exactly the settings reachable in the reader's settings menu — fonts,
 // typography, layout (incl. per-mode backing), reading mode, chrome, margins,
@@ -64,8 +72,6 @@ export interface ReadingPreset {
 export interface ReadingConfig {
   global: ReadingSnapshot
   presets: ReadingPreset[]
-  /** null = global config is active */
-  active: string | null
 }
 
 const CONFIG_STORAGE_KEY = 'bd-reading-config'
@@ -75,7 +81,7 @@ export function createPresetId(): string {
 }
 
 export function emptyConfig(snapshot: ReadingSnapshot): ReadingConfig {
-  return { global: snapshot, presets: [], active: null }
+  return { global: snapshot, presets: [] }
 }
 
 export function parseReadingConfig(raw: string | null | undefined): ReadingConfig | null {
@@ -87,9 +93,20 @@ export function parseReadingConfig(raw: string | null | undefined): ReadingConfi
       ? parsed.presets.filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string' && p.snapshot && typeof p.snapshot === 'object')
       : []
     const global = parsed.global && typeof parsed.global === 'object' ? parsed.global : null
-    const active = typeof parsed.active === 'string' ? parsed.active : null
     if (!global) return null
-    return { global: global as ReadingSnapshot, presets, active }
+    return { global: global as ReadingSnapshot, presets }
+  } catch {
+    return null
+  }
+}
+
+/** Legacy blobs carried the device pointer inside the payload; callers adopt
+ * it as the device-local active preset when the device has none yet. */
+export function legacyActiveId(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as { active?: unknown }
+    return parsed && typeof parsed.active === 'string' ? parsed.active : null
   } catch {
     return null
   }
@@ -109,19 +126,20 @@ export function pickReadingSnapshot(state: object): ReadingSnapshot {
   return snapshot
 }
 
-/** Values the active config resolves to (preset snapshot or the global one). */
-export function activeSnapshot(config: ReadingConfig): ReadingSnapshot {
-  if (config.active) {
-    const preset = config.presets.find((p) => p.id === config.active)
+/** Values the given preset resolves to, falling back to the global config. */
+export function resolveSnapshot(config: ReadingConfig, presetId: string | null): ReadingSnapshot {
+  if (presetId) {
+    const preset = config.presets.find((p) => p.id === presetId)
     if (preset) return preset.snapshot
   }
   return config.global
 }
 
-/** Fold a profile-key change into the active target (preset or global). */
-export function foldReadingChange(config: ReadingConfig, key: ReadingProfileKey, value: unknown): ReadingConfig {
-  const target = config.active
-    ? config.presets.find((p) => p.id === config.active)
+/** Fold a profile-key change into the target (preset or global). A dangling
+ * target id folds into global, mirroring the resolution fallback. */
+export function foldReadingChange(config: ReadingConfig, key: ReadingProfileKey, value: unknown, targetId: string | null): ReadingConfig {
+  const target = targetId
+    ? config.presets.find((p) => p.id === targetId)
     : undefined
   if (target) {
     return {
@@ -132,9 +150,11 @@ export function foldReadingChange(config: ReadingConfig, key: ReadingProfileKey,
   return { ...config, global: { ...config.global, [key]: value } }
 }
 
-export function createReadingPreset(config: ReadingConfig, name: string, snapshot: ReadingSnapshot): ReadingConfig {
+/** Creation does not activate: the (device-local) active pointer lives
+ * outside the blob, so the caller gets the new preset back to point at it. */
+export function createReadingPreset(config: ReadingConfig, name: string, snapshot: ReadingSnapshot): { config: ReadingConfig; preset: ReadingPreset } {
   const preset: ReadingPreset = { id: createPresetId(), name, snapshot }
-  return { global: config.global, presets: [...config.presets, preset], active: preset.id }
+  return { config: { global: config.global, presets: [...config.presets, preset] }, preset }
 }
 
 export function renameReadingPreset(config: ReadingConfig, id: string, name: string): ReadingConfig {
@@ -144,12 +164,13 @@ export function renameReadingPreset(config: ReadingConfig, id: string, name: str
   }
 }
 
-/** Deleting the active preset falls back to the global config. */
+/** Deleting never touches activation state: dangling device-local active and
+ * per-book bindings fall back at resolution instead of being cleaned up here
+ * (a cross-book meta scan on every delete is not worth it). */
 export function deleteReadingPreset(config: ReadingConfig, id: string): ReadingConfig {
   return {
     ...config,
     presets: config.presets.filter((p) => p.id !== id),
-    active: config.active === id ? null : config.active,
   }
 }
 

@@ -1,12 +1,14 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
 import type { BookListItem } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import MenuFlyout from '@/components/ui/MenuFlyout'
+import { useToastStore } from '@/stores/toast.store'
 
 import { useUpdateBook } from '../hooks'
 
-import { downloadBook } from '../download'
+import { downloadDefault } from '../download'
 
 import { READ_STATUS_OPTIONS, STATUS_DOT } from './read-status'
 
@@ -24,65 +26,53 @@ function MenuIcon({ children, className = 'text-stone-400' }: { children: ReactN
 function StatusFlyout({ book, onClose }: { book: BookListItem; onClose: () => void }) {
   const _ = useTranslation()
   const updateBook = useUpdateBook()
-  const [open, setOpen] = useState(false)
-  const [flip, setFlip] = useState(false)
-  const subRef = useRef<HTMLDivElement>(null)
-
-  useLayoutEffect(() => {
-    if (!open) return
-    const r = subRef.current?.getBoundingClientRect()
-    if (r) setFlip(r.right > window.innerWidth - 8)
-  }, [open])
-
   return (
-    <div
-      className="relative"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`${itemClass} ${open ? 'bg-stone-100 dark:bg-stone-800' : ''}`}
-      >
-        <MenuIcon>
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 6v6l4 2" />
-        </MenuIcon>
-        <span className="flex-1">{_('library.readStatusLabel')}</span>
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[book.readStatus]}`} />
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-stone-400 transition-transform ${flip ? 'rotate-180' : ''}`}>
-          <path d="M9 18l6-6-6-6" />
-        </svg>
-      </button>
-      {open && (
-        <div className={`absolute -top-1 z-10 ${flip ? 'right-full pr-1.5' : 'left-full pl-1.5'}`}>
-          <div ref={subRef} className="w-36 rounded-xl border border-stone-200/80 bg-white/95 p-1 shadow-xl shadow-stone-900/8 backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95">
-            {READ_STATUS_OPTIONS.map((action) => (
-              <button
-                key={action.value}
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  onClose()
-                  updateBook.mutate({ bookId: book.id, readStatus: action.value })
-                }}
-                className={itemClass}
-              >
-                <MenuIcon className={action.iconClass}>{action.icon}</MenuIcon>
-                <span className="flex-1">{_(action.labelKey)}</span>
-                {book.readStatus === action.value && (
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-300">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
+    <MenuFlyout
+      row={({ open, flip, toggle }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          className={`${itemClass} ${open ? 'bg-stone-100 dark:bg-stone-800' : ''}`}
+        >
+          <MenuIcon>
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 6v6l4 2" />
+          </MenuIcon>
+          <span className="flex-1">{_('library.readStatusLabel')}</span>
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[book.readStatus]}`} />
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-stone-400 transition-transform ${flip ? 'rotate-180' : ''}`}>
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
       )}
-    </div>
+    >
+      {(close) => (
+        <>
+          {READ_STATUS_OPTIONS.map((action) => (
+            <button
+              key={action.value}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                close()
+                onClose()
+                updateBook.mutate({ bookId: book.id, readStatus: action.value })
+              }}
+              className={itemClass}
+            >
+              <MenuIcon className={action.iconClass}>{action.icon}</MenuIcon>
+              <span className="flex-1">{_(action.labelKey)}</span>
+              {book.readStatus === action.value && (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-300">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              )}
+            </button>
+          ))}
+        </>
+      )}
+    </MenuFlyout>
   )
 }
 
@@ -94,6 +84,7 @@ export function ContextMenuContent({ book, onShowDetails, onDelete, onClose }: {
 }) {
   const _ = useTranslation()
   const updateBook = useUpdateBook()
+  const addToast = useToastStore((s) => s.addToast)
   return (
     <>
       <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
@@ -128,7 +119,9 @@ export function ContextMenuContent({ book, onShowDetails, onDelete, onClose }: {
           e.preventDefault()
           e.stopPropagation()
           onClose()
-          downloadBook(book.id, book.title)
+          void downloadDefault(book).catch((err) => {
+            addToast(err instanceof Error ? err.message : String(err), 'error')
+          })
         }}
         className={itemClass}
       >

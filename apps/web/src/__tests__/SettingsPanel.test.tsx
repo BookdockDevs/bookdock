@@ -5,10 +5,20 @@ import { SettingsPanel } from '../features/reader/components/SettingsPanel'
 import { useFontLoaderStore } from '../features/reader/fonts'
 import { useUiStore } from '../stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
+import { useBookTransforms } from '@/api/hooks/useTransforms'
+import type { TextTransformRes } from '@bookdock/shared'
 
 vi.mock('@/api/hooks/useFonts', () => ({
   useFonts: vi.fn(() => ({ data: { data: [] } })),
 }))
+
+vi.mock('@/api/hooks/useTransforms', () => ({
+  useBookTransforms: vi.fn(() => ({ data: { data: [] } })),
+}))
+
+const mockTransforms = (list: TextTransformRes[]) => {
+  vi.mocked(useBookTransforms).mockReturnValue({ data: { data: list } } as ReturnType<typeof useBookTransforms>)
+}
 
 const mockUploadedFonts = (fonts: unknown[]) => {
   vi.mocked(useFonts).mockReturnValue({ data: { data: fonts } } as ReturnType<typeof useFonts>)
@@ -252,5 +262,26 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /左右交换/ }))
     expect(useUiStore.getState().clickAreaMode).toBe('swap')
+  })
+
+  it('hides the text-transforms entry without a bookId', () => {
+    render(<SettingsPanel />)
+
+    fireEvent.click(screen.getByTitle('行为'))
+    expect(screen.queryByText('正文变换')).not.toBeInTheDocument()
+  })
+
+  it('shows the text-transforms entry with the effective count in the behavior section', () => {
+    mockTransforms([
+      { id: 'p1', bookId: 'b1', scope: 'book', matchType: 'point', pattern: null, replacement: '好', isRegex: false, caseSensitive: true, enabled: true, name: null, group: null, spineHref: 'c1', textOffset: 1, originalText: '坏', createdAt: 0, updatedAt: 0 },
+      { id: 'r1', bookId: null, scope: 'global', matchType: 'pattern', pattern: 'foo', replacement: null, isRegex: false, caseSensitive: true, enabled: true, effectiveEnabled: false, hasOverride: true, name: null, group: null, spineHref: null, textOffset: null, originalText: null, createdAt: 0, updatedAt: 0 },
+      { id: 'r2', bookId: null, scope: 'global', matchType: 'pattern', pattern: 'bar', replacement: null, isRegex: false, caseSensitive: true, enabled: false, effectiveEnabled: true, hasOverride: true, name: null, group: null, spineHref: null, textOffset: null, originalText: null, createdAt: 0, updatedAt: 0 },
+    ])
+    render(<SettingsPanel bookId="b1" />)
+
+    fireEvent.click(screen.getByTitle('行为'))
+    expect(screen.getByText('正文变换')).toBeInTheDocument()
+    // point patch enabled + pattern rule effective via override = 2 active
+    expect(screen.getByText('2 条生效')).toBeInTheDocument()
   })
 })

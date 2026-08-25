@@ -24,6 +24,7 @@ import type {
 } from '../types'
 import { FONT_OPTIONS } from '../types'
 import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
+import { applyTransforms, countPatternMatches, textContentOffset, type TextTransformRule } from '../lib/text-transforms'
 import { NavigationPending } from '../lib/navigation-pending'
 import { sectionFractionBoundaries } from '../lib/progress-model'
 import {
@@ -312,6 +313,21 @@ const transformedBooks = new WeakSet<object>()
 // keeps the book alive after destroy), so the current mode is module-level;
 // chineseConversion is a global UI setting.
 let conversionMode: ChineseConversion = 'off'
+// Active text-transform rules (正文变换 P1), module-level for the same reason
+// as conversionMode. Rules are per-book/per-user data, not a global setting,
+// so Reader clears them on unmount/book switch to avoid leaking across books.
+let activeTransforms: TextTransformRule[] = []
+export function setActiveTransforms(rules: TextTransformRule[]) {
+  activeTransforms = rules
+}
+// Invalid point-patch reporter (P2): attachChineseTransform runs outside any
+// instance (module-level book listener), so the current instance registers a
+// callback here on mount and clears it on destroy — same pattern as the rule
+// set above. Without a live reader the report is dropped, which is correct.
+let transformInvalidListener: ((ids: string[]) => void) | null = null
+export function setTransformInvalidListener(fn: ((ids: string[]) => void) | null) {
+  transformInvalidListener = fn
+}
 // "选中即划": auto-create a highlight the moment a selection settles, keeping
 // the toolbar open for restyling. Module-level like conversionMode because the
 // selection handlers live on iframe documents owned by the renderer.
@@ -326,16 +342,24 @@ function attachChineseTransform(book: any) {
   if (!target || transformedBooks.has(book)) return
   transformedBooks.add(book)
   target.addEventListener('data', (event: Event) => {
-    if (conversionMode === 'off') return
+    if (conversionMode === 'off' && activeTransforms.length === 0) return
     const detail = (event as CustomEvent).detail
     // Section markup only — images, fonts and CSS pass through untouched.
     if (!CONVERTIBLE_MEDIA_TYPES.has(detail?.type)) return
     const mode = conversionMode
+    const rules = activeTransforms
+    const docType = detail.type as DOMParserSupportedType
     // detail.data may be a promise; the Loader awaits it either way.
-    // Whole-string conversion also rewrites script/style/attribute text —
-    // accepted, same trade-off as Readest.
-    detail.data = Promise.resolve(detail.data).then((data: unknown) =>
-      typeof data === 'string' ? convertChinese(data, mode) : data)
+    // Text transforms run first (rules are written against the original text),
+    // then Chinese conversion on the whole string — conversion rewrites
+    // script/style/attribute text, an accepted trade-off (same as Readest).
+    detail.data = Promise.resolve(detail.data).then(async (data: unknown) => {
+      if (typeof data !== 'string') return data
+      const transformed = rules.length
+        ? applyTransforms(data, rules, docType, detail.name, (ids) => transformInvalidListener?.(ids))
+        : data
+      return mode === 'off' ? transformed : convertChinese(transformed, mode)
+    })
   })
 }
 
@@ -416,6 +440,9 @@ export class FoliateReader implements BookReader {
   })
   private lastRange: Range | null = null
   private conversion: ChineseConversion = conversionMode
+  // Snapshot of the rules this instance last applied, for change detection —
+  // the same rule set re-delivered by a query refetch must not reload the view.
+  private transformsJson = JSON.stringify(activeTransforms)
   private continuousScroll: ContinuousScroll = 'off'
   private pageAnimation = true
   private showHeader = true
@@ -561,7 +588,7 @@ export class FoliateReader implements BookReader {
     this.url = url
   }
 
-  async mount(container: HTMLElement, initialTarget?: string) {
+  async mount(container: HTMLElement, initialTarget?: string, initialFraction?: number) {
     this.container = container
     // [bd] mount timing: the first open pays the one-time costs below (module
     // load, zip open, parse); re-entries hit the parse cache and only rebuild
@@ -579,6 +606,12 @@ export class FoliateReader implements BookReader {
       // zombie view stacked on top of the surviving one
       if (this.destroyed) return
       this.book = epub
+      // Snapshot the rules in force at open time; later rule changes go
+      // through applyTextTransforms, which detects the diff and reloads.
+      this.transformsJson = JSON.stringify(activeTransforms)
+      // Point patches report their invalid ids here (P2); the module-level
+      // listener is shared with the load-time data pipeline.
+      setTransformInvalidListener((ids) => this.emit('transformInvalid', { ids }))
       attachChineseTransform(epub)
 
       const view = document.createElement('foliate-view') as any
@@ -615,7 +648,7 @@ export class FoliateReader implements BookReader {
           if (this.renderedAnnotations.has(value)) reapply.add(value)
         }
         for (const value of reapply) {
-          Promise.resolve(this.view?.addAnnotation({ value })).catch(() => {})
+          this.addAnnotationValue(value)
         }
         // …and any pending search highlights for that section
         const matches = this.searchMatchOffsets.get(index)
@@ -640,6 +673,10 @@ export class FoliateReader implements BookReader {
       // sees the default chapter. Internal: the initial open is not a "jump".
       if (initialTarget) {
         await this.display(initialTarget, { internal: true })
+        if (this.destroyed) return
+      } else if (initialFraction != null && initialFraction > 0) {
+        // Stale CFI after a re-TOC: land on the book fraction instead
+        await this.view?.goToFraction(Math.max(0, Math.min(1, initialFraction)))
         if (this.destroyed) return
       } else {
         // Ensure first section is visible after applyAllSettings re-render
@@ -1039,9 +1076,26 @@ export class FoliateReader implements BookReader {
     return this.conversionReload
   }
 
+  // Text transforms (正文变换 P1): same load-time caching as Chinese
+  // conversion, so a rule-set change takes effect via the same close/reopen
+  // reload. The module-level rules are always updated — they are what the
+  // transformTarget listener reads for sections loaded after this call.
+  applyTextTransforms(rules: TextTransformRule[]): Promise<void> {
+    const json = JSON.stringify(rules)
+    if (json === this.transformsJson) return this.conversionReload
+    this.transformsJson = json
+    setActiveTransforms(rules)
+    if (!this.view || !this.book) return Promise.resolve()
+    this.conversionReload = this.conversionReload
+      .catch(() => {})
+      .then(() => this.reloadViewForConversion())
+    return this.conversionReload
+  }
+
   private async reloadViewForConversion() {
-    // Conversion is applied at load time and cached per section URL, so a
-    // mode switch only takes effect by tearing the view down — paginator
+    // Load-time content transforms (text transforms, Chinese conversion) are
+    // cached per section URL, so a change only takes effect by tearing the
+    // view down — paginator
     // destroy() unloads every loaded section (adjacent preloads in continuous
     // mode included), clearing the loader cache — and reopening it.
     const cfi = this.lastCfi
@@ -1149,11 +1203,20 @@ export class FoliateReader implements BookReader {
         const cfiRange = this.view?.getCFI?.(index, range)
         if (!cfiRange) return
         this.selectionActive = true
+        const startNode = range.startContainer
         const info: SelectionInfo = {
           cfiRange,
           text: text.slice(0, 500),
           rawText,
           rect: this.popupRect(doc, range),
+          // Point-patch anchors (P2): the offset is counted on the rendered
+          // document (conversion is length-preserving, so it equals the
+          // engine's coordinate system); singleTextNode gates point creation.
+          startOffset: startNode.nodeType === Node.TEXT_NODE
+            ? textContentOffset(doc, startNode as Text, range.startOffset) ?? undefined
+            : undefined,
+          sectionHref: this.book?.sections?.[index]?.id as string | undefined,
+          singleTextNode: startNode === range.endContainer && startNode.nodeType === Node.TEXT_NODE,
         }
         if (autoMarkSelectionMode) {
           // 选中即划: create immediately but keep the toolbar open (restyle)
@@ -1204,8 +1267,34 @@ export class FoliateReader implements BookReader {
         Promise.resolve(this.view.deleteAnnotation({ value })).catch(() => {})
       }
       this.renderedAnnotations.set(value, key)
-      Promise.resolve(this.view.addAnnotation({ value })).catch(() => {})
+      this.addAnnotationValue(value)
     }
+  }
+
+  // addAnnotation with orphan detection (P2): the promise resolves with
+  // `{ index: -1 }` when the CFI's spine part cannot be resolved, and rejects
+  // when the text offset overflows the section (CFI.toRange throws) — both
+  // mean the annotation can never be drawn again. Deletion and search
+  // highlights keep the fire-and-forget path: a delete of an unresolvable
+  // annotation would otherwise report a false orphan.
+  private addAnnotationValue(value: string, detectOrphan = true) {
+    const promise = Promise.resolve(this.view?.addAnnotation({ value }))
+    if (!detectOrphan) {
+      promise.catch(() => {})
+      return
+    }
+    promise
+      .then((res: unknown) => {
+        const r = res as { index?: number } | null
+        if (r && typeof r.index === 'number' && r.index < 0) this.reportOrphan(value)
+      })
+      .catch(() => this.reportOrphan(value))
+  }
+
+  private reportOrphan(value: string) {
+    const ann = this.annotationMap.get(value)
+    if (!ann) return
+    this.emit('annotationOrphaned', { cfiRange: ann.cfiRange, type: ann.type })
   }
 
   private handleDrawAnnotation(detail: any) {
@@ -1414,8 +1503,38 @@ export class FoliateReader implements BookReader {
     }
   }
 
-  getSnippet(cfi: string, maxLength = 80): string {
-    try {
+  // Match counts per pattern rule across the whole book ("N 处" badges in the
+  // reader's per-book dialog). Reads the raw section markup through the same
+  // memoized loader the render pipeline uses (original text, pre-transforms),
+  // so counting never re-applies the rules. Cost: one parse per section, so
+  // the caller shows it async and caches by rule signature.
+  async countTransformMatches(rules: TextTransformRule[]): Promise<Record<string, number>> {
+    const book = this.book
+    if (!book) return {}
+    const patternRules = rules.filter((r) => r.matchType === 'pattern' && r.pattern && r.id)
+    if (!patternRules.length) return {}
+    const counts = Object.fromEntries(patternRules.map((r) => [r.id, 0]))
+    const indices: number[] = []
+    for (let i = 0; i < (book.sections ?? []).length; i++) {
+      const section = book.sections[i]
+      if (section?.id && section.linear !== 'no') indices.push(i)
+    }
+    for (const index of indices) {
+      if (this.destroyed) break
+      let markup: unknown
+      try {
+        markup = await book.loadSectionText?.(book.sections[index].id)
+      } catch {
+        continue
+      }
+      if (typeof markup !== 'string') continue
+      const per = countPatternMatches(markup, patternRules, 'application/xhtml+xml')
+      for (const [id, n] of Object.entries(per)) counts[id] = (counts[id] ?? 0) + n
+    }
+    return counts
+  }
+
+  getSnippet(cfi: string, maxLength = 80): string {    try {
       // chapter:{index}:{fraction} — scrolled-mode TXT books
       if (cfi.startsWith('chapter:')) {
         const text = this.lastRange?.startContainer?.textContent
@@ -1571,6 +1690,7 @@ export class FoliateReader implements BookReader {
     this.searchGen++
     this.drawnSearchValues.clear()
     this.searchMatchOffsets.clear()
+    setTransformInvalidListener(null)
     this.navigationPending.dispose()
     this.resizeObserver?.disconnect()
     this.resizeObserver = null

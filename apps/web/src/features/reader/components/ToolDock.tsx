@@ -30,11 +30,13 @@ interface ToolDockProps {
   sidebarOpen: boolean
   locked: boolean
   statsDisabled?: boolean
+  /** Touch devices pin the dock via the middle-tap chrome toggle instead */
+  hideLock?: boolean
   onNavTab: (tab: NavTab) => void
   onToggleLock: () => void
 }
 
-export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, onNavTab, onToggleLock }: ToolDockProps) {
+export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, hideLock, onNavTab, onToggleLock }: ToolDockProps) {
   const icons = [
     {
       id: 'toc' as const,
@@ -79,17 +81,21 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, onN
           />
         )
       })}
-      <div className="my-1 h-px w-8" style={{ backgroundColor: 'var(--bd-read-accent)' }} />
-      <IconButton
-        title={locked ? '解锁工具栏' : '锁定工具栏'}
-        active={locked}
-        onClick={onToggleLock}
-        icon={locked ? (
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
-        ) : (
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M7 11V7a5 5 0 0110 0" /></svg>
-        )}
-      />
+      {!hideLock && (
+        <>
+          <div className="my-1 h-px w-8" style={{ backgroundColor: 'var(--bd-read-accent)' }} />
+          <IconButton
+            title={locked ? '解锁工具栏' : '锁定工具栏'}
+            active={locked}
+            onClick={onToggleLock}
+            icon={locked ? (
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
+            ) : (
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M7 11V7a5 5 0 0110 0" /></svg>
+            )}
+          />
+        </>
+      )}
     </div>
   )
 }

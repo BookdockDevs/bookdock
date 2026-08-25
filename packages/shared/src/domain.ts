@@ -97,6 +97,64 @@ export interface ViewSettings {
   pageVerticalPadding?: number
 }
 
+export type TransformMatchType = 'pattern' | 'point'
+
+export type TransformScope = 'book' | 'global'
+
+export interface TextTransform {
+  id: string
+  userId: string
+  /** Null = user-global pattern rule; set = book-scoped (point patches always carry their book) */
+  bookId: string | null
+  matchType: TransformMatchType
+  /** Required for matchType 'pattern'; null for point patches */
+  pattern: string | null
+  /** Null/empty = delete (hide) the matched content */
+  replacement: string | null
+  isRegex: boolean
+  caseSensitive: boolean
+  enabled: boolean
+  name: string | null
+  /** Lightweight grouping label, list display only */
+  group: string | null
+  /** Point-patch anchors (matchType 'point' only) */
+  spineHref: string | null
+  textOffset: number | null
+  originalText: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * One level of a TOC rule (Sigil-style). Each pattern is scanned against the
+ * whole normalized text independently; a hit pins that line to this level.
+ * Level is a plain integer — levels nest in ascending order and can be freely
+ * added/removed (a single level degenerates into a legado-style flat rule).
+ */
+export interface TocRulePattern {
+  /** Nesting order, ascending (1 = top-level chapter). Integers >= 1. */
+  level: number
+  /** Regex (JS flavour), matched with 'g' + 'm' flags against the whole text. */
+  regex: string
+  /** Optional `$1`-style replacement to clean the matched line into a title. */
+  replacement: string | null
+  enabled: boolean
+}
+
+/** A named, reusable preset of TOC patterns, owned per user. */
+export interface TocRule {
+  id: string
+  userId: string
+  name: string
+  /** Show in the picker / allowed to participate in auto-scoring. */
+  enabled: boolean
+  /** Display + auto-scoring priority (ascending; ties prefer lower value). */
+  sortOrder: number
+  patterns: TocRulePattern[]
+  createdAt: number
+  updatedAt: number
+}
+
 export type AnnotationType = 'highlight' | 'note' | 'bookmark'
 
 export type AnnotationStyle = 'underline' | 'squiggly' | 'highlight'

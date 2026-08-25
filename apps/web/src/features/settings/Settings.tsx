@@ -11,6 +11,8 @@ import LanguageSwitcher from './components/LanguageSwitcher'
 import TrashSettingsRow from './components/TrashSettingsRow'
 import ReadingDataSettingsSection from './components/ReadingDataSettingsSection'
 import FontsSettingsSection from './components/FontsSettingsSection'
+import TransformsSettingsSection from './components/TransformsSettingsSection'
+import TocRulesSettingsSection from './components/TocRulesSettingsSection'
 import AccountSection from './components/AccountSection'
 
 type SectionId = 'general' | 'account' | 'reading' | 'library' | 'admin'
@@ -78,6 +80,8 @@ export default function Settings() {
             <div className="flex flex-col gap-6">
               <ReadingDataSettingsSection />
               <FontsSettingsSection />
+              <TransformsSettingsSection />
+              <TocRulesSettingsSection />
             </div>
           )}
           {active === 'library' && (

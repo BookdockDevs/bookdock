@@ -4,55 +4,21 @@ import { useMutation } from '@tanstack/react-query'
 import { apiGet, apiPut } from '@/api/client'
 import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
-import { activeSnapshot, parseReadingConfig, READING_PROFILE_KEYS } from '@/features/reader/lib/reading-profiles'
+import { legacyActiveId } from '@/features/reader/lib/reading-profiles'
+import { customThemesFromSync } from '@/lib/reading-theme'
 import type { SettingsRes } from '@bookdock/shared'
 
 const SYNC_CHANNEL = 'bd-settings'
 const SESSION_ID = Math.random().toString(36).slice(2)
 
+// Only non-reading, non-device settings sync to the server. Flat reading
+// fields are deliberately excluded (intents sync, outcomes stay local):
+// preset/global edits travel inside the `readingConfig` blob, and the
+// device-local active preset (`activePresetId`) rides the BroadcastChannel
+// but never the PUT. Device-adaptation keys (toolbarLocked, sidebarWidth,
+// gridColumns, library view prefs) stay in localStorage per device.
 const SETTINGS_KEYS = [
   'uiTheme',
-  'readingThemeId',
-  'lightReadingThemeId',
-  'fontFamily',
-  'fontSize',
-  'fontWeight',
-  'lineHeight',
-  'paragraphSpacing',
-  'letterSpacing',
-  'indent',
-  'pageWidth',
-  'verticalPadding',
-  'horizontalPadding',
-  'scrollPageWidth',
-  'scrollHorizontalPadding',
-  'scrollVerticalPadding',
-  'pagePageWidth',
-  'pageHorizontalPadding',
-  'pageVerticalPadding',
-  'textAlignJustify',
-  'overrideBookFont',
-  'overrideBookLayout',
-  'gridColumns',
-  'toolbarLocked',
-  'sidebarWidth',
-  'readingMode',
-  'pageColumns',
-  'columnGap',
-  'showHeader',
-  'showFooter',
-  'chineseConversion',
-  'continuousScroll',
-  'pageAnimation',
-  'autoMarkSelection',
-  'clickAreaMode',
-  'headerLeft',
-  'headerCenter',
-  'headerRight',
-  'footerLeft',
-  'footerCenter',
-  'footerRight',
-  'marginalFontSize',
   'readingTimerMode',
   'manualTimerGraceMinutes',
   'readingConfig',
@@ -69,6 +35,9 @@ function pickSettings(state: ReturnType<typeof useUiStore.getState>): SettingsRe
   // from web. The pair is lossless: coverMode = text hidden, coverFit = contain.
   settings.coverMode = !state.coverText
   settings.coverFit = state.coverFit === 'full'
+  // Custom themes sync as a JSON string: reading configs reference them by
+  // id, so the referenced resource must travel with the intent.
+  settings.customThemes = JSON.stringify(state.customThemes)
   return settings
 }
 
@@ -85,10 +54,20 @@ function settingsChanged(
 ): boolean {
   if (state.coverText !== prevState.coverText) return true
   if (state.coverFit !== prevState.coverFit) return true
+  if (state.customThemes !== prevState.customThemes) return true
   return SETTINGS_KEYS.some((key) => {
     // @ts-expect-error dynamic settings keys
     return state[key] !== prevState[key]
   })
+}
+
+// Blobs written before the activation rework carried the device pointer
+// inside the payload; a device with no local pointer yet adopts it.
+function adoptLegacyActive(raw: string | undefined) {
+  const state = useUiStore.getState()
+  if (state.activePresetId !== null || !raw) return
+  const legacy = legacyActiveId(raw)
+  if (legacy) state.activateReadingPreset(legacy)
 }
 
 export function SettingsSync() {
@@ -123,18 +102,16 @@ export function SettingsSync() {
             patch.coverText = coverPrefs.coverText
             patch.coverFit = coverPrefs.coverFit
           }
-          // The profiles blob is authoritative for the reading keys: re-apply
-          // its active snapshot over the flat fields so both stay consistent
-          // even when the server's flat values trail a preset transition.
-          const cfg = parseReadingConfig(patch.readingConfig ?? res.data.readingConfig)
-          if (cfg) {
-            for (const key of READING_PROFILE_KEYS) {
-              // @ts-expect-error dynamic settings keys
-              patch[key] = activeSnapshot(cfg)[key]
-            }
-          }
           return patch
         })
+        // Applied via the store action so localStorage persistence runs too
+        const syncedThemes = customThemesFromSync(res.data.customThemes)
+        if (syncedThemes) useUiStore.getState().setCustomThemes(syncedThemes)
+        adoptLegacyActive(res.data.readingConfig)
+        // The profiles blob is authoritative for the reading keys: re-apply
+        // the local resolution chain (bound > device active > global) so the
+        // flat fields follow the synced config.
+        useUiStore.getState().applyReadingResolution()
       })
       .catch(() => undefined)
   }, [userId])
@@ -159,15 +136,16 @@ export function SettingsSync() {
             patch.coverText = coverPrefs.coverText
             patch.coverFit = coverPrefs.coverFit
           }
-          const cfg = parseReadingConfig(patch.readingConfig)
-          if (cfg) {
-            for (const key of READING_PROFILE_KEYS) {
-              // @ts-expect-error dynamic settings keys
-              patch[key] = activeSnapshot(cfg)[key]
-            }
-          }
           return patch
         })
+        const syncedThemes = customThemesFromSync(data.customThemes)
+        if (syncedThemes) useUiStore.getState().setCustomThemes(syncedThemes)
+        // The device-local active rides the broadcast (never the PUT) so
+        // every tab of this device shares one pointer; resolution follows.
+        if (typeof data.activePresetId === 'string' || data.activePresetId === null) {
+          useUiStore.getState().activateReadingPreset(data.activePresetId)
+        }
+        useUiStore.getState().applyReadingResolution()
       }
     }
 
@@ -184,13 +162,16 @@ export function SettingsSync() {
     }
 
     const unsub = useUiStore.subscribe((state, prevState) => {
-      if (!settingsChanged(state, prevState)) return
+      const settingsTouched = settingsChanged(state, prevState)
+      const activeTouched = state.activePresetId !== prevState.activePresetId
+      if (!settingsTouched && !activeTouched) return
       if (!useAuthStore.getState().user) return
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         const payload = pickSettings(state)
-        mutateRef.current(payload)
-        bcRef.current?.postMessage({ sessionId: SESSION_ID, settings: payload })
+        // The device-local active preset is broadcast-only, never PUT
+        if (settingsTouched) mutateRef.current(payload)
+        bcRef.current?.postMessage({ sessionId: SESSION_ID, settings: { ...payload, activePresetId: state.activePresetId } })
       }, 1000)
     })
     return () => {

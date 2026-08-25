@@ -1,0 +1,222 @@
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
+
+import { cn } from '@/lib/utils'
+import { useUiStore } from '@/stores/ui.store'
+
+import { useReaderState } from '../state/reader-state'
+import { useIsTouch } from '../hooks/useIsTouch'
+import { ToolDock } from './ToolDock'
+import { NavigationPanel, type NavigationPanelRef } from './NavigationPanel'
+import type { NavTab } from '../types'
+
+interface ReaderSidebarProps {
+  bookId: string
+  onStatsTabOpen: () => void
+  /** Middle-tap chrome toggle; the only dock summon on touch (no hover) */
+  chromePinned: boolean
+}
+
+export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen, chromePinned }: ReaderSidebarProps) {
+  const isTouch = useIsTouch()
+  const activeNavTab = useReaderState((s) => s.activeNavTab)
+  const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
+  const sidebarOpen = useReaderState((s) => s.sidebarOpen)
+  const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
+  const readingThemeId = useUiStore((s) => s.readingThemeId)
+  const lightReadingThemeId = useUiStore((s) => s.lightReadingThemeId)
+  const setReadingThemeId = useUiStore((s) => s.setReadingThemeId)
+  const toolbarLocked = useUiStore((s) => s.toolbarLocked)
+  const setToolbarLocked = useUiStore((s) => s.setToolbarLocked)
+  const sidebarWidth = useUiStore((s) => s.sidebarWidth)
+  const setSidebarWidth = useUiStore((s) => s.setSidebarWidth)
+  const statsDisabled = useUiStore((s) => s.readingTimerMode) === 'off'
+
+  const SIDEBAR_MIN = 200
+  const SIDEBAR_MAX = 500
+  // Touch panel width is fixed: no drag-resize without a precise pointer
+  const TOUCH_PANEL_WIDTH = 'min(320px, 85vw)'
+
+  const [locked, setLocked] = useState(toolbarLocked)
+  const [hovered, setHovered] = useState(false)
+  // Touch ignores hover (absent) and the persisted lock (lock button hidden)
+  const toolbarVisible = isTouch
+    ? chromePinned || sidebarOpen
+    : locked || hovered || sidebarOpen
+  const panelRef = useRef<NavigationPanelRef>(null)
+
+  const [panelWidth, setPanelWidth] = useState(sidebarWidth)
+  const [resizing, setResizing] = useState(false)
+  const resizingRef = useRef(false)
+  const panelRefWidth = useRef(panelWidth)
+  const panelContainerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setLocked(toolbarLocked)
+  }, [toolbarLocked])
+
+  useEffect(() => {
+    setToolbarLocked(locked)
+  }, [locked, setToolbarLocked])
+
+  useEffect(() => {
+    if (resizing) return
+    setSidebarWidth(panelWidth)
+  }, [panelWidth, resizing, setSidebarWidth])
+
+  // Settle the unreported reading segment so the stats tab shows fresh numbers
+  const statsTabActive = sidebarOpen && activeNavTab === 'stats'
+  useEffect(() => {
+    if (statsTabActive) onStatsTabOpen()
+  }, [statsTabActive, onStatsTabOpen])
+
+  const dragState = useRef({ clientX: 0, width: 0 })
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    resizingRef.current = true
+    dragState.current.width = panelContainerRef.current?.getBoundingClientRect().width ?? panelWidth
+    dragState.current.clientX = e.clientX
+    setResizing(true)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [panelWidth])
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!resizingRef.current) return
+    const delta = e.clientX - dragState.current.clientX
+    const next = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, dragState.current.width + delta))
+    setPanelWidth(next)
+    panelRefWidth.current = next
+  }, [])
+
+  const handlePointerUp = useCallback(() => {
+    if (!resizingRef.current) return
+    resizingRef.current = false
+    setResizing(false)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    setSidebarWidth(panelRefWidth.current)
+  }, [setSidebarWidth])
+
+  const handleNavTab = useCallback((tab: NavTab) => {
+    if (sidebarOpen && activeNavTab === tab) {
+      setSidebarOpen(false)
+    } else {
+      panelRef.current?.saveScroll()
+      setActiveNavTab(tab)
+      setSidebarOpen(true)
+    }
+  }, [sidebarOpen, activeNavTab, setActiveNavTab, setSidebarOpen])
+
+  const handleClosePanel = useCallback(() => {
+    setSidebarOpen(false)
+  }, [setSidebarOpen])
+
+  function toggleTheme() {
+    setReadingThemeId(readingThemeId === 'night' ? lightReadingThemeId : 'night')
+  }
+
+  const collapsed = !toolbarVisible
+
+  const totalWidth = isTouch
+    ? collapsed
+      ? 0
+      : sidebarOpen
+        ? `calc(56px + ${TOUCH_PANEL_WIDTH})`
+        : 56
+    : collapsed
+      ? 8
+      : sidebarOpen
+        ? 56 + panelWidth
+        : 56
+
+  return (
+    <>
+      {isTouch && sidebarOpen && (
+        // Backdrop dismisses only the panel; the dock stays summoned
+        <div
+          data-testid="sidebar-backdrop"
+          className="fixed inset-0 z-40 bg-black/40"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <div
+        className={cn(
+          'z-50 flex h-full shrink-0 overflow-hidden',
+          // Touch: overlay floats over the full-width content instead of
+          // pushing it; PC: in-flow flex item (hover strip included)
+          isTouch ? 'absolute inset-y-0 left-0' : 'relative',
+          !resizing && 'transition-all duration-200',
+        )}
+        style={{ width: totalWidth }}
+        onPointerEnter={isTouch ? undefined : () => setHovered(true)}
+        onPointerLeave={isTouch ? undefined : () => setHovered(false)}
+      >
+        <div
+          className={cn(
+            'flex h-full w-14 shrink-0 flex-col items-center border-r py-3',
+            !resizing && 'transition-all duration-200',
+            collapsed ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',
+          )}
+          style={{ backgroundColor: 'var(--bd-read-bg)', borderColor: 'var(--bd-read-accent)' }}
+        >
+          <ToolDock
+            activeNavTab={activeNavTab}
+            sidebarOpen={sidebarOpen}
+            locked={locked}
+            statsDisabled={statsDisabled}
+            hideLock={isTouch}
+            onNavTab={handleNavTab}
+            onToggleLock={() => setLocked(!locked)}
+          />
+          <div className="flex-1" />
+          <button
+            onClick={toggleTheme}
+            title={readingThemeId === 'night' ? '切换为日间' : '切换为夜间'}
+            className="flex h-10 w-10 items-center justify-center rounded-lg border text-[var(--bd-read-text)] transition-colors hover:bg-stone-500/10"
+            style={{ borderColor: 'var(--bd-read-accent)' }}
+          >
+            {readingThemeId === 'night' ? (
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
+            ) : (
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
+            )}
+          </button>
+        </div>
+        <div
+          className={cn(
+            'relative h-full shrink-0 overflow-hidden',
+            !resizing && 'transition-all duration-200',
+            isTouch && (sidebarOpen ? 'w-[min(320px,85vw)]' : 'w-0'),
+          )}
+          style={isTouch
+            ? { backgroundColor: 'var(--bd-read-bg)' }
+            : { width: sidebarOpen ? panelWidth : 0, backgroundColor: 'var(--bd-read-bg)' }}
+        >
+          <div
+            className={cn('h-full', isTouch && 'w-[min(320px,85vw)]')}
+            style={isTouch ? undefined : { width: panelWidth }}
+          >
+            <NavigationPanel
+              ref={panelRef}
+              bookId={bookId}
+              open={sidebarOpen}
+              locked={locked}
+              statsDisabled={statsDisabled}
+              onClose={handleClosePanel}
+            />
+          </div>
+          {sidebarOpen && !isTouch && (
+            <div
+              className="absolute right-0 top-0 z-50 h-full w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-500/40 active:w-1.5 active:bg-blue-500/60"
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+            />
+          )}
+        </div>
+      </div>
+    </>
+  )
+})

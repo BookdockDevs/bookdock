@@ -1,9 +1,10 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { apiGet, apiPatch, apiPut } from '@/api/client'
 import { usePrefetchBookReadingStats } from '@/api/hooks/reading-records'
+import { useBookTransforms } from '@/api/hooks/useTransforms'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useToastStore } from '@/stores/toast.store'
 import { useUiStore, getEffectiveTheme } from '@/stores/ui.store'
@@ -11,9 +12,11 @@ import { useUiStore, getEffectiveTheme } from '@/stores/ui.store'
 import { cn } from '@/lib/utils'
 import { isPresetThemeId } from '@/lib/reading-theme'
 import ErrorBoundary from '@/components/ui/ErrorBoundary'
+import Modal from '@/components/ui/Modal'
 
 import { useReaderRenderer } from './hooks/useReaderRenderer'
 import { useReadingTimer } from './hooks/useReadingTimer'
+import { useIsTouch } from './hooks/useIsTouch'
 import { useReaderState } from './state/reader-state'
 import { RendererContext } from './hooks/useReaderApi'
 import { useBookChapters } from './hooks/useBookChapters'
@@ -23,21 +26,21 @@ import { createHistoryAutoHide, type HistoryAutoHide } from './history-auto-hide
 import { consumeEscFlag } from './lib/esc-consumed'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
+import { ReaderSidebar } from './components/ReaderSidebar'
 import { Ribbon } from './components/Ribbon'
-import { ToolDock } from './components/ToolDock'
-import { NavigationPanel, type NavigationPanelRef } from './components/NavigationPanel'
 import { SelectionToolbar } from './components/SelectionToolbar'
 import ShareCardDialog from './components/share/ShareCardDialog'
 import { ProgressStrip } from './components/ProgressStrip'
 import HistoryCapsule from './components/HistoryCapsule'
 import TimerPill from './components/TimerPill'
 import { getLastHighlightStyle } from './components/annotation-colors'
-import { setAutoMarkSelectionMode } from './renderers/FoliateReader'
+import { setActiveTransforms, setAutoMarkSelectionMode } from './renderers/FoliateReader'
+import TransformForm from '../settings/components/TransformForm'
 import { ViewSettingsContext } from './view-settings-context'
 import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './lib/view-settings'
 import { readingRateOf, RATE_SAMPLE_MIN_INTERVAL_MS } from './lib/progress-model'
 import type { PerBookSettingKey, GlobalViewSettings } from './lib/view-settings'
-import type { NavTab, ReaderAnnotation } from './types'
+import type { ReaderAnnotation } from './types'
 import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 
 export default function Reader() {
@@ -63,12 +66,17 @@ export default function Reader() {
   // raises the footer and never moves the capsule under the cursor.
   const [footerSummon, setFooterSummon] = useState(false)
   const [cornerDwell, setCornerDwell] = useState(false)
+  // Touch devices have no hover: the chrome hover hot zones stay inert and
+  // the top/bottom bars are driven by the middle-tap chromePinned alone
+  const isTouch = useIsTouch()
   const footerVisibleRef = useRef(false)
   const footerVisible = chromePinned || footerSummon || (footerVisibleRef.current && cornerDwell)
   useEffect(() => {
     footerVisibleRef.current = footerVisible
   }, [footerVisible])
   const setSelection = useReaderState((s) => s.setSelection)
+  const replaceTarget = useReaderState((s) => s.replaceTarget)
+  const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const setTocItems = useReaderState((s) => s.setTocItems)
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
@@ -210,6 +218,44 @@ export default function Reader() {
     if (viewSettingsTimerRef.current) clearTimeout(viewSettingsTimerRef.current)
   }, [])
 
+  // --- Per-book preset binding (book.meta.boundPresetId) -------------------
+  // Same optimistic-cache pattern as the viewSettings mutation above.
+  const boundPresetId = (bookQuery.data?.data?.meta?.boundPresetId as string | undefined) ?? null
+  const bindPresetMutation = useMutation({
+    mutationFn: (presetId: string | null) =>
+      apiPatch<{ data: BookDetailRes }>(`/books/${id}`, { boundPresetId: presetId }),
+    onMutate: (presetId) => {
+      queryClient.setQueryData(['book', id], (old: { data: BookDetailRes } | undefined) => {
+        if (!old?.data) return old
+        const meta = { ...old.data.meta }
+        if (presetId === null) delete meta.boundPresetId
+        else meta.boundPresetId = presetId
+        return { ...old, data: { ...old.data, meta } }
+      })
+    },
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: ['book', id] })
+    },
+  })
+  const setBoundPreset = useCallback((presetId: string | null) => {
+    bindPresetMutation.mutate(presetId)
+  }, [bindPresetMutation])
+
+  // Binding resolution: the open book's bound preset heads the resolution
+  // chain (bound > device active > global); leaving or switching books falls
+  // back to the device chain. The store writes only on actual change, so
+  // this never loops with the routing fold.
+  const setBoundPresetId = useUiStore((s) => s.setBoundPresetId)
+  const applyReadingResolution = useUiStore((s) => s.applyReadingResolution)
+  useEffect(() => {
+    setBoundPresetId(boundPresetId)
+    applyReadingResolution()
+    return () => {
+      setBoundPresetId(null)
+      applyReadingResolution()
+    }
+  }, [boundPresetId, setBoundPresetId, applyReadingResolution])
+
   const [perBookActive, setPerBookActiveState] = useState(false)
   // The Reader component persists across /books/:id navigation, so the
   // previous book's per-book state must not leak into the next one
@@ -256,8 +302,10 @@ export default function Reader() {
       setPerBookActive,
       updateSetting,
       perBookDiff: perBook,
+      boundPresetId,
+      setBoundPreset,
     }),
-    [effectiveSettings, perBookActive, setPerBookActive, updateSetting, perBook],
+    [effectiveSettings, perBookActive, setPerBookActive, updateSetting, perBook, boundPresetId, setBoundPreset],
   )
 
   const progressQuery = useQuery({
@@ -363,13 +411,20 @@ export default function Reader() {
   // Latch initialCfi at first resolve: later refetches of ['progress'] (e.g.
   // StatsPanel mounting) must not remount the renderer
   const initialCfiRef = useRef<string | undefined>(undefined)
+  const initialFractionRef = useRef<number | undefined>(undefined)
   const initialCfiBookRef = useRef(id)
   if (initialCfiBookRef.current !== id) {
     initialCfiBookRef.current = id
     initialCfiRef.current = undefined
+    initialFractionRef.current = undefined
   }
   if (initialCfiRef.current === undefined && !progressQuery.isPending) {
-    initialCfiRef.current = progressQuery.data?.data?.cfi ?? ''
+    const data = progressQuery.data?.data
+    initialCfiRef.current = data?.cfi ?? ''
+    // After re-TOC the saved CFI is stale; restore by the book-level percent
+    // instead (content is unchanged, so the fraction still lands on the same
+    // text). The reader re-saves a fresh CFI on the first relocate.
+    initialFractionRef.current = data?.cfi ? undefined : data && data.percent > 0 ? data.percent / 100 : undefined
   }
 
   const [bookReady, setBookReady] = useState(false)
@@ -408,11 +463,28 @@ export default function Reader() {
       : c.endOffset - (c.contentStartOffset ?? c.startOffset)))
   }, [chaptersQuery.data])
 
+  // Text transforms (正文变换 P1): the module-level rule set must be populated
+  // before the renderer mounts (transforms apply at section load time), so
+  // this effect is declared before useReaderRenderer. Cleared on unmount and
+  // book switch so rules never leak into another book's reader.
+  const { data: transformsData } = useBookTransforms(id)
+  const transformRules = useMemo(() => transformsData?.data ?? [], [transformsData])
+  useEffect(() => {
+    setActiveTransforms(transformRules)
+    return () => setActiveTransforms([])
+  }, [transformRules])
+
+  // A stale replace dialog must not follow the reader into another book
+  useEffect(() => {
+    setReplaceTarget(null)
+  }, [id, setReplaceTarget])
+
   const { containerRef, renderer } = useReaderRenderer({
     url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
     // so it navigates exactly once (to the saved CFI, or to the book start
     // when progress resolved to none)
     initialCfi: initialCfiRef.current,
+    initialFraction: initialFractionRef.current,
     settings: effectiveSettings,
     chapterWordCounts,
     onRendered: () => {
@@ -503,6 +575,19 @@ export default function Reader() {
       }
     },
     onUserJump: () => closeSegment(segmentTrackerRef.current),
+    onTransformInvalid: (e) => {
+      // The same invalid patch is reported again on every section reload —
+      // toast only the freshly discovered ones
+      const known = useReaderState.getState().invalidTransformIds
+      const fresh = e.ids.filter((id) => !known.includes(id))
+      if (fresh.length) {
+        addToast(_('reader.transformsInvalidToast', { count: fresh.length }), 'error')
+      }
+      useReaderState.getState().addInvalidTransformIds(e.ids)
+    },
+    onAnnotationOrphaned: (e) => {
+      useReaderState.getState().addOrphanedAnnotationKeys([`${e.cfiRange}|${e.type}`])
+    },
     onInstantAnnotation: (e) => {
       const lastStyle = getLastHighlightStyle()
       createAnnotation.mutate({
@@ -518,6 +603,14 @@ export default function Reader() {
       if (!e.keepSelection) setSelection(null)
     },
   })
+
+  // Rule-set changes after mount must invalidate the cached sections: the
+  // renderer tears the view down and reopens it (same mechanism as the
+  // Chinese-conversion switch). No-op while the query is still loading.
+  useEffect(() => {
+    if (!renderer || transformsData === undefined) return
+    void renderer.applyTextTransforms(transformRules)
+  }, [renderer, transformRules, transformsData])
 
   // Byte-weight section boundaries (foliate's own progress model) for the
   // progress strip's drag preview — same model the seek lands by, so the
@@ -897,16 +990,18 @@ export default function Reader() {
       <RendererContext.Provider value={rendererContextValue}>
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div className="flex h-full w-full">
-          <ReaderSidebar bookId={id} onStatsTabOpen={flushReadingTimer} />
+          <ReaderSidebar bookId={id} onStatsTabOpen={flushReadingTimer} chromePinned={chromePinned} />
           <div className="relative flex flex-1 flex-col">
-            {/* Top hover zone: hot strip + header belong to the same group so hover is continuous. */}
-            <div className="group absolute inset-x-0 top-0 z-40 pointer-events-none">
-              <div className="absolute inset-x-0 top-0 h-12 pointer-events-auto" />
+            {/* Top hover zone: hot strip + header belong to the same group so hover is continuous.
+                Touch: no group/hot strip — pinned (middle tap) is the only reveal. */}
+            <div className={cn('absolute inset-x-0 top-0 z-40 pointer-events-none', !isTouch && 'group')}>
+              {!isTouch && <div className="absolute inset-x-0 top-0 h-12 pointer-events-auto" />}
               <ReaderHeader
                 title={currentChapter || book.title}
                 visible
                 pinned={chromePinned}
                 settingsOpen={settingsOpen}
+                bookId={id}
                 estimatedMinutes={estimatedMinutes}
                 onAddBookmark={onAddBookmark}
                 onToggleSettings={onToggleSettings}
@@ -984,15 +1079,18 @@ export default function Reader() {
                 the footer; corner zones sustain it and carry the capsules, which
                 lift together with the footer via zone translate. Summon handlers
                 sit on the strip+footer wrapper so hovering footer controls (own
-                pointer targets) still counts as dwelling in the summon region. */}
+                pointer targets) still counts as dwelling in the summon region.
+                Touch: summon/dwell stay inert (no sticky hover, no tap
+                interception); the footer follows chromePinned alone. */}
             <div className="absolute inset-x-0 bottom-0 z-40 pointer-events-none">
               <div
-                onPointerEnter={() => setFooterSummon(true)}
-                onPointerLeave={() => setFooterSummon(false)}
+                onPointerEnter={isTouch ? undefined : () => setFooterSummon(true)}
+                onPointerLeave={isTouch ? undefined : () => setFooterSummon(false)}
               >
                 <div
                   className={cn(
-                    'absolute bottom-0 right-16 h-12 pointer-events-auto',
+                    'absolute bottom-0 right-16 h-12',
+                    !isTouch && 'pointer-events-auto',
                     (historyCaps.canBack || historyCaps.canForward) ? 'left-28' : 'left-0',
                   )}
                 />
@@ -1016,8 +1114,8 @@ export default function Reader() {
                     'absolute bottom-0 left-0 h-24 w-28 transition-transform duration-300',
                     footerVisible ? '-translate-y-10 pointer-events-auto' : 'pointer-events-none',
                   )}
-                  onPointerEnter={() => setCornerDwell(true)}
-                  onPointerLeave={() => setCornerDwell(false)}
+                  onPointerEnter={isTouch ? undefined : () => setCornerDwell(true)}
+                  onPointerLeave={isTouch ? undefined : () => setCornerDwell(false)}
                 >
                   <HistoryCapsule
                     canBack={historyCaps.canBack}
@@ -1032,8 +1130,8 @@ export default function Reader() {
                   'absolute bottom-0 right-0 h-24 w-16 transition-transform duration-300',
                   footerVisible ? '-translate-y-10 pointer-events-auto' : 'pointer-events-none',
                 )}
-                onPointerEnter={() => setCornerDwell(true)}
-                onPointerLeave={() => setCornerDwell(false)}
+                onPointerEnter={isTouch ? undefined : () => setCornerDwell(true)}
+                onPointerLeave={isTouch ? undefined : () => setCornerDwell(false)}
               >
                 {readingTimerMode === 'manual' && <TimerPill bookId={id} />}
               </div>
@@ -1042,182 +1140,18 @@ export default function Reader() {
         </div>
         <SelectionToolbar bookId={id} />
         <ShareCardDialog bookId={id} />
+        {replaceTarget && (
+          <Modal title={_('annotation.replaceSelection')} onClose={() => setReplaceTarget(null)}>
+            <TransformForm
+              bookId={id}
+              selection={replaceTarget}
+              onDone={() => setReplaceTarget(null)}
+            />
+          </Modal>
+        )}
       </div>
     </RendererContext.Provider>
     </ViewSettingsContext.Provider>
     </ErrorBoundary>
   )
 }
-
-const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen }: { bookId: string; onStatsTabOpen: () => void }) {
-  const activeNavTab = useReaderState((s) => s.activeNavTab)
-  const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
-  const sidebarOpen = useReaderState((s) => s.sidebarOpen)
-  const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
-  const readingThemeId = useUiStore((s) => s.readingThemeId)
-  const lightReadingThemeId = useUiStore((s) => s.lightReadingThemeId)
-  const setReadingThemeId = useUiStore((s) => s.setReadingThemeId)
-  const toolbarLocked = useUiStore((s) => s.toolbarLocked)
-  const setToolbarLocked = useUiStore((s) => s.setToolbarLocked)
-  const sidebarWidth = useUiStore((s) => s.sidebarWidth)
-  const setSidebarWidth = useUiStore((s) => s.setSidebarWidth)
-  const statsDisabled = useUiStore((s) => s.readingTimerMode) === 'off'
-
-  const SIDEBAR_MIN = 200
-  const SIDEBAR_MAX = 500
-
-  const [locked, setLocked] = useState(toolbarLocked)
-  const [hovered, setHovered] = useState(false)
-  const toolbarVisible = locked || hovered || sidebarOpen
-  const panelRef = useRef<NavigationPanelRef>(null)
-
-  const [panelWidth, setPanelWidth] = useState(sidebarWidth)
-  const [resizing, setResizing] = useState(false)
-  const resizingRef = useRef(false)
-  const panelRefWidth = useRef(panelWidth)
-  const panelContainerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    setLocked(toolbarLocked)
-  }, [toolbarLocked])
-
-  useEffect(() => {
-    setToolbarLocked(locked)
-  }, [locked, setToolbarLocked])
-
-  useEffect(() => {
-    if (resizing) return
-    setSidebarWidth(panelWidth)
-  }, [panelWidth, resizing, setSidebarWidth])
-
-  // Settle the unreported reading segment so the stats tab shows fresh numbers
-  const statsTabActive = sidebarOpen && activeNavTab === 'stats'
-  useEffect(() => {
-    if (statsTabActive) onStatsTabOpen()
-  }, [statsTabActive, onStatsTabOpen])
-
-  const dragState = useRef({ clientX: 0, width: 0 })
-
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault()
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-    resizingRef.current = true
-    dragState.current.width = panelContainerRef.current?.getBoundingClientRect().width ?? panelWidth
-    dragState.current.clientX = e.clientX
-    setResizing(true)
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-  }, [panelWidth])
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!resizingRef.current) return
-    const delta = e.clientX - dragState.current.clientX
-    const next = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, dragState.current.width + delta))
-    setPanelWidth(next)
-    panelRefWidth.current = next
-  }, [])
-
-  const handlePointerUp = useCallback(() => {
-    if (!resizingRef.current) return
-    resizingRef.current = false
-    setResizing(false)
-    document.body.style.cursor = ''
-    document.body.style.userSelect = ''
-    setSidebarWidth(panelRefWidth.current)
-  }, [setSidebarWidth])
-
-  const handleNavTab = useCallback((tab: NavTab) => {
-    if (sidebarOpen && activeNavTab === tab) {
-      setSidebarOpen(false)
-    } else {
-      panelRef.current?.saveScroll()
-      setActiveNavTab(tab)
-      setSidebarOpen(true)
-    }
-  }, [sidebarOpen, activeNavTab, setActiveNavTab, setSidebarOpen])
-
-  const handleClosePanel = useCallback(() => {
-    setSidebarOpen(false)
-  }, [setSidebarOpen])
-
-  function toggleTheme() {
-    setReadingThemeId(readingThemeId === 'night' ? lightReadingThemeId : 'night')
-  }
-
-  const collapsed = !toolbarVisible
-
-  const totalWidth = collapsed
-    ? 8
-    : sidebarOpen
-      ? 56 + panelWidth
-      : 56
-
-  return (
-    <div
-      className={cn(
-        'relative z-50 flex h-full shrink-0 overflow-hidden',
-        !resizing && 'transition-all duration-200',
-      )}
-      style={{ width: totalWidth }}
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
-    >
-      <div
-        className={cn(
-          'flex h-full w-14 shrink-0 flex-col items-center border-r py-3',
-          !resizing && 'transition-all duration-200',
-          collapsed ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',
-        )}
-        style={{ backgroundColor: 'var(--bd-read-bg)', borderColor: 'var(--bd-read-accent)' }}
-      >
-        <ToolDock
-          activeNavTab={activeNavTab}
-          sidebarOpen={sidebarOpen}
-          locked={locked}
-          statsDisabled={statsDisabled}
-          onNavTab={handleNavTab}
-          onToggleLock={() => setLocked(!locked)}
-        />
-        <div className="flex-1" />
-        <button
-          onClick={toggleTheme}
-          title={readingThemeId === 'night' ? '切换为日间' : '切换为夜间'}
-          className="flex h-10 w-10 items-center justify-center rounded-lg border text-[var(--bd-read-text)] transition-colors hover:bg-stone-500/10"
-          style={{ borderColor: 'var(--bd-read-accent)' }}
-        >
-          {readingThemeId === 'night' ? (
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
-          ) : (
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
-          )}
-        </button>
-      </div>
-      <div
-        className={cn(
-          'relative h-full shrink-0 overflow-hidden',
-          !resizing && 'transition-all duration-200',
-        )}
-        style={{ width: sidebarOpen ? panelWidth : 0, backgroundColor: 'var(--bd-read-bg)' }}
-      >
-        <div className="h-full" style={{ width: panelWidth }}>
-          <NavigationPanel
-            ref={panelRef}
-            bookId={bookId}
-            open={sidebarOpen}
-            locked={locked}
-            statsDisabled={statsDisabled}
-            onClose={handleClosePanel}
-          />
-        </div>
-        {sidebarOpen && (
-          <div
-            className="absolute right-0 top-0 z-50 h-full w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-500/40 active:w-1.5 active:bg-blue-500/60"
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-          />
-        )}
-      </div>
-    </div>
-  )
-})

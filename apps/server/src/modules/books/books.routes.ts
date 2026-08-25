@@ -21,13 +21,20 @@ import {
   getBookTags,
   stripMetaChapters,
   bufferFromStream,
+  reTocBook,
 } from './books.service'
 import { getTrashSettings } from '../settings/settings.service'
 import { getStorage } from '../../storage'
 import { config } from '../../config'
 import { AppError } from '../../middleware/error'
+import { exportEpubBook, exportTxtBook } from './txt-export'
 
 const booksRoutes = new Hono()
+
+// Download filenames keep word chars plus CJK punctuation/ideographs, '_' else.
+function safeFileBase(title: string): string {
+  return title.replace(/[^\w\u3000-\u303f\uff00-\uffef\u4e00-\u9fa5-]/g, '_')
+}
 
 booksRoutes.get('/', async (c) => {
   const query = c.req.query()
@@ -95,7 +102,7 @@ booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
     throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
   }
   const size = await storage.size(book.filePath)
-  const fileName = `${book.title.replace(/[^\w\u3000-\u303f\uff00-\uffef\u4e00-\u9fa5-]/g, '_')}.epub`
+  const fileName = `${safeFileBase(book.title)}.epub`
   // No HTTP caching on purpose: the URL is content-hash addressed (immutable
   // by design), but when the browser caches the full file, zip.js's Range
   // reads are served FROM that cached entry — Chrome's range reads over a
@@ -157,6 +164,41 @@ booksRoutes.get('/:id/epub', async (c) => {
   })
 })
 
+// P4: edited TXT export — the book's normalized text with the requesting
+// user's effective transforms applied. TXT books only. `?plain=1` skips the
+// transforms; without effective rules the filename falls back to 原文 too
+// (the content is identical, the 校订版 label would be dishonest).
+booksRoutes.get('/:id/export.txt', async (c) => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const plain = c.req.query('plain') === '1'
+  const { text, title, edited } = await exportTxtBook(user.id, id, plain)
+  const fileName = plain || !edited ? `${safeFileBase(title)}.txt` : `${safeFileBase(title)}.校订版.txt`
+  return c.newResponse(new TextEncoder().encode(text), 200, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Cache-Control': 'private, no-store',
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+  })
+})
+
+// P4: EPUB export — regenerated on demand (never a stored blob) from the
+// book's chapters with the user's effective transforms applied. TXT books
+// only; the 校订版 filename uses a hyphen (not the txt variant's dot) so the
+// two stems stay distinct. `?plain=1` skips the transforms; without effective
+// rules the filename is the 原文 form (same rule as export.txt above).
+booksRoutes.get('/:id/export.epub', async (c) => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const plain = c.req.query('plain') === '1'
+  const { buffer, title, edited } = await exportEpubBook(user.id, id, plain)
+  const fileName = plain || !edited ? `${safeFileBase(title)}.epub` : `${safeFileBase(title)}-校订版.epub`
+  return c.newResponse(new Uint8Array(buffer), 200, {
+    'Content-Type': 'application/epub+zip',
+    'Cache-Control': 'private, no-store',
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+  })
+})
+
 booksRoutes.get('/:id', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
@@ -182,6 +224,20 @@ booksRoutes.patch('/:id', async (c) => {
   }
   const book = await updateBook(user.id, id, parsed.data)
   return c.json({ data: book })
+})
+
+booksRoutes.post('/:id/re-toc', async (c) => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({}))
+  // Body is optional; when present it carries the pin decision for the book:
+  // a rule id pins it, null clears the pin and re-runs auto-scoring.
+  const tocRuleId = typeof body?.tocRuleId === 'string' || body?.tocRuleId === null
+    ? (body.tocRuleId as string | null)
+    : undefined
+  await reTocBook(user.id, id, tocRuleId)
+  const book = await getActiveBook(user.id, id)
+  return c.json({ data: stripMetaChapters(book) })
 })
 
 booksRoutes.delete('/trash', async (c) => {

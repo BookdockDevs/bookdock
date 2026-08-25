@@ -1,40 +1,96 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore } from '@/stores/ui.store'
 import { resolveReadingTheme } from '@/lib/reading-theme'
 
 import { useViewSettings } from '../view-settings-context'
+import { useIsTouch } from '../hooks/useIsTouch'
+import { PencilIcon, PinIcon, TrashIcon } from './annotation-icons'
 import {
   nextPresetName,
   parseReadingConfig,
   type ReadingPreset,
 } from '../lib/reading-profiles'
 
-// Reading-setting presets (grill 定案 2026-08-12): icon-ish chips colored by
-// the preset's own reading theme + its name; single-select toggling (clicking
-// the active chip again returns to the global config). Create/rename/delete
-// are icon-only affordances; the only text input is the name field.
+// Reading-setting presets (grill 定案 2026-08-12, activation rework
+// 2026-08-13): icon-ish chips colored by the preset's own reading theme +
+// its name. The highlighted chip is the EFFECTIVE preset (book binding wins
+// over the device active). Click semantics: on an unbound book it toggles
+// the device active; on a bound book it re-binds (also adopting the preset
+// as device active), or unbinds when the effective chip is clicked again.
+// Create/rename/delete/bind affordances: a right-click context menu on
+// pointer devices, inline ghost icon buttons on touch; the only text input
+// is the name field.
 export default function ReadingPresetPicker() {
   const _ = useTranslation()
   const readingConfig = useUiStore((s) => s.readingConfig)
+  const activeId = useUiStore((s) => s.activePresetId)
   const customThemes = useUiStore((s) => s.customThemes)
   const createReadingPreset = useUiStore((s) => s.createReadingPreset)
   const renameReadingPreset = useUiStore((s) => s.renameReadingPreset)
   const deleteReadingPreset = useUiStore((s) => s.deleteReadingPreset)
   const activateReadingPreset = useUiStore((s) => s.activateReadingPreset)
-  // 仅本书's raw diff rides into the new preset so a preset created while a
-  // book-level override is active captures the effective (WYSIWYG) values.
+  // Book context: 仅本书's raw diff rides into the new preset so a preset
+  // created while a book-level override is active captures the effective
+  // (WYSIWYG) values; the binding fields drive the pin affordance.
   const viewSettings = useViewSettings()
+  const boundPresetId = viewSettings?.boundPresetId ?? null
+  const setBoundPreset = viewSettings?.setBoundPreset ?? null
+  // Touch has no hover: the chip action group stays visible
+  const isTouch = useIsTouch()
 
   const [creating, setCreating] = useState(false)
   const [draftName, setDraftName] = useState('')
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+
+  useEffect(() => {
+    if (!menu) return
+    const onDismiss = (e: Event) => {
+      if (!document.getElementById('preset-context-menu')?.contains(e.target as Node)) {
+        setMenu(null)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenu(null)
+    }
+    // Clicks inside the foliate iframe never reach document; the renderer
+    // relays them as a bubbling `content-click` on the reader container
+    document.addEventListener('mousedown', onDismiss)
+    document.addEventListener('content-click', onDismiss)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDismiss)
+      document.removeEventListener('content-click', onDismiss)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menu])
 
   const cfg = parseReadingConfig(readingConfig)
   const presets = cfg?.presets ?? []
-  const activeId = cfg?.active ?? null
+  const effectiveId = boundPresetId && presets.some((p) => p.id === boundPresetId)
+    ? boundPresetId
+    : activeId
+  const menuPreset = presets.find((p) => p.id === menu?.id) ?? null
+
+  function onChipClick(preset: ReadingPreset) {
+    const effective = preset.id === effectiveId
+    if (boundPresetId !== null && setBoundPreset) {
+      if (effective) {
+        // Unbind: falls back to the device active preset
+        setBoundPreset(null)
+      } else {
+        // Rebind and adopt the preset as the device active too
+        setBoundPreset(preset.id)
+        activateReadingPreset(preset.id)
+      }
+    } else {
+      activateReadingPreset(effective ? null : preset.id)
+    }
+  }
 
   function startCreate() {
     if (creating || !cfg) return
@@ -78,10 +134,18 @@ export default function ReadingPresetPicker() {
 
       <div className="flex flex-wrap items-center gap-1.5">
         {presets.map((preset) => {
-          const active = preset.id === activeId
+          const effective = preset.id === effectiveId
+          const bound = preset.id === boundPresetId
           const theme = resolveReadingTheme(preset.snapshot.readingThemeId as string, customThemes)
           return (
-            <div key={preset.id} className="group/preset flex items-center gap-1">
+            <div
+              key={preset.id}
+              className="flex items-center gap-1"
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setMenu({ id: preset.id, x: e.clientX, y: e.clientY })
+              }}
+            >
               {renamingId === preset.id ? (
                 <input
                   autoFocus
@@ -98,10 +162,10 @@ export default function ReadingPresetPicker() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => activateReadingPreset(active ? null : preset.id)}
-                  title={active ? _('reader.presetBackToGlobal') : preset.name}
-                  className={`flex h-7 items-center gap-1.5 rounded-lg border px-2 text-xs transition-colors ${
-                    active
+                  onClick={() => onChipClick(preset)}
+                  title={effective ? (bound ? _('reader.presetUnbind') : _('reader.presetBackToGlobal')) : preset.name}
+                  className={`relative flex h-7 items-center gap-1.5 rounded-lg border px-2 text-xs transition-colors ${
+                    effective
                       ? 'border-current bg-current/10 text-current'
                       : 'border-stone-200 text-[var(--bd-read-sub)] hover:text-current dark:border-stone-800'
                   }`}
@@ -111,20 +175,39 @@ export default function ReadingPresetPicker() {
                     style={{ backgroundColor: theme.bg }}
                   />
                   <span className="max-w-20 truncate">{preset.name}</span>
+                  {/* Bound-to-this-book marker: plain text suffix — the tiny
+                      pin badge rendered as an unreadable dot at 8px */}
+                  {bound && (
+                    <span className="shrink-0 text-[10px] leading-none opacity-60">
+                      · {_('reader.presetBoundBadge')}
+                    </span>
+                  )}
                 </button>
               )}
 
-              {/* Icon-only actions emerge from the chip's right side on hover,
-                  pushing the following presets aside; collapse on mouse leave.
-                  The named group keeps the trigger scoped to this chip — the
-                  reader header (a bare `group`) wraps the settings popover. */}
-              {renamingId !== preset.id && (
-                <span className="hidden items-center gap-1 group-hover/preset:flex">
+              {/* Bind/rename/delete affordances: pointer devices get a
+                  right-click context menu (rendered below); touch has no
+                  contextmenu, so it keeps these inline ghost icon buttons. */}
+              {isTouch && renamingId !== preset.id && (
+                <span className="flex items-center gap-0.5">
+                  {setBoundPreset && (
+                    <button
+                      type="button"
+                      title={bound ? _('reader.presetUnbind') : _('reader.presetBind')}
+                      onClick={() => setBoundPreset(bound ? null : preset.id)}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 17v5" />
+                        <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+                      </svg>
+                    </button>
+                  )}
                   <button
                     type="button"
                     title={_('reader.presetRename')}
                     onClick={() => startRename(preset)}
-                    className="flex h-6 w-6 items-center justify-center rounded-md bg-stone-500 text-white transition-colors hover:bg-stone-600"
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -135,7 +218,7 @@ export default function ReadingPresetPicker() {
                     type="button"
                     title={_('reader.presetDelete')}
                     onClick={() => deleteReadingPreset(preset.id)}
-                    className="flex h-6 w-6 items-center justify-center rounded-md bg-stone-500 text-white transition-colors hover:bg-red-500"
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--bd-read-sub)] transition-colors hover:bg-red-500/10 hover:text-red-500"
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
@@ -173,6 +256,56 @@ export default function ReadingPresetPicker() {
           </button>
         )}
       </div>
+
+      {/* Portaled to body: the settings popover sits inside the transformed
+          ReaderHeader, which would capture `fixed` positioning and break both
+          the menu coordinates and dismissal. Style mirrors the NotesPanel
+          context menu. */}
+      {menu && menuPreset && createPortal(
+        <div
+          id="preset-context-menu"
+          role="menu"
+          className="fixed z-[60] min-w-28 rounded-lg border border-stone-200/60 bg-[var(--bd-read-bg)] py-1 shadow-xl dark:border-stone-800/60"
+          style={{ left: menu.x, top: menu.y }}
+        >
+          {setBoundPreset && (
+            <button
+              type="button"
+              onClick={() => {
+                setBoundPreset(menuPreset.id === boundPresetId ? null : menuPreset.id)
+                setMenu(null)
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+            >
+              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><PinIcon /></span>
+              {menuPreset.id === boundPresetId ? _('reader.presetUnbind') : _('reader.presetBind')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              startRename(menuPreset)
+              setMenu(null)
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+          >
+            <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><PencilIcon /></span>
+            {_('reader.presetRename')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              deleteReadingPreset(menuPreset.id)
+              setMenu(null)
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-500/5"
+          >
+            <span className="[&>svg]:h-4 [&>svg]:w-4"><TrashIcon /></span>
+            {_('reader.presetDelete')}
+          </button>
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }

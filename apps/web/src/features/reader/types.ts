@@ -1,3 +1,5 @@
+import type { TextTransformRule } from './lib/text-transforms'
+
 export interface ReaderLocation {
   cfi: string
   percent: number
@@ -33,6 +35,14 @@ export interface SelectionInfo {
   rawText?: string
   anchor?: string
   rect?: PopupRect
+  /** Point-patch anchor: character offset of the selection start in the
+   * section's text content (same traversal applyTransforms counts). */
+  startOffset?: number
+  /** Point-patch anchor: current section's manifest href (book.sections[index].id) */
+  sectionHref?: string
+  /** Point-patch anchor: true when the selection spans a single text node —
+   * only such selections can create a point patch. */
+  singleTextNode?: boolean
   /** When set on instantAnnotation, the selection toolbar stays open so the
    * user can restyle right after auto-marking ("选中即划" mode). */
   keepSelection?: boolean
@@ -68,6 +78,17 @@ export interface RendererEvents {
    * its reading segment so the jump stretch never counts as read coverage.
    */
   userJump: () => void
+  /**
+   * Point patches (正文变换) that could not be applied to a loaded section —
+   * snapshot not found at/around the recorded offset. Emitted per section load;
+   * the reader dedupes by patch id.
+   */
+  transformInvalid: (e: { ids: string[] }) => void
+  /**
+   * An annotation whose CFI no longer resolves in the book's spine (or whose
+   * text offset overflows the section) — it can never be drawn again.
+   */
+  annotationOrphaned: (e: { cfiRange: string; type: string }) => void
 }
 
 export interface TocItem {
@@ -77,7 +98,7 @@ export interface TocItem {
 }
 
 export interface BookReader {
-  mount(container: HTMLElement): Promise<void>
+  mount(container: HTMLElement, initialTarget?: string, initialFraction?: number): Promise<void>
   display(target?: string, opts?: { internal?: boolean; showPending?: boolean }): Promise<void>
   next(): Promise<void>
   prev(): Promise<void>
@@ -92,6 +113,7 @@ export interface BookReader {
   applyParagraphStyle(cfg: ParagraphStyle): void
   applyPageWidth(width: number): void
   applyChineseConversion(mode: ChineseConversion): Promise<void>
+  applyTextTransforms(rules: TextTransformRule[]): Promise<void>
   applyContinuousScroll(mode: ContinuousScroll): void
   applyClickSettings(mode: ClickAreaMode): void
   /** While >0, click-to-turn and chrome-toggle are swallowed: the click that
@@ -120,6 +142,11 @@ export interface BookReader {
     onProgress?: (results: SearchResult[], progress: number | null) => void,
   ): Promise<SearchResult[]>
   getSnippet(cfi: string, maxLength?: number): string
+  /**
+   * Match counts per pattern rule across the whole book ("N 处" badges).
+   * Counts against the original section markup, one parse per section.
+   */
+  countTransformMatches(rules: TextTransformRule[]): Promise<Record<string, number>>
   /** Render highlight/note annotations on the content and keep them in sync */
   setAnnotations(annotations: ReaderAnnotation[]): void
   /** Collapse any in-content text selection (e.g. after a toolbar action) */

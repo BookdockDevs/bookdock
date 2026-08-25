@@ -31,7 +31,9 @@ import {
   setBookShelf,
   getBookShelf,
   uploadBook,
+  reTocBook,
 } from './books.service'
+import { createTocRule } from '../toc-rules/toc-rules.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -400,6 +402,47 @@ describe('updateBook viewSettings (per-book reading settings)', () => {
   })
 })
 
+describe('updateBook boundPresetId (per-book preset binding)', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let book: ReturnType<typeof seedBook>
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+    book = seedBook(db, ownerId)
+  })
+
+  function metaOf() {
+    const row = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()!
+    return row.meta as Record<string, unknown>
+  }
+
+  it('stores the binding under meta.boundPresetId and overwrites it', async () => {
+    await updateBook(ownerId, book.id, { boundPresetId: 'preset-a' })
+    expect(metaOf().boundPresetId).toBe('preset-a')
+
+    await updateBook(ownerId, book.id, { boundPresetId: 'preset-b' })
+    expect(metaOf().boundPresetId).toBe('preset-b')
+  })
+
+  it('keeps unrelated meta keys when writing boundPresetId', async () => {
+    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 20 } })
+    await updateBook(ownerId, book.id, { boundPresetId: 'preset-a' })
+    const meta = metaOf()
+    expect(meta.boundPresetId).toBe('preset-a')
+    expect(meta.viewSettings).toEqual({ fontSize: 20 })
+  })
+
+  it('clears the binding with null so the book falls back to the device chain', async () => {
+    await updateBook(ownerId, book.id, { boundPresetId: 'preset-a' })
+    await updateBook(ownerId, book.id, { boundPresetId: null })
+    expect(metaOf().boundPresetId).toBeUndefined()
+  })
+})
+
 describe('deleteBook blob reference protection', () => {
   let db: ReturnType<typeof createTestDb>
   let mem: ReturnType<typeof createMemoryStorage>
@@ -760,5 +803,146 @@ describe('listBooks shelfName and tags', () => {
     const res = await listBooks(ownerId, 1, 20)
     expect(res.total).toBe(1)
     expect(res.data).toHaveLength(1)
+  })
+})
+
+describe('reTocBook', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeAll(() => {
+    registerParser(new TxtParser())
+  })
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  // "第X章" is both a legacy pattern and easy to control: a rule with the same
+  // regex still counts as a valid pin, so a clear pin-vs-null distinction is
+  // observable via meta.tocRuleId/tocRuleAuto.
+  function seedTxtBook(text: string) {
+    return uploadBook(ownerId, new File([text], 'book.txt', { type: 'text/plain' }))
+  }
+
+  it('pins an explicit rule (tocRuleAuto=false) and re-splits by it', async () => {
+    const rule = createTocRule(ownerId, {
+      name: 'custom',
+      patterns: [{ level: 1, regex: '^=== (.+)$', replacement: '$1' }],
+    })
+    const { book } = await seedTxtBook('序言\n\n=== 第一章\n\n正文一\n\n=== 第二章\n\n正文二')
+    expect((book.meta as Record<string, unknown>).tocRuleId).toBeUndefined()
+
+    await reTocBook(ownerId, book.id, rule.id)
+    const updated = await getBook(ownerId, book.id)
+    const meta = updated.meta as Record<string, unknown>
+    expect(meta.tocRuleId).toBe(rule.id)
+    expect(meta.tocRuleAuto).toBe(false)
+    expect((meta.chapters as { title: string }[]).map((c) => c.title)).toEqual(['序章', '第一章', '第二章'])
+  })
+
+  it('null clears the pin and re-runs auto-scoring (tocRuleAuto=true when a rule wins)', async () => {
+    const rule = createTocRule(ownerId, {
+      name: 'auto-winner',
+      patterns: [{ level: 1, regex: '^第[一二三四五六七八九十]+章 .+$' }],
+    })
+    // Long bodies so the custom chapter lines clear the >1000-char threshold
+    const body = '正文内容'.repeat(300)
+    const { book } = await seedTxtBook(
+      `第一章 启程\n\n${body}\n\n第二章 旅途\n\n${body}\n\n第三章 归来\n\n${body}`,
+    )
+    // Auto-scoring already picked the rule at upload (it beats the legacy split)
+    expect((book.meta as Record<string, unknown>).tocRuleId).toBe(rule.id)
+
+    await reTocBook(ownerId, book.id, null)
+    const updated = await getBook(ownerId, book.id)
+    const meta = updated.meta as Record<string, unknown>
+    expect(meta.tocRuleId).toBe(rule.id)
+    expect(meta.tocRuleAuto).toBe(true)
+  })
+
+  it('clears the stale progress CFI when the re-split changes chapters', async () => {
+    const { book } = await seedTxtBook('序言\n\n=== 第一章\n\n正文一\n\n=== 第二章\n\n正文二')
+    // The rule is created after upload: auto-scoring at upload fell back to the
+    // legacy split, so re-toc moves every chapter boundary.
+    const rule = createTocRule(ownerId, {
+      name: 'custom',
+      patterns: [{ level: 1, regex: '^=== (.+)$', replacement: '$1' }],
+    })
+
+    const store = storage.getStorage()
+    const progressKey = `progress/${book.id}.json`
+    await store.put(progressKey, Buffer.from(JSON.stringify({
+      cfi: 'chapter-0002.xhtml#epubcfi(/6/4/4)',
+      chapter: '第一章',
+      percent: 42,
+      fraction: 0.42,
+      intervals: [[0.1, 0.42]],
+      rateSamples: [{ at: 1, seconds: 30 }],
+      updatedAt: 123,
+    }), 'utf-8'))
+
+    await reTocBook(ownerId, book.id, rule.id)
+    const stream = await store.get(progressKey)
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    const data = JSON.parse(Buffer.concat(chunks).toString('utf-8'))
+    expect(data.cfi).toBeNull()
+    expect(data.chapter).toBeNull()
+    expect(data.percent).toBe(42)
+    expect(data.intervals).toEqual([[0.1, 0.42]])
+    expect(data.rateSamples).toEqual([{ at: 1, seconds: 30 }])
+  })
+
+  it('keeps the progress CFI when the re-split is unchanged (legacy txt file)', async () => {
+    const rule = createTocRule(ownerId, {
+      name: 'custom',
+      patterns: [{ level: 1, regex: '^第[一二三四五六七八九十]+章' }],
+    })
+    const book = seedBook(db, ownerId, {
+      title: 'Txt',
+      format: 'txt',
+      filePath: `books/${createId('book')}/book.txt`,
+      meta: { bookmeta: {} },
+    })
+    const store = storage.getStorage()
+    // Legacy txt books decode losslessly, so re-splitting with the same rule is
+    // a true no-op and a valid CFI must survive.
+    await store.put(book.filePath, Buffer.from('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二', 'utf-8'))
+    await reTocBook(ownerId, book.id, rule.id)
+
+    const progressKey = `progress/${book.id}.json`
+    await store.put(progressKey, Buffer.from(JSON.stringify({
+      cfi: 'chapter-0001.xhtml#epubcfi(/6/4/4)',
+      chapter: '第一章 启程',
+      percent: 30,
+      fraction: 0.3,
+      updatedAt: 123,
+    }), 'utf-8'))
+
+    await reTocBook(ownerId, book.id, rule.id)
+    const stream = await store.get(progressKey)
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    const data = JSON.parse(Buffer.concat(chunks).toString('utf-8'))
+    expect(data.cfi).toBe('chapter-0001.xhtml#epubcfi(/6/4/4)')
+  })
+
+  it('rejects a foreign rule with TOC_RULE_NOT_FOUND', async () => {
+    const otherId = seedUser(db, 'other')
+    const rule = createTocRule(otherId, {
+      name: 'theirs',
+      patterns: [{ level: 1, regex: '^第.+章 .+$' }],
+    })
+    const { book } = await seedTxtBook('第一章 启程\n\n正文内容')
+    await expect(reTocBook(ownerId, book.id, rule.id)).rejects.toMatchObject({ code: 'TOC_RULE_NOT_FOUND' })
+  })
+
+  it('rejects EPUB books with UNSUPPORTED_FORMAT', async () => {
+    const epub = seedBook(db, ownerId, { format: 'epub' })
+    await expect(reTocBook(ownerId, epub.id)).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
   })
 })

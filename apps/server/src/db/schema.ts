@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core'
 
+import type { TocRulePattern } from '@bookdock/shared'
+
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
   username: text('username').notNull().unique(),
@@ -96,6 +98,48 @@ export const annotations = sqliteTable('annotations', {
     .where(sql`${table.type} != 'note'`),
 }))
 
+// Text transforms (P1): regex/filter rules and point patches share one table,
+// discriminated by matchType. Pattern rules are user-global (bookId always null);
+// `enabled` is the global default, overridable per book via text_transform_overrides.
+// Point patches are inherently single-book (bookId required) and never overridden.
+export const textTransforms = sqliteTable('text_transforms', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').references(() => books.id, { onDelete: 'cascade' }),
+  matchType: text('match_type', { enum: ['pattern', 'point'] }).notNull().default('pattern'),
+  pattern: text('pattern'),
+  replacement: text('replacement'),
+  isRegex: integer('is_regex').notNull().default(0),
+  caseSensitive: integer('case_sensitive').notNull().default(0),
+  enabled: integer('enabled').notNull().default(1),
+  name: text('name'),
+  // `group` is a SQL reserved word; the column keeps the API field name via the property
+  group: text('group_name'),
+  // Point-patch anchors (matchType 'point' only)
+  spineHref: text('spine_href'),
+  textOffset: integer('text_offset'),
+  originalText: text('original_text'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  userBookIdx: index('text_transforms_user_book_idx').on(table.userId, table.bookId),
+}))
+
+// Per-book enable overrides for pattern rules: a row's existence is the override,
+// `enabled` is the value for that book. effectiveEnabled = override.enabled ?? rule.enabled
+export const textTransformOverrides = sqliteTable('text_transform_overrides', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  transformId: text('transform_id').notNull().references(() => textTransforms.id, { onDelete: 'cascade' }),
+  enabled: integer('enabled').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  bookTransformUnique: uniqueIndex('text_transform_overrides_book_transform_unique').on(table.bookId, table.transformId),
+  userBookIdx: index('text_transform_overrides_user_book_idx').on(table.userId, table.bookId),
+}))
+
 export const fonts = sqliteTable('fonts', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
@@ -109,6 +153,24 @@ export const fonts = sqliteTable('fonts', {
 }, (table) => ({
   userContentHashIdx: uniqueIndex('fonts_user_content_hash_idx').on(table.userId, table.contentHash),
   contentHashIdx: index('fonts_content_hash_idx').on(table.contentHash),
+}))
+
+// TOC rules (目录规则): named presets of regex patterns that split TXT books
+// into chapters. patterns is a JSON array of TocRulePattern (level/regex/
+// replacement/name/enabled). sortOrder drives both the picker order and the
+// auto-scoring priority (lower wins ties). A book pins one rule via
+// books.meta.tocRuleId (legado book.tocUrl analog).
+export const tocRules = sqliteTable('toc_rules', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  enabled: integer('enabled').notNull().default(1),
+  sortOrder: integer('sort_order').notNull().default(0),
+  patterns: text('patterns', { mode: 'json' }).$type<TocRulePattern[]>().notNull().default([]),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  userIdx: index('toc_rules_user_idx').on(table.userId, table.sortOrder),
 }))
 
 export const readingRecords = sqliteTable('reading_records', {

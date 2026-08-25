@@ -18,6 +18,9 @@ export function SettingsPopover({ open, onClose, children }: SettingsPopoverProp
       if (ref.current?.contains(e.target as Node)) return
       // Ignore clicks on the settings toggle button (avoids double-toggle)
       if ((e.target as HTMLElement).closest('[data-settings-toggle]')) return
+      // Ignore clicks on the preset context menu — it is portaled to body to
+      // escape this header's transform, so it lives outside the popover DOM
+      if ((e.target as HTMLElement).closest('#preset-context-menu')) return
       onClose()
     }
     function handleKey(e: KeyboardEvent) {

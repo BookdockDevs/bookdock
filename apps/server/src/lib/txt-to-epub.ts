@@ -13,6 +13,17 @@ export interface TxtToEpubMetadata {
   id?: string
 }
 
+export interface TxtToEpubCover {
+  data: Buffer
+  ext: 'jpg' | 'png' | 'webp'
+}
+
+const COVER_MEDIA_TYPES: Record<TxtToEpubCover['ext'], string> = {
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+}
+
 const XML_SPECIAL_CHAR_MAP: Record<string, string> = {
   '&': '&amp;',
   '<': '&lt;',
@@ -53,13 +64,20 @@ function buildChapterXhtml(title: string, content: string): string {
 
 function buildContentOpf(
   metadata: TxtToEpubMetadata,
-  chapterFiles: string[]
+  chapterFiles: string[],
+  cover?: TxtToEpubCover
 ): string {
   const id = metadata.id ?? 'bookdock-unknown'
   const title = metadata.title || 'Untitled'
   const author = metadata.author || 'Unknown'
   const language = metadata.language || 'zh-CN'
 
+  const coverMeta = cover
+    ? `    <meta name="cover" content="cover-image" />\n`
+    : ''
+  const coverItem = cover
+    ? `    <item id="cover-image" href="cover.${cover.ext}" media-type="${COVER_MEDIA_TYPES[cover.ext]}" />\n`
+    : ''
   const manifestItems = chapterFiles
     .map((file) => {
       const itemId = file.replace(/\.xhtml$/, '')
@@ -79,11 +97,11 @@ function buildContentOpf(
     <dc:title>${escapeXml(title)}</dc:title>
     <dc:creator>${escapeXml(author)}</dc:creator>
     <dc:language>${escapeXml(language)}</dc:language>
-  </metadata>
+${coverMeta}  </metadata>
   <manifest>
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
     <item id="style" href="style.css" media-type="text/css" />
-${manifestItems}
+${coverItem}${manifestItems}
   </manifest>
   <spine toc="ncx">
 ${itemRefs}
@@ -166,6 +184,7 @@ export async function convertTxtToEpub(
   metadata: TxtToEpubMetadata,
   chapters: TxtToEpubChapter[],
   contentFor: (index: number) => string,
+  cover?: TxtToEpubCover,
 ): Promise<Buffer> {
   const zip = new JSZip()
 
@@ -185,8 +204,10 @@ export async function convertTxtToEpub(
     zip.file(`OEBPS/${chapterFiles[i]}`, xhtml)
   }
 
+  if (cover) zip.file(`OEBPS/cover.${cover.ext}`, cover.data)
+
   zip.file('OEBPS/style.css', STYLE_CSS)
-  zip.file('OEBPS/content.opf', buildContentOpf(metadata, chapterFiles))
+  zip.file('OEBPS/content.opf', buildContentOpf(metadata, chapterFiles, cover))
   zip.file('OEBPS/toc.ncx', buildTocNcx(metadata, chapters))
 
   const arrayBuffer = await zip.generateAsync({ type: 'arraybuffer' })

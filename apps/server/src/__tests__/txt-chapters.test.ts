@@ -57,15 +57,36 @@ describe('detectTxtChapters', () => {
     expect(secondChapterSlice).toBe('第二章 图穷匕见\n\n正文内容\n\n')
   })
 
-  it('returns a single chapter when no chapter headings are found', () => {
+  it('falls back to a single 10KB chunk when no chapter headings are found', () => {
     const content = '没有章节标题\n的纯文本内容\n仍然是一章。'
     const normalized = normalizeText(content)
     const chapters = detectTxtChapters(content)
 
     expect(chapters).toHaveLength(1)
-    expect(chapters[0].title).toBe('全文')
+    expect(chapters[0].title).toBe('第1章(1)')
     expect(chapters[0].startOffset).toBe(0)
     expect(chapters[0].endOffset).toBe(normalized.length)
+  })
+
+  it('splits long unsectioned text into aligned 10KB chunks', () => {
+    const paragraph = '一段没有章节标题的内容。'
+    const content = Array.from({ length: 800 }, () => paragraph).join('\n')
+    const normalized = normalizeText(content)
+    const chapters = detectTxtChapters(content)
+
+    expect(chapters.length).toBeGreaterThan(1)
+    expect(chapters[0].title).toBe('第1章(1)')
+    expect(chapters[1].title).toBe('第2章(1)')
+    for (const c of chapters) {
+      expect(c.endOffset - c.startOffset).toBeLessThanOrEqual(10 * 1024)
+    }
+    // chunks must be aligned: never split a paragraph mid-line
+    for (const c of chapters) {
+      if (c.startOffset > 0) {
+        const before = normalized.slice(c.startOffset - 1, c.startOffset + 1)
+        expect(before).toContain('\n')
+      }
+    }
   })
 
   it('merges soft line breaks inside a paragraph', () => {

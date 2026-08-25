@@ -4,14 +4,15 @@ import type { CustomReadingTheme } from '../lib/reading-theme'
 import {
   CONFIG_STORAGE_KEY,
   READING_PROFILE_KEYS,
-  activeSnapshot,
   createReadingPreset as createPreset,
   deleteReadingPreset as deletePreset,
   emptyConfig,
   foldReadingChange,
+  legacyActiveId,
   parseReadingConfig,
   pickReadingSnapshot,
   renameReadingPreset as renamePreset,
+  resolveSnapshot,
   serializeReadingConfig,
   type ReadingConfig,
 } from '../features/reader/lib/reading-profiles'
@@ -146,14 +147,24 @@ interface UiState {
   setManualTimerGraceMinutes: (v: 1 | 5 | 10 | 30) => void
 
   // Named reading-setting profiles (阅读设置预设): serialized JSON of the
-  // whole multi-config state (`{ global, presets[], active }`). The flat
-  // fields above always hold the ACTIVE config's values; this blob owns the
-  // global + preset snapshots.
+  // multi-config blob (`{ global, presets[] }`). The blob syncs across
+  // devices; activation does not (intents sync, outcomes stay local):
+  // `activePresetId` is the device-local pointer (own localStorage key,
+  // BroadcastChannel only), `boundPresetId` is the session-only binding of
+  // the currently open book (set by Reader from book.meta.boundPresetId).
+  // Resolution chain: bound preset > device active > global; the flat fields
+  // above always hold the resolved config's values.
   readingConfig: string
+  activePresetId: string | null
+  boundPresetId: string | null
   createReadingPreset: (name: string, perBookOverlay?: Record<string, unknown>) => void
   renameReadingPreset: (id: string, name: string) => void
   deleteReadingPreset: (id: string) => void
   activateReadingPreset: (id: string | null) => void
+  setBoundPresetId: (id: string | null) => void
+  /** Re-apply the resolution chain to the flat fields (sync receive, book
+   * open/close, preset deletion). Clears a dangling device active. */
+  applyReadingResolution: () => void
 
   // Library UI prefs
   coverText: boolean
@@ -183,6 +194,8 @@ interface UiState {
   setReadingThemeId: (id: string) => void
   saveCustomTheme: (theme: CustomReadingTheme) => void
   deleteCustomTheme: (id: string) => void
+  /** Replace the whole list (settings sync); persists without theme side effects */
+  setCustomThemes: (themes: CustomReadingTheme[]) => void
   setFontFamily: (f: FontFamily) => void
   setFontSize: (n: number) => void
   setFontWeight: (n: number) => void
@@ -279,8 +292,15 @@ function setStorage(key: string, value: string) {
   }
 }
 
+const ACTIVE_PRESET_STORAGE_KEY = 'bd-reading-active-preset'
+
+function getInitialActivePresetId(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem(ACTIVE_PRESET_STORAGE_KEY)
+}
+
 // Reading-profile config from a previous session; the flat getInitial* values
-// below are overridden by the active snapshot right after store creation
+// below are overridden by the resolved snapshot right after store creation
 // (config is authoritative for the reading keys once it exists).
 function getInitialReadingConfig(): ReadingConfig | null {
   if (typeof window === 'undefined') return null
@@ -398,6 +418,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   // Seeded right after store creation (initialReadingConfig, or a fresh config
   // picked from the flat values); '' only during that same module tick.
   readingConfig: '',
+  activePresetId: getInitialActivePresetId(),
+  boundPresetId: null,
 
   coverText: getInitialCoverText(),
   coverFit: getInitialCoverFit(),
@@ -522,6 +544,10 @@ export const useUiStore = create<UiState>((set, get) => ({
     persistCustomThemes(next)
     set({ customThemes: next })
     if (get().readingThemeId === id) get().setReadingThemeId('paper')
+  },
+  setCustomThemes: (themes) => {
+    persistCustomThemes(themes)
+    set({ customThemes: themes })
   },
   setFontFamily: (fontFamily) => {
     setStorage('bd-font-family', fontFamily)
@@ -663,7 +689,9 @@ export const useUiStore = create<UiState>((set, get) => ({
         }
       }
     }
-    persistReadingConfig(createPreset(cfg, name.trim(), snapshot))
+    const { config, preset } = createPreset(cfg, name.trim(), snapshot)
+    persistReadingConfig(config)
+    persistActivePresetId(preset.id)
   },
   renameReadingPreset: (id, name) => {
     const cfg = parseReadingConfig(get().readingConfig)
@@ -673,19 +701,31 @@ export const useUiStore = create<UiState>((set, get) => ({
   deleteReadingPreset: (id) => {
     const cfg = parseReadingConfig(get().readingConfig)
     if (!cfg) return
-    const next = deletePreset(cfg, id)
-    if (cfg.active === id) {
-      // Fell back to the global config: reload its values into the flat fields
-      applyReadingSnapshot(next)
-    } else {
-      persistReadingConfig(next)
-    }
+    persistReadingConfig(deletePreset(cfg, id))
+    // Dangling pointers (device active here, per-book bindings elsewhere)
+    // fall back at resolution — no cross-book cleanup by design.
+    get().applyReadingResolution()
   },
   activateReadingPreset: (id) => {
     const cfg = parseReadingConfig(get().readingConfig)
-    if (!cfg || id === cfg.active) return
+    if (!cfg || id === get().activePresetId) return
     if (id !== null && !cfg.presets.some((p) => p.id === id)) return
-    applyReadingSnapshot({ ...cfg, active: id })
+    persistActivePresetId(id)
+    applyResolutionFlat()
+  },
+  setBoundPresetId: (id) => {
+    set({ boundPresetId: id })
+  },
+  applyReadingResolution: () => {
+    const cfg = parseReadingConfig(get().readingConfig)
+    if (!cfg) return
+    // A device active pointing at a preset deleted on another device clears
+    // and falls back to the global config.
+    const activeId = get().activePresetId
+    if (activeId && !cfg.presets.some((p) => p.id === activeId)) {
+      persistActivePresetId(null)
+    }
+    applyResolutionFlat()
   },
 }))
 
@@ -697,42 +737,73 @@ function persistReadingConfig(config: ReadingConfig) {
   useUiStore.setState({ readingConfig: raw })
 }
 
-// Switch the flat profile-key fields to the (new) active snapshot. The single
-// setState carries readingConfig too, so the routing subscription below skips
-// this transition as one atomic update.
-function applyReadingSnapshot(config: ReadingConfig) {
-  const snapshot = activeSnapshot(config)
-  const flat: Partial<ReturnType<typeof useUiStore.getState>> = {}
-  for (const key of READING_PROFILE_KEYS) {
-    ;(flat as Record<string, unknown>)[key] = snapshot[key]
+// Device-local active pointer: own localStorage key, BroadcastChannel via
+// SettingsSync, never part of the server sync payload.
+function persistActivePresetId(id: string | null) {
+  if (id === null) {
+    try { window.localStorage.removeItem(ACTIVE_PRESET_STORAGE_KEY) } catch { /* ignore */ }
+  } else {
+    setStorage(ACTIVE_PRESET_STORAGE_KEY, id)
   }
-  const raw = serializeReadingConfig(config)
-  setStorage(CONFIG_STORAGE_KEY, raw)
-  useUiStore.setState({ ...flat, readingConfig: raw })
+  useUiStore.setState({ activePresetId: id })
 }
 
-// Seed the config once: an existing blob wins (its active snapshot also
+// Resolution chain: the open book's bound preset wins over the device active;
+// dangling ids fall back (a binding whose preset was deleted resolves to the
+// device active, a dangling active to the global config).
+function resolvedTargetId(cfg: ReadingConfig, state: { boundPresetId: string | null; activePresetId: string | null }): string | null {
+  if (state.boundPresetId && cfg.presets.some((p) => p.id === state.boundPresetId)) return state.boundPresetId
+  if (state.activePresetId && cfg.presets.some((p) => p.id === state.activePresetId)) return state.activePresetId
+  return null
+}
+
+// Switch the flat profile-key fields to the resolved snapshot, writing only
+// when values actually change so resolution never loops with the routing
+// subscription below.
+function applyResolutionFlat() {
+  const state = useUiStore.getState()
+  const cfg = parseReadingConfig(state.readingConfig)
+  if (!cfg) return
+  const snapshot = resolveSnapshot(cfg, resolvedTargetId(cfg, state))
+  const flat: Record<string, unknown> = {}
+  for (const key of READING_PROFILE_KEYS) {
+    if (state[key] !== snapshot[key]) flat[key] = snapshot[key]
+  }
+  if (Object.keys(flat).length > 0) useUiStore.setState(flat)
+}
+
+// Seed the config once: an existing blob wins (its resolved snapshot also
 // overrides the flat getInitial* values — the config is authoritative for the
 // reading keys), otherwise a fresh config is picked from the current values.
 {
   const existing = initialReadingConfig
   if (existing) {
-    applyReadingSnapshot(existing)
+    // Legacy blobs carried the device pointer inside the payload; adopt it
+    // when this device has no local pointer yet.
+    if (useUiStore.getState().activePresetId === null) {
+      const legacy = legacyActiveId(localStorage.getItem(CONFIG_STORAGE_KEY))
+      if (legacy && existing.presets.some((p) => p.id === legacy)) {
+        persistActivePresetId(legacy)
+      }
+    }
+    useUiStore.getState().applyReadingResolution()
   } else {
     persistReadingConfig(emptyConfig(pickReadingSnapshot(useUiStore.getState())))
   }
 }
 
-// Route reading-setting edits into the active config target (preset or
-// global): every profile-key change folds into the persisted snapshot, so
-// activation switches are always backed by a complete, current config.
+// Route reading-setting edits into the resolved config target (bound preset
+// first, then device active, else global): every profile-key change folds
+// into the persisted snapshot, so activation switches are always backed by a
+// complete, current config.
 useUiStore.subscribe((state, prevState) => {
   if (state.readingConfig !== prevState.readingConfig) return
   const changed = READING_PROFILE_KEYS.filter((key) => state[key] !== prevState[key])
   if (changed.length === 0) return
   const cfg = parseReadingConfig(prevState.readingConfig)
   if (!cfg) return
+  const targetId = resolvedTargetId(cfg, state)
   let next = cfg
-  for (const key of changed) next = foldReadingChange(next, key, state[key])
+  for (const key of changed) next = foldReadingChange(next, key, state[key], targetId)
   persistReadingConfig(next)
 })

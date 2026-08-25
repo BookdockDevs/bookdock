@@ -53,3 +53,21 @@ export function resolveReadingTheme(id: string, customThemes: CustomReadingTheme
   if (custom) return deriveReadingTheme(custom.colors)
   return deriveReadingTheme(PRESET_READING_THEMES[0].colors)
 }
+
+// Parse the synced custom-themes JSON; undefined when absent or malformed so
+// an unrelated sync doesn't clobber the local list. Same validation leniency
+// as the store's localStorage seed.
+export function customThemesFromSync(raw: unknown): CustomReadingTheme[] | undefined {
+  if (typeof raw !== 'string') return undefined
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return undefined
+    return parsed.filter(
+      (t): t is CustomReadingTheme =>
+        !!t && typeof t.id === 'string' && typeof t.name === 'string'
+        && typeof t.colors?.bg === 'string' && typeof t.colors?.fg === 'string' && typeof t.colors?.primary === 'string',
+    )
+  } catch {
+    return undefined
+  }
+}

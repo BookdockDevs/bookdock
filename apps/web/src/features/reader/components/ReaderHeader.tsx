@@ -14,13 +14,14 @@ interface ReaderHeaderProps {
   className?: string
   estimatedMinutes?: number
   settingsOpen?: boolean
+  bookId?: string
   onAddBookmark?: () => void
   onToggleSettings?: () => void
   onToggleFullscreen?: () => void
   bookmarkActive?: boolean
 }
 
-export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, onAddBookmark, onToggleSettings, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, bookId, onAddBookmark, onToggleSettings, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
   const _ = useTranslation()
   return (
     <header
@@ -98,7 +99,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
               </svg>
             </button>
             <SettingsPopover open={!!settingsOpen} onClose={() => onToggleSettings?.()}>
-              <SettingsPanel />
+              <SettingsPanel bookId={bookId ?? ''} />
             </SettingsPopover>
           </div>
         )}

@@ -87,3 +87,79 @@ describe('migration 0021_single_shelf', () => {
     expect(row.shelf_id).toBeNull()
   })
 })
+
+describe('migration 0022_text_transforms', () => {
+  function seedUserBookTransform(sqlite: Database.Database) {
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1);
+      INSERT INTO books (id, user_id, title, format, file_path, size, created_at, updated_at)
+        VALUES ('b1', 'u1', 'B1', 'txt', 'k1', 1, 1, 1);
+      INSERT INTO text_transforms (id, user_id, book_id, pattern, created_at, updated_at) VALUES
+        ('t_book', 'u1', 'b1', 'x', 1, 1),
+        ('t_global', 'u1', NULL, 'y', 1, 1);
+    `)
+  }
+
+  it('creates text_transforms with global (NULL book_id) rows allowed', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    applyUpTo(sqlite, 22)
+    seedUserBookTransform(sqlite)
+    const rows = sqlite.prepare('SELECT id FROM text_transforms ORDER BY id').all()
+    expect(rows.map((r) => (r as { id: string }).id)).toEqual(['t_book', 't_global'])
+  })
+
+  it('cascades book-scoped transforms on book delete, keeps global ones', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    applyUpTo(sqlite, 22)
+    seedUserBookTransform(sqlite)
+    sqlite.exec(`DELETE FROM books WHERE id = 'b1'`)
+    const rows = sqlite.prepare('SELECT id FROM text_transforms').all()
+    expect(rows.map((r) => (r as { id: string }).id)).toEqual(['t_global'])
+  })
+})
+
+describe('migration 0023_text_transform_overrides', () => {
+  function seedOverrideFixtures(sqlite: Database.Database) {
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1);
+      INSERT INTO books (id, user_id, title, format, file_path, size, created_at, updated_at)
+        VALUES ('b1', 'u1', 'B1', 'txt', 'k1', 1, 1, 1);
+      INSERT INTO text_transforms (id, user_id, pattern, created_at, updated_at)
+        VALUES ('t1', 'u1', 'x', 1, 1);
+      INSERT INTO text_transform_overrides (id, user_id, book_id, transform_id, enabled, created_at, updated_at)
+        VALUES ('o1', 'u1', 'b1', 't1', 0, 1, 1);
+    `)
+  }
+
+  it('enforces the (book_id, transform_id) unique constraint', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    applyUpTo(sqlite, 23)
+    seedOverrideFixtures(sqlite)
+    expect(() => sqlite.exec(`
+      INSERT INTO text_transform_overrides (id, user_id, book_id, transform_id, enabled, created_at, updated_at)
+        VALUES ('o2', 'u1', 'b1', 't1', 1, 1, 1);
+    `)).toThrow()
+  })
+
+  it('cascades override rows on transform delete', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    applyUpTo(sqlite, 23)
+    seedOverrideFixtures(sqlite)
+    sqlite.exec(`DELETE FROM text_transforms WHERE id = 't1'`)
+    expect(sqlite.prepare('SELECT id FROM text_transform_overrides').all()).toHaveLength(0)
+  })
+
+  it('cascades override rows on book delete', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    applyUpTo(sqlite, 23)
+    seedOverrideFixtures(sqlite)
+    sqlite.exec(`DELETE FROM books WHERE id = 'b1'`)
+    expect(sqlite.prepare('SELECT id FROM text_transform_overrides').all()).toHaveLength(0)
+    expect(sqlite.prepare('SELECT id FROM text_transforms').all()).toHaveLength(1)
+  })
+})

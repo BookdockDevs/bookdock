@@ -159,6 +159,9 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
   const updateAnnotation = useUpdateAnnotation(bookId)
   const addToast = useToastStore((s) => s.addToast)
   const setShareTarget = useReaderState((s) => s.setShareTarget)
+  // Annotations whose CFI no longer resolves (P2): badge them and refuse to
+  // navigate instead of silently landing nowhere
+  const orphanedKeys = useReaderState((s) => s.orphanedAnnotationKeys)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: AnnotationRes } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -213,6 +216,10 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
   }, [contextMenu, renderer])
 
   function goTo(item: AnnotationRes) {
+    if (orphanedKeys.includes(`${item.cfiRange}|${item.type}`)) {
+      addToast(_('annotation.orphanedNotice'), 'info')
+      return
+    }
     renderer?.display(item.type === 'bookmark' ? item.cfiAnchor || item.cfiRange : item.cfiRange)
     if (!locked) onClose?.()
   }
@@ -255,11 +262,20 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
   function renderCard(a: AnnotationRes) {
     const hex = hexOf(a)
     const kind = kindOf(a)
+    const orphaned = orphanedKeys.includes(`${a.cfiRange}|${a.type}`)
     return (
       <div
         onContextMenu={(e) => handleContextMenu(e, a)}
-        className="group rounded-lg border border-stone-200/60 transition-colors hover:bg-stone-500/5 dark:border-stone-800/60"
+        className={`group relative rounded-lg border border-stone-200/60 transition-colors hover:bg-stone-500/5 dark:border-stone-800/60 ${orphaned ? 'opacity-60' : ''}`}
       >
+        {orphaned && (
+          <span
+            title={_('annotation.orphanedNotice')}
+            className="absolute right-2 top-2 z-10 shrink-0 rounded border border-red-300 px-1.5 py-0.5 text-[10px] text-red-500 dark:border-red-800 dark:text-red-400"
+          >
+            {_('annotation.orphaned')}
+          </span>
+        )}
         {editingId === a.id ? (
           <InlineEditor
             initial={a.type === 'bookmark' ? a.text : (a.note ?? '')}

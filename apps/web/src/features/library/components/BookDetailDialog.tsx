@@ -1,14 +1,19 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { BookListItem, BookMetadata } from '@bookdock/shared'
 
 import { apiPatch, apiPut } from '@/api/client'
+import { useBookTransforms } from '@/api/hooks/useTransforms'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatBytes, formatDate } from '@/lib/utils'
+import { computeFromAnchor, type SmartPosition } from '@/lib/position'
 import { useToastStore } from '@/stores/toast.store'
 import { Button } from '@/components/ui/Button'
+import MenuFlyout from '@/components/ui/MenuFlyout'
+import Modal from '@/components/ui/Modal'
+import SmartMenu from '@/components/ui/SmartMenu'
 
 import {
   useBook,
@@ -21,9 +26,10 @@ import {
   useUpdateBook,
   useUploadCover,
 } from '../hooks'
-import { downloadBook } from '../download'
+import { downloadBook, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../download'
 
 import BookCover from './BookCover'
+import TocRulePicker from './TocRulePicker'
 import { READ_STATUS_OPTIONS, STATUS_DOT, statusLabelKey } from './read-status'
 
 interface BookDetailDialogProps {
@@ -120,6 +126,65 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   const [newTagOpen, setNewTagOpen] = useState(false)
   const coverInputRef = useRef<HTMLInputElement>(null)
 
+  // P4 2×2: the 校订版 branch only shows when the book has effective rules.
+  const { data: transformsData } = useBookTransforms(book?.id)
+  const hasEffectiveRules = useMemo(
+    () => (transformsData?.data ?? []).some((r) => (r.effectiveEnabled ?? r.enabled)),
+    [transformsData],
+  )
+  const [downloadMenu, setDownloadMenu] = useState<SmartPosition | null>(null)
+  const downloadAnchorRef = useRef<HTMLDivElement>(null)
+  const downloadMenuRef = useRef<HTMLDivElement>(null)
+  const [moreMenu, setMoreMenu] = useState<SmartPosition | null>(null)
+  const moreAnchorRef = useRef<HTMLDivElement>(null)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
+  const [tocRuleOpen, setTocRuleOpen] = useState(false)
+
+  function toggleDownloadMenu() {
+    const el = downloadAnchorRef.current
+    if (!el) return
+    if (downloadMenu) {
+      setDownloadMenu(null)
+      return
+    }
+    const rect = el.getBoundingClientRect()
+    setDownloadMenu(computeFromAnchor(
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      176,
+      96,
+    ))
+  }
+
+  function toggleMoreMenu() {
+    const el = moreAnchorRef.current
+    if (!el) return
+    if (moreMenu) {
+      setMoreMenu(null)
+      return
+    }
+    const rect = el.getBoundingClientRect()
+    setMoreMenu(computeFromAnchor(
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      176,
+      88,
+    ))
+  }
+
+  async function onExport(format: 'epub' | 'txt', plain: boolean) {
+    setDownloadMenu(null)
+    try {
+      if (format === 'epub') {
+        await downloadEpub(book!.id, book!.title, { plain })
+      } else if (plain) {
+        await downloadOriginalTxt(book!.id, book!.title)
+      } else {
+        await downloadEditedTxt(book!.id, book!.title)
+      }
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : String(err), 'error')
+    }
+  }
+
   useEffect(() => {
     if (!book) return
     const onKey = (e: KeyboardEvent) => {
@@ -136,6 +201,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
     setDraft(null)
     setNewTag('')
     setNewTagOpen(false)
+    setTocRuleOpen(false)
   }, [book?.id])
 
   function enterEdit() {
@@ -226,6 +292,10 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   const memberTags = (tagsData?.data ?? []).filter((t) => tagIds.has(t.id))
 
   const hasProgress = displayBook.progress != null && displayBook.progress > 0
+  // The 校订版 branch only exists when the book has effective rules; the 原文
+  // branch is always available for TXT books. EPUB books keep the single
+  // stored-file download (no menu).
+  const canExportEdited = displayBook.format === 'txt' && hasEffectiveRules
   const identifier = bookmeta?.isbn || bookmeta?.identifier || ''
 
   function goToFilter(search: { shelf?: string; tag?: string }) {
@@ -263,16 +333,57 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
           <h2 className="font-serif text-base font-semibold text-stone-900 dark:text-stone-100">
             {editing ? _('library.edit') : _('library.details')}
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-            aria-label={_('library.cancel')}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1">
+            {displayBook.format === 'txt' && (
+              <div ref={moreAnchorRef} className="relative">
+                <button
+                  type="button"
+                  onClick={toggleMoreMenu}
+                  aria-label={_('library.moreActions')}
+                  title={_('library.moreActions')}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="1" />
+                    <circle cx="19" cy="12" r="1" />
+                    <circle cx="5" cy="12" r="1" />
+                  </svg>
+                </button>
+                {moreMenu && (
+                  <SmartMenu innerRef={moreMenuRef} position={moreMenu} onClose={() => setMoreMenu(null)}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreMenu(null)
+                        setTocRuleOpen(true)
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                        <line x1="8" y1="6" x2="21" y2="6" />
+                        <line x1="8" y1="12" x2="21" y2="12" />
+                        <line x1="8" y1="18" x2="21" y2="18" />
+                        <line x1="3" y1="6" x2="3.01" y2="6" />
+                        <line x1="3" y1="12" x2="3.01" y2="12" />
+                        <line x1="3" y1="18" x2="3.01" y2="18" />
+                      </svg>
+                      <span className="flex-1">{_('library.changeTocRule')}</span>
+                    </button>
+                  </SmartMenu>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+              aria-label={_('library.cancel')}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -530,11 +641,66 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                       </ActionIcon>
-                      <ActionIcon label={_('library.download')} onClick={() => void downloadBook(book.id, book.title)}>
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                      </ActionIcon>
+                      <div ref={downloadAnchorRef} className="relative">
+                        <ActionIcon
+                          label={_('library.download')}
+                          onClick={displayBook.format === 'txt'
+                            ? toggleDownloadMenu
+                            : () => void downloadBook(book!.id, book!.title)}
+                        >
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </ActionIcon>
+                        {downloadMenu && (
+                          <SmartMenu
+                            innerRef={downloadMenuRef}
+                            position={downloadMenu}
+                            onClose={() => setDownloadMenu(null)}
+                          >
+                            {canExportEdited && (
+                              <MenuFlyout
+                                panelWidth={96}
+                                row={({ open, flip, toggle }) => (
+                                  <button
+                                    type="button"
+                                    onClick={toggle}
+                                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-stone-500/10 ${open ? 'bg-stone-500/10' : ''}`}
+                                  >
+                                    <span className="flex-1">{_('library.edited')}</span>
+                                    <FlyoutChevron flip={flip} />
+                                  </button>
+                                )}
+                              >
+                                {(close) => (
+                                  <ExportFormats
+                                    onPick={(format) => { close(); void onExport(format, false) }}
+                                  />
+                                )}
+                              </MenuFlyout>
+                            )}
+                            <MenuFlyout
+                              panelWidth={96}
+                              row={({ open, flip, toggle }) => (
+                                <button
+                                  type="button"
+                                  onClick={toggle}
+                                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-stone-500/10 ${open ? 'bg-stone-500/10' : ''}`}
+                                >
+                                  <span className="flex-1">{_('library.original')}</span>
+                                  <FlyoutChevron flip={flip} />
+                                </button>
+                              )}
+                            >
+                              {(close) => (
+                                <ExportFormats
+                                  onPick={(format) => { close(); void onExport(format, true) }}
+                                />
+                              )}
+                            </MenuFlyout>
+                          </SmartMenu>
+                        )}
+                      </div>
                       <ActionIcon label={_('library.delete')} danger onClick={() => onDelete(book)}>
                         <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
                       </ActionIcon>
@@ -550,6 +716,16 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                     {bookmeta.description}
                   </p>
                 </section>
+              )}
+
+              {displayBook.format === 'txt' && tocRuleOpen && (
+                <Modal title={_('library.tocRuleSection')} onClose={() => setTocRuleOpen(false)}>
+                  <TocRulePicker
+                    bookId={book.id}
+                    currentRuleId={detail?.meta?.tocRuleId}
+                    autoScored={detail?.meta?.tocRuleAuto}
+                  />
+                </Modal>
               )}
 
               <section className="mt-6">
@@ -707,6 +883,26 @@ function ReadStatusChip({ book }: { book: BookListItem }) {
         </div>
       )}
     </div>
+  )
+}
+
+function FlyoutChevron({ flip }: { flip: boolean }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-stone-400 transition-transform ${flip ? 'rotate-180' : ''}`}>
+      <path d="M9 18l6-6-6-6" />
+    </svg>
+  )
+}
+
+const exportItemClass = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-stone-500/10'
+
+// The second level of the download menu: the concrete format per 原文/校订版.
+function ExportFormats({ onPick }: { onPick: (format: 'epub' | 'txt') => void }) {
+  return (
+    <>
+      <button type="button" onClick={() => onPick('epub')} className={exportItemClass}>EPUB</button>
+      <button type="button" onClick={() => onPick('txt')} className={exportItemClass}>TXT</button>
+    </>
   )
 }
 
