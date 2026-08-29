@@ -61,6 +61,8 @@ export default function Library() {
   const sortOrder = search.sortOrder ?? sortOrderPref
   const shelfId = search.shelf ?? null
   const tagId = search.tag ?? null
+  const author = search.author ?? null
+  const series = search.series ?? null
   const format = search.format ?? null
   const readStatus = search.status ?? null
   const trash = search.trash ?? false
@@ -243,6 +245,8 @@ export default function Library() {
     sortOrder,
     shelfId,
     tagId,
+    author,
+    series,
     format,
     readStatus,
     trash,
@@ -268,11 +272,20 @@ export default function Library() {
     [shelvesData, shelfOrderOverride],
   )
   const activeShelfName = shelfId ? shelvesData?.data.find((s) => s.id === shelfId)?.name : undefined
+  const metadataFilter = author
+    ? { kind: 'author' as const, value: author }
+    : series
+      ? { kind: 'series' as const, value: series }
+      : null
   const viewTitle = trash
     ? _('library.trash')
     : shelfId === 'none'
       ? _('library.uncategorized')
-      : (activeShelfName ?? _('library.allBooks'))
+      : metadataFilter?.kind === 'author'
+        ? _('library.authorFilterTitle', { name: metadataFilter.value })
+        : metadataFilter?.kind === 'series'
+          ? _('library.seriesFilterTitle', { name: metadataFilter.value })
+          : (activeShelfName ?? _('library.allBooks'))
 
   useEffect(() => {
     if (!selectionActive) return
@@ -332,6 +345,8 @@ export default function Library() {
           navSearch={navSearch}
           shelfId={shelfId}
           tagId={tagId}
+          author={author}
+          series={series}
           trash={trash}
           mobileOpen={mobileNavOpen}
           onMobileClose={() => setMobileNavOpen(false)}
@@ -358,10 +373,11 @@ export default function Library() {
           onOpenNavigation={() => setMobileNavOpen(true)}
           title={viewTitle}
           bookCount={total}
+          onResetMetadataFilter={metadataFilter ? () => navSearch({ author: undefined, series: undefined }) : undefined}
         />
 
-        {recentlyReadStyle !== 'off' && !trash && !query && !selectionActive && <ReadingStatsCard />}
-        {recentlyReadStyle !== 'off' && !trash && !query && !selectionActive && <RecentlyRead style={recentlyReadStyle} />}
+        {recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <ReadingStatsCard />}
+        {recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <RecentlyRead style={recentlyReadStyle} />}
 
         <div ref={containerRef} className={`min-h-0 flex-1 ${selection.size > 0 ? 'pb-16' : ''}`}>
           {isLoading ? (

@@ -298,12 +298,12 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   const canExportEdited = displayBook.format === 'txt' && hasEffectiveRules
   const identifier = bookmeta?.isbn || bookmeta?.identifier || ''
 
-  function goToFilter(search: { shelf?: string; tag?: string }) {
+  function goToFilter(search: { shelf?: string; tag?: string; author?: string; series?: string }) {
     onClose()
     void navigate({ to: '/', search })
   }
 
-  const metaRows: { label: string; value: string; copyable?: boolean }[] = []
+  const metaRows: { label: string; value: string; copyable?: boolean; onClick?: () => void }[] = []
   if (bookmeta?.publisher) metaRows.push({ label: _('library.publisher'), value: bookmeta.publisher })
   if (bookmeta?.published) metaRows.push({ label: _('library.published'), value: bookmeta.published })
   metaRows.push({ label: _('library.updatedAt'), value: formatDate(displayBook.updatedAt) })
@@ -317,6 +317,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
     metaRows.push({
       label: _('library.seriesSection'),
       value: bookmeta.seriesIndex != null ? `${bookmeta.series} #${bookmeta.seriesIndex}` : bookmeta.series,
+      onClick: () => goToFilter({ series: bookmeta.series }),
     })
   }
 
@@ -590,9 +591,19 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                   <h3 className="font-serif text-xl font-semibold leading-snug text-stone-900 dark:text-stone-100">
                     {displayBook.title}
                   </h3>
-                  <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
-                    {displayBook.author || _('library.unknown')}
-                  </p>
+                  {displayBook.author ? (
+                    <button
+                      type="button"
+                      onClick={() => goToFilter({ author: displayBook.author })}
+                      className="mt-1 text-left text-sm text-stone-500 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-400 dark:decoration-stone-600 dark:hover:text-stone-100"
+                    >
+                      {displayBook.author}
+                    </button>
+                  ) : (
+                    <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+                      {_('library.unknown')}
+                    </p>
+                  )}
 
                   <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                     <ReadStatusChip book={displayBook} />
@@ -601,8 +612,6 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                     </span>
                     {shelfName && currentShelfId ? (
                       <FilterChip label={shelfName} onClick={() => goToFilter({ shelf: currentShelfId })} />
-                    ) : !currentShelfId ? (
-                      <FilterChip label={_('library.uncategorized')} muted onClick={() => goToFilter({ shelf: 'none' })} />
                     ) : null}
                     {memberTags.map((tag) => (
                       <FilterChip key={tag.id} label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />
@@ -743,6 +752,17 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                             className="break-all font-mono text-sm text-stone-700 transition-colors hover:text-stone-900 dark:text-stone-200 dark:hover:text-stone-100"
                           >
                             {middleTruncate(row.value)}
+                          </button>
+                        </dd>
+                      ) : row.onClick ? (
+                        <dd className="mt-0.5">
+                          <button
+                            type="button"
+                            title={row.value}
+                            onClick={row.onClick}
+                            className="break-words text-left text-sm text-stone-700 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-200 dark:decoration-stone-600 dark:hover:text-stone-100"
+                          >
+                            {row.value}
                           </button>
                         </dd>
                       ) : (

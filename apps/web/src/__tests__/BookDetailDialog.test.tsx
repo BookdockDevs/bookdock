@@ -183,6 +183,25 @@ describe('BookDetailDialog tag chips', () => {
 })
 
 describe('BookDetailDialog identity chips', () => {
+  it('navigates to the exact author filter from the author link', () => {
+    const onClose = vi.fn()
+    render(<BookDetailDialog book={book} onClose={onClose} onDelete={vi.fn()} />, { wrapper })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Author' }))
+
+    expect(onClose).toHaveBeenCalled()
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { author: 'Author' } })
+  })
+
+  it('navigates to the series filter from the series metadata link', () => {
+    withMeta({ series: 'Trilogy', seriesIndex: 2 })
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Trilogy #2' }))
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { series: 'Trilogy' } })
+  })
+
   it('renders the format chip and navigates to the shelf filter on shelf chip click', () => {
     membershipShelf = 'shelf-1'
     const onClose = vi.fn()
@@ -195,11 +214,10 @@ describe('BookDetailDialog identity chips', () => {
     expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'shelf-1' } })
   })
 
-  it('renders a muted uncategorized chip that navigates to shelf=none', () => {
+  it('does not render an uncategorized chip for books without a shelf', () => {
     renderDialog()
 
-    fireEvent.click(screen.getByRole('button', { name: '未分类' }))
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'none' } })
+    expect(screen.queryByRole('button', { name: '未分类' })).toBeNull()
   })
 
   it('navigates to the tag filter on tag chip click', () => {
@@ -272,7 +290,7 @@ describe('BookDetailDialog metadata rows', () => {
 
     expect(screen.getByText('出版商')).toBeInTheDocument()
     expect(screen.getByText('Pub House')).toBeInTheDocument()
-    expect(screen.getByText('Trilogy #2')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Trilogy #2' })).toBeInTheDocument()
     expect(screen.getByText('desc')).toBeInTheDocument()
   })
 })

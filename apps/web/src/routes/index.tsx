@@ -9,6 +9,8 @@ export interface LibrarySearch {
   sortOrder?: 'asc' | 'desc'
   shelf?: string
   tag?: string
+  author?: string
+  series?: string
   format?: 'epub' | 'txt'
   status?: 'wishlist' | 'reading' | 'idle' | 'finished' | 'abandoned'
   trash?: boolean
@@ -29,6 +31,8 @@ export const indexRoute = createRoute({
     sortOrder: VALID_ORDERS.has(input.sortOrder as string) ? (input.sortOrder as 'asc' | 'desc') : undefined,
     shelf: typeof input.shelf === 'string' && input.shelf.length > 0 ? input.shelf : undefined,
     tag: typeof input.tag === 'string' && input.tag.length > 0 ? input.tag : undefined,
+    author: typeof input.author === 'string' && input.author.length > 0 ? input.author : undefined,
+    series: typeof input.series === 'string' && input.series.length > 0 ? input.series : undefined,
     format: VALID_FORMATS.has(input.format as string) ? (input.format as 'epub' | 'txt') : undefined,
     status: VALID_STATUSES.has(input.status as string) ? (input.status as LibrarySearch['status']) : undefined,
     trash: input.trash === true ? true : undefined,

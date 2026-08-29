@@ -48,6 +48,8 @@ booksRoutes.get('/', async (c) => {
   const sortOrder = query['sortOrder']
   const shelfId = query['shelfId']
   const tagId = query['tagId']
+  const author = query['author']
+  const series = query['series']
   const formatParsed = bookFormatSchema.safeParse(query['format'])
   const format = formatParsed.success ? formatParsed.data : undefined
   const readStatus = query['readStatus']
@@ -56,7 +58,7 @@ booksRoutes.get('/', async (c) => {
   if (trash) {
     await purgeExpiredTrash(user.id, getTrashSettings(user.id).autoCleanDays)
   }
-  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash)
+  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series)
   return c.json(result)
 })
 

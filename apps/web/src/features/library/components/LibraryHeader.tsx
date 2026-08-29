@@ -24,9 +24,10 @@ interface LibraryHeaderProps {
   onOpenNavigation?: () => void
   title?: string
   bookCount?: number
+  onResetMetadataFilter?: () => void
 }
 
-export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter }: LibraryHeaderProps) {
   const _ = useTranslation()
   const [searchInput, setSearchInput] = useState(query)
 
@@ -60,14 +61,30 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
             </button>
           )}
           <div className="min-w-0">
-          <h1 className="truncate font-serif text-2xl font-semibold text-stone-900 dark:text-stone-50">
-            {title ?? _('library.allBooks')}
-          </h1>
-          {bookCount !== undefined && (
-            <p className="mt-1 text-xs tabular-nums text-stone-400 dark:text-stone-500">
-              {_('library.bookCount', { count: bookCount })}
-            </p>
-          )}
+            <h1 className="truncate font-serif text-2xl font-semibold text-stone-900 dark:text-stone-50">
+              {title ?? _('library.allBooks')}
+            </h1>
+            {(bookCount !== undefined || onResetMetadataFilter) && (
+              <div className="mt-1 flex items-center gap-4">
+                {bookCount !== undefined && (
+                  <p className="text-xs tabular-nums text-stone-400 dark:text-stone-500">
+                    {_('library.bookCount', { count: bookCount })}
+                  </p>
+                )}
+                {onResetMetadataFilter && (
+                  <button
+                    type="button"
+                    onClick={onResetMetadataFilter}
+                    className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                    {_('library.resetFilter')}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

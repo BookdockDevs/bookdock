@@ -81,4 +81,15 @@ describe('LibraryHeader', () => {
     expect(screen.getByRole('button', { name: 'library.selectMode' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'library.emptyTrash' })).toBeInTheDocument()
   })
+
+  it('shows and handles the temporary metadata-filter reset action', () => {
+    const onResetMetadataFilter = vi.fn()
+    renderHeader({ title: '作者：Author', onResetMetadataFilter })
+
+    const resetButton = screen.getByRole('button', { name: 'library.resetFilter' })
+    expect(resetButton).toHaveClass('ml-auto')
+    fireEvent.click(resetButton)
+
+    expect(onResetMetadataFilter).toHaveBeenCalledOnce()
+  })
 })

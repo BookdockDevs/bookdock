@@ -230,6 +230,36 @@ describe('listBooks search escaping', () => {
   })
 })
 
+describe('listBooks metadata filters', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  it('filters authors by the exact stored value', async () => {
+    const match = seedBook(db, ownerId, { title: 'Match', author: 'Author One' })
+    seedBook(db, ownerId, { title: 'Partial', author: 'Author One and Two' })
+
+    const result = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 'Author One')
+
+    expect(result.data.map((book) => book.id)).toEqual([match.id])
+  })
+
+  it('filters series values stored in book metadata', async () => {
+    const match = seedBook(db, ownerId, { title: 'Match', meta: { bookmeta: { series: 'Series One' } } })
+    seedBook(db, ownerId, { title: 'Other', meta: { bookmeta: { series: 'Series Two' } } })
+    seedBook(db, ownerId, { title: 'No Series' })
+
+    const result = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 'Series One')
+
+    expect(result.data.map((book) => book.id)).toEqual([match.id])
+  })
+})
+
 describe('listBooks lastReadAt sort', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string

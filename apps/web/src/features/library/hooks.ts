@@ -15,12 +15,14 @@ export interface UseBooksParams {
   sortOrder: string
   shelfId: string | null
   tagId: string | null
+  author?: string | null
+  series?: string | null
   format: BookFormat | null
   readStatus: ReadStatus | null
   trash: boolean
 }
 
-function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash }: UseBooksParams): string {
+function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash }: UseBooksParams): string {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
@@ -30,6 +32,8 @@ function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, ta
   if (search) params.set('search', search)
   if (shelfId) params.set('shelfId', shelfId)
   if (tagId) params.set('tagId', tagId)
+  if (author) params.set('author', author)
+  if (series) params.set('series', series)
   if (format) params.set('format', format)
   if (readStatus) params.set('readStatus', readStatus)
   if (trash) params.set('trash', '1')
@@ -50,20 +54,22 @@ export interface UseInfiniteBooksParams {
   sortOrder: string
   shelfId: string | null
   tagId: string | null
+  author?: string | null
+  series?: string | null
   format: BookFormat | null
   readStatus: ReadStatus | null
   trash: boolean
 }
 
-function infiniteBooksFn(page: number, pageSize: number, search: string, sortBy: string, sortOrder: string, shelfId: string | null, tagId: string | null, format: BookFormat | null, readStatus: ReadStatus | null, trash: boolean) {
-  return apiGet<PaginatedResponse<BookListItem>>(buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash }))
+function infiniteBooksFn(page: number, pageSize: number, search: string, sortBy: string, sortOrder: string, shelfId: string | null, tagId: string | null, author: string | null | undefined, series: string | null | undefined, format: BookFormat | null, readStatus: ReadStatus | null, trash: boolean) {
+  return apiGet<PaginatedResponse<BookListItem>>(buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash }))
 }
 
 export function useInfiniteBooks(params: UseInfiniteBooksParams) {
   return useInfiniteQuery({
     queryKey: ['books', 'infinite', params],
     queryFn: ({ pageParam }) =>
-      infiniteBooksFn(pageParam, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.format, params.readStatus, params.trash),
+      infiniteBooksFn(pageParam, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash),
     initialPageParam: 1,
     placeholderData: keepPreviousData,
     getNextPageParam: (last) => {

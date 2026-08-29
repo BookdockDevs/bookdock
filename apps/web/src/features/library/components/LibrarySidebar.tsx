@@ -24,6 +24,8 @@ interface LibrarySidebarProps {
   navSearch: (patch: Partial<LibrarySearch>) => void
   shelfId: string | null
   tagId: string | null
+  author: string | null
+  series: string | null
   trash: boolean
   /** Mobile navigation drawer state; desktop keeps the sidebar in flow. */
   mobileOpen?: boolean
@@ -36,7 +38,7 @@ interface LibrarySidebarProps {
   settleShelfId?: string | null
 }
 
-const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId, trash, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId, author, series, trash, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const { data: shelvesData, isLoading: shelvesLoading } = useShelves()
@@ -81,10 +83,10 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
   const [deleteTagTarget, setDeleteTagTarget] = useState<TagListItem | null>(null)
   const deleteTag = useDeleteTag()
 
-  const isAllActive = !shelfId && !tagId && !trash
+  const isAllActive = !shelfId && !tagId && !author && !series && !trash
 
   function selectNavigation(patch: Partial<LibrarySearch>) {
-    navSearch(patch)
+    navSearch({ ...patch, author: undefined, series: undefined })
     onMobileClose?.()
   }
 

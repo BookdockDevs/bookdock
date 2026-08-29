@@ -54,7 +54,7 @@ export function scoreTocRules(userId: string, sample: string): typeof tocRules.$
   return pickedId ? rules.find((r) => r.id === pickedId) ?? null : null
 }
 
-export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean) {
+export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean, author?: string, series?: string) {
   const db = getDb()
   const conditions = [eq(books.userId, userId), trash ? isNotNull(books.deletedAt) : isNull(books.deletedAt)]
   if (search) {
@@ -80,6 +80,12 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   if (tagId) {
     const sub = db.select({ bookId: bookTags.bookId }).from(bookTags).where(eq(bookTags.tagId, tagId))
     conditions.push(sql`${books.id} IN ${sub}`)
+  }
+  if (author) {
+    conditions.push(eq(books.author, author))
+  }
+  if (series) {
+    conditions.push(sql`json_extract(${books.meta}, '$.bookmeta.series') = ${series}`)
   }
   // Pin-first is universal (user decision 2026-08-12): pinned books lead in
   // every sort 鈥?including lastReadAt 鈥?and the pinned group itself follows

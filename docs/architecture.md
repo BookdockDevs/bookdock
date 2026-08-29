@@ -189,7 +189,7 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | `/api/v1/auth` | auth | `GET /instance` `PATCH /instance`(owner) `POST /login` `POST /logout` `POST /setup` `GET /setup-required` `POST /register` `POST /password` `POST /username` `GET /me` |
 | `/api/v1/users` | users | `GET /`(owner) `PATCH /:id`(owner) |
 | `/api/v1/avatars` | avatars | `POST /`(multipart, jpeg/png/webp/gif ≤ 2MB) `DELETE /` `GET /<hh>/<sha256>.<ext>` (immutable content-hash blob) |
-| `/api/v1/books` | books | `GET /` `POST /` `GET /:id` `DELETE /:id` `GET /:id/file` `GET /:id/cover` `PUT /:id/shelves` (set single shelf, `{shelfId: string|null}`) `GET /:id/shelves` `PUT /:id/tags` `GET /:id/tags` `GET /:id/chapters` |
+| `/api/v1/books` | books | `GET /` (supports title/author search plus exact metadata filters `author` and `series`) `POST /` `GET /:id` `DELETE /:id` `GET /:id/file` `GET /:id/cover` `PUT /:id/shelves` (set single shelf, `{shelfId: string|null}`) `GET /:id/shelves` `PUT /:id/tags` `GET /:id/tags` `GET /:id/chapters` |
 | `/api/v1/shelves` | shelves | `GET /` `POST /` `PUT /:id` `DELETE /:id` `POST /:id/books` (batch move in) `DELETE /:id/books` (batch move out) |
 | `/api/v1/tags` | tags | `GET /` `POST /` `PUT /:id` `DELETE /:id` |
 | `/api/v1/annotations` | annotations | `GET /`(?bookId=) `POST /` `PUT /:id` `DELETE /:id` |
