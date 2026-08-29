@@ -278,9 +278,12 @@ Prod exposes only the port + `DATA_DIR` volume. Backup = tarball `DATA_DIR`.
 
 ## 9. Deployment
 
-- **Docker**: multi-stage. Build all packages in build stage; final stage has only `pnpm deploy` output + prod deps (incl. better-sqlite3 native binary for linux). Single container, single port, mounts `DATA_DIR`.
-- **docker-compose.yml**: mount `./data:/data`, env per §7, first-run prints default password.
-- **Health**: `GET /api/v1/health` → `{ data: { ok: true } }`.
+- **Docker**: multi-stage. The build stage compiles all packages, then deploys the server package alone with production dependencies; the web package is copied as static `dist` output. The final image contains no build toolchain and runs one Node process on one port. The server bundle includes `@bookdock/shared`; `better-sqlite3` is installed in the Linux build stage so its native binary matches the runtime image.
+- **docker-compose.yml**: source checkout deployment mounts `./data:/data`, sets `restart: unless-stopped`, and exposes the health check. A published registry image may use the same runtime layout and volume contract; Docker Hub is a distribution option, not a runtime dependency.
+- **Health**: `GET /api/v1/health` → `{ data: { ok: true } }`; both the image and Compose configuration use this endpoint for health checks.
+- **Persistence**: all mutable state lives under `DATA_DIR`, including SQLite, uploaded files, generated content, progress, and `.jwt-secret`. A cold backup copies the complete directory while the container is stopped; restore replaces the complete directory before startup. The `.jwt-secret` file must be preserved to keep existing sessions valid.
+- **Upgrade**: migrations run during startup. Back up `DATA_DIR` before upgrading, start the new image, and verify `/api/v1/health` plus the web setup/login flow before removing the previous image.
+- **Registry publishing**: `.github/workflows/docker-publish.yml` publishes `v*` git tags to Docker Hub as both a version tag and `latest`. It requires the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`; no registry credentials are stored in the repository.
 
 ---
 

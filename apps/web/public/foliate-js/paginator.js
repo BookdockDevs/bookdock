@@ -227,20 +227,12 @@ class View {
     if (typeof src !== 'string') throw new Error(`${src} is not string`)
     // bookdock: the upstream promise waits only for the iframe load event —
     // if it never fires (detached iframe, blob URL revoked, event lost) the
-    // reader hangs forever. Fall back after 10s: a loaded doc proceeds, a
-    // missing one rejects so the mount surfaces a real error instead.
+    // reader hangs forever. Blob iframe navigation is also blocked by some
+    // embedded browsers, so load blob markup through srcdoc in that case.
     return new Promise((resolve, reject) => {
       let done = false
-      const timer = setTimeout(() => {
-        if (done) return
-        done = true
-        console.warn('[bd] view.load: timeout, isConnected=', this.#iframe.isConnected, 'doc=', !!this.document)
-        if (this.document) {
-          finish(); resolve()
-        } else {
-          reject(new Error('iframe load timeout'))
-        }
-      }, 10000)
+      let timer
+      let poll
       const finish = () => {
         const doc = this.document
         afterLoad?.(doc)
@@ -267,13 +259,55 @@ class View {
 
         resolve()
       }
-      this.#iframe.addEventListener('load', () => {
+      const fail = error => {
         if (done) return
         done = true
         clearTimeout(timer)
+        clearInterval(poll)
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
+      let sourceMode = 'src'
+      const tryFinish = () => {
+        if (done) return true
+        const doc = this.document
+        // contentDocument is non-null for the old about:blank document while
+        // a blob navigation is still in flight. srcdoc has a stable URL and
+        // also works in embedded browsers that block blob iframe navigation.
+        const sourceReady = sourceMode === 'srcdoc'
+          ? doc?.URL === 'about:srcdoc'
+          : doc?.URL === this.#iframe.src
+        if (!doc || !sourceReady || doc.readyState === 'loading' || !doc.body)
+          return false
+        done = true
+        clearTimeout(timer)
+        clearInterval(poll)
         finish()
+        return true
+      }
+      this.#iframe.addEventListener('load', () => {
+        tryFinish()
       }, { once: true })
-      this.#iframe.src = src
+      const loadSource = async () => {
+        if (src.startsWith('blob:')) {
+          const response = await fetch(src)
+          if (!response.ok) throw new Error(`iframe source fetch failed: ${response.status}`)
+          const markup = await response.text()
+          if (done) return
+          sourceMode = 'srcdoc'
+          this.#iframe.srcdoc = markup
+        } else {
+          this.#iframe.src = src
+        }
+      }
+      loadSource().catch(fail)
+      poll = setInterval(tryFinish, 50)
+      timer = setTimeout(() => {
+        if (done) return
+        clearInterval(poll)
+        console.warn('[bd] view.load: timeout, isConnected=', this.#iframe.isConnected, 'doc=', !!this.document, 'readyState=', this.document?.readyState, 'sourceMode=', sourceMode)
+        if (tryFinish()) return
+        fail(new Error('iframe load timeout'))
+      }, 10000)
     })
   }
   render(layout) {
@@ -1666,6 +1700,7 @@ export class Paginator extends HTMLElement {
     return index >= 0 && index <= this.sections.length - 1
   }
   async #goTo({ index, anchor, select }) {
+    if (!this.#canGoToIndex(index)) return
     if (this.#continuous) {
       // Target already rendered: reuse the view, just switch primary + scroll.
       if (index !== this.#index && this.#views.has(index)) {

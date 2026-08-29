@@ -4,10 +4,13 @@
 // book). Contains matching here is a lowercased `indexOf` sliding window
 // (O(n)); regex delegates to the native engine.
 //
-// Matching runs on the raw (unconverted) section markup returned by the
-// memoized loadText — Chinese conversion applies downstream on the Loader's
-// data event, so search results may diverge from the displayed text when a
-// conversion mode is active (known backlog item, same as before).
+// Search text is derived from the same text-transform and Chinese-conversion
+// pipeline as the rendered section, so result offsets can be mapped back to
+// the live transformed document.
+
+import type { ChineseConversion } from '../types'
+import { convertChinese } from '@/lib/chinese'
+import { applyTransforms, type TextTransformRule } from './text-transforms'
 
 // length for context in excerpts (mirrors foliate's search.js)
 const EXCERPT_CONTEXT_LENGTH = 50
@@ -27,6 +30,11 @@ export interface SearchMatch {
 export interface SearchMatchOptions {
   mode?: 'contains' | 'regex'
   matchCase?: boolean
+}
+
+export interface ChapterTextOptions {
+  chineseConversion?: ChineseConversion
+  transforms?: TextTransformRule[]
 }
 
 // Script/style/noscript subtrees are markup, not book text — same exclusion
@@ -134,35 +142,61 @@ interface SearchableBook {
 // Chapter text cache keyed by (book, section index). Stored on a WeakMap so
 // it shares the book object's lifetime — which is the module-level parse
 // cache's lifetime in FoliateReader (evicting the book drops this too).
-const chapterTextCaches = new WeakMap<object, Map<number, Promise<ChapterText | null>>>()
+const chapterTextCaches = new WeakMap<object, Map<string, Promise<ChapterText | null>>>()
 
-async function loadChapterText(book: SearchableBook, index: number): Promise<ChapterText | null> {
+async function loadChapterText(
+  book: SearchableBook,
+  index: number,
+  options?: ChapterTextOptions,
+): Promise<ChapterText | null> {
   const section = book.sections?.[index]
   if (!section?.id || typeof book.loadSectionText !== 'function') return null
   const markup = await book.loadSectionText(section.id)
   if (typeof markup !== 'string') return null
   const parser = new DOMParser()
-  let doc = parser.parseFromString(markup, 'application/xhtml+xml')
+  let docType: DOMParserSupportedType = 'application/xhtml+xml'
+  let doc = parser.parseFromString(markup, docType)
   // Malformed XHTML fails hard under the XML parser; retry as lenient HTML
   if (doc.getElementsByTagName('parsererror').length > 0) {
-    doc = parser.parseFromString(markup, 'text/html')
+    docType = 'text/html'
+    doc = parser.parseFromString(markup, docType)
+  }
+  const conversion = options?.chineseConversion ?? 'off'
+  const transforms = options?.transforms ?? []
+  if (!transforms.length && conversion === 'off') return extractChapterText(doc)
+
+  let transformedMarkup = transforms.length
+    ? applyTransforms(markup, transforms, docType)
+    : markup
+  if (conversion !== 'off') transformedMarkup = await convertChinese(transformedMarkup, conversion)
+  doc = parser.parseFromString(transformedMarkup, docType)
+  if (docType === 'application/xhtml+xml' && doc.getElementsByTagName('parsererror').length > 0) {
+    doc = parser.parseFromString(transformedMarkup, 'text/html')
   }
   return extractChapterText(doc)
 }
 
-export function getChapterText(book: SearchableBook, index: number): Promise<ChapterText | null> {
+export function getChapterText(
+  book: SearchableBook,
+  index: number,
+  options?: ChapterTextOptions,
+): Promise<ChapterText | null> {
   let cache = chapterTextCaches.get(book as object)
   if (!cache) {
     cache = new Map()
     chapterTextCaches.set(book as object, cache)
   }
-  const cached = cache.get(index)
+  const cacheKey = `${index}:${JSON.stringify({
+    chineseConversion: options?.chineseConversion ?? 'off',
+    transforms: options?.transforms ?? [],
+  })}`
+  const cached = cache.get(cacheKey)
   if (cached) return cached
   // Failures resolve to null but are evicted, so the next search retries
-  const promise = loadChapterText(book, index).catch(() => null)
-  cache.set(index, promise)
+  const promise = loadChapterText(book, index, options).catch(() => null)
+  cache.set(cacheKey, promise)
   void promise.then((value) => {
-    if (value === null && cache.get(index) === promise) cache.delete(index)
+    if (value === null && cache.get(cacheKey) === promise) cache.delete(cacheKey)
   })
   return promise
 }

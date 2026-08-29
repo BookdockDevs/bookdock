@@ -23,3 +23,30 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build --tag bookdock:ci .
+      - name: Start production image
+        run: |
+          mkdir -p "$RUNNER_TEMP/bookdock-data"
+          docker run --detach --name bookdock-ci \
+            --publish 3000:3000 \
+            --volume "$RUNNER_TEMP/bookdock-data:/data" \
+            bookdock:ci
+      - name: Wait for health endpoint
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:3000/api/v1/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs bookdock-ci
+          exit 1
+      - name: Clean up container
+        if: always()
+        run: docker rm --force bookdock-ci

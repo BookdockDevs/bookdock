@@ -7,6 +7,7 @@ import {
   makeExcerpt,
   offsetsToRange,
 } from '../features/reader/lib/book-search'
+import type { TextTransformRule } from '../features/reader/lib/text-transforms'
 
 const parseXhtml = (markup: string) =>
   new DOMParser().parseFromString(markup, 'application/xhtml+xml')
@@ -138,6 +139,21 @@ describe('offsetsToRange', () => {
 })
 
 describe('getChapterText', () => {
+  const makeRule = (overrides: Partial<TextTransformRule> = {}): TextTransformRule => ({
+    id: 'rule-1',
+    matchType: 'pattern',
+    pattern: '广告',
+    replacement: null,
+    isRegex: false,
+    caseSensitive: false,
+    enabled: true,
+    effectiveEnabled: true,
+    spineHref: null,
+    textOffset: null,
+    originalText: null,
+    ...overrides,
+  })
+
   const makeBook = (loadSectionText: (href: string) => Promise<string | null>) => ({
     sections: [{ id: 'a.xhtml' }, { id: 'b.xhtml', linear: 'no' }],
     loadSectionText,
@@ -173,5 +189,32 @@ describe('getChapterText', () => {
 
   it('resolves null when loadSectionText is unavailable', async () => {
     expect(await getChapterText({ sections: [{ id: 'a.xhtml' }] }, 0)).toBeNull()
+  })
+
+  it('matches the rendered text after transforms and Chinese conversion', async () => {
+    const loadSectionText = vi.fn(async () => `${XHTML_HEAD}<p>我喜欢读书。广告内容</p>${XHTML_TAIL}`)
+    const book = makeBook(loadSectionText)
+    const text = await getChapterText(book, 0, {
+      chineseConversion: 'traditional',
+      transforms: [makeRule()],
+    })
+
+    expect(text?.text).toBe('我喜歡讀書。內容')
+    expect(findMatches(text?.text ?? '', '喜歡')).toEqual([{ start: 1, end: 3 }])
+    expect(findMatches(text?.text ?? '', '广告')).toEqual([])
+  })
+
+  it('keeps transformed chapter caches separate from raw and other conversion modes', async () => {
+    const loadSectionText = vi.fn(async () => `${XHTML_HEAD}<p>我喜欢读书</p>${XHTML_TAIL}`)
+    const book = makeBook(loadSectionText)
+
+    const raw = await getChapterText(book, 0)
+    const traditional = await getChapterText(book, 0, { chineseConversion: 'traditional' })
+    const simplified = await getChapterText(book, 0, { chineseConversion: 'simplified' })
+
+    expect(raw?.text).toBe('我喜欢读书')
+    expect(traditional?.text).toBe('我喜歡讀書')
+    expect(simplified?.text).toBe('我喜欢读书')
+    expect(loadSectionText).toHaveBeenCalledTimes(3)
   })
 })

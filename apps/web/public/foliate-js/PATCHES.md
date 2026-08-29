@@ -6,7 +6,7 @@
 >
 > 行号基于 2026-08-06 working tree（`9e36c55` 之后，未提交），升级后先 grep 标记再核对。
 
-## 1. 可追溯补丁（10 处）
+## 1. 可追溯补丁（11 处）
 
 ### 1.1 `overlayer.js:128-151` — `Overlayer.dashedUnderline`（想法标注）
 
@@ -73,6 +73,11 @@
 - **行为后果**：行模板缺失 → 行退化为 auto + 默认 stretch 均分自由空间 → scrolled flow 下**内容不足一屏的短章被垂直居中**（长章节自由空间为负不受影响，page 模式 `#container` 跨全部行也不受影响，故只有短章中招）。
 - **修复**：改为 `/* bookdock: */` 块注释（`#top` 规则里上游遗留的 `// --_gap: 7%;` 一并改为块注释）。**教训：本目录 shadow DOM `<style>` 模板里只能写 `/* */`，写 `//` 浏览器不报错、整条声明静默失效。**升级重放时同样禁止带入 `//`。
 - **验证**：短章（序章）`gridTemplateRows` 从 `298px 701px`（均分）恢复为 `0px 1000px 0px`，内容回顶。
+
+### 1.11 `paginator.js:228-310` — Blob 章节 srcdoc 兼容、文档就绪与导航边界保护（working tree）
+
+- **行为**：部分嵌入式浏览器会让 Blob iframe 永远停在旧的 `about:blank`，并且不会触发 `load`；直接检查 `contentDocument` 会把空白文档误判为正文，造成阅读页空白。现在 Blob 章节先 fetch 回 markup，再通过 `iframe.srcdoc` 加载；同时按 `about:srcdoc`/实际 URL 检查文档 readyState，并用 50ms 轮询补足丢失的 `load` 事件，超时明确失败。`#goTo` 拒绝越界章节索引，避免首章/末章翻页访问 `sections[undefined].load`。
+- **验证**：隔离本地实例真实浏览器回归：首开约 1 秒显示正文，目录跳转到“第二章 继续”显示对应正文，未再出现 10 秒 iframe 超时。
 
 ## 2. vendored 基线专属机制（初始 vendored 自带，上游 main 没有，升级全部需要重放）
 

@@ -443,6 +443,7 @@ export class FoliateReader implements BookReader {
   // Snapshot of the rules this instance last applied, for change detection —
   // the same rule set re-delivered by a query refetch must not reload the view.
   private transformsJson = JSON.stringify(activeTransforms)
+  private transforms: TextTransformRule[] = activeTransforms
   private continuousScroll: ContinuousScroll = 'off'
   private pageAnimation = true
   private showHeader = true
@@ -680,7 +681,7 @@ export class FoliateReader implements BookReader {
         if (this.destroyed) return
       } else {
         // Ensure first section is visible after applyAllSettings re-render
-        try { await this.view?.renderer?.goTo?.({ index: 0 }) } catch {}
+        await this.view?.renderer?.goTo?.({ index: 0 })
       }
       const tMount3 = performance.now()
       console.debug(
@@ -1081,6 +1082,7 @@ export class FoliateReader implements BookReader {
   // reload. The module-level rules are always updated — they are what the
   // transformTarget listener reads for sections loaded after this call.
   applyTextTransforms(rules: TextTransformRule[]): Promise<void> {
+    this.transforms = rules
     const json = JSON.stringify(rules)
     if (json === this.transformsJson) return this.conversionReload
     this.transformsJson = json
@@ -1366,8 +1368,9 @@ export class FoliateReader implements BookReader {
     // the currently rendered sections (chapter-scoped searches are instant and
     // their key would need the section index, so they're never cached)
     const cacheable = opts?.scope !== 'chapter'
+    const transformKey = JSON.stringify(this.transforms)
     const cacheKey = cacheable
-      ? `${this.url}|${opts?.scope ?? 'book'}|${opts?.mode ?? 'contains'}|${opts?.matchCase ?? false}|${q}`
+      ? `${this.url}|${opts?.scope ?? 'book'}|${opts?.mode ?? 'contains'}|${opts?.matchCase ?? false}|${this.conversion}|${transformKey}|${q}`
       : ''
     const cached = cacheable ? searchCache.get(cacheKey) : undefined
     if (cached) {
@@ -1410,7 +1413,10 @@ export class FoliateReader implements BookReader {
     for (let done = 0; done < indices.length; done++) {
       if (stale()) break
       const index = indices[done]!
-      const chapterText = await getChapterText(this.book, index)
+      const chapterText = await getChapterText(this.book, index, {
+        chineseConversion: this.conversion,
+        transforms: this.transforms,
+      })
       if (stale()) break
       if (chapterText?.text) {
         const matches = findMatches(chapterText.text, q, { mode: opts?.mode, matchCase: opts?.matchCase })
@@ -1454,8 +1460,7 @@ export class FoliateReader implements BookReader {
 
   // Search highlights are drawn only for currently rendered sections:
   // computing a CFI needs a live Range, and the paginator drops sections it
-  // isn't showing. Best-effort — a section whose rendered text diverges from
-  // the searched raw text (Chinese conversion) may lose or misplace marks.
+  // isn't showing. Best-effort while an unloaded section is waiting to render.
   private drawSearchHighlights(index: number, matches: SearchMatch[]) {
     try {
       const contents = (this.view?.renderer?.getContents?.() ?? []) as Array<{ index: number; doc?: Document }>

@@ -22,13 +22,19 @@ On first run, open the web UI and complete setup to create the owner account. Th
 ### Production (Docker)
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 Then open `http://localhost:3000` (the server also serves the built web UI) and complete `/setup` to create the owner account — no account is created automatically on first boot.
 
 - `JWT_SECRET` is optional: when omitted, a random secret is generated and persisted to `/data/.jwt-secret`.
 - `DEFAULT_USERNAME` only names the built-in guest account used when guest access is enabled; it does not create an admin.
+- The complete `data/` directory is the persistent state. Stop the container before copying it for a cold backup, and restore the complete directory (including the hidden `.jwt-secret` file) before starting the container again.
+- `docker compose ps` shows the health status. The health endpoint is `http://localhost:3000/api/v1/health`.
+
+To use a published registry image instead of building from the checkout, set `BOOKDOCK_IMAGE` to the image tag and run `docker compose pull` followed by `docker compose up -d --no-build`. Docker Hub is only needed for this pull-based workflow; building from the repository does not require Docker Hub.
+
+The repository publishes Docker Hub images when a `v*` tag is pushed. To enable that workflow, add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` as GitHub Actions secrets, create a public Docker Hub repository named `bookdock`, and push a release tag. The resulting image is `<dockerhub-username>/bookdock:latest`. Until an image is published, use the source-build command above.
 
 ## Commands
 
