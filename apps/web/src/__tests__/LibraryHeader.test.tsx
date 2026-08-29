@@ -63,6 +63,13 @@ describe('LibraryHeader', () => {
     expect(onToggleSelectMode).toHaveBeenCalled()
   })
 
+  it('opens mobile navigation from the menu button', () => {
+    const onOpenNavigation = vi.fn()
+    renderHeader({ onOpenNavigation })
+    screen.getByRole('button', { name: 'library.openNavigation' }).click()
+    expect(onOpenNavigation).toHaveBeenCalled()
+  })
+
   it('reflects selection state via aria-pressed', () => {
     renderHeader({ selectionActive: true, onToggleSelectMode: vi.fn() })
     expect(screen.getByRole('button', { name: 'library.selectMode' })).toHaveAttribute('aria-pressed', 'true')

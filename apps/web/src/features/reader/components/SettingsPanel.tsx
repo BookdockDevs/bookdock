@@ -199,7 +199,7 @@ function SectionIcon({
       onClick={onClick}
       title={label}
       className={cn(
-        'flex h-9 w-9 items-center justify-center rounded-lg border transition-colors',
+    'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors',
         active
           ? 'border-current bg-current/10 text-current'
           : 'border-stone-200 text-[var(--bd-read-sub)] hover:text-current dark:border-stone-800',
@@ -415,9 +415,9 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
   outline-offset: 2px;
 }
 `}</style>
-      <div className="mb-4 flex items-center justify-between border-b border-stone-200/60 pb-3 dark:border-stone-800/60">
-        <h3 className="font-medium">{_('reader.settings')}</h3>
-        <div className="flex items-center gap-2">
+      <div className="mb-4 flex flex-col gap-3 border-b border-stone-200/60 pb-3 sm:flex-row sm:items-center sm:justify-between dark:border-stone-800/60">
+        <h3 className="shrink-0 font-medium">{_('reader.settings')}</h3>
+        <div className="flex min-w-0 items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:ml-auto">
           <SectionIcon active={section === 'font'} onClick={() => onSetSection('font')} label={_('reader.sectionFont')}>
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M4 7V4h16v3M9 20h6M12 4v16" />
@@ -691,7 +691,7 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
                   <button
                     onClick={() => deleteCustomTheme(custom.id)}
                     title={_('reader.deleteTheme')}
-                    className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-stone-500 text-[10px] leading-none text-white group-hover:flex"
+                    className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-stone-500 text-[10px] leading-none text-white sm:hidden sm:group-hover:flex"
                   >
                     ×
                   </button>

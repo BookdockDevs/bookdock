@@ -87,12 +87,12 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onClose}
     >
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-6 shadow-xl dark:border-stone-800 dark:bg-stone-950"
+        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 font-serif text-base font-medium text-stone-900 dark:text-stone-100">
@@ -111,7 +111,7 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
         </div>
         <div className="mb-3">
           <span className={labelCls}>{_('reader.addRecordDuration')}</span>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-2 sm:flex">
             <input
               aria-label={_('reader.addRecordHours')}
               type="number"
@@ -144,7 +144,7 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
             className={inputCls}
           />
         </div>
-        <div className="mb-4 flex gap-3">
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:flex">
           <div className="flex-1">
             <label htmlFor="addRecordStartPct" className={labelCls}>{_('reader.sessionStartPercent')}</label>
             <input

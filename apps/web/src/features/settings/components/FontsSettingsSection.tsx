@@ -60,7 +60,7 @@ export default function FontsSettingsSection() {
   const badge = 'rounded border border-stone-200 px-1.5 py-0.5 text-[11px] text-stone-500 dark:border-stone-700 dark:text-stone-400'
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-sm font-medium">{_('settings.fonts')}</h2>
         <input

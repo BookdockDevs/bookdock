@@ -28,7 +28,7 @@ const BAR_HEIGHT = 44
 const STYLE_WIDTH = 236
 const STYLE_HEIGHT = 40
 
-const iconBtn = 'flex h-9 w-9 items-center justify-center rounded-full text-stone-200 transition-colors hover:bg-white/10 hover:text-white'
+const iconBtn = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-stone-200 transition-colors hover:bg-white/10 hover:text-white'
 
 export function SelectionToolbar({ bookId }: { bookId: string }) {
   const _ = useTranslation()
@@ -327,7 +327,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     <>
       {target && (
         <div
-          className="fixed z-50 flex h-10 items-center gap-0.5 rounded-2xl bg-stone-900/95 px-2 shadow-xl backdrop-blur-md"
+          className="fixed z-50 flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl bg-stone-900/95 px-2 shadow-xl backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           style={{ left: styleLeft, top: styleTop }}
         >
           {HIGHLIGHT_STYLES.map((s) => (
@@ -342,7 +342,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
           ))}
           <span className="mx-1 h-5 w-px bg-white/15" />
           {HIGHLIGHT_COLORS.map((c) => (
-            <button key={c.name} onClick={() => restyle({ color: c.name })} className="flex h-8 w-8 items-center justify-center rounded-full transition-transform hover:scale-110" title={_(COLOR_LABEL_KEYS[c.name])}>
+            <button key={c.name} onClick={() => restyle({ color: c.name })} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform hover:scale-110" title={_(COLOR_LABEL_KEYS[c.name])}>
               <span className="flex h-4 w-4 items-center justify-center rounded-full" style={{ backgroundColor: c.hex }}>
                 {target.color === c.name && (
                   <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#1c1917" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
@@ -355,7 +355,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         </div>
       )}
       <div
-        className="fixed z-50 flex h-11 items-center gap-0.5 rounded-2xl bg-stone-900/95 px-2 shadow-xl backdrop-blur-md"
+        className="fixed z-50 flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl bg-stone-900/95 px-2 shadow-xl backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{ left: bar.left, top: bar.top }}
       >
         {actions.map((a) => (

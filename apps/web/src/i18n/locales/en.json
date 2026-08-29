@@ -44,6 +44,8 @@
     "emptyHint": "Drag & drop files, or click the button above",
     "upload": "Upload",
     "viewMenu": "View Menu",
+    "openNavigation": "Open navigation",
+    "closeNavigation": "Close navigation",
     "uploading": "Uploading...",
     "processing": "Processing...",
     "uploadSuccess": "Upload successful",

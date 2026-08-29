@@ -26,13 +26,13 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
   return (
     <header
       className={cn(
-        'pointer-events-none absolute left-0 right-0 top-0 z-40 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-4 text-[var(--bd-read-text)] transition-transform duration-300',
+        'pointer-events-none absolute left-0 right-0 top-0 z-40 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] transition-transform duration-300 sm:px-4',
         visible ? 'group-hover:translate-y-0' : '',
         settingsOpen || pinned ? 'translate-y-0' : '-translate-y-full',
         className,
       )}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
         <Link
           to="/"
           aria-label={_('reader.back')}
@@ -42,11 +42,11 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
             <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
         </Link>
-        <span className="max-w-[40vw] truncate text-sm font-medium md:max-w-md">{title}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium md:max-w-md">{title}</span>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         {estimatedMinutes !== undefined && (
-          <span className="mr-2 text-xs tabular-nums text-[var(--bd-read-sub)]">
+          <span className="mr-1 hidden text-xs tabular-nums text-[var(--bd-read-sub)] sm:mr-2 sm:inline">
             {formatDuration(estimatedMinutes * 60, _)}
           </span>
         )}

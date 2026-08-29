@@ -25,6 +25,9 @@ interface LibrarySidebarProps {
   shelfId: string | null
   tagId: string | null
   trash: boolean
+  /** Mobile navigation drawer state; desktop keeps the sidebar in flow. */
+  mobileOpen?: boolean
+  onMobileClose?: () => void
   /** The scrollable nav element; the library autoscrolls it during shelf drags. */
   navRef?: React.RefObject<HTMLDivElement | null>
   /** Same-frame shelf order during drag end; see Library for the rationale. */
@@ -33,7 +36,7 @@ interface LibrarySidebarProps {
   settleShelfId?: string | null
 }
 
-const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId, trash, navRef, shelfOrderOverride, settleShelfId }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId, trash, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const { data: shelvesData, isLoading: shelvesLoading } = useShelves()
@@ -80,8 +83,27 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
 
   const isAllActive = !shelfId && !tagId && !trash
 
+  function selectNavigation(patch: Partial<LibrarySearch>) {
+    navSearch(patch)
+    onMobileClose?.()
+  }
+
   return (
-    <aside className="hidden w-60 shrink-0 flex-col border-r border-stone-200/60 px-3 py-6 dark:border-stone-800/50 md:flex">
+    <>
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label={_('library.closeNavigation')}
+          onClick={onMobileClose}
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+        />
+      )}
+      <aside className={cn(
+        'w-60 shrink-0 flex-col border-r border-stone-200/60 px-3 py-6 dark:border-stone-800/50',
+        mobileOpen
+          ? 'fixed inset-y-0 left-0 z-50 flex h-full w-[min(19rem,75vw)] overflow-hidden bg-stone-50 shadow-xl dark:bg-stone-950 md:static md:h-auto md:w-60 md:shadow-none'
+          : 'hidden md:flex',
+      )}>
       <div className="mb-8 flex items-center gap-2.5 px-2">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -102,7 +124,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
               <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
             </svg>
           }
-          onClick={() => navSearch({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })}
+          onClick={() => selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })}
         />
         <div className="mb-1 mt-6 flex items-center justify-between px-3">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">
@@ -122,13 +144,11 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
         <UncategorizedDropTarget
           count={uncategorizedCount}
           active={!trash && shelfId === 'none'}
-          onClick={() => navSearch({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
+          onClick={() => selectNavigation({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
         />
         {shelvesLoading ? (
           <div className="px-3 py-2 text-xs text-stone-400">{_('reader.loading')}</div>
-        ) : shelves.length === 0 ? (
-          <div className="px-3 py-1 text-xs text-stone-400">{_('library.noShelves')}</div>
-        ) : (
+        ) : shelves.length > 0 ? (
           <SortableContext items={shelves.map((s) => s.id)} strategy={verticalListSortingStrategy}>
             {shelves.map((shelf) => (
                 <ShelfItem
@@ -136,13 +156,13 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
                   shelf={shelf}
                   active={!trash && shelfId === shelf.id}
                   settling={settleShelfId === shelf.id}
-                  onClick={() => navSearch({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
+                  onClick={() => selectNavigation({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
                   onRename={() => setShelfDialog({ shelfId: shelf.id, initialName: shelf.name })}
                   onDelete={() => setDeleteShelfTarget(shelf)}
                 />
             ))}
           </SortableContext>
-        )}
+        ) : null}
 
         <div className="mb-1 mt-6 flex items-center justify-between px-3">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">
@@ -167,7 +187,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
               key={tag.id}
               tag={tag}
               active={!trash && tagId === tag.id}
-              onClick={() => navSearch({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
+              onClick={() => selectNavigation({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
               onRename={() => setTagDialog({ tagId: tag.id, initialName: tag.name })}
               onDelete={() => setDeleteTagTarget(tag)}
             />
@@ -184,7 +204,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
                 <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
               </svg>
             }
-            onClick={() => navSearch({ trash: true, shelf: undefined, tag: undefined, status: undefined })}
+            onClick={() => selectNavigation({ trash: true, shelf: undefined, tag: undefined, status: undefined })}
           />
         </div>
       </nav>
@@ -200,7 +220,10 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
               <rect x="17" y="4" width="3" height="14" rx="1" />
             </svg>
           }
-          onClick={() => void navigate({ to: '/stats' })}
+          onClick={() => {
+            onMobileClose?.()
+            void navigate({ to: '/stats' })
+          }}
         />
         <NavItem
           label={_('settings.title')}
@@ -210,7 +233,10 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           }
-          onClick={() => void navigate({ to: '/settings' })}
+          onClick={() => {
+            onMobileClose?.()
+            void navigate({ to: '/settings' })
+          }}
         />
         <div className="mt-1">
           <AccountMenu />
@@ -241,7 +267,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
           const target = deleteShelfTarget
           if (!target) return
           setDeleteShelfTarget(null)
-          if (shelfId === target.id) navSearch({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
+          if (shelfId === target.id) selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
           void deleteShelf.mutateAsync(target.id).catch(() => undefined)
         }}
       />
@@ -256,11 +282,12 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
           const target = deleteTagTarget
           if (!target) return
           setDeleteTagTarget(null)
-          if (tagId === target.id) navSearch({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
+          if (tagId === target.id) selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
           void deleteTag.mutateAsync(target.id).catch(() => undefined)
         }}
       />
-    </aside>
+      </aside>
+    </>
   )
 })
 
@@ -399,7 +426,7 @@ function ShelfItem({
           }}
           className={cn(
             'flex h-6 w-6 items-center justify-center rounded-md text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
-            menu.open ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+            menu.open ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100',
           )}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -498,7 +525,7 @@ function TagItem({
           }}
           className={cn(
             'flex h-6 w-6 items-center justify-center rounded-md text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
-            menu.open ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+            menu.open ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100',
           )}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">

@@ -110,7 +110,7 @@ export function IdeaOverlay({
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div
-          className="flex min-h-full flex-col items-center justify-center p-4 pb-[14vh]"
+          className="flex min-h-full flex-col items-center justify-center p-3 pb-20 sm:p-4 sm:pb-[14vh]"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) onClose()
           }}

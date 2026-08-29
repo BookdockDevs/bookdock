@@ -322,14 +322,14 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-stone-900"
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:max-h-[85vh] sm:rounded-2xl dark:bg-stone-900"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-stone-100 px-5 py-3 dark:border-stone-800">
+        <div className="flex shrink-0 items-center justify-between border-b border-stone-100 px-4 py-3 sm:px-5 dark:border-stone-800">
           <h2 className="font-serif text-base font-semibold text-stone-900 dark:text-stone-100">
             {editing ? _('library.edit') : _('library.details')}
           </h2>
@@ -386,19 +386,19 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           {editing && draft ? (
             <div>
               <section>
                 <GroupLabel>{_('library.editGroupBasic')}</GroupLabel>
-                <div className="flex gap-5">
-                  <div className="w-28 shrink-0">
+                <div className="flex flex-col gap-4 sm:flex-row sm:gap-5">
+                  <div className="w-28 shrink-0 self-center sm:self-auto">
                     <div
                       className="group relative cursor-pointer"
                       onClick={() => coverInputRef.current?.click()}
                     >
                       <BookCover book={displayBook} />
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 rounded-xl bg-black/55 opacity-0 transition-opacity group-hover:opacity-100">
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 rounded-xl bg-black/55 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                         <span className="rounded-md bg-white/90 px-2.5 py-1 text-xs font-medium text-stone-800">
                           {_('library.changeCover')}
                         </span>
@@ -464,7 +464,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
 
               <section className="mt-6">
                 <GroupLabel>{_('library.editGroupPublishing')}</GroupLabel>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                   <Field label={_('library.publisher')}>
                     <input type="text" value={draft.publisher} onChange={(e) => setDraft({ ...draft, publisher: e.target.value })} className={inputClass} />
                   </Field>
@@ -498,7 +498,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
 
               <section className="mt-6">
                 <GroupLabel>{_('library.seriesSection')}</GroupLabel>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                   <Field label={_('library.seriesSection')}>
                     <input type="text" value={draft.series} onChange={(e) => setDraft({ ...draft, series: e.target.value })} className={inputClass} />
                   </Field>
@@ -582,8 +582,8 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
             </div>
           ) : (
             <div>
-              <div className="flex gap-5">
-                <div className="w-32 shrink-0">
+              <div className="flex flex-col gap-4 sm:flex-row sm:gap-5">
+                <div className="w-32 shrink-0 self-center sm:self-auto">
                   <BookCover book={displayBook} />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -621,7 +621,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                     </div>
                   )}
 
-                  <div className="mt-4 flex items-center gap-2">
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
                     <Button
                       size="sm"
                       className="gap-1.5"
@@ -757,7 +757,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
         </div>
 
         {editing && (
-          <div className="flex shrink-0 items-center justify-between gap-2 border-t border-stone-100 px-5 py-3 dark:border-stone-800">
+          <div className="flex shrink-0 flex-col gap-3 border-t border-stone-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:px-5 dark:border-stone-800">
             {confirmReset ? (
               <div className="flex min-w-0 items-center gap-2">
                 <span className="truncate text-xs text-stone-500 dark:text-stone-400">{_('library.resetMetadataConfirm')}</span>

@@ -14,7 +14,7 @@ export default function ReadingStatsCard() {
     <section className="mb-8">
       <Link
         to="/stats"
-        className="flex items-center gap-8 rounded-xl bg-white px-5 py-4 shadow-sm ring-1 ring-stone-200/70 transition-shadow hover:shadow-md dark:bg-stone-900 dark:ring-stone-800"
+      className="flex items-center gap-4 rounded-xl bg-white px-4 py-4 shadow-sm ring-1 ring-stone-200/70 transition-shadow hover:shadow-md sm:gap-8 sm:px-5 dark:bg-stone-900 dark:ring-stone-800"
       >
         <span className="flex flex-col gap-0.5">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">{_('stats.today')}</span>

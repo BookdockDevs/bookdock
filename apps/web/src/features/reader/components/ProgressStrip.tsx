@@ -9,6 +9,8 @@ interface ProgressStripProps {
   visible: boolean
   /** Middle click-area tap forces the strip up (mobile: no hover) */
   pinned?: boolean
+  /** Move the strip above the mobile tool dock while reading controls are visible. */
+  mobileDockVisible?: boolean
   className?: string
   /** Chapter titles in section order for the drag-preview badge */
   chapters?: Chapter[]
@@ -29,6 +31,7 @@ export const ProgressStrip = memo(function ProgressStrip({
   pageInfo,
   visible,
   pinned = false,
+  mobileDockVisible = false,
   className,
   chapters,
   sectionFractions,
@@ -74,7 +77,8 @@ export const ProgressStrip = memo(function ProgressStrip({
   return (
     <div
       className={cn(
-        'pointer-events-none absolute bottom-0 left-0 right-0 z-40 flex h-12 items-center gap-3 border-t border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-4 text-xs transition-transform duration-300',
+        'pointer-events-none absolute left-0 right-0 z-40 flex h-12 items-center gap-1.5 border-t border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-xs transition-[bottom,transform] duration-300 sm:gap-3 sm:px-4',
+        mobileDockVisible ? 'bottom-14' : 'bottom-0',
         pinned || visible ? 'translate-y-0' : 'translate-y-full',
         className,
       )}

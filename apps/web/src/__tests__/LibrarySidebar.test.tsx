@@ -69,12 +69,47 @@ describe('LibrarySidebar', () => {
     expect(navSearch).toHaveBeenCalledWith({ shelf: 'shelf-1', tag: undefined, status: undefined, trash: undefined })
   })
 
+  it('closes the mobile drawer after selecting a shelf', () => {
+    const onMobileClose = vi.fn()
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] })
+
+    render(
+      <LibrarySidebar
+        navSearch={navSearch}
+        shelfId={null}
+        tagId={null}
+        trash={false}
+        mobileOpen
+        onMobileClose={onMobileClose}
+      />,
+    )
+    fireEvent.click(screen.getByText('Favorites'))
+    expect(onMobileClose).toHaveBeenCalled()
+  })
+
   it('renders the uncategorized entry and filters with the none sentinel', () => {
     mockHooks()
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
     fireEvent.click(screen.getByText('未分类'))
     expect(navSearch).toHaveBeenCalledWith({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })
+    expect(screen.queryByText('暂无书架')).toBeNull()
+  })
+
+  it('uses a three-quarter width mobile drawer', () => {
+    mockHooks()
+
+    render(
+      <LibrarySidebar
+        navSearch={navSearch}
+        shelfId={null}
+        tagId={null}
+        trash={false}
+        mobileOpen
+      />,
+    )
+
+    expect(screen.getByText('未分类').closest('aside')).toHaveClass('w-[min(19rem,75vw)]')
   })
 
   it('places uncategorized inside the shelves section, before real shelves', () => {

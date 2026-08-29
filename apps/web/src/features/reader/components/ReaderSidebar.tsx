@@ -12,7 +12,7 @@ import type { NavTab } from '../types'
 interface ReaderSidebarProps {
   bookId: string
   onStatsTabOpen: () => void
-  /** Middle-tap chrome toggle; the only dock summon on touch (no hover) */
+  /** Whether the mobile reading controls were summoned by the reader chrome toggle. */
   chromePinned: boolean
 }
 
@@ -33,14 +33,12 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
 
   const SIDEBAR_MIN = 200
   const SIDEBAR_MAX = 500
-  // Touch panel width is fixed: no drag-resize without a precise pointer
-  const TOUCH_PANEL_WIDTH = 'min(320px, 85vw)'
-
   const [locked, setLocked] = useState(toolbarLocked)
   const [hovered, setHovered] = useState(false)
-  // Touch ignores hover (absent) and the persisted lock (lock button hidden)
+  // Touch uses a bottom control sheet; the desktop dock keeps its hover/lock behavior.
+  const mobileControlsVisible = isTouch && (chromePinned || sidebarOpen)
   const toolbarVisible = isTouch
-    ? chromePinned || sidebarOpen
+    ? mobileControlsVisible
     : locked || hovered || sidebarOpen
   const panelRef = useRef<NavigationPanelRef>(null)
 
@@ -118,105 +116,133 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   }
 
   const collapsed = !toolbarVisible
+  const panelLocked = isTouch ? false : locked
 
-  const totalWidth = isTouch
-    ? collapsed
-      ? 0
-      : sidebarOpen
-        ? `calc(56px + ${TOUCH_PANEL_WIDTH})`
-        : 56
-    : collapsed
-      ? 8
-      : sidebarOpen
-        ? 56 + panelWidth
-        : 56
+  const totalWidth = collapsed
+    ? 8
+    : sidebarOpen
+      ? 56 + panelWidth
+      : 56
 
-  return (
-    <>
-      {isTouch && sidebarOpen && (
-        // Backdrop dismisses only the panel; the dock stays summoned
+  const toolDock = (
+    <div
+      data-testid="reader-tool-dock"
+      className={cn(
+        'flex shrink-0 border-[var(--bd-read-accent)]',
+        isTouch
+          ? 'order-2 h-14 w-full items-center border-t px-1'
+          : 'order-none h-full w-14 flex-col items-center border-r py-3',
+        collapsed ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',
+        !resizing && 'transition-all duration-200',
+      )}
+      style={{ backgroundColor: 'var(--bd-read-bg)' }}
+    >
+      <ToolDock
+        activeNavTab={activeNavTab}
+        sidebarOpen={sidebarOpen}
+        locked={locked}
+        statsDisabled={statsDisabled}
+        hideLock={isTouch}
+        mobile={isTouch}
+        onNavTab={handleNavTab}
+        onToggleLock={() => setLocked(!locked)}
+      />
+      <div className={isTouch ? 'hidden' : 'flex-1'} />
+      <button
+        onClick={toggleTheme}
+        title={readingThemeId === 'night' ? '切换为日间' : '切换为夜间'}
+        className={cn(
+          'flex shrink-0 items-center justify-center rounded-xl border text-[var(--bd-read-text)] transition-colors hover:bg-stone-500/10',
+          isTouch ? 'h-12 min-w-12 [&_svg]:h-5 [&_svg]:w-5' : 'h-10 w-10 rounded-lg',
+        )}
+        style={{ borderColor: 'var(--bd-read-accent)' }}
+      >
+        {readingThemeId === 'night' ? (
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
+        ) : (
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
+        )}
+      </button>
+    </div>
+  )
+
+  const navigationPanel = (
+    <div
+      className={cn(
+        'relative shrink-0 overflow-hidden',
+        isTouch
+          ? cn('order-1 w-full h-0 transition-[height]', sidebarOpen && 'h-[65dvh] max-h-[520px]')
+          : cn('order-none h-full', !resizing && 'transition-all duration-200', sidebarOpen ? '' : 'w-0'),
+      )}
+      style={isTouch
+        ? { backgroundColor: 'var(--bd-read-bg)' }
+        : { width: sidebarOpen ? panelWidth : 0, backgroundColor: 'var(--bd-read-bg)' }}
+    >
+      <div
+        className={cn('h-full', isTouch && 'w-full')}
+        style={isTouch ? undefined : { width: panelWidth }}
+      >
+        <NavigationPanel
+          ref={panelRef}
+          bookId={bookId}
+          open={sidebarOpen}
+          locked={panelLocked}
+          statsDisabled={statsDisabled}
+          onClose={handleClosePanel}
+        />
+      </div>
+      {sidebarOpen && !isTouch && (
         <div
-          data-testid="sidebar-backdrop"
-          className="fixed inset-0 z-40 bg-black/40"
-          onClick={() => setSidebarOpen(false)}
+          className="absolute right-0 top-0 z-50 h-full w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-500/40 active:w-1.5 active:bg-blue-500/60"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
         />
       )}
-      <div
-        className={cn(
-          'z-50 flex h-full shrink-0 overflow-hidden',
-          // Touch: overlay floats over the full-width content instead of
-          // pushing it; PC: in-flow flex item (hover strip included)
-          isTouch ? 'absolute inset-y-0 left-0' : 'relative',
-          !resizing && 'transition-all duration-200',
-        )}
-        style={{ width: totalWidth }}
-        onPointerEnter={isTouch ? undefined : () => setHovered(true)}
-        onPointerLeave={isTouch ? undefined : () => setHovered(false)}
-      >
-        <div
-          className={cn(
-            'flex h-full w-14 shrink-0 flex-col items-center border-r py-3',
-            !resizing && 'transition-all duration-200',
-            collapsed ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',
-          )}
-          style={{ backgroundColor: 'var(--bd-read-bg)', borderColor: 'var(--bd-read-accent)' }}
-        >
-          <ToolDock
-            activeNavTab={activeNavTab}
-            sidebarOpen={sidebarOpen}
-            locked={locked}
-            statsDisabled={statsDisabled}
-            hideLock={isTouch}
-            onNavTab={handleNavTab}
-            onToggleLock={() => setLocked(!locked)}
-          />
-          <div className="flex-1" />
-          <button
-            onClick={toggleTheme}
-            title={readingThemeId === 'night' ? '切换为日间' : '切换为夜间'}
-            className="flex h-10 w-10 items-center justify-center rounded-lg border text-[var(--bd-read-text)] transition-colors hover:bg-stone-500/10"
-            style={{ borderColor: 'var(--bd-read-accent)' }}
-          >
-            {readingThemeId === 'night' ? (
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
-            ) : (
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
-            )}
-          </button>
-        </div>
-        <div
-          className={cn(
-            'relative h-full shrink-0 overflow-hidden',
-            !resizing && 'transition-all duration-200',
-            isTouch && (sidebarOpen ? 'w-[min(320px,85vw)]' : 'w-0'),
-          )}
-          style={isTouch
-            ? { backgroundColor: 'var(--bd-read-bg)' }
-            : { width: sidebarOpen ? panelWidth : 0, backgroundColor: 'var(--bd-read-bg)' }}
-        >
+    </div>
+
+  )
+
+  if (isTouch) {
+    return (
+      <>
+        {sidebarOpen && (
           <div
-            className={cn('h-full', isTouch && 'w-[min(320px,85vw)]')}
-            style={isTouch ? undefined : { width: panelWidth }}
-          >
-            <NavigationPanel
-              ref={panelRef}
-              bookId={bookId}
-              open={sidebarOpen}
-              locked={locked}
-              statsDisabled={statsDisabled}
-              onClose={handleClosePanel}
-            />
-          </div>
-          {sidebarOpen && !isTouch && (
-            <div
-              className="absolute right-0 top-0 z-50 h-full w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-500/40 active:w-1.5 active:bg-blue-500/60"
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-            />
+            data-testid="sidebar-backdrop"
+            className="fixed inset-0 z-40 bg-black/40"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+        <div
+          id="reader-navigation"
+          data-testid="reader-sidebar"
+          className={cn(
+            'fixed inset-x-0 bottom-0 z-50 flex flex-col overflow-visible',
+            mobileControlsVisible ? 'translate-y-0' : 'pointer-events-none translate-y-full',
+            !resizing && 'transition-transform duration-200',
           )}
+        >
+          {navigationPanel}
+          {toolDock}
         </div>
-      </div>
-    </>
+      </>
+    )
+  }
+
+  return (
+    <div
+      id="reader-navigation"
+      data-testid="reader-sidebar"
+      className={cn(
+        'relative z-50 flex h-full shrink-0 overflow-hidden',
+        !resizing && 'transition-all duration-200',
+      )}
+      style={{ width: totalWidth }}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+    >
+      {toolDock}
+      {navigationPanel}
+    </div>
   )
 })

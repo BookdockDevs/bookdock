@@ -34,7 +34,7 @@ export default function Settings() {
   ]
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
+    <div className="mx-auto flex max-w-3xl flex-col gap-5 p-4 sm:gap-6 sm:p-6">
       <div className="flex items-center gap-3">
         <Link
           to="/"
@@ -49,15 +49,15 @@ export default function Settings() {
         <h1 className="text-2xl font-bold">{_('settings.title')}</h1>
       </div>
 
-      <div className="flex items-start gap-6">
-        <nav className="sticky top-6 flex w-40 shrink-0 flex-col gap-0.5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
+        <nav className="sticky top-0 flex w-full shrink-0 gap-0.5 overflow-x-auto pb-1 sm:top-6 sm:w-40 sm:flex-col sm:overflow-visible sm:pb-0">
           {sections.map((s) => (
             <button
               key={s.id}
               type="button"
               onClick={() => setActive(s.id)}
               className={cn(
-                'rounded-lg px-3 py-2 text-left text-[13px] transition-all',
+                'shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-left text-[13px] transition-all',
                 active === s.id
                   ? 'bg-white font-medium text-stone-900 shadow-sm ring-1 ring-stone-200/70 dark:bg-stone-900 dark:text-stone-50 dark:ring-stone-800'
                   : 'text-stone-500 hover:bg-stone-200/50 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/50 dark:hover:text-stone-100',
@@ -70,7 +70,7 @@ export default function Settings() {
 
         <div className="min-w-0 flex-1">
           {active === 'general' && (
-            <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+            <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
               <h2 className="mb-4 text-sm font-medium">{_('settings.general')}</h2>
               <LanguageSwitcher />
             </section>
@@ -85,7 +85,7 @@ export default function Settings() {
             </div>
           )}
           {active === 'library' && (
-            <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+            <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
               <h2 className="mb-4 text-sm font-medium">{_('settings.trash')}</h2>
               <TrashSettingsRow />
             </section>

@@ -757,7 +757,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       </div>
       {searchActive && searchResults.length > 0 && (
         <div
-          className="fixed bottom-16 left-1/2 z-[60] flex h-11 -translate-x-1/2 items-center gap-0.5 rounded-full border border-stone-200/60 bg-[var(--bd-read-bg)] px-1.5 shadow-xl dark:border-stone-800/60"
+          className="fixed bottom-14 left-1/2 z-[60] flex h-11 -translate-x-1/2 items-center gap-0.5 rounded-full border border-stone-200/60 bg-[var(--bd-read-bg)] px-1.5 shadow-xl dark:border-stone-800/60"
           style={{ animation: 'note-editor-in 140ms ease-out forwards', '--note-dx': '0px', '--note-dy': '8px' } as CSSProperties}
         >
           <button

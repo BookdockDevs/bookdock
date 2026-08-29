@@ -42,7 +42,7 @@ export default function TocRulesSettingsSection() {
     'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-stone-800 dark:hover:text-stone-200'
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h2 className="text-sm font-medium">{_('settings.tocRules')}</h2>

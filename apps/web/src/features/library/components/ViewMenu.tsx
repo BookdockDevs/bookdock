@@ -60,7 +60,10 @@ const LIST_INFO_LABEL_KEYS: Record<ListInfoItem, string> = {
 export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, readStatus }: ViewMenuProps) {
   const _ = useTranslation()
   const [open, setOpen] = useState(false)
+  const [isNarrow, setIsNarrow] = useState(false)
+  const [menuTop, setMenuTop] = useState<number | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   const coverText = useUiStore((s) => s.coverText)
   const coverFit = useUiStore((s) => s.coverFit)
@@ -77,6 +80,14 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
   const setView = useUiStore((s) => s.setView)
 
   useEffect(() => {
+    const media = window.matchMedia('(max-width: 639px)')
+    const update = () => setIsNarrow(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
     if (!open) return
     const onPointerDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
@@ -84,6 +95,21 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
     window.addEventListener('mousedown', onPointerDown)
     return () => window.removeEventListener('mousedown', onPointerDown)
   }, [open])
+
+  useEffect(() => {
+    if (!open || !isNarrow) return
+    const update = () => {
+      const rect = buttonRef.current?.getBoundingClientRect()
+      if (rect) setMenuTop(rect.bottom + 8)
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [open, isNarrow])
 
   const isFilterActive = Boolean(format) || Boolean(readStatus)
 
@@ -124,6 +150,7 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
     <div ref={ref} className="relative">
       <button
         type="button"
+        ref={buttonRef}
         aria-label={_('library.viewMenu')}
         onClick={() => setOpen((v) => !v)}
         className={cn(
@@ -144,7 +171,15 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
       </button>
 
       {open && (
-        <div className="absolute right-0 top-11 z-30 w-72 rounded-xl border border-stone-200/80 bg-white/95 p-1.5 shadow-xl shadow-stone-900/8 backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95">
+        <div
+          className={cn(
+            'z-30 rounded-xl border border-stone-200/80 bg-white/95 p-1.5 shadow-xl shadow-stone-900/8 backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95',
+            isNarrow
+              ? 'fixed right-2 max-h-[60dvh] w-[min(18rem,75vw)] overflow-y-auto'
+              : 'absolute right-0 top-11 w-72',
+          )}
+          style={isNarrow && menuTop !== null ? { top: menuTop } : undefined}
+        >
           <SectionLabel>{_('library.view')}</SectionLabel>
           <div className="mx-1 flex gap-1 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
             {viewOptions.map((opt) => (

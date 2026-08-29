@@ -38,12 +38,13 @@ export default function UserManagementSection() {
   }
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <h2 className="mb-4 text-sm font-medium">{_('admin.userManagement')}</h2>
       {isLoading ? (
         <p className="text-xs text-stone-400">{_('reader.loading')}</p>
       ) : (
-        <table className="w-full text-left text-sm">
+        <div className="-mx-1 overflow-x-auto px-1">
+          <table className="min-w-[42rem] w-full text-left text-sm">
           <thead>
             <tr className="border-b border-stone-100 text-xs text-stone-400 dark:border-stone-800">
               <th className="pb-2 font-medium">{_('auth.username')}</th>
@@ -65,7 +66,8 @@ export default function UserManagementSection() {
               />
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       )}
 
       <DeleteConfirm
@@ -202,7 +204,7 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onClose}
     >
       <form
@@ -214,7 +216,7 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
           }
           onSubmit(password)
         }}
-        className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-6 shadow-xl dark:border-stone-800 dark:bg-stone-950"
+        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-2 font-serif text-base font-medium text-stone-900 dark:text-stone-100">

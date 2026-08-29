@@ -12,6 +12,7 @@ export function IconButton({ icon, active, title, onClick }: IconButtonProps) {
   return (
     <button
       onClick={onClick}
+      aria-label={title}
       title={title}
       className={cn(
         'pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg border bg-[var(--bd-read-bg)] transition-all hover:shadow-md',
@@ -30,13 +31,15 @@ interface ToolDockProps {
   sidebarOpen: boolean
   locked: boolean
   statsDisabled?: boolean
-  /** Touch devices pin the dock via the middle-tap chrome toggle instead */
+  /** Hide the lock action on touch devices, where the dock is transient. */
   hideLock?: boolean
+  /** Render the touch toolbar as a labeled horizontal action row. */
+  mobile?: boolean
   onNavTab: (tab: NavTab) => void
   onToggleLock: () => void
 }
 
-export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, hideLock, onNavTab, onToggleLock }: ToolDockProps) {
+export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, hideLock, mobile = false, onNavTab, onToggleLock }: ToolDockProps) {
   const icons = [
     {
       id: 'toc' as const,
@@ -68,18 +71,30 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, hid
   ]
 
   return (
-    <div className="pointer-events-auto flex flex-col gap-2">
+    <div className={cn(
+      'pointer-events-auto flex',
+      mobile ? 'min-w-0 flex-1 items-stretch justify-around gap-1 overflow-x-auto px-1' : 'flex-col gap-2',
+    )}>
       {icons.map((item) => {
         const active = sidebarOpen && activeNavTab === item.id
-        return (
-          <IconButton
-            key={item.id}
-            title={item.title}
-            active={active}
-            onClick={() => onNavTab(item.id)}
-            icon={item.icon}
-          />
-        )
+        if (mobile) {
+          return (
+            <button
+              key={item.id}
+              type="button"
+              aria-label={item.title}
+              title={item.title}
+              onClick={() => onNavTab(item.id)}
+              className={cn(
+                'flex h-12 min-w-12 flex-1 shrink-0 items-center justify-center rounded-xl transition-colors [&_svg]:h-5 [&_svg]:w-5',
+                active ? 'bg-[var(--bd-read-accent)] text-current' : 'text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current',
+              )}
+            >
+              {item.icon}
+            </button>
+          )
+        }
+        return <IconButton key={item.id} title={item.title} active={active} onClick={() => onNavTab(item.id)} icon={item.icon} />
       })}
       {!hideLock && (
         <>

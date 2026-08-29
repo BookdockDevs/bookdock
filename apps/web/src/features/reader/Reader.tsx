@@ -66,8 +66,8 @@ export default function Reader() {
   // raises the footer and never moves the capsule under the cursor.
   const [footerSummon, setFooterSummon] = useState(false)
   const [cornerDwell, setCornerDwell] = useState(false)
-  // Touch devices have no hover: the chrome hover hot zones stay inert and
-  // the top/bottom bars are driven by the middle-tap chromePinned alone
+  // Touch devices have no hover: the chrome hot zones stay inert and the
+  // top/bottom controls are driven by the middle-tap chromePinned alone.
   const isTouch = useIsTouch()
   const footerVisibleRef = useRef(false)
   const footerVisible = chromePinned || footerSummon || (footerVisibleRef.current && cornerDwell)
@@ -78,6 +78,8 @@ export default function Reader() {
   const replaceTarget = useReaderState((s) => s.replaceTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const setTocItems = useReaderState((s) => s.setTocItems)
+  const sidebarOpen = useReaderState((s) => s.sidebarOpen)
+  const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setCurrentChapter = useReaderState((s) => s.setCurrentChapter)
@@ -565,11 +567,13 @@ export default function Reader() {
     },
     onNavigatePending: ({ pending }) => setNavPending(pending),
     onChromeToggle: () => {
-      // Tap-to-toggle: anything visible (pinned bars or the settings popover)
-      // dismisses on tap; nothing visible reveals the bars
-      if (chromePinned || settingsOpen) {
+      // Tap-to-toggle: anything visible (pinned bars, the settings popover,
+      // or the mobile bottom sheet) dismisses on tap; nothing visible reveals
+      // the reading chrome.
+      if (chromePinned || settingsOpen || sidebarOpen) {
         setChromePinned(false)
         setSettingsOpen(false)
+        setSidebarOpen(false)
       } else {
         setChromePinned(true)
       }
@@ -845,8 +849,9 @@ export default function Reader() {
   }, [currentChapterIndex, chapterFraction, currentOffset, chaptersQuery.data, rate, totalChars])
 
   const onToggleSettings = useCallback(() => {
+    setSidebarOpen(false)
     setSettingsOpen((v) => !v)
-  }, [])
+  }, [setSidebarOpen])
 
   const onToggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
@@ -990,7 +995,7 @@ export default function Reader() {
       <RendererContext.Provider value={rendererContextValue}>
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div className="flex h-full w-full">
-          <ReaderSidebar bookId={id} onStatsTabOpen={flushReadingTimer} chromePinned={chromePinned} />
+            <ReaderSidebar bookId={id} onStatsTabOpen={flushReadingTimer} chromePinned={chromePinned} />
           <div className="relative flex flex-1 flex-col">
             {/* Top hover zone: hot strip + header belong to the same group so hover is continuous.
                 Touch: no group/hot strip — pinned (middle tap) is the only reveal. */}
@@ -1081,7 +1086,8 @@ export default function Reader() {
                 sit on the strip+footer wrapper so hovering footer controls (own
                 pointer targets) still counts as dwelling in the summon region.
                 Touch: summon/dwell stay inert (no sticky hover, no tap
-                interception); the footer follows chromePinned alone. */}
+                interception); the footer follows chromePinned alone. The
+                mobile tool dock occupies the row below this progress strip. */}
             <div className="absolute inset-x-0 bottom-0 z-40 pointer-events-none">
               <div
                 onPointerEnter={isTouch ? undefined : () => setFooterSummon(true)}
@@ -1099,6 +1105,7 @@ export default function Reader() {
                   pageInfo={pageInfo ?? undefined}
                   visible={footerVisible}
                   pinned={chromePinned}
+                  mobileDockVisible={isTouch && (chromePinned || sidebarOpen)}
                   chapters={chaptersQuery.data?.data}
                   sectionFractions={sectionFractions}
                   onPrevChapter={onPrevChapter}

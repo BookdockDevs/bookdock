@@ -95,7 +95,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           </div>
         )}
         {showMenu && (
-          <div className={`absolute right-1.5 top-1.5 z-10 transition-opacity duration-150 ${menu.open ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+          <div className={`absolute right-1.5 top-1.5 z-10 transition-opacity duration-150 ${menu.open ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
             <button
               ref={menu.btnRef}
               type="button"
@@ -112,7 +112,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           </div>
         )}
         {trashCard && (
-          <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2.5 rounded-b-xl bg-gradient-to-t from-black/70 via-black/40 to-transparent p-2.5 pt-8 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+          <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2.5 rounded-b-xl bg-gradient-to-t from-black/70 via-black/40 to-transparent p-2.5 pt-8 opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
             <button
               type="button"
               aria-label={_('library.restore')}

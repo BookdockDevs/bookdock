@@ -52,7 +52,7 @@ export default function TagDistribution({ date, period, range }: TagDistribution
   })
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <h2 className="mb-4 text-sm font-medium">
         <span>{_('stats.tagDistribution')}</span>
         <span className="tabular-nums text-stone-500 dark:text-stone-400"> · {scopeLabel}</span>

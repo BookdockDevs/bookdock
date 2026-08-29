@@ -65,4 +65,20 @@ describe('ToolDock', () => {
     fireEvent.click(screen.getByTitle('锁定工具栏'))
     expect(onToggleLock).toHaveBeenCalled()
   })
+
+  it('uses a compact mobile bar with larger icons', () => {
+    render(
+      <ToolDock
+        activeNavTab="toc"
+        sidebarOpen={true}
+        locked={false}
+        mobile
+        onNavTab={vi.fn()}
+        onToggleLock={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTitle('目录')).toHaveClass('h-12', 'min-w-12')
+    expect(screen.getByTitle('目录')).toHaveClass('[&_svg]:h-5', '[&_svg]:w-5')
+  })
 })

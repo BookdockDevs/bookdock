@@ -58,17 +58,17 @@ export default function SelectionBar({ selectedIds, onClear, trash = false }: Se
 
   return (
     <>
-      <div className="fixed bottom-5 left-1/2 z-40 -translate-x-1/2">
-        <div className="flex items-center gap-2 rounded-2xl border border-stone-200/80 bg-white/95 py-2 pl-4 pr-2 shadow-xl shadow-stone-900/8 backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95">
+    <div className="fixed bottom-3 left-1/2 z-40 -translate-x-1/2 sm:bottom-5">
+        <div className="flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] items-center gap-2 overflow-x-auto rounded-2xl border border-stone-200/80 bg-white/95 py-2 pl-4 pr-2 shadow-xl shadow-stone-900/8 backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-auto sm:max-w-none dark:border-stone-700 dark:bg-stone-900/95">
           <span className="mr-1 whitespace-nowrap text-xs font-medium text-stone-600 dark:text-stone-300">
             {_('library.selectionCount', { count: selectedIds.length })}
           </span>
           {trash ? (
             <>
-              <Button variant="secondary" size="sm" disabled={marking} onClick={() => void handleBatchRestore()}>
+              <Button className="shrink-0 whitespace-nowrap" variant="secondary" size="sm" disabled={marking} onClick={() => void handleBatchRestore()}>
                 {_('library.restore')}
               </Button>
-              <Button variant="danger" size="sm" disabled={marking} onClick={() => setDialog('permanent')}>
+              <Button className="shrink-0 whitespace-nowrap" variant="danger" size="sm" disabled={marking} onClick={() => setDialog('permanent')}>
                 {_('library.permanentDelete')}
               </Button>
             </>
@@ -77,6 +77,7 @@ export default function SelectionBar({ selectedIds, onClear, trash = false }: Se
               {BATCH_STATUS_ACTIONS.map((action) => (
                 <Button
                   key={action.value}
+                  className="shrink-0 whitespace-nowrap"
                   variant="ghost"
                   size="sm"
                   disabled={marking}
@@ -85,11 +86,11 @@ export default function SelectionBar({ selectedIds, onClear, trash = false }: Se
                   {_(action.labelKey)}
                 </Button>
               ))}
-              <span className="mx-1 h-4 w-px bg-stone-200 dark:bg-stone-700" />
-              <Button variant="secondary" size="sm" onClick={() => setDialog('classify')}>
+              <span className="mx-1 h-4 w-px shrink-0 bg-stone-200 dark:bg-stone-700" />
+              <Button className="shrink-0 whitespace-nowrap" variant="secondary" size="sm" onClick={() => setDialog('classify')}>
                 {_('library.batchClassify')}
               </Button>
-              <Button variant="danger" size="sm" onClick={() => setDialog('delete')}>
+              <Button className="shrink-0 whitespace-nowrap" variant="danger" size="sm" onClick={() => setDialog('delete')}>
                 {_('library.batchDelete')}
               </Button>
             </>
@@ -98,7 +99,7 @@ export default function SelectionBar({ selectedIds, onClear, trash = false }: Se
             type="button"
             onClick={onClear}
             aria-label={_('library.clearSelection')}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6L6 18M6 6l12 12" />
@@ -174,8 +175,8 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
   const showSave = selectedShelf !== undefined || selectedTags.size > 0
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-stone-900">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
+      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
         <h2 className="mb-4 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
           {_('library.batchClassify')}
         </h2>
@@ -211,26 +212,22 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
         </div>
 
         {activeTab === 'shelves' ? (
-          shelves.length === 0 ? (
-            <div className="py-4 text-center text-sm text-stone-400">{_('library.noShelves')}</div>
-          ) : (
-            <div className="flex max-h-60 flex-col gap-1 overflow-y-auto">
+          <div className="flex max-h-60 flex-col gap-1 overflow-y-auto">
+            <ShelfRadio
+              label={_('library.uncategorized')}
+              checked={selectedShelf === null}
+              onChange={() => setSelectedShelf(null)}
+            />
+            {shelves.map((shelf) => (
               <ShelfRadio
-                label={_('library.uncategorized')}
-                checked={selectedShelf === null}
-                onChange={() => setSelectedShelf(null)}
+                key={shelf.id}
+                label={shelf.name}
+                count={shelf.bookCount}
+                checked={selectedShelf === shelf.id}
+                onChange={() => setSelectedShelf(shelf.id)}
               />
-              {shelves.map((shelf) => (
-                <ShelfRadio
-                  key={shelf.id}
-                  label={shelf.name}
-                  count={shelf.bookCount}
-                  checked={selectedShelf === shelf.id}
-                  onChange={() => setSelectedShelf(shelf.id)}
-                />
-              ))}
-            </div>
-          )
+            ))}
+          </div>
         ) : tags.length === 0 ? (
           <div className="py-4 text-center text-sm text-stone-400">{_('library.noTags')}</div>
         ) : (
@@ -313,8 +310,8 @@ function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: (
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-stone-900">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
+      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
         <h2 className="mb-2 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
           {_('library.batchDelete')}
         </h2>
@@ -363,8 +360,8 @@ function BatchPermanentDeleteDialog({ ids, onClose, onDone }: { ids: string[]; o
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-stone-900">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
+      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
         <h2 className="mb-2 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
           {_('library.permanentDelete')}
         </h2>

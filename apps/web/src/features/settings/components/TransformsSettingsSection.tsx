@@ -71,7 +71,7 @@ export default function TransformsSettingsSection() {
   }
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-4 flex items-center justify-between">
         <div className="min-w-0">
           <h2 className="text-sm font-medium">{_('settings.transforms')}</h2>

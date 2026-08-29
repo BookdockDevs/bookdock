@@ -32,7 +32,7 @@ export default function Stats() {
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
+    <div className="mx-auto flex max-w-4xl flex-col gap-5 p-4 sm:gap-6 sm:p-6">
       <div className="flex items-center gap-3">
         <Link
           to="/"

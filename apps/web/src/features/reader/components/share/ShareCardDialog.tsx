@@ -196,11 +196,11 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={() => setShareTarget(null)}
     >
       <div
-        className="flex max-h-full w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-xl dark:border-stone-800 dark:bg-stone-950"
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-stone-200 bg-white shadow-xl sm:max-h-full sm:rounded-2xl dark:border-stone-800 dark:bg-stone-950"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-end px-4 pt-3">
@@ -212,7 +212,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
             <CloseIcon />
           </button>
         </div>
-        <div ref={previewRef} className="flex justify-center overflow-y-auto px-6 pb-2">
+        <div ref={previewRef} className="flex min-h-0 flex-1 justify-center overflow-y-auto px-4 pb-2 sm:px-6">
           <div style={{ width: SHARE_CARD_WIDTH * scale, height }} className="shrink-0">
             <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: SHARE_CARD_WIDTH }}>
               <ShareCard
@@ -235,7 +235,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
           </div>
         </div>
         {customizing ? (
-          <div className="border-t border-stone-200/60 px-6 py-4 dark:border-stone-800/60">
+          <div className="shrink-0 border-t border-stone-200/60 px-4 py-4 sm:px-6 dark:border-stone-800/60">
             <div className="mb-3 flex items-center">
               <button
                 onClick={() => setCustomizing(false)}
@@ -301,7 +301,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-center gap-10 border-t border-stone-200/60 px-6 py-4 dark:border-stone-800/60">
+          <div className="flex shrink-0 items-center justify-center gap-6 border-t border-stone-200/60 px-4 py-4 sm:gap-10 sm:px-6 dark:border-stone-800/60">
             <button onClick={() => setCustomizing(true)} className={actionBtn}>
               <span className={actionIcon}><TemplateIcon /></span>
               {_('share.changeTemplate')}

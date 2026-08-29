@@ -193,7 +193,7 @@ export default function TransformForm({ bookId, initial, selection, onDone }: Tr
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+      <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
         <label className={cn('block min-w-0', scope !== 'global' && 'col-span-2')}>
           <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">{_('settings.transformsName')}</span>
           <input

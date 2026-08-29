@@ -113,12 +113,12 @@ export default function AccountSection() {
   const rowLabel = 'mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400'
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <h2 className="mb-4 text-sm font-medium">{_('settings.account')}</h2>
 
       <div className="mb-5">
         <span className={rowLabel}>{_('settings.avatar')}</span>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           {preview ? (
             <img src={preview.url} alt={_('settings.avatar')} className="h-16 w-16 rounded-full object-cover" />
           ) : url ? (
@@ -136,7 +136,7 @@ export default function AccountSection() {
             onChange={(e) => void onFileSelected(e.target.files)}
           />
           {preview ? (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button size="sm" disabled={uploadAvatar.isPending} onClick={() => void onUploadPreview()}>
                 {_('settings.avatarUpload')}
               </Button>
@@ -145,7 +145,7 @@ export default function AccountSection() {
               </Button>
             </div>
           ) : (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>
                 {_('settings.avatarChange')}
               </Button>
@@ -163,7 +163,7 @@ export default function AccountSection() {
         <span className={rowLabel}>{_('auth.username')}</span>
         {editingName ? (
           <div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <input
                 value={nameDraft}
                 onChange={(e) => setNameDraft(e.target.value)}

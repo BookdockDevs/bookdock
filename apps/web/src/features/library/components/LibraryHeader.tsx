@@ -21,11 +21,12 @@ interface LibraryHeaderProps {
   onEmptyTrash?: () => void
   selectionActive?: boolean
   onToggleSelectMode?: () => void
+  onOpenNavigation?: () => void
   title?: string
   bookCount?: number
 }
 
-export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, onEmptyTrash, selectionActive = false, onToggleSelectMode, title, bookCount }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount }: LibraryHeaderProps) {
   const _ = useTranslation()
   const [searchInput, setSearchInput] = useState(query)
 
@@ -42,9 +43,23 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
   }, [searchInput, query, navSearch])
 
   return (
-    <header className="mb-8">
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
-        <div className="min-w-0">
+    <header className="mb-6 md:mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 md:items-end md:gap-x-6 md:gap-y-4">
+        <div className="flex w-full min-w-0 items-center gap-2 md:w-auto md:flex-none">
+          {onOpenNavigation && (
+            <button
+              type="button"
+              aria-label={_('library.openNavigation')}
+              title={_('library.openNavigation')}
+              onClick={onOpenNavigation}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-900 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400 dark:hover:border-stone-700 dark:hover:text-stone-100 md:hidden"
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          )}
+          <div className="min-w-0">
           <h1 className="truncate font-serif text-2xl font-semibold text-stone-900 dark:text-stone-50">
             {title ?? _('library.allBooks')}
           </h1>
@@ -53,11 +68,12 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
               {_('library.bookCount', { count: bookCount })}
             </p>
           )}
+          </div>
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+        <div className="flex w-full min-w-0 flex-1 flex-wrap items-center justify-end gap-2 md:w-auto">
           {!trash && (
-            <div className="relative min-w-40 flex-1 sm:max-w-64">
+            <div className="relative min-w-0 flex-1 sm:min-w-40 sm:max-w-64">
               <svg
                 className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400"
                 viewBox="0 0 24 24"

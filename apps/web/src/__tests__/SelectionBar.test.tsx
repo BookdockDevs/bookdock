@@ -86,6 +86,14 @@ describe('SelectionBar', () => {
     expect(screen.getByText('library.batchClassifyConfirm')).toBeInTheDocument()
   })
 
+  it('shows the uncategorized option when no user shelves exist', () => {
+    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+    fireEvent.click(screen.getByText('library.batchClassify'))
+
+    expect(screen.getByText('library.uncategorized')).toBeInTheDocument()
+    expect(screen.queryByText('library.noShelves')).toBeNull()
+  })
+
   it('moves selected books into a single shelf', async () => {
     mockShelves = [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }]
     const onClear = vi.fn()

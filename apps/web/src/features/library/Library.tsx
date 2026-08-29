@@ -66,6 +66,7 @@ export default function Library() {
   const trash = search.trash ?? false
 
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<BookListItem | null>(null)
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<BookListItem | null>(null)
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false)
@@ -332,12 +333,14 @@ export default function Library() {
           shelfId={shelfId}
           tagId={tagId}
           trash={trash}
+          mobileOpen={mobileNavOpen}
+          onMobileClose={() => setMobileNavOpen(false)}
           navRef={sidebarNavRef}
           shelfOrderOverride={shelfOrderOverride}
           settleShelfId={settleShelfId}
         />
 
-      <main className="flex min-w-0 flex-1 flex-col px-4 py-8 md:px-8">
+      <main className="flex min-w-0 flex-1 flex-col px-3 py-5 sm:px-4 sm:py-8 md:px-8">
         <LibraryHeader
           navSearch={navSearch}
           view={view}
@@ -352,6 +355,7 @@ export default function Library() {
           onEmptyTrash={() => setEmptyTrashOpen(true)}
           selectionActive={selectionActive}
           onToggleSelectMode={toggleSelectionMode}
+          onOpenNavigation={() => setMobileNavOpen(true)}
           title={viewTitle}
           bookCount={total}
         />
@@ -630,7 +634,7 @@ function TrashGrid({ books, selection, selectionActive, onToggleSelect, onRestor
   onPermanentDelete: (b: BookListItem) => void
 }) {
   return (
-    <div className="grid grid-cols-3 gap-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-5 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
       {books.map((book, index) => (
         <div
           key={book.id}
@@ -736,7 +740,7 @@ export function ListItemWrapper({ book, selection, selectionActive, dragJustEnde
           </div>
           <ListItemContent book={book} />
           {meta}
-          <div className="flex w-7 shrink-0 items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="flex w-7 shrink-0 items-center justify-center opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
             <button
               ref={menu.btnRef}
               type="button"

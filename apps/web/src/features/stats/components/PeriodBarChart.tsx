@@ -82,7 +82,7 @@ export default function PeriodBarChart({
     : null
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
           {PERIODS.map((p) => (

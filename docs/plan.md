@@ -21,7 +21,7 @@ v0.1 does not include an in-app backup center or online restore. Docker Hub is t
 
 ## Next Web milestones
 
-- [ ] Basic mobile Web usability: responsive library, reader panels, touch targets, table of contents, progress, annotations, login, and upload
+- [x] Basic mobile Web usability: responsive library, reader panels, touch targets, table of contents, progress, annotations, login, and upload
 - [ ] Author and series navigation using existing book metadata
 - [ ] A small annotation output feature: Markdown export or Markdown deep links
 

@@ -16,11 +16,11 @@ vi.mock('../features/reader/components/NavigationPanel', () => ({
 let coarsePointer = false
 
 function outerEl(container: HTMLElement) {
-  return container.querySelector('.z-50') as HTMLElement
+  return container.querySelector('[data-testid="reader-sidebar"]') as HTMLElement
 }
 
 function dockEl(container: HTMLElement) {
-  return container.querySelector('.w-14') as HTMLElement
+  return container.querySelector('[data-testid="reader-tool-dock"]') as HTMLElement
 }
 
 function renderSidebar(chromePinned = false) {
@@ -54,14 +54,14 @@ describe('ReaderSidebar on touch devices', () => {
   it('keeps the dock hidden when chrome is not pinned', () => {
     const { container } = renderSidebar(false)
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
-    expect(outerEl(container).style.width).toBe('0px')
+    expect(outerEl(container)).toHaveClass('translate-y-full')
   })
 
-  it('reveals the dock as a zero-push overlay when chrome is pinned', () => {
+  it('reveals a bottom toolbar without reserving reader width when chrome is pinned', () => {
     const { container } = renderSidebar(true)
     expect(dockEl(container)).toHaveClass('opacity-100')
-    expect(outerEl(container)).toHaveClass('absolute')
-    expect(outerEl(container).style.width).toBe('56px')
+    expect(outerEl(container)).toHaveClass('fixed', 'inset-x-0', 'bottom-0')
+    expect(outerEl(container).style.width).toBe('')
   })
 
   it('ignores the persisted toolbar lock', () => {
@@ -81,15 +81,14 @@ describe('ReaderSidebar on touch devices', () => {
     const { container } = renderSidebar(true)
     fireEvent.click(screen.getByTestId('sidebar-backdrop'))
     expect(useReaderState.getState().sidebarOpen).toBe(false)
-    // the dock stays summoned by chromePinned after the panel closes
     expect(dockEl(container)).toHaveClass('opacity-100')
   })
 
-  it('fixes the panel width and drops the resize handle', () => {
+  it('uses a full-width bottom sheet and drops the resize handle', () => {
     act(() => useReaderState.setState({ sidebarOpen: true }))
     const { container } = renderSidebar(true)
-    const panel = outerEl(container).children[1] as HTMLElement
-    expect(panel).toHaveClass('w-[min(320px,85vw)]')
+    const panel = outerEl(container).children[0] as HTMLElement
+    expect(panel).toHaveClass('h-[65dvh]', 'max-h-[520px]')
     expect(container.querySelector('.cursor-col-resize')).toBeNull()
   })
 })
