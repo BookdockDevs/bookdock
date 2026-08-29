@@ -46,6 +46,9 @@ import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq, ViewS
 export default function Reader() {
   const _ = useTranslation()
   const { id } = useParams({ from: '/books/$id' })
+  const deepLinkParams = new URLSearchParams(window.location.search)
+  const deepLinkAnnotation = deepLinkParams.get('annotation')
+  const deepLinkCfi = deepLinkParams.get('cfi')
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [percent, setPercent] = useState(0)
@@ -86,9 +89,11 @@ export default function Reader() {
   const setCurrentChapterIndex = useReaderState((s) => s.setCurrentChapterIndex)
   const addToast = useToastStore((s) => s.addToast)
   const readingMode = useUiStore((s) => s.readingMode)
+  const toolbarLocked = useUiStore((s) => s.toolbarLocked)
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
   const { data: annotations } = useAnnotations(id)
+  const deepLinkHandled = useRef(false)
 
   const currentBookmark = useMemo(() => {
     if (!currentCfi) return undefined
@@ -479,6 +484,7 @@ export default function Reader() {
   // A stale replace dialog must not follow the reader into another book
   useEffect(() => {
     setReplaceTarget(null)
+    deepLinkHandled.current = false
   }, [id, setReplaceTarget])
 
   const { containerRef, renderer } = useReaderRenderer({
@@ -607,6 +613,17 @@ export default function Reader() {
       if (!e.keepSelection) setSelection(null)
     },
   })
+
+  useEffect(() => {
+    if (deepLinkHandled.current || !bookReady || !renderer) return
+    const annotation = deepLinkAnnotation
+      ? annotations?.data?.find((item) => item.id === deepLinkAnnotation)
+      : undefined
+    const target = deepLinkCfi || annotation?.cfiAnchor || annotation?.cfiRange
+    if (!target) return
+    deepLinkHandled.current = true
+    void renderer.display(target)
+  }, [annotations?.data, bookReady, deepLinkAnnotation, deepLinkCfi, renderer])
 
   // Rule-set changes after mount must invalidate the cached sections: the
   // renderer tears the view down and reopens it (same mechanism as the
@@ -849,9 +866,9 @@ export default function Reader() {
   }, [currentChapterIndex, chapterFraction, currentOffset, chaptersQuery.data, rate, totalChars])
 
   const onToggleSettings = useCallback(() => {
-    setSidebarOpen(false)
+    if (!toolbarLocked) setSidebarOpen(false)
     setSettingsOpen((v) => !v)
-  }, [setSidebarOpen])
+  }, [setSidebarOpen, toolbarLocked])
 
   const onToggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {

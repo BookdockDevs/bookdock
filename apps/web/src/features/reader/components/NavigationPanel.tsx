@@ -7,7 +7,7 @@ import type { SearchResult } from '../types'
 import { useAnnotations } from '../hooks/useAnnotations'
 import { useBookChapters } from '../hooks/useBookChapters'
 import { useNotesFilter, type ItemKind } from '../hooks/useNotesFilter'
-import { CloseIcon } from './annotation-icons'
+import { CloseIcon, DownloadIcon } from './annotation-icons'
 import { ExpandingSearchBar } from './ExpandingSearchBar'
 import { clearSearchHistory, loadSearchHistory, pushSearchTerm, saveSearchHistory } from '../lib/search-history'
 import { NotesFilterPanel } from './NotesFilterPanel'
@@ -115,6 +115,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const notesFilter = useNotesFilter(annotationItems, displayTypes)
   const [notesSearchExpanded, setNotesSearchExpanded] = useState(false)
   const [notesFilterOpen, setNotesFilterOpen] = useState(false)
+  const [notesSelectionMode, setNotesSelectionMode] = useState(false)
   const notesFilterBtnRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -585,6 +586,21 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
               </svg>
             </button>
           )}
+          {tab === 'notes' && (
+            <button
+              onClick={() => setNotesSelectionMode((value) => !value)}
+              title={_('annotation.export')}
+              aria-label={_('annotation.export')}
+              className={cn(
+                'flex h-7 w-7 items-center justify-center rounded transition-colors',
+                notesSelectionMode
+                  ? 'bg-stone-500/10 text-current'
+                  : 'text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current',
+              )}
+            >
+              <DownloadIcon size={18} />
+            </button>
+          )}
           {tab === 'toc' && hasMultiLevel && (
             <button
               onClick={toggleAllCollapse}
@@ -745,12 +761,14 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         {tab === 'notes' && (
           <NotesPanel
             items={notesFilter.filtered}
+            allItems={annotationItems}
             total={annotationItems.length}
             sort={notesFilter.sort}
             locked={locked}
             onClose={onClose}
             chapterOrder={chapterOrder}
             bookId={bookId}
+            selectionMode={notesSelectionMode}
           />
         )}
         {tab === 'stats' && !statsDisabled && <StatsPanel bookId={bookId} />}

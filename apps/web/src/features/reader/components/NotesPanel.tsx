@@ -10,8 +10,9 @@ import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotation
 import { kindOf, type NoteSort } from '../hooks/useNotesFilter'
 import { markEscConsumed } from '../lib/esc-consumed'
 import { useReaderState } from '../state/reader-state'
+import AnnotationExportDialog from './AnnotationExportDialog'
 import { HIGHLIGHT_COLORS } from './annotation-colors'
-import { BookmarkIcon, BulbIcon, CopyIcon, PencilIcon, ShareIcon, StyleGlyph, TrashIcon } from './annotation-icons'
+import { BookmarkIcon, BulbIcon, CheckIcon, CopyIcon, PencilIcon, SelectionIcon, ShareIcon, StyleGlyph, TemplateIcon, TrashIcon } from './annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from './format-relative-time'
 
 function hexOf(a: AnnotationRes): string {
@@ -143,16 +144,18 @@ function InlineEditor({
 
 interface NotesPanelProps {
   items: AnnotationRes[]
+  allItems?: AnnotationRes[]
   total: number
   sort: NoteSort
   locked?: boolean
   onClose?: () => void
-  /** Chapter titles in book order, used to sort chapter groups */
+  /** Chapter titles in book order, used to sort chapter groups and exports */
   chapterOrder: string[]
   bookId: string
+  selectionMode?: boolean
 }
 
-export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked, onClose, chapterOrder, bookId }: NotesPanelProps) {
+export const NotesPanel = memo(function NotesPanel({ items, allItems = items, total, sort, locked, onClose, chapterOrder, bookId, selectionMode = false }: NotesPanelProps) {
   const _ = useTranslation()
   const { renderer } = useReaderApi()
   const deleteAnnotation = useDeleteAnnotation(bookId)
@@ -164,10 +167,45 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
   const orphanedKeys = useReaderState((s) => s.orphanedAnnotationKeys)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: AnnotationRes } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [exportOpen, setExportOpen] = useState<'configure' | 'quick' | null>(null)
+  const wasSelectionMode = useRef(false)
+
+  useEffect(() => {
+    if (selectionMode && !wasSelectionMode.current) {
+      setSelectedIds(new Set(items.map((item) => item.id)))
+    } else if (!selectionMode) {
+      setSelectedIds(new Set())
+      setExportOpen(null)
+    }
+    wasSelectionMode.current = selectionMode
+  }, [items, selectionMode])
+
+  function toggleSelected(id: string) {
+    setSelectedIds((previous) => {
+      const next = new Set(previous)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAll() {
+    const visibleIds = items.map((item) => item.id)
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
+    setSelectedIds((previous) => {
+      const next = new Set(previous)
+      for (const id of visibleIds) {
+        if (allVisibleSelected) next.delete(id)
+        else next.add(id)
+      }
+      return next
+    })
+  }
 
   /** Chapter-grouped view, or null when a flat time-sorted list should render */
   const groups = useMemo(() => {
-    if (sort !== 'chapter') return null
+    if (sort !== 'chapter' && sort !== 'chapter-desc') return null
     const byChapter = new Map<string, AnnotationRes[]>()
     for (const a of items) {
       const key = a.chapter || _('reader.uncategorized')
@@ -178,16 +216,24 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
       const i = chapterOrder.indexOf(name)
       return i < 0 ? chapterOrder.length : i
     }
+    const reverse = sort === 'chapter-desc'
     return Array.from(byChapter.entries())
       .map(([chapter, list]) => ({
         chapter,
-        list: list.sort((a, b) => a.cfiRange.localeCompare(b.cfiRange)),
+        list: list.sort((a, b) => (reverse ? -1 : 1) * a.cfiRange.localeCompare(b.cfiRange)),
       }))
-      .sort((g1, g2) => orderIndex(g1.chapter) - orderIndex(g2.chapter))
+      .sort((g1, g2) => {
+        const a = orderIndex(g1.chapter)
+        const b = orderIndex(g2.chapter)
+        const aUnknown = a === chapterOrder.length
+        const bUnknown = b === chapterOrder.length
+        if (aUnknown !== bUnknown) return aUnknown ? 1 : -1
+        return (reverse ? -1 : 1) * (a - b)
+      })
   }, [items, sort, chapterOrder, _])
 
   const flat = useMemo(() => {
-    if (sort === 'chapter') return null
+    if (sort === 'chapter' || sort === 'chapter-desc') return null
     return [...items].sort((a, b) => (sort === 'time-asc' ? a.createdAt - b.createdAt : b.createdAt - a.createdAt))
   }, [items, sort])
 
@@ -266,7 +312,7 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
     return (
       <div
         onContextMenu={(e) => handleContextMenu(e, a)}
-        className={`group relative rounded-lg border border-stone-200/60 transition-colors hover:bg-stone-500/5 dark:border-stone-800/60 ${orphaned ? 'opacity-60' : ''}`}
+        className={`group relative rounded-lg transition-colors hover:bg-stone-500/5 ${orphaned ? 'opacity-60' : ''}`}
       >
         {orphaned && (
           <span
@@ -285,7 +331,12 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
           />
         ) : (
           <>
-            <button onClick={() => goTo(a)} className="w-full p-3 text-left">
+            <button onClick={() => selectionMode ? toggleSelected(a.id) : goTo(a)} className={`w-full p-3 text-left ${selectionMode ? 'pr-12' : ''}`}>
+              {selectionMode && (
+                <span className={`absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border ${selectedIds.has(a.id) ? 'border-stone-500 bg-stone-500/15 text-current dark:border-stone-400' : 'border-stone-300 bg-transparent dark:border-stone-600'}`}>
+                  {selectedIds.has(a.id) && <CheckIcon />}
+                </span>
+              )}
               {kind === 'bookmark' && (
                 <div className="flex items-start gap-2">
                   <span className="mt-0.5 shrink-0 text-stone-400 dark:text-stone-500">
@@ -320,7 +371,7 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
                 </div>
               )}
             </button>
-            <div className="flex max-h-0 items-center gap-0.5 overflow-hidden px-3 opacity-0 transition-all duration-200 group-hover:max-h-8 group-hover:pb-2 group-hover:opacity-100">
+            {!selectionMode && <div className="flex max-h-0 items-center gap-0.5 overflow-hidden px-3 opacity-0 transition-all duration-200 group-hover:max-h-8 group-hover:pb-2 group-hover:opacity-100">
               <span
                 title={formatFullDateTime(_, a.createdAt)}
                 className="text-[11px] text-[var(--bd-read-sub)]"
@@ -348,7 +399,7 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
               <button onClick={() => deleteItem(a)} title={_('annotation.deleteHighlight')} className={`${actionBtn} text-red-500 hover:bg-red-500/10 hover:text-red-500`}>
                 <TrashIcon />
               </button>
-            </div>
+            </div>}
           </>
         )}
       </div>
@@ -357,7 +408,25 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
 
   return (
     <div className="space-y-3">
-      <BookOverviewStrip total={total} />
+      {selectionMode ? (
+        <div className="sticky top-0 z-10 flex items-center gap-2 rounded-lg bg-[var(--bd-read-bg)] py-1 text-xs">
+          <span className="tabular-nums text-[var(--bd-read-sub)]">{_('annotation.exportSelected', { n: selectedIds.size })}</span>
+          <button type="button" onClick={selectAll} title={_('annotation.selectAll')} aria-label={_('annotation.selectAll')} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current">
+            <SelectionIcon state={items.length > 0 && items.every((item) => selectedIds.has(item.id)) ? 'all' : items.some((item) => selectedIds.has(item.id)) ? 'partial' : 'none'} />
+          </button>
+          <div className="flex-1" />
+          <button type="button" onClick={() => setExportOpen('configure')} disabled={selectedIds.size === 0} title={_('annotation.exportNext')} aria-label={_('annotation.exportNext')} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current disabled:opacity-40">
+            <TemplateIcon />
+          </button>
+          <button type="button" onClick={() => setExportOpen('quick')} disabled={selectedIds.size === 0} title={_('annotation.export')} aria-label={_('annotation.export')} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current disabled:opacity-40">
+            <ShareIcon />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          <BookOverviewStrip total={total} />
+        </div>
+      )}
       {items.length === 0 ? (
         <p className="mt-8 text-center text-xs text-[var(--bd-read-sub)]">{_('reader.noNotes')}</p>
       ) : groups ? (
@@ -429,6 +498,16 @@ export const NotesPanel = memo(function NotesPanel({ items, total, sort, locked,
             {_('reader.delete')}
           </button>
         </div>
+      )}
+      {exportOpen && (
+        <AnnotationExportDialog
+          bookId={bookId}
+          annotations={allItems.filter((item) => selectedIds.has(item.id))}
+          sort={sort}
+          chapterOrder={chapterOrder}
+          quickExport={exportOpen === 'quick'}
+          onClose={() => setExportOpen(null)}
+        />
       )}
     </div>
   )

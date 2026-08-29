@@ -79,6 +79,16 @@ export function CheckIcon() {
   )
 }
 
+export function SelectionIcon({ state = 'none' }: { state?: 'none' | 'partial' | 'all' }) {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+      {state === 'all' && <path d="m7.5 12 3 3 6-6" />}
+      {state === 'partial' && <path d="M7.5 12h9" />}
+    </svg>
+  )
+}
+
 export function CloseIcon() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">

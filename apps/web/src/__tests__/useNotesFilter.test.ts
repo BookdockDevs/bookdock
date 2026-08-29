@@ -70,4 +70,11 @@ describe('useNotesFilter', () => {
     expect(result.current.sort).toBe('chapter')
     expect(result.current.hasActiveFilter).toBe(false)
   })
+
+  it('marks reverse chapter order as an active sort', () => {
+    const { result } = renderHook(() => useNotesFilter(ITEMS))
+    act(() => result.current.setSort('chapter-desc'))
+    expect(result.current.sort).toBe('chapter-desc')
+    expect(result.current.hasActiveFilter).toBe(true)
+  })
 })

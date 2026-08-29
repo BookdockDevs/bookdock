@@ -72,7 +72,7 @@ export function NotesFilterPanel({
   return (
     <div
       ref={rootRef}
-      className="fixed z-[60] w-64 rounded-xl border border-stone-200/60 bg-[var(--bd-read-bg)] p-3 shadow-xl dark:border-stone-800/60"
+      className="fixed z-[60] w-56 rounded-xl border border-stone-200/60 bg-[var(--bd-read-bg)] p-3 shadow-xl dark:border-stone-800/60"
       style={{ top: pos.top, right: pos.right }}
     >
       <div className="text-xs text-[var(--bd-read-sub)]">{_('annotation.filterType')}</div>
@@ -124,19 +124,18 @@ export function NotesFilterPanel({
       </div>
       <div className="mt-3 text-xs text-[var(--bd-read-sub)]">{_('reader.sort')}</div>
       <div className="mt-1.5 flex gap-1.5">
-        {([
-          { key: 'chapter', label: _('reader.sortChapter') },
-          { key: 'time-desc', label: _('reader.sortTimeDesc') },
-          { key: 'time-asc', label: _('reader.sortTimeAsc') },
-        ] as const).map((item) => (
-          <button
-            key={item.key}
-            onClick={() => onSortChange(item.key)}
-            className={cn(filterPill, sort === item.key ? pillActive : pillIdle)}
-          >
-            {item.label}
-          </button>
-        ))}
+        <button
+          onClick={() => onSortChange(sort === 'chapter' ? 'chapter-desc' : 'chapter')}
+          className={cn(filterPill, sort === 'chapter' || sort === 'chapter-desc' ? pillActive : pillIdle)}
+        >
+          {sort === 'chapter-desc' ? _('reader.sortChapterReverse') : _('reader.sortChapter')}
+        </button>
+        <button
+          onClick={() => onSortChange(sort === 'time-desc' ? 'time-asc' : 'time-desc')}
+          className={cn(filterPill, sort === 'time-desc' || sort === 'time-asc' ? pillActive : pillIdle)}
+        >
+          {sort === 'time-asc' ? _('reader.sortTimeAsc') : _('reader.sortTimeDesc')}
+        </button>
       </div>
       <div className="mt-3 flex justify-end border-t border-stone-200/60 pt-2 dark:border-stone-800/60">
         <button

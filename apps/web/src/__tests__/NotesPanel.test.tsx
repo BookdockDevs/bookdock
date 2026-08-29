@@ -51,7 +51,7 @@ const ANNOTATIONS: AnnotationRes[] = [
   makeAnnotation({ id: 'h3', cfiRange: 'cfi:5', text: '无章节划线', color: 'green', style: 'highlight', chapter: null, createdAt: 5000 }),
 ]
 
-function renderPanel(onClose = vi.fn(), sort: 'chapter' | 'time-desc' | 'time-asc' = 'chapter') {
+function renderPanel(onClose = vi.fn(), sort: 'chapter' | 'chapter-desc' | 'time-desc' | 'time-asc' = 'chapter') {
   return render(
     <NotesPanel items={ANNOTATIONS} total={ANNOTATIONS.length} sort={sort} onClose={onClose} chapterOrder={['第一章', '第二章']} bookId="book-1" />,
   )
@@ -96,6 +96,11 @@ describe('NotesPanel', () => {
     expect(screen.getByText('reader.noNotes')).toBeInTheDocument()
   })
 
+  it('renders the panel normally without an inline export action', () => {
+    renderPanel()
+    expect(screen.queryByText('annotation.export')).toBeNull()
+  })
+
   it('navigates on click and closes the panel when not locked', () => {
     const onClose = vi.fn()
     renderPanel(onClose)
@@ -112,6 +117,13 @@ describe('NotesPanel', () => {
     expect(container.querySelector('.font-semibold')).toBeNull()
     const first = container.querySelector('ul li')
     expect(first?.textContent).toContain('无章节划线')
+  })
+
+  it('reverses chapter groups and keeps uncategorized items last', () => {
+    const { container } = renderPanel(vi.fn(), 'chapter-desc')
+    const headers = Array.from(container.querySelectorAll('.font-semibold')).map((el) => el.textContent)
+    expect(headers).toEqual(['第二章', '第一章', 'reader.uncategorized'])
+    expect(container.querySelector('ul li')?.textContent).toContain('书签丁')
   })
 
   it('renames a bookmark via the context menu', () => {

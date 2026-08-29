@@ -9,6 +9,7 @@ interface ModalProps {
   actions?: ReactNode
   /** Spread onto the backdrop (e.g. the settings-popover ignore flag) */
   containerProps?: HTMLAttributes<HTMLDivElement> & Record<string, string | undefined>
+  variant?: 'default' | 'reader'
   children: ReactNode
 }
 
@@ -16,10 +17,12 @@ interface ModalProps {
  *  per-book rules, selection replace) shares this shell so they read as one
  *  window system. The close button is always the X: hosts may give it
  *  "back" semantics (e.g. cancel an inline edit view) via onClose. */
-export default function Modal({ title, onClose, actions, containerProps, children }: ModalProps) {
+export default function Modal({ title, onClose, actions, containerProps, variant = 'default', children }: ModalProps) {
   const _ = useTranslation()
-  const btn =
-    'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'
+  const reader = variant === 'reader'
+  const btn = reader
+    ? 'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-[var(--bd-read-text)]'
+    : 'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'
 
   return (
     <div
@@ -28,11 +31,11 @@ export default function Modal({ title, onClose, actions, containerProps, childre
       onClick={onClose}
     >
       <div
-        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:max-h-[85vh] sm:rounded-2xl dark:bg-stone-900"
+        className={`flex max-h-[calc(100dvh-1rem)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl shadow-xl sm:max-h-[85vh] sm:rounded-2xl ${reader ? 'bg-[var(--bd-read-bg)] text-[var(--bd-read-text)]' : 'bg-white dark:bg-stone-900'}`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-stone-100 px-4 py-3 sm:px-5 dark:border-stone-800">
-          <h2 className="truncate text-base font-semibold text-stone-900 dark:text-stone-100">{title}</h2>
+        <div className={`flex shrink-0 items-center justify-between border-b px-4 py-3 sm:px-5 ${reader ? 'border-[var(--bd-read-accent)]' : 'border-stone-100 dark:border-stone-800'}`}>
+          <h2 className={`truncate text-base font-semibold ${reader ? 'text-[var(--bd-read-text)]' : 'text-stone-900 dark:text-stone-100'}`}>{title}</h2>
           <div className="flex items-center gap-1">
             {actions}
             <button

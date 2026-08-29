@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
-export type NoteSort = 'time-desc' | 'time-asc' | 'chapter'
+export type NoteSort = 'time-desc' | 'time-asc' | 'chapter' | 'chapter-desc'
 export type ItemKind = 'bookmark' | 'idea' | 'highlight'
 
 export function kindOf(a: AnnotationRes): ItemKind {
@@ -47,7 +47,7 @@ export function useNotesFilter(items: AnnotationRes[], displayTypes?: Set<ItemKi
     setSort,
     styleFilter,
     colorFilter,
-    hasActiveFilter: styleFilter.size > 0 || colorFilter.size > 0,
+    hasActiveFilter: styleFilter.size > 0 || colorFilter.size > 0 || sort !== 'chapter',
     toggleStyle: (style: AnnotationStyle) => setStyleFilter((s) => toggleInSet(s, style)),
     toggleColor: (color: string) => setColorFilter((s) => toggleInSet(s, color)),
     reset: () => {
