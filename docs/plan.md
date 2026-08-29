@@ -14,8 +14,8 @@
 
 - [x] Close the current reader compatibility patch and regression pass
 - [x] Make in-book search respect visible text transforms, including Simplified/Traditional conversion
-- [ ] Publish v0.1 with a reproducible Docker image, Compose setup, health check, CI smoke test, and `DATA_DIR` persistence
-- [ ] Document manual volume backup and restore
+- [x] Publish v0.1 with a reproducible Docker image, Compose setup, health check, CI smoke test, and `DATA_DIR` persistence
+- [x] Document manual volume backup and restore
 
 v0.1 does not include an in-app backup center or online restore. Docker Hub is the planned public image registry, but the image can also be built locally.
 
