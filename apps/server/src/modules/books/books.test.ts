@@ -196,6 +196,94 @@ describe('uploadBook dedup flag', () => {
   })
 })
 
+describe('uploadBook membership', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeAll(() => {
+    registerParser(new TxtParser())
+  })
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  it('persists the requested shelf and tags with a new book', async () => {
+    const shelfId = createId('shelf')
+    const tagId = createId('tag')
+    db.insert(schema.shelves).values({ id: shelfId, userId: ownerId, name: '科幻', sortOrder: 0, createdAt: Date.now() }).run()
+    db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
+
+    const { book } = await uploadBook(ownerId, new File(['book content'], 'book.txt', { type: 'text/plain' }), {
+      shelfId,
+      tagIds: [tagId],
+    })
+
+    expect(book.shelfId).toBe(shelfId)
+    expect(db.select().from(schema.bookTags).where(eq(schema.bookTags.bookId, book.id)).all()).toEqual([{ bookId: book.id, tagId }])
+  })
+
+  it('rejects membership owned by another user', async () => {
+    const otherId = seedUser(db, 'other')
+    const shelfId = createId('shelf')
+    db.insert(schema.shelves).values({ id: shelfId, userId: otherId, name: 'Other', sortOrder: 0, createdAt: Date.now() }).run()
+
+    await expect(
+      uploadBook(ownerId, new File(['book content'], 'book.txt', { type: 'text/plain' }), { shelfId }),
+    ).rejects.toMatchObject({ code: 'SHELF_NOT_FOUND' })
+  })
+})
+
+describe('POST /api/v1/books upload membership', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let shelfId: string
+  let tagId: string
+
+  beforeAll(() => {
+    registerParser(new TxtParser())
+  })
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+    shelfId = createId('shelf')
+    tagId = createId('tag')
+    db.insert(schema.shelves).values({ id: shelfId, userId: ownerId, name: '科幻', sortOrder: 0, createdAt: Date.now() }).run()
+    db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
+  })
+
+  function createUploadApp() {
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('*', async (c, next) => {
+      c.set('user', { id: ownerId, username: 'owner', role: 'owner', avatarKey: null })
+      return next()
+    })
+    app.route('/api/v1/books', booksRoutes)
+    return app
+  }
+
+  it('assigns multipart upload membership before returning the new book', async () => {
+    const body = new FormData()
+    body.append('file', new File(['book content'], 'book.txt', { type: 'text/plain' }))
+    body.append('shelfId', shelfId)
+    body.append('tagIds', JSON.stringify([tagId]))
+
+    const response = await createUploadApp().request('/api/v1/books', { method: 'POST', body })
+
+    expect(response.status).toBe(201)
+    const payload = await response.json() as { data: { id: string; shelfId: string } }
+    expect(payload.data.shelfId).toBe(shelfId)
+    expect(db.select().from(schema.bookTags).where(eq(schema.bookTags.bookId, payload.data.id)).all()).toEqual([{ bookId: payload.data.id, tagId }])
+  })
+})
+
 describe('listBooks search escaping', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string

@@ -15,12 +15,18 @@ function makeItems(overrides: Partial<UploadItem>[]): UploadItem[] {
 }
 
 const mockUseUploadBooks = vi.fn()
+const mockUseShelves = vi.fn()
+const mockUseTags = vi.fn()
 vi.mock('../features/library/hooks', () => ({
   useUploadBooks: (...args: unknown[]) => mockUseUploadBooks(...args),
+  useShelves: (...args: unknown[]) => mockUseShelves(...args),
+  useTags: (...args: unknown[]) => mockUseTags(...args),
 }))
 
 describe('UploadSheet', () => {
   beforeEach(() => {
+    mockUseShelves.mockReturnValue({ data: { data: [] } })
+    mockUseTags.mockReturnValue({ data: { data: [] } })
     mockUseUploadBooks.mockReturnValue({ items: [], addFiles: vi.fn(), startUpload: vi.fn(), isUploading: false, clearQueue: vi.fn() })
   })
 
@@ -93,13 +99,31 @@ describe('UploadSheet', () => {
     const dropZone = screen.getByText('library.uploadHint').parentElement!.parentElement!
     const file = new File([], 'book.epub')
     fireEvent.drop(dropZone, { dataTransfer: { files: [file] } })
-    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true, shelfId: undefined, tagIds: [] })
 
     addFiles.mockClear()
     const input = document.querySelector('input[type="file"]') as HTMLInputElement
     fireEvent.change(input, { target: { files: [file] } })
-    expect(addFiles).toHaveBeenCalledWith(expect.anything())
-    expect(addFiles.mock.calls[0][1]).toBeUndefined()
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { shelfId: undefined, tagIds: [] })
+  })
+
+  it('shows the current shelf and keeps the current tag opt-in', () => {
+    const addFiles = vi.fn()
+    mockUseShelves.mockReturnValue({ data: { data: [{ id: 'shelf-1', name: '科幻' }] } })
+    mockUseTags.mockReturnValue({ data: { data: [{ id: 'tag-1', name: '待读' }] } })
+    mockUseUploadBooks.mockReturnValue({ items: [], addFiles, startUpload: vi.fn(), isUploading: false, clearQueue: vi.fn() })
+
+    render(<UploadSheet open onClose={vi.fn()} shelfId="shelf-1" tagId="tag-1" />)
+
+    expect(screen.getByText('library.uploadShelfContext')).toBeInTheDocument()
+    const tagCheckbox = screen.getByRole('checkbox', { name: 'library.uploadTagContext' })
+    expect(tagCheckbox).not.toBeChecked()
+    fireEvent.click(tagCheckbox)
+
+    const dropZone = screen.getByText('library.uploadHint').parentElement!.parentElement!
+    const file = new File([], 'book.epub')
+    fireEvent.drop(dropZone, { dataTransfer: { files: [file] } })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true, shelfId: 'shelf-1', tagIds: ['tag-1'] })
   })
 
   it('shows a done button once settled, which clears the queue and closes', () => {

@@ -3,11 +3,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from '@/hooks/useTranslation'
 import { Button } from '@/components/ui/Button'
 
-import { useUploadBooks, type UploadItem } from '../hooks'
+import { useShelves, useTags, useUploadBooks, type UploadAssignment, type UploadItem } from '../hooks'
 
 interface UploadSheetProps {
   open: boolean
   onClose: () => void
+  shelfId?: string
+  tagId?: string
 }
 
 function statusLabel(item: UploadItem): string | null {
@@ -30,12 +32,22 @@ function statusLabel(item: UploadItem): string | null {
   }
 }
 
-export default function UploadSheet({ open, onClose }: UploadSheetProps) {
+export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadSheetProps) {
   const _ = useTranslation()
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [includeCurrentTag, setIncludeCurrentTag] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const { items, addFiles, startUpload, isUploading, clearQueue } = useUploadBooks()
+  const { data: shelvesData } = useShelves()
+  const { data: tagsData } = useTags()
+
+  const shelfName = shelfId ? shelvesData?.data.find((shelf) => shelf.id === shelfId)?.name : undefined
+  const tagName = tagId ? tagsData?.data.find((tag) => tag.id === tagId)?.name : undefined
+  const assignment: UploadAssignment = {
+    shelfId,
+    tagIds: includeCurrentTag && tagId ? [tagId] : [],
+  }
 
   // clearQueue keeps in-flight items, so closing mid-upload stays resumable
   const handleClose = useCallback(() => {
@@ -57,7 +69,8 @@ export default function UploadSheet({ open, onClose }: UploadSheetProps) {
       setDragOver(false)
       setError(null)
     }
-  }, [open])
+    setIncludeCurrentTag(false)
+  }, [open, tagId])
 
   const hasPending = items.some((it) => it.status === 'pending')
   const settled = items.length > 0 && !isUploading && !hasPending
@@ -89,7 +102,7 @@ export default function UploadSheet({ open, onClose }: UploadSheetProps) {
             setDragOver(false)
             setError(null)
             // Dropped files upload immediately on mouse release
-            if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files, { autoStart: true })
+            if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files, { autoStart: true, ...assignment })
           }}
           className={
             'flex h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed text-center transition-colors ' +
@@ -106,6 +119,23 @@ export default function UploadSheet({ open, onClose }: UploadSheetProps) {
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
         </div>
+
+        {(shelfName || tagName) && (
+          <div className="mt-4 space-y-2 rounded-xl bg-stone-50 px-3 py-2.5 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">
+            {shelfName && <p>{_('library.uploadShelfContext', { name: shelfName })}</p>}
+            {tagName && (
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={includeCurrentTag}
+                  onChange={(e) => setIncludeCurrentTag(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-stone-300 accent-stone-900 dark:border-stone-600 dark:accent-stone-100"
+                />
+                <span>{_('library.uploadTagContext', { name: tagName })}</span>
+              </label>
+            )}
+          </div>
+        )}
 
         {items.length > 0 && (
           <ul className="mt-4 max-h-52 space-y-2 overflow-y-auto pr-1">
@@ -159,7 +189,7 @@ export default function UploadSheet({ open, onClose }: UploadSheetProps) {
                 {_('library.cancel')}
               </Button>
               {hasPending ? (
-                <Button onClick={startUpload}>{_('library.upload')}</Button>
+                <Button onClick={() => startUpload(assignment)}>{_('library.upload')}</Button>
               ) : (
                 <Button onClick={() => inputRef.current?.click()}>{_('library.selectFiles')}</Button>
               )}
@@ -176,7 +206,7 @@ export default function UploadSheet({ open, onClose }: UploadSheetProps) {
           onChange={(e) => {
             setError(null)
             // Picker-selected files wait for an explicit upload click
-            if (e.target.files?.length) addFiles(e.target.files)
+            if (e.target.files?.length) addFiles(e.target.files, assignment)
             e.target.value = ''
           }}
         />

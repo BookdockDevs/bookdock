@@ -112,6 +112,11 @@ export default function Library() {
     lastSelectIndexRef.current = null
   }
 
+  function completeBatchAction() {
+    setSelectionMode(false)
+    clearSelection()
+  }
+
   function deselect(id: string) {
     setSelection((prev) => {
       if (!prev.has(id)) return prev
@@ -494,10 +499,15 @@ export default function Library() {
       </main>
 
       {selection.size > 0 && (
-        <SelectionBar selectedIds={Array.from(selection)} onClear={clearSelection} trash={trash} />
+        <SelectionBar selectedIds={Array.from(selection)} onClear={clearSelection} onComplete={completeBatchAction} trash={trash} />
       )}
 
-      <UploadSheet open={uploadOpen} onClose={() => setUploadOpen(false)} />
+      <UploadSheet
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        shelfId={shelfId && shelfId !== 'none' ? shelfId : undefined}
+        tagId={tagId ?? undefined}
+      />
 
       <BookDetailDialog
         book={detailTarget}

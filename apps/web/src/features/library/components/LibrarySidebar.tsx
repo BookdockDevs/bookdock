@@ -342,7 +342,11 @@ function UncategorizedDropTarget({
   const _ = useTranslation()
   const { setNodeRef, isOver } = useDroppable({ id: SHELF_NONE_DROPPABLE })
   const { active: dragActive } = useDndContext()
-  const dropHint = isBookDrag(dragActive?.data.current) && isOver
+  const isBookDragging = isBookDrag(dragActive?.data.current)
+  const dropHint = isBookDragging && isOver
+  const visible = active || count === undefined || count > 0 || isBookDragging
+
+  if (!visible) return null
 
   return (
     <div ref={setNodeRef} className="relative">

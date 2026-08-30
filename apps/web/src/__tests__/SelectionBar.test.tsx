@@ -52,6 +52,17 @@ describe('SelectionBar', () => {
     expect(apiPatch).toHaveBeenCalledWith('/books/c', { readStatus: 'finished' })
   })
 
+  it('uses the completion callback after a successful batch action', async () => {
+    const onClear = vi.fn()
+    const onComplete = vi.fn()
+    render(<SelectionBar selectedIds={['a']} onClear={onClear} onComplete={onComplete} />, { wrapper })
+
+    fireEvent.click(screen.getByText('library.markFinished'))
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled())
+    expect(onClear).not.toHaveBeenCalled()
+  })
+
   it('keeps selection and shows a summary toast when some updates fail', async () => {
     apiPatch.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce({})
     const onClear = vi.fn()

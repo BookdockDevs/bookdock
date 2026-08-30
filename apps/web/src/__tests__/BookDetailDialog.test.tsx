@@ -12,6 +12,7 @@ import BookDetailDialog from '../features/library/components/BookDetailDialog'
 
 const apiPatch = vi.fn()
 const apiPut = vi.fn()
+const createShelfMutate = vi.fn()
 const createTagMutate = vi.fn()
 const updateBookMutate = vi.fn()
 const navigateMock = vi.fn()
@@ -49,6 +50,7 @@ vi.mock('../features/library/hooks', () => ({
   }),
   useShelves: () => ({ data: { data: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] } }),
   useTags: () => ({ data: { data: [{ id: 'tag-1', name: '小说', bookCount: 1 }] } }),
+  useCreateShelf: () => ({ mutateAsync: createShelfMutate, isPending: false }),
   useCreateTag: () => ({ mutateAsync: createTagMutate, isPending: false }),
   useUpdateBook: () => ({ mutate: updateBookMutate, isPending: false }),
   useUploadCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -87,6 +89,7 @@ beforeEach(async () => {
   vi.clearAllMocks()
   apiPatch.mockResolvedValue({})
   apiPut.mockResolvedValue({})
+  createShelfMutate.mockResolvedValue({ data: { id: 'shelf-new', name: '科幻' } })
   vi.mocked(useBookTransforms).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useBookTransforms>)
   createTagMutate.mockResolvedValue({ data: { id: 'tag-new' } })
   membershipShelf = null
@@ -179,6 +182,58 @@ describe('BookDetailDialog tag chips', () => {
     expect(createTagMutate).not.toHaveBeenCalled()
     expect(screen.queryByPlaceholderText('新标签名称')).toBeNull()
     expect(screen.getByRole('button', { name: '+ 新建标签' })).toBeInTheDocument()
+  })
+
+  it('cancels the inline tag input when clicking away', () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '+ 新建标签' }))
+    const input = screen.getByPlaceholderText('新标签名称')
+    fireEvent.change(input, { target: { value: '科幻' } })
+    fireEvent.mouseDown(document.body)
+
+    expect(createTagMutate).not.toHaveBeenCalled()
+    expect(screen.queryByPlaceholderText('新标签名称')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 新建标签' }))
+    expect(screen.getByPlaceholderText('新标签名称')).toHaveValue('')
+  })
+})
+
+describe('BookDetailDialog shelf chips', () => {
+  it('creates a shelf from the inline chip and auto-selects it', async () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '+ 新建书架' }))
+    const input = screen.getByPlaceholderText('新书架名称')
+    fireEvent.change(input, { target: { value: '科幻' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(createShelfMutate).toHaveBeenCalledWith('科幻'))
+    await waitFor(() => expect(screen.getByRole('button', { name: '+ 新建书架' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => {
+      expect(apiPut).toHaveBeenCalledWith('/books/book-1/shelves', { shelfId: 'shelf-new' })
+    })
+  })
+
+  it('cancels the inline shelf input when clicking away', () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '+ 新建书架' }))
+    const input = screen.getByPlaceholderText('新书架名称')
+    fireEvent.change(input, { target: { value: '科幻' } })
+    fireEvent.mouseDown(document.body)
+
+    expect(createShelfMutate).not.toHaveBeenCalled()
+    expect(screen.queryByPlaceholderText('新书架名称')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 新建书架' }))
+    expect(screen.getByPlaceholderText('新书架名称')).toHaveValue('')
   })
 })
 

@@ -31,13 +31,13 @@ vi.mock('@/features/auth/AccountMenu', () => ({
 interface ShelfItemData { id: string; name: string; bookCount: number }
 interface TagItemData { id: string; name: string; bookCount: number }
 
-function mockHooks({ shelves = [], tags = [], trashTotal = 0 }: { shelves?: ShelfItemData[]; tags?: TagItemData[]; trashTotal?: number } = {}) {
+function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1 }: { shelves?: ShelfItemData[]; tags?: TagItemData[]; uncategorizedTotal?: number } = {}) {
   ;(libraryHooks.useShelves as ReturnType<typeof vi.fn>).mockReturnValue({
     data: { data: shelves },
     isLoading: false,
   })
   ;(libraryHooks.useBooks as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { data: [], total: trashTotal },
+    data: { data: [], total: uncategorizedTotal },
   })
   ;(libraryHooks.useTags as ReturnType<typeof vi.fn>).mockReturnValue({
     data: { data: tags },
@@ -121,6 +121,22 @@ describe('LibrarySidebar', () => {
     const firstShelf = screen.getByText('Favorites')
     expect(shelvesHeader.compareDocumentPosition(uncategorized) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(uncategorized.compareDocumentPosition(firstShelf) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('hides an empty uncategorized entry when a real shelf exists', () => {
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }], uncategorizedTotal: 0 })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+
+    expect(screen.queryByText('未分类')).toBeNull()
+  })
+
+  it('keeps an empty uncategorized entry visible when it is selected', () => {
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }], uncategorizedTotal: 0 })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId="none" tagId={null} trash={false} />)
+
+    expect(screen.getByText('未分类')).toBeInTheDocument()
   })
 
   it('enters trash view when trash is clicked', () => {

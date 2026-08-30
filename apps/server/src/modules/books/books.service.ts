@@ -168,7 +168,7 @@ export async function bufferFromStream(stream: Readable): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
-export async function uploadBook(userId: string, file: File) {
+export async function uploadBook(userId: string, file: File, membership?: { shelfId?: string | null; tagIds?: string[] }) {
   const storage = getStorage()
   const fileName = file.name
   const mime = file.type
@@ -182,6 +182,16 @@ export async function uploadBook(userId: string, file: File) {
   const format = fileName.endsWith('.txt') ? 'txt' : 'epub'
   const bookId = createId('book')
   const db = getDb()
+  const tagIds = [...new Set(membership?.tagIds ?? [])]
+  if (membership?.shelfId) {
+    const shelf = db.select({ id: shelves.id }).from(shelves).where(and(eq(shelves.id, membership.shelfId), eq(shelves.userId, userId))).get()
+    if (!shelf) throw new AppError('SHELF_NOT_FOUND')
+  }
+  if (tagIds.length > 0) {
+    const existingTags = db.select({ count: sql<number>`count(*)` }).from(tags)
+      .where(and(eq(tags.userId, userId), inArray(tags.id, tagIds))).get()
+    if ((existingTags?.count ?? 0) !== tagIds.length) throw new AppError('TAG_NOT_FOUND')
+  }
 
   // Content-based dedup. New rows store the FULL sha256 (64 hex) of the
   // original upload as contentHash; legacy rows hold the sampled partialMD5
@@ -307,11 +317,17 @@ export async function uploadBook(userId: string, file: File) {
     contentHash,
     size,
     meta,
+    shelfId: membership?.shelfId ?? null,
     readStatus: 'reading' as const,
     createdAt: now,
     updatedAt: now,
   }
-  db.insert(books).values(book).run()
+  db.transaction((tx) => {
+    tx.insert(books).values(book).run()
+    if (tagIds.length > 0) {
+      tx.insert(bookTags).values(tagIds.map((tagId) => ({ bookId, tagId }))).run()
+    }
+  })
   return { book: stripMetaChapters(book), duplicated: false }
 }
 

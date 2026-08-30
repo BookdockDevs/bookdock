@@ -72,7 +72,23 @@ booksRoutes.post('/', async (c) => {
   if (file.size > config.uploadMaxBytes) {
     return c.json({ error: { code: 'UPLOAD_TOO_LARGE', message: 'File too large' } }, 413)
   }
-  const { book, duplicated } = await uploadBook(user.id, file)
+  const rawTagIds = body['tagIds']
+  let tagIds: unknown
+  if (rawTagIds !== undefined) {
+    if (typeof rawTagIds !== 'string') {
+      return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid tagIds' } }, 400)
+    }
+    try {
+      tagIds = JSON.parse(rawTagIds)
+    } catch {
+      return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid tagIds' } }, 400)
+    }
+  }
+  const membership = bookMembershipSchema.safeParse({ shelfId: body['shelfId'], tagIds })
+  if (!membership.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid membership', details: membership.error.flatten() } }, 400)
+  }
+  const { book, duplicated } = await uploadBook(user.id, file, membership.data)
   return c.json({ data: book, duplicated }, 201)
 })
 

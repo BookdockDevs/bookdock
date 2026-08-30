@@ -88,7 +88,14 @@ export interface UploadItem {
   status: UploadItemStatus
   /** Upload progress 0-100; stays 100 while the server parses the book */
   progress: number
+  shelfId?: string
+  tagIds?: string[]
   message?: string
+}
+
+export interface UploadAssignment {
+  shelfId?: string
+  tagIds?: string[]
 }
 
 export const UPLOAD_ACCEPTED_EXTENSIONS = ['.epub', '.txt']
@@ -124,6 +131,8 @@ export function useUploadBooks() {
       const xhr = new XMLHttpRequest()
       const formData = new FormData()
       formData.append('file', item.file)
+      if (item.shelfId) formData.append('shelfId', item.shelfId)
+      if (item.tagIds?.length) formData.append('tagIds', JSON.stringify(item.tagIds))
       xhr.open('POST', `${BASE_URL}/books`)
       xhr.upload.addEventListener('progress', (e) => {
         if (!e.lengthComputable) return
@@ -202,7 +211,7 @@ export function useUploadBooks() {
   }, [items, queryClient, addToast, _])
 
   const addFiles = useCallback(
-    (files: FileList | File[], opts?: { autoStart?: boolean }) => {
+    (files: FileList | File[], opts?: { autoStart?: boolean } & UploadAssignment) => {
       const list = Array.from(files)
       const accepted = list.filter(isAcceptedUploadFile)
       const rejected = list.length - accepted.length
@@ -217,6 +226,8 @@ export function useUploadBooks() {
           file,
           status,
           progress: 0,
+          shelfId: opts?.shelfId,
+          tagIds: opts?.tagIds,
         })),
       ])
       if (rejected > 0) addToast(_('library.uploadIgnored', { count: rejected }), 'info')
@@ -224,8 +235,17 @@ export function useUploadBooks() {
     [addToast, _],
   )
 
-  const startUpload = useCallback(() => {
-    setItems((prev) => prev.map((it) => (it.status === 'pending' ? { ...it, status: 'queued' as const } : it)))
+  const startUpload = useCallback((assignment?: UploadAssignment) => {
+    setItems((prev) => prev.map((it) => {
+      if (it.status !== 'pending') return it
+      if (!assignment) return { ...it, status: 'queued' as const }
+      return {
+        ...it,
+        status: 'queued' as const,
+        shelfId: assignment.shelfId,
+        tagIds: assignment.tagIds,
+      }
+    }))
   }, [])
 
   const isUploading = items.some((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'processing')

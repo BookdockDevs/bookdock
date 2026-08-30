@@ -14,6 +14,7 @@ import { useShelves, useTags } from '../hooks'
 interface SelectionBarProps {
   selectedIds: string[]
   onClear: () => void
+  onComplete?: () => void
   trash?: boolean
 }
 
@@ -25,7 +26,7 @@ const BATCH_STATUS_ACTIONS: { value: ReadStatus; labelKey: string }[] = [
   { value: 'abandoned', labelKey: 'library.markAbandoned' },
 ]
 
-export default function SelectionBar({ selectedIds, onClear, trash = false }: SelectionBarProps) {
+export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, trash = false }: SelectionBarProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)
@@ -48,12 +49,12 @@ export default function SelectionBar({ selectedIds, onClear, trash = false }: Se
 
   async function handleBatchStatus(value: ReadStatus) {
     const ok = await runBatch((bookId) => apiPatch(`/books/${bookId}`, { readStatus: value }))
-    if (ok) onClear()
+    if (ok) onComplete()
   }
 
   async function handleBatchRestore() {
     const ok = await runBatch((bookId) => apiPost(`/books/${bookId}/restore`))
-    if (ok) onClear()
+    if (ok) onComplete()
   }
 
   return (
@@ -112,7 +113,7 @@ export default function SelectionBar({ selectedIds, onClear, trash = false }: Se
         <BatchClassifyDialog
           ids={selectedIds}
           onClose={() => setDialog(null)}
-          onDone={onClear}
+          onDone={onComplete}
         />
       )}
 
@@ -120,7 +121,7 @@ export default function SelectionBar({ selectedIds, onClear, trash = false }: Se
         <BatchDeleteDialog
           ids={selectedIds}
           onClose={() => setDialog(null)}
-          onDone={onClear}
+          onDone={onComplete}
         />
       )}
 
@@ -128,7 +129,7 @@ export default function SelectionBar({ selectedIds, onClear, trash = false }: Se
         <BatchPermanentDeleteDialog
           ids={selectedIds}
           onClose={() => setDialog(null)}
-          onDone={onClear}
+          onDone={onComplete}
         />
       )}
     </>
