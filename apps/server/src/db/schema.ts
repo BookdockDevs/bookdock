@@ -71,6 +71,23 @@ export const settings = sqliteTable('settings', {
   userKeyIdx: uniqueIndex('settings_user_key_idx').on(table.userId, table.key),
 }))
 
+export const ttsServices = sqliteTable('tts_services', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  provider: text('provider', { enum: ['openai', 'azure', 'aliyun', 'dashscope', 'minimax', 'mimo', 'volcengine', 'openai-compatible'] }).notNull(),
+  baseUrl: text('base_url'),
+  model: text('model'),
+  defaultVoice: text('default_voice'),
+  options: text('options', { mode: 'json' }).$type<Record<string, string | number | boolean>>().notNull().default({}),
+  encryptedSecrets: text('encrypted_secrets'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  userNameIdx: uniqueIndex('tts_services_user_name_idx').on(table.userId, table.name),
+  userUpdatedIdx: index('tts_services_user_updated_idx').on(table.userId, table.updatedAt),
+}))
+
 export const instanceSettings = sqliteTable('instance_settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),

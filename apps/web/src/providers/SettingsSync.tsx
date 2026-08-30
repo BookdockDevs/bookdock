@@ -21,6 +21,12 @@ const SETTINGS_KEYS = [
   'uiTheme',
   'readingTimerMode',
   'manualTimerGraceMinutes',
+  'ttsEngine',
+  'ttsServiceId',
+  'ttsVoiceId',
+  'ttsRate',
+  'ttsAutoNext',
+  'ttsFollow',
   'readingConfig',
 ]
 

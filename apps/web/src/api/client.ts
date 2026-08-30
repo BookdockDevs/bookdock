@@ -61,6 +61,21 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined })
 }
 
+export async function apiPostBlob(path: string, body: unknown, signal?: AbortSignal): Promise<Blob> {
+  const headers = new Headers({ 'Content-Type': 'application/json' })
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok) {
+    if (res.status === 401) handleUnauthorized(path)
+    throw await parseError(res)
+  }
+  return res.blob()
+}
+
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
 }

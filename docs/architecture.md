@@ -10,7 +10,7 @@
 2. **Evolution over prediction**: reserve interfaces only where "expensive to refactor and definitely needed" (storage driver, error-class, album-of-mapping parsing, API versioning, multi-user schema); everything else is YAGNI.
 3. **Contract first**: frontend and backend share a single source of truth for types + validation (`@bookdock/shared`) to eliminate drift.
 4. **Cohesive extractable modules**: the server is organized by domain modules, key capabilities exposed via interfaces (StorageDriver, FormatRegistry); only extract packages (e.g. `@bookdock/db`, `@bookdock/storage`) when the same capability is genuinely needed elsewhere.
-5. **Self-hosted first, privacy first**: data is byte backup-able; default single-process single-binary container; secrets from env.
+5. **Self-hosted first, privacy first**: data is byte backup-able; default single-process single-binary container; server-held secrets are encrypted at rest and never exposed to the browser.
 
 ---
 
@@ -93,6 +93,7 @@ apps/server/src/
     avatars/                # user avatar upload/delete + immutable content-hash file serving
     fonts/                  # custom font upload/list/delete/scope + immutable file serving
     reading-records.routes.ts # duration upsert + aggregation
+    tts/                  # user-owned AI voice services and server-side speech gateways
   middleware/
     error.ts               # AppError + errorHandler (ErrorCode → HTTP status)
     request-context.ts     # API request ID propagation and structured access log
@@ -108,6 +109,23 @@ apps/server/src/
 - **routes**: thin. Parse params → call service → wrap errors. No business logic.
 - **service**: orchestrate, return domain objects or throw `AppError(code)`. Dependencies injected via function args (db, storage) for testability & extraction.
 - Modules do **not** import each other's service; cross-module orchestration goes through shared db/storage instances.
+
+### 3.2 Reader TTS playback
+
+The reader keeps TTS navigation separate from audio acquisition. A session owns an ordered
+lookahead queue of visible-DOM segments, starts from the first fully visible candidate in the
+current viewport, prepares up to three online audio items concurrently, and only commits the
+next reader segment when it is about to play. Online audio is decoded into
+Web Audio buffers, then the current and next prepared items are scheduled on a shared
+AudioContext with a small rate-scaled sentence gap, so a prepared sentence can start without
+another network request or a per-sentence media-element restart. System speech keeps the session in its playing state while the short inter-sentence gap is bridged, so the controls remain enabled and stable between utterances. Pause, resume, stop, and rate changes preserve the active
+session; rate changes restart from the current sentence when already-scheduled timings need to
+be rebuilt. Lookahead uses the foliate TTS iterator's read-only `collectDetails` operation and
+never moves the reader viewport. User jumps or invalidation abort the session generation and
+discard its queue, while the per-session client cache may retain decoded buffers for reuse.
+R09 does not include word-level timing, persistent/offline audio, background/media-session
+playback, sleep timers, pitch-preserving time-stretching, or multi-role narration; these remain
+explicit follow-up capabilities rather than implicit promises of the baseline.
 - Tests live beside modules (`shelves.test.ts`, `tags.test.ts`) or centralized under `__tests__/` (books).
 
 ### 3.2 StorageDriver interface
@@ -149,7 +167,7 @@ Registered in `app.ts` (EpubParser + TxtParser). Adding PDF/MOBI/CBZ means only 
 
 SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instance seeds one "default user" row. Future multi-user/permissions/sharing only adds tables + policy logic, never touching existing columns.
 
-**Current tables** (10):
+**Current tables** (12):
 
 | Table | Key columns | Notes |
 |---|---|---|
@@ -164,6 +182,7 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | `reading_records` | id, userId FK, bookId FK (cascade), date (text), durationSeconds | unique (userId, bookId, date); upsert snapshot |
 | `reading_sessions` | id, userId FK, bookId FK (cascade), date (text), startedAt, durationSeconds | per-session detail for hourly distribution |
 | `fonts` | id, userId FK, scope (user\|instance), family, fileName, format, contentHash, size, createdAt | unique (userId, contentHash); file at `fonts/<hash>` in storage, ref-counted delete |
+| `tts_services` | id, userId FK, name, provider, baseUrl?, model?, defaultVoice?, options (json), encryptedSecrets?, createdAt, updatedAt | multiple user-owned AI voice services; credentials are encrypted at rest and never returned; built-in system/Edge engines are not rows; guest accounts cannot configure or use user AI services |
 
 `meta` is a JSON column for "may grow" metadata; frequently-queried stable fields are promoted to dedicated columns.
 
@@ -200,6 +219,7 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 
 **Progress storage**: per-book JSON file `progress/{bookId}.json`, shape `{ cfi?, chapter?, percent, fraction?, intervals?, updatedAt }`. `fraction` is the foliate book-wide position (0–1); `intervals` is the merged union of `[start, end]` fraction ranges the user has actually read — the web reader closes the current segment when a relocate jump exceeds `JUMP_THRESHOLD` (0.02) and reports `segmentStartFraction` on PUT. GET additionally returns `readFraction` (total union length, computed server-side). Legacy files without `intervals` are initialized to `[0, current fraction]` on the first new-format save.
 | `/api/v1/settings` | settings | `GET /` `PUT /` |
+| `/api/v1/tts` | tts | `GET /providers` `GET/POST /services` `POST /services/test` `GET/PUT/DELETE /services/:id` `GET /services/:id/voices` `POST /services/:id/test` `POST /speech` (server-side provider gateways) |
 | `/api/v1/reading-records` | reading | `POST /` `GET /summary` `GET /daily` `GET /by-book` `GET /hourly`(?from&to&tzOffset&bookId?) `GET /book/:bookId` |
 
 ---
@@ -223,7 +243,7 @@ apps/web/src/
   features/
     auth/                  # Login/Setup pages, auth hooks, error-code→message
     books/                 # hooks, components (BookCard/BookCover/Dialog…)
-    reader/                # Reader orchestration + FoliateReader adapter
+    reader/                # Reader orchestration + FoliateReader adapter + TtsController
     search/                # useSearch (TanStack Query), search params
     stats/                 # stats page + charts + hooks
   components/
@@ -311,3 +331,5 @@ Each ADR is a short standalone file. They live in `docs/local/adr/` (private wor
 | ADR-11 | HttpOnly cookie JWT + guard fresh DB user | `docs/local/adr/0011-http-only-cookie-jwt.md` |
 | ADR-12 | instance_settings has no userId (exception) | `docs/local/adr/0012-instance-settings-no-userid.md` |
 | ADR-13 | fonts table two-scope ownership (user/instance) | `docs/local/adr/0013-fonts-two-scope.md` |
+| ADR-14 | TTS visible-DOM segments and user-owned online configuration | `docs/local/adr/0014-tts-visible-dom-user-config.md` |
+| ADR-15 | unified reader TTS engines and multiple user AI services | `docs/local/adr/0015-tts-unified-engines-multi-services.md` |

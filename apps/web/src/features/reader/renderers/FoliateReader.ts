@@ -22,6 +22,7 @@ import type {
   SearchOptions,
   SearchResult,
   SelectionInfo,
+  TtsSegment,
 } from '../types'
 import { FONT_OPTIONS } from '../types'
 import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
@@ -36,6 +37,7 @@ import {
   type SearchMatch,
 } from '../lib/book-search'
 import { convertChinese } from '@/lib/chinese'
+import { mix } from '@/lib/color'
 
 const ANNOTATION_COLORS: Record<string, string> = {
   yellow: '#eab308',
@@ -49,6 +51,19 @@ const DEFAULT_ANNOTATION_COLOR = ANNOTATION_COLORS.yellow
 // Must match SEARCH_PREFIX in foliate-js/view.js: values with this prefix are
 // drawn as transient search highlights and ignored by annotation click handling
 const SEARCH_ANNOTATION_PREFIX = 'foliate-search:'
+
+function ttsTextHash(text: string): string {
+  let hash = 2166136261
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+export function ttsHighlightColor(theme: { bg: string; text: string; primary?: string }): string {
+  return mix(theme.primary ?? theme.text, theme.bg, 0.25)
+}
 
 // Click-to-turn zone config (F3). Kept pure for unit tests.
 export type ClickAreaMode = 'standard' | 'fullscreen' | 'swap' | 'none'
@@ -100,6 +115,25 @@ export function shouldArmPending(
   const target = book?.sections?.[currentSectionIndex + dir]
   if (!target || target.linear === 'no') return false
   return !book?.loadSectionText?.has?.(target.id)
+}
+
+export type TtsViewportAction = 'stay' | 'advance' | 'return'
+
+const TTS_START_VIEWPORT_INSET = 8
+
+// Use the sentence's first line as the page-turn trigger. A sentence may span
+// several lines, so using its bounding box would turn too early and scroll its
+// opening lines out of view.
+export function ttsViewportAction(
+  segmentRect: Pick<DOMRect, 'top' | 'bottom'>,
+  viewportRect: Pick<DOMRect, 'top' | 'bottom' | 'height'>,
+  segmentStartRect: Pick<DOMRect, 'top' | 'bottom'> = segmentRect,
+): TtsViewportAction {
+  const bottomSafeZone = Math.max(48, Math.min(96, viewportRect.height * 0.12))
+  if (segmentRect.bottom < viewportRect.top) return 'return'
+  if (segmentStartRect.top <= viewportRect.top + 4) return 'stay'
+  if (segmentStartRect.bottom <= viewportRect.bottom - bottomSafeZone) return 'stay'
+  return 'advance'
 }
 
 // Module-level parse cache: fetch + unzip + EPUB.init is the dominant cost of
@@ -399,6 +433,7 @@ export function buildAnnotationBuckets(annotations: ReaderAnnotation[]): {
 
 export class FoliateReader implements BookReader {
   private url: string
+  private bookId: string
   private container: HTMLElement | null = null
   private view: any | null = null
   private book: any | null = null
@@ -423,7 +458,7 @@ export class FoliateReader implements BookReader {
     textAlignJustify: false,
     overrideBookLayout: true,
   }
-  private theme: { bg: string; text: string } = { bg: '#ffffff', text: '#000000' }
+  private theme: { bg: string; text: string; primary?: string } = { bg: '#ffffff', text: '#000000' }
   private pageWidth = 0
   private lastFraction: number | null = null
   private lastCfi: string | null = null
@@ -450,6 +485,7 @@ export class FoliateReader implements BookReader {
   private showHeader = true
   private showFooter = true
   private currentSectionIndex = 0
+  private ttsNavigation = false
   private resizeObserver: ResizeObserver | null = null
   private lastScrollVPad = -1
   private activeDocs = new Set<Document>()
@@ -646,6 +682,7 @@ export class FoliateReader implements BookReader {
         color: ${this.theme.text} !important;
         background: ${this.theme.bg} !important;
         background-color: ${this.theme.bg} !important;
+        --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
       }
       body {
         box-sizing: border-box !important;
@@ -756,8 +793,9 @@ export class FoliateReader implements BookReader {
 
   private destroyed = false
 
-  constructor(url: string) {
+  constructor(url: string, bookId = '') {
     this.url = url
+    this.bookId = bookId
   }
 
   async mount(container: HTMLElement, initialTarget?: string, initialFraction?: number) {
@@ -976,6 +1014,7 @@ export class FoliateReader implements BookReader {
       total: chapterTotal,
       pageInChapter,
       movedScreens,
+      source: this.ttsNavigation ? 'tts' : 'reader',
     }
     this.lastTocLabel = tocItem?.label ?? ''
     this.lastChapterFraction = chapterFraction
@@ -1184,9 +1223,10 @@ export class FoliateReader implements BookReader {
     return typeof title === 'string' ? title : ''
   }
 
-  applyReadingTheme(theme: { bg: string; text: string }) {
+  applyReadingTheme(theme: { bg: string; text: string; primary?: string }) {
     this.theme = theme
     if (!this.view?.renderer) return
+    this.view.renderer.style.setProperty('--bd-tts-highlight', ttsHighlightColor(theme))
     this.view.renderer.setAttribute('background-color', theme.bg)
     this.applyStyles()
   }
@@ -1266,6 +1306,8 @@ export class FoliateReader implements BookReader {
     // view down — paginator
     // destroy() unloads every loaded section (adjacent preloads in continuous
     // mode included), clearing the loader cache — and reopening it.
+    this.emit('ttsInvalidated')
+    this.clearTtsHighlight()
     const cfi = this.lastCfi
     const fraction = this.lastFraction
     try { this.view.close() } catch { /* partial init */ }
@@ -1315,12 +1357,15 @@ export class FoliateReader implements BookReader {
     }
   }
 
-  async scrollByPages(delta: number) {
+  async scrollByPages(delta: number, distanceOverride?: number) {
     // In scrolled mode a full-viewport jump drops the half line at the page
     // edge; overlap 8% so the old page's last line reappears on the new one.
     // renderer.size is the paginator's viewport size (height when scrolled).
     const size = this.view?.renderer?.size
-    const distance = this.readingMode === 'scroll' && size ? Math.round(size * 0.92) : undefined
+    const pageDistance = this.readingMode === 'scroll' && size ? Math.round(size * 0.92) : undefined
+    const distance = this.readingMode === 'scroll'
+      ? distanceOverride ?? pageDistance
+      : undefined
     const steps = Math.abs(delta)
     for (let i = 0; i < steps; i++) {
       if (delta > 0) await this.view?.next(distance)
@@ -1328,9 +1373,202 @@ export class FoliateReader implements BookReader {
     }
   }
 
+  private ensureTts(): any | null {
+    if (!this.view?.renderer?.getContents) return null
+    try {
+      this.view.initTTS(false)
+      return this.view.tts ?? null
+    } catch {
+      return null
+    }
+  }
+
+  private ttsDetailToSegment(detail: any): TtsSegment | null {
+    const text = typeof detail?.text === 'string' ? detail.text.replace(/\s+/g, ' ').trim() : ''
+    const cfi = typeof detail?.cfi === 'string' ? detail.cfi : ''
+    if (!text || !cfi) return null
+    return {
+      id: `${this.bookId}:${this.currentSectionIndex}:${cfi}:${ttsTextHash(text)}`,
+      text,
+      cfi,
+      chapterIndex: this.currentSectionIndex,
+    }
+  }
+
+  private rangeForTtsCfi(cfi: string): Range | null {
+    const resolved = this.book?.resolveCFI?.(cfi)
+    if (!resolved?.anchor) return null
+    const contents = this.view?.renderer?.getContents?.() ?? []
+    const content = contents.find((item: any) => item.index === resolved.index)
+    if (!content?.doc) return null
+    try {
+      return resolved.anchor(content.doc) as Range
+    } catch {
+      return null
+    }
+  }
+
+  private ttsSegmentBounds(segment: TtsSegment): { top: number; bottom: number } | null {
+    const range = this.rangeForTtsCfi(segment.cfi)
+    const doc = range?.startContainer.ownerDocument
+    if (!range || !doc) return null
+    let top = Number.POSITIVE_INFINITY
+    let bottom = Number.NEGATIVE_INFINITY
+    for (const rect of Array.from(range.getClientRects())) {
+      const mapped = this.popupRect(doc, range, rect)
+      if (!mapped || mapped.height <= 0) continue
+      top = Math.min(top, mapped.top)
+      bottom = Math.max(bottom, mapped.top + mapped.height)
+    }
+    return Number.isFinite(top) && Number.isFinite(bottom) ? { top, bottom } : null
+  }
+
+  async getTtsSegment(startCfi?: string): Promise<TtsSegment | null> {
+    let tts = this.ensureTts()
+    if (!tts) return null
+    let detail: any = null
+    if (startCfi?.startsWith('epubcfi(')) {
+      const range = this.rangeForTtsCfi(startCfi)
+      if (range) {
+        tts.from(range, { highlight: false })
+        detail = tts.currentDetail?.()
+      } else {
+        this.ttsNavigation = true
+        try { await this.view?.goTo(startCfi) } finally { this.ttsNavigation = false }
+        tts = this.ensureTts()
+        detail = tts?.currentDetail?.()
+      }
+    } else if (this.lastRange) {
+      try {
+        tts.from(this.lastRange.cloneRange(), { highlight: false })
+        const currentDetail = tts.currentDetail?.()
+        const viewport = this.container?.getBoundingClientRect()
+        const details = tts.collectDetails?.(24, { includeCurrent: true, offset: 1 }) ?? (currentDetail ? [currentDetail] : [])
+        let fallbackDetail = currentDetail
+        for (const candidate of details) {
+          const segment = this.ttsDetailToSegment(candidate)
+          if (!segment) continue
+          fallbackDetail ??= candidate
+          if (!viewport || viewport.height <= 0) {
+            detail = candidate
+            break
+          }
+          const bounds = this.ttsSegmentBounds(segment)
+          if (bounds && bounds.top >= viewport.top + TTS_START_VIEWPORT_INSET && bounds.bottom <= viewport.bottom - TTS_START_VIEWPORT_INSET) {
+            detail = candidate
+            break
+          }
+        }
+        detail ??= fallbackDetail
+      } catch { /* stale iframe range */ }
+    }
+    detail ??= tts.currentDetail?.()
+    return this.ttsDetailToSegment(detail)
+  }
+
+  async getTtsChapterStartSegment(): Promise<TtsSegment | null> {
+    const tts = this.ensureTts()
+    if (!tts) return null
+    tts.start?.({ highlight: false })
+    return this.ttsDetailToSegment(tts.currentDetail?.())
+  }
+
+  async peekTtsSegments(count = 4): Promise<TtsSegment[]> {
+    const tts = this.ensureTts()
+    if (!tts?.collectDetails) return []
+    const details = tts.collectDetails(count, { offset: 1 })
+    return details.map((detail: any) => this.ttsDetailToSegment(detail)).filter((segment: TtsSegment | null): segment is TtsSegment => Boolean(segment))
+  }
+
+  private async moveTtsChapter(direction: 'next' | 'previous'): Promise<boolean> {
+    const renderer = this.view?.renderer
+    if (!renderer) return false
+    const before = this.currentSectionIndex
+    this.clearTtsHighlight()
+    this.ttsNavigation = true
+    try {
+      if (direction === 'next') await renderer.nextSection?.()
+      else await renderer.prevSection?.()
+    } finally {
+      this.ttsNavigation = false
+    }
+    return this.currentSectionIndex !== before
+  }
+
+  async nextTtsSegment(): Promise<TtsSegment | null> {
+    const tts = this.ensureTts()
+    if (!tts) return null
+    const nextText = tts.next?.()
+    let detail = nextText ? tts.currentDetail?.() : null
+    if (!nextText && await this.moveTtsChapter('next')) {
+      detail = this.ensureTts()?.currentDetail?.()
+    }
+    return this.ttsDetailToSegment(detail)
+  }
+
+  async previousTtsSegment(): Promise<TtsSegment | null> {
+    const tts = this.ensureTts()
+    if (!tts) return null
+    const previousText = tts.prev?.()
+    let detail = previousText ? tts.currentDetail?.() : null
+    if (!previousText && await this.moveTtsChapter('previous')) {
+      const previous = this.ensureTts()
+      previous?.end?.({ highlight: false })
+      detail = previous?.currentDetail?.()
+    }
+    return this.ttsDetailToSegment(detail)
+  }
+
+  async revealTtsSegment(segment: TtsSegment): Promise<void> {
+    const range = this.rangeForTtsCfi(segment.cfi)
+    const viewport = this.container?.getBoundingClientRect()
+    const rangeDocument = range?.startContainer.ownerDocument
+    const firstLineClientRect = range?.getClientRects?.()[0]
+    const segmentRect = range && rangeDocument
+      ? this.popupRect(rangeDocument, range)
+      : undefined
+    const segmentStartRect = range && rangeDocument && firstLineClientRect
+      ? this.popupRect(rangeDocument, range, firstLineClientRect)
+      : undefined
+    if (segmentRect && viewport && viewport.height > 0) {
+      const action = ttsViewportAction(
+        { top: segmentRect.top, bottom: segmentRect.top + segmentRect.height },
+        viewport,
+        segmentStartRect
+          ? { top: segmentStartRect.top, bottom: segmentStartRect.top + segmentStartRect.height }
+          : { top: segmentRect.top, bottom: segmentRect.top + segmentRect.height },
+      )
+      if (action === 'stay') return
+      if (action === 'advance') {
+        const topInset = 16
+        const safeDistance = segmentStartRect
+          ? Math.max(1, Math.round(segmentStartRect.top - viewport.top - topInset))
+          : undefined
+        const size = this.view?.renderer?.size
+        const pageDistance = this.readingMode === 'scroll' && size ? Math.round(size * 0.92) : undefined
+        const distance = pageDistance !== undefined && safeDistance !== undefined
+          ? Math.min(pageDistance, safeDistance)
+          : undefined
+        this.ttsNavigation = true
+        try { await this.scrollByPages(1, distance) } finally { this.ttsNavigation = false }
+        return
+      }
+    }
+    this.ttsNavigation = true
+    try { await this.view?.goTo(segment.cfi) } finally { this.ttsNavigation = false }
+  }
+
+  async highlightTtsSegment(segment: TtsSegment): Promise<void> {
+    this.ensureTts()?.highlightCfi?.(segment.cfi)
+  }
+
+  clearTtsHighlight() {
+    try { this.view?.initTTS?.(true) } catch { /* view may be between reloads */ }
+  }
+
   // --- Selection & annotations -------------------------------------------
 
-  private popupRect(doc: Document, range: Range): PopupRect | undefined {
+  private popupRect(doc: Document, range: Range, clientRect?: DOMRect): PopupRect | undefined {
     try {
       const frame = doc.defaultView?.frameElement as HTMLElement | null
       if (!frame) return undefined
@@ -1340,7 +1578,7 @@ export class FoliateReader implements BookReader {
       const scaleX = Number.isFinite(sx) ? sx! : 1
       const scaleY = Number.isFinite(sy) ? sy! : 1
       const frameRect = frame.getBoundingClientRect()
-      const rect = range.getBoundingClientRect()
+      const rect = clientRect ?? range.getBoundingClientRect()
       if (!rect || (rect.width === 0 && rect.height === 0)) return undefined
       return {
         left: scaleX * rect.left + frameRect.left,
@@ -1934,6 +2172,7 @@ export class FoliateReader implements BookReader {
         color: ${this.theme.text} !important;
         background: ${this.theme.bg} !important;
         background-color: ${this.theme.bg} !important;
+        --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
       }
       ::selection {
         background: ${this.theme.text}19 !important;

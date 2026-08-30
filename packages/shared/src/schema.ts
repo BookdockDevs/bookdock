@@ -151,12 +151,50 @@ export const settingsUpdateSchema = z.object({
   marginalFontSize: z.number().min(0).max(24).optional(),
   readingTimerMode: z.enum(['auto', 'manual', 'off']).optional(),
   manualTimerGraceMinutes: z.union([z.literal(1), z.literal(5), z.literal(10), z.literal(30)]).optional(),
+  ttsEngine: z.enum(['system', 'edge', 'service']).optional(),
+  ttsServiceId: z.string().nullable().optional(),
+  ttsVoiceId: z.string().max(200).optional(),
+  ttsRate: z.number().min(0.5).max(3).optional(),
+  ttsAutoNext: z.boolean().optional(),
+  ttsFollow: z.boolean().optional(),
   // Named reading-setting profiles; JSON serialized by the web client, server passes it through.
   readingConfig: z.string().optional(),
   customThemes: z.string().optional(),
   trash: z.object({
     autoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]),
   }).optional(),
+})
+
+const ttsBaseUrlSchema = z.string().url().max(500).refine((value) => /^https?:\/\//i.test(value), 'Only HTTP(S) URLs are supported')
+const ttsProviderSchema = z.enum(['openai', 'azure', 'aliyun', 'dashscope', 'minimax', 'mimo', 'volcengine', 'openai-compatible'])
+const ttsOptionsSchema = z.record(z.union([z.string().max(500), z.number().finite(), z.boolean()])).refine((value) => Object.keys(value).length <= 20)
+const ttsSecretsSchema = z.record(z.string().max(4096).nullable()).refine((value) => Object.keys(value).length <= 20)
+
+export const ttsServiceCreateSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  provider: ttsProviderSchema,
+  baseUrl: ttsBaseUrlSchema.nullable().optional(),
+  model: z.string().trim().max(200).nullable().optional(),
+  defaultVoice: z.string().trim().max(200).nullable().optional(),
+  options: ttsOptionsSchema.optional(),
+  secrets: z.record(z.string().max(4096)).refine((value) => Object.keys(value).length <= 20).optional(),
+})
+
+export const ttsServiceUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  provider: ttsProviderSchema.optional(),
+  baseUrl: ttsBaseUrlSchema.nullable().optional(),
+  model: z.string().trim().max(200).nullable().optional(),
+  defaultVoice: z.string().trim().max(200).nullable().optional(),
+  options: ttsOptionsSchema.optional(),
+  secrets: ttsSecretsSchema.optional(),
+})
+
+export const ttsSpeechSchema = z.object({
+  serviceId: z.string().min(1),
+  text: z.string().trim().min(1).max(4000),
+  voice: z.string().max(200).optional(),
+  rate: z.number().min(0.25).max(4).optional(),
 })
 
 export const annotationCreateSchema = z.object({

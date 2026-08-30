@@ -172,6 +172,12 @@ export interface SettingsRes {
   /** Reading-time accounting: automatic heuristics, manual timer pill, or off (no reading data) */
   readingTimerMode?: 'auto' | 'manual' | 'off'
   manualTimerGraceMinutes?: 1 | 5 | 10 | 30
+  ttsEngine?: 'system' | 'edge' | 'service'
+  ttsServiceId?: string | null
+  ttsVoiceId?: string
+  ttsRate?: number
+  ttsAutoNext?: boolean
+  ttsFollow?: boolean
   trash?: TrashSettings
   /**
    * Named reading-setting profiles (global config + presets + active pointer),
@@ -183,6 +189,65 @@ export interface SettingsRes {
    * Synced because reading configs reference custom themes by id.
    */
   customThemes?: string
+}
+
+export type TtsEngine = 'system' | 'edge' | 'service'
+export type TtsProvider = 'openai' | 'azure' | 'aliyun' | 'dashscope' | 'minimax' | 'mimo' | 'volcengine' | 'openai-compatible'
+
+export interface TtsProviderRes {
+  id: TtsProvider
+  kind: 'native' | 'openai-compatible'
+  defaultBaseUrl: string | null
+  defaultModel: string | null
+}
+
+export interface TtsServiceRes {
+  id: string
+  name: string
+  provider: TtsProvider
+  baseUrl: string | null
+  model: string | null
+  defaultVoice: string | null
+  options: Record<string, string | number | boolean>
+  credentialsConfigured: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface TtsServiceCreateReq {
+  name: string
+  provider: TtsProvider
+  baseUrl?: string | null
+  model?: string | null
+  defaultVoice?: string | null
+  options?: Record<string, string | number | boolean>
+  secrets?: Record<string, string>
+}
+
+export interface TtsServiceUpdateReq {
+  name?: string
+  provider?: TtsProvider
+  baseUrl?: string | null
+  model?: string | null
+  defaultVoice?: string | null
+  options?: Record<string, string | number | boolean>
+  /** Empty/missing preserves existing secrets; null clears one secret. */
+  secrets?: Record<string, string | null>
+}
+
+export interface TtsVoiceRes {
+  id: string
+  name: string
+  lang: string
+  gender?: string
+  description?: string
+}
+
+export interface TtsSpeechReq {
+  serviceId: string
+  text: string
+  voice?: string
+  rate?: number
 }
 
 export interface SettingsUpdateReq {

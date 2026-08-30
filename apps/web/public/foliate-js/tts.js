@@ -23,6 +23,7 @@ const isLocalLink = href => {
 const shouldSkipTextNode = node => {
     const parent = node.parentElement
     if (!parent) return false
+    if (parent.closest('script, style, noscript, template, [hidden], [aria-hidden="true"], [inert], [cfi-inert]')) return true
     const anchor = parent.closest('a')
     if (!anchor) return false
     return isLocalLink(anchor.getAttribute('href'))
@@ -285,18 +286,18 @@ export class TTS {
         return { text: plainText, cfi }
     }
 
-    start() {
+    start({ highlight = true } = {}) {
         this.#lastMark = null
         const entry = this.#list.first()
         if (!entry) return this.next()
-        return this.#resultFrom(entry, { highlight: true })?.text
+        return this.#resultFrom(entry, { highlight })?.text
     }
 
-    end() {
+    end({ highlight = true } = {}) {
         this.#lastMark = null
         const entry = this.#list.last()
         if (!entry) return this.next()
-        return this.#resultFrom(entry, { highlight: true })?.text
+        return this.#resultFrom(entry, { highlight })?.text
     }
 
     resume() {
@@ -325,11 +326,11 @@ export class TTS {
         return this.#resultFrom(entry)?.text
     }
 
-    from(range) {
+    from(range, { highlight = true } = {}) {
         this.#lastMark = null
         const entry = this.#list.find(range_ =>
             range.compareBoundaryPoints(Range.END_TO_START, range_) <= 0)
-        if (entry?.[1]) this.highlight(entry[1].cloneRange())
+        if (highlight && entry?.[1]) this.highlight(entry[1].cloneRange())
         return this.#resultFrom(entry)?.text
     }
 

@@ -6,9 +6,10 @@ interface SettingsPopoverProps {
   open: boolean
   onClose: () => void
   children: ReactNode
+  toggleSelector?: string
 }
 
-export function SettingsPopover({ open, onClose, children }: SettingsPopoverProps) {
+export function SettingsPopover({ open, onClose, children, toggleSelector = '[data-settings-toggle]' }: SettingsPopoverProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -17,7 +18,7 @@ export function SettingsPopover({ open, onClose, children }: SettingsPopoverProp
       // Ignore clicks inside the popover
       if (ref.current?.contains(e.target as Node)) return
       // Ignore clicks on the settings toggle button (avoids double-toggle)
-      if ((e.target as HTMLElement).closest('[data-settings-toggle]')) return
+      if ((e.target as HTMLElement).closest(toggleSelector)) return
       // Ignore clicks on the preset context menu — it is portaled to body to
       // escape this header's transform, so it lives outside the popover DOM
       if ((e.target as HTMLElement).closest('#preset-context-menu')) return
@@ -35,7 +36,7 @@ export function SettingsPopover({ open, onClose, children }: SettingsPopoverProp
       document.removeEventListener('click', handleClickCapture, true)
       document.removeEventListener('keydown', handleKey)
     }
-  }, [open, onClose])
+  }, [open, onClose, toggleSelector])
 
   if (!open) return null
 

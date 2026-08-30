@@ -19,6 +19,7 @@ import { useReadingTimer } from './hooks/useReadingTimer'
 import { useIsTouch } from './hooks/useIsTouch'
 import { useReaderState } from './state/reader-state'
 import { RendererContext } from './hooks/useReaderApi'
+import { TtsSessionProvider } from './hooks/TtsSessionProvider'
 import { useBookChapters } from './hooks/useBookChapters'
 import { createSegmentTracker, trackPosition, closeSegment } from './stats/reading-segments'
 import { createJumpHistory } from './jump-history'
@@ -32,7 +33,7 @@ import { SelectionToolbar } from './components/SelectionToolbar'
 import ShareCardDialog from './components/share/ShareCardDialog'
 import { ProgressStrip } from './components/ProgressStrip'
 import HistoryCapsule from './components/HistoryCapsule'
-import TimerPill from './components/TimerPill'
+import ReaderFooterControls from './components/ReaderFooterControls'
 import { getLastHighlightStyle } from './components/annotation-colors'
 import { setActiveTransforms, setAutoMarkSelectionMode } from './renderers/FoliateReader'
 import TransformForm from '../settings/components/TransformForm'
@@ -59,6 +60,7 @@ export default function Reader() {
   const [chapterFraction, setChapterFraction] = useState<number | undefined>(undefined)
   const [_atChapterStart, setAtChapterStart] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [ttsOpen, setTtsOpen] = useState(false)
   const [footnoteEntry, setFootnoteEntry] = useState<FootnoteEntry | null>(null)
   // Chapter-switch loading indicator (slow cross-chapter navigation)
   const [navPending, setNavPending] = useState(false)
@@ -491,6 +493,7 @@ export default function Reader() {
 
   const { containerRef, renderer } = useReaderRenderer({
     url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
+    bookId: id,
     // so it navigates exactly once (to the saved CFI, or to the book start
     // when progress resolved to none)
     initialCfi: initialCfiRef.current,
@@ -509,9 +512,9 @@ export default function Reader() {
     },
     onFootnoteClose: () => setFootnoteEntry(null),
     onRelocated: (e) => {
-      setChromePinned(false)
+      if (e.source !== 'tts') setChromePinned(false)
       setSelection(null)
-      pingReadingTimer()
+      if (e.source !== 'tts') pingReadingTimer()
       setPercent(e.percent)
       setCurrentCfi(e.cfi)
       currentCfiRef.current = e.cfi
@@ -543,6 +546,9 @@ export default function Reader() {
         setCurrentChapterIndex(e.chapterIndex)
       }
       historyAutoHideRef.current?.trackRelocate(e.movedScreens, e.chapterIndex)
+      // TTS maintains its own position and must not overwrite the user's
+      // reading progress while it moves the renderer internally.
+      if (e.source === 'tts') return
       // Manual timer mode owns the read intervals (one interval per manual
       // session) — the auto SegmentTracker must not create its own
       const segmentStartFraction = readingTimerMode === 'auto' && e.fraction !== undefined
@@ -720,6 +726,7 @@ export default function Reader() {
     if (!containerEl) return
     const handler = () => {
       setSettingsOpen(false)
+      setTtsOpen(false)
       setSelection(null)
     }
     containerEl.addEventListener('content-click', handler)
@@ -730,7 +737,7 @@ export default function Reader() {
   // popover), the click that dismisses it must not also turn a page or toggle
   // chrome — the renderer swallows click-to-turn while the guard is held
   const selection = useReaderState((s) => s.selection)
-  const popupOpen = !!selection || settingsOpen || !!footnoteEntry
+  const popupOpen = !!selection || settingsOpen || ttsOpen || !!footnoteEntry
   useEffect(() => {
     if (!popupOpen || !renderer) return
     renderer.pushPopupGuard()
@@ -875,8 +882,14 @@ export default function Reader() {
 
   const onToggleSettings = useCallback(() => {
     if (!toolbarLocked) setSidebarOpen(false)
+    setTtsOpen(false)
     setSettingsOpen((v) => !v)
   }, [setSidebarOpen, toolbarLocked])
+
+  const onToggleTts = useCallback(() => {
+    setSettingsOpen(false)
+    setTtsOpen((v) => !v)
+  }, [])
 
   const onToggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
@@ -1018,6 +1031,7 @@ export default function Reader() {
     <ErrorBoundary>
       <ViewSettingsContext.Provider value={viewSettingsContextValue}>
       <RendererContext.Provider value={rendererContextValue}>
+      <TtsSessionProvider renderer={renderer}>
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div className="flex h-full w-full">
             <ReaderSidebar bookId={id} onStatsTabOpen={flushReadingTimer} chromePinned={chromePinned} />
@@ -1031,10 +1045,12 @@ export default function Reader() {
                 visible
                 pinned={chromePinned}
                 settingsOpen={settingsOpen}
+                ttsOpen={ttsOpen}
                 bookId={id}
                 estimatedMinutes={estimatedMinutes}
                 onAddBookmark={onAddBookmark}
                 onToggleSettings={onToggleSettings}
+                onToggleTts={onToggleTts}
                 onToggleFullscreen={onToggleFullscreen}
                 bookmarkActive={!!currentBookmark}
               />
@@ -1108,21 +1124,25 @@ export default function Reader() {
             {/* Bottom chrome: hot strip (carved out around the corners) summons
                 the footer; corner zones sustain it and carry the capsules, which
                 lift together with the footer via zone translate. Summon handlers
-                sit on the strip+footer wrapper so hovering footer controls (own
-                pointer targets) still counts as dwelling in the summon region.
+                sit on the strip+footer wrapper, which has a real hit area so
+                moving between its controls does not cause a false leave.
                 Touch: summon/dwell stay inert (no sticky hover, no tap
                 interception); the footer follows chromePinned alone. The
                 mobile tool dock occupies the row below this progress strip. */}
             <div className="absolute inset-x-0 bottom-0 z-40 pointer-events-none">
               <div
+                className={cn(
+                  'absolute inset-x-0 bottom-0 h-12',
+                  !isTouch && footerVisible ? 'pointer-events-auto' : 'pointer-events-none',
+                )}
                 onPointerEnter={isTouch ? undefined : () => setFooterSummon(true)}
                 onPointerLeave={isTouch ? undefined : () => setFooterSummon(false)}
               >
                 <div
                   className={cn(
-                    'absolute bottom-0 right-16 h-12',
-                    !isTouch && 'pointer-events-auto',
+                    'pointer-events-auto absolute inset-y-0 right-16',
                     (historyCaps.canBack || historyCaps.canForward) ? 'left-28' : 'left-0',
+                    isTouch && 'pointer-events-none',
                   )}
                 />
                 <ProgressStrip
@@ -1157,16 +1177,14 @@ export default function Reader() {
                   />
                 </div>
               )}
-              <div
-                className={cn(
-                  'absolute bottom-0 right-0 h-24 w-16 transition-transform duration-300',
-                  footerVisible ? '-translate-y-10 pointer-events-auto' : 'pointer-events-none',
-                )}
-                onPointerEnter={isTouch ? undefined : () => setCornerDwell(true)}
-                onPointerLeave={isTouch ? undefined : () => setCornerDwell(false)}
-              >
-                {readingTimerMode === 'manual' && <TimerPill bookId={id} />}
-              </div>
+              <ReaderFooterControls
+                bookId={id}
+                footerVisible={footerVisible}
+                isTouch={isTouch}
+                onPointerEnter={() => setCornerDwell(true)}
+                onPointerLeave={() => setCornerDwell(false)}
+                readingTimerMode={readingTimerMode}
+              />
             </div>
           </div>
         </div>
@@ -1189,6 +1207,7 @@ export default function Reader() {
           </Modal>
         )}
       </div>
+      </TtsSessionProvider>
     </RendererContext.Provider>
     </ViewSettingsContext.Provider>
     </ErrorBoundary>

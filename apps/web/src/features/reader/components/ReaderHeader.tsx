@@ -3,8 +3,19 @@ import { Link } from '@tanstack/react-router'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { formatDuration } from '@/lib/format-duration'
+import { useTtsSession } from '../hooks/useTtsSession'
 import { SettingsPopover } from './SettingsPopover'
 import { SettingsPanel } from './SettingsPanel'
+import TtsPanel from './TtsPanel'
+
+function TtsActiveIcon() {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M4 9h3l5-4v14l-5-4H4V9Z" />
+      <path d="M16 9.5a3.5 3.5 0 010 5M18.7 7a7 7 0 010 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
 
 interface ReaderHeaderProps {
   title: string
@@ -14,21 +25,25 @@ interface ReaderHeaderProps {
   className?: string
   estimatedMinutes?: number
   settingsOpen?: boolean
+  ttsOpen?: boolean
   bookId?: string
   onAddBookmark?: () => void
   onToggleSettings?: () => void
+  onToggleTts?: () => void
   onToggleFullscreen?: () => void
   bookmarkActive?: boolean
 }
 
-export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, bookId, onAddBookmark, onToggleSettings, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, bookId, onAddBookmark, onToggleSettings, onToggleTts, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
   const _ = useTranslation()
+  const { state: ttsState } = useTtsSession()
+  const ttsActive = ttsState.status === 'starting' || ttsState.status === 'playing' || ttsState.status === 'paused'
   return (
     <header
       className={cn(
         'pointer-events-none absolute left-0 right-0 top-0 z-40 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] transition-transform duration-300 sm:px-4',
         visible ? 'group-hover:translate-y-0' : '',
-        settingsOpen || pinned ? 'translate-y-0' : '-translate-y-full',
+        settingsOpen || ttsOpen || pinned ? 'translate-y-0' : '-translate-y-full',
         className,
       )}
     >
@@ -49,6 +64,35 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
           <span className="mr-1 hidden text-xs tabular-nums text-[var(--bd-read-sub)] sm:mr-2 sm:inline">
             {formatDuration(estimatedMinutes * 60, _)}
           </span>
+        )}
+        {onToggleTts && (
+          <div className="relative">
+            <button
+              data-tts-toggle
+              onClick={onToggleTts}
+              title={_('reader.ttsTitle')}
+              aria-label={_('reader.ttsTitle')}
+              aria-pressed={ttsActive || !!ttsOpen}
+              className={cn(
+                'pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border transition-colors hover:bg-stone-500/10',
+                ttsActive
+                  ? 'border-current text-current'
+                  : 'text-[var(--bd-read-text)]',
+                !ttsActive && ttsOpen && 'bg-stone-500/10',
+              )}
+              style={ttsActive ? undefined : { borderColor: 'var(--bd-read-accent)' }}
+            >
+              {ttsActive ? <TtsActiveIcon /> : (
+                <svg className="h-4 w-4" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 6 2 29M12 6l9 23M5 20.5h14" />
+                  <path d="M19 7c5 2.8 7 7 7 11M20 2c7 4 11 9.5 11 16" />
+                </svg>
+              )}
+            </button>
+            <SettingsPopover open={!!ttsOpen} onClose={() => onToggleTts?.()} toggleSelector="[data-tts-toggle]">
+              <TtsPanel />
+            </SettingsPopover>
+          </div>
         )}
         {onAddBookmark && (
           <button

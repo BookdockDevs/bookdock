@@ -26,7 +26,8 @@ v0.1 does not include an in-app backup center or online restore. Docker Hub is t
 - [x] Annotation output with selection, Markdown/plain-text copy, Markdown/plain-text/CSV downloads, and optional private deep links
 - [x] Close EPUB footnote compatibility using the existing foliate footnote support
 - [x] Add minimal structured server logs and request context for self-hosted troubleshooting
-- [ ] Web TTS v1: focused playback loop with visible-text consistency, paragraph navigation, voice/rate controls, follow highlighting, and chapter continuation
+- [x] Web TTS R09 baseline: visible-text-consistent playback, chapter/selection start, voice/rate controls, sentence highlighting, follow decoupling, chapter continuation, online prefetch, and user-owned AI voice services
+- [ ] Web TTS follow-up: word-boundary highlighting, adaptive audible-time prefetch/backpressure, persistent/offline cache, background/media controls, sleep timer, pitch-preserving rate change, and multi-role narration
 - [ ] Constrained AI v1 after TTS: explicit selected-text explanation and Q&A with provider, secret, privacy, cancellation, and cost boundaries
 
 The following are intentionally excluded from this Web milestone: brightness control, volume-key navigation, E-Ink mode, native-style PWA behavior, and deep 3×3 gesture customization.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveClickDirection, shouldArmPending, turnsCrossChapter } from '../FoliateReader'
+import { resolveClickDirection, shouldArmPending, ttsHighlightColor, turnsCrossChapter, ttsViewportAction } from '../FoliateReader'
 
 // container spans x = 100..700 (width 600)
 function dir(x: number, mode: 'standard' | 'fullscreen' | 'swap' | 'none' = 'standard') {
@@ -96,5 +96,53 @@ describe('shouldArmPending', () => {
   it('no book or no warmth API defaults to arming', () => {
     expect(shouldArmPending(1, null, 0)).toBe(false)
     expect(shouldArmPending(1, { sections: [{ id: 'a.xhtml' }, { id: 'b.xhtml' }] }, 0)).toBe(true)
+  })
+})
+
+describe('ttsViewportAction', () => {
+  const viewport = { top: 100, bottom: 900, height: 800 }
+
+  it('keeps sentences that are comfortably visible', () => {
+    expect(ttsViewportAction({ top: 180, bottom: 700 }, viewport)).toBe('stay')
+  })
+
+  it('turns when the next sentence reaches the bottom safe zone', () => {
+    expect(ttsViewportAction({ top: 760, bottom: 820 }, viewport)).toBe('advance')
+    expect(ttsViewportAction({ top: 920, bottom: 980 }, viewport)).toBe('advance')
+  })
+
+  it('uses the first line instead of the full bounding box for long sentences', () => {
+    expect(ttsViewportAction(
+      { top: 180, bottom: 1120 },
+      viewport,
+      { top: 180, bottom: 220 },
+    )).toBe('stay')
+  })
+
+  it('turns when the first line itself reaches the bottom safe zone', () => {
+    expect(ttsViewportAction(
+      { top: 760, bottom: 1120 },
+      viewport,
+      { top: 760, bottom: 820 },
+    )).toBe('advance')
+  })
+
+  it('does not turn again for a long sentence already at the top', () => {
+    expect(ttsViewportAction({ top: 102, bottom: 1100 }, viewport)).toBe('stay')
+  })
+
+  it('returns to a sentence that is fully above the viewport', () => {
+    expect(ttsViewportAction({ top: -120, bottom: 80 }, viewport)).toBe('return')
+  })
+})
+
+describe('ttsHighlightColor', () => {
+  it('derives the highlight from the active theme instead of a fixed color', () => {
+    expect(ttsHighlightColor({ bg: '#ffffff', text: '#000000', primary: '#336699' })).toBe('#668cb3')
+    expect(ttsHighlightColor({ bg: '#202020', text: '#ffffff', primary: '#d97706' })).toBe('#ab610d')
+  })
+
+  it('falls back to the theme text when a primary color is unavailable', () => {
+    expect(ttsHighlightColor({ bg: '#ffffff', text: '#000000' })).toBe('#404040')
   })
 })

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
+import { Link, useSearch } from '@tanstack/react-router'
 
 import { useAuthStore } from '@/stores/auth.store'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -14,6 +14,7 @@ import FontsSettingsSection from './components/FontsSettingsSection'
 import TransformsSettingsSection from './components/TransformsSettingsSection'
 import TocRulesSettingsSection from './components/TocRulesSettingsSection'
 import AccountSection from './components/AccountSection'
+import TtsSettingsSection from './components/TtsSettingsSection'
 
 type SectionId = 'general' | 'account' | 'reading' | 'library' | 'admin'
 
@@ -22,7 +23,15 @@ export default function Settings() {
   const user = useAuthStore((s) => s.user)
   const isOwner = user?.role === 'owner' && user.guest !== true
   const isGuest = user?.role === 'guest' || user?.guest === true
-  const [active, setActive] = useState<SectionId>('general')
+  const search = useSearch({ from: '/settings' })
+  const [active, setActive] = useState<SectionId>(search.section ?? 'general')
+
+  useEffect(() => {
+    if (search.section) setActive(search.section)
+    if (search.section === 'reading' && search.focus === 'tts') {
+      window.requestAnimationFrame(() => document.getElementById('tts-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    }
+  }, [search.focus, search.section])
 
   const sections: { id: SectionId; label: string }[] = [
     { id: 'general', label: _('settings.general') },
@@ -79,6 +88,7 @@ export default function Settings() {
           {active === 'reading' && (
             <div className="flex flex-col gap-6">
               <ReadingDataSettingsSection />
+              <TtsSettingsSection id="tts-settings" />
               <FontsSettingsSection />
               <TransformsSettingsSection />
               <TocRulesSettingsSection />

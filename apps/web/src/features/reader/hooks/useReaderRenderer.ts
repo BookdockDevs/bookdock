@@ -9,6 +9,7 @@ import type { EffectiveViewSettings } from '../lib/view-settings'
 
 interface UseReaderRendererOptions {
   url: string
+  bookId?: string
   initialCfi?: string
   /** Fallback start position (0-1) when initialCfi is stale (re-TOC): the
    *  renderer navigates by fraction instead of CFI. */
@@ -37,6 +38,7 @@ interface UseReaderRendererOptions {
 
 export function useReaderRenderer({
   url,
+  bookId,
   initialCfi,
   initialFraction,
   settings,
@@ -181,7 +183,7 @@ export function useReaderRenderer({
     fontSize: marginalFontSize,
   }
 
-  const createRenderer = useCallback(() => new FoliateReader(url), [url])
+  const createRenderer = useCallback(() => new FoliateReader(url, bookId), [bookId, url])
 
   useEffect(() => {
     if (!containerRef.current || !url) return

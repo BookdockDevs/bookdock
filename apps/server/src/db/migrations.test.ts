@@ -163,3 +163,27 @@ describe('migration 0023_text_transform_overrides', () => {
     expect(sqlite.prepare('SELECT id FROM text_transforms').all()).toHaveLength(1)
   })
 })
+
+describe('migration 0026_tts_services_compat', () => {
+  it('creates the current TTS service table when the legacy config table exists', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    applyUpTo(sqlite, 20)
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1);
+      CREATE TABLE tts_configs (
+        id text PRIMARY KEY NOT NULL,
+        user_id text NOT NULL,
+        engine text DEFAULT 'system' NOT NULL,
+        updated_at integer NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE cascade
+      );
+      INSERT INTO tts_configs (id, user_id, engine, updated_at) VALUES ('legacy', 'u1', 'system', 1);
+    `)
+
+    applyMigration(sqlite, '0026_tts_services_compat.sql')
+
+    expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tts_services'").all()).toHaveLength(1)
+    expect(sqlite.prepare('SELECT id FROM tts_configs').all()).toEqual([{ id: 'legacy' }])
+  })
+})

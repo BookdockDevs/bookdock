@@ -570,7 +570,10 @@ export class View extends HTMLElement {
     if (stop)
       return this.#getOverlayer(this.#index)?.overlayer.remove(this.oldValue)
 
-    const doc = this.renderer.getContents()[0].doc;
+    const content = this.renderer.getContents().find(x => x.index === this.#index)
+      ?? this.renderer.getContents()[0]
+    const doc = content?.doc
+    if (!doc) return
     if (this.tts && this.tts.doc === doc) return;
     this.tts = new TTS(
       doc,
@@ -583,11 +586,10 @@ export class View extends HTMLElement {
           if (this.oldValue) {
             overlayer.remove(this.oldValue);
           }
-          value = this.getCFI(this.#index, range);
-          overlayer.add(value, range, Overlayer.highlight, { color: '#39c5bc83' });
+          value = `tts:${this.getCFI(this.#index, range)}`;
+          overlayer.add(value, range, Overlayer.highlight, { color: 'var(--bd-tts-highlight)' });
           this.oldValue = value;
         }
-        this.renderer.scrollToAnchor(range);
         return value;
       },
       (range) => this.getCFI(this.#index, range),

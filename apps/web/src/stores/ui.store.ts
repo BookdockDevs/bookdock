@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { TtsEngine } from '@bookdock/shared'
 import type { FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField } from '../features/reader/types'
 import type { CustomReadingTheme } from '../lib/reading-theme'
 import {
@@ -143,8 +144,20 @@ interface UiState {
   // or off — no reading data is recorded and the reader stats tab is hidden
   readingTimerMode: 'auto' | 'manual' | 'off'
   manualTimerGraceMinutes: 1 | 5 | 10 | 30
+  ttsEngine: TtsEngine
+  ttsServiceId: string | null
+  ttsVoiceId: string
+  ttsRate: number
+  ttsAutoNext: boolean
+  ttsFollow: boolean
   setReadingTimerMode: (v: 'auto' | 'manual' | 'off') => void
   setManualTimerGraceMinutes: (v: 1 | 5 | 10 | 30) => void
+  setTtsEngine: (v: TtsEngine) => void
+  setTtsServiceId: (v: string | null) => void
+  setTtsVoiceId: (v: string) => void
+  setTtsRate: (v: number) => void
+  setTtsAutoNext: (v: boolean) => void
+  setTtsFollow: (v: boolean) => void
 
   // Named reading-setting profiles (阅读设置预设): serialized JSON of the
   // multi-config blob (`{ global, presets[] }`). The blob syncs across
@@ -415,6 +428,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   marginalFontSize: getInitialNumber('bd-marginal-font-size', 0, 0, 24),
   readingTimerMode: getInitialTimerMode(),
   manualTimerGraceMinutes: getInitialGraceMinutes(),
+  ttsEngine: getInitial<string>('bd-tts-engine', 'system') === 'edge' ? 'edge' : getInitial<string>('bd-tts-engine', 'system') === 'service' ? 'service' : 'system',
+  ttsServiceId: getInitial<string>('bd-tts-service', '') || null,
+  ttsVoiceId: getInitial<string>('bd-tts-voice', ''),
+  ttsRate: getInitialNumber('bd-tts-rate', 1, 0.5, 3),
+  ttsAutoNext: getInitialBoolean('bd-tts-auto-next', true),
+  ttsFollow: getInitialBoolean('bd-tts-follow', true),
   // Seeded right after store creation (initialReadingConfig, or a fresh config
   // picked from the flat values); '' only during that same module tick.
   readingConfig: '',
@@ -515,6 +534,30 @@ export const useUiStore = create<UiState>((set, get) => ({
   setManualTimerGraceMinutes: (manualTimerGraceMinutes) => {
     setStorage('bd-manual-timer-grace', String(manualTimerGraceMinutes))
     set({ manualTimerGraceMinutes })
+  },
+  setTtsEngine: (ttsEngine) => {
+    setStorage('bd-tts-engine', ttsEngine)
+    set({ ttsEngine })
+  },
+  setTtsServiceId: (ttsServiceId) => {
+    setStorage('bd-tts-service', ttsServiceId ?? '')
+    set({ ttsServiceId })
+  },
+  setTtsVoiceId: (ttsVoiceId) => {
+    setStorage('bd-tts-voice', ttsVoiceId)
+    set({ ttsVoiceId })
+  },
+  setTtsRate: (ttsRate) => {
+    setStorage('bd-tts-rate', String(ttsRate))
+    set({ ttsRate })
+  },
+  setTtsAutoNext: (ttsAutoNext) => {
+    setStorage('bd-tts-auto-next', String(ttsAutoNext))
+    set({ ttsAutoNext })
+  },
+  setTtsFollow: (ttsFollow) => {
+    setStorage('bd-tts-follow', String(ttsFollow))
+    set({ ttsFollow })
   },
 
   setUiTheme: (uiTheme) => {

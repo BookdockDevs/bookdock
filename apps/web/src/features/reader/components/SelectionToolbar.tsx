@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth.store'
 import { useToastStore } from '@/stores/toast.store'
 import { useReaderState } from '../state/reader-state'
 import { useReaderApi } from '../hooks/useReaderApi'
+import { useTtsSession } from '../hooks/useTtsSession'
 import { useAnnotations, useCreateAnnotation, useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { IdeaOverlay } from './IdeaOverlay'
 import type { IdeaEntry } from './IdeaOverlay'
@@ -42,6 +43,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
   const setShareTarget = useReaderState((s) => s.setShareTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const { renderer } = useReaderApi()
+  const { controller: ttsController } = useTtsSession()
   const addToast = useToastStore((s) => s.addToast)
   const create = useCreateAnnotation(bookId)
   const update = useUpdateAnnotation(bookId)
@@ -227,6 +229,12 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     close()
   }
 
+  function readSelection() {
+    if (!selection) return
+    void ttsController?.start(selection.cfiRange)
+    close()
+  }
+
   // Sharing is ephemeral: the card dialog takes the excerpt text and chapter,
   // no annotation is created for a bare selection
   function shareExcerpt() {
@@ -312,6 +320,12 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
     { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: shareExcerpt },
     { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
+    { key: 'tts', label: _('reader.ttsFromSelection'), icon: (
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 10v4h3l4 4V6l-4 4H4z" />
+        <path d="M16 9.5a4 4 0 010 5" />
+      </svg>
+    ), danger: false, onClick: readSelection },
     // Low-frequency text-editing action sits last so the common actions stay put.
     // The replace dialog lives in Reader (via replaceTarget): opening it must
     // collapse this toolbar, but clearing the selection unmounts this

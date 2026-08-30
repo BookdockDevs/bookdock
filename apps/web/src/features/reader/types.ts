@@ -16,6 +16,8 @@ export interface ReaderLocation {
   pageInChapter?: number
   /** Viewport screens moved since the previous relocate (1 for a cross-chapter move), for jump-history auto-hide */
   movedScreens?: number
+  /** Internal relocation caused by TTS chapter navigation. */
+  source?: 'reader' | 'tts'
 }
 
 /** Rect in main-viewport client coordinates, used to position popups */
@@ -56,6 +58,13 @@ export interface SelectionInfo {
   /** When set on instantAnnotation, the selection toolbar stays open so the
    * user can restyle right after auto-marking ("选中即划" mode). */
   keepSelection?: boolean
+}
+
+export interface TtsSegment {
+  id: string
+  text: string
+  cfi: string
+  chapterIndex: number
 }
 
 export interface RendererEvents {
@@ -101,6 +110,7 @@ export interface RendererEvents {
   annotationOrphaned: (e: { cfiRange: string; type: string }) => void
   footnoteOpen: (e: FootnoteEntry) => void
   footnoteClose: () => void
+  ttsInvalidated: () => void
 }
 
 export interface TocItem {
@@ -169,6 +179,15 @@ export interface BookReader {
   clearSearch(): void
   /** Clear the DOM selection without emitting events — keeps React toolbar state */
   deselect(): void
+  getTtsSegment(startCfi?: string): Promise<TtsSegment | null>
+  getTtsChapterStartSegment(): Promise<TtsSegment | null>
+  /** Return following segments without moving the foliate TTS cursor or viewport. */
+  peekTtsSegments(count?: number): Promise<TtsSegment[]>
+  nextTtsSegment(): Promise<TtsSegment | null>
+  previousTtsSegment(): Promise<TtsSegment | null>
+  revealTtsSegment(segment: TtsSegment): Promise<void>
+  highlightTtsSegment(segment: TtsSegment): Promise<void>
+  clearTtsHighlight(): void
   on<K extends keyof RendererEvents>(type: K, fn: RendererEvents[K]): () => void
   destroy(): void
 }
