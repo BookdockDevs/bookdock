@@ -40,7 +40,8 @@ import { ViewSettingsContext } from './view-settings-context'
 import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './lib/view-settings'
 import { readingRateOf, RATE_SAMPLE_MIN_INTERVAL_MS } from './lib/progress-model'
 import type { PerBookSettingKey, GlobalViewSettings } from './lib/view-settings'
-import type { ReaderAnnotation } from './types'
+import type { FootnoteEntry, ReaderAnnotation } from './types'
+import { FootnotePopup } from './components/FootnotePopup'
 import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 
 export default function Reader() {
@@ -58,6 +59,7 @@ export default function Reader() {
   const [chapterFraction, setChapterFraction] = useState<number | undefined>(undefined)
   const [_atChapterStart, setAtChapterStart] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [footnoteEntry, setFootnoteEntry] = useState<FootnoteEntry | null>(null)
   // Chapter-switch loading indicator (slow cross-chapter navigation)
   const [navPending, setNavPending] = useState(false)
   // Middle click-area tap reveals the top/bottom bars (mobile: no hover);
@@ -500,6 +502,12 @@ export default function Reader() {
       setLoadError(null)
     },
     onError: (err) => setLoadError({ message: err.message || '加载失败', kind: 'parse' }),
+    onFootnoteOpen: (entry) => {
+      setSelection(null)
+      setSettingsOpen(false)
+      setFootnoteEntry(entry)
+    },
+    onFootnoteClose: () => setFootnoteEntry(null),
     onRelocated: (e) => {
       setChromePinned(false)
       setSelection(null)
@@ -722,7 +730,7 @@ export default function Reader() {
   // popover), the click that dismisses it must not also turn a page or toggle
   // chrome — the renderer swallows click-to-turn while the guard is held
   const selection = useReaderState((s) => s.selection)
-  const popupOpen = !!selection || settingsOpen
+  const popupOpen = !!selection || settingsOpen || !!footnoteEntry
   useEffect(() => {
     if (!popupOpen || !renderer) return
     renderer.pushPopupGuard()
@@ -1163,6 +1171,13 @@ export default function Reader() {
           </div>
         </div>
         <SelectionToolbar bookId={id} />
+        {footnoteEntry && (
+          <FootnotePopup
+            entry={footnoteEntry}
+            onBack={() => rendererRef.current?.backFootnote()}
+            onClose={() => rendererRef.current?.closeFootnote()}
+          />
+        )}
         <ShareCardDialog bookId={id} />
         {replaceTarget && (
           <Modal title={_('annotation.replaceSelection')} onClose={() => setReplaceTarget(null)}>

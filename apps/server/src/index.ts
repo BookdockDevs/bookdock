@@ -1,24 +1,65 @@
-import { serve } from '@hono/node-server'
 import type { AddressInfo } from 'node:net'
+import path from 'node:path'
+
+import { serve } from '@hono/node-server'
+
 import app from './app'
 import { config } from './config'
 import { runMigrations } from './db/client'
+import { log } from './lib/logger'
 import { bootstrapAuth } from './modules/auth/auth.service'
 import { purgeAllExpiredTrash } from './modules/books/books.service'
 
-runMigrations()
-bootstrapAuth()
+async function start() {
+  const startedAt = Date.now()
+  log('info', 'server.starting')
 
-// Sweep every user's expired trash once at boot; failures must never block startup
-void (async () => {
+  const migrationStartedAt = Date.now()
+  try {
+    runMigrations()
+    log('info', 'database.migration.completed', { durationMs: Date.now() - migrationStartedAt })
+  } catch (err) {
+    log('error', 'database.migration.failed', { durationMs: Date.now() - migrationStartedAt, error: err })
+    process.exitCode = 1
+    return
+  }
+
+  const authStartedAt = Date.now()
+  try {
+    await bootstrapAuth()
+    log('info', 'auth.bootstrap.completed', { durationMs: Date.now() - authStartedAt })
+  } catch (err) {
+    log('error', 'auth.bootstrap.failed', { durationMs: Date.now() - authStartedAt, error: err })
+    process.exitCode = 1
+    return
+  }
+
+  const trashStartedAt = Date.now()
   try {
     await purgeAllExpiredTrash()
+    log('info', 'trash.sweep.completed', { durationMs: Date.now() - trashStartedAt })
   } catch (err) {
-    console.error('trash auto-clean failed:', err)
+    // Trash cleanup is deliberately fail-silent so an operational cleanup
+    // problem never makes an otherwise healthy library unavailable.
+    log('warn', 'trash.sweep.failed', { durationMs: Date.now() - trashStartedAt, error: err })
   }
-})()
 
-serve(
-  { fetch: app.fetch, port: config.port },
-  (info: AddressInfo) => console.log(`bookdock server running on http://localhost:${info.port}`),
-)
+  try {
+    serve(
+      { fetch: app.fetch, port: config.port },
+      (info: AddressInfo) => log('info', 'server.listening', {
+        durationMs: Date.now() - startedAt,
+        meta: {
+          port: info.port,
+          storageDriver: config.storageDriver,
+          defaultDbPath: path.resolve(config.dbPath) === path.resolve(config.dataDir, 'bookdock.db'),
+        },
+      }),
+    )
+  } catch (err) {
+    log('error', 'server.listening.failed', { error: err })
+    process.exitCode = 1
+  }
+}
+
+void start()

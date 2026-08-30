@@ -95,8 +95,10 @@ apps/server/src/
     reading-records.routes.ts # duration upsert + aggregation
   middleware/
     error.ts               # AppError + errorHandler (ErrorCode → HTTP status)
+    request-context.ts     # API request ID propagation and structured access log
     auth.guard.ts          # cookie/header token → verify → DB fresh user (role/disabled) → inject c.var.user; or guest
   lib/
+    logger.ts              # dependency-free JSON logger with level filtering and safe fields
     id.ts                  # nanoid(21) wrapper, prefixable (book_, user_, ...)
     password.ts            # scrypt hashPassword + verifyPassword
     txt-to-epub.ts         # in-memory EPUB ZIP generation for TXT
@@ -180,6 +182,7 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 - **Roles**: `owner` (instance admin), `member` (registered), `guest` (anonymous → default user). First boot must create owner via `/setup` (web guard redirects when `initialized=false`).
 - **Instance settings**: `allowRegistration` / `allowGuestAccess` (default false), owner-edited via `PATCH /api/v1/auth/instance`, 5s module-level read cache. `AUTH_MODE` env removed.
 - **Unified responses**: success `{ data: T }`; failure `{ error: { code, message } }` (see §2.1 in shared).
+- **Request diagnostics**: `request-context` runs before `authGuard` on `/api/v1/*`, accepts a validated `X-Request-ID` or generates `req_<nanoid>`, echoes it on every API response, and writes one `http.request.completed` JSON record per non-successful-health request. `errorHandler` writes the single `app.unhandled_error` record for unexpected exceptions; logs never include query strings, bodies, credentials, usernames, or book content.
 
 ### Route overview
 
@@ -243,6 +246,7 @@ apps/web/src/
 ### 6.2 Reader
 - Rendering engine is vendored **foliate-js** (`public/foliate-js/`, not npm epubjs). `FoliateReader.ts` adapts the vendored engine: dynamic `import()` of `reader-entry.js`, manages reader lifecycle (render, pagination, annotations, progress). See `docs/local/reader/` for vendoring notes.
 - Creature devices: chapter list, TOC nav, progress persist to `books.progress` + `annotations`.
+- EPUB footnote references are handled by the vendored `FootnoteHandler`: explicit `epub:type`/ARIA references are preferred, conservative superscript heuristics require a note-like target, and the host renders the result in a disposable temporary `foliate-view` popup. Nested footnotes have local back history; parsing/rendering failures fall back to ordinary internal navigation and do not alter the main reader jump history.
 - Reader sidebar has three tabs: TOC, notes, and stats (数据). The stats tab shows per-book reading stats sourced from `GET /reading-records/book/:bookId` (totalSeconds + full daily records, no pagination), derived client-side by pure functions in `features/reader/stats/`; opening the tab flushes the in-progress reading timer first so the numbers include the current session. Below the daily-duration chart it also renders a 24-hour distribution module from `GET /reading-records/hourly` with the optional `bookId` filter (from = book start date, to = today), skipped when the book has no records. A "已读字数" card shows `readFraction × meta.wordCount` (from `GET /progress/:bookId` + book detail), formatted as `X.X万字` for ≥10000, with a `全书 N` sub-line; the card shows `-` when word counts are not backfilled yet.
 - Jump history (后退/前进): browser-style session history, in-memory only and cleared on book switch. `FoliateReader.display`/`scrollToPercent` is the chokepoint — every user jump (TOC, note/bookmark, search result, progress drag) emits `willJump` with the position being left, which `Reader.tsx` pushes into `features/reader/jump-history.ts` (back/forward stacks, cap 50; a new jump clears the forward stack). Internal navigation opts out via `display(target, { internal: true })`: the initial open, saved-progress re-display, and the history back/forward buttons themselves. Page turns and scrolling never enter the history.
 
@@ -259,6 +263,7 @@ Single `config.ts`, zod-validated then `Object.freeze`:
 | `DB_PATH` | `${DATA_DIR}/bookdock.db` | SQLite path |
 | `JWT_SECRET` | — | if unset: generate random hex, persist to `${DATA_DIR}/.jwt-secret` and reuse; env overrides |
 | `DEFAULT_USERNAME` | `admin` | default owner username |
+| `LOG_LEVEL` | `info` | minimum structured log level; all output is one JSON object per line |
 | `UPLOAD_MAX_BYTES` | `104857600` | max upload (100MB) |
 
 Prod exposes only the port + `DATA_DIR` volume. Backup = tarball `DATA_DIR`.

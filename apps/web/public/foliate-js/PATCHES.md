@@ -6,7 +6,7 @@
 >
 > 行号基于 2026-08-06 working tree（`9e36c55` 之后，未提交），升级后先 grep 标记再核对。
 
-## 1. 可追溯补丁（11 处）
+## 1. 可追溯补丁（13 处）
 
 ### 1.1 `overlayer.js:128-151` — `Overlayer.dashedUnderline`（想法标注）
 
@@ -79,6 +79,17 @@
 - **行为**：部分嵌入式浏览器会让 Blob iframe 永远停在旧的 `about:blank`，并且不会触发 `load`；直接检查 `contentDocument` 会把空白文档误判为正文，造成阅读页空白。现在 Blob 章节先 fetch 回 markup，再通过 `iframe.srcdoc` 加载；同时按 `about:srcdoc`/实际 URL 检查文档 readyState，并用 50ms 轮询补足丢失的 `load` 事件，超时明确失败。`#goTo` 拒绝越界章节索引，避免首章/末章翻页访问 `sections[undefined].load`。
 - **验证**：隔离本地实例真实浏览器回归：首开约 1 秒显示正文，目录跳转到“第二章 继续”显示对应正文，未再出现 10 秒 iframe 超时。
 
+### 1.12 `footnotes.js` — 脚注引用判定、片段提取与取消（working tree）
+
+- **行为**：显式识别 `epub:type`/`role=doc-noteref`/已验证类名；superscript 只在目标具备注释语义或可提取为非空块级内容时启用，数字索引簇和 backlink 保持普通链接。目标片段在独立临时 `foliate-view` 中渲染，支持同章/跨章、隐藏 `aside`，请求取消和 view dispose 可安全处理异步竞态。
+- **宿主契约**：`FootnoteHandler.handle(book, event)` 返回带 `requestId` 的 Promise，发出 `before-render`/`render` 事件；解析或渲染失败由宿主恢复为普通 `display(href)`。
+- **上游对照**：上游 `FootnoteHandler` 没有 Bookdock 的保守启发式、可取消请求和临时视图清理边界。
+
+### 1.13 `view.js:307-338` — 正文点击交给宿主脚注会话处理（working tree）
+
+- **行为**：移除旧的 `window.isFootNoteOpen()` / `window.closeFootNote()` 空桩调用；正文点击继续发出既有 `click-view`，由 `FoliateReader` 统一关闭脚注、消费本次点击并避免误翻页。
+- **上游对照**：这是宿主接线所需的行为调整，不再让 React 状态泄漏到全局 window。
+
 ## 2. vendored 基线专属机制（初始 vendored 自带，上游 main 没有，升级全部需要重放）
 
 以下机制在 `a8e48f2` vendored 时就存在（上游从未有过），与 §1 的"补丁"区分——它们没有 `// bookdock:` 标记，只能按功能定位：
@@ -116,14 +127,14 @@
 
 ## 3. 未改动文件（与上游基线一致）
 
-`epub.js` / `epubcfi.js` / `progress.js` / `search.js` / `text-walker.js` / `fixed-layout.js` / `footnotes.js` / `translator.js` / `tts.js` / `dict.js` / `vendor/*`——升级时可整体替换。
+`epub.js` / `epubcfi.js` / `progress.js` / `search.js` / `text-walker.js` / `fixed-layout.js` / `translator.js` / `tts.js` / `dict.js` / `vendor/*`——升级时可整体替换。
 
 `reader-entry.js` 是 bookdock 自写入口（导出 `globalThis.FoliateReader`，供 `FoliateReader.ts` 动态 import），不属于上游文件。
 
 ## 4. 升级 foliate 操作流程
 
 1. 以上游对应版本为基线整体替换未改动文件（§3）；
-2. 对 §1 的 10 处补丁逐条重放（grep `bookdock:` 核对，优先迁移到上游新抽象，如 1.3 的搜索配置项）；
+2. 对 §1 的 13 处补丁逐条重放（grep `bookdock:` 核对，优先迁移到上游新抽象，如 1.3 的搜索配置项）；
 3. 对 §2 的 4 项基线机制按功能重放（无标记，靠行为测试验证：滚轮翻页、iframe 键盘、continuous 无缝翻章、三格信息栏）；
 4. 跑阅读器相关测试 + 手动验证：搜索跳转锚点位置（28%）、想法虚线下划线、页眉页脚 padding=0 可见性、同 range 一划一想法渲染、页边距点击单次翻页；
 5. 更新本清单的行号与上游版本号。

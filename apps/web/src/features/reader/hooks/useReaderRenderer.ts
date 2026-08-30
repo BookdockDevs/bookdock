@@ -31,6 +31,8 @@ interface UseReaderRendererOptions {
   onUserJump?: () => void
   onTransformInvalid?: (e: Parameters<RendererEvents['transformInvalid']>[0]) => void
   onAnnotationOrphaned?: (e: Parameters<RendererEvents['annotationOrphaned']>[0]) => void
+  onFootnoteOpen?: (e: Parameters<RendererEvents['footnoteOpen']>[0]) => void
+  onFootnoteClose?: () => void
 }
 
 export function useReaderRenderer({
@@ -52,6 +54,8 @@ export function useReaderRenderer({
   onUserJump,
   onTransformInvalid,
   onAnnotationOrphaned,
+  onFootnoteOpen,
+  onFootnoteClose,
 }: UseReaderRendererOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<BookReader | null>(null)
@@ -121,6 +125,8 @@ export function useReaderRenderer({
   const onUserJumpRef = useRef(onUserJump)
   const onTransformInvalidRef = useRef(onTransformInvalid)
   const onAnnotationOrphanedRef = useRef(onAnnotationOrphaned)
+  const onFootnoteOpenRef = useRef(onFootnoteOpen)
+  const onFootnoteCloseRef = useRef(onFootnoteClose)
   const theme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [readingThemeId, customThemes])
   const themeRef = useRef(theme)
   const fontRef = useRef({ fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
@@ -154,6 +160,8 @@ export function useReaderRenderer({
   onUserJumpRef.current = onUserJump
   onTransformInvalidRef.current = onTransformInvalid
   onAnnotationOrphanedRef.current = onAnnotationOrphaned
+  onFootnoteOpenRef.current = onFootnoteOpen
+  onFootnoteCloseRef.current = onFootnoteClose
   themeRef.current = theme
   fontRef.current = { fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont }
   paragraphRef.current = { paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
@@ -227,6 +235,8 @@ export function useReaderRenderer({
     const unsubUserJump = newRenderer.on('userJump', () => onUserJumpRef.current?.())
     const unsubTransformInvalid = newRenderer.on('transformInvalid', (e) => onTransformInvalidRef.current?.(e))
     const unsubAnnotationOrphaned = newRenderer.on('annotationOrphaned', (e) => onAnnotationOrphanedRef.current?.(e))
+    const unsubFootnoteOpen = newRenderer.on('footnoteOpen', (e) => onFootnoteOpenRef.current?.(e))
+    const unsubFootnoteClose = newRenderer.on('footnoteClose', () => onFootnoteCloseRef.current?.())
 
     return () => {
       cancelled = true
@@ -242,6 +252,8 @@ export function useReaderRenderer({
       unsubUserJump()
       unsubTransformInvalid()
       unsubAnnotationOrphaned()
+      unsubFootnoteOpen()
+      unsubFootnoteClose()
       newRenderer.destroy()
       rendererRef.current = null
       setRenderer((current) => (current === newRenderer ? null : current))

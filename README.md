@@ -28,6 +28,7 @@ docker compose up -d --build
 Then open `http://localhost:3000` (the server also serves the built web UI) and complete `/setup` to create the owner account — no account is created automatically on first boot.
 
 - `JWT_SECRET` is optional: when omitted, a random secret is generated and persisted to `/data/.jwt-secret`.
+- `LOG_LEVEL` defaults to `info`; set it to `debug`, `warn`, or `error` when diagnosing a deployment. Logs are JSON lines on Docker stdout/stderr.
 - `DEFAULT_USERNAME` only names the built-in guest account used when guest access is enabled; it does not create an admin.
 - The complete `data/` directory is the persistent state. Stop the container before copying it for a cold backup, and restore the complete directory (including the hidden `.jwt-secret` file) before starting the container again.
 - `docker compose ps` shows the health status. The health endpoint is `http://localhost:3000/api/v1/health`.

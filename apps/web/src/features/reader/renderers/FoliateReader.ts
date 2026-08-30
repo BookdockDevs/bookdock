@@ -11,6 +11,7 @@ import type {
   ChineseConversion,
   ContinuousScroll,
   FontConfig,
+  FootnoteEntry,
   MarginalConfig,
   ParagraphStyle,
   PopupRect,
@@ -476,7 +477,13 @@ export class FoliateReader implements BookReader {
   private searchMatchOffsets = new Map<number, SearchMatch[]>()
   // Search-highlight annotation values currently handed to the view, per section
   private drawnSearchValues = new Map<number, string[]>()
+  private footnoteHandler: any = null
+  private footnoteEntries: FootnoteEntry[] = []
+  private footnoteEntryId = 0
+  private footnoteGeneration = 0
+  private footnoteRequests = new Map<number, number>()
   private handleDocInteraction = () => {
+    if (this.footnoteEntries.length > 0) this.closeFootnote()
     // Must bubble: listeners on document (e.g. popup dismiss handlers) rely on
     // the event travelling up from the container
     this.container?.dispatchEvent(new CustomEvent('content-click', { bubbles: true }))
@@ -496,8 +503,172 @@ export class FoliateReader implements BookReader {
   popPopupGuard() {
     this.popupGuardCount = Math.max(0, this.popupGuardCount - 1)
   }
+
+  private invalidateFootnoteRequests() {
+    this.footnoteGeneration += 1
+    for (const requestId of this.footnoteRequests.keys()) this.footnoteHandler?.cancel?.(requestId)
+    this.footnoteRequests.clear()
+  }
+
+  private disposeFootnoteView(view: HTMLElement) {
+    view.removeEventListener('link', this.handleFootnoteLink)
+    if (this.footnoteHandler?.dispose) this.footnoteHandler.dispose(view)
+    else {
+      try { (view as any).close?.() } catch { /* partial init */ }
+      view.remove()
+    }
+  }
+
+  private disposeFootnoteEntries() {
+    for (const entry of this.footnoteEntries) this.disposeFootnoteView(entry.view)
+    this.footnoteEntries = []
+  }
+
+  closeFootnote() {
+    const hadSession = this.footnoteEntries.length > 0 || this.footnoteRequests.size > 0
+    this.invalidateFootnoteRequests()
+    this.footnoteHandler?.disposeAll?.()
+    this.disposeFootnoteEntries()
+    if (hadSession) this.emit('footnoteClose')
+  }
+
+  backFootnote() {
+    if (this.footnoteEntries.length < 2) return
+    this.invalidateFootnoteRequests()
+    const current = this.footnoteEntries.pop()
+    if (current) this.disposeFootnoteView(current.view)
+    const previous = this.footnoteEntries[this.footnoteEntries.length - 1]
+    if (previous) this.emit('footnoteOpen', { ...previous, canGoBack: this.footnoteEntries.length > 1 })
+  }
+
+  private footnoteAnchorRect(anchor: any): PopupRect | undefined {
+    try {
+      const doc = anchor?.ownerDocument as Document | undefined
+      if (!doc) return undefined
+      const range = doc.createRange()
+      range.selectNode(anchor)
+      return this.popupRect(doc, range)
+    } catch {
+      return undefined
+    }
+  }
+
+  private handleFootnoteBeforeRender = (event: Event) => {
+    const detail = (event as CustomEvent).detail ?? {}
+    const requestId = detail.requestId
+    const generation = this.footnoteRequests.get(requestId)
+    if (generation !== undefined && (generation !== this.footnoteGeneration || this.destroyed)) {
+      this.footnoteHandler?.cancel?.(requestId)
+      return
+    }
+    this.applyFootnoteStyles(detail.view, Boolean(detail.hidden))
+  }
+
+  private handleFootnoteLink = (event: Event) => {
+    const detail = (event as CustomEvent).detail ?? {}
+    const href = typeof detail.href === 'string' ? detail.href : ''
+    const sourceView = event.currentTarget as HTMLElement
+    const mainView = this.view
+    const isMainView = sourceView === mainView
+    if (!href || !this.footnoteHandler || !this.book) return
+
+    const request = this.footnoteHandler.handle(this.book, event) as (Promise<any> & { requestId?: number }) | undefined
+    if (!request) {
+      if (!isMainView || this.footnoteEntries.length > 0) {
+        event.preventDefault()
+        if (this.footnoteEntries.length > 0) this.closeFootnote()
+        void this.display(href)
+      }
+      return
+    }
+
+    if (isMainView && this.footnoteEntries.length > 0) this.closeFootnote()
+    const generation = ++this.footnoteGeneration
+    const requestId = request.requestId as number | undefined
+    if (requestId !== undefined) this.footnoteRequests.set(requestId, generation)
+    void Promise.resolve(request).then((result) => {
+      if (requestId !== undefined) this.footnoteRequests.delete(requestId)
+      if (!result || result.kind === 'cancelled') return
+      if (generation !== this.footnoteGeneration || this.destroyed) {
+        this.disposeFootnoteView(result.view)
+        return
+      }
+      if (result.kind === 'fallback') {
+        if (this.footnoteEntries.length > 0) this.closeFootnote()
+        void this.display(href)
+        return
+      }
+      const view = result.view as HTMLElement
+      view.style.display = 'block'
+      view.style.width = '100%'
+      view.style.height = '100%'
+      view.addEventListener('link', this.handleFootnoteLink)
+      if (isMainView) this.disposeFootnoteEntries()
+      const entry: FootnoteEntry = {
+        id: ++this.footnoteEntryId,
+        href: result.href,
+        type: result.type ?? null,
+        hidden: Boolean(result.hidden),
+        view,
+        anchorRect: this.footnoteAnchorRect(detail.a),
+        canGoBack: !isMainView && this.footnoteEntries.length > 0,
+      }
+      this.footnoteEntries.push(entry)
+      this.emit('footnoteOpen', entry)
+    }).catch(() => {
+      if (generation !== this.footnoteGeneration || this.destroyed) return
+      if (this.footnoteEntries.length > 0) this.closeFootnote()
+      void this.display(href)
+    })
+  }
+
+  private applyFootnoteStyles(view: any, hidden: boolean) {
+    const renderer = view?.renderer
+    if (!renderer) return
+    renderer.setAttribute('flow', 'scrolled')
+    renderer.setAttribute('max-inline-size', '100000')
+    renderer.setAttribute('gutter', '0')
+    renderer.setAttribute('top-margin', '0')
+    renderer.setAttribute('bottom-margin', '0')
+    renderer.removeAttribute('snap-turn')
+    renderer.removeAttribute('continuous')
+    renderer.removeAttribute('show-header')
+    renderer.removeAttribute('show-footer')
+    const fontStack = this.font.fontStack ?? FONT_OPTIONS[0].value
+    renderer.setStyles?.(`
+      ${this.font.fontCss ?? ''}
+      html, body {
+        font-family: ${fontStack} !important;
+        font-size: ${this.font.size}px !important;
+        line-height: ${this.font.lineHeight} !important;
+        font-weight: ${this.font.fontWeight} !important;
+        letter-spacing: ${this.paragraph.letterSpacing}px !important;
+        color: ${this.theme.text} !important;
+        background: ${this.theme.bg} !important;
+        background-color: ${this.theme.bg} !important;
+      }
+      body {
+        box-sizing: border-box !important;
+        margin: 0 !important;
+        padding: 8px !important;
+        overflow-wrap: anywhere !important;
+      }
+      p {
+        text-indent: ${this.paragraph.indent}em !important;
+        margin-bottom: ${this.paragraph.paragraphSpacing}em !important;
+        text-align: ${this.paragraph.textAlignJustify ? 'justify' : 'start'} !important;
+      }
+      img { max-width: 100% !important; height: auto !important; }
+      table { max-width: 100% !important; overflow-x: auto !important; }
+      ${hidden ? 'aside { display: block !important; }' : ''}
+    `)
+  }
+
   private handleClickView = (event: Event) => {
-    if (this.popupGuardCount > 0) return
+    if (this.popupGuardCount > 0) {
+      if (this.footnoteEntries.length > 0) this.closeFootnote()
+      return
+    }
     const rect = this.container?.getBoundingClientRect()
     if (!rect) return
     const detail = (event as CustomEvent).detail
@@ -598,6 +769,11 @@ export class FoliateReader implements BookReader {
     try {
       const foliate = await this.loadFoliateScript()
       this.foliateOverlayer = foliate.Overlayer
+      const FootnoteHandler = foliate.FootnoteHandler
+      if (FootnoteHandler) {
+        this.footnoteHandler = new FootnoteHandler()
+        this.footnoteHandler.addEventListener('before-render', this.handleFootnoteBeforeRender)
+      }
       const tMount1 = performance.now()
 
       const epub = await getParsedBook(this.url, foliate)
@@ -620,6 +796,7 @@ export class FoliateReader implements BookReader {
       view.style.width = '100%'
       view.style.height = '100%'
       this.view = view
+      view.addEventListener('link', this.handleFootnoteLink)
 
       view.addEventListener('relocate', (event: Event) => {
         this.handleRelocate((event as CustomEvent).detail)
@@ -701,17 +878,6 @@ export class FoliateReader implements BookReader {
 
   private async loadFoliateScript(): Promise<any> {
     if (typeof window === 'undefined') throw new Error('FoliateReader requires a browser environment')
-    // foliate-js expects these from the host app (desktop Foliate); must be set
-    // even when the module was already preloaded at app boot — the early return
-    // below would otherwise skip them and every doc click would throw at
-    // view.js:298 before the click-view event is dispatched (click-to-turn and
-    // the middle-zone chrome toggle would be dead)
-    if (typeof (window as any).isFootNoteOpen !== 'function') {
-      (window as any).isFootNoteOpen = () => false
-    }
-    if (typeof (window as any).closeFootNote !== 'function') {
-      (window as any).closeFootNote = () => {}
-    }
     const existing = (window as any).FoliateReader
     if (existing) return existing
 
@@ -1695,12 +1861,18 @@ export class FoliateReader implements BookReader {
     this.searchGen++
     this.drawnSearchValues.clear()
     this.searchMatchOffsets.clear()
+    this.invalidateFootnoteRequests()
+    this.footnoteHandler?.disposeAll?.()
+    this.disposeFootnoteEntries()
+    this.footnoteHandler?.removeEventListener?.('before-render', this.handleFootnoteBeforeRender)
+    this.footnoteHandler = null
     setTransformInvalidListener(null)
     this.navigationPending.dispose()
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
     if (this.prefetchTimer !== null) { clearTimeout(this.prefetchTimer); this.prefetchTimer = null }
     if (this.marginalTimer !== null) { clearTimeout(this.marginalTimer); this.marginalTimer = null }
+    this.view?.removeEventListener('link', this.handleFootnoteLink)
     try { this.view?.close() } catch { /* view may be partially initialized */ }
     try { this.view?.remove() } catch { /* ignore */ }
     for (const doc of this.activeDocs) {

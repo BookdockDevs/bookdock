@@ -306,11 +306,8 @@ export class View extends HTMLElement {
 
   #handleClick(doc) {
     doc.addEventListener('click', e => {
-      if (window.isFootNoteOpen() && !e.currentTarget.__isFootNote) {
-        window.closeFootNote()
-        return
-      }
-
+      // bookdock: footnote session dismissal is handled by FoliateReader while
+      // ordinary document clicks continue to emit click-view for page controls.
       if (doc.getSelection().type === "Range")
         return
 

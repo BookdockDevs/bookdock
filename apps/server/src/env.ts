@@ -5,6 +5,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { config as loadDotenv } from 'dotenv'
 
+import { log, setLogLevel } from './lib/logger'
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '..', '..', '..')
 
@@ -20,6 +22,7 @@ const envSchema = z.object({
   FONT_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
   AVATAR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(2097152),
   STORAGE_DRIVER: z.enum(['localfs']).default('localfs'),
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 })
 
 export type Env = z.infer<typeof envSchema>
@@ -44,7 +47,7 @@ function loadOrCreateJwtSecret(dataDir: string): string {
   } catch {
     // best effort on non-POSIX filesystems
   }
-  console.log(`[auth] JWT_SECRET not set; generated and persisted to ${secretPath}`)
+  log('info', 'auth.jwt_secret.generated', { meta: { generated: true } })
   return secret
 }
 
@@ -52,9 +55,14 @@ export function loadEnv(): Env {
   if (_env) return _env
   const result = envSchema.safeParse(process.env)
   if (!result.success) {
-    console.error('Invalid environment variables:', result.error.flatten())
+    setLogLevel('error')
+    log('error', 'config.invalid', {
+      message: 'Environment validation failed',
+      meta: { issueCount: result.error.issues.length },
+    })
     process.exit(1)
   }
+  setLogLevel(result.data.LOG_LEVEL)
   if (!result.data.JWT_SECRET) {
     result.data.JWT_SECRET = loadOrCreateJwtSecret(result.data.DATA_DIR)
   }

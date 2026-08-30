@@ -121,6 +121,7 @@ export function authGuard(): MiddlewareHandler {
         return c.json({ error: { code: 'ACCOUNT_DISABLED', message: 'Account is disabled' } }, 403)
       }
       c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
+      c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
       return next()
     }
 
@@ -133,6 +134,7 @@ export function authGuard(): MiddlewareHandler {
       if (user && !user.disabled) {
         c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
         c.set('guest', true)
+        c.set('actorRole', 'guest')
         return next()
       }
     }

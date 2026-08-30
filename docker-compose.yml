@@ -12,6 +12,7 @@ services:
       NODE_ENV: production
       DATA_DIR: /data
       DEFAULT_USERNAME: ${DEFAULT_USERNAME:-admin}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       # Optional: when omitted, a random secret is generated and persisted to /data/.jwt-secret.
       JWT_SECRET: ${JWT_SECRET:-}
     healthcheck:

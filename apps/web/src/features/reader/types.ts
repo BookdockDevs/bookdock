@@ -26,6 +26,16 @@ export interface PopupRect {
   height: number
 }
 
+export interface FootnoteEntry {
+  id: number
+  href: string
+  type: string | null
+  hidden: boolean
+  view: HTMLElement
+  anchorRect?: PopupRect
+  canGoBack: boolean
+}
+
 export interface SelectionInfo {
   cfiRange: string
   text: string
@@ -89,6 +99,8 @@ export interface RendererEvents {
    * text offset overflows the section) — it can never be drawn again.
    */
   annotationOrphaned: (e: { cfiRange: string; type: string }) => void
+  footnoteOpen: (e: FootnoteEntry) => void
+  footnoteClose: () => void
 }
 
 export interface TocItem {
@@ -121,6 +133,8 @@ export interface BookReader {
    *  turn a page or toggle the header. Push/pop in pairs. */
   pushPopupGuard(): void
   popPopupGuard(): void
+  closeFootnote(): void
+  backFootnote(): void
   applyMarginals(config: MarginalConfig): void
   /** Per-chapter word counts, indexed by chapter (for the chapterWordCount field) */
   setChapterWordCounts(counts: (number | undefined)[]): void

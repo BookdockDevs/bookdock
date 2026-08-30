@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { errorHandler } from './middleware/error'
+import { requestContext } from './middleware/request-context'
 import { authGuard } from './middleware/auth.guard'
 import { registerParser } from './formats/registry'
 import { EpubParser } from './formats/epub'
@@ -30,6 +31,7 @@ const app = new Hono()
 
 app.onError(errorHandler)
 
+app.use('/api/v1/*', requestContext())
 app.get('/api/v1/health', (c) => c.json({ data: { ok: true } }))
 
 app.use('/api/v1/*', authGuard())
