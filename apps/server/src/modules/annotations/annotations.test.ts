@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
-import { createAnnotation, listAnnotations, deleteAnnotation } from './annotations.service'
+import { createAnnotation, deleteAnnotation, listAnnotations, searchAnnotations } from './annotations.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -135,5 +135,34 @@ describe('annotations service', () => {
     expect(restored.id).toBe(first.id)
     expect(restored.text).toBe('restored text')
     expect(restored.deletedAt).toBeNull()
+  })
+
+  it('searches active annotations for the owner without treating query characters as wildcards', async () => {
+    const match = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/2)',
+      type: 'note',
+      text: '命中的正文 %',
+      note: '关于线索的想法',
+      chapter: '第一章',
+    })
+    await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/4)',
+      type: 'highlight',
+      text: '另一个正文',
+      chapter: '第二章',
+    })
+    await deleteAnnotation(ownerId, match.id)
+    await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/6)',
+      type: 'note',
+      text: '保留的正文 %',
+      note: '只匹配字面量百分号',
+      chapter: '第一章',
+    })
+
+    const notes = await searchAnnotations(ownerId, bookId, '%')
+    expect(notes).toHaveLength(1)
+    expect(notes[0]?.text).toBe('保留的正文 %')
+    expect(await searchAnnotations(otherId, bookId, '正文')).toEqual([])
   })
 })

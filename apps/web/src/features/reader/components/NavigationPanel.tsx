@@ -13,6 +13,7 @@ import { clearSearchHistory, loadSearchHistory, pushSearchTerm, saveSearchHistor
 import { NotesFilterPanel } from './NotesFilterPanel'
 import { NotesPanel } from './NotesPanel'
 import StatsPanel from './StatsPanel'
+import AiPanel from './AiPanel'
 
 export interface NavigationPanelRef {
   saveScroll: () => void
@@ -529,16 +530,17 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
 
   return (
     <div className="flex h-full flex-col">
-      <div
-        className="sticky top-0 z-10 flex h-12 items-center border-b border-[var(--bd-read-accent)] px-4"
-        style={{ backgroundColor: 'var(--bd-read-bg)' }}
-      >
-        <span className="text-sm font-medium text-current">
-          {tab === 'toc' && _('reader.toc')}
-          {tab === 'notes' && _('reader.notes')}
-          {tab === 'stats' && _('reader.stats')}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
+      {tab !== 'ai' && (
+        <div
+          className="sticky top-0 z-10 flex h-12 items-center border-b border-[var(--bd-read-accent)] px-4"
+          style={{ backgroundColor: 'var(--bd-read-bg)' }}
+        >
+          <span className="text-sm font-medium text-current">
+            {tab === 'toc' && _('reader.toc')}
+            {tab === 'notes' && _('reader.notes')}
+            {tab === 'stats' && _('reader.stats')}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
           {showLocate && (
             <button
               onClick={scrollToCurrentChapter}
@@ -623,8 +625,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           {tab === 'toc' && (
             <span className="text-xs text-[var(--bd-read-sub)]">{`${tree.length} ${_('reader.chapters')}`}</span>
           )}
+          </div>
         </div>
-      </div>
+      )}
       {tab === 'toc' && (
         <div className="px-4">
           <ExpandingSearchBar
@@ -714,7 +717,11 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           />
         </div>
       )}
-      <div ref={listRef} onScroll={handleScroll} className="flex-1 overflow-y-auto pl-2 pr-4 py-4 text-sm">
+      <div
+        ref={listRef}
+        onScroll={handleScroll}
+        className={cn('flex-1 overflow-y-auto', tab === 'ai' ? 'px-0 py-0' : 'pl-2 pr-4 py-4 text-sm')}
+      >
         {tab === 'toc' && (searchActive ? (
           <div className="space-y-3">
             {searchResults.length > 0 && (
@@ -772,6 +779,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           />
         )}
         {tab === 'stats' && !statsDisabled && <StatsPanel bookId={bookId} />}
+        {tab === 'ai' && <AiPanel bookId={bookId} />}
       </div>
       {searchActive && searchResults.length > 0 && (
         <div

@@ -298,6 +298,50 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
   }
 }
 
+const READING_BLOCK_TAGS = new Set(['p', 'div', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre'])
+
+function collectReadingText(node: XmlElement): string {
+  let text = ''
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === 3) {
+      text += child.nodeValue ?? ''
+      continue
+    }
+    if (child.nodeType !== 1) continue
+    const element = child as XmlElement
+    const tag = element.tagName.toLowerCase()
+    if (tag === 'br') {
+      text += '\n'
+      continue
+    }
+    text += collectReadingText(element)
+    if (READING_BLOCK_TAGS.has(tag)) text += '\n\n'
+  }
+  return text
+}
+
+function normalizeReadingText(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/** Extract one chapter in reading order for server-side AI tools. */
+export async function extractEpubChapterText(buffer: Buffer, chapterIndex: number): Promise<string> {
+  const parsed = await parseEpubBuffer(buffer)
+  const chapter = parsed.chapters[chapterIndex]
+  if (!chapter) return ''
+  const zip = await JSZip.loadAsync(buffer)
+  const file = zip.file(chapter.content)
+  if (!file) return ''
+  const doc = new DOMParser().parseFromString(await file.async('text'), 'application/xml')
+  const body = firstElement(doc.getElementsByTagName('body')) ?? doc.documentElement
+  return body ? normalizeReadingText(collectReadingText(body)) : ''
+}
+
 export class EpubParser implements FormatParser {
   match(fileName: string, mime: string): boolean {
     return fileName.endsWith('.epub') || mime === 'application/epub+zip'

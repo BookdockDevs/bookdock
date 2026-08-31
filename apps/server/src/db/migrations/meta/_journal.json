@@ -190,6 +190,48 @@
       "when": 1791500000000,
       "tag": "0026_tts_services_compat",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791600000000,
+      "tag": "0027_ai_threads_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791700000000,
+      "tag": "0028_ai_lexical_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791800000000,
+      "tag": "0029_ai_embeddings",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791900000000,
+      "tag": "0030_ai_message_citations",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792000000000,
+      "tag": "0031_ai_index_progress",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792100000000,
+      "tag": "0032_ai_embedding_provider",
+      "breakpoints": true
     }
   ]
 }

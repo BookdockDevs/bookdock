@@ -1,6 +1,6 @@
 # Bookdock Architecture
 
-> Last updated: 2026-08-02 · This document is the authoritative architecture blueprint; the code follows it. When an architectural decision changes, update this document first, then change the code.
+> Last updated: 2026-08-30 · This document is the authoritative architecture blueprint; the code follows it. When an architectural decision changes, update this document first, then change the code.
 
 ---
 
@@ -93,6 +93,7 @@ apps/server/src/
     avatars/                # user avatar upload/delete + immutable content-hash file serving
     fonts/                  # custom font upload/list/delete/scope + immutable file serving
     reading-records.routes.ts # duration upsert + aggregation
+    ai/                   # Chat LLM gateway, user configuration, reader context, and bounded read-only tools
     tts/                  # user-owned AI voice services and server-side speech gateways
   middleware/
     error.ts               # AppError + errorHandler (ErrorCode → HTTP status)
@@ -167,7 +168,7 @@ Registered in `app.ts` (EpubParser + TxtParser). Adding PDF/MOBI/CBZ means only 
 
 SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instance seeds one "default user" row. Future multi-user/permissions/sharing only adds tables + policy logic, never touching existing columns.
 
-**Current tables** (12):
+**Current tables** (20):
 
 | Table | Key columns | Notes |
 |---|---|---|
@@ -176,13 +177,19 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | `shelves` | id, userId FK, name, sortOrder, createdAt | deleting a shelf sets its books' shelfId to NULL (books become 未分类, never deleted) |
 | `tags` | id, userId FK, name | |
 | `book_tags` | bookId FK (cascade), tagId FK (cascade) | composite PK, M2M |
-| `settings` | id, userId FK, key, value (json) | unique (userId, key); keys: `ui` (reader/UI prefs), `trash` (`{ autoCleanDays }`) |
-| `instance_settings` | key (text PK), value | no userId (ADR-12) |
+| `settings` | id, userId FK, key, value (json) | unique (userId, key); keys: `ui` (reader/UI prefs), `trash` (`{ autoCleanDays }`), `ai` (encrypted user AI provider configuration) |
+| `instance_settings` | key (text PK), value | no userId (ADR-12); auth policy only |
 | `annotations` | id, userId FK, bookId FK, cfiRange, cfiAnchor?, type, color, style, text, note?, chapter?, createdAt, updatedAt, **deletedAt?** | unique (userId, bookId, cfiRange); soft delete |
 | `reading_records` | id, userId FK, bookId FK (cascade), date (text), durationSeconds | unique (userId, bookId, date); upsert snapshot |
 | `reading_sessions` | id, userId FK, bookId FK (cascade), date (text), startedAt, durationSeconds | per-session detail for hourly distribution |
 | `fonts` | id, userId FK, scope (user\|instance), family, fileName, format, contentHash, size, createdAt | unique (userId, contentHash); file at `fonts/<hash>` in storage, ref-counted delete |
 | `tts_services` | id, userId FK, name, provider, baseUrl?, model?, defaultVoice?, options (json), encryptedSecrets?, createdAt, updatedAt | multiple user-owned AI voice services; credentials are encrypted at rest and never returned; built-in system/Edge engines are not rows; guest accounts cannot configure or use user AI services |
+| `ai_threads` | id, userId FK, bookId FK (cascade), title, createdAt, updatedAt | per-user, per-book persisted AI conversation; title is local metadata and contains no generated provider content |
+| `ai_messages` | id, userId FK, threadId FK (cascade), role, content, context (json)?, citations (json)?, createdAt, aborted | user-visible prompt/answer plus bounded book-source metadata; context stores a minimal receipt and citations store only chapter/offset/excerpt references, never selection text, secrets, system prompt, reasoning, or raw tool payload |
+| `ai_book_indexes` | id, userId FK, bookId FK (cascade), sourceVersion, status, progress, embeddingStatus, embeddingProvider?, embeddingModel?, embeddingDim?, chunkCount, error?, createdAt, updatedAt | one derived lexical-index record per user/book; `progress` is a 0–100 user-visible build progress value, optional semantic state is tracked separately, and stale source/config fingerprints are never treated as ready |
+| `ai_chunks` | id, userId FK, indexId FK (cascade), bookId FK (cascade), chapterIndex, chapterId, chapterTitle, startOffset, endOffset, text, createdAt | reusable bounded book-text units for FTS and later embeddings; source text is not chat history |
+| `ai_chunk_embeddings` | id, userId FK, indexId FK (cascade), chunkId FK (cascade), bookId FK (cascade), model, dimension, vector, createdAt | optional per-index Float32 embedding blobs; the parent index stores the provider/model/dimension fingerprint, and all three must match before semantic results are used |
+| `ai_chunks_fts` | chunkId, userId, bookId, chapterIndex, chapterTitle, text | SQLite FTS5 derived index; synchronized by `ai_chunks` triggers and never used without ownership filters |
 
 `meta` is a JSON column for "may grow" metadata; frequently-queried stable fields are promoted to dedicated columns.
 
@@ -199,7 +206,7 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 - **Auth**: JWT (jose, HS256, 7d) delivered via HttpOnly Cookie `bd_token` (SameSite=Strict, Path=/); Bearer header also accepted (web client transition). CSRF: cookie is same-site only + API is JSON-only.
 - **Guard**: verify → load **fresh user** from DB (30s short-TTL cache, invalidated on writes) → disabled → `ACCOUNT_DISABLED` (403); injected role is authoritative from DB. No token → inject default guest if `allowGuestAccess`, else 401.
 - **Roles**: `owner` (instance admin), `member` (registered), `guest` (anonymous → default user). First boot must create owner via `/setup` (web guard redirects when `initialized=false`).
-- **Instance settings**: `allowRegistration` / `allowGuestAccess` (default false), owner-edited via `PATCH /api/v1/auth/instance`, 5s module-level read cache. `AUTH_MODE` env removed.
+- **Instance settings**: `allowRegistration` / `allowGuestAccess` (default false), owner-edited via `PATCH /api/v1/auth/instance`, 5s module-level read cache. AI configuration is user-owned and edited from the reading settings; the `settings.ai` value stores up to 12 named provider profiles, the active Chat profile id, an optional independent Embedding profile id, protocol-specific endpoint/model fields, one user-curated `models` catalog per profile, an independently encrypted API key per profile, and bounded user-editable quick prompt templates. Model discovery is a server-side draft operation: the provider response is a candidate list only, and the browser persists only models explicitly added by the user. The active Chat model must come from that added catalog; model selectors never fetch or expose the provider's full catalog. Chat and Embedding share the same added model catalog; embedding-capable entries are identified by explicit provider metadata when available and otherwise by the shared conservative model classifier (for example, `embedding`/`embed` model ids), and the retrieval gateway selects the configured/first matching added entry without a second model field in the settings UI. Provider capability metadata is preserved when returned by a provider, while inferred capabilities are treated as hints and unknown capabilities are not presented as unsupported. Existing legacy embedding fields remain readable for migration compatibility but are no longer written by the web settings form. Prompt templates are presentation-level input presets only: they cannot change the system policy, tool allowlist, reading boundary, or provider request settings. The provider catalog includes OpenAI-compatible, Anthropic, Gemini, and Ollama protocol adapters plus presets for common compatible providers. The catalog also declares whether a provider requires an API key, so local providers and hosted providers share one contract without duplicating auth rules in the UI. Connection tests remain server-side draft operations, so provider keys never enter the browser's persistent state. Members may use only the catalog default endpoint for their selected provider; custom endpoints remain Owner-controlled to prevent the AI gateway from becoming an open proxy. Chat requests are limited to one active request per user and a configurable `AI_RPM` sliding window (default 6); both protections are enforced before provider calls. Environment variables remain optional headless defaults. `AUTH_MODE` env removed.
 - **Unified responses**: success `{ data: T }`; failure `{ error: { code, message } }` (see §2.1 in shared).
 - **Request diagnostics**: `request-context` runs before `authGuard` on `/api/v1/*`, accepts a validated `X-Request-ID` or generates `req_<nanoid>`, echoes it on every API response, and writes one `http.request.completed` JSON record per non-successful-health request. `errorHandler` writes the single `app.unhandled_error` record for unexpected exceptions; logs never include query strings, bodies, credentials, usernames, or book content.
 
@@ -217,10 +224,13 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | `/api/v1/annotations` | annotations | `GET /`(?bookId=) `POST /` `PUT /:id` `DELETE /:id` |
 | `/api/v1/progress` | reading | `GET /:bookId` `PUT /:bookId` |
 
-**Progress storage**: per-book JSON file `progress/{bookId}.json`, shape `{ cfi?, chapter?, percent, fraction?, intervals?, updatedAt }`. `fraction` is the foliate book-wide position (0–1); `intervals` is the merged union of `[start, end]` fraction ranges the user has actually read — the web reader closes the current segment when a relocate jump exceeds `JUMP_THRESHOLD` (0.02) and reports `segmentStartFraction` on PUT. GET additionally returns `readFraction` (total union length, computed server-side). Legacy files without `intervals` are initialized to `[0, current fraction]` on the first new-format save.
+**Progress storage**: per-book JSON file `progress/{bookId}.json`, shape `{ cfi?, chapter?, chapterIndex?, percent, fraction?, intervals?, updatedAt }`. `chapterIndex` is the zero-based chapter position from the current book TOC and is persisted for server-side consumers such as AI spoiler bounds; old files may omit it until the next reader save. `fraction` is the foliate book-wide position (0–1); `intervals` is the merged union of `[start, end]` fraction ranges the user has actually read — the web reader closes the current segment when a relocate jump exceeds `JUMP_THRESHOLD` (0.02) and reports `segmentStartFraction` on PUT. GET additionally returns `readFraction` (total union length, computed server-side). Legacy files without `intervals` are initialized to `[0, current fraction]` on the first new-format save.
 | `/api/v1/settings` | settings | `GET /` `PUT /` |
 | `/api/v1/tts` | tts | `GET /providers` `GET/POST /services` `POST /services/test` `GET/PUT/DELETE /services/:id` `GET /services/:id/voices` `POST /services/:id/test` `POST /speech` (server-side provider gateways) |
+| `/api/v1/ai` | ai | `GET /providers` `GET /status` `GET/PATCH /config`(active Chat/Embedding profiles and prompt templates) `POST/PATCH/DELETE /profiles` `POST /models` `POST /test` `GET/POST /threads` `GET/PATCH/DELETE /threads/:id` `GET /retrieval/status` `POST /retrieval/index` `POST /retrieval/index/cancel` `DELETE /retrieval/index` `POST /retrieval/search` `POST /chat` (server-side multi-provider Chat LLM gateway; provider metadata includes key requirements; status exposes only the active profile's non-sensitive model options and enabled quick prompts for the reader picker; model discovery/test are non-persistent draft operations; existing-profile drafts identify their profile so saved secrets are never borrowed by new profiles; retrieval status exposes user-visible lexical/embedding progress and the embedding provider/model fingerprint, and its derived index can be cancelled, rolled back, cleared, and rebuilt on demand; chat may use an allowlisted, bounded read-only tool set for the owned book, including bounded notes search, and persists user-visible messages by thread) |
 | `/api/v1/reading-records` | reading | `POST /` `GET /summary` `GET /daily` `GET /by-book` `GET /hourly`(?from&to&tzOffset&bookId?) `GET /book/:bookId` |
+
+AI retrieval indexes are derived per user and per book. A reader-triggered index request may carry bounded chapter text produced by the reader's visible transformation pipeline, together with its transformation fingerprint; the server keeps ownership and chapter metadata authoritative while using the supplied text for chunk offsets. Reader chat carries the same opaque transformation fingerprint through its context, so `search_book` and `get_chapter_content` must use an exact matching visible index and must not silently fall back to source text; an unbuilt visible index returns an explicit unavailable result for the model to explain. Semantic query embedding has a short bounded timeout and falls back to lexical retrieval, while an explicit user/request abort still cancels the whole operation. Server-only callers may use the source-book fallback, which is intentionally not represented as transformed visible text.
 
 ---
 
@@ -285,6 +295,8 @@ Single `config.ts`, zod-validated then `Object.freeze`:
 | `DEFAULT_USERNAME` | `admin` | default owner username |
 | `LOG_LEVEL` | `info` | minimum structured log level; all output is one JSON object per line |
 | `UPLOAD_MAX_BYTES` | `104857600` | max upload (100MB) |
+| `AI_RPM` | `6` | per-user sliding-window chat request limit; active-request concurrency remains 1 |
+| `AI_TIMEOUT_MS` | `60000` | maximum wall-clock time for one provider chat/embedding operation |
 
 Prod exposes only the port + `DATA_DIR` volume. Backup = tarball `DATA_DIR`.
 
@@ -333,3 +345,7 @@ Each ADR is a short standalone file. They live in `docs/local/adr/` (private wor
 | ADR-13 | fonts table two-scope ownership (user/instance) | `docs/local/adr/0013-fonts-two-scope.md` |
 | ADR-14 | TTS visible-DOM segments and user-owned online configuration | `docs/local/adr/0014-tts-visible-dom-user-config.md` |
 | ADR-15 | unified reader TTS engines and multiple user AI services | `docs/local/adr/0015-tts-unified-engines-multi-services.md` |
+| ADR-16 | AI lexical index and bounded book retrieval | `docs/local/adr/0017-ai-lexical-index.md` |
+| ADR-17 | optional AI embeddings and portable hybrid retrieval | `docs/local/adr/0018-ai-optional-embedding-vectors.md` |
+| ADR-18 | persisted AI citations and source navigation | `docs/local/adr/0019-ai-citations-source-navigation.md` |
+| ADR-19 | bounded AI search over user-owned book annotations | `docs/local/adr/0020-ai-annotation-search.md` |

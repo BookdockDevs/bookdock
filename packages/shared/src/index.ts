@@ -1,5 +1,5 @@
 export type { BookFormat, SortField, ReadStatus } from './constants'
-export { BOOK_FORMATS, READ_STATUSES, PAGINATION, SORT_FIELDS } from './constants'
+export { AI_MAX_INDEX_CORPUS_CHARS, BOOK_FORMATS, READ_STATUSES, PAGINATION, SORT_FIELDS } from './constants'
 
 export type {
   User,
@@ -52,6 +52,43 @@ export type {
   TtsServiceUpdateReq,
   TtsVoiceRes,
   TtsSpeechReq,
+  AiContextReq,
+  AiHistoryMessage,
+  AiChatReq,
+  AiCitation,
+  AiMessageRes,
+  AiThreadRes,
+  AiThreadDetailRes,
+  AiThreadCreateReq,
+  AiThreadUpdateReq,
+  AiThreadListReq,
+  AiIndexStatus,
+  AiEmbeddingStatus,
+  AiIndexChapter,
+  AiIndexReq,
+  AiIndexRes,
+  AiSearchReq,
+  AiSearchResultRes,
+  AiSearchRes,
+  AiStatusRes,
+  AiConfigRes,
+  AiConfigUpdateReq,
+  AiContextReceipt,
+  AiProvider,
+  AiProviderRes,
+  AiProtocol,
+  AiModelCapabilities,
+  AiModelRes,
+  AiModelKind,
+  AiPromptScope,
+  AiPromptTemplate,
+  AiPromptTemplateInput,
+  AiModelDiscoveryReq,
+  AiConfigTestReq,
+  AiConnectionTestRes,
+  AiProfileRes,
+  AiProfileCreateReq,
+  AiProfileUpdateReq,
   FontScope,
   FontListItem,
   ShelfListItem,
@@ -115,6 +152,19 @@ export {
   ttsServiceCreateSchema,
   ttsServiceUpdateSchema,
   ttsSpeechSchema,
+  aiProviderSchema,
+  aiChatSchema,
+  aiThreadCreateSchema,
+  aiThreadUpdateSchema,
+  aiThreadListSchema,
+  aiIndexStatusSchema,
+  aiIndexSchema,
+  aiSearchSchema,
+  aiConfigUpdateSchema,
+  aiModelDiscoverySchema,
+  aiConfigTestSchema,
+  aiProfileCreateSchema,
+  aiProfileUpdateSchema,
   annotationCreateSchema,
   annotationUpdateSchema,
   transformCreateSchema,
@@ -143,6 +193,8 @@ export {
 } from './schema'
 
 export { ErrorCode, ErrorHttpStatus } from './errors'
+
+export { getAiModelCapabilityFlags, isAiEmbeddingModel } from './ai-models'
 
 export {
   applyRuleToText,

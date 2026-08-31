@@ -32,14 +32,13 @@ type ProviderConfig = {
 type AudioResult = { audio: Buffer; contentType: string }
 
 const PROVIDERS: readonly TtsProviderRes[] = [
-  { id: 'openai', kind: 'native', defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini-tts' },
+  { id: 'openai', kind: 'openai-compatible', defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: null },
   { id: 'azure', kind: 'native', defaultBaseUrl: null, defaultModel: null },
   { id: 'aliyun', kind: 'native', defaultBaseUrl: 'https://nls-gateway.aliyuncs.com/stream/v1/tts', defaultModel: null },
   { id: 'dashscope', kind: 'native', defaultBaseUrl: 'https://dashscope.aliyuncs.com', defaultModel: 'qwen3-tts-instruct-flash' },
   { id: 'minimax', kind: 'native', defaultBaseUrl: 'https://api.minimaxi.com', defaultModel: 'speech-2.8-turbo' },
   { id: 'mimo', kind: 'native', defaultBaseUrl: 'https://api.xiaomimimo.com/v1', defaultModel: 'mimo-v2.5-tts' },
   { id: 'volcengine', kind: 'native', defaultBaseUrl: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional', defaultModel: 'seed-tts-2.0' },
-  { id: 'openai-compatible', kind: 'openai-compatible', defaultBaseUrl: null, defaultModel: null },
 ]
 
 const PROVIDER_IDS = new Set<TtsProvider>(PROVIDERS.map((provider) => provider.id))
@@ -87,7 +86,8 @@ const ALIYUN_VOICES: TtsVoiceRes[] = [
 ]
 
 function providerCatalog(provider: TtsProvider) {
-  return PROVIDERS.find((item) => item.id === provider)
+  const canonicalProvider = provider === 'openai-compatible' ? 'openai' : provider
+  return PROVIDERS.find((item) => item.id === canonicalProvider)
 }
 
 function encryptionKey() {
@@ -124,7 +124,7 @@ function decryptSecrets(value: string | null): Record<string, string> {
 
 function serviceConfig(row: TtsServiceRow): ProviderConfig {
   return {
-    provider: row.provider,
+    provider: row.provider === 'openai-compatible' ? 'openai' : row.provider,
     baseUrl: row.baseUrl,
     model: row.model,
     defaultVoice: row.defaultVoice,
@@ -137,7 +137,7 @@ function toServiceRes(row: TtsServiceRow): TtsServiceRes {
   return {
     id: row.id,
     name: row.name,
-    provider: row.provider,
+    provider: row.provider === 'openai-compatible' ? 'openai' : row.provider,
     baseUrl: row.baseUrl,
     model: row.model,
     defaultVoice: row.defaultVoice,
@@ -155,7 +155,9 @@ function getServiceRow(userId: string, serviceId: string) {
 }
 
 function validateProvider(provider: TtsProvider) {
-  if (!PROVIDER_IDS.has(provider)) throw new AppError('TTS_PROVIDER_NOT_SUPPORTED', 'TTS provider is not supported')
+  const canonicalProvider = provider === 'openai-compatible' ? 'openai' : provider
+  if (!PROVIDER_IDS.has(canonicalProvider)) throw new AppError('TTS_PROVIDER_NOT_SUPPORTED', 'TTS provider is not supported')
+  return canonicalProvider
 }
 
 function mergeSecrets(existing: Record<string, string>, patch: Record<string, string | null> | undefined) {
@@ -179,11 +181,8 @@ function assertConfigured(provider: TtsProvider, row: { baseUrl: string | null; 
   if (provider === 'azure' && !String(row.options.region ?? '').trim()) {
     throw new AppError('TTS_NOT_CONFIGURED', 'Azure TTS requires a region')
   }
-  if ((provider === 'openai' || provider === 'openai-compatible' || provider === 'dashscope' || provider === 'minimax' || provider === 'mimo') && !row.model) {
+  if ((provider === 'openai' || provider === 'dashscope' || provider === 'minimax' || provider === 'mimo') && !row.model) {
     throw new AppError('TTS_NOT_CONFIGURED', 'TTS service requires a model')
-  }
-  if (provider === 'openai-compatible' && !row.baseUrl) {
-    throw new AppError('TTS_NOT_CONFIGURED', 'OpenAI-compatible TTS requires a base URL')
   }
 }
 
@@ -198,18 +197,18 @@ export function listTtsServices(userId: string, role: string): TtsServiceRes[] {
 
 export function createTtsService(userId: string, role: string, input: TtsServiceCreateReq): TtsServiceRes {
   if (role === 'guest') throw new AppError('TTS_NOT_ALLOWED', 'Guest users cannot configure AI TTS')
-  validateProvider(input.provider)
+  const provider = validateProvider(input.provider)
   const secrets = Object.fromEntries(Object.entries(input.secrets ?? {}).map(([key, value]) => [key, value.trim()]))
-  const baseUrl = input.baseUrl ?? providerCatalog(input.provider)?.defaultBaseUrl ?? null
-  const model = input.model ?? providerCatalog(input.provider)?.defaultModel ?? null
+  const baseUrl = input.baseUrl ?? providerCatalog(provider)?.defaultBaseUrl ?? null
+  const model = input.model ?? providerCatalog(provider)?.defaultModel ?? null
   const options = input.options ?? {}
-  assertConfigured(input.provider, { baseUrl, model, options, secrets })
+  assertConfigured(provider, { baseUrl, model, options, secrets })
   const now = Date.now()
   const row = {
     id: createId('tts'),
     userId,
     name: input.name.trim(),
-    provider: input.provider,
+    provider,
     baseUrl,
     model,
     defaultVoice: input.defaultVoice?.trim() || null,
@@ -230,8 +229,7 @@ export function createTtsService(userId: string, role: string, input: TtsService
 export function updateTtsService(userId: string, role: string, serviceId: string, input: TtsServiceUpdateReq): TtsServiceRes {
   if (role === 'guest') throw new AppError('TTS_NOT_ALLOWED', 'Guest users cannot configure AI TTS')
   const existing = getServiceRow(userId, serviceId)
-  const provider = input.provider ?? existing.provider
-  validateProvider(provider)
+  const provider = validateProvider(input.provider ?? existing.provider)
   const secrets = mergeSecrets(decryptSecrets(existing.encryptedSecrets), input.secrets)
   const next = {
     baseUrl: input.baseUrl === undefined ? existing.baseUrl : input.baseUrl,
@@ -478,7 +476,7 @@ async function synthesizeVolcengine(input: ProviderConfig, speech: TtsSpeechReq,
 
 async function synthesizeProvider(input: ProviderConfig, speech: TtsSpeechReq, signal: AbortSignal): Promise<AudioResult> {
   switch (input.provider) {
-    case 'openai':
+    case 'openai': return synthesizeOpenAi(input, speech, signal)
     case 'openai-compatible': return synthesizeOpenAi(input, speech, signal)
     case 'azure': return synthesizeAzure(input, speech, signal)
     case 'aliyun': return synthesizeAliyun(input, speech, signal)
@@ -543,11 +541,11 @@ export async function testTtsService(userId: string, role: string, serviceId: st
 
 export async function testTtsServiceDraft(role: string, input: TtsServiceCreateReq, signal: AbortSignal) {
   if (role === 'guest') throw new AppError('TTS_NOT_ALLOWED', 'Guest users cannot use AI TTS')
-  validateProvider(input.provider)
+  const provider = validateProvider(input.provider)
   const service: ProviderConfig = {
-    provider: input.provider,
-    baseUrl: input.baseUrl ?? providerCatalog(input.provider)?.defaultBaseUrl ?? null,
-    model: input.model ?? providerCatalog(input.provider)?.defaultModel ?? null,
+    provider,
+    baseUrl: input.baseUrl ?? providerCatalog(provider)?.defaultBaseUrl ?? null,
+    model: input.model ?? providerCatalog(provider)?.defaultModel ?? null,
     defaultVoice: input.defaultVoice?.trim() || null,
     options: input.options ?? {},
     secrets: Object.fromEntries(Object.entries(input.secrets ?? {}).map(([key, value]) => [key, value.trim()])),

@@ -15,6 +15,7 @@ import TransformsSettingsSection from './components/TransformsSettingsSection'
 import TocRulesSettingsSection from './components/TocRulesSettingsSection'
 import AccountSection from './components/AccountSection'
 import TtsSettingsSection from './components/TtsSettingsSection'
+import AiSettingsSection from './components/AiSettingsSection'
 
 type SectionId = 'general' | 'account' | 'reading' | 'library' | 'admin'
 
@@ -89,6 +90,7 @@ export default function Settings() {
             <div className="flex flex-col gap-6">
               <ReadingDataSettingsSection />
               <TtsSettingsSection id="tts-settings" />
+              <AiSettingsSection id="ai-settings" />
               <FontsSettingsSection />
               <TransformsSettingsSection />
               <TocRulesSettingsSection />

@@ -7,6 +7,7 @@ import type { TocRuleRes } from '@bookdock/shared'
 
 import { useDeleteTocRule, useReorderTocRules, useSeedTocRules, useTocRules } from '@/api/hooks/useTocRules'
 import { Button } from '@/components/ui/Button'
+import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useToastStore } from '@/stores/toast.store'
 
@@ -85,17 +86,19 @@ export default function TocRulesSettingsSection() {
       </div>
 
       {rules.length === 0 ? (
-        <div className="flex flex-col items-start gap-2">
-          <p className="text-xs text-stone-400 dark:text-stone-500">{_('settings.tocRulesEmpty')}</p>
-          <Button type="button" variant="secondary" size="sm" onClick={() => {
-            seedRules.mutate(undefined, {
-              onSuccess: () => addToast(_('toast.tocRulesRestored'), 'success'),
-              onError: (err) => addToast(err.message, 'error'),
-            })
-          }}>
-            {_('settings.tocRulesRestore')}
-          </Button>
-        </div>
+        <SettingsEmptyState>
+          <div className="flex flex-col items-center gap-3">
+            <p>{_('settings.tocRulesEmpty')}</p>
+            <Button type="button" variant="secondary" size="sm" onClick={() => {
+              seedRules.mutate(undefined, {
+                onSuccess: () => addToast(_('toast.tocRulesRestored'), 'success'),
+                onError: (err) => addToast(err.message, 'error'),
+              })
+            }}>
+              {_('settings.tocRulesRestore')}
+            </Button>
+          </div>
+        </SettingsEmptyState>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={rules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>

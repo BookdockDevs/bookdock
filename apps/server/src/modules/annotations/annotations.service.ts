@@ -1,4 +1,4 @@
-import { eq, and, isNull } from 'drizzle-orm'
+import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import { annotations, books } from '../../db/schema'
 import { AppError } from '../../middleware/error'
@@ -9,6 +9,26 @@ export async function listAnnotations(userId: string, bookId: string) {
   const db = getDb()
   return db.select().from(annotations)
     .where(and(eq(annotations.userId, userId), eq(annotations.bookId, bookId), isNull(annotations.deletedAt)))
+    .all()
+}
+
+export async function searchAnnotations(userId: string, bookId: string, query: string, limit = 8) {
+  const normalized = query.trim().slice(0, 200)
+  if (!normalized) return []
+  const db = getDb()
+  return db.select().from(annotations)
+    .where(and(
+      eq(annotations.userId, userId),
+      eq(annotations.bookId, bookId),
+      isNull(annotations.deletedAt),
+      sql`(
+        instr(lower(${annotations.text}), lower(${normalized})) > 0
+        OR instr(lower(coalesce(${annotations.note}, '')), lower(${normalized})) > 0
+        OR instr(lower(coalesce(${annotations.chapter}, '')), lower(${normalized})) > 0
+      )`,
+    ))
+    .orderBy(desc(annotations.updatedAt), desc(annotations.id))
+    .limit(Math.min(Math.max(limit, 1), 20))
     .all()
 }
 

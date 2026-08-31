@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
-import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, real, blob, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core'
 
-import type { TocRulePattern } from '@bookdock/shared'
+import type { AiCitation, AiContextReceipt, TocRulePattern } from '@bookdock/shared'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -86,6 +86,83 @@ export const ttsServices = sqliteTable('tts_services', {
 }, (table) => ({
   userNameIdx: uniqueIndex('tts_services_user_name_idx').on(table.userId, table.name),
   userUpdatedIdx: index('tts_services_user_updated_idx').on(table.userId, table.updatedAt),
+}))
+
+export const aiThreads = sqliteTable('ai_threads', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  userBookUpdatedIdx: index('ai_threads_user_book_updated_idx').on(table.userId, table.bookId, table.updatedAt),
+}))
+
+export const aiMessages = sqliteTable('ai_messages', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  threadId: text('thread_id').notNull().references(() => aiThreads.id, { onDelete: 'cascade' }),
+  role: text('role', { enum: ['user', 'assistant'] }).notNull(),
+  content: text('content').notNull(),
+  context: text('context', { mode: 'json' }).$type<AiContextReceipt | null>(),
+  citations: text('citations', { mode: 'json' }).$type<AiCitation[] | null>(),
+  createdAt: integer('created_at').notNull(),
+  aborted: integer('aborted').notNull().default(0),
+}, (table) => ({
+  userThreadCreatedIdx: index('ai_messages_user_thread_created_idx').on(table.userId, table.threadId, table.createdAt),
+}))
+
+export const aiBookIndexes = sqliteTable('ai_book_indexes', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  sourceVersion: text('source_version').notNull(),
+  status: text('status', { enum: ['indexing', 'ready', 'failed'] }).notNull(),
+  embeddingStatus: text('embedding_status', { enum: ['not_indexed', 'indexing', 'ready', 'failed', 'unavailable'] }).notNull().default('unavailable'),
+  embeddingProvider: text('embedding_provider'),
+  embeddingModel: text('embedding_model'),
+  embeddingDim: integer('embedding_dim'),
+  progress: integer('progress').notNull().default(0),
+  chunkCount: integer('chunk_count').notNull().default(0),
+  error: text('error'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  userBookUnique: uniqueIndex('ai_book_indexes_user_book_unique').on(table.userId, table.bookId),
+  userStatusUpdatedIdx: index('ai_book_indexes_user_status_updated_idx').on(table.userId, table.status, table.updatedAt),
+}))
+
+export const aiChunks = sqliteTable('ai_chunks', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  indexId: text('index_id').notNull().references(() => aiBookIndexes.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  chapterIndex: integer('chapter_index').notNull(),
+  chapterId: text('chapter_id').notNull(),
+  chapterTitle: text('chapter_title').notNull(),
+  startOffset: integer('start_offset').notNull(),
+  endOffset: integer('end_offset').notNull(),
+  text: text('text').notNull(),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  userBookChapterIdx: index('ai_chunks_user_book_chapter_idx').on(table.userId, table.bookId, table.chapterIndex, table.startOffset),
+  indexIdIdx: index('ai_chunks_index_id_idx').on(table.indexId),
+}))
+
+export const aiChunkEmbeddings = sqliteTable('ai_chunk_embeddings', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  indexId: text('index_id').notNull().references(() => aiBookIndexes.id, { onDelete: 'cascade' }),
+  chunkId: text('chunk_id').notNull().references(() => aiChunks.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  model: text('model').notNull(),
+  dimension: integer('dimension').notNull(),
+  vector: blob('vector', { mode: 'buffer' }).notNull(),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  indexChunkUnique: uniqueIndex('ai_chunk_embeddings_index_chunk_unique').on(table.indexId, table.chunkId),
+  userBookIdx: index('ai_chunk_embeddings_user_book_idx').on(table.userId, table.bookId, table.indexId),
 }))
 
 export const instanceSettings = sqliteTable('instance_settings', {

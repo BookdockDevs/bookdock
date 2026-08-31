@@ -7,6 +7,8 @@ interface ReaderState {
   currentChapter: string | null
   currentChapterIndex: number | null
   selection: SelectionInfo | null
+  /** Selection handed off to the AI panel; survives closing the native selection bubble. */
+  aiContext: SelectionInfo | null
   sidebarOpen: boolean
   /** Set by "search selection" actions; NavigationPanel consumes and clears it */
   pendingSearchQuery: string | null
@@ -28,6 +30,7 @@ interface ReaderState {
   setCurrentChapter: (chapter: string | null) => void
   setCurrentChapterIndex: (index: number | null) => void
   setSelection: (sel: SelectionInfo | null) => void
+  setAiContext: (context: SelectionInfo | null) => void
   setSidebarOpen: (open: boolean) => void
   setPendingSearchQuery: (query: string | null) => void
   setNoteEditorRange: (range: string | null) => void
@@ -43,6 +46,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   currentChapter: null,
   currentChapterIndex: null,
   selection: null,
+  aiContext: null,
   sidebarOpen: false,
   pendingSearchQuery: null,
   noteEditorRange: null,
@@ -55,6 +59,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   setCurrentChapter: (currentChapter) => set({ currentChapter }),
   setCurrentChapterIndex: (currentChapterIndex) => set({ currentChapterIndex }),
   setSelection: (selection) => set({ selection }),
+  setAiContext: (aiContext) => set({ aiContext }),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
   setNoteEditorRange: (noteEditorRange) => set({ noteEditorRange }),

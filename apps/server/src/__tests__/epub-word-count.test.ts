@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import JSZip from 'jszip'
 
-import { parseEpubBuffer } from '../formats/epub'
+import { extractEpubChapterText, parseEpubBuffer } from '../formats/epub'
 
 async function buildEpubWithNcx(): Promise<Buffer> {
   const zip = new JSZip()
@@ -65,5 +65,13 @@ describe('epub chapter word counts', () => {
     expect(parsed.chapters[1].wordCount).toBe(0)
 
     expect(parsed.chapters[2].wordCount).toBe(4)
+  })
+
+  it('extracts one chapter with paragraph boundaries in the same TOC order', async () => {
+    const buffer = await buildEpubWithNcx()
+
+    expect(await extractEpubChapterText(buffer, 1)).toBe('天地玄黄宇宙洪荒\n\nhello world & foo')
+    expect(await extractEpubChapterText(buffer, 2)).toBe('日月盈昃')
+    expect(await extractEpubChapterText(buffer, 99)).toBe('')
   })
 })

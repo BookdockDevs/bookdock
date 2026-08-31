@@ -14,3 +14,6 @@ export const PAGINATION = {
 
 export const SORT_FIELDS = ['title', 'author', 'createdAt', 'updatedAt', 'lastReadAt', 'size'] as const
 export type SortField = (typeof SORT_FIELDS)[number]
+
+/** Maximum transformed text accepted in one explicit reader corpus snapshot. */
+export const AI_MAX_INDEX_CORPUS_CHARS = 10_000_000

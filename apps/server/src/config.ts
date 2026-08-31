@@ -13,4 +13,11 @@ export const config = Object.freeze({
   avatarMaxBytes: env.AVATAR_UPLOAD_MAX_BYTES,
   storageDriver: env.STORAGE_DRIVER,
   logLevel: env.LOG_LEVEL,
+  aiProvider: env.AI_PROVIDER,
+  aiBaseUrl: env.AI_BASE_URL,
+  aiApiKey: env.AI_API_KEY,
+  aiModel: env.AI_MODEL,
+  aiMaxOutputTokens: env.AI_MAX_OUTPUT_TOKENS,
+  aiRpm: env.AI_RPM,
+  aiTimeoutMs: env.AI_TIMEOUT_MS,
 })

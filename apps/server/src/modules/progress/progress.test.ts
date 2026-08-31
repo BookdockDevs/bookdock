@@ -101,8 +101,9 @@ describe('progress service', () => {
   })
 
   it('should upsert and read progress for the book owner', async () => {
-    const saved = await upsertProgress(ownerId, bookId, { percent: 50 })
+    const saved = await upsertProgress(ownerId, bookId, { percent: 50, chapter: '第一章', chapterIndex: 2 })
     expect(saved.percent).toBe(50)
+    expect(saved.chapterIndex).toBe(2)
 
     const book = db.select().from(schema.books).where(eq(schema.books.id, bookId)).get()
     expect(book!.progress).toBe(50)
@@ -112,6 +113,7 @@ describe('progress service', () => {
 
     const loaded = await getProgress(ownerId, bookId)
     expect(loaded!.percent).toBe(50)
+    expect(loaded!.chapterIndex).toBe(2)
   })
 
   it('should return null when the owner has no progress yet', async () => {

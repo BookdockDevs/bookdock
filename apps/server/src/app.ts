@@ -24,6 +24,7 @@ import fontsRoutes from './modules/fonts/fonts.routes'
 import transformRoutes from './modules/transforms/transforms.routes'
 import tocRuleRoutes from './modules/toc-rules/toc-rules.routes'
 import ttsRoutes from './modules/tts/tts.routes'
+import aiRoutes from './modules/ai/ai.routes'
 
 registerParser(new EpubParser())
 registerParser(new TxtParser())
@@ -51,6 +52,7 @@ app.route('/api/v1/fonts', fontsRoutes)
 app.route('/api/v1/transforms', transformRoutes)
 app.route('/api/v1/toc-rules', tocRuleRoutes)
 app.route('/api/v1/tts', ttsRoutes)
+app.route('/api/v1/ai', aiRoutes)
 
 // Serve the built web client (apps/web/dist) in production. Skipped in dev,
 // where the dist directory may not exist and Vite serves the client instead.

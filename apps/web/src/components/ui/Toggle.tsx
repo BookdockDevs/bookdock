@@ -2,6 +2,7 @@ import { cn } from '@/lib/utils'
 
 interface ToggleProps {
   checked: boolean
+  disabled?: boolean
   onChange: (checked: boolean) => void
   /** Accessible name; falls back to the visible label */
   ariaLabel?: string
@@ -9,15 +10,16 @@ interface ToggleProps {
   label?: string
 }
 
-export default function Toggle({ checked, onChange, ariaLabel, label }: ToggleProps) {
+export default function Toggle({ checked, disabled, onChange, ariaLabel, label }: ToggleProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={ariaLabel ?? label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={cn(label != null && 'flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300')}
+      className={cn('disabled:cursor-not-allowed disabled:opacity-50', label != null && 'flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300')}
     >
       {/* block + shrink-0 + explicit left anchor on the knob: as a flex item the
           track would otherwise collapse or the knob would drift in tight rows */}

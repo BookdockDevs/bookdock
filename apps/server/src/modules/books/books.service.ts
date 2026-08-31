@@ -6,6 +6,7 @@ import { getDb } from '../../db/client'
 import { books, annotations, bookTags, shelves, tags, settings, users as usersTable, tocRules } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
+import { extractEpubChapterText } from '../../formats/epub'
 import { scanTxtChapters, normalizeText, decodeTextBuffer } from '../../formats/txt'
 import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
@@ -671,6 +672,26 @@ export async function getBookContent(userId: string, bookId: string): Promise<st
     return (await bufferFromStream(stream)).toString('utf-8')
   }
   return regenerateTxtBookContent(userId, bookId)
+}
+
+export async function getBookChapterContent(userId: string, bookId: string, chapterIndex: number) {
+  const book = await getActiveBook(userId, bookId)
+  const chapters = await getBookChapters(userId, bookId)
+  const chapter = chapters[chapterIndex]
+  if (!chapter) throw new AppError('VALIDATION_ERROR', 'Chapter index is out of range')
+
+  const content = book.format === 'txt'
+    ? (await getBookContent(userId, bookId)).slice(chapter.contentStartOffset ?? chapter.startOffset, chapter.endOffset).trim()
+    : await extractEpubChapterText(await getBookEpubBuffer(userId, bookId), chapterIndex)
+
+  return {
+    id: chapter.id,
+    index: chapterIndex,
+    title: chapter.title,
+    level: chapter.level,
+    wordCount: chapter.wordCount,
+    content,
+  }
 }
 
 export async function getBookEpubBuffer(userId: string, bookId: string): Promise<Buffer> {

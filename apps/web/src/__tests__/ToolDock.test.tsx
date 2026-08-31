@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { ToolDock } from '../features/reader/components/ToolDock'
 
 describe('ToolDock', () => {
-  it('renders two nav tabs plus the lock button', () => {
+  it('renders the navigation tabs plus the lock button', () => {
     const onNavTab = vi.fn()
     const onToggleLock = vi.fn()
 
@@ -13,6 +13,7 @@ describe('ToolDock', () => {
 
     expect(screen.getByTitle('目录')).toBeInTheDocument()
     expect(screen.getByTitle('笔记')).toBeInTheDocument()
+    expect(screen.getByTitle('AI 助手')).toBeInTheDocument()
     expect(screen.getByTitle('锁定工具栏')).toBeInTheDocument()
     expect(screen.queryByTitle('搜索')).toBeNull()
     expect(screen.queryByTitle('书签')).toBeNull()

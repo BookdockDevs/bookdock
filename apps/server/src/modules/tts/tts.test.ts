@@ -59,6 +59,17 @@ describe('tts routes', () => {
     guest = seedUser('guest', 'guest')
   })
 
+  it('lists one merged OpenAI-compatible provider without a default model', async () => {
+    const response = await createApp(owner).request('http://test/api/v1/tts/providers')
+
+    expect(response.status).toBe(200)
+    const body = await response.json() as { data: Array<Record<string, unknown>> }
+    expect(body.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'openai', kind: 'openai-compatible', defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: null }),
+    ]))
+    expect(body.data).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'openai-compatible' })]))
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -81,11 +92,13 @@ describe('tts routes', () => {
     const list = await app.request('http://test/api/v1/tts/services')
     const body = await list.json() as { data: Array<Record<string, unknown>> }
     expect(body.data).toHaveLength(2)
+    expect(body.data.find((service) => service.name === '兼容网关')?.provider).toBe('openai')
     expect(body.data[0]).not.toHaveProperty('secrets')
     expect(body.data[0]).toHaveProperty('credentialsConfigured', true)
 
     const stored = db.select().from(schema.ttsServices).all()
     expect(stored).toHaveLength(2)
+    expect(stored.find((service) => service.name === '兼容网关')?.provider).toBe('openai')
     expect(stored.every((row) => row.encryptedSecrets && !row.encryptedSecrets.includes('secret'))).toBe(true)
     const memberList = await createApp(member).request('http://test/api/v1/tts/services')
     expect((await memberList.json() as { data: unknown[] }).data).toEqual([])

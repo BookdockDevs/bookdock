@@ -82,6 +82,7 @@ export default function Reader() {
     footerVisibleRef.current = footerVisible
   }, [footerVisible])
   const setSelection = useReaderState((s) => s.setSelection)
+  const setAiContext = useReaderState((s) => s.setAiContext)
   const replaceTarget = useReaderState((s) => s.replaceTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const setTocItems = useReaderState((s) => s.setTocItems)
@@ -343,6 +344,7 @@ export default function Reader() {
                 ...old.data,
                 cfi: body.cfi ?? old.data.cfi,
                 chapter: body.chapter ?? old.data.chapter,
+                chapterIndex: body.chapterIndex ?? old.data.chapterIndex,
                 percent: body.percent,
                 fraction: body.fraction ?? old.data.fraction,
               },
@@ -562,7 +564,7 @@ export default function Reader() {
         ? { fraction: e.fraction, at: now }
         : undefined
       if (sample) lastSampleAtRef.current = now
-      scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, percent: e.percent, fraction: e.fraction, segmentStartFraction, sample })
+      scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, segmentStartFraction, sample })
     },
     onSelected: (e) => {
       if (e) setChromePinned(false)
@@ -682,6 +684,7 @@ export default function Reader() {
   useEffect(() => {
     setCurrentChapter(null)
     setCurrentChapterIndex(null)
+    setAiContext(null)
     // chapterCount starts empty; the effect below syncs it when chapters arrive
     segmentTrackerRef.current = createSegmentTracker()
     lastSegmentStartRef.current = null
@@ -690,7 +693,7 @@ export default function Reader() {
     syncHistoryCaps()
     historyAutoHideRef.current?.dispose()
     currentCfiRef.current = null
-  }, [id, setCurrentChapter, setCurrentChapterIndex, syncHistoryCaps])
+  }, [id, setAiContext, setCurrentChapter, setCurrentChapterIndex, syncHistoryCaps])
 
   // The displacement threshold scales with the chapter count (big books cap it
   // at two chapter widths); update it once the chapters arrive

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { PAGINATION } from './constants'
+import { AI_MAX_INDEX_CORPUS_CHARS, PAGINATION } from './constants'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
 
@@ -22,6 +22,7 @@ export const paginationSchema = z.object({
 export const readingProgressUpdateSchema = z.object({
   cfi: z.string().optional(),
   chapter: z.string().optional(),
+  chapterIndex: z.number().int().min(-1).max(1_000_000).optional(),
   percent: z.number().min(0).max(100),
   fraction: z.number().min(0).max(1).optional(),
   segmentStartFraction: z.number().min(0).max(1).optional(),
@@ -196,6 +197,185 @@ export const ttsSpeechSchema = z.object({
   voice: z.string().max(200).optional(),
   rate: z.number().min(0.25).max(4).optional(),
 })
+
+const aiContextSchema = z.object({
+  chapterIndex: z.number().int().min(-1).max(1_000_000),
+  chapterTitle: z.string().max(500).optional(),
+  cfiRange: z.string().trim().min(1).max(2000),
+  selection: z.string().trim().max(6000),
+  before: z.string().max(2000).optional(),
+  visibleTextVersion: z.string().trim().min(1).max(200).optional(),
+}).strict()
+
+const aiHistoryMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string().trim().min(1).max(8000),
+}).strict()
+
+export const aiChatSchema = z.object({
+  bookId: z.string().trim().min(1).max(200),
+  threadId: z.string().trim().min(1).max(100).optional(),
+  regenerate: z.boolean().optional(),
+  prompt: z.string().trim().min(1).max(4000),
+  context: aiContextSchema,
+  history: z.array(aiHistoryMessageSchema).max(12).optional(),
+}).strict()
+
+const aiThreadTitleSchema = z.string().trim().min(1).max(100)
+
+export const aiThreadCreateSchema = z.object({
+  bookId: z.string().trim().min(1).max(200),
+  title: aiThreadTitleSchema.optional(),
+}).strict()
+
+export const aiThreadUpdateSchema = z.object({
+  title: aiThreadTitleSchema,
+}).strict()
+
+export const aiThreadListSchema = z.object({
+  bookId: z.string().trim().min(1).max(200),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+}).strict()
+
+export const aiIndexStatusSchema = z.object({
+  bookId: z.string().trim().min(1).max(200),
+}).strict()
+
+export const aiIndexSchema = z.object({
+  bookId: z.string().trim().min(1).max(200),
+  force: z.boolean().optional(),
+  visibleTextVersion: z.string().trim().min(1).max(200).optional(),
+  chapters: z.array(z.object({
+    chapterIndex: z.number().int().min(0).max(1_000_000),
+    text: z.string().max(1_000_000),
+  }).strict()).max(10_000).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.chapters && !value.visibleTextVersion) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['visibleTextVersion'], message: 'visibleTextVersion is required with chapters' })
+  }
+  if (value.visibleTextVersion && !value.chapters) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['chapters'], message: 'chapters are required with visibleTextVersion' })
+  }
+  if (value.chapters) {
+    const totalChars = value.chapters.reduce((total, chapter) => total + chapter.text.length, 0)
+    if (totalChars > AI_MAX_INDEX_CORPUS_CHARS) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['chapters'], message: 'transformed corpus is too large' })
+    }
+    const indexes = new Set<number>()
+    for (const chapter of value.chapters) {
+      if (indexes.has(chapter.chapterIndex)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ['chapters'], message: 'chapter indexes must be unique' })
+        break
+      }
+      indexes.add(chapter.chapterIndex)
+    }
+  }
+})
+
+export const aiSearchSchema = z.object({
+  bookId: z.string().trim().min(1).max(200),
+  query: z.string().trim().min(1).max(500),
+  limit: z.coerce.number().int().min(1).max(10).default(5),
+  maxChapterIndex: z.coerce.number().int().min(-1).max(1_000_000).optional(),
+}).strict()
+
+const aiBaseUrlSchema = z.string().trim().min(1).max(2048).url().refine((value) => /^https?:\/\//i.test(value), 'Only HTTP(S) URLs are supported')
+
+const aiModelCapabilitiesSchema = z.object({
+  vision: z.boolean().optional(),
+  tools: z.boolean().optional(),
+  reasoning: z.boolean().optional(),
+  embedding: z.boolean().optional(),
+}).strict()
+
+const aiModelSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
+  ownedBy: z.string().trim().max(200).optional(),
+  capabilities: aiModelCapabilitiesSchema.optional(),
+}).strict()
+
+const aiModelKindSchema = z.enum(['chat', 'embedding'])
+
+const aiPromptTemplateSchema = z.object({
+  id: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(80),
+  prompt: z.string().trim().min(1).max(2_000),
+  scope: z.enum(['selection', 'reading', 'both']),
+  enabled: z.boolean().optional().default(true),
+  order: z.number().int().min(0).max(10_000).optional().default(0),
+}).strict()
+
+export const aiProviderSchema = z.enum([
+  'openai',
+  'anthropic',
+  'gemini',
+  'ollama',
+  'lmstudio',
+  'deepseek',
+  'qwen',
+  'glm',
+  'moonshot',
+  'openrouter',
+  'siliconflow',
+  'minimax',
+  'mimo',
+  'custom',
+])
+
+export const aiConfigUpdateSchema = z.object({
+  activeProfileId: z.string().trim().max(100).nullable().optional(),
+  profileId: z.string().trim().max(100).nullable().optional(),
+  name: z.string().trim().max(100).optional(),
+  provider: aiProviderSchema.optional(),
+  baseUrl: aiBaseUrlSchema.nullable().optional(),
+  model: z.string().trim().min(1).max(200).nullable().optional(),
+  models: z.array(aiModelSchema).max(200).optional(),
+  embeddingProfileId: z.string().trim().max(100).nullable().optional(),
+  embeddingModel: z.string().trim().min(1).max(200).nullable().optional(),
+  embeddingModels: z.array(aiModelSchema).max(200).optional(),
+  prompts: z.array(aiPromptTemplateSchema).max(24).nullable().optional(),
+  apiKey: z.string().max(4096).nullable().optional(),
+}).strict()
+
+export const aiProfileCreateSchema = z.object({
+  name: z.string().trim().max(100),
+  provider: aiProviderSchema,
+  baseUrl: aiBaseUrlSchema.nullable().optional(),
+  model: z.string().trim().max(200).nullable().optional(),
+  models: z.array(aiModelSchema).max(200).optional(),
+  embeddingModel: z.string().trim().max(200).nullable().optional(),
+  embeddingModels: z.array(aiModelSchema).max(200).optional(),
+  apiKey: z.string().max(4096).nullable().optional(),
+}).strict()
+
+export const aiProfileUpdateSchema = z.object({
+  name: z.string().trim().max(100).optional(),
+  provider: aiProviderSchema.optional(),
+  baseUrl: aiBaseUrlSchema.nullable().optional(),
+  model: z.string().trim().max(200).nullable().optional(),
+  models: z.array(aiModelSchema).max(200).optional(),
+  embeddingModel: z.string().trim().max(200).nullable().optional(),
+  embeddingModels: z.array(aiModelSchema).max(200).optional(),
+  apiKey: z.string().max(4096).nullable().optional(),
+}).strict()
+
+export const aiModelDiscoverySchema = z.object({
+  profileId: z.string().trim().max(100).nullable().optional(),
+  provider: aiProviderSchema,
+  baseUrl: aiBaseUrlSchema.nullable().optional(),
+  kind: aiModelKindSchema.optional(),
+  apiKey: z.string().max(4096).nullable().optional(),
+}).strict()
+
+export const aiConfigTestSchema = z.object({
+  profileId: z.string().trim().max(100).nullable().optional(),
+  provider: aiProviderSchema,
+  baseUrl: aiBaseUrlSchema.nullable().optional(),
+  kind: aiModelKindSchema.optional().default('chat'),
+  model: z.string().trim().min(1).max(200),
+  apiKey: z.string().max(4096).nullable().optional(),
+}).strict()
 
 export const annotationCreateSchema = z.object({
   cfiRange: z.string().min(1),

@@ -13,6 +13,7 @@ function progressKey(bookId: string): string {
 interface ProgressData {
   cfi?: string | null
   chapter?: string | null
+  chapterIndex?: number | null
   percent: number
   fraction?: number | null
   intervals?: FractionInterval[]
@@ -44,7 +45,7 @@ export async function getProgress(userId: string, bookId: string) {
   return { id: `prog-${bookId}`, userId, bookId, ...rest, readFraction }
 }
 
-export async function upsertProgress(userId: string, bookId: string, data: { cfi?: string; chapter?: string; percent: number; fraction?: number; segmentStartFraction?: number; sample?: RateSample }) {
+export async function upsertProgress(userId: string, bookId: string, data: { cfi?: string; chapter?: string; chapterIndex?: number; percent: number; fraction?: number; segmentStartFraction?: number; sample?: RateSample }) {
   const db = getDb()
   const storage = getStorage()
   const book = db.select({ id: books.id }).from(books).where(and(eq(books.id, bookId), eq(books.userId, userId), isNull(books.deletedAt))).get()
@@ -75,6 +76,7 @@ export async function upsertProgress(userId: string, bookId: string, data: { cfi
   const payload: ProgressData = {
     cfi: data.cfi ?? existing?.cfi ?? null,
     chapter: data.chapter ?? existing?.chapter ?? null,
+    chapterIndex: data.chapterIndex ?? existing?.chapterIndex ?? null,
     percent: data.percent,
     fraction: data.fraction ?? existing?.fraction ?? null,
     intervals,

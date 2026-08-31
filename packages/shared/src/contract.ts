@@ -250,6 +250,333 @@ export interface TtsSpeechReq {
   rate?: number
 }
 
+export type AiProvider =
+  | 'openai'
+  | 'anthropic'
+  | 'gemini'
+  | 'ollama'
+  | 'lmstudio'
+  | 'deepseek'
+  | 'qwen'
+  | 'glm'
+  | 'moonshot'
+  | 'openrouter'
+  | 'siliconflow'
+  | 'minimax'
+  | 'mimo'
+  | 'custom'
+
+export type AiProtocol = 'openai-compatible' | 'anthropic' | 'gemini' | 'ollama'
+
+export interface AiProviderRes {
+  id: AiProvider
+  name: string
+  protocol: AiProtocol
+  defaultBaseUrl: string | null
+  defaultModel: string | null
+  requiresApiKey: boolean
+}
+
+export interface AiModelCapabilities {
+  vision?: boolean
+  tools?: boolean
+  reasoning?: boolean
+  embedding?: boolean
+}
+
+export interface AiModelRes {
+  id: string
+  name: string
+  ownedBy?: string
+  capabilities?: AiModelCapabilities
+}
+
+export type AiModelKind = 'chat' | 'embedding'
+
+export type AiPromptScope = 'selection' | 'reading' | 'both'
+
+export interface AiPromptTemplate {
+  id: string
+  name: string
+  prompt: string
+  scope: AiPromptScope
+  enabled: boolean
+  order: number
+  builtIn: boolean
+}
+
+export interface AiPromptTemplateInput {
+  id: string
+  name: string
+  prompt: string
+  scope: AiPromptScope
+  enabled?: boolean
+  order?: number
+}
+
+export interface AiModelDiscoveryReq {
+  /** Existing profile whose saved secret may be reused; omitted for new drafts. */
+  profileId?: string | null
+  provider: AiProvider
+  baseUrl?: string | null
+  kind?: AiModelKind
+  apiKey?: string | null
+}
+
+export interface AiConfigTestReq {
+  /** Existing profile whose saved secret may be reused; omitted for new drafts. */
+  profileId?: string | null
+  provider: AiProvider
+  baseUrl?: string | null
+  kind?: AiModelKind
+  model: string
+  apiKey?: string | null
+}
+
+export interface AiConnectionTestRes {
+  ok: true
+  provider: AiProvider
+  model: string
+  latencyMs: number
+}
+
+export interface AiProfileRes {
+  id: string
+  name: string
+  provider: AiProvider
+  baseUrl: string | null
+  model: string | null
+  models: AiModelRes[]
+  embeddingModel: string | null
+  embeddingModels: AiModelRes[]
+  apiKeyConfigured: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AiProfileCreateReq {
+  name: string
+  provider: AiProvider
+  baseUrl?: string | null
+  model?: string | null
+  models?: AiModelRes[]
+  embeddingModel?: string | null
+  embeddingModels?: AiModelRes[]
+  /** Credentials are accepted only for this request and never returned. */
+  apiKey?: string | null
+}
+
+export interface AiProfileUpdateReq {
+  name?: string
+  provider?: AiProvider
+  baseUrl?: string | null
+  model?: string | null
+  models?: AiModelRes[]
+  embeddingModel?: string | null
+  embeddingModels?: AiModelRes[]
+  /** Missing preserves the saved key; null clears it. */
+  apiKey?: string | null
+}
+
+export interface AiContextReq {
+  chapterIndex: number
+  chapterTitle?: string
+  cfiRange: string
+  selection: string
+  before?: string
+  /** Reader transformation fingerprint used to keep book tools on visible text. */
+  visibleTextVersion?: string
+}
+
+export interface AiHistoryMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface AiChatReq {
+  bookId: string
+  /** Existing persisted conversation; omitted to create one on first send. */
+  threadId?: string
+  /** Replaces the latest matching user/assistant turn when retrying a response. */
+  regenerate?: boolean
+  prompt: string
+  context: AiContextReq
+  history?: AiHistoryMessage[]
+}
+
+export interface AiCitation {
+  id: string
+  chapterIndex: number
+  chapterId: string
+  chapterTitle: string
+  startOffset: number
+  endOffset: number
+  excerpt: string
+  sourceType?: 'book' | 'annotation'
+  sourceCfi?: string
+}
+
+export interface AiMessageRes {
+  id: string
+  threadId: string
+  role: 'user' | 'assistant'
+  content: string
+  context: AiContextReceipt | null
+  citations: AiCitation[]
+  createdAt: number
+  aborted: boolean
+}
+
+export interface AiThreadRes {
+  id: string
+  bookId: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  messageCount: number
+}
+
+export interface AiThreadDetailRes extends AiThreadRes {
+  messages: AiMessageRes[]
+}
+
+export interface AiThreadCreateReq {
+  bookId: string
+  title?: string
+}
+
+export interface AiThreadUpdateReq {
+  title: string
+}
+
+export interface AiThreadListReq {
+  bookId: string
+  limit?: number
+}
+
+export type AiIndexStatus = 'not_indexed' | 'indexing' | 'ready' | 'failed' | 'stale'
+
+export type AiEmbeddingStatus = 'not_indexed' | 'indexing' | 'ready' | 'failed' | 'unavailable'
+
+export interface AiIndexChapter {
+  /** Server chapter position; text is produced by the visible Reader pipeline. */
+  chapterIndex: number
+  text: string
+}
+
+export interface AiIndexReq {
+  bookId: string
+  force?: boolean
+  /** Reader transformation fingerprint; omitted by server-only source fallback. */
+  visibleTextVersion?: string
+  /** Complete transformed corpus for an explicit Reader-triggered build. */
+  chapters?: AiIndexChapter[]
+}
+
+export interface AiIndexRes {
+  bookId: string
+  /** Opaque source fingerprint used to decide whether a derived index is stale. */
+  sourceVersion?: string
+  status: AiIndexStatus
+  embeddingStatus: AiEmbeddingStatus
+  embeddingProvider?: AiProvider
+  embeddingModel?: string
+  embeddingDim?: number
+  /** Current user-visible build progress, from 0 to 100. */
+  progress: number
+  chunkCount: number
+  updatedAt: number | null
+  error?: string
+}
+
+export interface AiSearchReq {
+  bookId: string
+  query: string
+  limit?: number
+  maxChapterIndex?: number
+}
+
+export interface AiSearchResultRes extends AiCitation {
+  score: number
+}
+
+export interface AiSearchRes {
+  status: 'ready' | 'empty'
+  results: AiSearchResultRes[]
+  reason?: 'visible_index_unavailable'
+}
+
+export interface AiStatusRes {
+  enabled: boolean
+  provider: AiProvider
+  model?: string
+  models: AiModelRes[]
+  prompts: AiPromptTemplate[]
+  embeddingProfileId: string | null
+  embeddingProvider: AiProvider | null
+  embeddingModel: string | null
+  embeddingModels: AiModelRes[]
+  embeddingConfigured: boolean
+  activeProfileId: string | null
+  maxSelectionChars: number
+  maxContextChars: number
+}
+
+export interface AiConfigRes {
+  activeProfileId: string | null
+  profiles: AiProfileRes[]
+  provider: AiProvider
+  baseUrl: string | null
+  model: string | null
+  models: AiModelRes[]
+  prompts: AiPromptTemplate[]
+  embeddingProfileId: string | null
+  embeddingProvider: AiProvider | null
+  embeddingModel: string | null
+  embeddingModels: AiModelRes[]
+  embeddingConfigured: boolean
+  apiKeyConfigured: boolean
+  configuredByUser: boolean
+}
+
+export interface AiConfigUpdateReq {
+  /** Switches the active profile without changing its fields. */
+  activeProfileId?: string | null
+  /** Backward-compatible update target; omitted means the active profile. */
+  profileId?: string | null
+  name?: string
+  provider?: AiProvider
+  baseUrl?: string | null
+  model?: string | null
+  models?: AiModelRes[]
+  /** Explicitly selects the profile used by the selected embedding model; null disables semantic retrieval. */
+  embeddingProfileId?: string | null
+  /** Explicitly selects an embedding model from that profile; null disables semantic retrieval. */
+  embeddingModel?: string | null
+  embeddingModels?: AiModelRes[]
+  /** Replaces the user's bounded quick-prompt template list; null restores defaults. */
+  prompts?: AiPromptTemplateInput[] | null
+  /** Missing preserves the saved key; null clears it. */
+  apiKey?: string | null
+}
+
+export interface AiContextReceipt {
+  /** Character count of the current user question. */
+  questionChars?: number
+  selectionChars: number
+  beforeChars: number
+  /** Character count of chapter text returned by a read tool. */
+  chapterChars?: number
+  /** Character count of book-search results returned by a retrieval tool. */
+  ragChars?: number
+  /** Character count of note-search results returned by a retrieval tool. */
+  notesChars?: number
+  /** Direct context plus bounded tool results; excludes the question itself. */
+  contextChars: number
+  chapterTitle: string | null
+  sourceCfi: string
+}
+
 export interface SettingsUpdateReq {
   settings: SettingsRes
 }
@@ -405,6 +732,8 @@ export interface RateSample {
 export interface ReadingProgressUpdateReq {
   cfi?: string
   chapter?: string
+  /** Zero-based chapter position from the current book TOC, when known */
+  chapterIndex?: number
   percent: number
   /** Book-wide position 0-1 reported by the reader engine */
   fraction?: number
@@ -419,6 +748,8 @@ export interface ReadingProgressRes {
   bookId: string
   cfi: string | null
   chapter: string | null
+  /** Zero-based chapter position from the current book TOC; absent on legacy files */
+  chapterIndex?: number | null
   percent: number
   fraction?: number | null
   /** Total union length of read intervals, 0-1; absent for legacy progress not yet re-saved */

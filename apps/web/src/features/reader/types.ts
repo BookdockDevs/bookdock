@@ -1,3 +1,5 @@
+import type { AiIndexChapter } from '@bookdock/shared'
+
 import type { TextTransformRule } from './lib/text-transforms'
 
 export interface ReaderLocation {
@@ -41,6 +43,11 @@ export interface FootnoteEntry {
 export interface SelectionInfo {
   cfiRange: string
   text: string
+  /** Captured reader location when the selection is handed to AI. */
+  chapterIndex?: number
+  chapterTitle?: string
+  /** Visible text immediately before the selection, captured for opt-in AI context. */
+  beforeText?: string
   // Selection.toString() keeps block-level line breaks (Range.toString() does
   // not) — preferred over `text` for annotation excerpts and copy so quotes
   // keep their paragraphs
@@ -58,6 +65,11 @@ export interface SelectionInfo {
   /** When set on instantAnnotation, the selection toolbar stays open so the
    * user can restyle right after auto-marking ("选中即划" mode). */
   keepSelection?: boolean
+}
+
+export interface AiIndexCorpus {
+  visibleTextVersion: string
+  chapters: AiIndexChapter[]
 }
 
 export interface TtsSegment {
@@ -166,6 +178,10 @@ export interface BookReader {
     onProgress?: (results: SearchResult[], progress: number | null) => void,
   ): Promise<SearchResult[]>
   getSnippet(cfi: string, maxLength?: number): string
+  /** Build the same transformed plain-text corpus used by the visible reader. */
+  getAiCorpus(signal?: AbortSignal): Promise<AiIndexCorpus>
+  /** Stable fingerprint for the current visible text transformation settings. */
+  getAiCorpusVersion(): string
   /**
    * Match counts per pattern rule across the whole book ("N 处" badges).
    * Counts against the original section markup, one parse per section.
@@ -215,7 +231,7 @@ export interface SearchResult {
   excerpt?: { pre: string; match: string; post: string }
 }
 
-export type NavTab = 'toc' | 'notes' | 'stats'
+export type NavTab = 'toc' | 'notes' | 'stats' | 'ai'
 export type PageWidth = number
 
 // Font ids: the four system stacks below, builtin CDN ids (fonts.ts), or

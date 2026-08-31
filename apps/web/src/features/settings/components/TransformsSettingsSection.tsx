@@ -5,6 +5,7 @@ import type { TextTransformRes } from '@bookdock/shared'
 import { useDeleteTransform, useTransforms, useUpdateTransform } from '@/api/hooks/useTransforms'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
+import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
@@ -93,7 +94,7 @@ export default function TransformsSettingsSection() {
       </div>
 
       {rules.length === 0 ? (
-        <p className="text-xs text-stone-400 dark:text-stone-500">{_('settings.transformsEmpty')}</p>
+        <SettingsEmptyState>{_('settings.transformsEmpty')}</SettingsEmptyState>
       ) : (
         <div className="divide-y divide-stone-100 dark:divide-stone-800">
           {groups.map(([key, list]) => {

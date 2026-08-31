@@ -7,6 +7,7 @@ import {
 } from '@zip.js/zip.js'
 
 import type {
+  AiIndexCorpus,
   BookReader,
   ChineseConversion,
   ContinuousScroll,
@@ -61,8 +62,39 @@ function ttsTextHash(text: string): string {
   return (hash >>> 0).toString(36)
 }
 
+function readerTextVersion(conversion: ChineseConversion, transforms: TextTransformRule[]): string {
+  let hash = 2166136261
+  const value = JSON.stringify({ conversion, transforms })
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `reader-${(hash >>> 0).toString(36)}`
+}
+
+function normalizeBookHref(value: string): string {
+  const withoutFragment = value.split('#', 1)[0]!.split('?', 1)[0]!
+  try {
+    return decodeURIComponent(withoutFragment)
+  } catch {
+    return withoutFragment
+  }
+}
+
 export function ttsHighlightColor(theme: { bg: string; text: string; primary?: string }): string {
   return mix(theme.primary ?? theme.text, theme.bg, 0.25)
+}
+
+function textBeforeSelection(doc: Document, range: Range, maxLength = 2_000): string {
+  try {
+    if (!doc.body) return ''
+    const before = doc.createRange()
+    before.selectNodeContents(doc.body)
+    before.setEnd(range.startContainer, range.startOffset)
+    return before.toString().replace(/\s+/g, ' ').trim().slice(-maxLength)
+  } catch {
+    return ''
+  }
 }
 
 // Click-to-turn zone config (F3). Kept pure for unit tests.
@@ -1610,10 +1642,12 @@ export class FoliateReader implements BookReader {
         if (!cfiRange) return
         this.selectionActive = true
         const startNode = range.startContainer
+        const beforeText = textBeforeSelection(doc, range)
         const info: SelectionInfo = {
           cfiRange,
           text: text.slice(0, 500),
           rawText,
+          ...(beforeText ? { beforeText } : {}),
           rect: this.popupRect(doc, range),
           // Point-patch anchors (P2): the offset is counted on the rendered
           // document (conversion is length-preserving, so it equals the
@@ -1943,7 +1977,58 @@ export class FoliateReader implements BookReader {
     return counts
   }
 
-  getSnippet(cfi: string, maxLength = 80): string {    try {
+  private aiCorpusSectionIndices(): number[] {
+    const sections: any[] = this.book?.sections ?? []
+    const sectionByHref = new Map<string, number>()
+    for (let index = 0; index < sections.length; index++) {
+      const href = sections[index]?.id
+      if (typeof href !== 'string' || !href) continue
+      const normalized = normalizeBookHref(href)
+      if (!sectionByHref.has(normalized)) sectionByHref.set(normalized, index)
+    }
+
+    const indices: number[] = []
+    let tocHrefCount = 0
+    const visit = (items: any[]) => {
+      for (const item of items) {
+        if (typeof item?.href === 'string' && item.href) {
+          tocHrefCount++
+          const index = sectionByHref.get(normalizeBookHref(item.href))
+          if (index !== undefined) indices.push(index)
+        }
+        if (Array.isArray(item?.subitems)) visit(item.subitems)
+      }
+    }
+    if (Array.isArray(this.book?.toc)) visit(this.book.toc)
+    if (tocHrefCount > 0 && indices.length === tocHrefCount) return indices
+
+    return sections.flatMap((section, index) => section?.id ? [index] : [])
+  }
+
+  getAiCorpusVersion(): string {
+    return readerTextVersion(this.conversion, this.transforms)
+  }
+
+  async getAiCorpus(signal?: AbortSignal): Promise<AiIndexCorpus> {
+    const book = this.book
+    if (!book) throw new Error('Reader is not ready')
+    const indices = this.aiCorpusSectionIndices()
+    const chapters = []
+    for (const [chapterIndex, sectionIndex] of indices.entries()) {
+      if (signal?.aborted || this.destroyed) throw new DOMException('The reader corpus request was aborted', 'AbortError')
+      const chapterText = await getChapterText(book, sectionIndex, {
+        chineseConversion: this.conversion,
+        transforms: this.transforms,
+      })
+      if (signal?.aborted || this.destroyed) throw new DOMException('The reader corpus request was aborted', 'AbortError')
+      if (!chapterText) throw new Error('Reader chapter content is not available')
+      chapters.push({ chapterIndex, text: chapterText.text })
+    }
+    return { visibleTextVersion: this.getAiCorpusVersion(), chapters }
+  }
+
+  getSnippet(cfi: string, maxLength = 80): string {
+    try {
       // chapter:{index}:{fraction} — scrolled-mode TXT books
       if (cfi.startsWith('chapter:')) {
         const text = this.lastRange?.startContainer?.textContent

@@ -5,6 +5,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { config as loadDotenv } from 'dotenv'
 
+import { aiProviderSchema } from '@bookdock/shared'
+
 import { log, setLogLevel } from './lib/logger'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -23,6 +25,13 @@ const envSchema = z.object({
   AVATAR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(2097152),
   STORAGE_DRIVER: z.enum(['localfs']).default('localfs'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  AI_PROVIDER: aiProviderSchema.default('openai'),
+  AI_BASE_URL: z.string().trim().min(1).url().refine((value) => /^https?:\/\//i.test(value), 'Only HTTP(S) URLs are supported').optional(),
+  AI_API_KEY: z.string().max(4096).optional(),
+  AI_MODEL: z.string().trim().max(200).optional(),
+  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(1).max(32768).default(2048),
+  AI_RPM: z.coerce.number().int().min(1).max(120).default(6),
+  AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(60000),
 })
 
 export type Env = z.infer<typeof envSchema>

@@ -32,7 +32,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   const statsDisabled = useUiStore((s) => s.readingTimerMode) === 'off'
 
   const SIDEBAR_MIN = 200
-  const SIDEBAR_MAX = 500
+  const SIDEBAR_MAX = 640
   const [locked, setLocked] = useState(toolbarLocked)
   const [hovered, setHovered] = useState(false)
   // Touch uses a bottom control sheet; the desktop dock keeps its hover/lock behavior.
@@ -171,7 +171,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       className={cn(
         'relative shrink-0 overflow-hidden',
         isTouch
-          ? cn('order-1 w-full h-0 transition-[height]', sidebarOpen && 'h-[65dvh] max-h-[520px]')
+          ? cn('order-1 w-full h-0 transition-[height]', sidebarOpen && (activeNavTab === 'ai' ? 'h-[80dvh] max-h-[720px]' : 'h-[65dvh] max-h-[520px]'))
           : cn('order-none h-full', !resizing && 'transition-all duration-200', sidebarOpen ? '' : 'w-0'),
       )}
       style={isTouch

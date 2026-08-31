@@ -35,7 +35,9 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
   const _ = useTranslation()
   const selection = useReaderState((s) => s.selection)
   const setSelection = useReaderState((s) => s.setSelection)
+  const setAiContext = useReaderState((s) => s.setAiContext)
   const currentChapter = useReaderState((s) => s.currentChapter)
+  const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
   const setPendingSearchQuery = useReaderState((s) => s.setPendingSearchQuery)
@@ -229,6 +231,15 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     close()
   }
 
+  function askAi() {
+    if (!selection) return
+    setAiContext({ ...selection, chapterIndex: currentChapterIndex ?? undefined, chapterTitle: currentChapter ?? undefined })
+    renderer?.deselect()
+    setSelection(null)
+    setActiveNavTab('ai')
+    setSidebarOpen(true)
+  }
+
   function readSelection() {
     if (!selection) return
     void ttsController?.start(selection.cfiRange)
@@ -318,14 +329,20 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
       ? { key: 'delete', label: _('annotation.deleteHighlight'), icon: <TrashIcon />, danger: true, onClick: () => removeAnnotation() }
       : { key: 'highlight', label: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, danger: false, onClick: highlight },
     { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
-    { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: shareExcerpt },
-    { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
-    { key: 'tts', label: _('reader.ttsFromSelection'), icon: (
+    { key: 'ai', label: 'AI 解释', icon: (
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 10v4h3l4 4V6l-4 4H4z" />
-        <path d="M16 9.5a4 4 0 010 5" />
+        <path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" />
+        <path d="m19 15 .75 2.25L22 18l-2.25.75L19 21l-.75-2.25L16 18l2.25-.75z" />
+      </svg>
+    ), danger: false, onClick: askAi },
+    { key: 'tts', label: _('reader.ttsFromSelection'), icon: (
+      <svg width="18" height="18" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 6 2 29M12 6l9 23M5 20.5h14" />
+        <path d="M19 7c5 2.8 7 7 7 11M20 2c7 4 11 9.5 11 16" />
       </svg>
     ), danger: false, onClick: readSelection },
+    { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
+    { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: shareExcerpt },
     // Low-frequency text-editing action sits last so the common actions stay put.
     // The replace dialog lives in Reader (via replaceTarget): opening it must
     // collapse this toolbar, but clearing the selection unmounts this

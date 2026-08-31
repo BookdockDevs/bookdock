@@ -102,7 +102,7 @@ describe('FontsSettingsSection', () => {
     expect(input).toBeTruthy()
     expect(input.accept).toBe('.ttf,.otf,.woff,.woff2')
     const clickSpy = vi.spyOn(input, 'click').mockImplementation(() => {})
-    fireEvent.click(screen.getByText('上传字体'))
+    fireEvent.click(screen.getByRole('button', { name: '上传字体' }))
     expect(clickSpy).toHaveBeenCalled()
   })
 })

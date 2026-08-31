@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import type { FontListItem } from '@bookdock/shared'
 
 import { useDeleteFont, useFonts, useUpdateFontScope, useUploadFont } from '@/api/hooks/useFonts'
+import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { ensureUploadedFontLoaded, uploadedFontAlias } from '@/features/reader/fonts'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
@@ -11,6 +12,10 @@ import { useToastStore } from '@/stores/toast.store'
 function formatSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${Math.ceil(bytes / 1024)} KB`
+}
+
+function PlusIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
 }
 
 export default function FontsSettingsSection() {
@@ -75,13 +80,15 @@ export default function FontsSettingsSection() {
           type="button"
           disabled={uploadFont.isPending}
           onClick={() => fileInputRef.current?.click()}
-          className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs text-white transition-colors hover:bg-stone-700 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-stone-300"
+          aria-label={_('settings.fontsUpload')}
+          title={_('settings.fontsUpload')}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
         >
-          {_('settings.fontsUpload')}
+          <PlusIcon />
         </button>
       </div>
       {fonts.length === 0 ? (
-        <p className="text-xs text-stone-400 dark:text-stone-500">{_('settings.fontsEmpty')}</p>
+        <SettingsEmptyState>{_('settings.fontsEmpty')}</SettingsEmptyState>
       ) : (
         <ul className="divide-y divide-stone-200 dark:divide-stone-800">
           {fonts.map((f) => (

@@ -91,6 +91,14 @@ describe('ReaderSidebar on touch devices', () => {
     expect(panel).toHaveClass('h-[65dvh]', 'max-h-[520px]')
     expect(container.querySelector('.cursor-col-resize')).toBeNull()
   })
+
+  it('gives the AI panel more vertical room without changing other tabs', () => {
+    act(() => useReaderState.setState({ sidebarOpen: true, activeNavTab: 'ai' }))
+    const { container } = renderSidebar(true)
+    const panel = outerEl(container).children[0] as HTMLElement
+    expect(panel).toHaveClass('h-[80dvh]', 'max-h-[720px]')
+    expect(panel).not.toHaveClass('h-[65dvh]', 'max-h-[520px]')
+  })
 })
 
 describe('ReaderSidebar on pointer devices', () => {
