@@ -489,6 +489,7 @@ describe('ai routes', () => {
         model: 'test-model',
         models: [{ id: 'test-model', name: 'test-model' }],
         prompts: expect.any(Array),
+        modes: [{ id: 'assistant', name: '助理', prompt: '', builtIn: true }],
         embeddingProfileId: null,
         embeddingProvider: null,
         embeddingModel: null,
@@ -533,6 +534,84 @@ describe('ai routes', () => {
     const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ content?: string }> }
     expect(payload.messages.at(-1)?.content).toContain('&lt;需要分析&gt;')
     expect(payload.messages.at(-1)?.content).toContain('trust="untrusted"')
+  })
+
+  it('persists custom assistant modes while keeping the built-in assistant', async () => {
+    const app = createApp({ id: 'member-1', role: 'member' })
+    const response = await app.request('http://test/api/v1/ai/config', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        modes: [{ id: 'reviewer', name: '书评人', prompt: '请从叙事结构和人物动机分析。' }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).data.modes).toEqual([
+      { id: 'assistant', name: '助理', prompt: '', builtIn: true },
+      { id: 'reviewer', name: '书评人', prompt: '请从叙事结构和人物动机分析。', builtIn: false },
+    ])
+
+    const status = await app.request('http://test/api/v1/ai/status')
+    expect((await status.json()).data.modes).toEqual([
+      { id: 'assistant', name: '助理', prompt: '', builtIn: true },
+      { id: 'reviewer', name: '书评人', prompt: '请从叙事结构和人物动机分析。', builtIn: false },
+    ])
+  })
+
+  it('includes assistant mode instructions and explicit chapter references in the provider request', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(
+      'data: {"choices":[{"delta":{"content":"完成"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+
+    const response = await createApp({ id: 'user-1', role: 'owner' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...requestBody,
+        context: {
+          ...requestBody.context,
+          chapterIndex: 1,
+          chapterReferences: [{ chapterIndex: 1, chapterTitle: '第二章', text: '变换后的<正文>' }],
+        },
+        assistantModePrompt: '请优先指出叙事视角的变化。',
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await response.text()
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ role: string; content?: string }> }
+    expect(payload.messages[0]?.content).toContain('<assistant_mode>请优先指出叙事视角的变化。</assistant_mode>')
+    expect(payload.messages.at(-1)?.content).toContain('<chapter_reference chapter="第二章" chapter_index="1">')
+    expect(payload.messages.at(-1)?.content).toContain('变换后的&lt;正文&gt;')
+  })
+
+  it('allows explicit chapter references beyond the current reading boundary', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(
+      'data: {"choices":[{"delta":{"content":"完成"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+
+    const response = await createApp({ id: 'user-1', role: 'owner' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...requestBody,
+        context: {
+          ...requestBody.context,
+          chapterIndex: 1,
+          chapterReferences: [{ chapterIndex: 2, chapterTitle: '第三章', text: '不应发送' }],
+        },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await response.text()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('enforces the per-user chat request window before contacting the provider', async () => {
@@ -688,6 +767,7 @@ describe('ai routes', () => {
         model: 'deepseek-chat',
         models: [{ id: 'deepseek-chat', name: 'deepseek-chat', capabilities: { tools: true } }],
         prompts: expect.any(Array),
+        modes: [{ id: 'assistant', name: '助理', prompt: '', builtIn: true }],
         embeddingProfileId: null,
         embeddingProvider: null,
         embeddingModel: null,
@@ -885,6 +965,7 @@ describe('ai routes', () => {
         model: 'test-model',
         models: [{ id: 'test-model', name: 'test-model' }],
         prompts: expect.any(Array),
+        modes: [{ id: 'assistant', name: '助理', prompt: '', builtIn: true }],
         embeddingProfileId: null,
         embeddingProvider: null,
         embeddingModel: null,
@@ -1074,6 +1155,38 @@ describe('ai routes', () => {
     const secondPayload = JSON.parse(String((secondCall[1] as RequestInit).body)) as { messages: Array<{ role: string; tool_calls?: unknown; tool_call_id?: string }> }
     expect(secondPayload.messages.at(-2)).toMatchObject({ role: 'assistant', tool_calls: expect.any(Array) })
     expect(secondPayload.messages.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'call-1' })
+  })
+
+  it('limits provider tools to the requested allowlist and blocks disabled calls', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(new Response(
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-notes","function":{"name":"search_notes","arguments":"{\\"query\\":\\"想法\\"}"}}]}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        'data: {"choices":[{"delta":{"content":"我会只根据已启用的能力回答。"}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+
+    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...requestBody, enabledTools: ['search_book'] }),
+    })
+
+    expect(response.status).toBe(200)
+    const stream = await response.text()
+    expect(stream).toContain('我会只根据已启用的能力回答。')
+
+    const firstCall = fetchMock.mock.calls[0]
+    const secondCall = fetchMock.mock.calls[1]
+    if (!firstCall || !secondCall) throw new Error('Expected two provider requests')
+    const firstPayload = JSON.parse(String((firstCall[1] as RequestInit).body)) as { tools?: Array<{ function?: { name?: string } }> }
+    const secondPayload = JSON.parse(String((secondCall[1] as RequestInit).body)) as { messages: Array<{ content?: string }> }
+    expect(firstPayload.tools).toHaveLength(1)
+    expect(firstPayload.tools?.[0]?.function?.name).toBe('search_book')
+    expect(secondPayload.messages.at(-1)?.content).toContain('该工具已被用户关闭')
   })
 
   it('streams bounded source citations and persists them with the assistant answer', async () => {

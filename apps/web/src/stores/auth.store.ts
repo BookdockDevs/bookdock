@@ -10,6 +10,10 @@ export interface AuthUser {
   guest?: boolean
 }
 
+export function getUserDisplayName(user: AuthUser | null | undefined, guestLabel: string): string {
+  return user?.guest === true || user?.role === 'guest' ? guestLabel : user?.username || guestLabel
+}
+
 interface AuthState {
   user: AuthUser | null
   setAuth: (user: AuthUser) => void

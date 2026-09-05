@@ -6,6 +6,7 @@ import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiStreamAiChat } from 
 import AiPanel from '../features/reader/components/AiPanel'
 import { RendererContext } from '../features/reader/hooks/useReaderApi'
 import { useReaderState } from '../features/reader/state/reader-state'
+import { useAuthStore } from '../stores/auth.store'
 
 vi.mock('../api/client', () => ({
   apiDelete: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('../api/client', () => ({
 interface TestRenderer {
   display: ReturnType<typeof vi.fn>
   getAiCorpus?: ReturnType<typeof vi.fn>
+  getAiChapterText?: ReturnType<typeof vi.fn>
   getAiCorpusVersion?: ReturnType<typeof vi.fn>
 }
 
@@ -38,6 +40,14 @@ function readerWithCorpus(): TestRenderer {
         { chapterIndex: 0, text: '第一章 经过阅读器变换后的文本' },
       ],
     }),
+    getAiCorpusVersion: vi.fn().mockReturnValue('reader-test'),
+  }
+}
+
+function readerWithChapterReferences(): TestRenderer {
+  return {
+    display: vi.fn(),
+    getAiChapterText: vi.fn().mockImplementation(async (chapterIndex: number) => `第${chapterIndex + 1}章的可见正文`),
     getAiCorpusVersion: vi.fn().mockReturnValue('reader-test'),
   }
 }
@@ -63,8 +73,14 @@ function renderPanel(renderer: TestRenderer | null = null) {
   }
 }
 
+async function openTools() {
+  fireEvent.click(await screen.findByRole('button', { name: 'AI 工具' }))
+  await screen.findByTestId('ai-tools-drawer')
+}
+
 describe('AiPanel', () => {
   beforeEach(() => {
+    useAuthStore.setState({ user: null })
     useReaderState.setState({
       aiContext: null,
       currentChapter: null,
@@ -94,6 +110,129 @@ describe('AiPanel', () => {
     expect(screen.getByRole('textbox')).not.toBeDisabled()
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
     expect(screen.queryByText(/尚未配置|暂不可使用/)).toBeNull()
+    expect(screen.queryByText('可让 AI 查看目录或章节')).toBeNull()
+  })
+
+  it('sends only the tools enabled in the AI tools drawer', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
+    vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
+
+    renderPanel()
+    await openTools()
+
+    const notesTool = screen.getByRole('switch', { name: '读取我的笔记' })
+    expect(notesTool).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(notesTool)
+    expect(notesTool).toHaveAttribute('aria-checked', 'false')
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '只根据正文回答' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
+    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
+      enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book'],
+    })
+  })
+
+  it('attaches selected chapters, including chapters after the current position, to the next AI request', async () => {
+    vi.mocked(apiGet).mockImplementation(async (path) => {
+      if (path === '/books/book-1/chapters') return { data: [
+        { id: 'chapter-1', title: '第一章', level: 1, startOffset: 0, endOffset: 10 },
+        { id: 'chapter-2', title: '第二章', level: 1, startOffset: 10, endOffset: 20 },
+        { id: 'chapter-3', title: '第三章', level: 1, startOffset: 20, endOffset: 30 },
+      ] }
+      return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
+    })
+    vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
+    useReaderState.setState({ currentChapterIndex: 1 })
+    const renderer = readerWithChapterReferences()
+
+    renderPanel(renderer)
+
+    fireEvent.click(await screen.findByRole('button', { name: '添加章节引用' }))
+    fireEvent.click(await screen.findByRole('button', { name: '第三章' }))
+    expect(screen.getByRole('button', { name: '移除章节引用 第三章' })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '请总结引用内容' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
+    expect(renderer.getAiChapterText).toHaveBeenCalledWith(2)
+    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
+      context: {
+        chapterReferences: [{ chapterIndex: 2, chapterTitle: '第三章', text: '第3章的可见正文' }],
+      },
+    })
+  })
+
+  it('closes the chapter reference menu when the composer text area is clicked', async () => {
+    vi.mocked(apiGet).mockImplementation(async (path) => {
+      if (path === '/books/book-1/chapters') return { data: [{ id: 'chapter-1', title: '第一章', level: 1, startOffset: 0, endOffset: 10 }] }
+      return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
+    })
+
+    renderPanel(readerWithChapterReferences())
+
+    fireEvent.click(await screen.findByRole('button', { name: '添加章节引用' }))
+    expect(screen.getByRole('dialog', { name: '添加章节引用' })).toBeInTheDocument()
+    fireEvent.pointerDown(screen.getByRole('textbox'))
+    expect(screen.queryByRole('dialog', { name: '添加章节引用' })).toBeNull()
+  })
+
+  it('selects an assistant mode and persists a new mode from the composer', async () => {
+    let modeSaved = false
+    let savedModeId = ''
+    vi.mocked(apiGet).mockImplementation(async () => ({ data: {
+      enabled: true,
+      provider: 'ollama',
+      model: 'qwen3:8b',
+      modes: modeSaved ? [
+        { id: 'assistant', name: '助理', prompt: '', builtIn: true },
+        { id: savedModeId, name: '书评人', prompt: '用书评人的口吻回答。', builtIn: false },
+      ] : [{ id: 'assistant', name: '助理', prompt: '', builtIn: true }],
+      maxSelectionChars: 6_000,
+      maxContextChars: 8_000,
+    } }))
+    vi.mocked(apiPatch).mockImplementation(async (_path, body) => {
+      modeSaved = true
+      savedModeId = (body as { modes: Array<{ id: string }> }).modes[0]!.id
+      return { data: {
+        modes: [
+          { id: 'assistant', name: '助理', prompt: '', builtIn: true },
+          { id: savedModeId, name: '书评人', prompt: '用书评人的口吻回答。', builtIn: false },
+        ],
+      } }
+    })
+
+    renderPanel()
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择助理模式' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '添加模式' }))
+    fireEvent.change(screen.getByLabelText('模式名称'), { target: { value: '书评人' } })
+    fireEvent.change(screen.getByLabelText('系统提示词'), { target: { value: '用书评人的口吻回答。' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/ai/config', {
+      modes: [{ id: expect.any(String), name: '书评人', prompt: '用书评人的口吻回答。' }],
+    }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '选择助理模式' })).toHaveTextContent('书评人'))
+  })
+
+  it('uses the toolbar button and outside area to close the compact tools menu', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
+
+    renderPanel()
+    await openTools()
+    expect(screen.queryByText('控制这次对话可以使用的能力')).toBeNull()
+    expect(screen.queryByRole('button', { name: '关闭 AI 工具' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI 工具' }))
+    expect(screen.queryByTestId('ai-tools-drawer')).toBeNull()
+
+    await openTools()
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByTestId('ai-tools-drawer')).toBeNull()
   })
 
   it('fills a selected-passage quick action without sending it', async () => {
@@ -101,6 +240,7 @@ describe('AiPanel', () => {
     useReaderState.setState({ aiContext: { cfiRange: 'selection', text: '选区', rawText: '选区', chapterIndex: 0 } })
 
     renderPanel()
+    await openTools()
 
     const quickAction = await screen.findByRole('button', { name: 'reader.aiQuickExplain' })
     fireEvent.click(quickAction)
@@ -113,6 +253,7 @@ describe('AiPanel', () => {
     useReaderState.setState({ aiContext: { cfiRange: 'selection', text: '选区', rawText: '选区', chapterIndex: 0 } })
 
     renderPanel()
+    await openTools()
 
     const quickAction = await screen.findByRole('button', { name: 'reader.aiQuickTranslate' })
     fireEvent.click(quickAction)
@@ -126,9 +267,10 @@ describe('AiPanel', () => {
 
     renderPanel()
 
-    const selector = await screen.findByLabelText('选择模型')
+    const selector = await screen.findByRole('button', { name: '选择模型' })
     await waitFor(() => expect(selector).not.toBeDisabled())
-    fireEvent.change(selector, { target: { value: 'llama3.2' } })
+    fireEvent.click(selector)
+    fireEvent.click(screen.getByRole('option', { name: 'llama3.2' }))
 
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/ai/config', { model: 'llama3.2' }))
   })
@@ -142,9 +284,10 @@ describe('AiPanel', () => {
 
     renderPanel()
 
-    const selector = await screen.findByLabelText('选择模型')
+    const selector = await screen.findByRole('button', { name: '选择模型' })
     await waitFor(() => expect(selector).not.toBeDisabled())
-    expect(selector).toContainElement(screen.getByRole('option', { name: 'qwen3:8b' }))
+    fireEvent.click(selector)
+    expect(screen.getByRole('listbox', { name: '选择模型' })).toContainElement(screen.getByRole('option', { name: 'qwen3:8b' }))
     expect(screen.queryByRole('option', { name: 'qwen3-embedding-8b' })).toBeNull()
   })
 
@@ -176,6 +319,7 @@ describe('AiPanel', () => {
     vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
 
     renderPanel()
+    await openTools()
 
     const summary = await screen.findByRole('button', { name: 'reader.aiQuickChapterSummary' })
     expect(screen.getByRole('button', { name: 'reader.aiQuickReadToHere' })).toBeInTheDocument()
@@ -203,6 +347,7 @@ describe('AiPanel', () => {
 
     const source = await screen.findByRole('button', { name: '第一章' })
     expect(source).toHaveAttribute('title', '命中段落')
+    expect(screen.getByText('这是回答').parentElement?.parentElement).toHaveClass('w-fit', 'max-w-full')
     fireEvent.click(source)
     expect(display).toHaveBeenCalledWith('search-hit:1:12:24')
     expect(useReaderState.getState().sidebarOpen).toBe(false)
@@ -241,6 +386,7 @@ describe('AiPanel', () => {
     vi.mocked(apiPost).mockResolvedValue({ data: { bookId: 'book-1', status: 'ready', embeddingStatus: 'ready', chunkCount: 8, updatedAt: 123 } })
 
     renderPanel(readerWithCorpus())
+    await openTools()
 
     const button = await screen.findByRole('button', { name: 'reader.aiIndexBuild' })
     fireEvent.click(button)
@@ -261,6 +407,7 @@ describe('AiPanel', () => {
     vi.mocked(apiPost).mockResolvedValue({ data: { bookId: 'book-1', status: 'ready', embeddingStatus: 'unavailable', chunkCount: 8, updatedAt: 123 } })
 
     renderPanel(readerWithCorpus())
+    await openTools()
 
     fireEvent.click(await screen.findByRole('button', { name: 'reader.aiIndexBuild' }))
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/ai/retrieval/index', {
@@ -269,7 +416,7 @@ describe('AiPanel', () => {
       visibleTextVersion: 'reader-test',
       chapters: [{ chapterIndex: 0, text: '第一章 经过阅读器变换后的文本' }],
     }, expect.any(AbortSignal)))
-    expect(screen.getByRole('combobox', { name: '选择模型' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '选择模型' })).toBeDisabled()
     expect(screen.getByRole('textbox')).not.toBeDisabled()
   })
 
@@ -282,6 +429,7 @@ describe('AiPanel', () => {
     vi.mocked(apiPost).mockResolvedValue({ data: { bookId: 'book-1', status: 'ready', embeddingStatus: 'ready', embeddingProvider: 'openai', embeddingModel: 'text-embedding-3-small', chunkCount: 8, updatedAt: 123 } })
 
     renderPanel(readerWithCorpus())
+    await openTools()
 
     expect(await screen.findByText('reader.aiEmbeddingStale')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiEmbeddingRebuild' }))
@@ -309,6 +457,7 @@ describe('AiPanel', () => {
     })
 
     renderPanel(readerWithCorpus())
+    await openTools()
     fireEvent.click(await screen.findByRole('button', { name: 'reader.aiIndexBuild' }))
     const cancelButton = await screen.findByRole('button', { name: 'reader.aiIndexCancel' })
     fireEvent.click(cancelButton)
@@ -325,6 +474,7 @@ describe('AiPanel', () => {
     })
 
     renderPanel()
+    await openTools()
 
     expect(await screen.findByText('reader.aiEmbeddingProgress')).toBeInTheDocument()
     expect(screen.getByText('42%')).toBeInTheDocument()
@@ -339,6 +489,7 @@ describe('AiPanel', () => {
     vi.mocked(apiDelete).mockResolvedValue({ data: null })
 
     renderPanel()
+    await openTools()
     fireEvent.click(await screen.findByRole('button', { name: 'reader.aiIndexClear' }))
     expect(screen.getByText('reader.aiIndexClearConfirm')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'settings.fontsDelete' }))
@@ -365,8 +516,25 @@ describe('AiPanel', () => {
     expect(apiStreamAiChat.mock.calls[1]?.[0]).toMatchObject({ threadId: 'thread-1', prompt: '第二个问题' })
   })
 
+  it('sends with Enter and keeps Shift+Enter available for new lines', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
+    vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
+
+    renderPanel()
+    const textbox = screen.getByRole('textbox')
+    fireEvent.change(textbox, { target: { value: '第一行' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).not.toBeDisabled())
+    fireEvent.keyDown(textbox, { key: 'Enter', code: 'Enter' })
+    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
+
+    fireEvent.change(textbox, { target: { value: '第一行' } })
+    fireEvent.keyDown(textbox, { key: 'Enter', code: 'Enter', shiftKey: true })
+    expect(apiStreamAiChat).toHaveBeenCalledTimes(1)
+  })
+
   it('loads a selected thread from the per-book history', async () => {
-    const thread = { id: 'thread-1', bookId: 'book-1', title: '解释第一章', createdAt: 1_000, updatedAt: 2_000, messageCount: 2 }
+    const threadStart = Date.now()
+    const thread = { id: 'thread-1', bookId: 'book-1', title: '解释第一章', createdAt: threadStart, updatedAt: threadStart + 1_000, messageCount: 2 }
     vi.mocked(apiGet).mockImplementation(async (path) => {
       if (path === '/ai/threads?bookId=book-1') return { data: [thread] }
       if (path === '/ai/threads/thread-1') return { data: { ...thread, messages: [
@@ -379,36 +547,35 @@ describe('AiPanel', () => {
     renderPanel()
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiHistory' }))
     await waitFor(() => expect(screen.getByText('解释第一章')).toBeInTheDocument())
+    expect(screen.getByText(new RegExp(`${new Date(threadStart).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })} · 2`))).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'reader.aiRename 解释第一章' })).toHaveClass('opacity-0', 'group-hover:opacity-100')
     fireEvent.click(screen.getByText('解释第一章'))
     await waitFor(() => expect(screen.getByText('服务端问题')).toBeInTheDocument())
     expect(screen.getByText('服务端回答')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'reader.aiHistory' }))
+    await waitFor(() => expect(screen.getByText('解释第一章')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('解释第一章'))
+    expect(screen.getByText('服务端问题')).toBeInTheDocument()
+    expect(screen.getByText('服务端回答')).toBeInTheDocument()
   })
 
-  it('shows a receipt and only sends opted-in visible before text', async () => {
+  it('shows the selected text as a truncated removable context chip', async () => {
     vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
-    vi.mocked(apiStreamAiChat).mockImplementation(async (_body, handlers) => {
-      handlers.onMeta?.({ requestId: 'ai-1', model: 'qwen3:8b', receipt: { selectionChars: 2, beforeChars: 3, contextChars: 5, chapterTitle: '第一章', sourceCfi: 'epubcfi(/6/4!/2)' } })
-      handlers.onDelta?.('**回答**')
-    })
+    const selectedText = '这是一段很长的引用原文，用于确认输入框上方只显示原文，而不是显示上下文统计。'
     useReaderState.setState({
-      aiContext: { cfiRange: 'epubcfi(/6/4!/2)', text: '选区', rawText: '选区', beforeText: '前文内容', chapterTitle: '第一章', chapterIndex: 0 },
+      aiContext: { cfiRange: 'epubcfi(/6/4!/2)', text: selectedText, rawText: selectedText, chapterTitle: '第一章', chapterIndex: 0 },
     })
 
     renderPanel()
 
-    await waitFor(() => expect(screen.getByRole('switch')).toBeInTheDocument())
-    expect(screen.getByText('reader.aiReceiptSelection')).toBeInTheDocument()
-    expect(screen.getByText('reader.aiReceiptBefore')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('switch'))
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: '解释一下' } })
-    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).not.toBeDisabled())
-    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    const quote = await screen.findByTitle(selectedText)
+    expect(quote).toHaveClass('truncate')
+    expect(quote.parentElement).toHaveClass('border-[var(--bd-read-primary)]/60', 'text-[var(--bd-read-primary)]')
+    expect(screen.queryByText('reader.aiReceiptTitle')).toBeNull()
 
-    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
-    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
-      context: { selection: '选区', before: '前文内容' },
-    })
-    expect(screen.getByText('回答')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '移除引用原文' }))
+    expect(screen.queryByTitle(selectedText)).toBeNull()
   })
 
   it('saves a selected answer as an idea through the existing annotation API', async () => {
@@ -521,6 +688,7 @@ describe('AiPanel', () => {
     const copyButton = await screen.findByRole('button', { name: 'reader.aiCopy' })
     fireEvent.click(copyButton)
     expect(writeText).toHaveBeenCalledWith('可复制回答')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiCopied' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(2))
     expect(apiStreamAiChat.mock.calls[1]?.[0]).toMatchObject({ threadId: 'thread-1', regenerate: true })
@@ -536,12 +704,14 @@ describe('AiPanel', () => {
       handlers.onMeta?.({ requestId: 'ai-1', threadId: 'thread-1', model: 'qwen3:8b', receipt: { selectionChars: 0, beforeChars: 0, contextChars: 0, chapterTitle: null, sourceCfi: 'selection' } })
       handlers.onDelta?.('可导出回答')
     })
+    useAuthStore.setState({ user: { id: 'user-1', username: '小西', role: 'owner' } })
 
     renderPanel()
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '导出这个对话' } })
     await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: '发送' }))
 
+    await openTools()
     const exportButton = await screen.findByRole('button', { name: 'reader.aiExport' })
     await waitFor(() => expect(exportButton).not.toBeDisabled())
     fireEvent.click(exportButton)
@@ -550,20 +720,18 @@ describe('AiPanel', () => {
     expect(click).toHaveBeenCalled()
     const blob = createObjectURL.mock.calls[0]?.[0] as Blob
     expect(await blob.text()).toContain('可导出回答')
+    expect(await blob.text()).toContain('## 小西')
     click.mockRestore()
     vi.unstubAllGlobals()
   })
 
-  it('jumps back to the server-confirmed source CFI', async () => {
-    const display = vi.fn().mockResolvedValue(undefined)
+  it('shows the selected text in the input context chip', async () => {
     vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
-    useReaderState.setState({ aiContext: { cfiRange: 'epubcfi(/6/4!/2)', text: '选区', rawText: '选区', chapterTitle: '第一章', chapterIndex: 0 } })
+    const selectedText = '选区原文'
+    useReaderState.setState({ aiContext: { cfiRange: 'epubcfi(/6/4!/2)', text: selectedText, rawText: selectedText, chapterTitle: '第一章', chapterIndex: 0 } })
 
-    renderPanel({ display })
+    renderPanel()
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '回到原文' })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '回到原文' }))
-    expect(display).toHaveBeenCalledWith('epubcfi(/6/4!/2)')
-    expect(useReaderState.getState().sidebarOpen).toBe(false)
+    expect(await screen.findByTitle(selectedText)).toBeInTheDocument()
   })
 })

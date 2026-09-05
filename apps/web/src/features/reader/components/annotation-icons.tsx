@@ -105,6 +105,17 @@ export function QuoteIcon({ size = 20 }: { size?: number }) {
   )
 }
 
+export function SelectedPositionIcon({ size = 20 }: { size?: number } = {}) {
+  return (
+    <svg className="shrink-0" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="7.5" cy="9" r="2.75" />
+      <path d="M10.25 9c0 3.6-.7 6.1-2.8 9" />
+      <circle cx="16.5" cy="9" r="2.75" />
+      <path d="M19.25 9c0 3.6-.7 6.1-2.8 9" />
+    </svg>
+  )
+}
+
 /** Opening-quote glyph (“) for idea cards. Shape pixel-traced from the 微信读书
  *  reference card (ball r15.5 + short tapered tail whose left edge is the
  *  tangent extension of the ball's left contour, native 72×53, IoU 0.90 vs ref);

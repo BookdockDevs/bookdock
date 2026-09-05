@@ -11,6 +11,7 @@ import { useUiStore } from '@/stores/ui.store'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useTtsSession } from '../hooks/useTtsSession'
 import { useReaderState } from '../state/reader-state'
+import { SelectedPositionIcon } from './annotation-icons'
 
 function PlayIcon() {
   return (
@@ -56,17 +57,6 @@ function ChapterStartIcon() {
   return (
     <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 8h11M21 6.5l-3 1.5 3 1.5M4 12h17M4 16h17" />
-    </svg>
-  )
-}
-
-function SelectedPositionIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="7.5" cy="9" r="2.75" />
-      <path d="M10.25 9c0 3.6-.7 6.1-2.8 9" />
-      <circle cx="16.5" cy="9" r="2.75" />
-      <path d="M19.25 9c0 3.6-.7 6.1-2.8 9" />
     </svg>
   )
 }

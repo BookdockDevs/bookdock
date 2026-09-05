@@ -297,7 +297,6 @@
     "aiExported": "对话已导出",
     "aiExportFailed": "对话导出失败",
     "aiExportTimestamp": "导出时间",
-    "aiExportUser": "你",
     "aiExportAssistant": "AI",
     "aiExportNoContent": "无可见内容",
     "aiExportContext": "上下文：{{chapter}} · {{chars}} 字",

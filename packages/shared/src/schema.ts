@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AI_MAX_INDEX_CORPUS_CHARS, PAGINATION } from './constants'
+import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAPTER_REFERENCES, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, PAGINATION } from './constants'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
 
@@ -205,11 +205,23 @@ const aiContextSchema = z.object({
   selection: z.string().trim().max(6000),
   before: z.string().max(2000).optional(),
   visibleTextVersion: z.string().trim().min(1).max(200).optional(),
+  chapterReferences: z.array(z.object({
+    chapterIndex: z.number().int().min(0).max(1_000_000),
+    chapterTitle: z.string().max(500).optional(),
+    text: z.string().trim().min(1).max(8_000),
+  }).strict()).max(AI_MAX_CHAPTER_REFERENCES).optional(),
 }).strict()
 
 const aiHistoryMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string().trim().min(1).max(8000),
+}).strict()
+
+const aiToolNameSchema = z.enum(AI_TOOL_NAMES)
+const aiReadingScopeSchema = z.enum(AI_READING_SCOPES)
+const aiThreadSettingsSchema = z.object({
+  readingScope: aiReadingScopeSchema,
+  enabledTools: z.array(aiToolNameSchema).max(AI_TOOL_NAMES.length),
 }).strict()
 
 export const aiChatSchema = z.object({
@@ -219,6 +231,9 @@ export const aiChatSchema = z.object({
   prompt: z.string().trim().min(1).max(4000),
   context: aiContextSchema,
   history: z.array(aiHistoryMessageSchema).max(12).optional(),
+  assistantModePrompt: z.string().trim().max(2_000).optional(),
+  readingScope: aiReadingScopeSchema.optional(),
+  enabledTools: z.array(aiToolNameSchema).max(AI_TOOL_NAMES.length).optional(),
 }).strict()
 
 const aiThreadTitleSchema = z.string().trim().min(1).max(100)
@@ -226,11 +241,13 @@ const aiThreadTitleSchema = z.string().trim().min(1).max(100)
 export const aiThreadCreateSchema = z.object({
   bookId: z.string().trim().min(1).max(200),
   title: aiThreadTitleSchema.optional(),
+  settings: aiThreadSettingsSchema.optional(),
 }).strict()
 
 export const aiThreadUpdateSchema = z.object({
-  title: aiThreadTitleSchema,
-}).strict()
+  title: aiThreadTitleSchema.optional(),
+  settings: aiThreadSettingsSchema.optional(),
+}).strict().refine((value) => value.title !== undefined || value.settings !== undefined, 'At least one AI thread field is required')
 
 export const aiThreadListSchema = z.object({
   bookId: z.string().trim().min(1).max(200),
@@ -276,6 +293,7 @@ export const aiSearchSchema = z.object({
   bookId: z.string().trim().min(1).max(200),
   query: z.string().trim().min(1).max(500),
   limit: z.coerce.number().int().min(1).max(10).default(5),
+  minChapterIndex: z.coerce.number().int().min(0).max(1_000_000).optional(),
   maxChapterIndex: z.coerce.number().int().min(-1).max(1_000_000).optional(),
 }).strict()
 
@@ -304,6 +322,12 @@ const aiPromptTemplateSchema = z.object({
   scope: z.enum(['selection', 'reading', 'both']),
   enabled: z.boolean().optional().default(true),
   order: z.number().int().min(0).max(10_000).optional().default(0),
+}).strict()
+
+const aiAssistantModeSchema = z.object({
+  id: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(80),
+  prompt: z.string().trim().min(1).max(2_000),
 }).strict()
 
 export const aiProviderSchema = z.enum([
@@ -335,6 +359,7 @@ export const aiConfigUpdateSchema = z.object({
   embeddingModel: z.string().trim().min(1).max(200).nullable().optional(),
   embeddingModels: z.array(aiModelSchema).max(200).optional(),
   prompts: z.array(aiPromptTemplateSchema).max(24).nullable().optional(),
+  modes: z.array(aiAssistantModeSchema).max(AI_MAX_ASSISTANT_MODES).nullable().optional(),
   apiKey: z.string().max(4096).nullable().optional(),
 }).strict()
 

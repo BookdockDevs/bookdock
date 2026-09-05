@@ -2027,6 +2027,21 @@ export class FoliateReader implements BookReader {
     return { visibleTextVersion: this.getAiCorpusVersion(), chapters }
   }
 
+  async getAiChapterText(chapterIndex: number, signal?: AbortSignal): Promise<string> {
+    const book = this.book
+    if (!book) throw new Error('Reader is not ready')
+    const sectionIndex = this.aiCorpusSectionIndices()[chapterIndex]
+    if (sectionIndex === undefined) throw new Error('Reader chapter is not available')
+    if (signal?.aborted || this.destroyed) throw new DOMException('The reader chapter request was aborted', 'AbortError')
+    const chapterText = await getChapterText(book, sectionIndex, {
+      chineseConversion: this.conversion,
+      transforms: this.transforms,
+    })
+    if (signal?.aborted || this.destroyed) throw new DOMException('The reader chapter request was aborted', 'AbortError')
+    if (!chapterText) throw new Error('Reader chapter content is not available')
+    return chapterText.text
+  }
+
   getSnippet(cfi: string, maxLength = 80): string {
     try {
       // chapter:{index}:{fraction} — scrolled-mode TXT books

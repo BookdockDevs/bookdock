@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm'
 
-import type { AiCitation, AiContextReceipt, AiHistoryMessage, AiThreadCreateReq, AiThreadDetailRes, AiThreadListReq, AiThreadRes, AiThreadUpdateReq } from '@bookdock/shared'
+import { AI_DEFAULT_READING_SCOPE, AI_TOOL_NAMES } from '@bookdock/shared'
+import type { AiCitation, AiContextReceipt, AiHistoryMessage, AiReadingScope, AiThreadCreateReq, AiThreadDetailRes, AiThreadListReq, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, AiToolName } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { aiMessages, aiThreads, books } from '../../db/schema'
@@ -9,11 +10,27 @@ import { AppError } from '../../middleware/error'
 
 const DEFAULT_THREAD_TITLE = '新对话'
 const MAX_THREAD_TITLE_LENGTH = 100
+const DEFAULT_THREAD_SETTINGS: AiThreadSettings = {
+  readingScope: AI_DEFAULT_READING_SCOPE,
+  enabledTools: [...AI_TOOL_NAMES],
+}
 
 interface AiThreadContext {
   threadId: string
   history: AiHistoryMessage[]
+  settings: AiThreadSettings
   replaceMessageIds?: string[]
+}
+
+function normalizeThreadSettings(value: unknown): AiThreadSettings {
+  const raw = value && typeof value === 'object' ? value as { readingScope?: unknown; enabledTools?: unknown } : {}
+  const readingScope: AiReadingScope = raw.readingScope === 'current_chapter' || raw.readingScope === 'full_book'
+    ? raw.readingScope
+    : DEFAULT_THREAD_SETTINGS.readingScope
+  const enabledTools = Array.isArray(raw.enabledTools)
+    ? Array.from(new Set(raw.enabledTools.filter((name): name is AiToolName => typeof name === 'string' && AI_TOOL_NAMES.includes(name as AiToolName))))
+    : [...DEFAULT_THREAD_SETTINGS.enabledTools]
+  return { readingScope, enabledTools }
 }
 
 function assertBookOwnership(userId: string, bookId: string) {
@@ -38,6 +55,7 @@ function toThreadRes(row: typeof aiThreads.$inferSelect, messageCount: number): 
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     messageCount,
+    settings: normalizeThreadSettings(row.settings),
   }
 }
 
@@ -79,6 +97,7 @@ export function createAiThread(userId: string, input: AiThreadCreateReq): AiThre
     userId,
     bookId: input.bookId,
     title: input.title?.trim().slice(0, MAX_THREAD_TITLE_LENGTH) || DEFAULT_THREAD_TITLE,
+    settings: normalizeThreadSettings(input.settings),
     createdAt: now,
     updatedAt: now,
   }
@@ -93,6 +112,7 @@ export function listAiThreads(userId: string, input: AiThreadListReq): AiThreadR
     userId: aiThreads.userId,
     bookId: aiThreads.bookId,
     title: aiThreads.title,
+    settings: aiThreads.settings,
     createdAt: aiThreads.createdAt,
     updatedAt: aiThreads.updatedAt,
     messageCount: count(aiMessages.id),
@@ -118,10 +138,15 @@ export function getAiThread(userId: string, threadId: string): AiThreadDetailRes
 
 export function updateAiThread(userId: string, threadId: string, input: AiThreadUpdateReq): AiThreadRes {
   ownedThread(userId, threadId)
-  const title = input.title.trim().slice(0, MAX_THREAD_TITLE_LENGTH)
-  if (!title) throw new AppError('VALIDATION_ERROR', 'AI thread title is required')
   const updatedAt = Date.now()
-  getDb().update(aiThreads).set({ title, updatedAt }).where(and(
+  const changes: { title?: string; settings?: AiThreadSettings; updatedAt: number } = { updatedAt }
+  if (input.title !== undefined) {
+    const title = input.title.trim().slice(0, MAX_THREAD_TITLE_LENGTH)
+    if (!title) throw new AppError('VALIDATION_ERROR', 'AI thread title is required')
+    changes.title = title
+  }
+  if (input.settings !== undefined) changes.settings = normalizeThreadSettings(input.settings)
+  getDb().update(aiThreads).set(changes).where(and(
     eq(aiThreads.id, threadId),
     eq(aiThreads.userId, userId),
   )).run()
@@ -141,10 +166,17 @@ export function deleteAiThread(userId: string, threadId: string) {
   )).run()
 }
 
-export function prepareAiThread(userId: string, bookId: string, threadId: string | undefined, prompt: string, regenerate = false): AiThreadContext {
+export function prepareAiThread(userId: string, bookId: string, threadId: string | undefined, prompt: string, regenerate = false, settings?: Partial<AiThreadSettings>): AiThreadContext {
   if (threadId) {
     const thread = ownedThread(userId, threadId)
     if (thread.bookId !== bookId) throw new AppError('AI_THREAD_NOT_FOUND', 'AI thread does not belong to this book')
+    const effectiveSettings = normalizeThreadSettings({ ...normalizeThreadSettings(thread.settings), ...settings })
+    if (settings && (settings.readingScope !== undefined || settings.enabledTools !== undefined)) {
+      getDb().update(aiThreads).set({ settings: effectiveSettings, updatedAt: Date.now() }).where(and(
+        eq(aiThreads.id, thread.id),
+        eq(aiThreads.userId, userId),
+      )).run()
+    }
     const messages = threadMessages(userId, thread.id)
     const last = messages.at(-1)
     const previous = messages.at(-2)
@@ -156,12 +188,13 @@ export function prepareAiThread(userId: string, bookId: string, threadId: string
     return {
       threadId: thread.id,
       history: messages.filter((message) => !replaceMessageIds.includes(message.id)).map((message) => ({ role: message.role, content: message.content })),
+      settings: effectiveSettings,
       ...(replaceMessageIds.length > 0 ? { replaceMessageIds } : {}),
     }
   }
 
-  const thread = createAiThread(userId, { bookId, title: titleFromPrompt(prompt) })
-  return { threadId: thread.id, history: [] }
+  const thread = createAiThread(userId, { bookId, title: titleFromPrompt(prompt), settings: normalizeThreadSettings(settings) })
+  return { threadId: thread.id, history: [], settings: thread.settings }
 }
 
 export function saveAiMessage(

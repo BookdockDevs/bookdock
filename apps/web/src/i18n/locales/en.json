@@ -303,7 +303,6 @@
     "aiExported": "Conversation exported",
     "aiExportFailed": "Conversation export failed",
     "aiExportTimestamp": "Exported at",
-    "aiExportUser": "You",
     "aiExportAssistant": "AI",
     "aiExportNoContent": "No visible content",
     "aiExportContext": "Context: {{chapter}} · {{chars}} characters",

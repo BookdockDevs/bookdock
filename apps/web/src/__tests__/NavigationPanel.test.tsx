@@ -13,6 +13,10 @@ vi.mock('../features/reader/hooks/useReaderApi', () => ({
   useReaderApi: vi.fn(),
 }))
 
+vi.mock('../features/reader/components/AiPanel', () => ({
+  default: () => null,
+}))
+
 const deleteMutate = vi.fn()
 const updateMutate = vi.fn()
 

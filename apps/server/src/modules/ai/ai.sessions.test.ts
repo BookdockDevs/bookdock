@@ -61,12 +61,16 @@ describe('AI session service', () => {
 
     saveAiMessage('user-1', first.threadId, { role: 'user', content: '服务端问题' })
     saveAiMessage('user-1', first.threadId, { role: 'assistant', content: '服务端回答' })
-    expect(prepareAiThread('user-1', 'book-1', first.threadId, '客户端伪造历史')).toEqual({
+    expect(prepareAiThread('user-1', 'book-1', first.threadId, '客户端伪造历史')).toMatchObject({
       threadId: first.threadId,
       history: [
         { role: 'user', content: '服务端问题' },
         { role: 'assistant', content: '服务端回答' },
       ],
+      settings: {
+        readingScope: 'to_here',
+        enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'search_notes'],
+      },
     })
   })
 

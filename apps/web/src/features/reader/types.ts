@@ -180,6 +180,8 @@ export interface BookReader {
   getSnippet(cfi: string, maxLength?: number): string
   /** Build the same transformed plain-text corpus used by the visible reader. */
   getAiCorpus(signal?: AbortSignal): Promise<AiIndexCorpus>
+  /** Read one transformed chapter for an explicit AI composer reference. */
+  getAiChapterText(chapterIndex: number, signal?: AbortSignal): Promise<string>
   /** Stable fingerprint for the current visible text transformation settings. */
   getAiCorpusVersion(): string
   /**

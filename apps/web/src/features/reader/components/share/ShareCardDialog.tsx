@@ -8,7 +8,7 @@ import { apiGet } from '@/api/client'
 import { useFonts } from '@/api/hooks/useFonts'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
-import { useAuthStore } from '@/stores/auth.store'
+import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
 import { useToastStore } from '@/stores/toast.store'
 
 import { markEscConsumed } from '../../lib/esc-consumed'
@@ -41,7 +41,8 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const shareTarget = useReaderState((s) => s.shareTarget)
   const setShareTarget = useReaderState((s) => s.setShareTarget)
   const addToast = useToastStore((s) => s.addToast)
-  const username = useAuthStore((s) => s.user?.username)
+  const user = useAuthStore((s) => s.user)
+  const authorName = getUserDisplayName(user, _('auth.guest'))
   const avatarKey = useAuthStore((s) => s.user?.avatarKey)
   const { data: bookData } = useQuery({
     queryKey: ['book', bookId],
@@ -80,11 +81,11 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
         title: book?.title ?? '',
         author: book?.author ?? '',
         chapter: shareTarget?.chapter ?? null,
-        user: username ?? null,
+        user: authorName,
         avatar: avatarKey ?? null,
         writtenAt: shareTarget?.createdAt ?? null,
       }),
-    [prefs, shareTarget, book, username, avatarKey],
+    [prefs, shareTarget, book, authorName, avatarKey],
   )
 
   useLayoutEffect(() => {
@@ -226,7 +227,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
                 background={prefs.background}
                 brand={prefs.brand}
                 note={shareTarget.note}
-                authorName={username ?? undefined}
+                authorName={authorName}
                 avatarUrl={avatarUrl(avatarKey)}
                 writtenAt={shareTarget.createdAt ? _('share.writtenAt', { date: formatShareDate(shareTarget.createdAt) }) : undefined}
                 writtenAtCn={shareTarget.createdAt ? _('share.writtenAtCn', { date: formatChineseDate(shareTarget.createdAt) }) : undefined}

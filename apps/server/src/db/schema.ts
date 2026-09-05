@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, blob, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core'
 
-import type { AiCitation, AiContextReceipt, TocRulePattern } from '@bookdock/shared'
+import type { AiCitation, AiContextReceipt, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -93,6 +93,7 @@ export const aiThreads = sqliteTable('ai_threads', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
+  settings: text('settings', { mode: 'json' }).$type<AiThreadSettings | null>(),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({

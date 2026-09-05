@@ -720,7 +720,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       <div
         ref={listRef}
         onScroll={handleScroll}
-        className={cn('flex-1 overflow-y-auto', tab === 'ai' ? 'px-0 py-0' : 'pl-2 pr-4 py-4 text-sm')}
+        className={cn('flex-1', tab === 'ai' ? 'overflow-hidden px-0 py-0' : 'overflow-y-auto pl-2 pr-4 py-4 text-sm')}
       >
         {tab === 'toc' && (searchActive ? (
           <div className="space-y-3">
@@ -779,7 +779,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           />
         )}
         {tab === 'stats' && !statsDisabled && <StatsPanel bookId={bookId} />}
-        {tab === 'ai' && <AiPanel bookId={bookId} />}
+        <div className={tab === 'ai' ? 'h-full' : 'hidden'}>
+          <AiPanel bookId={bookId} />
+        </div>
       </div>
       {searchActive && searchResults.length > 0 && (
         <div

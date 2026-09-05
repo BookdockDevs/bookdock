@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { useAuthStore } from '@/stores/auth.store'
+import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
 import { useToastStore } from '@/stores/toast.store'
 import { useReaderState } from '../state/reader-state'
 import { useReaderApi } from '../hooks/useReaderApi'
@@ -57,7 +57,8 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
   // A brand-new idea stays local until published — nothing hits the server
   // before the user commits, so cancels leave no placeholder row behind
   const [noteDraft, setNoteDraft] = useState(false)
-  const username = useAuthStore((s) => s.user?.username)
+  const user = useAuthStore((s) => s.user)
+  const authorName = getUserDisplayName(user, _('auth.guest'))
   const avatarKey = useAuthStore((s) => s.user?.avatarKey)
   useEffect(() => {
     setCreatedLocal(null)
@@ -295,7 +296,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     const atRange = annotations?.data?.filter((a) => a.cfiRange === target.cfiRange && a.type === 'note') ?? []
     const entries: IdeaEntry[] = (atRange.length > 0 ? atRange : [target]).map((a) => ({
       annotation: a,
-      authorName: username ?? undefined,
+      authorName,
       authorAvatarKey: avatarKey,
       own: true,
     }))

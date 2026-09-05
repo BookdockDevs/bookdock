@@ -1,4 +1,4 @@
-import type { BookFormat, ReadStatus } from './constants'
+import type { AiReadingScope, AiToolName, BookFormat, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
 import type { AnnotationStyle, AnnotationType, TocRulePattern, TransformMatchType, TransformScope, ViewSettings } from './domain'
 
@@ -314,6 +314,19 @@ export interface AiPromptTemplateInput {
   order?: number
 }
 
+export interface AiAssistantMode {
+  id: string
+  name: string
+  prompt: string
+  builtIn: boolean
+}
+
+export interface AiAssistantModeInput {
+  id: string
+  name: string
+  prompt: string
+}
+
 export interface AiModelDiscoveryReq {
   /** Existing profile whose saved secret may be reused; omitted for new drafts. */
   profileId?: string | null
@@ -386,6 +399,14 @@ export interface AiContextReq {
   before?: string
   /** Reader transformation fingerprint used to keep book tools on visible text. */
   visibleTextVersion?: string
+  /** Explicit Reader-visible chapter text attached by the user to this request. */
+  chapterReferences?: AiChapterReference[]
+}
+
+export interface AiChapterReference {
+  chapterIndex: number
+  chapterTitle?: string
+  text: string
 }
 
 export interface AiHistoryMessage {
@@ -402,6 +423,12 @@ export interface AiChatReq {
   prompt: string
   context: AiContextReq
   history?: AiHistoryMessage[]
+  /** Optional user-selected assistant mode instruction. */
+  assistantModePrompt?: string
+  /** Chapter-level spoiler boundary; omitted by legacy clients to use the thread default. */
+  readingScope?: AiReadingScope
+  /** Optional per-request allowlist for the server's bounded read-only tools. */
+  enabledTools?: AiToolName[]
 }
 
 export interface AiCitation {
@@ -434,6 +461,7 @@ export interface AiThreadRes {
   createdAt: number
   updatedAt: number
   messageCount: number
+  settings: AiThreadSettings
 }
 
 export interface AiThreadDetailRes extends AiThreadRes {
@@ -443,10 +471,17 @@ export interface AiThreadDetailRes extends AiThreadRes {
 export interface AiThreadCreateReq {
   bookId: string
   title?: string
+  settings?: AiThreadSettings
 }
 
 export interface AiThreadUpdateReq {
-  title: string
+  title?: string
+  settings?: AiThreadSettings
+}
+
+export interface AiThreadSettings {
+  readingScope: AiReadingScope
+  enabledTools: AiToolName[]
 }
 
 export interface AiThreadListReq {
@@ -493,6 +528,7 @@ export interface AiSearchReq {
   bookId: string
   query: string
   limit?: number
+  minChapterIndex?: number
   maxChapterIndex?: number
 }
 
@@ -512,6 +548,7 @@ export interface AiStatusRes {
   model?: string
   models: AiModelRes[]
   prompts: AiPromptTemplate[]
+  modes: AiAssistantMode[]
   embeddingProfileId: string | null
   embeddingProvider: AiProvider | null
   embeddingModel: string | null
@@ -530,6 +567,7 @@ export interface AiConfigRes {
   model: string | null
   models: AiModelRes[]
   prompts: AiPromptTemplate[]
+  modes: AiAssistantMode[]
   embeddingProfileId: string | null
   embeddingProvider: AiProvider | null
   embeddingModel: string | null
@@ -556,6 +594,8 @@ export interface AiConfigUpdateReq {
   embeddingModels?: AiModelRes[]
   /** Replaces the user's bounded quick-prompt template list; null restores defaults. */
   prompts?: AiPromptTemplateInput[] | null
+  /** Replaces the bounded user-authored assistant mode list; null restores the built-in assistant. */
+  modes?: AiAssistantModeInput[] | null
   /** Missing preserves the saved key; null clears it. */
   apiKey?: string | null
 }
@@ -575,6 +615,14 @@ export interface AiContextReceipt {
   contextChars: number
   chapterTitle: string | null
   sourceCfi: string
+  /** Effective chapter-level reading boundary used for this request. */
+  readingScope?: AiReadingScope
+  /** Effective fixed read-only tools exposed to the provider. */
+  enabledTools?: AiToolName[]
+  /** Provider model used for this request; never contains credentials or endpoints. */
+  model?: string
+  /** User-visible mode identifier or bounded mode label, not the hidden system prompt. */
+  assistantMode?: string
 }
 
 export interface SettingsUpdateReq {

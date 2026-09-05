@@ -17,3 +17,13 @@ export type SortField = (typeof SORT_FIELDS)[number]
 
 /** Maximum transformed text accepted in one explicit reader corpus snapshot. */
 export const AI_MAX_INDEX_CORPUS_CHARS = 10_000_000
+
+export const AI_TOOL_NAMES = ['get_book_toc', 'get_chapter_content', 'search_book', 'search_notes'] as const
+export type AiToolName = (typeof AI_TOOL_NAMES)[number]
+
+export const AI_READING_SCOPES = ['to_here', 'current_chapter', 'full_book'] as const
+export type AiReadingScope = (typeof AI_READING_SCOPES)[number]
+export const AI_DEFAULT_READING_SCOPE: AiReadingScope = 'to_here'
+
+export const AI_MAX_CHAPTER_REFERENCES = 8
+export const AI_MAX_ASSISTANT_MODES = 12

@@ -1,4 +1,4 @@
-import type { AiCitation } from '@bookdock/shared'
+import type { AiCitation, AiToolName } from '@bookdock/shared'
 
 import { searchAnnotations } from '../annotations/annotations.service'
 import { getActiveBook, getBookChapterContent, getBookChapters } from '../books/books.service'
@@ -13,7 +13,7 @@ export const AI_TOOL_MAX_NOTE_TEXT_CHARS = 500
 export const AI_TOOL_MAX_NOTE_CONTENT_CHARS = 800
 
 export interface AiToolDefinition {
-  name: string
+  name: AiToolName
   description: string
   parameters: Record<string, unknown>
 }
@@ -37,6 +37,11 @@ export function createAiToolBudgetExecution(call: AiToolCall, maxChars: number):
   const content = 'Tool result budget exhausted; answer using the sources already provided.'
   const bounded = content.slice(0, Math.max(0, maxChars))
   return { call, content: bounded, resultChars: bounded.length, sourceChars: 0 }
+}
+
+export function createAiToolDisabledExecution(call: AiToolCall): AiToolExecution {
+  const content = '该工具已被用户关闭，请不要依赖它，改用已有信息回答。'
+  return { call, content, resultChars: content.length, sourceChars: 0 }
 }
 
 export const AI_TOOLS: readonly AiToolDefinition[] = [
@@ -87,7 +92,7 @@ export const AI_TOOLS: readonly AiToolDefinition[] = [
   },
 ]
 
-const TOOL_MAP = new Map(AI_TOOLS.map((tool) => [tool.name, tool]))
+const TOOL_MAP = new Map<string, AiToolDefinition>(AI_TOOLS.map((tool) => [tool.name, tool]))
 
 function parseArguments(raw: string): Record<string, unknown> {
   try {
