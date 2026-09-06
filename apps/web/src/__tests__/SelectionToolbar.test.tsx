@@ -18,6 +18,16 @@ vi.mock('../features/reader/hooks/useAnnotations', () => ({
   useDeleteAnnotation: () => ({ mutateAsync: deleteMutate }),
 }))
 
+vi.mock('../features/reader/hooks/useAiQuickCommands', () => ({
+  useAiQuickCommands: () => ({
+    commands: [
+      { id: 'explain', name: '解释内容', prompt: '解释：{SELTEXT}' },
+      { id: 'chapter', name: '总结章节', prompt: '总结：{CHAPTER}' },
+      { id: 'custom', name: '自定义指令', prompt: '处理：{SELPARA}' },
+    ],
+  }),
+}))
+
 const RECT = { left: 100, top: 300, width: 200, height: 40 }
 
 const ANNOTATION: AnnotationRes = {
@@ -49,7 +59,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  useReaderState.setState({ selection: null, noteEditorRange: null })
+  useReaderState.setState({ selection: null, aiContext: null, aiPendingPrompt: null, noteEditorRange: null })
 })
 
 describe('SelectionToolbar', () => {
@@ -99,6 +109,63 @@ describe('SelectionToolbar', () => {
     fireEvent.click(screen.getByTitle('annotation.drawHighlight'))
     await waitFor(() => expect(createMutate).toHaveBeenCalledTimes(1))
     expect(createMutate.mock.calls[0][0]).toMatchObject({ type: 'highlight', cfiRange: 'epubcfi(/6/4!/2)' })
+  })
+
+  it('shows all enabled AI commands and hands a selected command to the AI panel', () => {
+    act(() => useReaderState.setState({
+      selection: {
+        cfiRange: 'epubcfi(/6/4!/2)',
+        text: '划线文本',
+        rawText: '划线文本',
+        paragraphText: '包含划线文本的段落',
+        chapterIndex: 2,
+        chapterTitle: '第三章',
+        rect: RECT,
+      },
+      currentChapter: '当前章节',
+      currentChapterIndex: 1,
+    }))
+    render(<SelectionToolbar bookId="b1" />)
+
+    expect(screen.getByTitle('reader.aiChatSelection')).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('reader.aiQuickCommands'))
+    expect(screen.getByRole('menuitem', { name: '解释内容' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '总结章节' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '自定义指令' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '解释内容' }).querySelector('svg')).toBeNull()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '解释内容' }))
+    expect(useReaderState.getState()).toMatchObject({
+      selection: null,
+      activeNavTab: 'ai',
+      sidebarOpen: true,
+      aiPendingPrompt: '解释：{SELTEXT}',
+      aiContext: expect.objectContaining({ chapterIndex: 2, chapterTitle: '第三章', paragraphText: '包含划线文本的段落' }),
+    })
+  })
+
+  it('opens AI chat with the selection without running a quick command', () => {
+    act(() => useReaderState.setState({
+      selection: {
+        cfiRange: 'epubcfi(/6/4!/2)',
+        text: '划线文本',
+        chapterIndex: 2,
+        chapterTitle: '第三章',
+        rect: RECT,
+      },
+      aiPendingPrompt: '不应发送的旧指令',
+    }))
+    render(<SelectionToolbar bookId="b1" />)
+
+    fireEvent.click(screen.getByTitle('reader.aiChatSelection'))
+
+    expect(useReaderState.getState()).toMatchObject({
+      selection: null,
+      activeNavTab: 'ai',
+      sidebarOpen: true,
+      aiPendingPrompt: null,
+      aiContext: expect.objectContaining({ text: '划线文本', chapterIndex: 2, chapterTitle: '第三章' }),
+    })
   })
 
   it('transforms into the annotation state after highlighting', async () => {

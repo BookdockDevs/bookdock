@@ -48,6 +48,8 @@ export interface SelectionInfo {
   chapterTitle?: string
   /** Visible text immediately before the selection, captured for opt-in AI context. */
   beforeText?: string
+  /** Visible paragraph containing the selection, used by AI quick-command templates. */
+  paragraphText?: string
   // Selection.toString() keeps block-level line breaks (Range.toString() does
   // not) — preferred over `text` for annotation excerpts and copy so quotes
   // keep their paragraphs
@@ -178,6 +180,8 @@ export interface BookReader {
     onProgress?: (results: SearchResult[], progress: number | null) => void,
   ): Promise<SearchResult[]>
   getSnippet(cfi: string, maxLength?: number): string
+  /** Read the visible paragraph at the current reading position. */
+  getCurrentParagraphText(maxLength?: number): string
   /** Build the same transformed plain-text corpus used by the visible reader. */
   getAiCorpus(signal?: AbortSignal): Promise<AiIndexCorpus>
   /** Read one transformed chapter for an explicit AI composer reference. */

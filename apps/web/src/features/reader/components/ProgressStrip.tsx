@@ -77,7 +77,7 @@ export const ProgressStrip = memo(function ProgressStrip({
   return (
     <div
       className={cn(
-        'pointer-events-none absolute left-0 right-0 z-40 flex h-12 items-center gap-1.5 border-t border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-xs transition-[bottom,transform] duration-300 sm:gap-3 sm:px-4',
+        'pointer-events-none absolute left-0 right-0 z-40 flex h-12 items-center gap-1.5 border-t border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-xs transition-[bottom,translate] duration-300 sm:gap-3 sm:px-4',
         mobileDockVisible ? 'bottom-14' : 'bottom-0',
         pinned || visible ? 'translate-y-0' : 'translate-y-full',
         className,

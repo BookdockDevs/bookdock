@@ -1,4 +1,4 @@
-import { and, asc, eq, lte, sql } from 'drizzle-orm'
+import { and, asc, eq, gte, lte, sql } from 'drizzle-orm'
 
 import { AI_MAX_INDEX_CORPUS_CHARS } from '@bookdock/shared'
 import type { AiEmbeddingStatus, AiIndexChapter, AiIndexReq, AiIndexRes, AiProvider, AiSearchReq, AiSearchRes, AiSearchResultRes } from '@bookdock/shared'
@@ -596,7 +596,10 @@ function toSearchResult(row: ChunkRow, query: string, score = 0): AiSearchResult
 function ftsSearch(userId: string, input: AiSearchReq): FtsRow[] {
   const query = ftsQuery(input.query)
   if (!query) return []
-  const chapterLimit = input.maxChapterIndex !== undefined && input.maxChapterIndex >= 0
+  const chapterMin = input.minChapterIndex !== undefined && input.minChapterIndex >= 0
+    ? sql` AND chunks.chapter_index >= ${input.minChapterIndex}`
+    : sql``
+  const chapterMax = input.maxChapterIndex !== undefined && input.maxChapterIndex >= 0
     ? sql` AND chunks.chapter_index <= ${input.maxChapterIndex}`
     : sql``
   try {
@@ -616,7 +619,8 @@ function ftsSearch(userId: string, input: AiSearchReq): FtsRow[] {
         AND ai_chunks_fts.book_id = ${input.bookId}
         AND chunks.user_id = ${userId}
         AND chunks.book_id = ${input.bookId}
-        ${chapterLimit}
+        ${chapterMin}
+        ${chapterMax}
       ORDER BY rank ASC
       LIMIT ${input.limit ?? MAX_CANDIDATES}
     `) as unknown as FtsRow[]
@@ -626,7 +630,10 @@ function ftsSearch(userId: string, input: AiSearchReq): FtsRow[] {
 }
 
 function likeSearch(userId: string, input: AiSearchReq): ChunkRow[] {
-  const chapterLimit = input.maxChapterIndex !== undefined && input.maxChapterIndex >= 0
+  const chapterMin = input.minChapterIndex !== undefined && input.minChapterIndex >= 0
+    ? gte(aiChunks.chapterIndex, input.minChapterIndex)
+    : undefined
+  const chapterMax = input.maxChapterIndex !== undefined && input.maxChapterIndex >= 0
     ? lte(aiChunks.chapterIndex, input.maxChapterIndex)
     : undefined
   const conditions = [
@@ -634,7 +641,8 @@ function likeSearch(userId: string, input: AiSearchReq): ChunkRow[] {
     eq(aiChunks.bookId, input.bookId),
     sql`${aiChunks.text} LIKE ${escapeLike(input.query)} ESCAPE '!'`,
   ]
-  if (chapterLimit) conditions.push(chapterLimit)
+  if (chapterMin) conditions.push(chapterMin)
+  if (chapterMax) conditions.push(chapterMax)
   return getDb().select({
     id: aiChunks.id,
     chapterIndex: aiChunks.chapterIndex,
@@ -667,7 +675,10 @@ async function vectorSearch(userId: string, input: AiSearchReq, indexRow: typeof
   const queryVector = vectorBuffer(queryBatch.vectors[0]).buffer
   const queryValues = vectorValues(queryVector, indexRow.embeddingDim)
   if (!queryValues) return []
-  const chapterLimit = input.maxChapterIndex !== undefined && input.maxChapterIndex >= 0
+  const chapterMin = input.minChapterIndex !== undefined && input.minChapterIndex >= 0
+    ? gte(aiChunks.chapterIndex, input.minChapterIndex)
+    : undefined
+  const chapterMax = input.maxChapterIndex !== undefined && input.maxChapterIndex >= 0
     ? lte(aiChunks.chapterIndex, input.maxChapterIndex)
     : undefined
   const conditions = [
@@ -677,7 +688,8 @@ async function vectorSearch(userId: string, input: AiSearchReq, indexRow: typeof
     eq(aiChunkEmbeddings.model, indexRow.embeddingModel),
     eq(aiChunkEmbeddings.dimension, indexRow.embeddingDim),
   ]
-  if (chapterLimit) conditions.push(chapterLimit)
+  if (chapterMin) conditions.push(chapterMin)
+  if (chapterMax) conditions.push(chapterMax)
   const rows = getDb().select({
     id: aiChunks.id,
     chapterIndex: aiChunks.chapterIndex,

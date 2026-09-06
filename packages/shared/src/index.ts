@@ -1,5 +1,5 @@
 export type { AiReadingScope, AiToolName, BookFormat, SortField, ReadStatus } from './constants'
-export { AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAPTER_REFERENCES, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, BOOK_FORMATS, READ_STATUSES, PAGINATION, SORT_FIELDS } from './constants'
+export { AI_CORE_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, BOOK_FORMATS, READ_STATUSES, PAGINATION, SORT_FIELDS } from './constants'
 
 export type {
   User,
@@ -55,7 +55,9 @@ export type {
   AiContextReq,
   AiHistoryMessage,
   AiChatReq,
+  AiRetryRecipe,
   AiThreadSettings,
+  AiConversationSettings,
   AiCitation,
   AiMessageRes,
   AiThreadRes,

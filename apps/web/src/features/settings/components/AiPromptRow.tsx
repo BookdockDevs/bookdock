@@ -1,7 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
-import type { AiPromptScope, AiPromptTemplate } from '@bookdock/shared'
+import type { AiPromptTemplate } from '@bookdock/shared'
 
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -21,8 +21,6 @@ export default function AiPromptRow({ prompt, disabled, onToggle, onEdit, onDele
     id: prompt.id,
     animateLayoutChanges: () => false,
   })
-  const scopeLabel = (scope: AiPromptScope) => scope === 'selection' ? _('settings.aiPromptSelection') : scope === 'reading' ? _('settings.aiPromptReading') : _('settings.aiPromptBoth')
-
   return (
     <li
       ref={setNodeRef}
@@ -53,7 +51,7 @@ export default function AiPromptRow({ prompt, disabled, onToggle, onEdit, onDele
           {prompt.name}
         </p>
         <p className="truncate text-[11px] text-stone-400">
-          {scopeLabel(prompt.scope)} · {prompt.prompt}
+          {prompt.prompt}
         </p>
       </div>
 

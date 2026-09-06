@@ -32,6 +32,7 @@ export function useAiThreads(bookId: string, options?: { enabled?: boolean }) {
     queryKey: [...AI_THREADS_KEY, bookId],
     queryFn: () => apiGet<{ data: AiThreadRes[] }>(`/ai/threads?bookId=${encodeURIComponent(bookId)}`),
     enabled: options?.enabled ?? Boolean(bookId),
+    staleTime: 30 * 1000,
   })
 }
 

@@ -309,7 +309,8 @@ export interface AiPromptTemplateInput {
   id: string
   name: string
   prompt: string
-  scope: AiPromptScope
+  /** Legacy compatibility field; new clients do not use it for command availability. */
+  scope?: AiPromptScope
   enabled?: boolean
   order?: number
 }
@@ -412,6 +413,8 @@ export interface AiChapterReference {
 export interface AiHistoryMessage {
   role: 'user' | 'assistant'
   content: string
+  /** Original reader context attached to a user turn, preserved for later turns. */
+  context?: AiContextReq
 }
 
 export interface AiChatReq {
@@ -423,12 +426,26 @@ export interface AiChatReq {
   prompt: string
   context: AiContextReq
   history?: AiHistoryMessage[]
-  /** Optional user-selected assistant mode instruction. */
+  /** Optional prompt supplied by the selected assistant mode; the server always adds its invariant core system prompt. */
   assistantModePrompt?: string
+  /** User-visible assistant mode label stored in the request receipt. */
+  assistantMode?: string
+  /** Selected assistant mode id used to snapshot a new or updated thread. */
+  assistantModeId?: string
   /** Chapter-level spoiler boundary; omitted by legacy clients to use the thread default. */
   readingScope?: AiReadingScope
   /** Optional per-request allowlist for the server's bounded read-only tools. */
   enabledTools?: AiToolName[]
+}
+
+export interface AiRetryRecipe {
+  /** The bounded context and selected mode prompt needed to issue the same request again. */
+  context: AiChatReq['context']
+  readingScope: AiReadingScope
+  enabledTools: AiToolName[]
+  assistantMode?: string
+  assistantModeId?: string
+  assistantModePrompt?: string
 }
 
 export interface AiCitation {
@@ -449,6 +466,7 @@ export interface AiMessageRes {
   role: 'user' | 'assistant'
   content: string
   context: AiContextReceipt | null
+  retry: AiRetryRecipe | null
   citations: AiCitation[]
   createdAt: number
   aborted: boolean
@@ -482,6 +500,14 @@ export interface AiThreadUpdateReq {
 export interface AiThreadSettings {
   readingScope: AiReadingScope
   enabledTools: AiToolName[]
+  /** Optional for backward compatibility with threads created before mode snapshots. */
+  assistantModeId?: string
+}
+
+export interface AiConversationSettings {
+  readingScope: AiReadingScope
+  enabledTools: AiToolName[]
+  assistantModeId: string
 }
 
 export interface AiThreadListReq {
@@ -549,14 +575,13 @@ export interface AiStatusRes {
   models: AiModelRes[]
   prompts: AiPromptTemplate[]
   modes: AiAssistantMode[]
+  lastUsedConversationSettings: AiConversationSettings
   embeddingProfileId: string | null
   embeddingProvider: AiProvider | null
   embeddingModel: string | null
   embeddingModels: AiModelRes[]
   embeddingConfigured: boolean
   activeProfileId: string | null
-  maxSelectionChars: number
-  maxContextChars: number
 }
 
 export interface AiConfigRes {
@@ -568,6 +593,7 @@ export interface AiConfigRes {
   models: AiModelRes[]
   prompts: AiPromptTemplate[]
   modes: AiAssistantMode[]
+  lastUsedConversationSettings: AiConversationSettings
   embeddingProfileId: string | null
   embeddingProvider: AiProvider | null
   embeddingModel: string | null
@@ -594,8 +620,12 @@ export interface AiConfigUpdateReq {
   embeddingModels?: AiModelRes[]
   /** Replaces the user's bounded quick-prompt template list; null restores defaults. */
   prompts?: AiPromptTemplateInput[] | null
-  /** Replaces the bounded user-authored assistant mode list; null restores the built-in assistant. */
+  /** Replaces the bounded user-authored assistant mode list; null clears custom modes. */
   modes?: AiAssistantModeInput[] | null
+  /** Updates the built-in assistant mode; null restores its default name and prompt. */
+  defaultAssistantMode?: AiAssistantModeInput | null
+  /** Updates the user-level snapshot copied into newly created AI threads. */
+  lastUsedConversationSettings?: AiConversationSettings
   /** Missing preserves the saved key; null clears it. */
   apiKey?: string | null
 }
@@ -607,6 +637,10 @@ export interface AiContextReceipt {
   beforeChars: number
   /** Character count of chapter text returned by a read tool. */
   chapterChars?: number
+  /** Character count of explicitly attached chapter context. */
+  directChapterChars?: number
+  /** Metadata for explicitly attached chapter context; chapter text is never persisted. */
+  directChapterReferences?: Array<{ chapterIndex: number; chapterTitle?: string }>
   /** Character count of book-search results returned by a retrieval tool. */
   ragChars?: number
   /** Character count of note-search results returned by a retrieval tool. */

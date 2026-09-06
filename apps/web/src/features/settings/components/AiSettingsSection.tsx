@@ -4,7 +4,7 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type D
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
 import { getAiModelCapabilityFlags, isAiEmbeddingModel } from '@bookdock/shared'
-import type { AiModelRes, AiProfileRes, AiPromptScope, AiPromptTemplate, AiPromptTemplateInput, AiProvider, AiProviderRes } from '@bookdock/shared'
+import type { AiModelRes, AiProfileRes, AiPromptTemplate, AiPromptTemplateInput, AiProvider, AiProviderRes } from '@bookdock/shared'
 
 import { useActivateAiProfile, useAiConfig, useAiProviders, useCreateAiProfile, useDeleteAiProfile, useFetchAiModels, useTestAiConfigDraft, useUpdateAiConfig, useUpdateAiProfile } from '@/api/hooks/useAi'
 import AiBrandIcon from '@/components/ui/AiBrandIcon'
@@ -36,8 +36,9 @@ interface AiPromptFormState {
   id?: string
   name: string
   prompt: string
-  scope: AiPromptScope
 }
+
+const AI_PROMPT_VARIABLES = ['{SELTEXT}', '{SELPARA}', '{CHAPTER}'] as const
 
 function fingerprint(value: string) {
   let hash = 2166136261
@@ -454,8 +455,12 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
   const addToast = useToastStore((s) => s.addToast)
   const [drafts, setDrafts] = useState(prompts)
   const [form, setForm] = useState<AiPromptFormState | null>(null)
+  const [variableHelpOpen, setVariableHelpOpen] = useState(false)
+  const variableHelpRef = useRef<HTMLDivElement>(null)
+  const promptTextareaRef = useRef<HTMLTextAreaElement>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   useEffect(() => setDrafts(prompts), [prompts])
+  useDismissiblePopup(variableHelpOpen, variableHelpRef, () => setVariableHelpOpen(false))
 
   function persist(next: AiPromptTemplate[], onSuccess?: () => void) {
     setDrafts(next)
@@ -476,19 +481,40 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
   }
 
   function openCreate() {
-    setForm({ name: '', prompt: '', scope: 'both' })
+    setVariableHelpOpen(false)
+    setForm({ name: '', prompt: '' })
   }
 
   function openEdit(prompt: AiPromptTemplate) {
-    setForm({ id: prompt.id, name: prompt.name, prompt: prompt.prompt, scope: prompt.scope })
+    setVariableHelpOpen(false)
+    setForm({ id: prompt.id, name: prompt.name, prompt: prompt.prompt })
+  }
+
+  function closeForm() {
+    setVariableHelpOpen(false)
+    setForm(null)
+  }
+
+  function insertVariable(variable: typeof AI_PROMPT_VARIABLES[number]) {
+    if (!form) return
+    const textarea = promptTextareaRef.current
+    const start = textarea?.selectionStart ?? form.prompt.length
+    const end = textarea?.selectionEnd ?? start
+    const nextPrompt = `${form.prompt.slice(0, start)}${variable}${form.prompt.slice(end)}`
+    const nextCursor = start + variable.length
+    setForm({ ...form, prompt: nextPrompt })
+    window.requestAnimationFrame(() => {
+      promptTextareaRef.current?.focus()
+      promptTextareaRef.current?.setSelectionRange(nextCursor, nextCursor)
+    })
   }
 
   function submitForm() {
     if (!form || !form.name.trim() || !form.prompt.trim()) return
     const next = form.id
-      ? drafts.map((prompt) => prompt.id === form.id ? { ...prompt, name: form.name.trim(), prompt: form.prompt.trim(), scope: form.scope } : prompt)
-      : [...drafts, { id: `custom-${Date.now().toString(36)}`, name: form.name.trim(), prompt: form.prompt.trim(), scope: form.scope, enabled: true, order: drafts.length ? Math.max(...drafts.map((prompt) => prompt.order)) + 10 : 10, builtIn: false }]
-    persist(next, () => setForm(null))
+      ? drafts.map((prompt) => prompt.id === form.id ? { ...prompt, name: form.name.trim(), prompt: form.prompt.trim() } : prompt)
+      : [...drafts, { id: `custom-${Date.now().toString(36)}`, name: form.name.trim(), prompt: form.prompt.trim(), scope: 'both' as const, enabled: true, order: drafts.length ? Math.max(...drafts.map((prompt) => prompt.order)) + 10 : 10, builtIn: false }]
+    persist(next, closeForm)
   }
 
   function onDragEnd({ active, over }: DragEndEvent) {
@@ -519,17 +545,36 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
         </ul>
       </SortableContext>
     </DndContext>}
-    {form && <Modal title={_(form.id ? 'settings.aiPromptEdit' : 'settings.aiPromptAdd')} onClose={() => setForm(null)}>
+    {form && <Modal title={_(form.id ? 'settings.aiPromptEdit' : 'settings.aiPromptAdd')} onClose={closeForm}>
       <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); submitForm() }}>
-        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.aiPromptName')}</span><input required autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="h-9 rounded-lg border border-stone-200 bg-transparent px-3 text-sm outline-none focus:border-blue-500 dark:border-stone-700" /></label>
-        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.aiPromptText')}</span><textarea required rows={5} value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} className="resize-y rounded-lg border border-stone-200 bg-transparent px-3 py-2 text-sm leading-5 outline-none focus:border-blue-500 dark:border-stone-700" /></label>
-        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.aiPromptScope')}</span><select value={form.scope} onChange={(event) => setForm({ ...form, scope: event.target.value as AiPromptScope })} className="h-9 rounded-lg border border-stone-200 bg-transparent px-3 text-sm outline-none focus:border-blue-500 dark:border-stone-700"><option value="selection">{_('settings.aiPromptSelection')}</option><option value="reading">{_('settings.aiPromptReading')}</option><option value="both">{_('settings.aiPromptBoth')}</option></select></label>
-        <div className="flex justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800"><button type="button" onClick={() => setForm(null)} className="rounded-lg border border-stone-200 px-4 py-2 text-xs text-stone-600 dark:border-stone-700 dark:text-stone-300">{_('library.cancel')}</button><button type="submit" disabled={!form.name.trim() || !form.prompt.trim()} className="rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-40 dark:bg-stone-100 dark:text-stone-900">{_('settings.aiPromptApply')}</button></div>
+        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.aiPromptName')}</span><input required autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={_('settings.aiPromptNamePlaceholder')} className="h-9 rounded-lg border border-stone-200 bg-transparent px-3 text-sm outline-none focus:border-blue-500 dark:border-stone-700" /></label>
+        <div className="flex flex-col gap-2 text-xs text-stone-600 dark:text-stone-300">
+          <div ref={variableHelpRef} className="relative flex items-center gap-1.5">
+            <span>{_('settings.aiPromptVariables')}</span>
+            <button type="button" onClick={() => setVariableHelpOpen((open) => !open)} aria-label={_('settings.aiPromptVariablesHelp')} aria-expanded={variableHelpOpen} className={`flex h-5 w-5 items-center justify-center rounded-full transition-colors ${variableHelpOpen ? 'bg-stone-200 text-stone-800 dark:bg-stone-700 dark:text-stone-100' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'}`}>
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+            </button>
+            {variableHelpOpen && <div role="dialog" aria-label={_('settings.aiPromptVariablesHelpTitle')} className="absolute left-0 top-7 z-20 w-80 max-w-[calc(100vw-3rem)] rounded-xl border border-stone-200 bg-white p-3 shadow-xl dark:border-stone-700 dark:bg-stone-900">
+              <p className="mb-3 text-sm font-medium text-stone-900 dark:text-stone-100">{_('settings.aiPromptVariablesHelpTitle')}</p>
+              <dl className="space-y-3">
+                <div><dt className="font-mono text-xs text-stone-800 dark:text-stone-100">{'{SELTEXT}'}</dt><dd className="mt-1 leading-relaxed text-stone-500 dark:text-stone-400">{_('settings.aiPromptVariableSelText')}</dd></div>
+                <div><dt className="font-mono text-xs text-stone-800 dark:text-stone-100">{'{SELPARA}'}</dt><dd className="mt-1 leading-relaxed text-stone-500 dark:text-stone-400">{_('settings.aiPromptVariableSelPara')}</dd></div>
+                <div><dt className="font-mono text-xs text-stone-800 dark:text-stone-100">{'{CHAPTER}'}</dt><dd className="mt-1 leading-relaxed text-stone-500 dark:text-stone-400">{_('settings.aiPromptVariableChapter')}</dd></div>
+              </dl>
+            </div>}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {AI_PROMPT_VARIABLES.map((variable) => <button key={variable} type="button" onClick={() => insertVariable(variable)} aria-label={_('settings.aiPromptInsertVariable', { variable })} className="rounded-lg border border-stone-200 px-2.5 py-1.5 font-mono text-xs text-stone-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-stone-700 dark:text-stone-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300">{variable}</button>)}
+          </div>
+          <p className="text-[11px] text-stone-400 dark:text-stone-500">{_('settings.aiPromptVariablesHint')}</p>
+        </div>
+        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.aiPromptText')}</span><textarea ref={promptTextareaRef} required rows={5} value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} placeholder={_('settings.aiPromptTextPlaceholder')} className="resize-y rounded-lg border border-stone-200 bg-transparent px-3 py-2 text-sm leading-5 outline-none focus:border-blue-500 dark:border-stone-700" /></label>
+        <div className="flex justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800"><button type="button" onClick={closeForm} className="rounded-lg border border-stone-200 px-4 py-2 text-xs text-stone-600 dark:border-stone-700 dark:text-stone-300">{_('library.cancel')}</button><button type="submit" disabled={!form.name.trim() || !form.prompt.trim() || update.isPending} className="rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-40 dark:bg-stone-100 dark:text-stone-900">{_('settings.aiPromptApply')}</button></div>
       </form>
     </Modal>}
   </section>
 }
 
 function toPromptInput(prompt: AiPromptTemplate): AiPromptTemplateInput {
-  return { id: prompt.id, name: prompt.name, prompt: prompt.prompt, scope: prompt.scope, enabled: prompt.enabled, order: prompt.order }
+  return { id: prompt.id, name: prompt.name, prompt: prompt.prompt, enabled: prompt.enabled, order: prompt.order }
 }

@@ -127,6 +127,8 @@ describe('AI lexical retrieval service', () => {
     await indexAiBook('user-1', { bookId: 'book-1' })
     expect((await searchAiBook('user-1', { bookId: 'book-1', query: '公开词语', maxChapterIndex: 0 })).results).toEqual([])
     expect((await searchAiBook('user-1', { bookId: 'book-1', query: '公开词语', maxChapterIndex: 1 })).results[0]?.chapterIndex).toBe(1)
+    expect((await searchAiBook('user-1', { bookId: 'book-1', query: '公开词语', minChapterIndex: 1, maxChapterIndex: 1 })).results[0]?.chapterIndex).toBe(1)
+    expect((await searchAiBook('user-1', { bookId: 'book-1', query: '秘密关键词', minChapterIndex: 1, maxChapterIndex: 1 })).results).toEqual([])
 
     content = '第一章 这里是更新后的新关键词，旧内容已经失效。'
     chapters = [{ id: 'ch-0', title: '第一章', level: 1, startOffset: 0, endOffset: content.length, contentStartOffset: 0 }]

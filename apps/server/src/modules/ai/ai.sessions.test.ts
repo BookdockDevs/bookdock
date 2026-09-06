@@ -28,6 +28,12 @@ describe('AI session service', () => {
       role: 'user',
       content: '解释第一章',
       context: { selectionChars: 4, beforeChars: 0, contextChars: 4, chapterTitle: '第一章', sourceCfi: 'selection' },
+      retry: {
+        context: { chapterIndex: 0, chapterTitle: '第一章', cfiRange: 'selection', selection: '正文' },
+        readingScope: 'to_here',
+        enabledTools: ['get_book_toc', 'get_chapter_content'],
+        assistantMode: '助理',
+      },
     })
     saveAiMessage('user-1', thread.id, {
       role: 'assistant',
@@ -41,7 +47,7 @@ describe('AI session service', () => {
       id: thread.id,
       bookId: 'book-1',
       messages: [
-        expect.objectContaining({ role: 'user', content: '解释第一章', context: expect.objectContaining({ selectionChars: 4 }), aborted: false }),
+        expect.objectContaining({ role: 'user', content: '解释第一章', context: expect.objectContaining({ selectionChars: 4 }), retry: expect.objectContaining({ readingScope: 'to_here' }), aborted: false }),
         expect.objectContaining({
           role: 'assistant', content: '这是解释', context: null, aborted: true,
           citations: [{ id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 2, endOffset: 8, excerpt: '命中段落' }],
@@ -59,12 +65,17 @@ describe('AI session service', () => {
     const first = prepareAiThread('user-1', 'book-1', undefined, '  总结\n第一章   内容  ')
     expect(getAiThread('user-1', first.threadId).title).toBe('总结 第一章 内容')
 
-    saveAiMessage('user-1', first.threadId, { role: 'user', content: '服务端问题' })
+    const context = { chapterIndex: 0, chapterTitle: '第一章', cfiRange: 'selection', selection: '服务端引用原文', before: '服务端前文' }
+    saveAiMessage('user-1', first.threadId, {
+      role: 'user',
+      content: '服务端问题',
+      retry: { context, readingScope: 'to_here', enabledTools: ['get_book_toc'] },
+    })
     saveAiMessage('user-1', first.threadId, { role: 'assistant', content: '服务端回答' })
     expect(prepareAiThread('user-1', 'book-1', first.threadId, '客户端伪造历史')).toMatchObject({
       threadId: first.threadId,
       history: [
-        { role: 'user', content: '服务端问题' },
+        { role: 'user', content: '服务端问题', context },
         { role: 'assistant', content: '服务端回答' },
       ],
       settings: {

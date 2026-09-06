@@ -83,6 +83,7 @@ export default function Reader() {
   }, [footerVisible])
   const setSelection = useReaderState((s) => s.setSelection)
   const setAiContext = useReaderState((s) => s.setAiContext)
+  const setAiPendingPrompt = useReaderState((s) => s.setAiPendingPrompt)
   const replaceTarget = useReaderState((s) => s.replaceTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const setTocItems = useReaderState((s) => s.setTocItems)
@@ -590,12 +591,13 @@ export default function Reader() {
     onNavigatePending: ({ pending }) => setNavPending(pending),
     onChromeToggle: () => {
       // Tap-to-toggle: anything visible (pinned bars, the settings popover,
-      // or the mobile bottom sheet) dismisses on tap; nothing visible reveals
-      // the reading chrome.
-      if (chromePinned || settingsOpen || sidebarOpen) {
+      // or a dismissible sidebar) closes on tap. A locked desktop sidebar is
+      // persistent and must not participate in reading-chrome dismissal.
+      const dismissibleSidebarOpen = sidebarOpen && (isTouch || !toolbarLocked)
+      if (chromePinned || settingsOpen || dismissibleSidebarOpen) {
         setChromePinned(false)
         setSettingsOpen(false)
-        setSidebarOpen(false)
+        if (dismissibleSidebarOpen) setSidebarOpen(false)
       } else {
         setChromePinned(true)
       }
@@ -685,6 +687,7 @@ export default function Reader() {
     setCurrentChapter(null)
     setCurrentChapterIndex(null)
     setAiContext(null)
+    setAiPendingPrompt(null)
     // chapterCount starts empty; the effect below syncs it when chapters arrive
     segmentTrackerRef.current = createSegmentTracker()
     lastSegmentStartRef.current = null
@@ -693,7 +696,7 @@ export default function Reader() {
     syncHistoryCaps()
     historyAutoHideRef.current?.dispose()
     currentCfiRef.current = null
-  }, [id, setAiContext, setCurrentChapter, setCurrentChapterIndex, syncHistoryCaps])
+  }, [id, setAiContext, setAiPendingPrompt, setCurrentChapter, setCurrentChapterIndex, syncHistoryCaps])
 
   // The displacement threshold scales with the chapter count (big books cap it
   // at two chapter widths); update it once the chapters arrive

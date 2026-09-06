@@ -449,7 +449,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   sortOrder: getInitial<string>('bd-sort-order', 'desc') === 'asc' ? ('asc' as const) : ('desc' as const),
   view: getInitial<string>('bd-library-view', 'grid') === 'list' ? ('list' as const) : ('grid' as const),
   toolbarLocked: getInitialBoolean('bd-reader-toolbar-locked', false),
-  sidebarWidth: getInitialNumber('bd-sidebar-width', 288, 200, 500),
+  sidebarWidth: getInitialNumber('bd-sidebar-width', 288, 200, 640),
 
   setCoverText: (coverText) => {
     setStorage('bd-cover-text', String(coverText))

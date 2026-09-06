@@ -64,6 +64,15 @@ describe('AI read-only tools', () => {
     })
   })
 
+  it('restricts the table of contents and chapter reads to the current-chapter interval', async () => {
+    const toc = await executeAiTool('user-1', 'book-1', { id: 'call-current-toc', name: 'get_book_toc', arguments: '{}' }, new AbortController().signal, 1, undefined, undefined, 1)
+    expect(JSON.parse(toc.content).chapters).toEqual([{ index: 1, id: 'ch-1', title: '第一章', level: 1, wordCount: 20 }])
+
+    const blocked = await executeAiTool('user-1', 'book-1', { id: 'call-current-chapter', name: 'get_chapter_content', arguments: '{"chapterIndex":0}' }, new AbortController().signal, 1, undefined, undefined, 1)
+    expect(blocked.content).toContain('outside the current reading boundary')
+    expect(getBookChapterContent).not.toHaveBeenCalled()
+  })
+
   it('bounds one chapter result and never accepts a negative index', async () => {
     const execution = await executeAiTool('user-1', 'book-1', { id: 'call-2', name: 'get_chapter_content', arguments: '{"chapterIndex":1}' }, new AbortController().signal)
     const value = JSON.parse(execution.content) as { content: string; truncated: boolean; chapterIndex: number }

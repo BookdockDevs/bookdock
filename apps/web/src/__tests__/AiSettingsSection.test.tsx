@@ -288,26 +288,49 @@ describe('AiSettingsSection', () => {
     expect(screen.queryByRole('button', { name: '编辑 AI 供应商' })).toBeNull()
   })
 
-  it('saves quick prompt edits immediately without a separate save button', () => {
+  it('saves quick command edits immediately without a separate save button', () => {
     useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
     const mutate = vi.fn()
     vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
 
     render(<AiSettingsSection />)
-    expect(screen.queryByRole('button', { name: '保存快捷提示' })).toBeNull()
+    expect(screen.getByText('快捷指令')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存快捷指令' })).toBeNull()
     expect(screen.queryByRole('button', { name: '上移' })).toBeNull()
     expect(screen.queryByRole('button', { name: '下移' })).toBeNull()
-    expect(screen.getAllByRole('button', { name: '调整快捷提示顺序' })).toHaveLength(6)
-    fireEvent.click(screen.getByRole('button', { name: '添加快捷提示' }))
-    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '线索提取' } })
-    fireEvent.change(screen.getByLabelText('提示内容'), { target: { value: '请列出当前内容中的关键线索。' } })
-    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    expect(screen.getAllByRole('button', { name: '调整快捷指令顺序' })).toHaveLength(6)
+    fireEvent.click(screen.getByRole('button', { name: '添加快捷指令' }))
+    fireEvent.change(screen.getByLabelText('指令名称'), { target: { value: '线索提取' } })
+    fireEvent.change(screen.getByLabelText('提示词模板'), { target: { value: '请列出当前内容中的关键线索。' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     expect(mutate).toHaveBeenCalledWith(
       { prompts: expect.arrayContaining([
-        expect.objectContaining({ name: '线索提取', prompt: '请列出当前内容中的关键线索。', scope: 'both', enabled: true }),
+        expect.objectContaining({ name: '线索提取', prompt: '请列出当前内容中的关键线索。', enabled: true }),
       ]) },
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     )
+  })
+
+  it('explains quick-command variables and inserts them at the prompt cursor', () => {
+    useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+    vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
+
+    render(<AiSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '添加快捷指令' }))
+
+    expect(screen.getByPlaceholderText('输入指令名称')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('输入提示词模板，使用上方变量插入阅读内容…')).toBeInTheDocument()
+    expect(screen.getByText('点击变量可将其插入到提示词模板的光标位置')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看变量说明' }))
+    expect(screen.getByRole('dialog', { name: '变量说明' })).toHaveTextContent('用户当前选中的文本内容；没有选区时为空。')
+    expect(screen.getByRole('dialog', { name: '变量说明' })).toHaveTextContent('选中文本所在的完整段落；没有选区时使用当前阅读段落。')
+    expect(screen.getByRole('dialog', { name: '变量说明' })).toHaveTextContent('当前正在阅读章节的完整正文；展开时受上下文长度限制。')
+
+    const textarea = screen.getByLabelText('提示词模板')
+    fireEvent.change(textarea, { target: { value: '请解释' } })
+    textarea.setSelectionRange(1, 1)
+    fireEvent.click(screen.getByRole('button', { name: '插入变量 {SELTEXT}' }))
+    expect(textarea).toHaveValue('请{SELTEXT}解释')
   })
 })

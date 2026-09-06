@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, blob, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core'
 
-import type { AiCitation, AiContextReceipt, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
+import type { AiCitation, AiContextReceipt, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -107,6 +107,7 @@ export const aiMessages = sqliteTable('ai_messages', {
   role: text('role', { enum: ['user', 'assistant'] }).notNull(),
   content: text('content').notNull(),
   context: text('context', { mode: 'json' }).$type<AiContextReceipt | null>(),
+  retry: text('retry', { mode: 'json' }).$type<AiRetryRecipe | null>(),
   citations: text('citations', { mode: 'json' }).$type<AiCitation[] | null>(),
   createdAt: integer('created_at').notNull(),
   aborted: integer('aborted').notNull().default(0),

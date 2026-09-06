@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
@@ -6,6 +6,7 @@ import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
 import { useToastStore } from '@/stores/toast.store'
 import { useReaderState } from '../state/reader-state'
 import { useReaderApi } from '../hooks/useReaderApi'
+import { useAiQuickCommands, type AiQuickCommand } from '../hooks/useAiQuickCommands'
 import { useTtsSession } from '../hooks/useTtsSession'
 import { useAnnotations, useCreateAnnotation, useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { IdeaOverlay } from './IdeaOverlay'
@@ -24,10 +25,11 @@ import {
 } from './annotation-colors'
 import { BulbIcon, CopyIcon, ExcerptShareIcon, ReplaceIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
 
-const BAR_WIDTH = 214
+const BAR_WIDTH = 356
 const BAR_HEIGHT = 44
 const STYLE_WIDTH = 236
 const STYLE_HEIGHT = 40
+const AI_MENU_WIDTH = 184
 
 const iconBtn = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-stone-200 transition-colors hover:bg-white/10 hover:text-white'
 
@@ -36,6 +38,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
   const selection = useReaderState((s) => s.selection)
   const setSelection = useReaderState((s) => s.setSelection)
   const setAiContext = useReaderState((s) => s.setAiContext)
+  const setAiPendingPrompt = useReaderState((s) => s.setAiPendingPrompt)
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
@@ -51,9 +54,13 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
   const update = useUpdateAnnotation(bookId)
   const del = useDeleteAnnotation(bookId)
   const { data: annotations } = useAnnotations(bookId)
+  const { commands: aiCommands } = useAiQuickCommands()
 
   const [createdLocal, setCreatedLocal] = useState<AnnotationRes | null>(null)
   const [noteEditing, setNoteEditing] = useState(false)
+  const [aiMenuAnchor, setAiMenuAnchor] = useState<{ left: number; top: number; bottom: number } | null>(null)
+  const aiMenuButtonRef = useRef<HTMLButtonElement>(null)
+  const aiMenuRef = useRef<HTMLDivElement>(null)
   // A brand-new idea stays local until published — nothing hits the server
   // before the user commits, so cancels leave no placeholder row behind
   const [noteDraft, setNoteDraft] = useState(false)
@@ -65,7 +72,26 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     setNoteEditing(false)
     setNoteDraft(false)
     setNoteEditorRange(null)
+    setAiMenuAnchor(null)
   }, [selection?.cfiRange, setNoteEditorRange])
+  useEffect(() => {
+    if (!aiMenuAnchor) return
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node) || (!aiMenuButtonRef.current?.contains(target) && !aiMenuRef.current?.contains(target))) {
+        setAiMenuAnchor(null)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAiMenuAnchor(null)
+    }
+    document.addEventListener('pointerdown', dismiss, true)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss, true)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [aiMenuAnchor])
 
   if (!selection) return null
 
@@ -232,13 +258,45 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
     close()
   }
 
-  function askAi() {
+  function runAiCommand(command: AiQuickCommand) {
     if (!selection) return
-    setAiContext({ ...selection, chapterIndex: currentChapterIndex ?? undefined, chapterTitle: currentChapter ?? undefined })
+    setAiContext({
+      ...selection,
+      chapterIndex: selection.chapterIndex ?? currentChapterIndex ?? undefined,
+      chapterTitle: selection.chapterTitle ?? currentChapter ?? undefined,
+    })
+    setAiPendingPrompt(command.prompt)
     renderer?.deselect()
     setSelection(null)
+    setNoteEditorRange(null)
+    setAiMenuAnchor(null)
     setActiveNavTab('ai')
     setSidebarOpen(true)
+  }
+
+  function openAiChat() {
+    if (!selection) return
+    setAiContext({
+      ...selection,
+      chapterIndex: selection.chapterIndex ?? currentChapterIndex ?? undefined,
+      chapterTitle: selection.chapterTitle ?? currentChapter ?? undefined,
+    })
+    setAiPendingPrompt(null)
+    renderer?.deselect()
+    setSelection(null)
+    setNoteEditorRange(null)
+    setAiMenuAnchor(null)
+    setActiveNavTab('ai')
+    setSidebarOpen(true)
+  }
+
+  function toggleAiMenu() {
+    if (aiMenuAnchor) {
+      setAiMenuAnchor(null)
+      return
+    }
+    const rect = aiMenuButtonRef.current?.getBoundingClientRect()
+    if (rect) setAiMenuAnchor({ left: rect.left, top: rect.top, bottom: rect.bottom })
   }
 
   function readSelection() {
@@ -330,12 +388,22 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
       ? { key: 'delete', label: _('annotation.deleteHighlight'), icon: <TrashIcon />, danger: true, onClick: () => removeAnnotation() }
       : { key: 'highlight', label: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, danger: false, onClick: highlight },
     { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
-    { key: 'ai', label: 'AI 解释', icon: (
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-        <path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" />
-        <path d="m19 15 .75 2.25L22 18l-2.25.75L19 21l-.75-2.25L16 18l2.25-.75z" />
+    { key: 'ai-chat', label: _('reader.aiChatSelection'), icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 11.5a8 8 0 0 1-8 8 8.3 8.3 0 0 1-3.5-.8L4 20l1.3-4A8 8 0 1 1 20 11.5Z" />
+        <path d="M8.5 11h.01M12 11h.01M15.5 11h.01" strokeWidth="2.4" />
       </svg>
-    ), danger: false, onClick: askAi },
+    ), danger: false, onClick: openAiChat },
+    { key: 'ai-commands', label: _('reader.aiQuickCommands'), icon: (
+      <span className="flex items-center gap-px">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m13 2-8 12h7l-1 8 8-12h-7z" />
+        </svg>
+        <svg className={`h-2.5 w-2.5 transition-transform ${aiMenuAnchor ? 'rotate-180' : ''}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="m3 4.5 3 3 3-3" />
+        </svg>
+      </span>
+    ), danger: false, onClick: toggleAiMenu },
     { key: 'tts', label: _('reader.ttsFromSelection'), icon: (
       <svg width="18" height="18" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 6 2 29M12 6l9 23M5 20.5h14" />
@@ -393,9 +461,12 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         {actions.map((a) => (
           <button
             key={a.key}
+            ref={a.key === 'ai-commands' ? aiMenuButtonRef : undefined}
             onClick={a.onClick}
             title={a.label}
-            className={`${iconBtn} ${a.danger ? 'text-red-400 hover:text-red-300' : ''}`}
+            aria-haspopup={a.key === 'ai-commands' ? 'menu' : undefined}
+            aria-expanded={a.key === 'ai-commands' ? Boolean(aiMenuAnchor) : undefined}
+            className={`${iconBtn} ${a.key === 'ai-commands' && aiMenuAnchor ? 'bg-white/15 text-white' : ''} ${a.danger ? 'text-red-400 hover:text-red-300' : ''}`}
           >
             {a.icon}
           </button>
@@ -407,6 +478,37 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
           style={{ left: bar.caretLeft - 6 }}
         />
       </div>
+      {aiMenuAnchor && (
+        <div
+          ref={aiMenuRef}
+          role="menu"
+          data-testid="selection-ai-commands"
+          aria-label={_('reader.aiQuickCommands')}
+          className="fixed z-[51] overflow-y-auto rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1.5 text-[var(--bd-read-text)] shadow-2xl"
+          style={{
+            left: Math.min(
+              Math.max(8, aiMenuAnchor.left - 8),
+              Math.max(8, window.innerWidth - AI_MENU_WIDTH - 8),
+            ),
+            ...(window.innerHeight - aiMenuAnchor.bottom >= 120
+              ? { top: aiMenuAnchor.bottom + 6, maxHeight: Math.max(80, window.innerHeight - aiMenuAnchor.bottom - 14) }
+              : { bottom: window.innerHeight - aiMenuAnchor.top + 6, maxHeight: Math.max(80, aiMenuAnchor.top - 14) }),
+            width: AI_MENU_WIDTH,
+          }}
+        >
+          {aiCommands.length > 0 ? aiCommands.map((command) => (
+            <button
+              key={command.id}
+              type="button"
+              role="menuitem"
+              onClick={() => runAiCommand(command)}
+              className="flex min-h-10 w-full items-center rounded-lg px-3 text-left text-sm transition-colors hover:bg-[var(--bd-read-page-bg)]"
+            >
+              <span className="min-w-0 flex-1 truncate">{command.name}</span>
+            </button>
+          )) : <p className="px-3 py-3 text-xs text-[var(--bd-read-sub)]">{_('reader.aiPromptsEmpty')}</p>}
+        </div>
+      )}
     </>
   )
 }

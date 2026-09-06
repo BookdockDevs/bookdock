@@ -239,6 +239,13 @@
       "when": 1792200000000,
       "tag": "0033_ai_thread_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792300000000,
+      "tag": "0034_ai_message_retry",
+      "breakpoints": true
     }
   ]
 }

@@ -97,6 +97,18 @@ function textBeforeSelection(doc: Document, range: Range, maxLength = 2_000): st
   }
 }
 
+export function textParagraphSelection(range: Range, maxLength = 8_000): string {
+  try {
+    const node = range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer as Element
+      : range.startContainer.parentElement
+    const paragraph = node?.closest('p, li, blockquote, dd, dt, h1, h2, h3, h4, h5, h6')
+    return paragraph?.textContent?.replace(/\s+/g, ' ').trim().slice(0, maxLength) ?? ''
+  } catch {
+    return ''
+  }
+}
+
 // Click-to-turn zone config (F3). Kept pure for unit tests.
 export type ClickAreaMode = 'standard' | 'fullscreen' | 'swap' | 'none'
 
@@ -1643,11 +1655,14 @@ export class FoliateReader implements BookReader {
         this.selectionActive = true
         const startNode = range.startContainer
         const beforeText = textBeforeSelection(doc, range)
+        const paragraphText = textParagraphSelection(range)
         const info: SelectionInfo = {
           cfiRange,
           text: text.slice(0, 500),
           rawText,
+          chapterIndex: index,
           ...(beforeText ? { beforeText } : {}),
+          ...(paragraphText ? { paragraphText } : {}),
           rect: this.popupRect(doc, range),
           // Point-patch anchors (P2): the offset is counted on the rendered
           // document (conversion is length-preserving, so it equals the
@@ -2064,6 +2079,10 @@ export class FoliateReader implements BookReader {
     } catch {
       return ''
     }
+  }
+
+  getCurrentParagraphText(maxLength = 8_000): string {
+    return this.lastRange ? textParagraphSelection(this.lastRange, maxLength) : ''
   }
 
   // Text starting at the range's start point. Location CFIs collapse to a

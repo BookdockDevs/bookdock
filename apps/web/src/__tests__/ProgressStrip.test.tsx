@@ -34,6 +34,11 @@ function renderStrip(overrides: Partial<Parameters<typeof ProgressStrip>[0]> = {
 }
 
 describe('ProgressStrip drag preview', () => {
+  it('animates the individual translate property used by the bottom chrome', () => {
+    const { view } = renderStrip()
+    expect(view.container.firstElementChild).toHaveClass('transition-[bottom,translate]', 'duration-300')
+  })
+
   it('shows the real chapter and percent when idle', () => {
     renderStrip()
     expect(screen.getByText('1 / 2')).toBeInTheDocument()

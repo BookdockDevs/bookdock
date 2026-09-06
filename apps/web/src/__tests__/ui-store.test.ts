@@ -70,3 +70,17 @@ describe('ui.store recentlyReadStyle migration', () => {
     expect(store.getState().recentlyReadStyle).toBe('covers')
   })
 })
+
+describe('ui.store reader sidebar width', () => {
+  it('restores the full width range offered by the resize handle', async () => {
+    localStorage.setItem('bd-sidebar-width', '640')
+    const store = await freshStore()
+    expect(store.getState().sidebarWidth).toBe(640)
+  })
+
+  it('clamps stale widths to the resize bounds', async () => {
+    localStorage.setItem('bd-sidebar-width', '900')
+    const store = await freshStore()
+    expect(store.getState().sidebarWidth).toBe(640)
+  })
+})

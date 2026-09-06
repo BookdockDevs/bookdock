@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import { AI_DEFAULT_READING_SCOPE, AI_TOOL_NAMES } from '@bookdock/shared'
-import type { AiCitation, AiContextReceipt, AiHistoryMessage, AiReadingScope, AiThreadCreateReq, AiThreadDetailRes, AiThreadListReq, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, AiToolName } from '@bookdock/shared'
+import type { AiCitation, AiContextReceipt, AiHistoryMessage, AiReadingScope, AiRetryRecipe, AiThreadCreateReq, AiThreadDetailRes, AiThreadListReq, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, AiToolName } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { aiMessages, aiThreads, books } from '../../db/schema'
@@ -13,6 +13,7 @@ const MAX_THREAD_TITLE_LENGTH = 100
 const DEFAULT_THREAD_SETTINGS: AiThreadSettings = {
   readingScope: AI_DEFAULT_READING_SCOPE,
   enabledTools: [...AI_TOOL_NAMES],
+  assistantModeId: 'assistant',
 }
 
 interface AiThreadContext {
@@ -23,14 +24,17 @@ interface AiThreadContext {
 }
 
 function normalizeThreadSettings(value: unknown): AiThreadSettings {
-  const raw = value && typeof value === 'object' ? value as { readingScope?: unknown; enabledTools?: unknown } : {}
+  const raw = value && typeof value === 'object' ? value as { readingScope?: unknown; enabledTools?: unknown; assistantModeId?: unknown } : {}
   const readingScope: AiReadingScope = raw.readingScope === 'current_chapter' || raw.readingScope === 'full_book'
     ? raw.readingScope
     : DEFAULT_THREAD_SETTINGS.readingScope
   const enabledTools = Array.isArray(raw.enabledTools)
     ? Array.from(new Set(raw.enabledTools.filter((name): name is AiToolName => typeof name === 'string' && AI_TOOL_NAMES.includes(name as AiToolName))))
     : [...DEFAULT_THREAD_SETTINGS.enabledTools]
-  return { readingScope, enabledTools }
+  const assistantModeId = typeof raw.assistantModeId === 'string' && raw.assistantModeId.trim()
+    ? raw.assistantModeId.trim().slice(0, 100)
+    : DEFAULT_THREAD_SETTINGS.assistantModeId
+  return { readingScope, enabledTools, assistantModeId }
 }
 
 function assertBookOwnership(userId: string, bookId: string) {
@@ -66,6 +70,7 @@ function toMessageRes(row: typeof aiMessages.$inferSelect) {
     role: row.role,
     content: row.content,
     context: row.context ?? null,
+    retry: row.retry ?? null,
     citations: row.citations ?? [],
     createdAt: row.createdAt,
     aborted: row.aborted === 1,
@@ -171,7 +176,7 @@ export function prepareAiThread(userId: string, bookId: string, threadId: string
     const thread = ownedThread(userId, threadId)
     if (thread.bookId !== bookId) throw new AppError('AI_THREAD_NOT_FOUND', 'AI thread does not belong to this book')
     const effectiveSettings = normalizeThreadSettings({ ...normalizeThreadSettings(thread.settings), ...settings })
-    if (settings && (settings.readingScope !== undefined || settings.enabledTools !== undefined)) {
+    if (settings && (settings.readingScope !== undefined || settings.enabledTools !== undefined || settings.assistantModeId !== undefined)) {
       getDb().update(aiThreads).set({ settings: effectiveSettings, updatedAt: Date.now() }).where(and(
         eq(aiThreads.id, thread.id),
         eq(aiThreads.userId, userId),
@@ -187,7 +192,11 @@ export function prepareAiThread(userId: string, bookId: string, threadId: string
         : []
     return {
       threadId: thread.id,
-      history: messages.filter((message) => !replaceMessageIds.includes(message.id)).map((message) => ({ role: message.role, content: message.content })),
+      history: messages.filter((message) => !replaceMessageIds.includes(message.id)).map((message) => ({
+        role: message.role,
+        content: message.content,
+        ...(message.role === 'user' && message.retry?.context ? { context: message.retry.context } : {}),
+      })),
       settings: effectiveSettings,
       ...(replaceMessageIds.length > 0 ? { replaceMessageIds } : {}),
     }
@@ -200,7 +209,7 @@ export function prepareAiThread(userId: string, bookId: string, threadId: string
 export function saveAiMessage(
   userId: string,
   threadId: string,
-  message: { role: 'user' | 'assistant'; content: string; context?: AiContextReceipt | null; citations?: AiCitation[]; aborted?: boolean; replaceMessageIds?: string[] },
+  message: { role: 'user' | 'assistant'; content: string; context?: AiContextReceipt | null; retry?: AiRetryRecipe | null; citations?: AiCitation[]; aborted?: boolean; replaceMessageIds?: string[] },
 ) {
   if (!message.content.trim()) return undefined
   ownedThread(userId, threadId)
@@ -225,6 +234,7 @@ export function saveAiMessage(
       role: message.role,
       content: message.content,
       context: message.context ?? null,
+      retry: message.retry ?? null,
       citations: message.citations?.length ? message.citations : null,
       createdAt: now,
       aborted: message.aborted ? 1 : 0,

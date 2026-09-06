@@ -116,7 +116,7 @@ function result(content: string, call: AiToolCall, chapterIndex?: number, citati
   }
 }
 
-export async function executeAiTool(userId: string, bookId: string, call: AiToolCall, signal: AbortSignal, maxChapterIndex = -1, embedder?: AiEmbedder, visibleTextVersion?: string): Promise<AiToolExecution> {
+export async function executeAiTool(userId: string, bookId: string, call: AiToolCall, signal: AbortSignal, maxChapterIndex = -1, embedder?: AiEmbedder, visibleTextVersion?: string, minChapterIndex = 0): Promise<AiToolExecution> {
   if (!TOOL_MAP.has(call.name)) return result('Unknown tool', call)
   if (signal.aborted) throw new DOMException('The AI request was aborted', 'AbortError')
 
@@ -124,9 +124,10 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
     if (call.name === 'get_book_toc') {
       const book = await getActiveBook(userId, bookId)
       const chapters = await getBookChapters(userId, bookId)
-      const visibleChapters = maxChapterIndex >= 0 ? chapters.slice(0, maxChapterIndex + 1) : chapters
+      const visibleChapters = chapters.slice(minChapterIndex, maxChapterIndex >= 0 ? maxChapterIndex + 1 : undefined)
       const boundedChapters = []
-      for (const [index, chapter] of visibleChapters.entries()) {
+      for (const [offset, chapter] of visibleChapters.entries()) {
+        const index = minChapterIndex + offset
         const item = {
           index,
           id: chapter.id,
@@ -148,7 +149,7 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
     if (call.name === 'search_book') {
       const query = parseArguments(call.arguments).query
       if (typeof query !== 'string' || !query.trim()) return result('Invalid query: expected a non-empty string.', call)
-      const search = await searchAiBook(userId, { bookId, query, limit: 5, maxChapterIndex }, { signal, embedder, ...(visibleTextVersion ? { visibleTextVersion } : {}) })
+      const search = await searchAiBook(userId, { bookId, query, limit: 5, maxChapterIndex, ...(minChapterIndex > 0 ? { minChapterIndex } : {}) }, { signal, embedder, ...(visibleTextVersion ? { visibleTextVersion } : {}) })
       const citations = search.results.map((item) => ({
         id: item.id,
         chapterIndex: item.chapterIndex,
@@ -172,7 +173,7 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
       const notes = await searchAnnotations(userId, bookId, normalizedQuery, 8)
       const visibleNotes = notes.flatMap((annotation) => {
         const chapter = annotation.chapter ? chapterIndexByTitle.get(annotation.chapter) : undefined
-        if (maxChapterIndex >= 0 && (!chapter || chapter.index > maxChapterIndex)) return []
+        if ((maxChapterIndex >= 0 && (!chapter || chapter.index > maxChapterIndex)) || chapter?.index !== undefined && chapter.index < minChapterIndex) return []
         return [{ annotation, chapter }]
       })
       const citations = visibleNotes.map(({ annotation, chapter }) => {
@@ -204,7 +205,7 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
     if (typeof chapterIndex !== 'number' || !Number.isInteger(chapterIndex) || chapterIndex < 0) {
       return result('Invalid chapterIndex: expected a non-negative integer.', call)
     }
-    if (maxChapterIndex >= 0 && chapterIndex > maxChapterIndex) {
+    if ((maxChapterIndex >= 0 && chapterIndex > maxChapterIndex) || chapterIndex < minChapterIndex) {
       return result('The requested chapter is outside the current reading boundary.', call, chapterIndex)
     }
     const indexedChapter = visibleTextVersion
