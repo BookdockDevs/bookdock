@@ -1,16 +1,13 @@
-// Named reading-setting profiles (grill 定案 2026-08-12, activation/sync
-// rework 2026-08-13): a full-snapshot config set layered above the flat
-// global store fields. The store keeps the resolved config's values in its
-// flat fields; this module owns the persistent multi-config state:
+// Named reading-setting profiles are full-snapshot config sets layered above
+// the flat global store fields. The store keeps the resolved config's values in
+// its flat fields; this module owns the persistent multi-config state:
 // `{ global, presets[] }`, serialized as one JSON string (`readingConfig`) in
-// localStorage + the server sync payload.
+// localStorage and the server sync payload.
 //
 // Activation is deliberately NOT part of the synced blob (intents sync,
 // outcomes stay local): the device-local active preset lives in the ui.store
 // (`bd-reading-active-preset`), per-book bindings in `book.meta.boundPresetId`.
-// Resolution chain: bound preset > device active > global. Legacy blobs
-// carried `active` inside the payload — parseReadingConfig drops it and
-// legacyActiveId lets callers adopt it as the device pointer.
+// Resolution chain: bound preset > device active > global.
 
 // Exactly the settings reachable in the reader's settings menu — fonts,
 // typography, layout (incl. per-mode backing), reading mode, chrome, margins,
@@ -95,18 +92,6 @@ export function parseReadingConfig(raw: string | null | undefined): ReadingConfi
     const global = parsed.global && typeof parsed.global === 'object' ? parsed.global : null
     if (!global) return null
     return { global: global as ReadingSnapshot, presets }
-  } catch {
-    return null
-  }
-}
-
-/** Legacy blobs carried the device pointer inside the payload; callers adopt
- * it as the device-local active preset when the device has none yet. */
-export function legacyActiveId(raw: string | null | undefined): string | null {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as { active?: unknown }
-    return parsed && typeof parsed.active === 'string' ? parsed.active : null
   } catch {
     return null
   }

@@ -16,7 +16,7 @@ interface ExpandingSearchBarProps {
   progress?: number | null
   /** Trailing controls rendered at the right of the input (e.g. options button) */
   children?: ReactNode
-  /** Search-history chips shown while the input is empty (Readest parity) */
+  /** Search-history chips shown while the input is empty */
   history?: string[]
   onHistoryClick?: (term: string) => void
   onClearHistory?: () => void

@@ -8,7 +8,7 @@ const MIN_SESSION_SECONDS = 5
 const HIDDEN_GRACE_MS = 10_000
 // No relocate (page turn / scroll position change) for this long = not actively
 // reading (walked away, staring at a static page) — settle and pause. Same
-// trade-off as Readest's idleTimeout: a single page read for >2min only counts
+// A single page read for more than two minutes only counts
 // the first 2 minutes.
 const IDLE_TIMEOUT_MS = 120_000
 

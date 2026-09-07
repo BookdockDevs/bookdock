@@ -6,10 +6,11 @@ A self-hosted web e-book library. pnpm monorepo — `@bookdock/shared` (contract
 
 | Doc | Purpose |
 |---|---|
+| [`../CHANGELOG.md`](../CHANGELOG.md) | User-facing release history and version-specific upgrade notes |
 | [`architecture.md`](./architecture.md) | Authoritative architecture blueprint (design principles, module layout, schema, API, ADRs) |
 | [`plan.md`](./plan.md) | Curated public roadmap (P0/P1/P2/P3) |
 
-> Private development tracking lives under `docs/local/` (git-ignored): full dev-log plan, ADRs, domain glossary, and competitor research.
+> Private development tracking lives under `docs/local/` (git-ignored): full dev-log plan, ADRs, and domain glossary.
 
 ## Quick start
 

@@ -8,7 +8,7 @@ FROM base AS build
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
-# The server bundles @bookdock/shared, so legacy deploy avoids requiring
+# The server bundles @bookdock/shared, so standalone deploy avoids requiring
 # injected workspace packages solely for the production layout step.
 RUN pnpm --filter @bookdock/server deploy --legacy --prod /out/server
 

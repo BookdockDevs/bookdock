@@ -352,7 +352,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const [searchMenuPos, setSearchMenuPos] = useState<{ top: number; right: number } | null>(null)
   const searchMenuBtnRef = useRef<HTMLButtonElement>(null)
   const searchGenRef = useRef(0)
-  // Search-history chips (Readest parity): per-book, deduped, capped at 10;
+  // Search-history chips are per-book, deduped, and capped at 10;
   // only completed searches with hits are recorded
   const [searchHistory, setSearchHistory] = useState<string[]>(() => loadSearchHistory(bookId))
   // Mirror of `open` for the debounced search: `open` is deliberately out of

@@ -6,7 +6,7 @@ export interface ProgressFileData {
   chapter?: string | null
   percent: number
   fraction?: number | null
-  intervals?: FractionInterval[]
+  intervals: FractionInterval[]
   updatedAt: number
   [key: string]: unknown
 }
@@ -34,9 +34,7 @@ export async function mergeProgressInterval(bookId: string, interval: FractionIn
   const [start, end] = interval[0] <= interval[1] ? interval : [interval[1], interval[0]]
   if (end <= start) return
   const existing = await readProgressFile(bookId)
-  // Legacy files have no intervals: everything up to the current position
-  // counts as read (same assumption as progress.service's upsert)
-  const base = existing?.intervals ?? [[0, existing?.fraction ?? 0] as FractionInterval]
+  const base = existing?.intervals ?? []
   const intervals = mergeInterval(base, [start, end])
   const payload: ProgressFileData = existing
     ? { ...existing, intervals, updatedAt: Date.now() }

@@ -9,7 +9,6 @@ import {
   deleteReadingPreset as deletePreset,
   emptyConfig,
   foldReadingChange,
-  legacyActiveId,
   parseReadingConfig,
   pickReadingSnapshot,
   renameReadingPreset as renamePreset,
@@ -31,22 +30,6 @@ export type RecentlyReadStyle = 'off' | 'covers' | 'cards'
 export type ListInfoItem = 'progress' | 'size' | 'lastRead' | 'shelf' | 'tags' | 'createdAt'
 /** Fixed display order: the row renders enabled items in this sequence */
 export const LIST_INFO_ITEMS: ListInfoItem[] = ['progress', 'size', 'lastRead', 'shelf', 'tags', 'createdAt']
-
-export const SETTINGS_VERSION = 1
-const VERSION_KEY = 'bd-settings-version'
-
-function migrateSettings(): number {
-  if (typeof window === 'undefined') return SETTINGS_VERSION
-  const currentVer = Number(localStorage.getItem(VERSION_KEY)) || 0
-  if (currentVer >= SETTINGS_VERSION) return currentVer
-
-  let v = currentVer
-  // Future migrations: while (v < SETTINGS_VERSION) { v = migrate_v${v}_to_${v + 1}() }
-  localStorage.setItem(VERSION_KEY, String(v))
-  return v
-}
-
-const initialSettingsVersion = migrateSettings()
 
 const CUSTOM_THEMES_KEY = 'bd-read-custom-themes'
 
@@ -75,7 +58,6 @@ function persistCustomThemes(themes: CustomReadingTheme[]) {
 }
 
 interface UiState {
-  settingsVersion: number
   uiTheme: UiTheme
   readingThemeId: string
   lightReadingThemeId: string
@@ -232,8 +214,7 @@ interface UiState {
   setPageAnimation: (v: boolean) => void
 }
 
-// UI theme is fixed to follow the system preference; the stored `uiTheme`
-// field remains only for settings-sync schema compatibility.
+// UI theme is fixed to follow the system preference.
 export function getEffectiveTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined') return 'light'
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -312,9 +293,6 @@ function getInitialActivePresetId(): string | null {
   return localStorage.getItem(ACTIVE_PRESET_STORAGE_KEY)
 }
 
-// Reading-profile config from a previous session; the flat getInitial* values
-// below are overridden by the resolved snapshot right after store creation
-// (config is authoritative for the reading keys once it exists).
 function getInitialReadingConfig(): ReadingConfig | null {
   if (typeof window === 'undefined') return null
   return parseReadingConfig(localStorage.getItem(CONFIG_STORAGE_KEY))
@@ -323,13 +301,8 @@ const initialReadingConfig = getInitialReadingConfig()
 
 const initialReadingMode = getInitial<ReadingMode>('bd-reading-mode', 'scroll')
 
-// Click-area mode migrated from the pre-rework three booleans: the old keys
-// win while present, otherwise the mode defaults to the standard three zones.
 function getInitialClickAreaMode(): ClickAreaMode {
   if (typeof window === 'undefined') return 'standard'
-  if (localStorage.getItem('bd-click-disable') === 'true') return 'none'
-  if (localStorage.getItem('bd-click-fullscreen-area') === 'true') return 'fullscreen'
-  if (localStorage.getItem('bd-click-swap-area') === 'true') return 'swap'
   const stored = localStorage.getItem('bd-click-area-mode')
   if (stored === 'standard' || stored === 'fullscreen' || stored === 'swap' || stored === 'none') return stored
   return 'standard'
@@ -337,34 +310,22 @@ function getInitialClickAreaMode(): ClickAreaMode {
 
 const initialScrollPageWidth = getInitialNumber('bd-page-width', 800, 400, 1800)
 
-// Cover prefs migrated from the merged tri-state enum (bd-cover-style) and,
-// before that, the boolean pair (bd-cover-mode=true meant cover-only,
-// bd-cover-fit='true' meant object-contain). New keys win while present.
 function getInitialCoverText(): boolean {
   if (typeof window === 'undefined') return true
   const stored = localStorage.getItem('bd-cover-text')
-  if (stored !== null) return stored === 'true'
-  const style = localStorage.getItem('bd-cover-style')
-  if (style !== null) return style !== 'none'
-  if (localStorage.getItem('bd-cover-mode') === 'true') return false
-  return true
+  return stored === null ? true : stored === 'true'
 }
 
 function getInitialCoverFit(): CoverFit {
   if (typeof window === 'undefined') return 'crop'
   const stored = localStorage.getItem('bd-cover-fit')
-  if (stored === 'crop' || stored === 'full') return stored
-  if (stored === 'true') return 'full' // legacy boolean form
-  if (localStorage.getItem('bd-cover-style') === 'full') return 'full'
-  return 'crop'
+  return stored === 'full' ? 'full' : 'crop'
 }
 
 function getInitialRecentlyReadStyle(): RecentlyReadStyle {
   if (typeof window === 'undefined') return 'off'
   const stored = localStorage.getItem('bd-recently-read-style')
-  if (stored === 'off' || stored === 'covers' || stored === 'cards') return stored
-  if (localStorage.getItem('bd-show-recently-read') === 'true') return 'cards'
-  return 'off'
+  return stored === 'covers' || stored === 'cards' ? stored : 'off'
 }
 const initialScrollHorizontalPadding = getInitialNumber('bd-horizontal-padding', 0, 0, 120)
 const initialScrollVerticalPadding = getInitialNumber('bd-vertical-padding', 0, 0, 120)
@@ -380,7 +341,6 @@ const initialHorizontalPadding = initialReadingMode === 'page' ? initialPageHori
 const initialVerticalPadding = initialReadingMode === 'page' ? initialPageVerticalPadding : initialScrollVerticalPadding
 
 export const useUiStore = create<UiState>((set, get) => ({
-  settingsVersion: initialSettingsVersion,
   uiTheme: getInitialUiTheme(),
   readingThemeId: getInitial<string>('bd-read-theme', 'paper'),
   lightReadingThemeId: getInitial<string>('bd-read-theme-light', 'paper'),
@@ -821,14 +781,6 @@ function applyResolutionFlat() {
 {
   const existing = initialReadingConfig
   if (existing) {
-    // Legacy blobs carried the device pointer inside the payload; adopt it
-    // when this device has no local pointer yet.
-    if (useUiStore.getState().activePresetId === null) {
-      const legacy = legacyActiveId(localStorage.getItem(CONFIG_STORAGE_KEY))
-      if (legacy && existing.presets.some((p) => p.id === legacy)) {
-        persistActivePresetId(legacy)
-      }
-    }
     useUiStore.getState().applyReadingResolution()
   } else {
     persistReadingConfig(emptyConfig(pickReadingSnapshot(useUiStore.getState())))

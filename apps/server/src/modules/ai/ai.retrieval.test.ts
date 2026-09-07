@@ -112,7 +112,7 @@ describe('AI lexical retrieval service', () => {
 
   it('builds only the local lexical index when search is requested before explicit semantic indexing', async () => {
     const embedder = vi.fn(async (texts: string[], _signal: AbortSignal, kind: 'document' | 'query') => ({
-      provider: 'custom' as const,
+      provider: 'openai' as const,
       model: 'test-embedding',
       vectors: texts.map(() => kind === 'query' ? [1, 0] : [0, 1]),
     }))
@@ -159,7 +159,7 @@ describe('AI lexical retrieval service', () => {
 
   it('builds optional embeddings and recalls semantic matches through hybrid search', async () => {
     const embedder = vi.fn(async (texts: string[], _signal: AbortSignal, kind: 'document' | 'query') => ({
-      provider: 'custom' as const,
+      provider: 'openai' as const,
       model: 'test-embedding',
       vectors: texts.map((text) => kind === 'query' || text.includes('秘密') ? [1, 0] : [0, 1]),
     }))
@@ -178,7 +178,7 @@ describe('AI lexical retrieval service', () => {
 
   it('falls back to lexical retrieval when the embedding provider changes', async () => {
     const indexEmbedder = vi.fn(async (texts: string[], _signal: AbortSignal, kind: 'document' | 'query') => ({
-      provider: 'custom' as const,
+      provider: 'openai' as const,
       model: 'test-embedding',
       vectors: texts.map(() => kind === 'query' ? [1, 0] : [0, 1]),
     }))
@@ -197,7 +197,7 @@ describe('AI lexical retrieval service', () => {
 
   it('falls back to lexical retrieval when query embedding exceeds its short budget', async () => {
     const indexEmbedder = vi.fn(async (texts: string[], _signal: AbortSignal, kind: 'document' | 'query') => ({
-      provider: 'custom' as const,
+      provider: 'openai' as const,
       model: 'test-embedding',
       vectors: texts.map(() => kind === 'query' ? [1, 0] : [0, 1]),
     }))
@@ -209,7 +209,7 @@ describe('AI lexical retrieval service', () => {
         if (kind === 'query') {
           return new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Embedding timed out', 'AbortError')), { once: true }))
         }
-        return { provider: 'custom' as const, model: 'test-embedding', vectors: [[1, 0]] }
+        return { provider: 'openai' as const, model: 'test-embedding', vectors: [[1, 0]] }
       })
       const searchPromise = searchAiBook('user-1', { bookId: 'book-1', query: '秘密关键词' }, { embedder: slowEmbedder })
       await vi.advanceTimersByTimeAsync(5_000)
@@ -226,7 +226,7 @@ describe('AI lexical retrieval service', () => {
 
   it('keeps user cancellation effective while query embedding is pending', async () => {
     const indexEmbedder = vi.fn(async (texts: string[], _signal: AbortSignal, kind: 'document' | 'query') => ({
-      provider: 'custom' as const,
+      provider: 'openai' as const,
       model: 'test-embedding',
       vectors: texts.map(() => kind === 'query' ? [1, 0] : [0, 1]),
     }))
@@ -237,7 +237,7 @@ describe('AI lexical retrieval service', () => {
       if (kind === 'query') {
         return new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true }))
       }
-      return { provider: 'custom' as const, model: 'test-embedding', vectors: [[1, 0]] }
+      return { provider: 'openai' as const, model: 'test-embedding', vectors: [[1, 0]] }
     })
     const searchPromise = searchAiBook('user-1', { bookId: 'book-1', query: '秘密关键词' }, { embedder: slowEmbedder, signal: controller.signal })
 
@@ -258,7 +258,7 @@ describe('AI lexical retrieval service', () => {
       if (kind === 'document') {
         await new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true }))
       }
-      return { provider: 'custom' as const, model: 'test-embedding', vectors: [[1, 0]] }
+      return { provider: 'openai' as const, model: 'test-embedding', vectors: [[1, 0]] }
     })
     const job = indexAiBook('user-1', { bookId: 'book-1', force: true }, { embedder })
 

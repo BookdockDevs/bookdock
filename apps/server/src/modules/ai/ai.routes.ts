@@ -36,7 +36,7 @@ aiRoutes.patch('/config', async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI configuration', details: parsed.error.flatten() } }, 400)
   }
-  return c.json({ data: updateAiConfig(user.id, user.role, parsed.data) } satisfies { data: AiConfigRes })
+  return c.json({ data: updateAiConfig(user.id, parsed.data) } satisfies { data: AiConfigRes })
 })
 
 aiRoutes.post('/profiles', async (c) => {

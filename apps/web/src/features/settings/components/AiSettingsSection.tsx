@@ -13,7 +13,6 @@ import Modal from '@/components/ui/Modal'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
-import { isRetiredAiPrompt, localizeAiPromptName, migrateAiPromptText } from '@/lib/ai-prompt-migrations'
 import { useAuthStore } from '@/stores/auth.store'
 import { useToastStore } from '@/stores/toast.store'
 
@@ -138,25 +137,8 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   const formRef = useRef<AiFormState | null>(null)
   const providers = providersData?.data ?? FALLBACK_PROVIDERS
   const config = data?.data
-  const hasService = Boolean(config?.baseUrl && config.model)
   const isOwner = user?.role === 'owner'
-  const profiles = useMemo(() => {
-    if (config?.profiles?.length) return config.profiles
-    if (!config || !hasService) return []
-    return [{
-      id: 'legacy',
-      name: '',
-      provider: config.provider,
-      baseUrl: config.baseUrl,
-      model: config.model,
-      models: config.models,
-      embeddingModel: config.embeddingModel ?? null,
-      embeddingModels: config.embeddingModels ?? [],
-      apiKeyConfigured: config.apiKeyConfigured,
-      createdAt: 0,
-      updatedAt: 0,
-    }]
-  }, [config, hasService])
+  const profiles = useMemo(() => config?.profiles ?? [], [config?.profiles])
   const embeddingOptions = useMemo(() => profiles.flatMap((profile) => profile.embeddingModels.map((model) => ({
     key: `${profile.id}::${model.id}`,
     profileId: profile.id,
@@ -164,7 +146,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
     model,
   }))), [profiles, providers])
   const embeddingSelectionKey = config?.embeddingProfileId && config.embeddingModel ? `${config.embeddingProfileId}::${config.embeddingModel}` : ''
-  const selectableProviders = useMemo(() => providers.filter((provider) => provider.id !== 'custom'), [providers])
+  const selectableProviders = useMemo(() => providers, [providers])
   const selectedProvider = form ? providers.find((provider) => provider.id === form.provider) : undefined
   const formProviders = useMemo(() => {
     if (!form || isOwner || selectableProviders.some((provider) => provider.id === form.provider)) return selectableProviders
@@ -204,7 +186,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   function openEdit(profile: AiProfileRes) {
     setModelsLoadedFingerprint('')
     setAvailableModels([])
-    setForm({ id: profile.id, name: profile.name, provider: profile.provider === 'custom' ? 'openai' : profile.provider, baseUrl: profile.baseUrl ?? '', model: profile.model ?? '', models: profile.models, apiKey: '' })
+    setForm({ id: profile.id, name: profile.name, provider: profile.provider, baseUrl: profile.baseUrl ?? '', model: profile.model ?? '', models: profile.models, apiKey: '' })
   }
 
   function changeProvider(provider: AiProvider) {
@@ -221,8 +203,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
     const body = { name: form.name.trim(), provider: form.provider, baseUrl: form.baseUrl.trim() || null, model: selectedModel || null, models: form.models, ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}) }
     const onSuccess = () => { setForm(null); addToast(_('settings.aiSaved'), 'success') }
     const onError = (error: Error) => addToast(error.message, 'error')
-    if (form.id && form.id !== 'legacy') updateProfile.mutate({ id: form.id, body }, { onSuccess, onError })
-    else if (form.id === 'legacy') updateConfig.mutate({ profileId: form.id, ...body }, { onSuccess, onError })
+    if (form.id) updateProfile.mutate({ id: form.id, body }, { onSuccess, onError })
     else create.mutate(body, { onSuccess, onError })
   }
 
@@ -294,8 +275,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
     if (!form) return
     const onSuccess = () => { setForm((current) => current ? { ...current, apiKey: '' } : current); addToast(_('settings.aiKeyCleared'), 'success') }
     const onError = (error: Error) => addToast(error.message, 'error')
-    if (form.id && form.id !== 'legacy') updateProfile.mutate({ id: form.id, body: { apiKey: null } }, { onSuccess, onError })
-    else updateConfig.mutate({ profileId: form.id ?? null, apiKey: null }, { onSuccess, onError })
+    if (form.id) updateProfile.mutate({ id: form.id, body: { apiKey: null } }, { onSuccess, onError })
   }
 
   function openModelPicker() {
@@ -320,7 +300,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   }
 
   function confirmDelete() {
-    if (!pendingDelete || pendingDelete.id === 'legacy') return
+    if (!pendingDelete) return
     remove.mutate(pendingDelete.id, { onSuccess: () => { if (form?.id === pendingDelete.id) setForm(null); setPendingDelete(null); addToast(_('settings.aiDeleted'), 'success') }, onError: (error) => addToast(error.message, 'error') })
   }
 
@@ -345,7 +325,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         {profiles.map((profile) => <div key={profile.id} className="flex items-center gap-3 py-3">
           <AiBrandIcon provider={providers.find((item) => item.id === profile.provider) ?? profile.provider} className="h-8 w-8" />
           <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-sm text-stone-800 dark:text-stone-100">{profile.name || providers.find((item) => item.id === profile.provider)?.name || profile.provider}</p>{config.activeProfileId === profile.id && <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiActive')}</span>}</div><p className="mt-0.5 truncate text-xs text-stone-400">{providers.find((item) => item.id === profile.provider)?.name ?? profile.provider}{profile.model ? ` · ${profile.model}` : ''}</p></div>
-          <div className="flex shrink-0 items-center gap-1"><button type="button" onClick={() => openEdit(profile)} aria-label={_('settings.aiEdit')} title={_('settings.aiEdit')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"><EditIcon /></button>{config.activeProfileId !== profile.id && profile.id !== 'legacy' && <button type="button" onClick={() => activate.mutate(profile.id, { onError: (error) => addToast(error.message, 'error') })} className="rounded-lg px-2 py-1 text-[11px] text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200">{_('settings.aiUse')}</button>}{profile.id !== 'legacy' && <button type="button" onClick={() => setPendingDelete(profile)} aria-label={_('settings.aiDelete')} title={_('settings.aiDelete')} className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"><TrashIcon /></button>}</div>
+          <div className="flex shrink-0 items-center gap-1"><button type="button" onClick={() => openEdit(profile)} aria-label={_('settings.aiEdit')} title={_('settings.aiEdit')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"><EditIcon /></button>{config.activeProfileId !== profile.id && <button type="button" onClick={() => activate.mutate(profile.id, { onError: (error) => addToast(error.message, 'error') })} className="rounded-lg px-2 py-1 text-[11px] text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200">{_('settings.aiUse')}</button>}<button type="button" onClick={() => setPendingDelete(profile)} aria-label={_('settings.aiDelete')} title={_('settings.aiDelete')} className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-stone-200"><TrashIcon /></button></div>
         </div>)}
       </div>}
 
@@ -372,7 +352,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         </label>}
       </div>}
 
-      {!isGuest && config && <AiPromptTemplates prompts={config.prompts ?? defaultPrompts} defaultPrompts={defaultPrompts} update={updateConfig} />}
+      {!isGuest && config && <AiPromptTemplates prompts={config.prompts ?? defaultPrompts} update={updateConfig} />}
 
       {pendingDelete && <ConfirmDialog message={_('settings.aiDeleteConfirm')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
 
@@ -450,7 +430,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   )
 }
 
-function AiPromptTemplates({ prompts, defaultPrompts, update }: { prompts: AiPromptTemplate[]; defaultPrompts: AiPromptTemplate[]; update: ReturnType<typeof useUpdateAiConfig> }) {
+function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; update: ReturnType<typeof useUpdateAiConfig> }) {
   const _ = useTranslation()
   const addToast = useToastStore((s) => s.addToast)
   const [drafts, setDrafts] = useState(prompts)
@@ -459,16 +439,7 @@ function AiPromptTemplates({ prompts, defaultPrompts, update }: { prompts: AiPro
   const variableHelpRef = useRef<HTMLDivElement>(null)
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
-  const normalizedPrompts = useMemo(() => {
-    const defaultPromptById = new Map(defaultPrompts.map((prompt) => [prompt.id, prompt]))
-    return prompts
-      .filter((prompt) => !isRetiredAiPrompt(prompt.id))
-      .map((prompt) => ({
-        ...prompt,
-        name: localizeAiPromptName(prompt.id, prompt.name, defaultPromptById.get(prompt.id)?.name),
-        prompt: migrateAiPromptText(prompt.id, prompt.prompt, defaultPromptById.get(prompt.id)?.prompt),
-      }))
-  }, [defaultPrompts, prompts])
+  const normalizedPrompts = prompts
   useEffect(() => setDrafts(normalizedPrompts), [normalizedPrompts])
   useDismissiblePopup(variableHelpOpen, variableHelpRef, () => setVariableHelpOpen(false))
 

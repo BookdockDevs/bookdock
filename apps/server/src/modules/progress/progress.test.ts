@@ -180,7 +180,7 @@ describe('progress service', () => {
     expect(loaded!.readFraction).toBeCloseTo(0.2)
   })
 
-  it('should initialize legacy progress without fraction from percent', async () => {
+  it('initializes coverage from percent when fraction is unavailable', async () => {
     await upsertProgress(ownerId, bookId, { percent: 30 })
     const loaded = await getProgress(ownerId, bookId)
     expect(loaded!.fraction).toBeNull()

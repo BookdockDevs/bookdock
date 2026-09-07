@@ -102,7 +102,7 @@ describe('AI session service', () => {
     })
   })
 
-  it('normalizes legacy assistant citations when restoring history', () => {
+  it('normalizes assistant citations when restoring history', () => {
     const thread = createAiThread('user-1', { bookId: 'book-1' })
     saveAiMessage('user-1', thread.id, { role: 'user', content: '问题' })
     saveAiMessage('user-1', thread.id, {

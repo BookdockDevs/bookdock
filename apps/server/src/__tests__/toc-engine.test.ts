@@ -53,7 +53,7 @@ describe('scorePattern', () => {
     expect(score).toEqual({ csNum: 0, numE: 0 })
   })
 
-  it('handles the lookbehind form used by legado rules', () => {
+  it('handles lookbehind-based chapter rules', () => {
     // Leading newline so every title line is preceded by whitespace — a
     // lookbehind-constrained rule never matches the file's first byte
     const sample = '\n' + book(['第一章 启程', '第二章 续篇', '第三章 终局'])

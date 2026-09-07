@@ -155,8 +155,8 @@ export interface SettingsRes {
   textAlignJustify?: boolean
   overrideBookFont?: boolean
   overrideBookLayout?: boolean
-  coverMode?: boolean
-  coverFit?: boolean
+  coverText?: boolean
+  coverFit?: 'crop' | 'full'
   gridColumns?: string
   toolbarLocked?: boolean
   sidebarWidth?: number
@@ -260,11 +260,10 @@ export type AiProvider =
   | 'qwen'
   | 'glm'
   | 'moonshot'
-  | 'openrouter'
-  | 'siliconflow'
-  | 'minimax'
-  | 'mimo'
-  | 'custom'
+   | 'openrouter'
+   | 'siliconflow'
+   | 'minimax'
+   | 'mimo'
 
 export type AiProtocol = 'openai-compatible' | 'anthropic' | 'gemini' | 'ollama'
 
@@ -309,7 +308,6 @@ export interface AiPromptTemplateInput {
   id: string
   name: string
   prompt: string
-  /** Legacy compatibility field; new clients do not use it for command availability. */
   scope?: AiPromptScope
   enabled?: boolean
   order?: number
@@ -434,7 +432,7 @@ export interface AiChatReq {
   assistantMode?: string
   /** Selected assistant mode id used to snapshot a new or updated thread. */
   assistantModeId?: string
-  /** Chapter-level spoiler boundary; omitted by legacy clients to use the thread default. */
+  /** Chapter-level spoiler boundary; omitted to use the thread default. */
   readingScope?: AiReadingScope
   /** Optional per-request allowlist for the server's bounded read-only tools. */
   enabledTools?: AiToolName[]
@@ -613,7 +611,7 @@ export interface AiThreadUpdateReq {
 export interface AiThreadSettings {
   readingScope: AiReadingScope
   enabledTools: AiToolName[]
-  /** Optional for backward compatibility with threads created before mode snapshots. */
+  /** Optional when the built-in assistant mode is selected. */
   assistantModeId?: string
 }
 
@@ -720,18 +718,10 @@ export interface AiConfigRes {
 export interface AiConfigUpdateReq {
   /** Switches the active profile without changing its fields. */
   activeProfileId?: string | null
-  /** Backward-compatible update target; omitted means the active profile. */
-  profileId?: string | null
-  name?: string
-  provider?: AiProvider
-  baseUrl?: string | null
-  model?: string | null
-  models?: AiModelRes[]
   /** Explicitly selects the profile used by the selected embedding model; null disables semantic retrieval. */
   embeddingProfileId?: string | null
   /** Explicitly selects an embedding model from that profile; null disables semantic retrieval. */
   embeddingModel?: string | null
-  embeddingModels?: AiModelRes[]
   /** Replaces the user's bounded quick-prompt template list; null restores defaults. */
   prompts?: AiPromptTemplateInput[] | null
   /** Replaces the bounded user-authored assistant mode list; null clears custom modes. */
@@ -740,8 +730,6 @@ export interface AiConfigUpdateReq {
   defaultAssistantMode?: AiAssistantModeInput | null
   /** Updates the user-level snapshot copied into newly created AI threads. */
   lastUsedConversationSettings?: AiConversationSettings
-  /** Missing preserves the saved key; null clears it. */
-  apiKey?: string | null
 }
 
 export type AiContextTruncationReason = 'history' | 'tool_results'
@@ -908,8 +896,8 @@ export interface BookMeta {
    * (preset deleted) falls back to the device resolution chain */
   boundPresetId?: string
   /** TOC rule pinned to this book (id); dangling id falls back to auto-scoring
-   * then the legacy hardcoded patterns. `tocRuleAuto` records that the pin was
-   * chosen by auto-scoring (titled + lazy-reprocessed), not by the user. */
+   * then the built-in default patterns. `tocRuleAuto` records that the pin was
+   * chosen by auto-scoring, not by the user. */
   tocRuleId?: string
   tocRuleAuto?: boolean
 }
@@ -972,12 +960,12 @@ export interface ReadingProgressRes {
   bookId: string
   cfi: string | null
   chapter: string | null
-  /** Zero-based chapter position from the current book TOC; absent on legacy files */
+  /** Zero-based chapter position from the current book TOC. */
   chapterIndex?: number | null
   percent: number
   fraction?: number | null
-  /** Total union length of read intervals, 0-1; absent for legacy progress not yet re-saved */
-  readFraction?: number
+  /** Total union length of read intervals, 0-1. */
+  readFraction: number
   /** Sliding window of reading-speed samples (most recent last) */
   rateSamples?: RateSample[]
   updatedAt: number

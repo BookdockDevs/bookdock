@@ -12,7 +12,7 @@ import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { convertTxtToEpub } from '../../lib/txt-to-epub'
-import { partialMD5, sha256 } from '../../lib/hash'
+import { sha256 } from '../../lib/hash'
 import { countWords } from '../../lib/word-count'
 import type { BookFormat, BookMetadata, Chapter, TocRulePattern, TrashSettings, ViewSettings } from '@bookdock/shared'
 
@@ -20,7 +20,7 @@ import type { BookFormat, BookMetadata, Chapter, TocRulePattern, TrashSettings, 
  * The effective TOC preset for a book: the pinned rule id in books.meta
  * (user-chosen or auto-scored) when it still exists, otherwise nothing.
  * Returns `{ patterns, tocRuleId, tocRuleAuto }`; `patterns` is null when no
- * preset applies (the legacy hardcoded patterns take over) and `tocRuleId` is
+ * preset applies (the built-in patterns take over) and `tocRuleId` is
  * null then too.
  */
 export async function resolveEffectiveTocRule(
@@ -40,7 +40,7 @@ export async function resolveEffectiveTocRule(
   }
 }
 
-/** Auto-score the user's enabled presets against a normalized sample (legado getTocRule).
+/** Auto-score the user's enabled presets against a normalized sample.
  * Returns the winning preset row (with its patterns), or null when none clears the bar. */
 export function scoreTocRules(userId: string, sample: string): typeof tocRules.$inferSelect | null {
   const db = getDb()
@@ -194,33 +194,12 @@ export async function uploadBook(userId: string, file: File, membership?: { shel
     if ((existingTags?.count ?? 0) !== tagIds.length) throw new AppError('TAG_NOT_FOUND')
   }
 
-  // Content-based dedup. New rows store the FULL sha256 (64 hex) of the
-  // original upload as contentHash; legacy rows hold the sampled partialMD5
-  // (32 hex) 鈥?the query matches either. A sampled-hash hit is only a
-  // fingerprint, so duplicates are adjudicated by full hash:
-  // - new-style rows: string compare against the stored full hash (the stored
-  //   blob may be a converted artifact for txt books, so no blob read)
-  // - legacy epub rows: the blob IS the original 鈥?read and sha256-compare
-  // - legacy txt rows: the blob is the converted EPUB, incomparable to the
-  //   upload 鈥?the theoretical sampled-hash collision risk stays (B3 note)
   const contentHash = sha256(buffer)
-  const partial = partialMD5(buffer)
-  const existing = db.select({ id: books.id, filePath: books.filePath, format: books.format, contentHash: books.contentHash }).from(books).where(
-    and(eq(books.userId, userId), inArray(books.contentHash, [contentHash, partial]), isNull(books.deletedAt)),
+  const existing = db.select({ id: books.id }).from(books).where(
+    and(eq(books.userId, userId), eq(books.contentHash, contentHash), isNull(books.deletedAt)),
   ).get()
   if (existing) {
-    let isDuplicate: boolean
-    if (existing.contentHash?.length === 64) {
-      isDuplicate = existing.contentHash === contentHash
-    } else if (existing.format === 'epub') {
-      const existingBuffer = await bufferFromStream(await getStorage().get(existing.filePath))
-      isDuplicate = sha256(existingBuffer) === contentHash
-    } else {
-      isDuplicate = true
-    }
-    if (isDuplicate) {
-      return { book: stripMetaChapters(db.select().from(books).where(eq(books.id, existing.id)).get()!), duplicated: true }
-    }
+    return { book: stripMetaChapters(db.select().from(books).where(eq(books.id, existing.id)).get()!), duplicated: true }
   }
 
   const title = parsed.meta.title || fileName.replace(/\.[^.]+$/, '')
@@ -234,10 +213,7 @@ export async function uploadBook(userId: string, file: File, membership?: { shel
   }
 
   const meta: Record<string, unknown> = {}
-  // Always persist bookmeta (empty object for formats that don't produce one,
-  // e.g. txt): leaving it undefined makes every getBook/getActiveBook call
-  // re-parse the whole stored file on first open (backfillBookmeta), and the
-  // reader fires 3-4 such requests concurrently -> first open hangs.
+  // Persist bookmeta for every upload so book reads never need a metadata pass.
   meta.bookmeta = parsed.meta.bookmeta ?? {}
   let fileKey: string
   let size = buffer.length
@@ -336,41 +312,7 @@ export async function getBook(userId: string, bookId: string) {
   const db = getDb()
   const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
-  if ((book.meta as Record<string, unknown>).bookmeta === undefined) {
-    return (await backfillBookmeta(book)) ?? book
-  }
   return book
-}
-
-// One full-file re-parse per book at a time: the reader fires /books/:id,
-// /file and /chapters concurrently on first open, and each getBook call would
-// otherwise start its own parse of the whole stored file, blocking the event
-// loop. The first resolver writes bookmeta; waiters re-read the row.
-const bookmetaBackfills = new Map<string, Promise<unknown>>()
-
-async function backfillBookmeta(book: typeof books.$inferSelect) {
-  const inFlight = bookmetaBackfills.get(book.id)
-  if (inFlight) {
-    await inFlight
-    return getDb().select().from(books).where(eq(books.id, book.id)).get()
-  }
-  const promise = (async () => {
-    try {
-      const storage = getStorage()
-      const parser = getParser(book.filePath, '')
-      if (!parser) return null
-      const parsed = await parser.parse(await storage.get(book.filePath))
-      const meta = { ...(book.meta as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
-      getDb().update(books).set({ meta }).where(eq(books.id, book.id)).run()
-      return getDb().select().from(books).where(eq(books.id, book.id)).get()
-    } catch {
-      return null
-    } finally {
-      bookmetaBackfills.delete(book.id)
-    }
-  })()
-  bookmetaBackfills.set(book.id, promise)
-  return promise
 }
 
 export async function getActiveBook(userId: string, bookId: string) {
@@ -381,95 +323,13 @@ export async function getActiveBook(userId: string, bookId: string) {
 
 export async function getBookChapters(userId: string, bookId: string) {
   const book = await getBook(userId, bookId)
-  let chapters = (book.meta?.chapters ?? []) as Chapter[]
-
-  // Migrate old txt books that lack normalized chapter metadata.
-  if (book.format === 'txt' && chapters.length > 0 && chapters[0]?.contentStartOffset === undefined) {
-    await regenerateTxtBookContent(userId, bookId)
-    const updatedBook = await getBook(userId, bookId)
-    chapters = (updatedBook.meta?.chapters ?? []) as Chapter[]
-  }
-
-  // Backfill word counts for books uploaded before the feature existed.
-  if (chapters.length > 0 && chapters[0]?.wordCount === undefined) {
-    chapters = (await backfillWordCounts(userId, bookId)) ?? chapters
-  }
-
-  return chapters
-}
-
-async function backfillWordCounts(userId: string, bookId: string): Promise<Chapter[] | null> {
-  try {
-    const book = await getBook(userId, bookId)
-    const storage = getStorage()
-    const buffer = await bufferFromStream(await storage.get(book.filePath))
-    let chapters: Chapter[]
-    if (book.filePath.endsWith('.txt')) {
-      const normalized = normalizeText(decodeTextBuffer(buffer))
-      chapters = scanTxtChapters(normalized).map((c) => ({
-        id: `ch-${c.startOffset}`,
-        title: c.title,
-        level: c.level,
-        startOffset: c.startOffset,
-        endOffset: c.endOffset,
-        contentStartOffset: c.contentStartOffset,
-        wordCount: countWords(normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)),
-      }))
-    } else {
-      const parser = getParser(book.filePath, '')
-      if (!parser) return null
-      const parsed = await parser.parse(buffer)
-      // meta.chapters were built from the same parser output, in the same order
-      const existing = (book.meta?.chapters ?? []) as Chapter[]
-      if (existing.length !== parsed.chapters.length) return null
-      chapters = existing.map((c, idx) => ({ ...c, wordCount: parsed.chapters[idx].wordCount ?? 0 }))
-    }
-    const wordCount = chapters.reduce((sum, c) => sum + (c.wordCount ?? 0), 0)
-    const meta = { ...(book.meta as Record<string, unknown>), chapters, wordCount }
-    getDb().update(books).set({ meta }).where(eq(books.id, bookId)).run()
-    return chapters
-  } catch {
-    // Missing/corrupt file: serve chapters without counts, retry next time.
-    return null
-  }
-}
-
-async function regenerateTxtBookContent(userId: string, bookId: string, patterns?: TocRulePattern[]): Promise<string> {
-  const storage = getStorage()
-  const book = await getBook(userId, bookId)
-
-  // Legacy: parse from original TXT file (pre-refactor books)
-  const stream = await storage.get(book.filePath)
-  const buffer = await bufferFromStream(stream)
-  const text = decodeTextBuffer(buffer)
-  const normalized = normalizeText(text)
-  const chapters = scanTxtChapters(normalized, patterns)
-
-  const db = getDb()
-  const metaChapters = chapters.map((c) => ({
-    id: `ch-${c.startOffset}`,
-    title: c.title,
-    level: c.level,
-    startOffset: c.startOffset,
-    endOffset: c.endOffset,
-    contentStartOffset: c.contentStartOffset,
-    wordCount: countWords(normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)),
-  }))
-  const wordCount = metaChapters.reduce((sum, c) => sum + c.wordCount, 0)
-  const meta = { ...book.meta, chapters: metaChapters, wordCount }
-  db.update(books).set({ meta, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
-
-  return normalized
+  return (book.meta?.chapters ?? []) as Chapter[]
 }
 
 /**
- * Rebuild a TXT book's chapters + stored EPUB from the effective TOC preset:
- * recover the normalized text, re-scan with the given patterns, write
- * meta.chapters/wordCount and overwrite the stored EPUB so the reader serves
- * the new split immediately. Legacy TXT-file books (filePath ends with .txt)
- * keep their file and get meta-only regeneration.
- *
- * Returns the recovered normalized text (used by the legacy content endpoint).
+ * Rebuild a TXT book's chapters and stored EPUB from the effective TOC preset.
+ * The normalized text is recovered from the server-generated EPUB, then the
+ * stored artifact is replaced so the reader serves the new split immediately.
  */
 async function rebuildTocBook(
   userId: string,
@@ -513,23 +373,21 @@ async function rebuildTocBook(
     delete meta.tocRuleAuto
   }
 
-  if (book.filePath.endsWith('.epub')) {
-    const epubChapters = chapters.map((c) => ({
-      id: `ch-${c.startOffset}`,
-      title: c.title,
-      level: c.level,
-    }))
-    const contentFor = (index: number) => {
-      const c = chapters[index]
-      return normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)
-    }
-    const epubBuffer = await convertTxtToEpub(
-      { title: book.title, author: book.author || undefined, id: book.id },
-      epubChapters,
-      contentFor,
-    )
-    await storage.put(book.filePath, epubBuffer)
+  const epubChapters = chapters.map((c) => ({
+    id: `ch-${c.startOffset}`,
+    title: c.title,
+    level: c.level,
+  }))
+  const contentFor = (index: number) => {
+    const c = chapters[index]
+    return normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)
   }
+  const epubBuffer = await convertTxtToEpub(
+    { title: book.title, author: book.author || undefined, id: book.id },
+    epubChapters,
+    contentFor,
+  )
+  await storage.put(book.filePath, epubBuffer)
 
   // A re-split re-indexes the EPUB's chapter files, so the saved progress CFI
   // is stale; keep the book-level percent so the reader can restore by
@@ -554,17 +412,11 @@ async function rebuildTocBook(
 }
 
 /**
- * Recover the normalized text of a TXT book from its stored form:
- * - new-style books store the generated EPUB, from which each chapter's runs
- *   are extracted and reassembled (the server wrote it, so this is lossless);
- * - legacy books store the original .txt, decoded and normalized directly.
+ * Recover the normalized text of a TXT book from its server-generated EPUB.
  */
 export async function recoverTxtNormalized(book: { filePath: string }): Promise<string> {
   const storage = getStorage()
   const buffer = await bufferFromStream(await storage.get(book.filePath))
-  if (!book.filePath.endsWith('.epub')) {
-    return normalizeText(decodeTextBuffer(buffer))
-  }
 
   const zip = await JSZip.loadAsync(buffer)
   const opfEntry = zip.file('OEBPS/content.opf')
@@ -615,8 +467,7 @@ function unescapeXml(text: string): string {
  * Re-TOC a TXT book (POST /books/:id/re-toc). With an explicit `tocRuleId` the
  * rule is pinned (tocRuleAuto=false) and used; with `null` the pin is cleared
  * and auto-scoring decides; with undefined the current effective rule wins.
- * Rebuilds meta.chapters + the stored EPUB, then returns the recovered
- * normalized text for the legacy content endpoint.
+ * Rebuilds meta.chapters + the stored EPUB, then returns the normalized text.
  */
 export async function reTocBook(
   userId: string,
@@ -660,18 +511,11 @@ export async function reTocBook(
 }
 
 export async function getBookContent(userId: string, bookId: string): Promise<string> {
-  const storage = getStorage()
   const book = await getBook(userId, bookId)
   if (book.format !== 'txt') {
     throw new AppError('UNSUPPORTED_FORMAT', 'Content endpoint only supports txt')
   }
-  // Legacy path (pre-refactor content.txt)
-  const legacyKey = `books/${bookId}/content.txt`
-  if (await storage.exists(legacyKey)) {
-    const stream = await storage.get(legacyKey)
-    return (await bufferFromStream(stream)).toString('utf-8')
-  }
-  return regenerateTxtBookContent(userId, bookId)
+  return recoverTxtNormalized(book)
 }
 
 export async function getBookChapterContent(userId: string, bookId: string, chapterIndex: number) {
@@ -697,43 +541,8 @@ export async function getBookChapterContent(userId: string, bookId: string, chap
 export async function getBookEpubBuffer(userId: string, bookId: string): Promise<Buffer> {
   const storage = getStorage()
   const book = await getBook(userId, bookId)
-
-  // New-style path: filePath points to an EPUB (hash-based or books/<id>/book.epub)
-  if (book.filePath.endsWith('.epub') && await storage.exists(book.filePath)) {
-    return bufferFromStream(await storage.get(book.filePath))
-  }
-
-  if (book.format === 'txt') {
-    // Legacy: check old generated.epub cache
-    const cacheKey = `books/${bookId}/generated.epub`
-    if (await storage.exists(cacheKey)) {
-      return bufferFromStream(await storage.get(cacheKey))
-    }
-
-    // Legacy: lazy-generate from normalized text
-    const [content, chapters] = await Promise.all([
-      getBookContent(userId, bookId),
-      getBookChapters(userId, bookId),
-    ])
-    const epubChapters = chapters.map((c) => ({
-      id: c.id,
-      title: c.title,
-      level: c.level,
-    }))
-    const contentFor = (i: number) => {
-      const c = chapters[i]
-      return content.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)
-    }
-    const buffer = await convertTxtToEpub(
-      { title: book.title, author: book.author || undefined, id: book.id },
-      epubChapters,
-      contentFor,
-    )
-    await storage.put(cacheKey, buffer)
-    return buffer
-  }
-
-  throw new AppError('UNSUPPORTED_FORMAT', 'EPUB export only supports txt and epub')
+  if (!(await storage.exists(book.filePath))) throw new AppError('BOOK_FILE_MISSING')
+  return bufferFromStream(await storage.get(book.filePath))
 }
 
 export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata; viewSettings?: ViewSettings | null; boundPresetId?: string | null; tocRuleId?: string | null }) {
@@ -799,7 +608,7 @@ export async function updateBookCover(userId: string, bookId: string, file: File
   const ext = detectImageExtension(buffer)
   if (!ext) throw new AppError('UNSUPPORTED_FORMAT', 'Cover must be a PNG, JPEG or WebP image')
   const storage = getStorage()
-  const coverKey = blobKey(partialMD5(buffer), `.cover.${ext}`)
+  const coverKey = blobKey(sha256(buffer), `.cover.${ext}`)
   await storage.put(coverKey, buffer)
   db.update(books).set({ coverKey, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
   return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
@@ -920,16 +729,6 @@ export async function deleteBook(userId: string, bookId: string) {
   const progressKey = `progress/${bookId}.json`
   if (await storage.exists(progressKey)) {
     await storage.delete(progressKey)
-  }
-  // Legacy content.txt (pre-refactor TXT books)
-  const oldContentKey = `books/${bookId}/content.txt`
-  if (await storage.exists(oldContentKey)) {
-    await storage.delete(oldContentKey)
-  }
-  // Legacy generated.epub (pre-refactor TXT lazy cache)
-  const oldEpubKey = `books/${bookId}/generated.epub`
-  if (await storage.exists(oldEpubKey)) {
-    await storage.delete(oldEpubKey)
   }
   if (book.coverKey) {
     const coverRefs = db.select({ count: sql<number>`count(*)` }).from(books)

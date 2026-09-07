@@ -48,7 +48,7 @@ function firstElement(list: ArrayLike<XmlElement>): XmlElement | null {
 
 const DESCRIPTION_BLOCK_TAGS = new Set(['p', 'div', 'li', 'tr', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
 
-// Descriptions arrive either as escaped HTML text (Calibre) or as nested XHTML
+// Descriptions arrive either as escaped HTML text or as nested XHTML
 // elements; both must keep paragraph breaks instead of flattening into one line.
 function collectDescriptionText(el: XmlElement): string {
   let out = ''

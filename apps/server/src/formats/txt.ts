@@ -28,8 +28,8 @@ export function decodeTextBuffer(buffer: Buffer): string {
   }
 }
 
-/** Legacy hardcoded default patterns (used when no TOC rule is pinned/scored). */
-export const legacyTocPatterns: TocPatternLike[] = [
+/** Built-in default patterns used when no TOC rule is pinned or scored. */
+export const defaultTocPatterns: TocPatternLike[] = [
   { level: 1, regex: '^第[一二三四五六七八九十百千万零\\d]+章\\s*[：:]?\\s*(.+)?$' },
   { level: 1, regex: '^第[一二三四五六七八九十百千万零\\d]+回\\s*[：:]?\\s*(.+)?$' },
   { level: 2, regex: '^第[一二三四五六七八九十百千万零\\d]+节\\s*[：:]?\\s*(.+)?$' },
@@ -44,7 +44,7 @@ const continuationMarks = new Set(['，', '；', '：', '、', '—', '–', '~'
 
 function isChapterTitle(line: string): boolean {
   const trimmed = line.trim()
-  return legacyTocPatterns.some((pattern) => new RegExp(pattern.regex, 'm').test(trimmed))
+  return defaultTocPatterns.some((pattern) => new RegExp(pattern.regex, 'm').test(trimmed))
 }
 
 function isContinuationEnd(line: string): boolean {
@@ -117,17 +117,17 @@ export function detectTxtChapters(text: string): TxtChapter[] {
  * normalizing internally for callers with raw input (tests, TxtParser).
  *
  * `patterns` is an optional TOC-rule preset (TocPatternLike[]); when omitted
- * the legacy hardcoded patterns are used. Matching runs against the WHOLE text
- * with 'g' + 'm' flags (not per trimmed line): this keeps lookbehinds like
- * `(?<=[　\s])` — common in legado rules — functional. Patterns are applied in
+ * the built-in default patterns are used. Matching runs against the WHOLE text
+ * with 'g' + 'm' flags (not per trimmed line): this keeps lookbehinds such as
+ * `(?<=[　\s])` functional. Patterns are applied in
  * order and each line is claimed by the first pattern that hits it; every
  * matched line is pinned to that pattern's level. Titles go through the
  * pattern's $1-style replacement when present. With no matches at all the book
  * falls back to ~10KB chunks aligned on newlines (never a single "全文"
- * chapter), matching legado.
+ * chapter).
  */
 export function scanTxtChapters(normalized: string, patterns?: TocPatternLike[]): TxtChapter[] {
-  const active = patterns && patterns.length > 0 ? patterns.filter((p) => p.enabled !== false) : legacyTocPatterns
+  const active = patterns && patterns.length > 0 ? patterns.filter((p) => p.enabled !== false) : defaultTocPatterns
 
   const claimed = new Set<number>()
   const titles: { offset: number; title: string; level: number }[] = []
@@ -205,7 +205,7 @@ export function scanTxtChapters(normalized: string, patterns?: TocPatternLike[])
   return chapters
 }
 
-/** legado fallback: split into ~10KB blocks aligned to the previous newline. */
+/** Split long text into ~10KB blocks aligned to the previous newline. */
 export function fallbackChapters(normalized: string): TxtChapter[] {
   const blockSize = 10 * 1024
   const chapters: TxtChapter[] = []

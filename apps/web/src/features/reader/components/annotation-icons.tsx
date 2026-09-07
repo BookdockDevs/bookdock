@@ -136,10 +136,8 @@ export function SelectedPositionIcon({ size = 20 }: { size?: number } = {}) {
   )
 }
 
-/** Opening-quote glyph (“) for idea cards. Shape pixel-traced from the 微信读书
- *  reference card (ball r15.5 + short tapered tail whose left edge is the
- *  tangent extension of the ball's left contour, native 72×53, IoU 0.90 vs ref);
- *  a font “ is too thin-stroked and a hand-drawn teardrop misses the geometry */
+/** Opening-quote glyph (“) for idea cards. The path stays inline so it scales
+ * with the card's icon color. */
 export function QuoteLeftIcon({ height = 24 }: { height?: number }) {
   return (
     <svg viewBox="0 0 72 53" width={(height * 72) / 53} height={height} fill="currentColor" stroke="none">

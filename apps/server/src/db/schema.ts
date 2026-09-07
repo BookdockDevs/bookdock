@@ -304,7 +304,7 @@ export const fonts = sqliteTable('fonts', {
 // into chapters. patterns is a JSON array of TocRulePattern (level/regex/
 // replacement/name/enabled). sortOrder drives both the picker order and the
 // auto-scoring priority (lower wins ties). A book pins one rule via
-// books.meta.tocRuleId (legado book.tocUrl analog).
+// books.meta.tocRuleId stores the selected rule for a book.
 export const tocRules = sqliteTable('toc_rules', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

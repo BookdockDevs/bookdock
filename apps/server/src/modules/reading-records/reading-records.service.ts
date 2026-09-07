@@ -289,8 +289,8 @@ function toSessionItem(row: SessionRow): ReadingSessionItem {
     id: row.id,
     bookId: row.bookId,
     date: row.date,
-    // Null only for retroactive no-time entries, which the legacy session
-    // endpoints never list; the mixed detail feed types startedAt as nullable
+    // Null only for retroactive no-time entries, which the session list never
+    // includes; the mixed detail feed types startedAt as nullable.
     startedAt: row.startedAt as number,
     durationSeconds: row.durationSeconds,
     endedAt: row.endedAt,
@@ -318,9 +318,8 @@ export async function listSessions(userId: string, bookId: string, limit: number
   const db = getDb()
   // Manual sessions only: auto-mode blocks are heuristic fragments without
   // exact bounds and are immutable — they never appear in the session list.
-  // Retroactive entries without a start time are excluded too: the legacy
-  // session UI assumes a non-null startedAt; they surface in the mixed
-  // detail feed (getBookDetail) instead.
+  // Retroactive entries without a start time surface in the mixed detail feed
+  // instead of this session list.
   return db.select().from(readingSessions)
     .where(and(
       eq(readingSessions.userId, userId),

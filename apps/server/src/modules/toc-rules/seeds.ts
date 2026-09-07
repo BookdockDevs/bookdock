@@ -15,10 +15,10 @@ export interface SeedTocRule {
 }
 
 /**
- * Built-in presets installed once per user on first access. Ported from
- * legado's assets/defaultData/txtTocRule.json (single-regex rules merged into
- * our multi-level presets). sortOrder 0 is the flat preset so that the common
- * web-novel shape (第X章 only) wins ties over the nested preset; 卷·章·节
+ * Built-in presets installed once per user on first access. The single-regex
+ * patterns are merged into our multi-level presets. sortOrder 0 is the flat
+ * preset so that the common web-novel shape (第X章 only) wins ties over the
+ * nested preset; 卷·章·节
  * competes on volume/section headers, which push its count above the flat one.
  */
 export const SEED_TOC_RULES: SeedTocRule[] = [

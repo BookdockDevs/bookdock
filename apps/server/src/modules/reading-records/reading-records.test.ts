@@ -356,7 +356,7 @@ describe('reading-records service', () => {
     expect(otherUser).toEqual([])
   })
 
-  it('stores retroactive entries with null startedAt, skipped by hourly and the legacy session list', async () => {
+  it('stores retroactive entries with null startedAt and skips them in hourly/session views', async () => {
     await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 600, startedAt: null, endedAt: 1785000600000 })
 
     const session = db.select().from(schema.readingSessions).get()!
@@ -368,7 +368,7 @@ describe('reading-records service', () => {
 
     // no start time → no hour to attribute to
     expect(await getHourly(ownerId, {}, 0)).toEqual([])
-    // the legacy session list assumes non-null startedAt; the mixed detail feed carries it instead
+    // Session entries require a start time for hour attribution.
     expect(await listSessions(ownerId, bookId, 50, 0)).toEqual([])
   })
 
@@ -461,19 +461,18 @@ describe('reading-records service', () => {
     expect(summary.prevMonthSeconds).toBe(90)
   })
 
-  it('sums readFraction × wordCount across books, skipping books without intervals or wordCount', async () => {
+  it('sums readFraction × wordCount and skips books without word counts', async () => {
     db.update(schema.books).set({ meta: { wordCount: 1000 } }).where(eq(schema.books.id, bookId)).run()
     db.update(schema.books).set({ meta: { wordCount: 500 } }).where(eq(schema.books.id, book2Id)).run()
-    // book1: 50% read → 500 words; book2: legacy file without intervals → skipped
     seedProgressFile(files, bookId, { percent: 50, fraction: 0.5, intervals: [[0.1, 0.4], [0.4, 0.6]], updatedAt: 1 })
-    seedProgressFile(files, book2Id, { percent: 80, fraction: 0.8, updatedAt: 1 })
+    seedProgressFile(files, book2Id, { percent: 80, fraction: 0.8, intervals: [[0, 0.8]], updatedAt: 1 })
 
     const summary = await getSummary(ownerId, '2026-07-31')
-    expect(summary.totalWordsRead).toBe(500)
+    expect(summary.totalWordsRead).toBe(900)
 
-    // no wordCount in meta → skipped even with intervals
+    // no wordCount in meta → skipped
     db.update(schema.books).set({ meta: {} }).where(eq(schema.books.id, bookId)).run()
-    expect((await getSummary(ownerId, '2026-07-31')).totalWordsRead).toBe(0)
+    expect((await getSummary(ownerId, '2026-07-31')).totalWordsRead).toBe(400)
   })
 
   it('aggregates reading time by tag, excluding untagged books and honoring the range', async () => {

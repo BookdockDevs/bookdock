@@ -1,0 +1,157 @@
+name: Release Bookdock
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish, for example v0.2.0
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+
+          const tag = process.env.RELEASE_TAG
+          if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag)) {
+            throw new Error(`Unsupported release tag: ${tag}`)
+          }
+
+          const expectedVersion = tag.slice(1)
+          const packageFiles = [
+            'apps/server/package.json',
+            'apps/web/package.json',
+            'packages/shared/package.json',
+          ]
+          const versions = packageFiles.map((file) => {
+            const version = JSON.parse(readFileSync(file, 'utf8')).version
+            console.log(`${file}: ${version}`)
+            return version
+          })
+
+          if (versions.some((version) => version !== expectedVersion)) {
+            throw new Error(`Package versions must all match ${expectedVersion}`)
+          }
+          NODE
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run release checks
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Prepare release notes
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          NOTES_FILE: ${{ runner.temp }}/bookdock-release-notes.md
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+
+          const tag = process.env.RELEASE_TAG
+          const version = tag.slice(1)
+          const lines = readFileSync('CHANGELOG.md', 'utf8').split(/\r?\n/)
+          const englishStart = lines.findIndex((line) => line.startsWith(`## [${version}]`))
+          const chineseHeader = lines.findIndex((line) => line === '## 中文')
+          const chineseStart = lines.findIndex(
+            (line, index) => index > chineseHeader && line.startsWith(`### [${version}]`),
+          )
+          const englishEnd = lines.findIndex(
+            (line, index) => index > englishStart && (line === '## 中文' || line.startsWith('## [')),
+          )
+          const chineseEnd = lines.findIndex(
+            (line, index) => index > chineseStart && line.startsWith('## ['),
+          )
+
+          if (englishStart < 0 || chineseHeader < 0 || chineseStart < 0) {
+            throw new Error(`Could not find bilingual changelog entry for ${tag}`)
+          }
+
+          const english = lines
+            .slice(englishStart, englishEnd < 0 ? lines.length : englishEnd)
+            .join('\n')
+            .trim()
+          const chinese = lines
+            .slice(chineseStart, chineseEnd < 0 ? lines.length : chineseEnd)
+            .join('\n')
+            .trim()
+          writeFileSync(process.env.NOTES_FILE, `${english}\n\n## 中文\n\n${chinese}\n`)
+          NODE
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/bookdock
+          tags: |
+            type=semver,pattern={{version}},value=${{ inputs.tag || github.ref_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref_name }}
+            type=raw,value=latest,enable=${{ !contains(inputs.tag || github.ref_name, '-') }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          NOTES_FILE: ${{ runner.temp }}/bookdock-release-notes.md
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_TAG already exists; leaving it unchanged."
+            exit 0
+          fi
+
+          release_args=(
+            release create "$RELEASE_TAG"
+            --verify-tag
+            --title "Bookdock $RELEASE_TAG"
+            --notes-file "$NOTES_FILE"
+          )
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            release_args+=(--prerelease)
+          fi
+          gh "${release_args[@]}"

@@ -1,12 +1,12 @@
 /**
- * TOC-rule scoring + selection, ported from legado's getTocRule (TextFile.kt).
- * Pure functions only — callers own the sample text and the DB.
+ * TOC-rule scoring and selection. Pure functions only — callers own the sample
+ * text and the database.
  *
- * Auto-scoring answers "which of my presets splits this book best", mirroring
- * legado: each preset's patterns are scored on a 512KB sample; a preset wins
- * when its chapter count is clearly above both the misjudge floor and the
- * current best. The user can pin a preset per book (books.meta.tocRuleId);
- * auto-scoring only runs when no pin exists.
+ * Auto-scoring answers "which of my presets splits this book best". Each
+ * preset's patterns are scored on a 512KB sample; a preset wins when its
+ * chapter count is clearly above both the misjudge floor and the current best.
+ * The user can pin a preset per book (books.meta.tocRuleId); auto-scoring only
+ * runs when no pin exists.
  */
 
 /** Sample size (chars) read from the head of the normalized text. */
@@ -34,7 +34,7 @@ export interface TocScore {
 }
 
 /**
- * Legado's $1-replacement semantics for cleaning a matched line into a title.
+ * `$1`-replacement semantics for cleaning a matched line into a title.
  * `$1`..`$9` refer to capture groups; anything else is kept literally.
  */
 export function applyTitleReplacement(match: RegExpExecArray, replacement?: string | null): string {
@@ -43,11 +43,11 @@ export function applyTitleReplacement(match: RegExpExecArray, replacement?: stri
 }
 
 /**
- * Score a single pattern against a sample (legado TextFile.kt analyze()).
+ * Score a single pattern against a sample.
  * Walks all matches; a match counts as a chapter candidate when it starts the
  * sample or follows >1000 chars of content, and as a misjudge when it follows
  * <100 chars. `last` tracks the previous match position and is updated on
- * every match (legado semantics). Mirrors legado's csNum/numE exactly.
+ * every match so short false positives are counted separately.
  */
 export function scorePattern(pattern: TocPatternLike, sample: string): TocScore {
   let re: RegExp
@@ -93,7 +93,7 @@ export function scorePreset(patterns: TocPatternLike[], sample: string): TocScor
 }
 
 /**
- * Pick the best enabled preset for a sample (legado getTocRule()).
+ * Pick the best enabled preset for a sample.
  * Candidates need csNum >= numE*3; they must beat the current best by more
  * than 2. Stops early once a preset reaches maxNum > 70. Rules are expected to
  * be pre-sorted by sortOrder ascending (lower wins ties). Returns the rule id,

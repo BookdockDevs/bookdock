@@ -6,7 +6,6 @@ import {
   deleteReadingPreset,
   emptyConfig,
   foldReadingChange,
-  legacyActiveId,
   nextPresetName,
   parseReadingConfig,
   pickReadingSnapshot,
@@ -54,20 +53,6 @@ describe('reading profiles', () => {
     }))
     expect(cfg?.presets).toHaveLength(1)
     expect(cfg?.presets[0].id).toBe('ok')
-  })
-
-  it('the blob carries no active pointer; legacy payloads migrate it out', () => {
-    const raw = JSON.stringify({
-      global: snapshot(),
-      presets: [{ id: 'p1', name: 'x', snapshot: snapshot() }],
-      active: 'p1',
-    })
-    const cfg = parseReadingConfig(raw)!
-    expect('active' in cfg).toBe(false)
-    expect(legacyActiveId(raw)).toBe('p1')
-    expect(legacyActiveId(serializeReadingConfig(cfg))).toBeNull()
-    expect(legacyActiveId('not json')).toBeNull()
-    expect(legacyActiveId(null)).toBeNull()
   })
 
   it('creates a preset without touching activation state', () => {

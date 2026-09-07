@@ -59,9 +59,6 @@ function readMemory(): StyleMemory {
         for (const s of HIGHLIGHT_STYLES) {
           if (HIGHLIGHT_COLORS.some((c) => c.name === parsed.colors[s])) colors[s] = parsed.colors[s]
         }
-      } else if (HIGHLIGHT_COLORS.some((c) => c.name === parsed?.color)) {
-        // Legacy shape { color, style }: seed the remembered color for that style
-        colors[style] = parsed.color
       }
       return { style, colors }
     }

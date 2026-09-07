@@ -8,16 +8,18 @@
 - EPUB and TXT remain the main formats.
 - Near-term mobile work means responsive layout and touch usability, not Android-only features.
 - Online book sources are out of scope.
-- Android, browser extensions, and additional storage backends are later-stage work. AI will start with a deliberately small reader workflow only after the current EPUB and operational hardening work.
+- Android, browser extensions, and additional storage backends are later-stage work. AI currently provides a deliberately small, read-only reader workflow.
 
 ## Current release track
 
-- [x] Close the current reader compatibility patch and regression pass
+- [x] Close the current reader regression pass
 - [x] Make in-book search respect visible text transforms, including Simplified/Traditional conversion
-- [x] Publish v0.1 with a reproducible Docker image, Compose setup, health check, CI smoke test, and `DATA_DIR` persistence
+- [ ] Publish v0.2 with a reproducible Docker image, Compose setup, health check, CI smoke test, and `DATA_DIR` persistence
+- [x] Deliver the read-only AI reading workflow with provider profiles, bounded tools, retrieval, citations, durable history, retry, and cancellation
+- [x] Start v0.2 from a clean database baseline without the 0.1 schema upgrade path
 - [x] Document manual volume backup and restore
 
-v0.1 does not include an in-app backup center or online restore. Docker Hub is the planned public image registry, but the image can also be built locally.
+The private v0.2 release does not include an in-app backup center or online restore. The image can be built locally or published to the operator's chosen registry.
 
 ## Next Web milestones
 
@@ -28,7 +30,6 @@ v0.1 does not include an in-app backup center or online restore. Docker Hub is t
 - [x] Add minimal structured server logs and request context for self-hosted troubleshooting
 - [x] Web TTS R09 baseline: visible-text-consistent playback, chapter/selection start, voice/rate controls, sentence highlighting, follow decoupling, chapter continuation, online prefetch, and user-owned AI voice services
 - [ ] Web TTS follow-up: word-boundary highlighting, adaptive audible-time prefetch/backpressure, persistent/offline cache, background/media controls, sleep timer, pitch-preserving rate change, and multi-role narration
-- [ ] Constrained AI v1 after TTS: explicit selected-text explanation and Q&A with provider, secret, privacy, cancellation, and cost boundaries
 
 The following are intentionally excluded from this Web milestone: brightness control, volume-key navigation, E-Ink mode, native-style PWA behavior, and deep 3×3 gesture customization.
 
@@ -38,7 +39,7 @@ The following are intentionally excluded from this Web milestone: brightness con
 - Library organization: shelf grouping only when a real hierarchy need appears; batch metadata editing is not planned without concrete maintenance pain
 - JSON import/export after the backup data model is defined
 - Browser extension after the Web library and reader are stable
-- Open API, OPDS, Calibre, and note-taking integrations based on real consumers
+- Open API, feed, and note-taking integrations based on real consumers
 - Additional deployment examples where operational use justifies them
 
 FTS5 is conditional: it will be considered only if real library scale shows that title/author search is insufficient. Virtual scrolling is also demand-driven because the current reader already uses on-demand loading, Range requests, and caches.
@@ -49,7 +50,7 @@ FTS5 is conditional: it will be considered only if real library scale shows that
 - Advanced TTS engines/offline audio, dictionary, translation, advanced annotation, custom CSS, code highlighting, and bionic reading
 - Whole-book or cross-book AI retrieval, autonomous agents, knowledge graphs, and advanced reading knowledge tools
 - S3/MinIO, WebDAV, and other storage drivers
-- OPDS/Calibre compatibility and broader synchronization
+- Feed compatibility and broader synchronization
 
 ## Not planned for the current product phase
 

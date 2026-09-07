@@ -129,7 +129,7 @@ export interface TextTransform {
  * One level of a TOC rule (Sigil-style). Each pattern is scanned against the
  * whole normalized text independently; a hit pins that line to this level.
  * Level is a plain integer — levels nest in ascending order and can be freely
- * added/removed (a single level degenerates into a legado-style flat rule).
+ * added/removed (a single level is a flat rule).
  */
 export interface TocRulePattern {
   /** Nesting order, ascending (1 = top-level chapter). Integers >= 1. */

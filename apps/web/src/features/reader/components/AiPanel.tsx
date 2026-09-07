@@ -6,7 +6,7 @@ import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT
 import type { AiAssistantMode, AiChapterReference, AiChatReq, AiCitation, AiContextReceipt, AiConversationSettings, AiHistoryMessage, AiMessageEventRes, AiMessageRes, AiReadingScope, AiRetryRecipe, AiStatusRes, AiThreadRes, AiToolName } from '@bookdock/shared'
 
 import { apiGet, apiPost, apiStreamAiChat, ApiError } from '@/api/client'
-import { AI_THREADS_KEY, useAiIndexStatus, useAiMessageRevisions, useAiThread, useAiThreads, useCancelAiBookIndex, useClearAiBookIndex, useDeleteAiThread, useIndexAiBook, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiThread } from '@/api/hooks/useAi'
+import { AI_THREADS_KEY, useAiIndexStatus, useAiMessageRevisions, useAiThread, useAiThreads, useCancelAiBookIndex, useClearAiBookIndex, useDeleteAiThread, useIndexAiBook, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiProfile, useUpdateAiThread } from '@/api/hooks/useAi'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import AiBrandIcon from '@/components/ui/AiBrandIcon'
 import Modal from '@/components/ui/Modal'
@@ -577,6 +577,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
   const cancelIndex = useCancelAiBookIndex()
   const clearIndex = useClearAiBookIndex()
   const updateAiConfig = useUpdateAiConfig()
+  const updateAiProfile = useUpdateAiProfile()
   const selectRevisionMutation = useSelectAiMessageRevision()
   const { mutate: updateThreadSettings } = useUpdateAiThread()
   const renameThread = useUpdateAiThread()
@@ -1604,8 +1605,9 @@ export default function AiPanel({ bookId }: { bookId: string }) {
   }
 
   function selectModel(model: string) {
-    if (!model || model === statusQuery.data?.data.model || updateAiConfig.isPending) return
-    updateAiConfig.mutate({ model }, { onError: (error) => addToast(error.message, 'error') })
+    const activeProfileId = statusQuery.data?.data.activeProfileId
+    if (!model || model === statusQuery.data?.data.model || !activeProfileId || updateAiConfig.isPending || updateAiProfile.isPending) return
+    updateAiProfile.mutate({ id: activeProfileId, body: { model } }, { onError: (error) => addToast(error.message, 'error') })
   }
 
   async function buildBookIndex() {
@@ -1791,7 +1793,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
               const isLatestEditableUser = message.role === 'user' && message.id === latestUserMessageId && messages[index + 1]?.role === 'assistant' && Boolean(message.retry) && !streaming
               return (
                 <div key={message.id} className={`group flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className={message.role === 'user' ? 'w-fit max-w-[85%] break-words rounded-xl bg-[var(--bd-read-accent)]/20 p-3 text-sm' : 'w-fit max-w-[92%] break-words rounded-xl bg-[var(--bd-read-page-bg)] p-3 text-[13.5px] leading-[1.75]'}>
+                  <div className={message.role === 'user' ? 'w-fit max-w-[85%] break-words rounded-xl bg-[var(--bd-read-accent)]/20 p-3 text-sm [text-autospace:normal]' : 'w-fit max-w-[92%] break-words rounded-xl bg-[var(--bd-read-page-bg)] p-3 text-[13.5px] leading-[1.75] [text-autospace:normal]'}>
                     {quoteEntries.length > 0 && <div className="mb-2 w-full text-[11px] text-[var(--bd-read-sub)]">
                       {singleQuote ? <button type="button" disabled={!renderer} onClick={() => jumpToQuote(singleQuote.target)} aria-label={_('reader.aiQuoteJump', { n: 1, label: singleQuote.label })} className={`flex min-h-8 max-w-full min-w-0 items-center gap-2 rounded-md border px-2.5 py-1 text-left text-sm transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-default disabled:opacity-70 ${singleQuote.id === 'selection' ? 'border-[var(--bd-read-primary)]/50 bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] text-current'}`}>
                         {singleQuote.id === 'selection' ? <SelectedPositionIcon size={14} /> : <ChapterReferenceIcon />}
@@ -1827,7 +1829,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                   {message.aborted && <div className="mt-2 text-[11px] text-[var(--bd-read-sub)]">{_('reader.aiStoppedLabel')}</div>}
                   </div>
                   {hasBasis && (
-                    <div className="mt-1 max-w-[92%] pl-2 text-[11px] text-[var(--bd-read-sub)]">
+                    <div className="mt-1 w-full max-w-[92%] pl-2 text-[11px] text-[var(--bd-read-sub)] [text-autospace:normal]">
                       <button type="button" aria-expanded={basisOpen} aria-controls={`answer-basis-${message.id}`} onClick={() => setOpenBasisId(basisOpen ? null : message.id)} className="flex max-w-full items-center gap-1 rounded px-1 py-0.5 text-left transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current">
                         <span>{_('reader.aiBasisSummary', { n: message.citations.length })}</span>
                         <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${basisOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
@@ -1962,7 +1964,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                     aria-haspopup="listbox"
                     aria-expanded={modelMenuOpen}
                     title={selectedModelLabel}
-                    disabled={!modelReady || modelOptions.length < 2 || updateAiConfig.isPending}
+                    disabled={!modelReady || modelOptions.length < 2 || updateAiConfig.isPending || updateAiProfile.isPending}
                     ref={modelButtonRef}
                     onClick={() => { setAttachmentOpen(false); setToolsOpen(false); setAssistantModeMenuOpen(false); setQuickCommandMenuOpen(false); setMoreOpen(false); setModelMenuOpen((open) => !open) }}
                     className={`flex min-w-0 w-full max-w-full items-center gap-1 rounded py-0.5 pl-1 pr-1 text-left text-xs text-current outline-none transition-colors hover:bg-stone-500/10 focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)] disabled:cursor-not-allowed disabled:text-[var(--bd-read-sub)] ${modelMenuOpen ? 'bg-stone-500/10' : ''}`}

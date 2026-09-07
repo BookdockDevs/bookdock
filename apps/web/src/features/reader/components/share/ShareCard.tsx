@@ -126,8 +126,8 @@ function BrandMark({ brand, colors, align = 'right' }: { brand: ShareCardBrand; 
   )
 }
 
-/** The ink bars mimic the aged-woodblock strips in the 微信读书 墨白 reference:
- *  square-edged warm brown rectangle with page-colored nicks scattered inside
+/** The ink bars use square-edged warm brown rectangles with page-colored nicks
+ *  scattered inside
  *  (a few touching the edges for roughness). Speckle positions are fixed so
  *  repeated exports render identically. */
 function InkBar({ colors, className = '' }: { colors: CardColors; className?: string }) {
@@ -152,7 +152,7 @@ function InkBar({ colors, className = '' }: { colors: CardColors; className?: st
 /** Vertical book-title block pinned top-left (ink / brocade templates).
  *  writing-mode must live on each column, not the flex container — putting it
  *  on the container rotates the flex main axis and drops the author column
- *  below the title instead of beside it (reference: 微信读书 ink card) */
+ *  below the title instead of beside it. */
 function VerticalTitle({ title, author, colors }: { title: string; author: string; colors: CardColors }) {
   return (
     <div className="flex gap-6 self-start">

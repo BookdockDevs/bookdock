@@ -117,7 +117,7 @@ describe('AiPanel', () => {
     vi.mocked(apiGet).mockResolvedValue({
       data: {
         enabled: false,
-        provider: 'custom',
+        provider: 'openai',
         maxSelectionChars: 6_000,
         maxContextChars: 8_000,
       },
@@ -753,11 +753,11 @@ describe('AiPanel', () => {
     expect(selector).toHaveClass('bg-stone-500/10')
     fireEvent.click(screen.getByRole('option', { name: 'llama3.2' }))
 
-    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/ai/config', { model: 'llama3.2' }))
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/ai/profiles/profile-1', { model: 'llama3.2' }))
   })
 
   it('filters embedding models out of the Chat selector', async () => {
-    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'custom', model: 'qwen3:8b', models: [
+    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'openai', model: 'qwen3:8b', models: [
       { id: 'qwen3:8b', name: 'qwen3:8b' },
       { id: 'llama3.2', name: 'llama3.2' },
       { id: 'qwen3-embedding-8b', name: 'qwen3-embedding-8b' },
@@ -951,7 +951,8 @@ describe('AiPanel', () => {
     fireEvent.click(basis)
     const source = await screen.findByRole('button', { name: /reader.aiBasisJump/ })
     expect(source).toHaveAttribute('title', '命中段落')
-    expect(screen.getByText('这是回答').parentElement?.parentElement).toHaveClass('w-fit', 'max-w-[92%]')
+    expect(screen.getByText('这是回答').parentElement?.parentElement).toHaveClass('w-fit', 'max-w-[92%]', '[text-autospace:normal]')
+    expect(source.parentElement?.parentElement).toHaveClass('w-full', 'max-w-[92%]', '[text-autospace:normal]')
     fireEvent.click(source)
     expect(display).toHaveBeenCalledWith('search-hit-chapter:1:12:24')
     expect(useReaderState.getState().sidebarOpen).toBe(false)
@@ -1099,7 +1100,7 @@ describe('AiPanel', () => {
 
   it('keeps lexical index controls available without a chat model', async () => {
     vi.mocked(apiGet).mockImplementation(async (path) => {
-      if (path === '/ai/status') return { data: { enabled: false, provider: 'custom', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
+      if (path === '/ai/status') return { data: { enabled: false, provider: 'openai', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
       if (path === '/ai/retrieval/status?bookId=book-1') return { data: { bookId: 'book-1', status: 'not_indexed', embeddingStatus: 'unavailable', chunkCount: 0, updatedAt: null } }
       return { data: [] }
     })

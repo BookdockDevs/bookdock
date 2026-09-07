@@ -23,13 +23,27 @@ describe('AiSettingsSection', () => {
     await i18n.changeLanguage('zh-CN')
     useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
     vi.mocked(useAiConfig).mockReturnValue({
-      data: { data: { provider: 'custom', baseUrl: 'http://localhost:11434/v1', model: 'qwen3:8b', models: [{ id: 'qwen3:8b', name: 'qwen3:8b' }], apiKeyConfigured: false, configuredByUser: true } },
+      data: { data: {
+        provider: 'openai',
+        baseUrl: 'http://localhost:11434/v1',
+        model: 'qwen3:8b',
+        models: [{ id: 'qwen3:8b', name: 'qwen3:8b' }],
+        profiles: [{ id: 'profile-1', name: '本地配置', provider: 'openai', baseUrl: 'http://localhost:11434/v1', model: 'qwen3:8b', models: [{ id: 'qwen3:8b', name: 'qwen3:8b' }], embeddingModel: null, embeddingModels: [], apiKeyConfigured: false, createdAt: 1, updatedAt: 1 }],
+        activeProfileId: 'profile-1',
+        modes: [],
+        embeddingProfileId: null,
+        embeddingProvider: null,
+        embeddingModel: null,
+        embeddingModels: [],
+        embeddingConfigured: false,
+        apiKeyConfigured: false,
+        configuredByUser: true,
+      } },
       isLoading: false,
     } as ReturnType<typeof useAiConfig>)
     vi.mocked(useAiProviders).mockReturnValue({
       data: { data: [
         { id: 'openai', name: 'OpenAI', protocol: 'openai-compatible', defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: null, requiresApiKey: true },
-        { id: 'custom', name: '自定义兼容接口', protocol: 'openai-compatible', defaultBaseUrl: null, defaultModel: null, requiresApiKey: false },
         { id: 'deepseek', name: 'DeepSeek', protocol: 'openai-compatible', defaultBaseUrl: 'https://api.deepseek.com', defaultModel: 'deepseek-chat', requiresApiKey: true },
       ] },
     } as ReturnType<typeof useAiProviders>)
@@ -39,12 +53,13 @@ describe('AiSettingsSection', () => {
     vi.mocked(useFetchAiModels).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useFetchAiModels>)
     vi.mocked(useTestAiConfigDraft).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useTestAiConfigDraft>)
     vi.mocked(useUpdateAiProfile).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useUpdateAiProfile>)
+    vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
   })
 
   it('keeps AI configuration in the reading settings flow', () => {
     useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'owner' } })
     const mutate = vi.fn()
-    vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
+    vi.mocked(useUpdateAiProfile).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useUpdateAiProfile>)
 
     render(<AiSettingsSection />)
     fireEvent.click(screen.getAllByRole('button', { name: '编辑 AI 供应商' })[0]!)
@@ -54,12 +69,14 @@ describe('AiSettingsSection', () => {
 
     expect(mutate).toHaveBeenCalledWith(
       {
-        profileId: 'legacy',
-        name: '测试配置',
-        provider: 'openai',
-        baseUrl: 'https://api.example.test/v1',
-        model: 'qwen3:8b',
-        models: [{ id: 'qwen3:8b', name: 'qwen3:8b' }],
+        id: 'profile-1',
+        body: {
+          name: '测试配置',
+          provider: 'openai',
+          baseUrl: 'https://api.example.test/v1',
+          model: 'qwen3:8b',
+          models: [{ id: 'qwen3:8b', name: 'qwen3:8b' }],
+        },
       },
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     )
@@ -77,7 +94,7 @@ describe('AiSettingsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: '拉取模型' }))
 
     expect(fetchMutate).toHaveBeenCalledWith(
-      { profileId: 'legacy', provider: 'openai', baseUrl: 'http://localhost:11434/v1' },
+      { profileId: 'profile-1', provider: 'openai', baseUrl: 'http://localhost:11434/v1' },
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     )
     const options = fetchMutate.mock.calls[0]?.[1] as { onSuccess: (value: { data: { id: string; name: string; capabilities?: { vision?: boolean; tools?: boolean; reasoning?: boolean } }[] }) => void }
@@ -127,7 +144,7 @@ describe('AiSettingsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: '拉取模型' }))
 
     expect(fetchMutate).toHaveBeenCalledWith(
-      { profileId: 'legacy', provider: 'openai', baseUrl: 'http://localhost:11434/v1' },
+      { profileId: 'profile-1', provider: 'openai', baseUrl: 'http://localhost:11434/v1' },
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     )
     const options = fetchMutate.mock.calls[0]?.[1] as { onSuccess: (value: { data: { id: string; name: string }[] }) => void }
@@ -168,11 +185,11 @@ describe('AiSettingsSection', () => {
   it('ignores a stale model response after switching to another profile with the same endpoint', async () => {
     useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'owner' } })
     const profiles = [
-      { id: 'profile-a', name: '配置 A', provider: 'custom' as const, baseUrl: 'http://localhost:11434/v1', model: 'model-a', models: [{ id: 'model-a', name: 'model-a' }], embeddingModel: null, embeddingModels: [], apiKeyConfigured: false, createdAt: 1, updatedAt: 1 },
-      { id: 'profile-b', name: '配置 B', provider: 'custom' as const, baseUrl: 'http://localhost:11434/v1', model: 'model-b', models: [{ id: 'model-b', name: 'model-b' }], embeddingModel: null, embeddingModels: [], apiKeyConfigured: false, createdAt: 2, updatedAt: 2 },
+      { id: 'profile-a', name: '配置 A', provider: 'openai' as const, baseUrl: 'http://localhost:11434/v1', model: 'model-a', models: [{ id: 'model-a', name: 'model-a' }], embeddingModel: null, embeddingModels: [], apiKeyConfigured: false, createdAt: 1, updatedAt: 1 },
+      { id: 'profile-b', name: '配置 B', provider: 'openai' as const, baseUrl: 'http://localhost:11434/v1', model: 'model-b', models: [{ id: 'model-b', name: 'model-b' }], embeddingModel: null, embeddingModels: [], apiKeyConfigured: false, createdAt: 2, updatedAt: 2 },
     ]
     vi.mocked(useAiConfig).mockReturnValue({
-      data: { data: { provider: 'custom', baseUrl: profiles[0]!.baseUrl, model: profiles[0]!.model, models: profiles[0]!.models, profiles, activeProfileId: 'profile-a', prompts: [], embeddingProfileId: null, embeddingProvider: null, embeddingModel: null, embeddingModels: [], embeddingConfigured: false, apiKeyConfigured: false, configuredByUser: true } },
+      data: { data: { provider: 'openai', baseUrl: profiles[0]!.baseUrl, model: profiles[0]!.model, models: profiles[0]!.models, profiles, activeProfileId: 'profile-a', prompts: [], modes: [], embeddingProfileId: null, embeddingProvider: null, embeddingModel: null, embeddingModels: [], embeddingConfigured: false, apiKeyConfigured: false, configuredByUser: true } },
       isLoading: false,
     } as ReturnType<typeof useAiConfig>)
     const fetchMutate = vi.fn()
@@ -198,11 +215,11 @@ describe('AiSettingsSection', () => {
     useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'owner' } })
     const mutate = vi.fn()
     const profiles = [
-      { id: 'chat-profile', name: 'Chat 服务', provider: 'custom' as const, baseUrl: 'http://chat.test/v1', model: 'chat-model', models: [{ id: 'chat-model', name: 'chat-model' }], embeddingModel: 'chat-embedding', embeddingModels: [{ id: 'chat-embedding', name: 'chat-embedding' }], apiKeyConfigured: false, createdAt: 1, updatedAt: 1 },
+      { id: 'chat-profile', name: 'Chat 服务', provider: 'openai' as const, baseUrl: 'http://chat.test/v1', model: 'chat-model', models: [{ id: 'chat-model', name: 'chat-model' }], embeddingModel: 'chat-embedding', embeddingModels: [{ id: 'chat-embedding', name: 'chat-embedding' }], apiKeyConfigured: false, createdAt: 1, updatedAt: 1 },
       { id: 'embedding-profile', name: '本地 Embedding', provider: 'ollama' as const, baseUrl: 'http://localhost:11434', model: 'llama3.2', models: [{ id: 'llama3.2', name: 'llama3.2' }], embeddingModel: 'nomic-embed-text', embeddingModels: [{ id: 'nomic-embed-text', name: 'nomic-embed-text' }], apiKeyConfigured: false, createdAt: 2, updatedAt: 2 },
     ]
     vi.mocked(useAiConfig).mockReturnValue({
-      data: { data: { provider: 'custom', baseUrl: 'http://chat.test/v1', model: 'chat-model', models: profiles[0]!.models, profiles, activeProfileId: 'chat-profile', prompts: [], embeddingProfileId: null, embeddingProvider: null, embeddingModel: null, embeddingModels: [], embeddingConfigured: false, apiKeyConfigured: false, configuredByUser: true } },
+      data: { data: { provider: 'openai', baseUrl: 'http://chat.test/v1', model: 'chat-model', models: profiles[0]!.models, profiles, activeProfileId: 'chat-profile', prompts: [], modes: [], embeddingProfileId: null, embeddingProvider: null, embeddingModel: null, embeddingModels: [], embeddingConfigured: false, apiKeyConfigured: false, configuredByUser: true } },
       isLoading: false,
     } as ReturnType<typeof useAiConfig>)
     vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
@@ -240,7 +257,23 @@ describe('AiSettingsSection', () => {
   it('tests the draft model configuration without saving it', () => {
     useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'owner' } })
     vi.mocked(useAiConfig).mockReturnValue({
-      data: { data: { provider: 'custom', baseUrl: 'http://localhost:11434/v1', model: 'qwen3:8b', models: [{ id: 'qwen3:8b', name: 'qwen3:8b' }, { id: 'llama3.2', name: 'llama3.2' }], apiKeyConfigured: false, configuredByUser: true } },
+      data: { data: {
+        provider: 'openai',
+        baseUrl: 'http://localhost:11434/v1',
+        model: 'qwen3:8b',
+        models: [{ id: 'qwen3:8b', name: 'qwen3:8b' }, { id: 'llama3.2', name: 'llama3.2' }],
+        profiles: [{ id: 'profile-1', name: '本地配置', provider: 'openai', baseUrl: 'http://localhost:11434/v1', model: 'qwen3:8b', models: [{ id: 'qwen3:8b', name: 'qwen3:8b' }, { id: 'llama3.2', name: 'llama3.2' }], embeddingModel: null, embeddingModels: [], apiKeyConfigured: false, createdAt: 1, updatedAt: 1 }],
+        activeProfileId: 'profile-1',
+        prompts: [],
+        modes: [],
+        embeddingProfileId: null,
+        embeddingProvider: null,
+        embeddingModel: null,
+        embeddingModels: [],
+        embeddingConfigured: false,
+        apiKeyConfigured: false,
+        configuredByUser: true,
+      } },
       isLoading: false,
     } as ReturnType<typeof useAiConfig>)
     const testMutate = vi.fn()
@@ -252,7 +285,7 @@ describe('AiSettingsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: '测试可用性 llama3.2' }))
 
     expect(testMutate).toHaveBeenCalledWith(
-      { profileId: 'legacy', provider: 'openai', baseUrl: 'http://localhost:11434/v1', model: 'llama3.2' },
+      { profileId: 'profile-1', provider: 'openai', baseUrl: 'http://localhost:11434/v1', model: 'llama3.2' },
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     )
   })

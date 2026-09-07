@@ -1,4 +1,4 @@
-// Chapter-switch loading indicator (Readest-style): a navigation is only
+// Chapter-switch loading indicator: a navigation is only
 // surfaced after it outlives the anti-flicker window, and only the newest
 // in-flight navigation may show it — a rapid second jump supersedes the first
 // instead of both indicators fighting.

@@ -7,7 +7,7 @@ vi.mock('../../config', () => ({
     aiBaseUrl: 'https://ai.example.test/v1',
     aiApiKey: 'env-key',
     aiModel: 'chat-model',
-    aiProvider: 'custom',
+    aiProvider: 'openai',
     jwtSecret: 'test-jwt-secret',
     aiRpm: 1000,
     aiTimeoutMs: 2000,
@@ -59,11 +59,31 @@ function encryptApiKey(value: string) {
   return [iv, cipher.getAuthTag(), ciphertext].map((part) => part.toString('base64url')).join('.')
 }
 
-function setLegacyConfig(provider: string, baseUrl: string, encryptedApiKey: string | null = null, embeddingModel?: string) {
+function setAiConfig(provider: 'openai' | 'ollama' | 'gemini' | 'anthropic', baseUrl: string, encryptedApiKey: string | null = null, embeddingModel?: string) {
   setting = {
     userId: 'user-1',
     key: 'ai',
-    value: { provider, baseUrl, model: 'chat-model', encryptedApiKey, ...(embeddingModel ? { embeddingProfileId: 'legacy', embeddingModel } : {}) },
+    value: {
+      profiles: [{
+        id: 'profile-1',
+        name: 'Embedding profile',
+        provider,
+        baseUrl,
+        model: 'chat-model',
+        models: [
+          { id: 'chat-model', name: 'chat-model' },
+          ...(embeddingModel ? [{ id: embeddingModel, name: embeddingModel }] : []),
+        ],
+        embeddingModel: embeddingModel ?? null,
+        embeddingModels: embeddingModel ? [{ id: embeddingModel, name: embeddingModel }] : [],
+        encryptedApiKey,
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+      activeProfileId: 'profile-1',
+      embeddingProfileId: embeddingModel ? 'profile-1' : null,
+      embeddingModel: embeddingModel ?? null,
+    },
   }
 }
 
@@ -75,7 +95,7 @@ describe('AI embedding provider adapters', () => {
   })
 
   it('uses the OpenAI-compatible embeddings contract', async () => {
-    setLegacyConfig('openai', 'https://api.openai.test/v1', encryptApiKey('openai-key'), 'text-embedding-3-small')
+    setAiConfig('openai', 'https://api.openai.test/v1', encryptApiKey('openai-key'), 'text-embedding-3-small')
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ data: [{ embedding: [1, 2] }, { embedding: [3, 4] }] }), { status: 200 }))
 
     const result = await embedAiTexts('user-1', ['first', 'second'], new AbortController().signal, 'document', 'owner')
@@ -87,7 +107,7 @@ describe('AI embedding provider adapters', () => {
   })
 
   it('uses Ollama batch embeddings without requiring an API key', async () => {
-    setLegacyConfig('ollama', 'http://localhost:11434', null, 'nomic-embed-text')
+    setAiConfig('ollama', 'http://localhost:11434', null, 'nomic-embed-text')
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ embeddings: [[1, 0], [0, 1]] }), { status: 200 }))
 
     const result = await embedAiTexts('user-1', ['first', 'second'], new AbortController().signal, 'document', 'owner')
@@ -98,7 +118,7 @@ describe('AI embedding provider adapters', () => {
   })
 
   it('uses Gemini batch embeddings and distinguishes query tasks', async () => {
-    setLegacyConfig('gemini', 'https://generativelanguage.googleapis.com', encryptApiKey('gemini-key'), 'text-embedding-004')
+    setAiConfig('gemini', 'https://generativelanguage.googleapis.com', encryptApiKey('gemini-key'), 'text-embedding-004')
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ embeddings: [{ values: [0.5, 0.25] }] }), { status: 200 }))
 
     const result = await embedAiTexts('user-1', ['question'], new AbortController().signal, 'query', 'owner')
@@ -111,13 +131,13 @@ describe('AI embedding provider adapters', () => {
   })
 
   it('keeps unsupported Anthropic embeddings out of the network path', async () => {
-    setLegacyConfig('anthropic', 'https://api.anthropic.test', encryptApiKey('anthropic-key'), 'text-embedding-004')
+    setAiConfig('anthropic', 'https://api.anthropic.test', encryptApiKey('anthropic-key'), 'text-embedding-004')
     await expect(embedAiTexts('user-1', ['text'], new AbortController().signal, 'document', 'owner')).rejects.toMatchObject({ code: 'AI_PROVIDER_ERROR' })
     expect(fetch).not.toHaveBeenCalled()
   })
 
   it('does not send book text when only a chat model is configured', async () => {
-    setLegacyConfig('custom', 'https://api.example.test/v1')
+    setAiConfig('openai', 'https://api.example.test/v1')
 
     await expect(embedAiTexts('user-1', ['text'], new AbortController().signal, 'document', 'owner')).rejects.toMatchObject({ code: 'AI_NOT_CONFIGURED' })
     expect(fetch).not.toHaveBeenCalled()

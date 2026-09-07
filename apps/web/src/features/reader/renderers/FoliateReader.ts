@@ -431,7 +431,7 @@ function attachChineseTransform(book: any) {
     // detail.data may be a promise; the Loader awaits it either way.
     // Text transforms run first (rules are written against the original text),
     // then Chinese conversion on the whole string — conversion rewrites
-    // script/style/attribute text, an accepted trade-off (same as Readest).
+    // script/style/attribute text as part of the visible-text transformation.
     detail.data = Promise.resolve(detail.data).then(async (data: unknown) => {
       if (typeof data !== 'string') return data
       const transformed = rules.length

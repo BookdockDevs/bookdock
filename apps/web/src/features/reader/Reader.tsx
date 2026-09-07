@@ -55,7 +55,6 @@ export default function Reader() {
   const queryClient = useQueryClient()
   const [percent, setPercent] = useState(0)
   const [pageInfo, setPageInfo] = useState<{ page: number; total: number } | null>(null)
-  const [currentOffset, setCurrentOffset] = useState<number | null>(null)
   const [currentCfi, setCurrentCfi] = useState<string | null>(null)
   const [chapterFraction, setChapterFraction] = useState<number | undefined>(undefined)
   const [_atChapterStart, setAtChapterStart] = useState(false)
@@ -529,7 +528,6 @@ export default function Reader() {
       if (e.cfi.startsWith('txt:')) {
         const offset = Number(e.cfi.split(':')[1])
         if (!Number.isNaN(offset)) {
-          setCurrentOffset(offset)
           // TXT page/percent are book-wide, so detect chapter start by offset distance
           const chapters = chaptersQuery.data?.data
           const chapter = chapters?.find((c) => offset >= c.startOffset && offset < c.endOffset)
@@ -538,12 +536,6 @@ export default function Reader() {
       } else {
         // foliate emits per-chapter page in both paginated and scrolled flow
         setAtChapterStart((e.pageInChapter ?? 1) <= 1)
-        if (e.chapterIndex !== undefined) {
-          const chapters = chaptersQuery.data?.data
-          if (chapters?.[e.chapterIndex]?.startOffset != null) {
-            setCurrentOffset(chapters[e.chapterIndex].startOffset)
-          }
-        }
       }
       if (e.chapterIndex !== undefined) {
         setCurrentChapterIndex(e.chapterIndex)
@@ -874,9 +866,6 @@ export default function Reader() {
       remainingChars = chapterFraction != null
         ? current.wordCount * (1 - chapterFraction)
         : current.wordCount
-    } else if (currentOffset != null && current.endOffset > current.startOffset) {
-      // Legacy fallback: offset arithmetic only works for txt chapters
-      remainingChars = Math.max(0, current.endOffset - currentOffset)
     }
     if (remainingChars == null) return undefined
     if (rate != null && rate > 0 && totalChars > 0) {
@@ -884,7 +873,7 @@ export default function Reader() {
       return Math.max(1, Math.ceil((remainingChars / totalChars) / rate / 60_000))
     }
     return Math.max(1, Math.ceil(remainingChars / 800))
-  }, [currentChapterIndex, chapterFraction, currentOffset, chaptersQuery.data, rate, totalChars])
+  }, [currentChapterIndex, chapterFraction, chaptersQuery.data, rate, totalChars])
 
   const onToggleSettings = useCallback(() => {
     if (!toolbarLocked) setSidebarOpen(false)

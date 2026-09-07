@@ -1,1 +1,0 @@
-ALTER TABLE `annotations` ADD `style` text DEFAULT 'underline' NOT NULL;

@@ -128,8 +128,8 @@ export const settingsUpdateSchema = z.object({
   textAlignJustify: z.boolean().optional(),
   overrideBookFont: z.boolean().optional(),
   overrideBookLayout: z.boolean().optional(),
-  coverMode: z.boolean().optional(),
-  coverFit: z.boolean().optional(),
+  coverText: z.boolean().optional(),
+  coverFit: z.enum(['crop', 'full']).optional(),
   gridColumns: z.string().optional(),
   toolbarLocked: z.boolean().optional(),
   sidebarWidth: z.number().min(200).max(500).optional(),
@@ -353,25 +353,16 @@ export const aiProviderSchema = z.enum([
   'siliconflow',
   'minimax',
   'mimo',
-  'custom',
 ])
 
 export const aiConfigUpdateSchema = z.object({
   activeProfileId: z.string().trim().max(100).nullable().optional(),
-  profileId: z.string().trim().max(100).nullable().optional(),
-  name: z.string().trim().max(100).optional(),
-  provider: aiProviderSchema.optional(),
-  baseUrl: aiBaseUrlSchema.nullable().optional(),
-  model: z.string().trim().min(1).max(200).nullable().optional(),
-  models: z.array(aiModelSchema).max(200).optional(),
   embeddingProfileId: z.string().trim().max(100).nullable().optional(),
   embeddingModel: z.string().trim().min(1).max(200).nullable().optional(),
-  embeddingModels: z.array(aiModelSchema).max(200).optional(),
   prompts: z.array(aiPromptTemplateSchema).max(24).nullable().optional(),
   modes: z.array(aiAssistantModeSchema).max(AI_MAX_ASSISTANT_MODES).nullable().optional(),
   defaultAssistantMode: aiAssistantModeSchema.nullable().optional(),
   lastUsedConversationSettings: aiThreadSettingsSchema.required({ assistantModeId: true }).optional(),
-  apiKey: z.string().max(4096).nullable().optional(),
 }).strict()
 
 export const aiProfileCreateSchema = z.object({
@@ -614,6 +605,6 @@ export const bookUpdateSchema = z.object({
   viewSettings: viewSettingsSchema.nullable().optional(),
   // null removes the preset binding (fall back to the device resolution chain)
   boundPresetId: z.string().nullable().optional(),
-  // null removes the pinned TOC rule (fall back to auto-scoring, then legacy)
+  // null removes the pinned TOC rule and restores automatic selection
   tocRuleId: z.string().nullable().optional(),
 })

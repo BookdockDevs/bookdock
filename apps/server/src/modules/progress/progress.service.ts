@@ -16,7 +16,7 @@ interface ProgressData {
   chapterIndex?: number | null
   percent: number
   fraction?: number | null
-  intervals?: FractionInterval[]
+  intervals: FractionInterval[]
   rateSamples?: RateSample[]
   updatedAt: number
 }
@@ -41,7 +41,7 @@ export async function getProgress(userId: string, bookId: string) {
   if (!data) return null
   // intervals stay server-side; clients get the precomputed union length
   const { intervals, ...rest } = data
-  const readFraction = intervals ? unionLength(intervals) : undefined
+  const readFraction = unionLength(intervals)
   return { id: `prog-${bookId}`, userId, bookId, ...rest, readFraction }
 }
 
@@ -54,8 +54,6 @@ export async function upsertProgress(userId: string, bookId: string, data: { cfi
   const now = Date.now()
   const existing = await readProgressData(bookId)
 
-  // Legacy files have no intervals: assume everything up to the current
-  // position was read, then merge the reported segment on top.
   let intervals = existing?.intervals ?? [[0, data.fraction ?? data.percent / 100] as FractionInterval]
   if (data.fraction !== undefined && data.segmentStartFraction !== undefined) {
     let start = data.segmentStartFraction
