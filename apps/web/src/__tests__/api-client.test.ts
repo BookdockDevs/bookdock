@@ -71,4 +71,26 @@ describe('AI stream client', () => {
       }],
     })
   })
+
+  it('parses the final normalized answer and citations from the done event', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response([
+      'event: done',
+      `data: ${JSON.stringify({
+        content: '回答[1]，链接[2](https://example.com)。',
+        citations: [
+          { id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 4, endOffset: 18, excerpt: '正文', sourceType: 'book' },
+          { id: 'malformed' },
+        ],
+      })}`,
+      '',
+    ].join('\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
+
+    const onDone = vi.fn()
+    await apiStreamAiChat(requestBody, { onDone })
+
+    expect(onDone).toHaveBeenCalledWith({
+      content: '回答[1]，链接[2](https://example.com)。',
+      citations: [{ id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 4, endOffset: 18, excerpt: '正文', sourceType: 'book' }],
+    })
+  })
 })

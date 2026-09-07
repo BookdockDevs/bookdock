@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { eq } from 'drizzle-orm'
 
 import { createTestDb } from '../../__tests__/setup'
 import { getDb } from '../../db/client'
-import { aiMessages, books, users } from '../../db/schema'
+import { aiMessageEvents, aiMessages, books, users } from '../../db/schema'
 
 vi.mock('../../db/client', () => ({ getDb: vi.fn() }))
 
-import { createAiThread, deleteAiThread, getAiThread, listAiThreads, prepareAiThread, saveAiMessage, updateAiMessageContext, updateAiThread } from './ai.sessions.service'
+import { createAiAssistantDraft, createAiThread, deleteAiThread, getAiThread, listAiMessageRevisions, listAiThreads, prepareAiThread, saveAiMessage, selectAiMessageRevision, updateAiMessageContext, updateAiThread } from './ai.sessions.service'
 
 describe('AI session service', () => {
   beforeEach(() => {
@@ -35,12 +36,27 @@ describe('AI session service', () => {
         assistantMode: '助理',
       },
     })
-    saveAiMessage('user-1', thread.id, {
+    const assistantMessageId = saveAiMessage('user-1', thread.id, {
       role: 'assistant',
       content: '这是解释',
       citations: [{ id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 2, endOffset: 8, excerpt: '命中段落' }],
       aborted: true,
     })
+    if (!assistantMessageId) throw new Error('Expected an assistant message id')
+    getDb().insert(aiMessageEvents).values({
+      id: 'event-1',
+      userId: 'user-1',
+      threadId: thread.id,
+      messageId: assistantMessageId,
+      sequence: 0,
+      type: 'tool',
+      phase: 'result',
+      name: 'search_book',
+      chapterIndex: 0,
+      resultChars: 12,
+      citationId: null,
+      createdAt: 3,
+    }).run()
 
     expect(listAiThreads('user-1', { bookId: 'book-1' })).toEqual([expect.objectContaining({ id: thread.id, title: '新对话', messageCount: 2 })])
     expect(getAiThread('user-1', thread.id)).toMatchObject({
@@ -50,7 +66,8 @@ describe('AI session service', () => {
         expect.objectContaining({ role: 'user', content: '解释第一章', context: expect.objectContaining({ selectionChars: 4 }), retry: expect.objectContaining({ readingScope: 'to_here' }), aborted: false }),
         expect.objectContaining({
           role: 'assistant', content: '这是解释', context: null, aborted: true,
-          citations: [{ id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 2, endOffset: 8, excerpt: '命中段落' }],
+          citations: [],
+          events: [{ id: 'event-1', sequence: 0, event: { type: 'tool', name: 'search_book', phase: 'result', chapterIndex: 0, resultChars: 12 }, createdAt: 3 }],
         }),
       ],
     })
@@ -80,9 +97,32 @@ describe('AI session service', () => {
       ],
       settings: {
         readingScope: 'to_here',
-        enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'search_notes'],
+        enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'],
       },
     })
+  })
+
+  it('normalizes legacy assistant citations when restoring history', () => {
+    const thread = createAiThread('user-1', { bookId: 'book-1' })
+    saveAiMessage('user-1', thread.id, { role: 'user', content: '问题' })
+    saveAiMessage('user-1', thread.id, {
+      role: 'assistant',
+      content: '依据第二章作答[2]，无效依据[3]。',
+      citations: [
+        { id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 0, endOffset: 4, excerpt: '正文一' },
+        { id: 'chunk-2', chapterIndex: 1, chapterId: 'ch-1', chapterTitle: '第二章', startOffset: 5, endOffset: 9, excerpt: '正文二' },
+      ],
+    })
+
+    expect(getAiThread('user-1', thread.id).messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: '依据第二章作答[1]，无效依据。',
+      citations: [{ id: 'chunk-2' }],
+    })
+    expect(prepareAiThread('user-1', 'book-1', thread.id, '后续问题').history).toEqual([
+      { role: 'user', content: '问题' },
+      { role: 'assistant', content: '依据第二章作答[1]，无效依据。' },
+    ])
   })
 
   it('updates only an owned user message context receipt', () => {
@@ -107,17 +147,64 @@ describe('AI session service', () => {
     })
   })
 
-  it('atomically replaces the matching last turn for regeneration', () => {
+  it('keeps the previous assistant answer as an unselected revision during regeneration', () => {
     const thread = createAiThread('user-1', { bookId: 'book-1' })
-    saveAiMessage('user-1', thread.id, { role: 'user', content: '重新回答' })
-    saveAiMessage('user-1', thread.id, { role: 'assistant', content: '旧回答' })
+    const userMessageId = saveAiMessage('user-1', thread.id, { role: 'user', content: '重新回答' })
+    const oldAssistantId = saveAiMessage('user-1', thread.id, { role: 'assistant', content: '旧回答' })
+    if (!userMessageId || !oldAssistantId) throw new Error('Expected persisted message ids')
 
     const prepared = prepareAiThread('user-1', 'book-1', thread.id, '重新回答', true)
     expect(prepared.history).toEqual([])
     expect(prepared.replaceMessageIds).toHaveLength(2)
-    saveAiMessage('user-1', thread.id, { role: 'user', content: '重新回答', replaceMessageIds: prepared.replaceMessageIds })
+    if (!prepared.regenerateUserMessageId || !prepared.revisionGroupId || !prepared.supersedeAssistantMessageId) throw new Error('Expected regeneration metadata')
+    expect(prepared.regenerateUserMessageId).toBe(userMessageId)
+    expect(prepared.supersedeAssistantMessageId).toBe(oldAssistantId)
 
-    expect(getAiThread('user-1', thread.id).messages).toEqual([expect.objectContaining({ role: 'user', content: '重新回答' })])
+    expect(saveAiMessage('user-1', thread.id, {
+      role: 'user',
+      content: '重新回答',
+      existingMessageId: prepared.regenerateUserMessageId,
+    })).toBe(userMessageId)
+    const newAssistantId = createAiAssistantDraft('user-1', thread.id, {
+      revisionGroupId: prepared.revisionGroupId,
+      supersedeMessageId: prepared.supersedeAssistantMessageId,
+    })
+    getDb().update(aiMessages).set({ content: '新回答' }).where(eq(aiMessages.id, newAssistantId)).run()
+
+    expect(getAiThread('user-1', thread.id).messages).toEqual([
+      expect.objectContaining({ id: userMessageId, role: 'user', content: '重新回答', revision: 0, revisionGroupId: userMessageId }),
+      expect.objectContaining({ id: newAssistantId, role: 'assistant', content: '新回答', revision: 1, revisionGroupId: userMessageId }),
+    ])
+    expect(listAiThreads('user-1', { bookId: 'book-1' })[0].messageCount).toBe(2)
+    expect(getDb().select().from(aiMessages).all()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: oldAssistantId, content: '旧回答', revision: 0, revisionGroupId: userMessageId, isSelected: 0 }),
+      expect.objectContaining({ id: newAssistantId, content: '新回答', revision: 1, revisionGroupId: userMessageId, isSelected: 1 }),
+    ]))
+
+    expect(listAiMessageRevisions('user-1', thread.id, newAssistantId)).toEqual([
+      expect.objectContaining({ id: oldAssistantId, revision: 0, content: '旧回答', selected: false }),
+      expect.objectContaining({ id: newAssistantId, revision: 1, content: '新回答', selected: true }),
+    ])
+    expect(selectAiMessageRevision('user-1', thread.id, oldAssistantId)).toEqual(expect.objectContaining({ id: oldAssistantId, selected: true }))
+    expect(getAiThread('user-1', thread.id).messages).toEqual([
+      expect.objectContaining({ id: userMessageId, role: 'user' }),
+      expect.objectContaining({ id: oldAssistantId, role: 'assistant', content: '旧回答', revision: 0 }),
+    ])
+  })
+
+  it('replaces the latest user prompt when editing before regeneration', () => {
+    const thread = createAiThread('user-1', { bookId: 'book-1' })
+    const userMessageId = saveAiMessage('user-1', thread.id, { role: 'user', content: '原问题' })
+    const oldAssistantId = saveAiMessage('user-1', thread.id, { role: 'assistant', content: '旧回答' })
+    if (!userMessageId || !oldAssistantId) throw new Error('Expected persisted message ids')
+
+    const prepared = prepareAiThread('user-1', 'book-1', thread.id, '修改后的问题', true, undefined, userMessageId)
+    expect(prepared.history).toEqual([])
+    expect(prepared.replaceMessageIds).toEqual([userMessageId, oldAssistantId])
+    expect(prepared.regenerateUserMessageId).toBe(userMessageId)
+    expect(prepared.supersedeAssistantMessageId).toBe(oldAssistantId)
+
+    expect(() => prepareAiThread('user-1', 'book-1', thread.id, '另一个问题', true, undefined, 'not-latest')).toThrow('Only the latest user message can be edited')
   })
 
   it('rejects cross-user and cross-book access', () => {

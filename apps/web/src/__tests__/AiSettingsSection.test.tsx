@@ -298,7 +298,7 @@ describe('AiSettingsSection', () => {
     expect(screen.queryByRole('button', { name: '保存快捷指令' })).toBeNull()
     expect(screen.queryByRole('button', { name: '上移' })).toBeNull()
     expect(screen.queryByRole('button', { name: '下移' })).toBeNull()
-    expect(screen.getAllByRole('button', { name: '调整快捷指令顺序' })).toHaveLength(6)
+    expect(screen.getAllByRole('button', { name: '调整快捷指令顺序' })).toHaveLength(5)
     fireEvent.click(screen.getByRole('button', { name: '添加快捷指令' }))
     fireEvent.change(screen.getByLabelText('指令名称'), { target: { value: '线索提取' } })
     fireEvent.change(screen.getByLabelText('提示词模板'), { target: { value: '请列出当前内容中的关键线索。' } })
@@ -321,7 +321,7 @@ describe('AiSettingsSection', () => {
 
     expect(screen.getByPlaceholderText('输入指令名称')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('输入提示词模板，使用上方变量插入阅读内容…')).toBeInTheDocument()
-    expect(screen.getByText('点击变量可将其插入到提示词模板的光标位置')).toBeInTheDocument()
+    expect(screen.queryByText('点击变量可将其插入到提示词模板的光标位置')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '查看变量说明' }))
     expect(screen.getByRole('dialog', { name: '变量说明' })).toHaveTextContent('用户当前选中的文本内容；没有选区时为空。')
     expect(screen.getByRole('dialog', { name: '变量说明' })).toHaveTextContent('选中文本所在的完整段落；没有选区时使用当前阅读段落。')

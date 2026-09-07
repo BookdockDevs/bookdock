@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { AiConfigRes, AiConfigTestReq, AiConnectionTestRes, AiIndexReq, AiIndexRes, AiModelDiscoveryReq, AiModelRes, AiConfigUpdateReq, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiProviderRes, AiThreadCreateReq, AiThreadDetailRes, AiThreadRes, AiThreadUpdateReq } from '@bookdock/shared'
+import type { AiConfigRes, AiConfigTestReq, AiConnectionTestRes, AiIndexReq, AiIndexRes, AiMessageRevisionRes, AiModelDiscoveryReq, AiModelRes, AiConfigUpdateReq, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiProviderRes, AiThreadCreateReq, AiThreadDetailRes, AiThreadRes, AiThreadUpdateReq } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost } from '../client'
 
@@ -41,6 +41,26 @@ export function useAiThread(threadId: string | null, options?: { enabled?: boole
     queryKey: [...AI_THREADS_KEY, 'detail', threadId],
     queryFn: () => apiGet<{ data: AiThreadDetailRes }>(`/ai/threads/${threadId}`),
     enabled: (options?.enabled ?? true) && Boolean(threadId),
+  })
+}
+
+export function useAiMessageRevisions(threadId: string | null, messageId: string | null, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [...AI_THREADS_KEY, 'revisions', threadId, messageId],
+    queryFn: () => apiGet<{ data: AiMessageRevisionRes[] }>(`/ai/threads/${threadId}/messages/${messageId}/revisions`),
+    enabled: (options?.enabled ?? true) && Boolean(threadId && messageId),
+  })
+}
+
+export function useSelectAiMessageRevision() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ threadId, messageId }: { threadId: string; messageId: string }) => apiPost<{ data: AiMessageRevisionRes }>(`/ai/threads/${threadId}/messages/${messageId}/revisions/select`),
+    onSuccess: (_response, variables) => {
+      void queryClient.invalidateQueries({ queryKey: [...AI_THREADS_KEY, 'detail', variables.threadId] })
+      void queryClient.invalidateQueries({ queryKey: [...AI_THREADS_KEY, 'revisions', variables.threadId] })
+      void queryClient.invalidateQueries({ queryKey: AI_THREADS_KEY })
+    },
   })
 }
 

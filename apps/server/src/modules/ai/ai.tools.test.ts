@@ -8,15 +8,29 @@ const { getActiveBook, getBookChapters, getBookChapterContent } = vi.hoisted(() 
 
 const { searchAiBook } = vi.hoisted(() => ({ searchAiBook: vi.fn() }))
 const { getVisibleAiChapterContent } = vi.hoisted(() => ({ getVisibleAiChapterContent: vi.fn() }))
-const { searchAnnotations } = vi.hoisted(() => ({ searchAnnotations: vi.fn() }))
+const { listAnnotations, searchAnnotations } = vi.hoisted(() => ({ listAnnotations: vi.fn(), searchAnnotations: vi.fn() }))
 
-vi.mock('../annotations/annotations.service', () => ({ searchAnnotations }))
+vi.mock('../annotations/annotations.service', () => ({ listAnnotations, searchAnnotations }))
 vi.mock('../books/books.service', () => ({ getActiveBook, getBookChapters, getBookChapterContent }))
 vi.mock('./ai.retrieval.service', () => ({ getVisibleAiChapterContent, searchAiBook }))
 
-import { AI_TOOL_MAX_CHAPTER_CHARS, AI_TOOL_MAX_RESULT_CHARS, executeAiTool } from './ai.tools'
+import { AI_TOOL_DEFAULT_TIMEOUT_MS, AI_TOOL_MAX_ANNOTATION_RESULTS, AI_TOOL_MAX_CHAPTER_CHARS, AI_TOOL_MAX_RESULT_CHARS, AI_TOOLS, createAiToolRepeatedExecution, executeAiTool, executeAiToolWithPolicy, getAiToolDefinition } from './ai.tools'
 
 describe('AI read-only tools', () => {
+  it('declares bounded read-only tools and excludes write capabilities', () => {
+    expect(AI_TOOLS.length).toBeGreaterThan(0)
+    expect(AI_TOOLS.every((tool) => tool.readOnly && tool.parallelSafe && tool.timeoutMs === AI_TOOL_DEFAULT_TIMEOUT_MS && tool.maxResultChars === AI_TOOL_MAX_RESULT_CHARS)).toBe(true)
+    expect(getAiToolDefinition('save_as_idea')).toBeUndefined()
+  })
+
+  it('returns a bounded stop signal for repeated identical tool calls', () => {
+    const execution = createAiToolRepeatedExecution({ id: 'call-repeat', name: 'search_book', arguments: '{"query":"线索"}' }, 3)
+
+    expect(execution.content).toContain('repeated 3 times')
+    expect(execution.sourceChars).toBe(0)
+    expect(execution.resultChars).toBe(execution.content.length)
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     getActiveBook.mockResolvedValue({ id: 'book-1', title: '测试书' })
@@ -34,6 +48,10 @@ describe('AI read-only tools', () => {
     searchAnnotations.mockResolvedValue([
       { id: 'anno-1', type: 'note', chapter: '第一章', text: '标注正文', note: '我的想法', cfiRange: 'epubcfi(/6/4!/2)', cfiAnchor: null },
       { id: 'anno-2', type: 'highlight', chapter: '第二章', text: '未读内容', note: null, cfiRange: 'epubcfi(/6/6!/2)', cfiAnchor: null },
+    ])
+    listAnnotations.mockResolvedValue([
+      { id: 'anno-1', type: 'note', chapter: '第一章', text: '标注正文', note: '我的想法', cfiRange: 'epubcfi(/6/4!/2)', cfiAnchor: null, updatedAt: 2 },
+      { id: 'anno-2', type: 'highlight', chapter: '第二章', text: '未读内容', note: null, cfiRange: 'epubcfi(/6/6!/2)', cfiAnchor: null, updatedAt: 1 },
     ])
   })
 
@@ -108,6 +126,22 @@ describe('AI read-only tools', () => {
     await expect(executeAiTool('user-1', 'book-1', { id: 'call-5', name: 'get_book_toc', arguments: '{}' }, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
   })
 
+  it('returns a bounded timeout result when a read is not abortable', async () => {
+    const definition = getAiToolDefinition('get_book_toc')
+    if (!definition) throw new Error('Expected get_book_toc definition')
+    const previousTimeout = definition.timeoutMs
+    definition.timeoutMs = 1
+    getActiveBook.mockImplementationOnce(() => new Promise((resolve) => setTimeout(() => resolve({ id: 'book-1', title: '测试书' }), 20)))
+
+    try {
+      const execution = await executeAiToolWithPolicy('user-1', 'book-1', { id: 'call-timeout', name: 'get_book_toc', arguments: '{}' }, new AbortController().signal)
+      expect(execution.content).toContain('timed out after 1ms')
+      expect(execution.resultChars).toBe(execution.content.length)
+    } finally {
+      definition.timeoutMs = previousTimeout
+    }
+  })
+
   it('searches through the bounded retrieval tool and forwards the spoiler boundary', async () => {
     const execution = await executeAiTool('user-1', 'book-1', { id: 'call-6', name: 'search_book', arguments: '{"query":"命中段落"}' }, new AbortController().signal, 3)
 
@@ -129,17 +163,32 @@ describe('AI read-only tools', () => {
   })
 
   it('searches only visible notes and turns them into direct-CFI citations', async () => {
-    const execution = await executeAiTool('user-1', 'book-1', { id: 'call-7', name: 'search_notes', arguments: '{"query":"想法"}' }, new AbortController().signal, 1)
+    const execution = await executeAiTool('user-1', 'book-1', { id: 'call-7', name: 'search_annotations', arguments: '{"query":"想法"}' }, new AbortController().signal, 1)
 
-    expect(searchAnnotations).toHaveBeenCalledWith('user-1', 'book-1', '想法', 8)
+    expect(searchAnnotations).toHaveBeenCalledWith('user-1', 'book-1', '想法', 20)
     expect(JSON.parse(execution.content)).toEqual({
       query: '想法',
-      results: [{ id: 'anno-1', type: 'note', chapter: '第一章', text: '标注正文', note: '我的想法' }],
-      truncated: true,
+      results: [{ id: 'anno-1', type: 'note', chapter: '第一章', text: '标注正文', note: '我的想法', cfi: 'epubcfi(/6/4!/2)' }],
+      truncated: false,
     })
     expect(execution.citations).toEqual([expect.objectContaining({
       id: 'annotation:anno-1', sourceType: 'annotation', sourceCfi: 'epubcfi(/6/4!/2)', chapterTitle: '第一章',
     })])
     expect(execution.sourceChars).toBe('标注正文我的想法'.length)
+  })
+
+  it('lists current chapter annotations with optional type filters', async () => {
+    const execution = await executeAiTool('user-1', 'book-1', { id: 'call-8', name: 'list_annotations', arguments: '{}' }, new AbortController().signal, 1, undefined, undefined, 0, 1)
+    expect(JSON.parse(execution.content)).toEqual({
+      chapterIndex: 1,
+      results: [{ id: 'anno-1', type: 'note', chapter: '第一章', text: '标注正文', note: '我的想法', cfi: 'epubcfi(/6/4!/2)' }],
+      truncated: false,
+    })
+    expect(execution.citations).toEqual([expect.objectContaining({ id: 'annotation:anno-1', sourceType: 'annotation' })])
+    expect(execution.resultChars).toBeLessThanOrEqual(AI_TOOL_MAX_RESULT_CHARS)
+    expect(AI_TOOL_MAX_ANNOTATION_RESULTS).toBeGreaterThan(0)
+
+    const filtered = await executeAiTool('user-1', 'book-1', { id: 'call-9', name: 'list_annotations', arguments: '{"type":"highlight"}' }, new AbortController().signal, 1, undefined, undefined, 0, 1)
+    expect(JSON.parse(filtered.content).results).toEqual([])
   })
 })

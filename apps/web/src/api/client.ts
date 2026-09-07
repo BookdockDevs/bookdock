@@ -33,6 +33,31 @@ function handleUnauthorized(path: string) {
   window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
 }
 
+function parseAiCitation(value: unknown): AiCitation | null {
+  if (!value || typeof value !== 'object') return null
+  const citation = value as Record<string, unknown>
+  if (
+    typeof citation.id !== 'string' || !citation.id
+    || typeof citation.chapterIndex !== 'number' || !Number.isInteger(citation.chapterIndex) || citation.chapterIndex < 0
+    || typeof citation.chapterId !== 'string' || !citation.chapterId
+    || typeof citation.chapterTitle !== 'string'
+    || typeof citation.startOffset !== 'number' || !Number.isInteger(citation.startOffset) || citation.startOffset < 0
+    || typeof citation.endOffset !== 'number' || !Number.isInteger(citation.endOffset) || citation.endOffset < citation.startOffset
+    || typeof citation.excerpt !== 'string'
+  ) return null
+  return {
+    id: citation.id,
+    chapterIndex: citation.chapterIndex,
+    chapterId: citation.chapterId,
+    chapterTitle: citation.chapterTitle,
+    startOffset: citation.startOffset,
+    endOffset: citation.endOffset,
+    excerpt: citation.excerpt.slice(0, 240),
+    ...(citation.sourceType === 'book' || citation.sourceType === 'annotation' ? { sourceType: citation.sourceType } : {}),
+    ...(typeof citation.sourceCfi === 'string' && citation.sourceCfi ? { sourceCfi: citation.sourceCfi } : {}),
+  }
+}
+
 async function parseError(res: Response): Promise<ApiError> {
   const body = await res.json().catch(() => ({}))
   return new ApiError(body?.error?.code ?? 'UNKNOWN', body?.error?.message ?? res.statusText, body?.error?.details)
@@ -105,10 +130,11 @@ export async function apiUpload<T>(path: string, file: File, method: 'POST' | 'P
 }
 
 export interface AiStreamHandlers {
-  onMeta?: (event: { requestId: string; threadId?: string; model?: string; receipt: AiContextReceipt }) => void
+  onMeta?: (event: { requestId: string; runId?: string; threadId?: string; model?: string; receipt: AiContextReceipt }) => void
   onDelta?: (text: string) => void
   onUsage?: (event: { inputTokens?: number; outputTokens?: number }) => void
   onTool?: (event: { name: string; phase: 'start' | 'result'; chapterIndex?: number; resultChars?: number; citations?: AiCitation[] }) => void
+  onDone?: (event: { content: string; citations: AiCitation[] }) => void
 }
 
 export async function apiStreamAiChat(body: AiChatReq, handlers: AiStreamHandlers, signal?: AbortSignal): Promise<void> {
@@ -127,6 +153,7 @@ export async function apiStreamAiChat(body: AiChatReq, handlers: AiStreamHandler
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let blocksSinceYield = 0
 
   const consume = (block: string) => {
     const lines = block.split(/\r?\n/)
@@ -140,8 +167,8 @@ export async function apiStreamAiChat(body: AiChatReq, handlers: AiStreamHandler
       throw new ApiError('AI_PROVIDER_ERROR', 'AI stream returned invalid data')
     }
     if (event === 'meta' && parsed && typeof parsed === 'object' && 'receipt' in parsed) {
-      const value = parsed as { requestId?: unknown; threadId?: unknown; model?: unknown; receipt: AiContextReceipt }
-      if (typeof value.requestId === 'string') handlers.onMeta?.({ requestId: value.requestId, threadId: typeof value.threadId === 'string' ? value.threadId : undefined, model: typeof value.model === 'string' ? value.model : undefined, receipt: value.receipt })
+      const value = parsed as { requestId?: unknown; runId?: unknown; threadId?: unknown; model?: unknown; receipt: AiContextReceipt }
+      if (typeof value.requestId === 'string') handlers.onMeta?.({ requestId: value.requestId, runId: typeof value.runId === 'string' ? value.runId : undefined, threadId: typeof value.threadId === 'string' ? value.threadId : undefined, model: typeof value.model === 'string' ? value.model : undefined, receipt: value.receipt })
     } else if (event === 'delta' && parsed && typeof parsed === 'object' && typeof (parsed as { text?: unknown }).text === 'string') {
       handlers.onDelta?.((parsed as { text: string }).text)
     } else if (event === 'usage' && parsed && typeof parsed === 'object') {
@@ -149,29 +176,9 @@ export async function apiStreamAiChat(body: AiChatReq, handlers: AiStreamHandler
     } else if (event === 'tool' && parsed && typeof parsed === 'object') {
       const value = parsed as { name?: unknown; phase?: unknown; chapterIndex?: unknown; resultChars?: unknown; citations?: unknown }
       if (typeof value.name === 'string' && (value.phase === 'start' || value.phase === 'result')) {
-        const citations = Array.isArray(value.citations) ? value.citations.flatMap((item): AiCitation[] => {
-          if (!item || typeof item !== 'object') return []
-          const citation = item as Record<string, unknown>
-          if (
-            typeof citation.id !== 'string' || !citation.id
-            || typeof citation.chapterIndex !== 'number' || !Number.isInteger(citation.chapterIndex) || citation.chapterIndex < 0
-            || typeof citation.chapterId !== 'string' || !citation.chapterId
-            || typeof citation.chapterTitle !== 'string'
-            || typeof citation.startOffset !== 'number' || !Number.isInteger(citation.startOffset) || citation.startOffset < 0
-            || typeof citation.endOffset !== 'number' || !Number.isInteger(citation.endOffset) || citation.endOffset < citation.startOffset
-            || typeof citation.excerpt !== 'string'
-          ) return []
-          return [{
-            id: citation.id,
-            chapterIndex: citation.chapterIndex,
-            chapterId: citation.chapterId,
-            chapterTitle: citation.chapterTitle,
-            startOffset: citation.startOffset,
-            endOffset: citation.endOffset,
-            excerpt: citation.excerpt.slice(0, 240),
-            ...(citation.sourceType === 'book' || citation.sourceType === 'annotation' ? { sourceType: citation.sourceType } : {}),
-            ...(typeof citation.sourceCfi === 'string' && citation.sourceCfi ? { sourceCfi: citation.sourceCfi } : {}),
-          }]
+        const citations = Array.isArray(value.citations) ? value.citations.flatMap((item) => {
+          const citation = parseAiCitation(item)
+          return citation ? [citation] : []
         }) : []
         handlers.onTool?.({
           name: value.name,
@@ -181,6 +188,13 @@ export async function apiStreamAiChat(body: AiChatReq, handlers: AiStreamHandler
           ...(citations.length > 0 ? { citations } : {}),
         })
       }
+    } else if (event === 'done' && parsed && typeof parsed === 'object') {
+      const value = parsed as { content?: unknown; citations?: unknown }
+      const citations = Array.isArray(value.citations) ? value.citations.flatMap((item) => {
+        const citation = parseAiCitation(item)
+        return citation ? [citation] : []
+      }) : []
+      handlers.onDone?.({ content: typeof value.content === 'string' ? value.content : '', citations })
     } else if (event === 'error') {
       const value = parsed as { code?: unknown; message?: unknown }
       throw new ApiError(typeof value.code === 'string' ? value.code : 'AI_PROVIDER_ERROR', typeof value.message === 'string' ? value.message : 'AI provider stream failed')
@@ -195,6 +209,13 @@ export async function apiStreamAiChat(body: AiChatReq, handlers: AiStreamHandler
       consume(buffer.slice(0, separator))
       buffer = buffer.slice(separator + 2)
       separator = buffer.indexOf('\n\n')
+      blocksSinceYield += 1
+      if (blocksSinceYield >= 8) {
+        // A proxy can deliver many SSE frames in one read; yield so the
+        // streaming message scheduler and browser paint can run between bursts.
+        blocksSinceYield = 0
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+      }
     }
     if (done) break
   }

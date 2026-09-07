@@ -41,6 +41,26 @@ export function BulbIcon({ size = 20 }: { size?: number }) {
   )
 }
 
+export function AiChatIcon({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 11.5a8 8 0 0 1-8 8 8.3 8.3 0 0 1-3.5-.8L4 20l1.3-4A8 8 0 1 1 20 11.5Z" />
+      <circle cx="8.5" cy="11" r=".7" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="11" r=".7" fill="currentColor" stroke="none" />
+      <circle cx="15.5" cy="11" r=".7" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function AiSparkleIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" />
+      <path d="m19 15 .75 2.25L22 18l-2.25.75L19 21l-.75-2.25L16 18l2.25-.75z" />
+    </svg>
+  )
+}
+
 export function SearchIcon() {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">

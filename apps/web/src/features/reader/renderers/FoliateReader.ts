@@ -1125,7 +1125,22 @@ export class FoliateReader implements BookReader {
       if (renderer) return renderer.goTo({ index })
     }
 
-    // search-hit:{index}:{start}:{end} — lazy jump target for search results.
+    // search-hit-chapter:{chapterIndex}:{start}:{end} — AI citation target.
+    // AI chapter indexes follow the visible TOC corpus, not raw Foliate sections.
+    if (target.startsWith('search-hit-chapter:')) {
+      const parts = target.split(':')
+      const chapterIndex = Number(parts[1])
+      const start = Number(parts[2])
+      const end = Number(parts[3])
+      const sectionIndex = this.aiCorpusSectionIndices()[chapterIndex]
+      if (![chapterIndex, start, end, sectionIndex].every(Number.isFinite)) return
+      if (renderer) {
+        return renderer.goTo({ index: sectionIndex, anchor: (doc: Document) => offsetsToRange(doc, start, end) })
+      }
+      return
+    }
+
+    // search-hit:{sectionIndex}:{start}:{end} — lazy jump target for reader search results.
     // No CFI is computed at search time; the anchor resolves the plain-text
     // span to a Range on the freshly loaded section document, so both reading
     // modes land on the exact match (paginator treats Range anchors uniformly).

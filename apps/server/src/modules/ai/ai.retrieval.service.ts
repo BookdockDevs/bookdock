@@ -1,7 +1,7 @@
 import { and, asc, eq, gte, lte, sql } from 'drizzle-orm'
 
 import { AI_MAX_INDEX_CORPUS_CHARS } from '@bookdock/shared'
-import type { AiEmbeddingStatus, AiIndexChapter, AiIndexReq, AiIndexRes, AiProvider, AiSearchReq, AiSearchRes, AiSearchResultRes } from '@bookdock/shared'
+import type { AiEmbeddingStatus, AiIndexChapter, AiIndexReq, AiIndexRes, AiProvider, AiRetrievalCandidateSource, AiRetrievalDiagnostics, AiRetrievalFallbackReason, AiSearchReq, AiSearchRes, AiSearchResultRes } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { aiBookIndexes, aiChunkEmbeddings, aiChunks } from '../../db/schema'
@@ -70,6 +70,12 @@ interface ChunkRow {
 
 interface SemanticRow extends ChunkRow {
   score: number
+}
+
+interface RankedSearchResult {
+  result: AiSearchResultRes
+  lexicalRank?: number
+  semanticRank?: number
 }
 
 interface AiIndexJob {
@@ -580,17 +586,54 @@ function excerpt(text: string, query: string) {
   return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`
 }
 
+function citationOffsets(row: ChunkRow, query: string): { startOffset: number; endOffset: number } {
+  const normalizedQuery = query.trim()
+  if (!normalizedQuery) return { startOffset: row.startOffset, endOffset: row.endOffset }
+  const lowerText = row.text.toLocaleLowerCase()
+  const exactIndex = lowerText.indexOf(normalizedQuery.toLocaleLowerCase())
+  if (exactIndex >= 0) {
+    return {
+      startOffset: row.startOffset + exactIndex,
+      endOffset: row.startOffset + exactIndex + normalizedQuery.length,
+    }
+  }
+  for (const term of normalizedQuery.split(/\s+/).filter(Boolean)) {
+    const termIndex = lowerText.indexOf(term.toLocaleLowerCase())
+    if (termIndex >= 0) {
+      return {
+        startOffset: row.startOffset + termIndex,
+        endOffset: row.startOffset + termIndex + term.length,
+      }
+    }
+  }
+  return { startOffset: row.startOffset, endOffset: row.endOffset }
+}
+
 function toSearchResult(row: ChunkRow, query: string, score = 0): AiSearchResultRes {
   return {
     id: row.id,
     chapterIndex: row.chapterIndex,
     chapterId: row.chapterId,
     chapterTitle: row.chapterTitle,
-    startOffset: row.startOffset,
-    endOffset: row.endOffset,
+    ...citationOffsets(row, query),
     excerpt: excerpt(row.text, query),
     score,
   }
+}
+
+function likeScore(text: string, query: string) {
+  const lowerText = text.toLocaleLowerCase()
+  const lowerQuery = query.toLocaleLowerCase()
+  if (!lowerQuery) return 0
+  let count = 0
+  let offset = 0
+  while (true) {
+    const match = lowerText.indexOf(lowerQuery, offset)
+    if (match < 0) break
+    count += 1
+    offset = match + lowerQuery.length
+  }
+  return count
 }
 
 function ftsSearch(userId: string, input: AiSearchReq): FtsRow[] {
@@ -667,14 +710,15 @@ function cosine(left: number[], right: number[]) {
   return dot / Math.sqrt(leftNorm * rightNorm)
 }
 
-async function vectorSearch(userId: string, input: AiSearchReq, indexRow: typeof aiBookIndexes.$inferSelect, options: AiRetrievalOptions): Promise<SemanticRow[]> {
-  if (!options.embedder || indexRow.embeddingStatus !== 'ready' || !indexRow.embeddingModel || !indexRow.embeddingDim) return []
+async function vectorSearch(userId: string, input: AiSearchReq, indexRow: typeof aiBookIndexes.$inferSelect, options: AiRetrievalOptions): Promise<{ rows: SemanticRow[]; reason?: AiRetrievalFallbackReason }> {
+  if (!options.embedder || indexRow.embeddingStatus !== 'ready' || !indexRow.embeddingModel || !indexRow.embeddingDim) return { rows: [], reason: 'not_ready' }
   const signal = options.signal ?? new AbortController().signal
   const queryBatch = await options.embedder([input.query], signal, 'query')
-  if (!indexRow.embeddingProvider || queryBatch.provider !== indexRow.embeddingProvider || queryBatch.model.trim() !== indexRow.embeddingModel || queryBatch.vectors.length !== 1) return []
+  if (!indexRow.embeddingProvider || queryBatch.provider !== indexRow.embeddingProvider || queryBatch.model.trim() !== indexRow.embeddingModel) return { rows: [], reason: 'provider_mismatch' }
+  if (queryBatch.vectors.length !== 1) return { rows: [], reason: 'invalid_response' }
   const queryVector = vectorBuffer(queryBatch.vectors[0]).buffer
   const queryValues = vectorValues(queryVector, indexRow.embeddingDim)
-  if (!queryValues) return []
+  if (!queryValues) return { rows: [], reason: 'invalid_response' }
   const chapterMin = input.minChapterIndex !== undefined && input.minChapterIndex >= 0
     ? gte(aiChunks.chapterIndex, input.minChapterIndex)
     : undefined
@@ -700,28 +744,89 @@ async function vectorSearch(userId: string, input: AiSearchReq, indexRow: typeof
     text: aiChunks.text,
     vector: aiChunkEmbeddings.vector,
   }).from(aiChunkEmbeddings).innerJoin(aiChunks, eq(aiChunkEmbeddings.chunkId, aiChunks.id)).where(and(...conditions)).all()
-  return rows.flatMap((row) => {
+  return { rows: rows.flatMap((row) => {
     const values = vectorValues(row.vector, indexRow.embeddingDim!)
     const score = values ? cosine(queryValues, values) : null
     return score === null ? [] : [{ ...row, score }]
-  }).sort((left, right) => right.score - left.score).slice(0, input.limit ?? MAX_CANDIDATES)
+  }).sort((left, right) => right.score - left.score).slice(0, input.limit ?? MAX_CANDIDATES) }
 }
 
 function lexicalResults(rows: FtsRow[] | ChunkRow[], query: string): AiSearchResultRes[] {
-  return rows.map((row) => toSearchResult(row, query, 'rank' in row ? Math.max(0, -Number(row.rank) || 0) : 0))
+  const results = rows.map((row) => toSearchResult(row, query, 'rank' in row ? Math.max(0, -Number(row.rank) || 0) : likeScore(row.text, query)))
+  if (rows.length === 0 || 'rank' in rows[0]!) return results
+  return results.sort((left, right) => right.score - left.score || left.chapterIndex - right.chapterIndex || left.startOffset - right.startOffset)
 }
 
-function fuseResults(lexical: AiSearchResultRes[], semantic: AiSearchResultRes[], limit: number) {
-  const fused = new Map<string, AiSearchResultRes>()
+function fuseResults(lexical: AiSearchResultRes[], semantic: AiSearchResultRes[], limit: number): RankedSearchResult[] {
+  const fused = new Map<string, RankedSearchResult>()
   lexical.forEach((result, index) => {
-    fused.set(result.id, { ...result, score: 1 / (RRF_K + index + 1) })
+    fused.set(result.id, { result: { ...result, score: 1 / (RRF_K + index + 1) }, lexicalRank: index + 1 })
   })
   semantic.forEach((result, index) => {
     const current = fused.get(result.id)
     const score = 1 / (RRF_K + index + 1)
-    fused.set(result.id, { ...(current ?? result), score: (current?.score ?? 0) + score })
+    fused.set(result.id, {
+      result: { ...(current?.result ?? result), score: (current?.result.score ?? 0) + score },
+      ...(current?.lexicalRank === undefined ? {} : { lexicalRank: current.lexicalRank }),
+      semanticRank: index + 1,
+    })
   })
-  return [...fused.values()].sort((left, right) => right.score - left.score).slice(0, limit)
+  return [...fused.values()]
+    .sort((left, right) => right.result.score - left.result.score || left.result.id.localeCompare(right.result.id))
+    .slice(0, limit)
+}
+
+function lexicalRankedResults(results: AiSearchResultRes[], limit: number): RankedSearchResult[] {
+  return results.slice(0, limit).map((result, index) => ({ result, lexicalRank: index + 1 }))
+}
+
+function emptyRetrievalDiagnostics(embeddingFallbackReason?: AiRetrievalFallbackReason): AiRetrievalDiagnostics {
+  return {
+    source: 'none',
+    lexicalCandidateCount: 0,
+    semanticCandidateCount: 0,
+    fusedCandidateCount: 0,
+    selectedCount: 0,
+    embeddingAttempted: false,
+    embeddingUsed: false,
+    ...(embeddingFallbackReason ? { embeddingFallbackReason } : {}),
+    topResults: [],
+  }
+}
+
+function retrievalDiagnostics(
+  lexical: AiSearchResultRes[],
+  semantic: AiSearchResultRes[],
+  ranked: RankedSearchResult[],
+  source: AiRetrievalDiagnostics['source'],
+  embeddingAttempted: boolean,
+  embeddingFallbackReason?: AiRetrievalFallbackReason,
+): AiRetrievalDiagnostics {
+  const ids = new Set([...lexical, ...semantic].map((result) => result.id))
+  return {
+    source,
+    lexicalCandidateCount: lexical.length,
+    semanticCandidateCount: semantic.length,
+    fusedCandidateCount: ids.size,
+    selectedCount: ranked.length,
+    embeddingAttempted,
+    embeddingUsed: semantic.length > 0,
+    ...(embeddingFallbackReason && semantic.length === 0 ? { embeddingFallbackReason } : {}),
+    topResults: ranked.slice(0, 5).map(({ result, lexicalRank, semanticRank }) => {
+      const candidateSource: AiRetrievalCandidateSource = lexicalRank !== undefined && semanticRank !== undefined
+        ? 'hybrid'
+        : semanticRank !== undefined
+          ? 'semantic'
+          : 'lexical'
+      return {
+        id: result.id,
+        source: candidateSource,
+        score: result.score,
+        ...(lexicalRank === undefined ? {} : { lexicalRank }),
+        ...(semanticRank === undefined ? {} : { semanticRank }),
+      }
+    }),
+  }
 }
 
 export async function searchAiBook(userId: string, input: AiSearchReq, options: AiRetrievalOptions = {}): Promise<AiSearchRes> {
@@ -729,7 +834,7 @@ export async function searchAiBook(userId: string, input: AiSearchReq, options: 
   if (!query) return { status: 'empty', results: [] }
   const ensured = await ensureIndex(userId, input.bookId, options)
   if (options.visibleTextVersion && ensured.status.status !== 'ready') {
-    return { status: 'empty', results: [], reason: 'visible_index_unavailable' }
+    return { status: 'empty', results: [], reason: 'visible_index_unavailable', diagnostics: emptyRetrievalDiagnostics('not_ready') }
   }
   const limit = Math.min(input.limit ?? 5, MAX_SEARCH_RESULTS)
   const candidateInput = { ...input, query, limit: MAX_CANDIDATES }
@@ -737,24 +842,40 @@ export async function searchAiBook(userId: string, input: AiSearchReq, options: 
   const lexicalRows = ftsRows.length > 0 ? ftsRows : likeSearch(userId, candidateInput)
   const lexical = lexicalResults(lexicalRows, query)
   let semantic: AiSearchResultRes[] = []
+  let embeddingAttempted = false
+  let embeddingFallbackReason: AiRetrievalFallbackReason | undefined
   if (ensured.status.status === 'ready' && ensured.status.embeddingStatus === 'ready' && options.embedder) {
+    embeddingAttempted = true
     const semanticController = new AbortController()
     const semanticSignal = options.signal ? AbortSignal.any([options.signal, semanticController.signal]) : semanticController.signal
     const semanticTimer = setTimeout(() => semanticController.abort(), QUERY_EMBEDDING_TIMEOUT_MS)
     try {
       const row = ensured.row ?? getIndexRow(userId, input.bookId)
       if (row) {
-        const semanticRows = await vectorSearch(userId, candidateInput, row, { ...options, signal: semanticSignal })
-        semantic = semanticRows.map((result) => toSearchResult(result, query, result.score))
+        const semanticResult = await vectorSearch(userId, candidateInput, row, { ...options, signal: semanticSignal })
+        embeddingFallbackReason = semanticResult.reason
+        semantic = semanticResult.rows.map((result) => toSearchResult(result, query, result.score))
+      } else {
+        embeddingFallbackReason = 'not_ready'
       }
     } catch (error) {
       if (options.signal?.aborted || (!semanticController.signal.aborted && isAbort(error))) throw error
+      embeddingFallbackReason = semanticController.signal.aborted ? 'timeout' : 'error'
     } finally {
       clearTimeout(semanticTimer)
     }
+  } else {
+    embeddingFallbackReason = options.embedder ? 'not_ready' : 'not_configured'
   }
-  const rows = semantic.length > 0 ? fuseResults(lexical, semantic, limit) : lexical.slice(0, limit)
-  return { status: rows.length > 0 ? 'ready' : 'empty', results: rows }
+  const source: AiRetrievalDiagnostics['source'] = semantic.length > 0
+    ? 'hybrid'
+    : lexicalRows.length > 0
+      ? (ftsRows.length > 0 ? 'fts' : 'like')
+      : 'none'
+  const ranked = semantic.length > 0 ? fuseResults(lexical, semantic, limit) : lexicalRankedResults(lexical, limit)
+  const diagnostics = retrievalDiagnostics(lexical, semantic, ranked, source, embeddingAttempted, embeddingFallbackReason)
+  const rows = ranked.map(({ result }) => result)
+  return { status: rows.length > 0 ? 'ready' : 'empty', results: rows, diagnostics }
 }
 
 export async function getVisibleAiChapterContent(userId: string, bookId: string, chapterIndex: number, visibleTextVersion: string, maxChars: number): Promise<{ index: number; id: string; title: string; content: string } | null> {

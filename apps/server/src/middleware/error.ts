@@ -18,7 +18,7 @@ export class AppError extends Error {
 export function errorHandler(err: Error, c: Context) {
   if (err instanceof AppError) {
     const status = (ErrorHttpStatus[err.code as keyof typeof ErrorHttpStatus] ?? 500) as StatusCode
-    if (err.code === 'AI_RATE_LIMITED' && typeof err.details === 'object' && err.details !== null && 'retryAfterSeconds' in err.details) {
+    if ((err.code === 'AI_RATE_LIMITED' || err.code === 'AI_PROVIDER_ERROR') && typeof err.details === 'object' && err.details !== null && 'retryAfterSeconds' in err.details) {
       const retryAfterSeconds = (err.details as { retryAfterSeconds?: unknown }).retryAfterSeconds
       if (typeof retryAfterSeconds === 'number' && Number.isInteger(retryAfterSeconds) && retryAfterSeconds > 0) c.header('Retry-After', String(retryAfterSeconds))
     }

@@ -13,6 +13,7 @@ import Modal from '@/components/ui/Modal'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
+import { isRetiredAiPrompt, localizeAiPromptName, migrateAiPromptText } from '@/lib/ai-prompt-migrations'
 import { useAuthStore } from '@/stores/auth.store'
 import { useToastStore } from '@/stores/toast.store'
 
@@ -108,7 +109,6 @@ function defaultPromptTemplates(_: (key: string) => string): AiPromptTemplate[] 
     { id: 'summarize-selection', name: _('reader.aiQuickSummarize'), prompt: _('reader.aiQuickSummarizePrompt'), scope: 'selection', enabled: true, order: 30, builtIn: true },
     { id: 'questions-selection', name: _('reader.aiQuickQuestions'), prompt: _('reader.aiQuickQuestionsPrompt'), scope: 'selection', enabled: true, order: 40, builtIn: true },
     { id: 'summarize-chapter', name: _('reader.aiQuickChapterSummary'), prompt: _('reader.aiQuickChapterSummaryPrompt'), scope: 'reading', enabled: true, order: 50, builtIn: true },
-    { id: 'review-to-here', name: _('reader.aiQuickReadToHere'), prompt: _('reader.aiQuickReadToHerePrompt'), scope: 'reading', enabled: true, order: 60, builtIn: true },
   ]
 }
 
@@ -372,7 +372,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         </label>}
       </div>}
 
-      {!isGuest && config && <AiPromptTemplates prompts={config.prompts ?? defaultPrompts} update={updateConfig} />}
+      {!isGuest && config && <AiPromptTemplates prompts={config.prompts ?? defaultPrompts} defaultPrompts={defaultPrompts} update={updateConfig} />}
 
       {pendingDelete && <ConfirmDialog message={_('settings.aiDeleteConfirm')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
 
@@ -450,7 +450,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   )
 }
 
-function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; update: ReturnType<typeof useUpdateAiConfig> }) {
+function AiPromptTemplates({ prompts, defaultPrompts, update }: { prompts: AiPromptTemplate[]; defaultPrompts: AiPromptTemplate[]; update: ReturnType<typeof useUpdateAiConfig> }) {
   const _ = useTranslation()
   const addToast = useToastStore((s) => s.addToast)
   const [drafts, setDrafts] = useState(prompts)
@@ -459,7 +459,17 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
   const variableHelpRef = useRef<HTMLDivElement>(null)
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
-  useEffect(() => setDrafts(prompts), [prompts])
+  const normalizedPrompts = useMemo(() => {
+    const defaultPromptById = new Map(defaultPrompts.map((prompt) => [prompt.id, prompt]))
+    return prompts
+      .filter((prompt) => !isRetiredAiPrompt(prompt.id))
+      .map((prompt) => ({
+        ...prompt,
+        name: localizeAiPromptName(prompt.id, prompt.name, defaultPromptById.get(prompt.id)?.name),
+        prompt: migrateAiPromptText(prompt.id, prompt.prompt, defaultPromptById.get(prompt.id)?.prompt),
+      }))
+  }, [defaultPrompts, prompts])
+  useEffect(() => setDrafts(normalizedPrompts), [normalizedPrompts])
   useDismissiblePopup(variableHelpOpen, variableHelpRef, () => setVariableHelpOpen(false))
 
   function persist(next: AiPromptTemplate[], onSuccess?: () => void) {
@@ -467,7 +477,7 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
     update.mutate({ prompts: next.map(toPromptInput) }, {
       onSuccess,
       onError: (error) => {
-        setDrafts(prompts)
+        setDrafts(normalizedPrompts)
         addToast(error.message, 'error')
       },
     })
@@ -566,7 +576,6 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
           <div className="flex flex-wrap gap-2">
             {AI_PROMPT_VARIABLES.map((variable) => <button key={variable} type="button" onClick={() => insertVariable(variable)} aria-label={_('settings.aiPromptInsertVariable', { variable })} className="rounded-lg border border-stone-200 px-2.5 py-1.5 font-mono text-xs text-stone-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-stone-700 dark:text-stone-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300">{variable}</button>)}
           </div>
-          <p className="text-[11px] text-stone-400 dark:text-stone-500">{_('settings.aiPromptVariablesHint')}</p>
         </div>
         <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.aiPromptText')}</span><textarea ref={promptTextareaRef} required rows={5} value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} placeholder={_('settings.aiPromptTextPlaceholder')} className="resize-y rounded-lg border border-stone-200 bg-transparent px-3 py-2 text-sm leading-5 outline-none focus:border-blue-500 dark:border-stone-700" /></label>
         <div className="flex justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800"><button type="button" onClick={closeForm} className="rounded-lg border border-stone-200 px-4 py-2 text-xs text-stone-600 dark:border-stone-700 dark:text-stone-300">{_('library.cancel')}</button><button type="submit" disabled={!form.name.trim() || !form.prompt.trim() || update.isPending} className="rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-40 dark:bg-stone-100 dark:text-stone-900">{_('settings.aiPromptApply')}</button></div>

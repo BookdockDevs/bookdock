@@ -246,6 +246,34 @@
       "when": 1792300000000,
       "tag": "0034_ai_message_retry",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792400000000,
+      "tag": "0035_ai_generation_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792500000000,
+      "tag": "0036_ai_message_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792600000000,
+      "tag": "0037_ai_message_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792700000000,
+      "tag": "0038_ai_generation_diagnostics",
+      "breakpoints": true
     }
   ]
 }

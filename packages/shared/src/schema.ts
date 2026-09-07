@@ -230,6 +230,7 @@ export const aiChatSchema = z.object({
   bookId: z.string().trim().min(1).max(200),
   threadId: z.string().trim().min(1).max(100).optional(),
   regenerate: z.boolean().optional(),
+  editMessageId: z.string().trim().min(1).max(100).optional(),
   prompt: z.string().trim().min(1).max(AI_MAX_CHAT_PROMPT_CHARS),
   context: aiContextSchema,
   history: z.array(aiHistoryMessageSchema).max(12).optional(),
@@ -257,6 +258,10 @@ export const aiThreadListSchema = z.object({
   bookId: z.string().trim().min(1).max(200),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 }).strict()
+
+export const aiGenerationRunIdSchema = z.string().trim().min(1).max(100)
+
+export const aiMessageIdSchema = z.string().trim().min(1).max(100)
 
 export const aiIndexStatusSchema = z.object({
   bookId: z.string().trim().min(1).max(200),

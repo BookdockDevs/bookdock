@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, blob, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core'
 
-import type { AiCitation, AiContextReceipt, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
+import type { AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -109,10 +109,59 @@ export const aiMessages = sqliteTable('ai_messages', {
   context: text('context', { mode: 'json' }).$type<AiContextReceipt | null>(),
   retry: text('retry', { mode: 'json' }).$type<AiRetryRecipe | null>(),
   citations: text('citations', { mode: 'json' }).$type<AiCitation[] | null>(),
+  revisionGroupId: text('revision_group_id'),
+  revision: integer('revision').notNull().default(0),
+  isSelected: integer('is_selected').notNull().default(1),
   createdAt: integer('created_at').notNull(),
   aborted: integer('aborted').notNull().default(0),
 }, (table) => ({
   userThreadCreatedIdx: index('ai_messages_user_thread_created_idx').on(table.userId, table.threadId, table.createdAt),
+  revisionGroupIdx: index('ai_messages_revision_group_idx').on(table.userId, table.threadId, table.revisionGroupId, table.revision),
+}))
+
+export const aiMessageEvents = sqliteTable('ai_message_events', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  threadId: text('thread_id').notNull().references(() => aiThreads.id, { onDelete: 'cascade' }),
+  messageId: text('message_id').notNull().references(() => aiMessages.id, { onDelete: 'cascade' }),
+  sequence: integer('sequence').notNull(),
+  type: text('type', { enum: ['tool', 'citation'] }).notNull(),
+  phase: text('phase', { enum: ['start', 'result'] }),
+  name: text('name'),
+  chapterIndex: integer('chapter_index'),
+  resultChars: integer('result_chars'),
+  citationId: text('citation_id'),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  messageSequenceUnique: uniqueIndex('ai_message_events_message_sequence_unique').on(table.messageId, table.sequence),
+  userThreadCreatedIdx: index('ai_message_events_user_thread_created_idx').on(table.userId, table.threadId, table.createdAt),
+}))
+
+export const aiGenerationRuns = sqliteTable('ai_generation_runs', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  threadId: text('thread_id').notNull().references(() => aiThreads.id, { onDelete: 'cascade' }),
+  requestId: text('request_id').notNull(),
+  targetMessageId: text('target_message_id').references(() => aiMessages.id, { onDelete: 'set null' }),
+  state: text('state', { enum: ['preparing', 'requesting', 'streaming', 'waiting_tool', 'completed', 'failed', 'cancelled', 'interrupted'] }).notNull(),
+  stateRevision: integer('state_revision').notNull().default(0),
+  checkpointSeq: integer('checkpoint_seq').notNull().default(0),
+  checkpointText: text('checkpoint_text').notNull().default(''),
+  checkpointEvents: text('checkpoint_events', { mode: 'json' }).$type<AiNormalizedEvent[] | null>(),
+  checkpointUsage: text('checkpoint_usage', { mode: 'json' }).$type<AiGenerationUsage | null>(),
+  diagnostics: text('diagnostics', { mode: 'json' }).$type<AiGenerationDiagnostics | null>(),
+  errorCode: text('error_code'),
+  reason: text('reason', { enum: ['user_cancelled', 'client_disconnected', 'stream_disconnected', 'server_restarted', 'provider_aborted', 'timeout', 'provider_error', 'persistence_error'] }),
+  errorMessage: text('error_message'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  terminalAt: integer('terminal_at'),
+}, (table) => ({
+  requestUnique: uniqueIndex('ai_generation_runs_request_unique').on(table.requestId),
+  userThreadUpdatedIdx: index('ai_generation_runs_user_thread_updated_idx').on(table.userId, table.threadId, table.updatedAt),
+  activeUserUnique: uniqueIndex('ai_generation_runs_active_user_unique')
+    .on(table.userId)
+    .where(sql`${table.state} IN ('preparing', 'requesting', 'streaming', 'waiting_tool')`),
 }))
 
 export const aiBookIndexes = sqliteTable('ai_book_indexes', {

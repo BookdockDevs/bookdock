@@ -26,7 +26,7 @@ describe('AI panel memory', () => {
       activeThreadId: 42,
       prompt: true,
       readingScope: 'future_scope',
-      enabledTools: ['search_notes', 'removed_tool', 'search_notes'],
+      enabledTools: ['search_annotations', 'removed_tool', 'search_annotations'],
       assistantModeId: '',
       chapterReferences: [3, -1, 3, 1.5, '2'],
     }))

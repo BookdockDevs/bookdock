@@ -1,6 +1,7 @@
-import type { AiCitation, AiToolName } from '@bookdock/shared'
+import { normalizeAiToolName } from '@bookdock/shared'
+import type { AiCitation, AiRetrievalDiagnostics, AiToolName } from '@bookdock/shared'
 
-import { searchAnnotations } from '../annotations/annotations.service'
+import { listAnnotations, searchAnnotations } from '../annotations/annotations.service'
 import { getActiveBook, getBookChapterContent, getBookChapters } from '../books/books.service'
 import { getVisibleAiChapterContent, searchAiBook, type AiEmbedder } from './ai.retrieval.service'
 
@@ -11,17 +12,25 @@ export const AI_TOOL_MAX_TOTAL_RESULT_CHARS = 12_000
 export const AI_TOOL_MAX_CHAPTER_CHARS = 10_000
 export const AI_TOOL_MAX_NOTE_TEXT_CHARS = 500
 export const AI_TOOL_MAX_NOTE_CONTENT_CHARS = 800
+export const AI_TOOL_MAX_ANNOTATION_RESULTS = 12
+export const AI_TOOL_MAX_CONCURRENCY = 3
+export const AI_TOOL_DEFAULT_TIMEOUT_MS = 120_000
 
 export interface AiToolDefinition {
   name: AiToolName
   description: string
   parameters: Record<string, unknown>
+  readOnly: true
+  parallelSafe: boolean
+  timeoutMs: number
+  maxResultChars: number
 }
 
 export interface AiToolCall {
   id: string
   name: string
   arguments: string
+  thoughtSignature?: string
 }
 
 export interface AiToolExecution {
@@ -31,6 +40,7 @@ export interface AiToolExecution {
   resultChars: number
   sourceChars: number
   citations?: AiCitation[]
+  retrieval?: AiRetrievalDiagnostics
 }
 
 export function createAiToolBudgetExecution(call: AiToolCall, maxChars: number): AiToolExecution {
@@ -44,10 +54,53 @@ export function createAiToolDisabledExecution(call: AiToolCall): AiToolExecution
   return { call, content, resultChars: content.length, sourceChars: 0 }
 }
 
+export function createAiToolRepeatedExecution(call: AiToolCall, streak: number): AiToolExecution {
+  const content = `The same read-only tool call was repeated ${streak} times with identical arguments. Do not call it again; answer using the result already available or explain what information is still missing.`
+  return { call, content, resultChars: content.length, sourceChars: 0 }
+}
+
+export async function executeAiToolWithPolicy(userId: string, bookId: string, call: AiToolCall, signal: AbortSignal, maxChapterIndex = -1, embedder?: AiEmbedder, visibleTextVersion?: string, minChapterIndex = 0, currentChapterIndex = 0): Promise<AiToolExecution> {
+  const definition = getAiToolDefinition(call.name)
+  if (!definition || definition.timeoutMs <= 0) return executeAiTool(userId, bookId, call, signal, maxChapterIndex, embedder, visibleTextVersion, minChapterIndex, currentChapterIndex)
+
+  const timeoutController = new AbortController()
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  let rejectAbort: ((error: DOMException) => void) | undefined
+  const abortPromise = new Promise<AiToolExecution>((_, reject) => {
+    rejectAbort = reject
+  })
+  const onAbort = () => rejectAbort?.(new DOMException('The AI request was aborted', 'AbortError'))
+  if (signal.aborted) onAbort()
+  else signal.addEventListener('abort', onAbort, { once: true })
+  try {
+    const timeoutPromise = new Promise<AiToolExecution>((resolve) => {
+      timeoutId = setTimeout(() => {
+        resolve(result(`Tool ${call.name} timed out after ${definition.timeoutMs}ms. Answer using the information already available.`, call))
+        timeoutController.abort()
+      }, definition.timeoutMs)
+    })
+    const execution = await Promise.race([
+      executeAiTool(userId, bookId, call, AbortSignal.any([signal, timeoutController.signal]), maxChapterIndex, embedder, visibleTextVersion, minChapterIndex, currentChapterIndex),
+      timeoutPromise,
+      abortPromise,
+    ])
+    if (execution.resultChars <= definition.maxResultChars) return execution
+    const content = execution.content.slice(0, definition.maxResultChars)
+    return { ...execution, content, resultChars: content.length }
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
+    signal.removeEventListener('abort', onAbort)
+  }
+}
+
 export const AI_TOOLS: readonly AiToolDefinition[] = [
   {
     name: 'get_book_toc',
     description: 'Read the visible table of contents of the current book. The server hides chapters beyond the current reading boundary and returns metadata only, not chapter text.',
+    readOnly: true,
+    parallelSafe: true,
+    timeoutMs: AI_TOOL_DEFAULT_TIMEOUT_MS,
+    maxResultChars: AI_TOOL_MAX_RESULT_CHARS,
     parameters: {
       type: 'object',
       properties: {},
@@ -57,6 +110,10 @@ export const AI_TOOLS: readonly AiToolDefinition[] = [
   {
     name: 'get_chapter_content',
     description: 'Read one chapter from the current book by its zero-based chapter index. The server rejects chapters beyond the current reading boundary. Use get_book_toc first when the index is unknown.',
+    readOnly: true,
+    parallelSafe: true,
+    timeoutMs: AI_TOOL_DEFAULT_TIMEOUT_MS,
+    maxResultChars: AI_TOOL_MAX_RESULT_CHARS,
     parameters: {
       type: 'object',
       properties: {
@@ -69,6 +126,10 @@ export const AI_TOOLS: readonly AiToolDefinition[] = [
   {
     name: 'search_book',
     description: 'Search the current book for relevant passages by keyword or phrase. Results include chapter and position metadata; the server applies the current reading-position spoiler boundary.',
+    readOnly: true,
+    parallelSafe: true,
+    timeoutMs: AI_TOOL_DEFAULT_TIMEOUT_MS,
+    maxResultChars: AI_TOOL_MAX_RESULT_CHARS,
     parameters: {
       type: 'object',
       properties: {
@@ -79,12 +140,34 @@ export const AI_TOOLS: readonly AiToolDefinition[] = [
     },
   },
   {
-    name: 'search_notes',
-    description: 'Search the current user\'s notes, highlights, and bookmarks in the current book. Results are bounded and may be limited by the current reading position.',
+    name: 'list_annotations',
+    description: 'List the current user\'s highlights, notes, and bookmarks in the current book. By default, list the current chapter within the reading boundary; optionally filter by chapter index or annotation type.',
+    readOnly: true,
+    parallelSafe: true,
+    timeoutMs: AI_TOOL_DEFAULT_TIMEOUT_MS,
+    maxResultChars: AI_TOOL_MAX_RESULT_CHARS,
+    parameters: {
+      type: 'object',
+      properties: {
+        chapterIndex: { type: 'integer', minimum: 0, description: 'Optional zero-based chapter index. Defaults to the current chapter.' },
+        type: { type: 'string', enum: ['highlight', 'note', 'bookmark'], description: 'Optional annotation type filter.' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_annotations',
+    description: 'Search the current user\'s highlights, notes, and bookmarks in the current book by keyword or phrase. Results are bounded and may be limited by the current reading position; optionally filter by chapter index or annotation type.',
+    readOnly: true,
+    parallelSafe: true,
+    timeoutMs: AI_TOOL_DEFAULT_TIMEOUT_MS,
+    maxResultChars: AI_TOOL_MAX_RESULT_CHARS,
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', minLength: 1, maxLength: 200, description: 'A focused keyword or phrase to find in notes or highlighted text.' },
+        chapterIndex: { type: 'integer', minimum: 0, description: 'Optional zero-based chapter index filter.' },
+        type: { type: 'string', enum: ['highlight', 'note', 'bookmark'], description: 'Optional annotation type filter.' },
       },
       required: ['query'],
       additionalProperties: false,
@@ -93,6 +176,16 @@ export const AI_TOOLS: readonly AiToolDefinition[] = [
 ]
 
 const TOOL_MAP = new Map<string, AiToolDefinition>(AI_TOOLS.map((tool) => [tool.name, tool]))
+
+export function getAiToolDefinition(name: string) {
+  const normalized = normalizeAiToolName(name)
+  return normalized ? TOOL_MAP.get(normalized) : undefined
+}
+
+export function isAiToolEnabled(name: string, enabledTools: ReadonlySet<string>) {
+  const normalized = normalizeAiToolName(name)
+  return normalized !== undefined && enabledTools.has(normalized)
+}
 
 function parseArguments(raw: string): Record<string, unknown> {
   try {
@@ -104,7 +197,7 @@ function parseArguments(raw: string): Record<string, unknown> {
   }
 }
 
-function result(content: string, call: AiToolCall, chapterIndex?: number, citations: AiCitation[] = [], sourceChars = 0): AiToolExecution {
+function result(content: string, call: AiToolCall, chapterIndex?: number, citations: AiCitation[] = [], sourceChars = 0, retrieval?: AiRetrievalDiagnostics): AiToolExecution {
   const bounded = content.slice(0, AI_TOOL_MAX_RESULT_CHARS)
   return {
     call,
@@ -113,15 +206,17 @@ function result(content: string, call: AiToolCall, chapterIndex?: number, citati
     resultChars: bounded.length,
     sourceChars,
     ...(citations.length > 0 ? { citations } : {}),
+    ...(retrieval ? { retrieval } : {}),
   }
 }
 
-export async function executeAiTool(userId: string, bookId: string, call: AiToolCall, signal: AbortSignal, maxChapterIndex = -1, embedder?: AiEmbedder, visibleTextVersion?: string, minChapterIndex = 0): Promise<AiToolExecution> {
-  if (!TOOL_MAP.has(call.name)) return result('Unknown tool', call)
+export async function executeAiTool(userId: string, bookId: string, call: AiToolCall, signal: AbortSignal, maxChapterIndex = -1, embedder?: AiEmbedder, visibleTextVersion?: string, minChapterIndex = 0, currentChapterIndex = 0): Promise<AiToolExecution> {
+  const toolName = normalizeAiToolName(call.name)
+  if (!toolName) return result('Unknown tool', call)
   if (signal.aborted) throw new DOMException('The AI request was aborted', 'AbortError')
 
   try {
-    if (call.name === 'get_book_toc') {
+    if (toolName === 'get_book_toc') {
       const book = await getActiveBook(userId, bookId)
       const chapters = await getBookChapters(userId, bookId)
       const visibleChapters = chapters.slice(minChapterIndex, maxChapterIndex >= 0 ? maxChapterIndex + 1 : undefined)
@@ -146,7 +241,7 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
       }), call)
     }
 
-    if (call.name === 'search_book') {
+    if (toolName === 'search_book') {
       const query = parseArguments(call.arguments).query
       if (typeof query !== 'string' || !query.trim()) return result('Invalid query: expected a non-empty string.', call)
       const search = await searchAiBook(userId, { bookId, query, limit: 5, maxChapterIndex, ...(minChapterIndex > 0 ? { minChapterIndex } : {}) }, { signal, embedder, ...(visibleTextVersion ? { visibleTextVersion } : {}) })
@@ -160,24 +255,44 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
         excerpt: item.excerpt,
       }))
       const sourceChars = search.results.reduce((total, item) => total + item.excerpt.length, 0)
-      return result(JSON.stringify({ query: query.trim(), results: search.results, truncated: false, ...(search.reason ? { reason: search.reason } : {}) }), call, undefined, citations, sourceChars)
+      return result(JSON.stringify({ query: query.trim(), results: search.results, truncated: false, ...(search.reason ? { reason: search.reason } : {}) }), call, undefined, citations, sourceChars, search.diagnostics)
     }
 
-    if (call.name === 'search_notes') {
-      const query = parseArguments(call.arguments).query
-      if (typeof query !== 'string' || !query.trim()) return result('Invalid query: expected a non-empty string.', call)
-      const normalizedQuery = query.trim().slice(0, 200)
+    if (toolName === 'list_annotations' || toolName === 'search_annotations') {
+      const args = parseArguments(call.arguments)
+      const query = args.query
+      if (toolName === 'search_annotations' && (typeof query !== 'string' || !query.trim())) return result('Invalid query: expected a non-empty string.', call)
+      if (toolName === 'list_annotations' && query !== undefined) return result('Invalid arguments: list_annotations does not accept query.', call)
+      const normalizedQuery = typeof query === 'string' ? query.trim().slice(0, 200) : undefined
+      const requestedChapterIndex = args.chapterIndex
+      if (requestedChapterIndex !== undefined && (typeof requestedChapterIndex !== 'number' || !Number.isInteger(requestedChapterIndex) || requestedChapterIndex < 0)) {
+        return result('Invalid chapterIndex: expected a non-negative integer.', call)
+      }
+      const requestedType = args.type
+      if (requestedType !== undefined && (typeof requestedType !== 'string' || !['highlight', 'note', 'bookmark'].includes(requestedType))) {
+        return result('Invalid type: expected highlight, note, or bookmark.', call)
+      }
+      const chapterFilter = toolName === 'list_annotations' ? requestedChapterIndex ?? currentChapterIndex : requestedChapterIndex
+      if (chapterFilter !== undefined && (chapterFilter < minChapterIndex || (maxChapterIndex >= 0 && chapterFilter > maxChapterIndex))) {
+        return result('The requested chapter is outside the current reading boundary.', call, chapterFilter)
+      }
       await getActiveBook(userId, bookId)
       const chapters = await getBookChapters(userId, bookId)
       const chapterIndexByTitle = new Map(chapters.map((chapter, index) => [chapter.title, { index, chapter }]))
-      const notes = await searchAnnotations(userId, bookId, normalizedQuery, 8)
-      const visibleNotes = notes.flatMap((annotation) => {
+      const annotations = toolName === 'list_annotations'
+        ? await listAnnotations(userId, bookId)
+        : await searchAnnotations(userId, bookId, normalizedQuery!, 20)
+      const visibleAnnotations = annotations.flatMap((annotation) => {
         const chapter = annotation.chapter ? chapterIndexByTitle.get(annotation.chapter) : undefined
-        if ((maxChapterIndex >= 0 && (!chapter || chapter.index > maxChapterIndex)) || chapter?.index !== undefined && chapter.index < minChapterIndex) return []
+        if (!chapter || chapter.index < minChapterIndex || (maxChapterIndex >= 0 && chapter.index > maxChapterIndex)) return []
+        if (chapterFilter !== undefined && chapter.index !== chapterFilter) return []
+        if (requestedType !== undefined && annotation.type !== requestedType) return []
         return [{ annotation, chapter }]
       })
-      const citations = visibleNotes.map(({ annotation, chapter }) => {
-        const excerpt = (annotation.note?.trim() || annotation.text || '笔记').slice(0, 240)
+      visibleAnnotations.sort((left, right) => right.annotation.updatedAt - left.annotation.updatedAt || right.annotation.id.localeCompare(left.annotation.id))
+      const boundedAnnotations = visibleAnnotations.slice(0, AI_TOOL_MAX_ANNOTATION_RESULTS)
+      const citations = boundedAnnotations.map(({ annotation, chapter }) => {
+        const excerpt = (annotation.note?.trim() || annotation.text || '书签位置').slice(0, 240)
         return {
           id: `annotation:${annotation.id}`,
           chapterIndex: chapter?.index ?? 0,
@@ -190,15 +305,21 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
           sourceCfi: annotation.cfiAnchor ?? annotation.cfiRange,
         }
       })
-      const results = visibleNotes.map(({ annotation, chapter }) => ({
+      const results = boundedAnnotations.map(({ annotation, chapter }) => ({
         id: annotation.id,
         type: annotation.type,
         chapter: annotation.chapter ?? chapter?.chapter.title ?? null,
         text: annotation.text.slice(0, AI_TOOL_MAX_NOTE_TEXT_CHARS),
         note: annotation.note?.slice(0, AI_TOOL_MAX_NOTE_CONTENT_CHARS) ?? null,
+        cfi: annotation.cfiAnchor ?? annotation.cfiRange,
       }))
       const sourceChars = results.reduce((total, item) => total + item.text.length + (item.note?.length ?? 0), 0)
-      return result(JSON.stringify({ query: normalizedQuery, results, truncated: notes.length > visibleNotes.length || notes.length >= 8 }), call, undefined, citations, sourceChars)
+      return result(JSON.stringify({
+        ...(normalizedQuery === undefined ? { chapterIndex: chapterFilter } : { query: normalizedQuery }),
+        ...(requestedType === undefined ? {} : { type: requestedType }),
+        results,
+        truncated: visibleAnnotations.length > boundedAnnotations.length || (annotations.length >= 20 && visibleAnnotations.length >= boundedAnnotations.length),
+      }), call, undefined, citations, sourceChars)
     }
 
     const chapterIndex = parseArguments(call.arguments).chapterIndex

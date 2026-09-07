@@ -9,6 +9,7 @@ import { runMigrations } from './db/client'
 import { log } from './lib/logger'
 import { bootstrapAuth } from './modules/auth/auth.service'
 import { purgeAllExpiredTrash } from './modules/books/books.service'
+import { interruptStaleAiGenerationRuns } from './modules/ai/ai.runs.service'
 
 async function start() {
   const startedAt = Date.now()
@@ -18,6 +19,8 @@ async function start() {
   try {
     runMigrations()
     log('info', 'database.migration.completed', { durationMs: Date.now() - migrationStartedAt })
+    const interruptedRuns = interruptStaleAiGenerationRuns()
+    if (interruptedRuns > 0) log('info', 'ai.generation.stale_runs_interrupted', { meta: { count: interruptedRuns } })
   } catch (err) {
     log('error', 'database.migration.failed', { durationMs: Date.now() - migrationStartedAt, error: err })
     process.exitCode = 1

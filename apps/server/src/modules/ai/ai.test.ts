@@ -43,13 +43,28 @@ vi.mock('../../db/client', () => ({ getDb: vi.fn() }))
 vi.mock('./ai.sessions.service', () => ({
   prepareAiThread: vi.fn().mockReturnValue({ threadId: 'ai-thread-test', history: [] }),
   saveAiMessage: vi.fn(),
+  createAiAssistantDraft: vi.fn().mockReturnValue('ai-assistant-draft'),
   updateAiMessageContext: vi.fn(),
   createAiThread: vi.fn(),
   deleteAiThread: vi.fn(),
   getAiThread: vi.fn(),
+  listAiMessageRevisions: vi.fn().mockReturnValue([]),
   listAiThreads: vi.fn().mockReturnValue([]),
+  selectAiMessageRevision: vi.fn(),
   updateAiThread: vi.fn(),
 }))
+
+const generationRunMocks = vi.hoisted(() => ({
+  startAiGenerationRun: vi.fn().mockReturnValue({ id: 'ai-run-test', checkpointSeq: 0 }),
+  setAiGenerationTargetMessage: vi.fn(),
+  transitionAiGenerationRun: vi.fn(),
+  getAiGenerationRun: vi.fn().mockReturnValue({ state: 'streaming', checkpointSeq: 0 }),
+  createAiCheckpointWriter: vi.fn().mockReturnValue({ schedule: vi.fn(), close: vi.fn() }),
+  finalizeAiGenerationRun: vi.fn(),
+  cancelAiGenerationRun: vi.fn().mockReturnValue({ id: 'ai-run-test', state: 'cancelled' }),
+}))
+
+vi.mock('./ai.runs.service', () => generationRunMocks)
 
 const { cancelAiBookIndex, clearAiBookIndex, getAiIndexStatus, indexAiBook, searchAiBook } = vi.hoisted(() => ({
   getAiIndexStatus: vi.fn(),
@@ -65,7 +80,8 @@ import aiRoutes from './ai.routes'
 import { getAiReadingBoundary } from './ai.service'
 import { config } from '../../config'
 import { getAiIndexStatus, indexAiBook, searchAiBook } from './ai.retrieval.service'
-import { createAiThread, deleteAiThread, getAiThread, listAiThreads, prepareAiThread, saveAiMessage, updateAiMessageContext, updateAiThread } from './ai.sessions.service'
+import { cancelAiGenerationRun, finalizeAiGenerationRun, getAiGenerationRun } from './ai.runs.service'
+import { createAiThread, deleteAiThread, getAiThread, listAiMessageRevisions, listAiThreads, prepareAiThread, saveAiMessage, selectAiMessageRevision, updateAiMessageContext, updateAiThread } from './ai.sessions.service'
 
 interface TestUser {
   id: string
@@ -183,6 +199,38 @@ describe('ai routes', () => {
     expect(deleteAiThread).toHaveBeenCalledWith('member-1', 'thread-1')
   })
 
+  it('exposes bounded latest-turn revision read and selection endpoints', async () => {
+    const revisions = [
+      { id: 'assistant-1', revisionGroupId: 'user-1', revision: 0, content: '旧回答', citations: [], events: [], createdAt: 1, aborted: false, selected: false },
+      { id: 'assistant-2', revisionGroupId: 'user-1', revision: 1, content: '新回答', citations: [], events: [], createdAt: 2, aborted: false, selected: true },
+    ]
+    vi.mocked(listAiMessageRevisions).mockReturnValue(revisions)
+    vi.mocked(selectAiMessageRevision).mockReturnValue(revisions[0]!)
+
+    const app = createApp({ id: 'member-1', role: 'member' })
+    const listResponse = await app.request('http://test/api/v1/ai/threads/thread-1/messages/assistant-2/revisions')
+    expect(listResponse.status).toBe(200)
+    expect(await listResponse.json()).toEqual({ data: revisions })
+    expect(listAiMessageRevisions).toHaveBeenCalledWith('member-1', 'thread-1', 'assistant-2')
+
+    const selectResponse = await app.request('http://test/api/v1/ai/threads/thread-1/messages/assistant-1/revisions/select', { method: 'POST' })
+    expect(selectResponse.status).toBe(200)
+    expect(await selectResponse.json()).toEqual({ data: revisions[0] })
+    expect(selectAiMessageRevision).toHaveBeenCalledWith('member-1', 'thread-1', 'assistant-1')
+  })
+
+  it('exposes durable generation status and cancellation endpoints', async () => {
+    const app = createApp({ id: 'member-1', role: 'member' })
+
+    const statusResponse = await app.request('http://test/api/v1/ai/runs/run-1')
+    expect(statusResponse.status).toBe(200)
+    expect(getAiGenerationRun).toHaveBeenCalledWith('member-1', 'run-1')
+
+    const cancelResponse = await app.request('http://test/api/v1/ai/runs/run-1/cancel', { method: 'POST' })
+    expect(cancelResponse.status).toBe(200)
+    expect(cancelAiGenerationRun).toHaveBeenCalledWith('member-1', 'run-1')
+  })
+
   it('exposes versioned book retrieval status, indexing, and search contracts', async () => {
     getAiIndexStatus.mockResolvedValue({ bookId: 'book-1', status: 'ready', chunkCount: 12, updatedAt: 123 })
     indexAiBook.mockResolvedValue({ bookId: 'book-1', status: 'ready', chunkCount: 12, updatedAt: 123 })
@@ -277,9 +325,9 @@ describe('ai routes', () => {
   it('derives chapter intervals from the requested reading scope without trusting the client chapter', async () => {
     vi.mocked(getProgress).mockResolvedValue({ chapterIndex: 1 } as never)
 
-    await expect(getAiReadingBoundary('member-1', 'book-1', 'to_here')).resolves.toEqual({ minChapterIndex: 0, maxChapterIndex: 1, readingScope: 'to_here' })
-    await expect(getAiReadingBoundary('member-1', 'book-1', 'current_chapter')).resolves.toEqual({ minChapterIndex: 1, maxChapterIndex: 1, readingScope: 'current_chapter' })
-    await expect(getAiReadingBoundary('member-1', 'book-1', 'full_book')).resolves.toEqual({ minChapterIndex: 0, maxChapterIndex: 2, readingScope: 'full_book' })
+    await expect(getAiReadingBoundary('member-1', 'book-1', 'to_here')).resolves.toEqual({ minChapterIndex: 0, maxChapterIndex: 1, currentChapterIndex: 1, readingScope: 'to_here' })
+    await expect(getAiReadingBoundary('member-1', 'book-1', 'current_chapter')).resolves.toEqual({ minChapterIndex: 1, maxChapterIndex: 1, currentChapterIndex: 1, readingScope: 'current_chapter' })
+    await expect(getAiReadingBoundary('member-1', 'book-1', 'full_book')).resolves.toEqual({ minChapterIndex: 0, maxChapterIndex: 2, currentChapterIndex: 1, readingScope: 'full_book' })
   })
 
   it('rejects hosted provider operations without a required API key', async () => {
@@ -501,7 +549,7 @@ describe('ai routes', () => {
         models: [{ id: 'test-model', name: 'test-model' }],
         prompts: expect.any(Array),
         modes: [{ id: 'assistant', name: '助理', prompt: AI_DEFAULT_ASSISTANT_MODE_PROMPT, builtIn: true }],
-        lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'search_notes'], assistantModeId: 'assistant' },
+        lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'], assistantModeId: 'assistant' },
         embeddingProfileId: null,
         embeddingProvider: null,
         embeddingModel: null,
@@ -533,6 +581,25 @@ describe('ai routes', () => {
     expect(stream).toContain('event: delta\ndata: {"text":"解释"}')
     expect(stream).toContain('event: delta\ndata: {"text":"完成"}')
     expect(stream).toContain('event: done')
+    const meta = JSON.parse(stream.match(/event: meta\ndata: ([^\n]+)/)?.[1] ?? '{}') as { receipt?: { contextPlan?: Record<string, unknown> } }
+    expect(meta.receipt?.contextPlan).toEqual(expect.objectContaining({
+      maxChars: 100_000,
+      historyChars: 0,
+      historyMessageCount: 0,
+      directContextChars: expect.any(Number),
+      historyTruncated: false,
+      readingBoundary: expect.objectContaining({ readingScope: 'to_here' }),
+    }))
+    expect(generationRunMocks.finalizeAiGenerationRun).toHaveBeenCalledWith('user-1', 'ai-run-test', expect.objectContaining({
+      diagnostics: expect.objectContaining({
+        provider: 'openai',
+        model: 'test-model',
+        providerRequestCount: 1,
+        timeToFirstTokenMs: expect.any(Number),
+        totalDurationMs: expect.any(Number),
+        outputChars: 4,
+      }),
+    }))
 
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe('https://ai.example.test/v1/chat/completions')
@@ -557,7 +624,7 @@ describe('ai routes', () => {
       history: [{ role: 'user', content: requestBody.prompt, context: requestBody.context }],
       settings: {
         readingScope: 'to_here',
-        enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'search_notes'],
+        enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'],
         assistantModeId: 'assistant',
       },
     })
@@ -589,16 +656,18 @@ describe('ai routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...requestBody,
-        context: { ...requestBody.context, selection: '字'.repeat(10_000) },
+        context: { ...requestBody.context, selection: '字'.repeat(10_000), visibleTextVersion: 'reader-visible-v1' },
       }),
     })
 
     expect(response.status).toBe(200)
-    await response.text()
+    const stream = await response.text()
     const [, init] = fetchMock.mock.calls[0] ?? []
     const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ content?: string }> }
     expect(payload.messages.at(-1)?.content).toContain('<selection>')
     expect(payload.messages.at(-1)?.content).toContain('字'.repeat(10_000))
+    const meta = JSON.parse(stream.match(/event: meta\ndata: ([^\n]+)/)?.[1] ?? '{}') as { receipt?: { contextPlan?: Record<string, unknown> } }
+    expect(meta.receipt?.contextPlan).toEqual(expect.objectContaining({ visibleTextVersion: 'reader-visible-v1', directContextChars: expect.any(Number) }))
   })
 
   it('does not send an empty book context for a follow-up question', async () => {
@@ -640,7 +709,7 @@ describe('ai routes', () => {
       ],
       settings: {
         readingScope: 'to_here',
-        enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'search_notes'],
+        enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'],
         assistantModeId: 'assistant',
       },
     })
@@ -652,7 +721,7 @@ describe('ai routes', () => {
     })
 
     expect(response.status).toBe(200)
-    await response.text()
+    const stream = await response.text()
     const [, init] = fetchMock.mock.calls[0] ?? []
     const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ content?: string }> }
     const contents = payload.messages.map((message) => message.content ?? '').join('\n')
@@ -661,6 +730,13 @@ describe('ai routes', () => {
     expect(contents).toContain('最近用户问题')
     expect(contents).toContain('最近助手回答')
     expect(contents).toContain('当前问题')
+    const meta = JSON.parse(stream.match(/event: meta\ndata: ([^\n]+)/)?.[1] ?? '{}') as { receipt?: { contextPlan?: Record<string, unknown> } }
+    expect(meta.receipt?.contextPlan).toEqual(expect.objectContaining({
+      historyMessageCount: 2,
+      droppedHistoryMessageCount: 2,
+      droppedHistoryChars: expect.any(Number),
+      historyTruncated: true,
+    }))
   })
 
   it('persists custom assistant modes while keeping the built-in assistant', async () => {
@@ -997,7 +1073,7 @@ describe('ai routes', () => {
         models: [{ id: 'deepseek-chat', name: 'deepseek-chat', capabilities: { tools: true } }],
         prompts: expect.any(Array),
         modes: [{ id: 'assistant', name: '助理', prompt: AI_DEFAULT_ASSISTANT_MODE_PROMPT, builtIn: true }],
-        lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'search_notes'], assistantModeId: 'assistant' },
+        lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'], assistantModeId: 'assistant' },
         embeddingProfileId: null,
         embeddingProvider: null,
         embeddingModel: null,
@@ -1196,7 +1272,7 @@ describe('ai routes', () => {
         models: [{ id: 'test-model', name: 'test-model' }],
         prompts: expect.any(Array),
         modes: [{ id: 'assistant', name: '助理', prompt: AI_DEFAULT_ASSISTANT_MODE_PROMPT, builtIn: true }],
-        lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'search_notes'], assistantModeId: 'assistant' },
+        lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'], assistantModeId: 'assistant' },
         embeddingProfileId: null,
         embeddingProvider: null,
         embeddingModel: null,
@@ -1231,6 +1307,27 @@ describe('ai routes', () => {
     expect((await status.json()).data.prompts).toEqual([
       expect.objectContaining({ id: 'custom-review', enabled: true, scope: 'both' }),
     ])
+  })
+
+  it('migrates unchanged built-in quick prompts and removes the retired command', async () => {
+    const app = createApp({ id: 'member-legacy-prompts', role: 'member' })
+    const response = await app.request('http://test/api/v1/ai/config', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompts: [
+          { id: 'explain-selection', name: '解释这段', prompt: '请解释这段内容。', enabled: true, order: 10 },
+          { id: 'review-to-here', name: '回顾读到这里', prompt: '请回顾这本书截至我当前阅读位置的内容。', enabled: true, order: 60 },
+        ],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    const prompts = (await response.json()).data.prompts
+    expect(prompts).toEqual([
+      expect.objectContaining({ id: 'explain-selection', prompt: expect.stringContaining('{SELTEXT}') }),
+    ])
+    expect(prompts.some((prompt: { id: string }) => prompt.id === 'review-to-here')).toBe(false)
   })
 
   it('blocks guests from configuring or calling AI', async () => {
@@ -1388,11 +1485,54 @@ describe('ai routes', () => {
     expect(secondPayload.messages.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'call-1' })
   })
 
+  it('runs same-round read-only calls concurrently while preserving provider order', async () => {
+    const { getBookChapters } = await import('../books/books.service')
+    let activeReads = 0
+    let maximumActiveReads = 0
+    vi.mocked(getBookChapters).mockImplementation(async () => {
+      activeReads += 1
+      maximumActiveReads = Math.max(maximumActiveReads, activeReads)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      activeReads -= 1
+      return [
+        { id: 'ch-0', title: '第一章', level: 1, startOffset: 0, endOffset: 10, wordCount: 4 },
+        { id: 'ch-1', title: '第二章', level: 1, startOffset: 10, endOffset: 20, wordCount: 5 },
+      ]
+    })
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(new Response(
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"get_book_toc","arguments":"{}"}},{"index":1,"id":"call-2","function":{"name":"get_book_toc","arguments":"{}"}}]}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        'data: {"choices":[{"delta":{"content":"已按顺序整理两个读取结果。"}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+
+    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('已按顺序整理两个读取结果。')
+    expect(maximumActiveReads).toBe(2)
+    const secondCall = fetchMock.mock.calls[1]
+    if (!secondCall) throw new Error('Expected the provider request after tool execution')
+    const secondPayload = JSON.parse(String((secondCall[1] as RequestInit).body)) as { messages: Array<{ role: string; tool_call_id?: string }> }
+    expect(secondPayload.messages.slice(-2)).toEqual([
+      expect.objectContaining({ role: 'tool', tool_call_id: 'call-1' }),
+      expect.objectContaining({ role: 'tool', tool_call_id: 'call-2' }),
+    ])
+  })
+
   it('limits provider tools to the requested allowlist and blocks disabled calls', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock
       .mockResolvedValueOnce(new Response(
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-notes","function":{"name":"search_notes","arguments":"{\\"query\\":\\"想法\\"}"}}]}}]}\n\ndata: [DONE]\n\n',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-notes","function":{"name":"search_annotations","arguments":"{\\"query\\":\\"想法\\"}"}}]}}]}\n\ndata: [DONE]\n\n',
         { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
       ))
       .mockResolvedValueOnce(new Response(
@@ -1433,6 +1573,7 @@ describe('ai routes', () => {
   it('streams bounded source citations and persists them with the assistant answer', async () => {
     vi.mocked(getProgress).mockResolvedValueOnce({ chapterIndex: 1 } as never)
     vi.mocked(saveAiMessage).mockClear()
+    vi.mocked(finalizeAiGenerationRun).mockClear()
     vi.mocked(updateAiMessageContext).mockClear()
     vi.mocked(saveAiMessage).mockReturnValue('ai-user-message')
     const fetchMock = vi.mocked(fetch)
@@ -1442,7 +1583,7 @@ describe('ai routes', () => {
         { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
       ))
       .mockResolvedValueOnce(new Response(
-        'data: {"choices":[{"delta":{"content":"根据第二章正文作答。"}}]}\n\ndata: [DONE]\n\n',
+        'data: {"choices":[{"delta":{"content":"根据第二章正文作答。[1]"}}]}\n\ndata: [DONE]\n\n',
         { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
       ))
 
@@ -1457,11 +1598,17 @@ describe('ai routes', () => {
     expect(stream).toContain('event: tool\ndata: {"name":"get_chapter_content","phase":"result","chapterIndex":1,"resultChars":')
     expect(stream).toContain('"questionChars":')
     expect(stream).toContain('"chapterChars":5')
-    expect(stream).toContain('"citations":[{"id":"chapter:1"')
+    const toolEvents = [...stream.matchAll(/event: tool\ndata: ([^\n]+)/g)].map((match) => JSON.parse(match[1] ?? '{}') as { phase?: string; citations?: unknown })
+    expect(toolEvents.find((event) => event.phase === 'result')?.citations).toBeUndefined()
+    expect(stream).toContain('event: done')
+    const secondCall = fetchMock.mock.calls[1]
+    if (!secondCall) throw new Error('Expected the provider request after tool execution')
+    const secondPayload = JSON.parse(String((secondCall[1] as RequestInit).body)) as { messages: Array<{ role: string; content?: string }> }
+    expect(secondPayload.messages.at(-1)?.content).toContain('Citation manifest (only these numbers may be used as [n] markers): 1=chapter:1')
     expect(vi.mocked(updateAiMessageContext)).toHaveBeenCalled()
-    expect(vi.mocked(saveAiMessage)).toHaveBeenLastCalledWith('user-1', 'ai-thread-test', expect.objectContaining({
-      role: 'assistant',
-      content: '根据第二章正文作答。',
+    expect(vi.mocked(finalizeAiGenerationRun)).toHaveBeenLastCalledWith('user-1', 'ai-run-test', expect.objectContaining({
+      state: 'completed',
+      text: '根据第二章正文作答。[1]',
       citations: [expect.objectContaining({ id: 'chapter:1', chapterIndex: 1, startOffset: 0 })],
     }))
   })
@@ -1503,6 +1650,59 @@ describe('ai routes', () => {
     expect(secondPayload.tools).toBeUndefined()
   })
 
+  it('re-trims older complete turns when a tool round would exceed the input budget', async () => {
+    vi.mocked(getProgress).mockResolvedValueOnce({ chapterIndex: 1 } as never)
+    const getBookChapterContent = await import('../books/books.service').then((module) => module.getBookChapterContent)
+    vi.mocked(getBookChapterContent).mockResolvedValue({
+      id: 'ch-1', index: 1, title: '第二章', level: 1, wordCount: 20_000, content: '正文'.repeat(10_000),
+    } as never)
+    vi.mocked(prepareAiThread).mockReturnValueOnce({
+      threadId: 'ai-thread-test',
+      history: [
+        { role: 'user', content: '旧问题'.repeat(7_000) },
+        { role: 'assistant', content: '旧回答'.repeat(7_000) },
+        { role: 'user', content: '最近问题'.repeat(8_000) },
+        { role: 'assistant', content: '最近回答'.repeat(8_000) },
+      ],
+      settings: {
+        readingScope: 'to_here',
+        enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'],
+        assistantModeId: 'assistant',
+      },
+    })
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(new Response(
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-budget","function":{"name":"get_chapter_content","arguments":"{\\"chapterIndex\\":1}"}}]}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        'data: {"choices":[{"delta":{"content":"已在预算内继续回答。"}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+
+    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...requestBody, threadId: 'ai-thread-test' }),
+    })
+
+    expect(response.status).toBe(200)
+    const stream = await response.text()
+    const secondCall = fetchMock.mock.calls[1]
+    if (!secondCall) throw new Error('Expected the provider request after tool execution')
+    const secondPayload = JSON.parse(String((secondCall[1] as RequestInit).body)) as { messages: Array<{ content?: string }> }
+    const secondContents = secondPayload.messages.map((message) => message.content ?? '').join('\n')
+    expect(secondContents).not.toContain('旧问题')
+    expect(secondContents).not.toContain('旧回答')
+    expect(secondContents).toContain('最近问题')
+    expect(secondContents).toContain('最近回答')
+    expect(secondContents).toContain('正文')
+    expect(JSON.stringify(secondPayload).length).toBeLessThan(110_000)
+    const plans = [...stream.matchAll(/event: meta\ndata: ([^\n]+)/g)].map((match) => (JSON.parse(match[1] ?? '{}') as { receipt?: { contextPlan?: { truncationReasons?: string[]; droppedHistoryTurnCount?: number } } }).receipt?.contextPlan)
+    expect(plans.some((plan) => plan?.truncationReasons?.includes('history') && plan.droppedHistoryTurnCount === 1)).toBe(true)
+  })
+
   it('returns a distinct retryable error when the provider times out before streaming', async () => {
     const mutableConfig = config as typeof config & { aiTimeoutMs: number }
     const previousTimeout = mutableConfig.aiTimeoutMs
@@ -1526,8 +1726,57 @@ describe('ai routes', () => {
     }
   })
 
+  it('normalizes provider HTTP errors into bounded retry metadata', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(
+      JSON.stringify({ error: { message: 'invalid request', apiKey: 'should not be exposed' } }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    ))
+
+    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    })
+
+    expect(response.status).toBe(502)
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'AI_PROVIDER_ERROR',
+        message: 'AI provider returned HTTP 400: invalid request',
+        details: { providerStatus: 400, retryable: false, providerMessage: 'invalid request' },
+      },
+    })
+  })
+
+  it('keeps normalized provider diagnostics and retryability in stream errors', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(new Response(
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-stream-error","function":{"name":"get_book_toc","arguments":"{}"}}]}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: { message: 'invalid tool transcript' } }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      ))
+
+    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    })
+
+    expect(response.status).toBe(200)
+    const stream = await response.text()
+    expect(stream).toContain('event: error')
+    expect(stream).toContain('"message":"AI provider returned HTTP 400: invalid tool transcript"')
+    expect(stream).toContain('"retryable":false')
+  })
+
   it('persists a partial assistant answer when a later provider round fails', async () => {
     vi.mocked(saveAiMessage).mockClear()
+    vi.mocked(finalizeAiGenerationRun).mockClear()
     vi.mocked(saveAiMessage).mockReturnValue('ai-message')
     const fetchMock = vi.mocked(fetch)
     fetchMock
@@ -1546,15 +1795,16 @@ describe('ai routes', () => {
     const stream = await response.text()
     expect(stream).toContain('event: delta\ndata: {"text":"先给出部分回答"}')
     expect(stream).toContain('event: error')
-    expect(vi.mocked(saveAiMessage)).toHaveBeenLastCalledWith('user-1', 'ai-thread-test', expect.objectContaining({
-      role: 'assistant',
-      content: '先给出部分回答',
+    expect(vi.mocked(finalizeAiGenerationRun)).toHaveBeenLastCalledWith('user-1', 'ai-run-test', expect.objectContaining({
+      state: 'failed',
+      text: '先给出部分回答',
     }))
-    expect(vi.mocked(saveAiMessage).mock.calls.at(-1)?.[2]).not.toHaveProperty('aborted')
+    expect(vi.mocked(finalizeAiGenerationRun).mock.calls.at(-1)?.[2]).not.toHaveProperty('aborted', true)
   })
 
   it('persists a failure assistant message when a later provider round fails before any text', async () => {
     vi.mocked(saveAiMessage).mockClear()
+    vi.mocked(finalizeAiGenerationRun).mockClear()
     vi.mocked(saveAiMessage).mockReturnValue('ai-message')
     const fetchMock = vi.mocked(fetch)
     fetchMock
@@ -1571,9 +1821,9 @@ describe('ai routes', () => {
     })
 
     expect(await response.text()).toContain('event: error')
-    expect(vi.mocked(saveAiMessage)).toHaveBeenLastCalledWith('user-1', 'ai-thread-test', expect.objectContaining({
-      role: 'assistant',
-      content: '请求失败，请稍后重试。',
+    expect(vi.mocked(finalizeAiGenerationRun)).toHaveBeenLastCalledWith('user-1', 'ai-run-test', expect.objectContaining({
+      state: 'failed',
+      text: '',
     }))
   })
 
@@ -1702,4 +1952,69 @@ describe('ai routes', () => {
     }
     expect(fetchMock).toHaveBeenCalledTimes(6)
   })
+
+  it('preserves Gemini thought signatures across tool rounds', async () => {
+    const fetchMock = vi.mocked(fetch)
+    await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/config', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', model: 'gemini-3.5-flash-lite', apiKey: 'gemini-secret' }),
+    })
+    fetchMock
+      .mockResolvedValueOnce(new Response(
+        'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_book_toc","args":{}},"thoughtSignature":"signature-1"}]}}]}' + '\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        'data: {"candidates":[{"content":{"parts":[{"text":"目录回答"}]}}]}' + '\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+
+    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('目录回答')
+    const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { contents?: Array<{ role?: string; parts?: Array<Record<string, unknown>> }> }
+    expect(secondRequest.contents?.[1]?.parts?.[0]).toMatchObject({
+      functionCall: { name: 'get_book_toc', args: {} },
+      thoughtSignature: 'signature-1',
+    })
+  })
+
+  it('attaches a detached Gemini thought signature to the preceding tool call', async () => {
+    const fetchMock = vi.mocked(fetch)
+    await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/config', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', model: 'gemini-3.5-flash-lite', apiKey: 'gemini-secret' }),
+    })
+    fetchMock
+      .mockResolvedValueOnce(new Response(
+        'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_book_toc","args":{}}}]}}]}\n\ndata: {"candidates":[{"content":{"parts":[{"text":"","thoughtSignature":"signature-detached"}]}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        'data: {"candidates":[{"content":{"parts":[{"text":"目录回答"}]}}]}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+
+    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('目录回答')
+    const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { contents?: Array<{ role?: string; parts?: Array<Record<string, unknown>> }> }
+    expect(secondRequest.contents?.[1]?.parts?.[0]).toMatchObject({
+      functionCall: { name: 'get_book_toc', args: {} },
+      thoughtSignature: 'signature-detached',
+    })
+  })
+
 })

@@ -57,6 +57,8 @@ describe('AI lexical retrieval service', () => {
     const result = await searchAiBook('user-1', { bookId: 'book-1', query: '秘密关键词', limit: 5 })
     expect(result.status).toBe('ready')
     expect(result.results[0]).toMatchObject({ chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章' })
+    expect(result.results[0]?.endOffset).toBe(result.results[0]!.startOffset + '秘密关键词'.length)
+    expect(result.results[0]?.startOffset).toBe(content.indexOf('秘密关键词'))
     expect(result.results[0]?.excerpt).toContain('秘密关键词')
 
     const shortQuery = await searchAiBook('user-1', { bookId: 'book-1', query: '秘密', limit: 5 })
@@ -84,7 +86,7 @@ describe('AI lexical retrieval service', () => {
     const exactVersion = await searchAiBook('user-1', { bookId: 'book-1', query: '可见关键词' }, { visibleTextVersion: 'reader-transformed' })
     expect(exactVersion.status).toBe('ready')
     const wrongVersion = await searchAiBook('user-1', { bookId: 'book-1', query: '可见关键词' }, { visibleTextVersion: 'reader-other' })
-    expect(wrongVersion).toEqual({ status: 'empty', results: [], reason: 'visible_index_unavailable' })
+    expect(wrongVersion).toMatchObject({ status: 'empty', results: [], reason: 'visible_index_unavailable', diagnostics: { source: 'none', embeddingFallbackReason: 'not_ready' } })
 
     await expect(getVisibleAiChapterContent('user-1', 'book-1', 0, 'reader-transformed', 10_000)).resolves.toMatchObject({
       index: 0,
@@ -169,6 +171,8 @@ describe('AI lexical retrieval service', () => {
     const result = await searchAiBook('user-1', { bookId: 'book-1', query: '完全不会出现在正文的语义问题' }, { embedder })
     expect(result.status).toBe('ready')
     expect(result.results[0]).toMatchObject({ chapterIndex: 0, chapterTitle: '第一章' })
+    expect(result.diagnostics).toMatchObject({ source: 'hybrid', embeddingAttempted: true, embeddingUsed: true, semanticCandidateCount: expect.any(Number), selectedCount: expect.any(Number) })
+    expect(result.diagnostics?.topResults[0]).toMatchObject({ source: 'semantic', semanticRank: 1 })
     expect(embedder).toHaveBeenCalledWith(expect.any(Array), expect.any(AbortSignal), 'query')
   })
 
@@ -187,7 +191,7 @@ describe('AI lexical retrieval service', () => {
     }))
     const result = await searchAiBook('user-1', { bookId: 'book-1', query: '不在正文中的语义问题' }, { embedder: changedProviderEmbedder })
 
-    expect(result).toEqual({ status: 'empty', results: [] })
+    expect(result).toMatchObject({ status: 'empty', results: [], diagnostics: { embeddingAttempted: true, embeddingFallbackReason: 'provider_mismatch', source: 'none' } })
     expect(changedProviderEmbedder).toHaveBeenCalledWith(['不在正文中的语义问题'], expect.any(AbortSignal), 'query')
   })
 
@@ -213,6 +217,7 @@ describe('AI lexical retrieval service', () => {
 
       expect(result.status).toBe('ready')
       expect(result.results[0]).toMatchObject({ chapterIndex: 0, chapterTitle: '第一章' })
+      expect(result.diagnostics).toMatchObject({ source: 'fts', embeddingAttempted: true, embeddingUsed: false, embeddingFallbackReason: 'timeout' })
       expect(slowEmbedder).toHaveBeenCalledWith(['秘密关键词'], expect.any(AbortSignal), 'query')
     } finally {
       vi.useRealTimers()

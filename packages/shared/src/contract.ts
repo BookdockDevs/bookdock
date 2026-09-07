@@ -423,6 +423,8 @@ export interface AiChatReq {
   threadId?: string
   /** Replaces the latest matching user/assistant turn when retrying a response. */
   regenerate?: boolean
+  /** Replaces the latest user turn with this new prompt before regenerating. */
+  editMessageId?: string
   prompt: string
   context: AiContextReq
   history?: AiHistoryMessage[]
@@ -448,6 +450,101 @@ export interface AiRetryRecipe {
   assistantModePrompt?: string
 }
 
+export type AiGenerationState = 'preparing' | 'requesting' | 'streaming' | 'waiting_tool' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+
+export type AiGenerationTerminalReason = 'user_cancelled' | 'client_disconnected' | 'stream_disconnected' | 'server_restarted' | 'provider_aborted' | 'timeout' | 'provider_error' | 'persistence_error'
+
+export interface AiToolEvent {
+  type: 'tool'
+  name: string
+  phase: 'start' | 'result'
+  chapterIndex?: number
+  resultChars?: number
+}
+
+export interface AiCitationEvent {
+  type: 'citation'
+  citationId: string
+}
+
+export type AiNormalizedEvent = AiToolEvent | AiCitationEvent
+export type AiGenerationEvent = AiNormalizedEvent
+
+export interface AiGenerationUsage {
+  inputTokens?: number
+  outputTokens?: number
+}
+
+export type AiRetrievalSource = 'fts' | 'like' | 'hybrid' | 'none'
+export type AiRetrievalCandidateSource = 'lexical' | 'semantic' | 'hybrid'
+export type AiRetrievalFallbackReason = 'not_configured' | 'not_ready' | 'provider_mismatch' | 'timeout' | 'error' | 'invalid_response'
+
+export interface AiRetrievalTopResult {
+  id: string
+  source: AiRetrievalCandidateSource
+  score: number
+  lexicalRank?: number
+  semanticRank?: number
+}
+
+export interface AiRetrievalDiagnostics {
+  source: AiRetrievalSource
+  lexicalCandidateCount: number
+  semanticCandidateCount: number
+  fusedCandidateCount: number
+  selectedCount: number
+  embeddingAttempted: boolean
+  embeddingUsed: boolean
+  embeddingFallbackReason?: AiRetrievalFallbackReason
+  topResults: AiRetrievalTopResult[]
+}
+
+export interface AiGenerationDiagnostics {
+  provider: AiProvider
+  model?: string
+  providerRequestCount: number
+  timeToFirstTokenMs?: number
+  totalDurationMs?: number
+  contextChars?: number
+  sentMessageChars?: number
+  droppedHistoryChars?: number
+  toolSteps: number
+  toolCalls: number
+  toolResultChars: number
+  retrievalQueries: number
+  retrievalLexicalCandidates: number
+  retrievalSemanticCandidates: number
+  retrievalSelectedResults: number
+  retrievalFallbacks: number
+  outputChars: number
+}
+
+export interface AiGenerationRunRes {
+  id: string
+  requestId: string
+  threadId: string
+  targetMessageId: string | null
+  state: AiGenerationState
+  stateRevision: number
+  checkpointSeq: number
+  checkpointText: string
+  checkpointEvents: AiNormalizedEvent[]
+  checkpointUsage: AiGenerationUsage | null
+  diagnostics: AiGenerationDiagnostics | null
+  errorCode: ErrorCode | null
+  reason: AiGenerationTerminalReason | null
+  createdAt: number
+  updatedAt: number
+  terminalAt: number | null
+}
+
+export interface AiMessageEventRes {
+  id: string
+  sequence: number
+  event: AiNormalizedEvent
+  createdAt: number
+}
+
 export interface AiCitation {
   id: string
   chapterIndex: number
@@ -464,12 +561,27 @@ export interface AiMessageRes {
   id: string
   threadId: string
   role: 'user' | 'assistant'
+  revisionGroupId: string | null
+  revision: number
   content: string
   context: AiContextReceipt | null
   retry: AiRetryRecipe | null
   citations: AiCitation[]
+  events: AiMessageEventRes[]
   createdAt: number
   aborted: boolean
+}
+
+export interface AiMessageRevisionRes {
+  id: string
+  revisionGroupId: string
+  revision: number
+  content: string
+  citations: AiCitation[]
+  events: AiMessageEventRes[]
+  createdAt: number
+  aborted: boolean
+  selected: boolean
 }
 
 export interface AiThreadRes {
@@ -484,6 +596,7 @@ export interface AiThreadRes {
 
 export interface AiThreadDetailRes extends AiThreadRes {
   messages: AiMessageRes[]
+  generation: AiGenerationRunRes | null
 }
 
 export interface AiThreadCreateReq {
@@ -566,6 +679,7 @@ export interface AiSearchRes {
   status: 'ready' | 'empty'
   results: AiSearchResultRes[]
   reason?: 'visible_index_unavailable'
+  diagnostics?: AiRetrievalDiagnostics
 }
 
 export interface AiStatusRes {
@@ -630,6 +744,32 @@ export interface AiConfigUpdateReq {
   apiKey?: string | null
 }
 
+export type AiContextTruncationReason = 'history' | 'tool_results'
+
+export interface AiContextPlan {
+  maxChars: number
+  modeChars: number
+  coreSystemChars: number
+  systemChars: number
+  currentRequestChars: number
+  directContextChars: number
+  historyBudgetChars: number
+  historyChars: number
+  historyMessageCount: number
+  droppedHistoryChars: number
+  droppedHistoryMessageCount: number
+  toolResultChars: number
+  toolResultTrimmedChars: number
+  providerInputChars: number
+  historyTurnCount: number
+  droppedHistoryTurnCount: number
+  truncationReasons: AiContextTruncationReason[]
+  sentMessageChars: number
+  historyTruncated: boolean
+  readingBoundary?: { minChapterIndex: number; maxChapterIndex: number; readingScope: AiReadingScope }
+  visibleTextVersion?: string
+}
+
 export interface AiContextReceipt {
   /** Character count of the current user question. */
   questionChars?: number
@@ -657,6 +797,8 @@ export interface AiContextReceipt {
   model?: string
   /** User-visible mode identifier or bounded mode label, not the hidden system prompt. */
   assistantMode?: string
+  /** Bounded diagnostics describing how the provider context was assembled. */
+  contextPlan?: AiContextPlan
 }
 
 export interface SettingsUpdateReq {

@@ -23,7 +23,7 @@ import {
   popupPosition,
   setLastHighlightStyle,
 } from './annotation-colors'
-import { BulbIcon, CopyIcon, ExcerptShareIcon, ReplaceIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
+import { AiSparkleIcon, BulbIcon, CopyIcon, ExcerptShareIcon, ReplaceIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
 
 const BAR_WIDTH = 356
 const BAR_HEIGHT = 44
@@ -388,12 +388,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
       ? { key: 'delete', label: _('annotation.deleteHighlight'), icon: <TrashIcon />, danger: true, onClick: () => removeAnnotation() }
       : { key: 'highlight', label: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, danger: false, onClick: highlight },
     { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
-    { key: 'ai-chat', label: _('reader.aiChatSelection'), icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 11.5a8 8 0 0 1-8 8 8.3 8.3 0 0 1-3.5-.8L4 20l1.3-4A8 8 0 1 1 20 11.5Z" />
-        <path d="M8.5 11h.01M12 11h.01M15.5 11h.01" strokeWidth="2.4" />
-      </svg>
-    ), danger: false, onClick: openAiChat },
+    { key: 'ai-chat', label: _('reader.aiChatSelection'), icon: <AiSparkleIcon size={18} />, danger: false, onClick: openAiChat },
     { key: 'ai-commands', label: _('reader.aiQuickCommands'), icon: (
       <span className="flex items-center gap-px">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
