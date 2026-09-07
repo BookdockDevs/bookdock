@@ -35,7 +35,7 @@ function formatFraction(fraction: number | undefined): string {
 }
 
 function formatTime(now: number): string {
-  return new Date(now).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  return new Date(now).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 // Same shape as the removed bottom word-count badge: >=10000 renders as X.X万.
