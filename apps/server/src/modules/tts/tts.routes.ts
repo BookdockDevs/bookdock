@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 
 import {
+  ttsEdgeSpeechSchema,
   ttsServiceCreateSchema,
   ttsServiceUpdateSchema,
   ttsSpeechSchema,
@@ -8,6 +9,7 @@ import {
   type TtsServiceRes,
 } from '@bookdock/shared'
 
+import { synthesizeEdgeSpeech } from './edge-tts'
 import {
   createTtsService,
   deleteTtsService,
@@ -72,6 +74,17 @@ ttsRoutes.get('/services/:id/voices', async (c) => {
 ttsRoutes.post('/services/:id/test', async (c) => {
   const user = c.get('user')
   return c.json({ data: await testTtsService(user.id, user.role, c.req.param('id'), c.req.raw.signal) })
+})
+
+ttsRoutes.post('/edge/speech', async (c) => {
+  const parsed = ttsEdgeSpeechSchema.safeParse(await c.req.json())
+  if (!parsed.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid Edge speech request', details: parsed.error.flatten() } }, 400)
+  const result = await synthesizeEdgeSpeech(parsed.data, c.req.raw.signal)
+  return c.newResponse(new Uint8Array(result.audio), 200, {
+    'Content-Type': result.contentType,
+    'Content-Length': String(result.audio.length),
+    'Cache-Control': 'no-store',
+  })
 })
 
 ttsRoutes.post('/speech', async (c) => {

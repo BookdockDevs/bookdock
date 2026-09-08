@@ -282,7 +282,10 @@ aiRoutes.post('/retrieval/search', async (c) => {
 aiRoutes.post('/chat', async (c) => {
   const user = c.get('user')
   const raw = await c.req.json().catch(() => null)
-  const parsed = aiChatSchema.safeParse(raw)
+  const normalizedRaw = raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as Record<string, unknown>).threadId === 'string'
+    ? { ...(raw as Record<string, unknown>), history: undefined }
+    : raw
+  const parsed = aiChatSchema.safeParse(normalizedRaw)
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI chat request', details: parsed.error.flatten() } }, 400)
   }

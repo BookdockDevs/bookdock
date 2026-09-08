@@ -250,6 +250,12 @@ export interface TtsSpeechReq {
   rate?: number
 }
 
+export interface TtsEdgeSpeechReq {
+  text: string
+  voice?: string
+  rate?: number
+}
+
 export type AiProvider =
   | 'openai'
   | 'anthropic'
@@ -396,6 +402,8 @@ export interface AiContextReq {
   cfiRange: string
   selection: string
   before?: string
+  /** Reader-visible paragraph containing the selection or current reading position. */
+  paragraph?: string
   /** Reader transformation fingerprint used to keep book tools on visible text. */
   visibleTextVersion?: string
   /** Explicit Reader-visible chapter text attached by the user to this request. */
@@ -763,6 +771,8 @@ export interface AiContextReceipt {
   questionChars?: number
   selectionChars: number
   beforeChars: number
+  /** Character count of the direct Reader-visible paragraph context. */
+  paragraphChars?: number
   /** Character count of chapter text returned by a read tool. */
   chapterChars?: number
   /** Character count of explicitly attached chapter context. */

@@ -2,8 +2,8 @@ import crypto from 'node:crypto'
 
 import { and, eq } from 'drizzle-orm'
 
-import { AI_CORE_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CONTEXT_CHARS, AI_TOOL_NAMES, getAiModelCapabilityFlags, isAiEmbeddingModel, normalizeAiCitationMarkers, normalizeAiToolName } from '@bookdock/shared'
-import type { AiAssistantMode, AiAssistantModeInput, AiChatReq, AiCitation, AiConfigRes, AiConfigTestReq, AiConfigUpdateReq, AiConnectionTestRes, AiContextPlan, AiContextReceipt, AiContextTruncationReason, AiConversationSettings, AiGenerationDiagnostics, AiGenerationUsage, AiHistoryMessage, AiModelCapabilities, AiModelDiscoveryReq, AiModelKind, AiModelRes, AiNormalizedEvent, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiPromptTemplate, AiPromptTemplateInput, AiProvider, AiProviderRes, AiProtocol, AiReadingScope, AiRetryRecipe, AiStatusRes, AiToolName } from '@bookdock/shared'
+import { AI_CORE_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CONTEXT_CHARS, AI_TOOL_NAMES, expandAiPrompt, getAiModelCapabilityFlags, getAiPromptVariables, isAiEmbeddingModel, normalizeAiCitationMarkers, normalizeAiToolName } from '@bookdock/shared'
+import type { AiAssistantMode, AiAssistantModeInput, AiChatReq, AiCitation, AiConfigRes, AiConfigTestReq, AiConfigUpdateReq, AiConnectionTestRes, AiContextPlan, AiContextReceipt, AiContextTruncationReason, AiConversationSettings, AiGenerationDiagnostics, AiGenerationUsage, AiHistoryMessage, AiModelCapabilities, AiModelDiscoveryReq, AiModelKind, AiModelRes, AiNormalizedEvent, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiPromptTemplate, AiPromptTemplateInput, AiPromptVariable, AiProvider, AiProviderRes, AiProtocol, AiReadingScope, AiRetryRecipe, AiStatusRes, AiToolName } from '@bookdock/shared'
 
 import { config } from '../../config'
 import { getDb } from '../../db/client'
@@ -666,40 +666,65 @@ function escapeXml(value: string) {
     .replaceAll("'", '&apos;')
 }
 
-function buildContext(context: AiChatReq['context']): { content: string; receipt: AiContextReceipt } {
+function promptValues(context: AiChatReq['context']) {
+  return {
+    selectedText: context.selection,
+    selectedParagraph: context.paragraph,
+    chapterText: context.chapterReferences?.find((reference) => reference.chapterIndex === context.chapterIndex)?.text,
+  }
+}
+
+function consumedPromptVariables(prompt: string, context: AiChatReq['context']): AiPromptVariable[] {
+  const values = promptValues(context)
+  return getAiPromptVariables(prompt).filter((variable) => {
+    const value = variable === 'SELTEXT'
+      ? values.selectedText
+      : variable === 'SELPARA'
+        ? values.selectedParagraph
+        : values.chapterText
+    return Boolean(value?.trim())
+  })
+}
+
+function buildContext(context: AiChatReq['context'], consumedVariables: readonly AiPromptVariable[] = []): { content: string; receipt: AiContextReceipt } {
   const selection = context.selection.trim()
   const before = context.before?.trim() ?? ''
+  const paragraph = context.paragraph?.trim() ?? ''
+  const consumed = new Set(consumedVariables)
   const chapterReferences = Array.from(new Map((context.chapterReferences ?? []).map((reference) => [reference.chapterIndex, reference])).values())
   const chapterChars = chapterReferences.reduce((total, reference) => total + reference.text.trim().length, 0)
   const directChapterReferences = chapterReferences.map((reference) => ({
     chapterIndex: reference.chapterIndex,
     ...(reference.chapterTitle?.trim() ? { chapterTitle: reference.chapterTitle.trim() } : {}),
   }))
-  const contextChars = selection.length + before.length + chapterChars
+  const contextChars = selection.length + before.length + paragraph.length + chapterChars
   if (contextChars > AI_MAX_CONTEXT_CHARS) {
     throw new AppError('VALIDATION_ERROR', 'AI context exceeds the safe request envelope')
   }
 
   const chapterTitle = context.chapterTitle?.trim() || null
-  const source = [
-    `<source chapter="${escapeXml(chapterTitle ?? '未知章节')}" chapter_index="${context.chapterIndex}" cfi="${escapeXml(context.cfiRange)}">`,
+  const sourceEntries = [
     before ? `<before>${escapeXml(before)}</before>` : '',
-    `<selection>${escapeXml(selection)}</selection>`,
-    '</source>',
+    paragraph && !consumed.has('SELPARA') ? `<paragraph>${escapeXml(paragraph)}</paragraph>` : '',
+    !consumed.has('SELTEXT') && selection ? `<selection>${escapeXml(selection)}</selection>` : '',
   ].filter(Boolean).join('\n')
-  const references = chapterReferences.map((reference) => [
+  const source = sourceEntries
+    ? `<source chapter="${escapeXml(chapterTitle ?? '未知章节')}" chapter_index="${context.chapterIndex}" cfi="${escapeXml(context.cfiRange)}">\n${sourceEntries}\n</source>`
+    : ''
+  const references = chapterReferences.filter((reference) => !(consumed.has('CHAPTER') && reference.chapterIndex === context.chapterIndex)).map((reference) => [
     `<chapter_reference chapter="${escapeXml(reference.chapterTitle?.trim() || '未知章节')}" chapter_index="${reference.chapterIndex}">`,
     `<content>${escapeXml(reference.text.trim())}</content>`,
     '</chapter_reference>',
   ].join('\n'))
 
   return {
-    content: contextChars > 0 || references.length > 0
+    content: source || references.length > 0
       ? `<book_context trust="untrusted">\n${source}${references.length ? `\n${references.join('\n')}` : ''}\n</book_context>`
       : '',
     receipt: {
       selectionChars: selection.length,
       beforeChars: before.length,
+      ...(paragraph ? { paragraphChars: paragraph.length } : {}),
       chapterChars,
       ...(chapterChars > 0 ? { directChapterChars: chapterChars } : {}),
       ...(directChapterReferences.length > 0 ? { directChapterReferences } : {}),
@@ -721,7 +746,7 @@ function addToolReceipt(receipt: AiContextReceipt, toolName: string, sourceChars
     chapterChars,
     ragChars,
     notesChars,
-    contextChars: receipt.selectionChars + receipt.beforeChars + chapterChars + ragChars + notesChars,
+    contextChars: receipt.selectionChars + receipt.beforeChars + (receipt.paragraphChars ?? 0) + chapterChars + ragChars + notesChars,
     ...(receipt.contextPlan ? { contextPlan: { ...receipt.contextPlan, toolResultChars, sentMessageChars: receipt.contextPlan.sentMessageChars + sourceChars } } : {}),
   }
 }
@@ -847,8 +872,9 @@ function buildMessages(input: AiChatReq, context: string): { messages: ChatMessa
       continue
     }
     try {
-      const historicalContext = buildContext(message.context).content
-      history.push({ role: 'user', content: historicalContext ? `${historicalContext}\n\n用户问题：\n${message.content}` : `用户问题：\n${message.content}` })
+      const historicalContext = buildContext(message.context, consumedPromptVariables(message.content, message.context)).content
+      const historicalPrompt = expandAiPrompt(message.content, promptValues(message.context))
+      history.push({ role: 'user', content: historicalContext ? `${historicalContext}\n\n用户问题：\n${historicalPrompt}` : `用户问题：\n${historicalPrompt}` })
     } catch (error) {
       if (error instanceof AppError && error.message === 'AI context exceeds the safe request envelope') continue
       throw error
@@ -860,7 +886,8 @@ function buildMessages(input: AiChatReq, context: string): { messages: ChatMessa
     : ''
   const systemContent = [modeInstruction, AI_CORE_SYSTEM_PROMPT].filter(Boolean).join('\n\n')
   const systemMessages: ChatMessage[] = [{ role: 'system', content: systemContent }]
-  const currentMessage = { role: 'user' as const, content: context ? `${context}\n\n用户问题：\n${input.prompt.trim()}` : `用户问题：\n${input.prompt.trim()}` }
+  const currentPrompt = expandAiPrompt(input.prompt, promptValues(input.context))
+  const currentMessage = { role: 'user' as const, content: context ? `${context}\n\n用户问题：\n${currentPrompt.trim()}` : `用户问题：\n${currentPrompt.trim()}` }
   const fixedChars = systemMessages.reduce((total, message) => total + message.content.length, 0) + currentMessage.content.length
   const historyBudget = Math.max(0, MAX_PROVIDER_INPUT_CHARS - fixedChars)
   const totalHistoryChars = history.reduce((total, message) => total + message.content.length, 0)
@@ -1898,7 +1925,7 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
     boundary = await getAiReadingBoundary(userId, input.bookId, readingScope)
     minSearchChapterIndex = boundary.minChapterIndex
     maxSearchChapterIndex = boundary.maxChapterIndex;
-    ({ content: context, receipt } = buildContext(input.context))
+    ({ content: context, receipt } = buildContext(input.context, consumedPromptVariables(input.prompt, input.context)))
     receipt = {
       ...receipt,
       questionChars: input.prompt.trim().length,

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyn
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT_PROMPT_CHARS, AI_TOOL_NAMES, isAiEmbeddingModel, sanitizeAiCitationMarkers } from '@bookdock/shared'
+import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT_PROMPT_CHARS, AI_TOOL_NAMES, getAiPromptVariables, isAiEmbeddingModel, sanitizeAiCitationMarkers } from '@bookdock/shared'
 import type { AiAssistantMode, AiChapterReference, AiChatReq, AiCitation, AiContextReceipt, AiConversationSettings, AiHistoryMessage, AiMessageEventRes, AiMessageRes, AiReadingScope, AiRetryRecipe, AiStatusRes, AiThreadRes, AiToolName } from '@bookdock/shared'
 
 import { apiGet, apiPost, apiStreamAiChat, ApiError } from '@/api/client'
@@ -23,9 +23,9 @@ import { useAiQuickCommands, type AiQuickCommand } from '../hooks/useAiQuickComm
 import { useIsTouch } from '../hooks/useIsTouch'
 import { useAnnotations, useCreateAnnotation } from '../hooks/useAnnotations'
 import { readAiPanelMemory, writeAiPanelMemory, type AiPanelMemory } from '../lib/ai-panel-memory'
-import { expandAiPrompt } from '../lib/ai-quick-commands'
 import { LEADING_CLOSING_PUNCTUATION, normalizeMarkdownParagraphLines } from '../lib/markdown'
 import { useReaderState } from '../state/reader-state'
+import AiChapterReferenceChip, { ChapterReferenceIcon } from './AiChapterReferenceChip'
 import { AiChatIcon, BulbIcon, CheckIcon, CloseIcon, SelectedPositionIcon } from './annotation-icons'
 
 interface AiMessage {
@@ -72,6 +72,8 @@ interface ChapterReferenceNode {
 
 const DEFAULT_ASSISTANT_MODE: AiAssistantMode = { id: 'assistant', name: '助理', prompt: AI_DEFAULT_ASSISTANT_MODE_PROMPT, builtIn: true }
 const DEFAULT_CONVERSATION_SETTINGS: AiConversationSettings = { readingScope: AI_DEFAULT_READING_SCOPE, enabledTools: [...AI_TOOL_NAMES], assistantModeId: DEFAULT_ASSISTANT_MODE.id }
+const AI_PROMPT_PLACEHOLDER_PATTERN = /(\{SELTEXT\}|\{SELPARA\}|\{CHAPTER\})/g
+const AI_PROMPT_PLACEHOLDERS = new Set(['{SELTEXT}', '{SELPARA}', '{CHAPTER}'])
 const COMPOSER_MIN_HEIGHT = 48
 const COMPOSER_MAX_HEIGHT = 144
 const READ_SCROLLBAR_CLASSES = '[scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:var(--bd-read-sub)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[var(--bd-read-sub)]/50'
@@ -114,15 +116,6 @@ function fromPersistedMessage(message: AiMessageRes): AiMessage {
     retry: message.retry ?? null,
     savedAsIdea: false,
   }
-}
-
-function ChapterReferenceIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M6 3.5h8l4 4V20.5H6z" />
-      <path d="M14 3.5v4h4M9 12h6M9 15.5h6" />
-    </svg>
-  )
 }
 
 function AttachmentIcon() {
@@ -486,8 +479,10 @@ export default function AiPanel({ bookId }: { bookId: string }) {
   const queryClient = useQueryClient()
   const aiContext = useReaderState((s) => s.aiContext)
   const setAiContext = useReaderState((s) => s.setAiContext)
-  const aiPendingPrompt = useReaderState((s) => s.aiPendingPrompt)
-  const setAiPendingPrompt = useReaderState((s) => s.setAiPendingPrompt)
+  const activeSelection = useReaderState((s) => s.selection)
+  const setSelection = useReaderState((s) => s.setSelection)
+  const aiPendingCommand = useReaderState((s) => s.aiPendingCommand)
+  const setAiPendingCommand = useReaderState((s) => s.setAiPendingCommand)
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
@@ -916,11 +911,12 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     if (copiedMessageTimerRef.current !== null) window.clearTimeout(copiedMessageTimerRef.current)
   }, [])
 
-  const selection = aiContext?.rawText?.trim() || aiContext?.text.trim() || ''
+  const selectionContext = aiContext ?? activeSelection
+  const selection = selectionContext?.rawText?.trim() || selectionContext?.text.trim() || ''
   const selectionPreview = selection.replace(/\s+/g, ' ')
-  const currentParagraph = !selection ? renderer?.getCurrentParagraphText?.()?.trim() ?? '' : ''
-  const chapterTitle = aiContext?.chapterTitle ?? currentChapter
-  const chapterIndex = aiContext?.chapterIndex ?? currentChapterIndex ?? -1
+  const currentParagraph = renderer?.getCurrentParagraphText?.()?.trim() ?? ''
+  const chapterTitle = aiContext?.chapterTitle ?? activeSelection?.chapterTitle ?? currentChapter
+  const chapterIndex = aiContext?.chapterIndex ?? activeSelection?.chapterIndex ?? currentChapterIndex ?? -1
   const modelReady = Boolean(statusQuery.data?.data.enabled)
   const modelLabel = modelReady ? statusQuery.data?.data.model ?? _('reader.aiCurrentModel') : _('reader.aiSelectModel')
   const modelOptions = useMemo(() => {
@@ -1105,7 +1101,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     setRetryRequest(null)
     setToolStatus(null)
     setPrompt('')
-    setAiPendingPrompt(null)
+    setAiPendingCommand(null)
     setQuickCommandMenuOpen(false)
     setAssistantModeMenuOpen(false)
     setAttachmentOpen(false)
@@ -1136,7 +1132,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     setThreadId(id)
     setMessages([])
     setPrompt('')
-    setAiPendingPrompt(null)
+    setAiPendingCommand(null)
     setQuickCommandMenuOpen(false)
     setAttachmentOpen(false)
     setToolsOpen(false)
@@ -1350,7 +1346,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     let activeThreadId = request.threadId
 
     try {
-      await apiStreamAiChat({ bookId, ...request }, {
+      await apiStreamAiChat({ bookId, ...request, ...(request.threadId ? { history: undefined } : {}) }, {
         onMeta: (event) => {
           if (requestGenerationRef.current !== requestGeneration) return
           if (event.runId) activeRunIdRef.current = event.runId
@@ -1399,7 +1395,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
       } else {
         updateAssistant(assistantId, (current) => {
           const content = streamingTextStore.getText(assistantId) || current.content
-          return { ...current, content: content ? `${content}\n\n${_('reader.aiStopped')}` : _('reader.aiStopped'), aborted: true }
+          return { ...current, content, aborted: true }
         })
       }
     } finally {
@@ -1426,6 +1422,8 @@ export default function AiPanel({ bookId }: { bookId: string }) {
   async function send(promptOverride?: string) {
     const template = (promptOverride ?? prompt).trim()
     if (!modelReady || !template || streaming || preparingReferences) return
+    const promptVariables = getAiPromptVariables(template)
+    const selectedParagraph = aiContext?.paragraphText?.trim() || activeSelection?.paragraphText?.trim() || currentParagraph
     if (readingScope !== 'full_book' && chapterIndex >= 0 && selectedChapterReferences.some((referenceIndex) => referenceIndex > chapterIndex)) {
       addToast(_('reader.aiFutureChapterWarning'))
     }
@@ -1434,18 +1432,20 @@ export default function AiPanel({ bookId }: { bookId: string }) {
       content: message.content,
       ...(message.role === 'user' && message.retry?.context ? { context: message.retry.context } : {}),
     })).filter((message) => message.content.trim())
+    const referenceIndexes = new Set(selectedChapterReferences)
+    if (promptVariables.includes('CHAPTER') && chapterIndex >= 0 && renderer?.getAiChapterText) referenceIndexes.add(chapterIndex)
     let chapterReferences: AiChapterReference[] | undefined
-    if (selectedChapterReferences.length > 0) {
+    if (referenceIndexes.size > 0) {
       if (!renderer?.getAiChapterText) {
         addToast(_('reader.aiReaderNotReady'), 'error')
         return
       }
       setPreparingReferences(true)
       try {
-        const references = await Promise.all(selectedChapterReferences.map(async (chapterIndex) => ({
-          chapterIndex,
-          chapterTitle: chapters[chapterIndex]?.title,
-          text: await renderer.getAiChapterText(chapterIndex),
+        const references = await Promise.all([...referenceIndexes].map(async (referenceIndex) => ({
+          chapterIndex: referenceIndex,
+          chapterTitle: chapters[referenceIndex]?.title,
+          text: await renderer.getAiChapterText(referenceIndex),
         })))
         chapterReferences = references.map((reference) => ({
           ...reference,
@@ -1458,40 +1458,20 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         setPreparingReferences(false)
       }
     }
-    let chapterText = ''
-    if (template.includes('{CHAPTER}')) {
-      if (!renderer?.getAiChapterText || chapterIndex < 0) {
-        addToast(_('reader.aiChapterVariableNotReady'), 'error')
-        return
-      }
-      setPreparingReferences(true)
-      try {
-        chapterText = await renderer.getAiChapterText(chapterIndex)
-      } catch (error) {
-        if (!(error instanceof Error && error.name === 'AbortError')) addToast(error instanceof Error ? error.message : _('reader.aiChapterReadFailed'), 'error')
-        return
-      } finally {
-        setPreparingReferences(false)
-      }
-    }
-    const text = expandAiPrompt(template, {
-      selectedText: selection,
-      selectedParagraph: aiContext?.paragraphText?.trim() || currentParagraph,
-      chapterText,
-    })
-    if (text.length > AI_MAX_CHAT_PROMPT_CHARS) {
+    if (template.length > AI_MAX_CHAT_PROMPT_CHARS) {
       addToast(_('reader.aiPromptTooLong'), 'error')
       return
     }
     void runRequest({
       ...(threadId ? { threadId } : {}),
-      prompt: text,
+      prompt: template,
       history,
       context: {
         chapterIndex,
         chapterTitle: chapterTitle ?? undefined,
-        cfiRange: aiContext?.cfiRange ?? 'selection',
+        cfiRange: selectionContext?.cfiRange ?? 'selection',
         selection,
+        ...(promptVariables.includes('SELPARA') && selectedParagraph ? { paragraph: selectedParagraph } : {}),
         ...(chapterReferences?.length ? { chapterReferences } : {}),
         ...(visibleTextVersion ? { visibleTextVersion } : {}),
       },
@@ -1503,18 +1483,22 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     })
     setSelectedChapterReferences([])
     setAiContext(null)
+    if (!aiContext && activeSelection) {
+      renderer?.deselect()
+      setSelection(null)
+    }
   }
 
   sendRef.current = send
 
   useEffect(() => {
-    if (!aiPendingPrompt || streaming || statusQuery.isPending) return
-    const pendingPrompt = aiPendingPrompt
-    setAiPendingPrompt(null)
-    setPrompt(pendingPrompt)
+    if (!aiPendingCommand || streaming || statusQuery.isPending) return
+    const pendingCommand = aiPendingCommand
+    setAiPendingCommand(null)
+    setPrompt(pendingCommand.prompt)
     setQuickCommandMenuOpen(false)
-    if (modelReady) void sendRef.current(pendingPrompt)
-  }, [aiPendingPrompt, modelReady, setAiPendingPrompt, statusQuery.isPending, streaming])
+    if (modelReady) void sendRef.current(pendingCommand.prompt)
+  }, [aiPendingCommand, modelReady, setAiPendingCommand, statusQuery.isPending, streaming])
 
   async function stop() {
     const runId = activeRunIdRef.current
@@ -1774,6 +1758,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
               const quoteTarget = quoteContext && quoteContext.cfiRange !== 'selection' ? quoteContext.cfiRange : quoteContext ? `chapter:${quoteContext.chapterIndex}` : ''
               const quoteEntries = quoteContext ? [
                 ...(quoteContext.selection.trim() ? [{ id: 'selection', label: `${quoteChapterTitle || _('reader.aiCurrentChapter')} · ${_('reader.aiSelectedText')}`, text: quoteContext.selection.trim(), target: quoteTarget }] : []),
+                ...(quoteContext.paragraph?.trim() ? [{ id: 'paragraph', label: `${quoteChapterTitle || _('reader.aiCurrentChapter')} · ${_('reader.aiSelectedParagraph')}`, text: quoteContext.paragraph.trim(), target: quoteTarget }] : []),
                 ...(quoteContext.chapterReferences ?? []).map((reference) => ({
                   id: `chapter-${reference.chapterIndex}`,
                   label: reference.chapterTitle || chapters[reference.chapterIndex]?.title || _('reader.aiChapterNumber', { n: reference.chapterIndex + 1 }),
@@ -1791,11 +1776,13 @@ export default function AiPanel({ bookId }: { bookId: string }) {
               const selectedRevisionIndex = Math.max(0, revisionOptions.findIndex((revision) => revision.selected || revision.id === message.id))
               const isEditingMessage = editingMessageId === message.id
               const isLatestEditableUser = message.role === 'user' && message.id === latestUserMessageId && messages[index + 1]?.role === 'assistant' && Boolean(message.retry) && !streaming
+              const isStoppedPlaceholder = message.aborted && (message.content === _('reader.aiStopped') || message.content === '（已停止）' || message.content === '(已停止)')
+              const hasVisibleContent = Boolean(message.content && !isStoppedPlaceholder)
               return (
                 <div key={message.id} className={`group flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div className={message.role === 'user' ? 'w-fit max-w-[85%] break-words rounded-xl bg-[var(--bd-read-accent)]/20 p-3 text-sm [text-autospace:normal]' : 'w-fit max-w-[92%] break-words rounded-xl bg-[var(--bd-read-page-bg)] p-3 text-[13.5px] leading-[1.75] [text-autospace:normal]'}>
                     {quoteEntries.length > 0 && <div className="mb-2 w-full text-[11px] text-[var(--bd-read-sub)]">
-                      {singleQuote ? <button type="button" disabled={!renderer} onClick={() => jumpToQuote(singleQuote.target)} aria-label={_('reader.aiQuoteJump', { n: 1, label: singleQuote.label })} className={`flex min-h-8 max-w-full min-w-0 items-center gap-2 rounded-md border px-2.5 py-1 text-left text-sm transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-default disabled:opacity-70 ${singleQuote.id === 'selection' ? 'border-[var(--bd-read-primary)]/50 bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] text-current'}`}>
+                      {singleQuote ? singleQuote.id.startsWith('chapter-') ? <AiChapterReferenceChip title={singleQuote.label} disabled={!renderer} onActivate={() => jumpToQuote(singleQuote.target)} ariaLabel={_('reader.aiQuoteJump', { n: 1, label: singleQuote.label })} /> : <button type="button" disabled={!renderer} onClick={() => jumpToQuote(singleQuote.target)} aria-label={_('reader.aiQuoteJump', { n: 1, label: singleQuote.label })} className={`flex min-h-8 max-w-full min-w-0 items-center gap-2 rounded-md border px-2.5 py-1 text-left text-sm transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-default disabled:opacity-70 ${singleQuote.id === 'selection' ? 'border-[var(--bd-read-primary)]/50 bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] text-current'}`}>
                         {singleQuote.id === 'selection' ? <SelectedPositionIcon size={14} /> : <ChapterReferenceIcon />}
                         <span className="min-w-0 flex-1 truncate">{singleQuote.id === 'selection' ? singleQuote.text : singleQuote.label}</span>
                       </button> : <>
@@ -1825,7 +1812,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                         <button type="button" onClick={cancelEditMessage} className="rounded-md px-2.5 py-1.5 text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current">{_('reader.aiCancel')}</button>
                         <button type="submit" disabled={!editDraft.trim()} className="rounded-md bg-[var(--bd-read-primary)] px-2.5 py-1.5 text-xs text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50">{_('reader.aiRegenerate')}</button>
                       </div>
-                    </form> : isActiveStreamMessage || hasStreamContent ? <StreamingMarkdownText store={streamingTextStore} messageId={message.id} citations={message.citations} onCitationClick={jumpToCitation} citationLabel={(n) => _('reader.aiCitationJump', { n })} thinkingLabel={_('reader.aiThinking')} toolStatus={toolStatus} streaming={isActiveStreamMessage} /> : message.content ? (message.role === 'assistant' ? <MarkdownText content={message.content} citations={message.citations} onCitationClick={jumpToCitation} citationLabel={(n) => _('reader.aiCitationJump', { n })} /> : <div className="whitespace-pre-wrap break-words leading-relaxed">{message.content}</div>) : null}
+                    </form> : isActiveStreamMessage || hasStreamContent ? <StreamingMarkdownText store={streamingTextStore} messageId={message.id} citations={message.citations} onCitationClick={jumpToCitation} citationLabel={(n) => _('reader.aiCitationJump', { n })} thinkingLabel={_('reader.aiThinking')} toolStatus={toolStatus} streaming={isActiveStreamMessage} /> : hasVisibleContent ? (message.role === 'assistant' ? <MarkdownText content={message.content} citations={message.citations} onCitationClick={jumpToCitation} citationLabel={(n) => _('reader.aiCitationJump', { n })} /> : <div className="whitespace-pre-wrap break-words leading-relaxed">{message.content.split(AI_PROMPT_PLACEHOLDER_PATTERN).map((part, partIndex) => AI_PROMPT_PLACEHOLDERS.has(part) ? <span key={`${part}-${partIndex}`} className="rounded border border-[var(--bd-read-primary)]/40 bg-[var(--bd-read-primary)]/10 px-1 font-mono text-[0.9em] text-[var(--bd-read-primary)]">{part}</span> : <Fragment key={`${part}-${partIndex}`}>{part}</Fragment>)}</div>) : null}
                   {message.aborted && <div className="mt-2 text-[11px] text-[var(--bd-read-sub)]">{_('reader.aiStoppedLabel')}</div>}
                   </div>
                   {hasBasis && (
@@ -1841,9 +1828,9 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                       </div>}
                     </div>
                   )}
-                  {message.role === 'assistant' && message.content && !streaming && (
+                  {message.role === 'assistant' && (hasVisibleContent || message.aborted) && !streaming && (
                     <div className="mt-1 flex max-h-7 items-center gap-1 overflow-hidden pl-2 text-[var(--bd-read-sub)] opacity-100 transition-[max-height,margin,opacity] [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:mt-0 [@media(hover:hover)]:max-h-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:mt-1 [@media(hover:hover)]:group-hover:max-h-7 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:pointer-events-auto [@media(hover:hover)]:group-focus-within:mt-1 [@media(hover:hover)]:group-focus-within:max-h-7 [@media(hover:hover)]:group-focus-within:opacity-100">
-                      <button type="button" onClick={() => void copyAssistantMessage(message.id, message.content)} aria-label={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} title={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} className={`flex h-7 w-7 items-center justify-center rounded transition-colors active:scale-95 ${copiedMessageId === message.id ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'hover:bg-[var(--bd-read-page-bg)] hover:text-current'}`}>{copiedMessageId === message.id ? <CheckIcon /> : <CopyIcon />}</button>
+                      <button type="button" disabled={!hasVisibleContent} onClick={() => void copyAssistantMessage(message.id, message.content)} aria-label={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} title={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} className={`flex h-7 w-7 items-center justify-center rounded transition-colors active:scale-95 ${copiedMessageId === message.id ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-default disabled:opacity-50'}`}>{copiedMessageId === message.id ? <CheckIcon /> : <CopyIcon />}</button>
                       {message.ideaTarget && !message.aborted && <button type="button" onClick={() => void saveAssistantAsIdea(message)} disabled={message.savedAsIdea || createAnnotation.isPending} aria-label={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} title={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-default disabled:opacity-60"><BulbIcon size={14} /></button>}
                       {retryRequest && index === messages.length - 1 && <button type="button" onClick={() => void runRequest(retryRequest, 2)} aria-label={_('reader.aiRetry')} title={_('reader.aiRetry')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current"><RetryIcon /></button>}
                       {revisionOptions.length > 1 && <div className="ml-1 flex items-center gap-0.5 rounded-md bg-stone-500/5 px-0.5" aria-label={_('reader.aiAnswerVersions')}>
@@ -1922,15 +1909,11 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                 {selection && <span className="flex min-h-8 max-w-full min-w-0 items-center gap-2 rounded-md border border-[var(--bd-read-primary)]/50 bg-[var(--bd-read-primary)]/10 px-2.5 py-1 text-sm text-[var(--bd-read-primary)]">
                   <SelectedPositionIcon size={14} />
                   <span className="min-w-0 flex-1 truncate" title={selection}>{selectionPreview}</span>
-                  <button type="button" onClick={() => setAiContext(null)} aria-label={_('reader.aiRemoveSelectedText')} title={_('reader.aiRemoveSelectedText')} className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bd-read-primary)]/10"><CloseIcon /></button>
+                  <button type="button" onClick={() => { setAiContext(null); setSelection(null); renderer?.clearSelection() }} aria-label={_('reader.aiRemoveSelectedText')} title={_('reader.aiRemoveSelectedText')} className="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--bd-read-primary)]/10"><CloseIcon /></button>
                 </span>}
                 {selectedChapterReferences.map((referenceIndex) => {
                   const title = chapters[referenceIndex]?.title ?? _('reader.aiChapterNumber', { n: referenceIndex + 1 })
-                  return <span key={referenceIndex} className="flex min-h-8 max-w-full min-w-0 items-center gap-2 rounded-md border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 py-1 text-sm text-current">
-                    <ChapterReferenceIcon />
-                    <span className="min-w-0 flex-1 truncate" title={title}>{title}</span>
-                    <button type="button" onClick={() => toggleChapterReference(referenceIndex)} aria-label={_('reader.aiRemoveChapterReference', { title })} title={_('reader.aiRemoveChapterReference', { title })} className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"><CloseIcon /></button>
-                  </span>
+                  return <AiChapterReferenceChip key={referenceIndex} title={title} onRemove={() => toggleChapterReference(referenceIndex)} removeLabel={_('reader.aiRemoveChapterReference', { title })} />
                 })}
                 </div>
               </div>}

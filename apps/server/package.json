@@ -24,11 +24,13 @@
     "jose": "^5.9.0",
     "jszip": "^3.10.1",
     "nanoid": "^5.0.0",
+    "ws": "^8.21.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
     "drizzle-kit": "^0.31.10",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.0",

@@ -22,6 +22,7 @@ const BRANDS: BrandDefinition[] = [
   { file: 'doubao-color.svg', pattern: /doubao|豆包/i },
   { file: 'zhipu-color.svg', pattern: /zhipu|智谱|glm/i },
   { file: 'kimi-color.svg', pattern: /kimi|moonshot|月之暗面/i },
+  { file: 'lmstudio.svg', pattern: /lm\s*studio|lmstudio/i, monochrome: true },
   { file: 'openrouter.svg', pattern: /openrouter/i, monochrome: true },
   { file: 'siliconflow-color.svg', pattern: /siliconflow|silicon cloud|硅基/i },
   { file: 'minimax-color.svg', pattern: /minimax|mini max/i },

@@ -71,7 +71,10 @@ export class SystemSpeechClient implements TtsClient {
       this.paused = false
       utterance.rate = options.rate
       const voice = globalThis.speechSynthesis.getVoices().find((item) => (item.voiceURI || item.name) === options.voiceId)
-      if (voice) utterance.voice = voice
+      if (voice) {
+        utterance.voice = voice
+        if (voice.lang) utterance.lang = voice.lang
+      }
       let settled = false
       const cleanup = () => {
         signal.removeEventListener('abort', abort)
@@ -116,7 +119,6 @@ export class SystemSpeechClient implements TtsClient {
         }
       }
       signal.addEventListener('abort', abort, { once: true })
-      globalThis.speechSynthesis.cancel()
       globalThis.speechSynthesis.speak(utterance)
     })
   }
@@ -143,15 +145,12 @@ export class SystemSpeechClient implements TtsClient {
   }
 
   async stop() {
-    globalThis.speechSynthesis?.cancel()
+    const synthesis = globalThis.speechSynthesis
+    if (this.utterance || synthesis?.speaking || synthesis?.pending) synthesis?.cancel()
     this.paused = false
     this.utterance = null
   }
 }
-
-const EDGE_API_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4'
-const EDGE_SPEECH_URL = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1'
-const EDGE_CHROMIUM_VERSION = '143.0.3650.75'
 
 const EDGE_VOICES: TtsVoice[] = [
   { id: 'zh-CN-XiaoxiaoNeural', name: 'Xiaoxiao', lang: 'zh-CN' },
@@ -168,44 +167,6 @@ const EDGE_VOICES: TtsVoice[] = [
   { id: 'ko-KR-SunHiNeural', name: 'SunHi', lang: 'ko-KR' },
 ]
 
-function edgeLanguage(voice: string) {
-  const parts = voice.split('-')
-  return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : 'zh-CN'
-}
-
-async function edgeGec() {
-  const windowsEpochSeconds = 11644473600
-  let seconds = Math.floor(Date.now() / 1000) + windowsEpochSeconds
-  seconds -= seconds % 300
-  const ticks = seconds * 10_000_000
-  const data = new TextEncoder().encode(`${ticks}${EDGE_API_TOKEN}`)
-  const digest = await crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, '0')).join('').toUpperCase()
-}
-
-function edgeFrame(headers: Record<string, string>, body: string) {
-  return `${Object.entries(headers).map(([key, value]) => `${key}: ${value}`).join('\r\n')}\r\n\r\n${body}`
-}
-
-function edgeMessage(message: string) {
-  const separator = message.indexOf('\n\n')
-  const headerPart = separator >= 0 ? message.slice(0, separator) : message
-  const body = separator >= 0 ? message.slice(separator + 2) : ''
-  const headers: Record<string, string> = {}
-  for (const line of headerPart.split(/\r?\n/)) {
-    const index = line.indexOf(':')
-    if (index > 0) headers[line.slice(0, index).trim().toLowerCase()] = line.slice(index + 1).trim()
-  }
-  return { path: headers.path, body }
-}
-
-function edgeSsml(text: string, voice: string, rate: number) {
-  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
-  const lang = edgeLanguage(voice)
-  const relativeRate = `${rate >= 1 ? '+' : ''}${Math.round((rate - 1) * 100)}%`
-  return `<speak version="1.0" xml:lang="${lang}"><voice name="${voice}"><prosody rate="${relativeRate}" pitch="0Hz">${escaped}</prosody></voice></speak>`
-}
-
 export class EdgeSpeechClient implements TtsClient {
   readonly id = 'edge' as const
   readonly pauseResume = true
@@ -219,7 +180,7 @@ export class EdgeSpeechClient implements TtsClient {
 
   async prepare(segment: TtsSegment, options: TtsSpeakOptions, signal: AbortSignal) {
     const voice = options.voiceId || EDGE_VOICES[0].id
-    const blob = await this.fetchAudio(segment.text, voice, 1, signal)
+    const blob = await apiPostBlob('/tts/edge/speech', { text: segment.text, voice, rate: 1 }, signal)
     if (signal.aborted) throw abortedError()
     return this.audioPlayer.decode(await blob.arrayBuffer())
   }
@@ -239,64 +200,6 @@ export class EdgeSpeechClient implements TtsClient {
 
   setRate(rate: number) {
     this.audioPlayer.setRate(rate)
-  }
-
-  private async fetchAudio(text: string, voice: string, rate: number, signal: AbortSignal) {
-    const connectionId = crypto.randomUUID().replaceAll('-', '')
-    const params = new URLSearchParams({ ConnectionId: connectionId, TrustedClientToken: EDGE_API_TOKEN, 'Sec-MS-GEC': await edgeGec(), 'Sec-MS-GEC-Version': `1-${EDGE_CHROMIUM_VERSION}` })
-    const socket = new WebSocket(`${EDGE_SPEECH_URL}?${params}`)
-    socket.binaryType = 'arraybuffer'
-    const config = edgeFrame({ 'Content-Type': 'application/json; charset=utf-8', Path: 'speech.config', 'X-Timestamp': new Date().toString() }, JSON.stringify({ context: { synthesis: { audio: { metadataoptions: { sentenceBoundaryEnabled: false, wordBoundaryEnabled: false }, outputFormat: 'audio-24khz-48kbitrate-mono-mp3' } } } }))
-    const content = edgeFrame({ 'Content-Type': 'application/ssml+xml', Path: 'ssml', 'X-RequestId': connectionId, 'X-Timestamp': new Date().toString() }, edgeSsml(text, voice, rate))
-    return new Promise<Blob>((resolve, reject) => {
-      const chunks: ArrayBuffer[] = []
-      let pendingBinary: Promise<void> = Promise.resolve()
-      let turnEnded = false
-      let settled = false
-      let closeTimer: ReturnType<typeof setTimeout> | undefined
-      const cleanup = () => {
-        signal.removeEventListener('abort', abort)
-        if (closeTimer) clearTimeout(closeTimer)
-        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close()
-      }
-      const fail = (error: Error) => {
-        if (settled) return
-        settled = true
-        cleanup()
-        reject(error)
-      }
-      const finish = () => {
-        if (settled) return
-        settled = true
-        cleanup()
-        if (!chunks.length) { reject(new Error('Edge TTS returned no audio')); return }
-        resolve(new Blob(chunks, { type: 'audio/mpeg' }))
-      }
-      const finishAfterBinary = () => {
-        pendingBinary.then(finish).catch(() => fail(new Error('Edge TTS returned an invalid audio frame')))
-      }
-      const abort = () => fail(abortedError())
-      signal.addEventListener('abort', abort, { once: true })
-      closeTimer = setTimeout(() => fail(new Error('Edge TTS request timed out')), 30_000)
-      socket.onopen = () => { socket.send(config); socket.send(content) }
-      socket.onmessage = (event) => {
-        if (typeof event.data === 'string') {
-          const message = edgeMessage(event.data)
-          if (message.path === 'turn.end') { turnEnded = true; finishAfterBinary() }
-          return
-        }
-        const read = async () => {
-          const buffer = event.data instanceof ArrayBuffer ? event.data : await (event.data as Blob).arrayBuffer()
-          if (buffer.byteLength < 2) return
-          const headerLength = new DataView(buffer).getInt16(0)
-          if (buffer.byteLength > headerLength + 2) chunks.push(buffer.slice(headerLength + 2))
-        }
-        pendingBinary = pendingBinary.then(read)
-        void pendingBinary.catch(() => fail(new Error('Edge TTS returned an invalid audio frame')))
-      }
-      socket.onerror = () => fail(new Error('Edge TTS connection failed'))
-      socket.onclose = () => { if (!settled && turnEnded) finishAfterBinary() }
-    })
   }
 
   async pause() { return this.audioPlayer.pause() }

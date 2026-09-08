@@ -371,7 +371,7 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
                 </div>
               )}
             </button>
-            {!selectionMode && <div className="flex max-h-0 items-center gap-0.5 overflow-hidden px-3 opacity-0 transition-all duration-200 group-hover:max-h-8 group-hover:pb-2 group-hover:opacity-100">
+            {!selectionMode && <div className="flex max-h-0 items-center gap-0.5 overflow-hidden px-3 opacity-0 transition-all duration-200 group-hover:max-h-8 group-hover:pb-2 group-hover:opacity-100 max-md:max-h-8 max-md:pb-2 max-md:opacity-100">
               <span
                 title={formatFullDateTime(_, a.createdAt)}
                 className="text-[11px] text-[var(--bd-read-sub)]"

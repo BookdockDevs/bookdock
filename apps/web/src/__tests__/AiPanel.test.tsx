@@ -101,7 +101,8 @@ describe('AiPanel', () => {
     useUiStore.setState({ toolbarLocked: false })
     useReaderState.setState({
       aiContext: null,
-      aiPendingPrompt: null,
+      aiPendingCommand: null,
+      selection: null,
       currentChapter: null,
       currentChapterIndex: null,
       sidebarOpen: true,
@@ -362,10 +363,10 @@ describe('AiPanel', () => {
       editMessageId: 'message-1',
       prompt: '修改后的问题',
       context: retry.context,
-      history: [],
       readingScope: 'to_here',
       enabledTools: ['get_book_toc', 'get_chapter_content'],
     })
+    expect(apiStreamAiChat.mock.calls[0]?.[0].history).toBeUndefined()
   })
 
   it('shows a compact control for returning to the latest message after scrolling up', async () => {
@@ -669,7 +670,7 @@ describe('AiPanel', () => {
 
   it('fills a selected-passage quick action from the slash menu without sending it', async () => {
     vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
-    useReaderState.setState({ aiContext: { cfiRange: 'selection', text: '选区', rawText: '选区', chapterIndex: 0 } })
+    useReaderState.setState({ selection: { cfiRange: 'selection', text: '选区', rawText: '选区', chapterIndex: 0 }, aiContext: null })
 
     renderPanel()
     const textbox = screen.getByRole('textbox')
@@ -694,6 +695,72 @@ describe('AiPanel', () => {
     fireEvent.click(quickAction)
     expect(screen.getByRole('textbox')).toHaveValue('reader.aiQuickTranslatePrompt')
     expect(apiStreamAiChat).not.toHaveBeenCalled()
+  })
+
+  it('uses the same context-slot binding when a slash command is selected', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: {
+      enabled: true,
+      provider: 'ollama',
+      model: 'qwen3:8b',
+      prompts: [{ id: 'summarize', name: '概括', prompt: '概括：{SELTEXT}', scope: 'selection', enabled: true, order: 1, builtIn: false }],
+      maxSelectionChars: 6_000,
+      maxContextChars: 8_000,
+    } })
+    useReaderState.setState({ aiContext: { cfiRange: 'selection', text: '选区', rawText: '选区', chapterIndex: 0 } })
+
+    renderPanel()
+    const textbox = screen.getByRole('textbox')
+    fireEvent.change(textbox, { target: { value: '/' } })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '概括' }))
+
+    expect(textbox).toHaveValue('概括：{SELTEXT}')
+    expect(apiStreamAiChat).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'reader.aiSend' }))
+
+    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
+    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
+      prompt: '概括：{SELTEXT}',
+      context: { selection: '选区' },
+    })
+    expect(screen.getByText('{SELTEXT}')).toHaveClass('font-mono')
+  })
+
+  it('binds the current chapter when a slash command contains the chapter variable', async () => {
+    vi.mocked(apiGet).mockImplementation(async (path) => {
+      if (path === '/books/book-1/chapters') return { data: [{ id: 'chapter-1', title: '第一章', level: 1, startOffset: 0, endOffset: 10 }] }
+      return { data: {
+        enabled: true,
+        provider: 'ollama',
+        model: 'qwen3:8b',
+        prompts: [{ id: 'chapter-summary', name: '概括章节', prompt: '概括：{CHAPTER}', scope: 'reading', enabled: true, order: 1, builtIn: false }],
+        maxSelectionChars: 6_000,
+        maxContextChars: 8_000,
+      } }
+    })
+    vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
+    useReaderState.setState({ currentChapter: '第一章', currentChapterIndex: 0 })
+
+    const renderer = readerWithChapterReferences()
+    renderPanel(renderer)
+    const textbox = screen.getByRole('textbox')
+    fireEvent.change(textbox, { target: { value: '/' } })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '概括章节' }))
+
+    expect(textbox).toHaveValue('概括：{CHAPTER}')
+    expect(apiStreamAiChat).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'reader.aiSend' }))
+
+    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
+    expect(renderer.getAiChapterText).toHaveBeenCalledWith(0)
+    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
+      prompt: '概括：{CHAPTER}',
+      context: { chapterReferences: [{ chapterIndex: 0, chapterTitle: '第一章', text: '第1章的可见正文' }] },
+    })
+    const quote = await screen.findByTestId('ai-chapter-reference-chip')
+    expect(quote).toHaveTextContent('第一章')
+    expect(quote).toHaveClass('border-[var(--bd-read-accent)]')
+    fireEvent.click(quote)
+    expect(renderer.display).toHaveBeenCalledWith('chapter:0')
   })
 
   it('applies slash commands with keyboard navigation without sending', async () => {
@@ -813,7 +880,7 @@ describe('AiPanel', () => {
     expect(apiStreamAiChat).not.toHaveBeenCalled()
   })
 
-  it('expands selection, paragraph, and visible chapter variables before sending', async () => {
+  it('binds selection, paragraph, and visible chapter variables as direct context once', async () => {
     vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
     vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
     useReaderState.setState({
@@ -836,8 +903,12 @@ describe('AiPanel', () => {
     await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
     expect(renderer.getAiChapterText).toHaveBeenCalledWith(0)
     expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
-      prompt: '处理 选区\n选区所在段落\n第1章的可见正文',
-      context: { selection: '选区' },
+      prompt: '处理 {SELTEXT}\n{SELPARA}\n{CHAPTER}',
+      context: {
+        selection: '选区',
+        paragraph: '选区所在段落',
+        chapterReferences: [{ chapterIndex: 0, text: '第1章的可见正文' }],
+      },
     })
   })
 
@@ -875,7 +946,26 @@ describe('AiPanel', () => {
 
     await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
     expect(renderer.getCurrentParagraphText).toHaveBeenCalled()
-    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({ prompt: '当前阅读段落' })
+    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
+      prompt: '{SELPARA}',
+      context: { paragraph: '当前阅读段落' },
+    })
+  })
+
+  it('keeps a manually entered placeholder when its context value is unavailable', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
+    vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
+
+    renderPanel()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '解释：{SELTEXT}' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiSend' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'reader.aiSend' }))
+
+    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
+    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
+      prompt: '解释：{SELTEXT}',
+      context: { selection: '' },
+    })
   })
 
   it('sends a pending selection command as soon as the AI panel is ready', async () => {
@@ -883,14 +973,17 @@ describe('AiPanel', () => {
     vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
     useReaderState.setState({
       aiContext: { cfiRange: 'selection', text: '选区', rawText: '选区', chapterIndex: 0 },
-      aiPendingPrompt: '解释：{SELTEXT}',
+      aiPendingCommand: { id: 'explain', name: '解释这段', prompt: '解释：{SELTEXT}' },
     })
 
     renderPanel()
 
     await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
-    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({ prompt: '解释：选区' })
-    expect(useReaderState.getState().aiPendingPrompt).toBeNull()
+    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
+      prompt: '解释：{SELTEXT}',
+      context: { selection: '选区' },
+    })
+    expect(useReaderState.getState().aiPendingCommand).toBeNull()
   })
 
   it('sends a chapter variable larger than the former context limit without truncating it', async () => {
@@ -909,7 +1002,8 @@ describe('AiPanel', () => {
 
     await waitFor(() => expect(renderer.getAiChapterText).toHaveBeenCalledWith(0))
     await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
-    expect(apiStreamAiChat.mock.calls[0]?.[0].prompt).toHaveLength(8_001)
+    expect(apiStreamAiChat.mock.calls[0]?.[0].prompt).toBe('{CHAPTER}')
+    expect(apiStreamAiChat.mock.calls[0]?.[0].context.chapterReferences?.[0]?.text).toHaveLength(8_001)
   })
 
   it('shows tool citations and jumps to their bounded reader range', async () => {
@@ -1217,12 +1311,8 @@ describe('AiPanel', () => {
     expect(apiStreamAiChat.mock.calls[1]?.[0]).toMatchObject({
       threadId: 'thread-1',
       prompt: '第二个问题',
-      history: expect.arrayContaining([expect.objectContaining({
-        role: 'user',
-        content: '第一个问题',
-        context: expect.objectContaining({ selection: '选中的原文' }),
-      })]),
     })
+    expect(apiStreamAiChat.mock.calls[1]?.[0].history).toBeUndefined()
   })
 
   it('keeps the first answer visible while the new thread is added to history', async () => {
@@ -1276,7 +1366,7 @@ describe('AiPanel', () => {
 
     useReaderState.setState({
       aiContext: { cfiRange: 'epubcfi(/6/8!/4/8,/1:0,/1:105)', text: '选中的内容', rawText: '选中的内容', beforeText: '前文', chapterTitle: '第1章 徐福', chapterIndex: 0 },
-      aiPendingPrompt: '请围绕这段内容提出几个思考问题。',
+      aiPendingCommand: { id: 'questions', name: '提出问题', prompt: '请围绕这段内容提出几个思考问题。' },
     })
     renderPanel()
 
@@ -1334,7 +1424,8 @@ describe('AiPanel', () => {
     vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
     const selectedText = '这是一段很长的引用原文，用于确认输入框上方只显示原文，而不是显示上下文统计。'
     useReaderState.setState({
-      aiContext: { cfiRange: 'epubcfi(/6/4!/2)', text: selectedText, rawText: selectedText, chapterTitle: '第一章', chapterIndex: 0 },
+      aiContext: null,
+      selection: { cfiRange: 'epubcfi(/6/4!/2)', text: selectedText, rawText: selectedText, chapterTitle: '第一章', chapterIndex: 0 },
     })
 
     renderPanel()
@@ -1347,6 +1438,8 @@ describe('AiPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiRemoveSelectedText' }))
     expect(screen.queryByTitle(selectedText)).toBeNull()
+    expect(useReaderState.getState().selection).toBeNull()
+    expect(useReaderState.getState().aiContext).toBeNull()
   })
 
   it('saves a selected answer as an idea through the existing annotation API', async () => {
@@ -1399,6 +1492,8 @@ describe('AiPanel', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiStopGenerating' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiStopGenerating' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiRetry' })).toBeInTheDocument())
+    expect(screen.getByText('reader.aiStoppedLabel')).toBeInTheDocument()
+    expect(screen.queryByText('reader.aiStopped')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiRetry' }))
 
     await waitFor(() => expect(screen.getByText('重试成功')).toBeInTheDocument())

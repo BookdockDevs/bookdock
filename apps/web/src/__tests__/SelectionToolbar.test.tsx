@@ -59,7 +59,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  useReaderState.setState({ selection: null, aiContext: null, aiPendingPrompt: null, noteEditorRange: null })
+  useReaderState.setState({ selection: null, aiContext: null, aiPendingCommand: null, noteEditorRange: null })
 })
 
 describe('SelectionToolbar', () => {
@@ -73,14 +73,14 @@ describe('SelectionToolbar', () => {
     expect(createMutate.mock.calls[0][0].text).toBe('第一段\n\n第二段')
   })
 
-  it('slices overlong rawText to the same 500-char cap as before', async () => {
+  it('slices overlong rawText to the 800-char annotation cap', async () => {
     act(() => useReaderState.setState({
-      selection: { cfiRange: 'epubcfi(/6/4!/2)', text: 'x'.repeat(500), rawText: 'y'.repeat(600), rect: RECT },
+      selection: { cfiRange: 'epubcfi(/6/4!/2)', text: 'x'.repeat(800), rawText: 'y'.repeat(900), rect: RECT },
     }))
     render(<SelectionToolbar bookId="b1" />)
     fireEvent.click(screen.getByTitle('annotation.drawHighlight'))
     await waitFor(() => expect(createMutate).toHaveBeenCalledTimes(1))
-    expect(createMutate.mock.calls[0][0].text).toBe('y'.repeat(500))
+    expect(createMutate.mock.calls[0][0].text).toBe('y'.repeat(800))
   })
 
   it('stores the raw selection text when creating a note', async () => {
@@ -139,7 +139,7 @@ describe('SelectionToolbar', () => {
       selection: null,
       activeNavTab: 'ai',
       sidebarOpen: true,
-      aiPendingPrompt: '解释：{SELTEXT}',
+      aiPendingCommand: { id: 'explain', name: '解释内容', prompt: '解释：{SELTEXT}' },
       aiContext: expect.objectContaining({ chapterIndex: 2, chapterTitle: '第三章', paragraphText: '包含划线文本的段落' }),
     })
   })
@@ -153,7 +153,7 @@ describe('SelectionToolbar', () => {
         chapterTitle: '第三章',
         rect: RECT,
       },
-      aiPendingPrompt: '不应发送的旧指令',
+      aiPendingCommand: { id: 'old', name: '旧指令', prompt: '不应发送的旧指令' },
     }))
     render(<SelectionToolbar bookId="b1" />)
 
@@ -163,7 +163,7 @@ describe('SelectionToolbar', () => {
       selection: null,
       activeNavTab: 'ai',
       sidebarOpen: true,
-      aiPendingPrompt: null,
+      aiPendingCommand: null,
       aiContext: expect.objectContaining({ text: '划线文本', chapterIndex: 2, chapterTitle: '第三章' }),
     })
   })
@@ -235,6 +235,22 @@ describe('SelectionToolbar', () => {
     expect(screen.getByTitle('annotation.editNote')).toBeInTheDocument()
     fireEvent.click(screen.getByTitle('annotation.editNote'))
     expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument()
+  })
+
+  it('opens AI chat with the quoted text from the idea overlay', () => {
+    annotationsData = [{ ...ANNOTATION, type: 'note', note: '我的想法内容' }]
+    setSelection(ANNOTATION.cfiRange)
+    render(<SelectionToolbar bookId="b1" />)
+
+    fireEvent.click(screen.getByTitle('reader.aiChatSelection'))
+
+    expect(useReaderState.getState()).toMatchObject({
+      selection: null,
+      activeNavTab: 'ai',
+      sidebarOpen: true,
+      aiPendingCommand: null,
+      aiContext: expect.objectContaining({ text: '划线文本' }),
+    })
   })
 
   it('copies the note content from the idea detail', async () => {

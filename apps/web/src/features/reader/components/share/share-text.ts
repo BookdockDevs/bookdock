@@ -1,7 +1,7 @@
 export const EXCERPT_MAX_CHARS = 600
-export const NOTE_MAX_CHARS = 400
+export const NOTE_MAX_CHARS = 600
 /** The quoted excerpt on an idea card is context, not the subject — capped tighter */
-export const QUOTE_MAX_CHARS = 100
+export const QUOTE_MAX_CHARS = 200
 
 const FONT_TIERS = [
   { max: 160, size: 24 },

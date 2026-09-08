@@ -77,8 +77,8 @@ export const ProgressStrip = memo(function ProgressStrip({
   return (
     <div
       className={cn(
-        'pointer-events-none absolute left-0 right-0 z-40 flex h-12 items-center gap-1.5 border-t border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-xs transition-[bottom,translate] duration-300 sm:gap-3 sm:px-4',
-        mobileDockVisible ? 'bottom-14' : 'bottom-0',
+        'pointer-events-none absolute left-0 right-0 z-40 flex h-[calc(3rem+env(safe-area-inset-bottom))] items-center gap-1.5 border-t border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 pb-[env(safe-area-inset-bottom)] text-xs transition-[bottom,translate] duration-300 sm:gap-3 sm:px-4',
+        mobileDockVisible ? 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))]' : 'bottom-[env(safe-area-inset-bottom)]',
         pinned || visible ? 'translate-y-0' : 'translate-y-full',
         className,
       )}
@@ -138,7 +138,7 @@ export const ProgressStrip = memo(function ProgressStrip({
       <button
         type="button"
         onClick={onPrevChapter}
-        className="pointer-events-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)]"
+        className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)] sm:h-8 sm:w-8"
         aria-label="上一章"
       >
         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -148,7 +148,7 @@ export const ProgressStrip = memo(function ProgressStrip({
       <button
         type="button"
         onClick={onNextChapter}
-        className="pointer-events-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)]"
+        className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)] sm:h-8 sm:w-8"
         aria-label="下一章"
       >
         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -199,7 +199,7 @@ export const ProgressStrip = memo(function ProgressStrip({
       <button
         type="button"
         onClick={onPageUp}
-        className="pointer-events-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)]"
+        className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)] sm:h-8 sm:w-8"
         aria-label="上一页"
       >
         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -209,7 +209,7 @@ export const ProgressStrip = memo(function ProgressStrip({
       <button
         type="button"
         onClick={onPageDown}
-        className="pointer-events-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)]"
+        className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)] sm:h-8 sm:w-8"
         aria-label="下一页"
       >
         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

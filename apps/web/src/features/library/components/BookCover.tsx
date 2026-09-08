@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { BookListItem } from '@bookdock/shared'
 
 import { useUiStore } from '@/stores/ui.store'
@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 interface BookCoverProps {
   book: BookListItem
   size?: 'sm' | 'md'
+  coverSrc?: string | null
 }
 
 const STONE_PALETTES = [
@@ -36,17 +37,24 @@ function displayTitle(title: string): string {
   return trimmed.replace(EXT_RE, '') || trimmed
 }
 
-export default function BookCover({ book, size = 'md' }: BookCoverProps) {
+export default function BookCover({ book, size = 'md', coverSrc }: BookCoverProps) {
   const [error, setError] = useState(false)
   const coverFit = useUiStore((s) => s.coverFit)
   const palette = STONE_PALETTES[hashHue(book.id) % STONE_PALETTES.length]
   const isSm = size === 'sm'
-  const hasCover = Boolean(book.coverKey) && !error
+  const source = coverSrc === undefined
+    ? (book.coverKey ? `/api/v1/books/${book.id}/cover?v=${encodeURIComponent(book.coverKey)}` : null)
+    : coverSrc
+  const hasCover = Boolean(source) && !error
+
+  useEffect(() => {
+    setError(false)
+  }, [source])
 
   if (hasCover) {
     return (
       <img
-        src={`/api/v1/books/${book.id}/cover?v=${encodeURIComponent(book.coverKey ?? '')}`}
+        src={source ?? undefined}
         alt={book.title}
         className={cn(
           'block overflow-hidden rounded-xl border border-stone-200/70 dark:border-stone-800/60',

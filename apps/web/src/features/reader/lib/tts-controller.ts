@@ -292,10 +292,6 @@ export class TtsController {
       else await this.playSystemSegment(segment, generation, controller)
     } catch (error) {
       if (generation !== this.generation || controller.signal.aborted) return
-      if (this.preferences.engine !== 'system') {
-        await this.fallbackToSystem(segment)
-        return
-      }
       this.renderer.clearTtsHighlight()
       this.state = { ...this.state, status: 'error', error: error instanceof Error ? error.message : '朗读失败' }
       this.emit()
@@ -556,17 +552,6 @@ export class TtsController {
       void this.extendBufferedQueue(generation)
       this.pumpPreparations(generation)
     }
-  }
-
-  private async fallbackToSystem(segment: TtsSegment) {
-    await this.cancelPlayback()
-    if (this.state.status === 'idle') return
-    this.client = new SystemSpeechClient()
-    this.preparedCache.clear()
-    this.preferences = { ...this.preferences, engine: 'system', service: undefined, voices: undefined, voiceId: '' }
-    this.state = { ...this.state, engine: 'system', service: null, voices: this.client.listVoices(), error: '在线语音失败，已切换系统语音' }
-    this.emit()
-    await this.startPlayback(segment)
   }
 
   private async advance(generation: number) {

@@ -167,4 +167,15 @@ describe('tts routes', () => {
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit
     expect(JSON.parse(String(init.body))).toMatchObject({ model: 'voice-model', input: '你好', voice: 'alloy', speed: 1.2 })
   })
+
+  it('validates the built-in Edge speech request before contacting the provider', async () => {
+    const response = await createApp(guest).request('http://test/api/v1/tts/edge/speech', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '' }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } })
+  })
 })

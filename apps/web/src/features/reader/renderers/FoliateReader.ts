@@ -2165,6 +2165,8 @@ export class FoliateReader implements BookReader {
           if (sel) {
             doc.removeEventListener('mouseup', sel.handler)
             doc.removeEventListener('keyup', sel.handler)
+            doc.removeEventListener('selectionchange', sel.handler)
+            doc.removeEventListener('touchend', sel.handler)
             doc.removeEventListener('dblclick', sel.dblHandler)
             doc.removeEventListener('keydown', sel.escHandler)
             this.selectionDocs.delete(doc)
@@ -2177,6 +2179,8 @@ export class FoliateReader implements BookReader {
         const handler = () => this.handleSelection(doc, index)
         doc.addEventListener('mouseup', handler)
         doc.addEventListener('keyup', handler)
+        doc.addEventListener('selectionchange', handler)
+        doc.addEventListener('touchend', handler, { passive: true })
         const dblHandler = () => {
           setTimeout(() => {
             try {
@@ -2253,6 +2257,8 @@ export class FoliateReader implements BookReader {
       if (sel) {
         doc.removeEventListener('mouseup', sel.handler)
         doc.removeEventListener('keyup', sel.handler)
+        doc.removeEventListener('selectionchange', sel.handler)
+        doc.removeEventListener('touchend', sel.handler)
         doc.removeEventListener('dblclick', sel.dblHandler)
       }
     }

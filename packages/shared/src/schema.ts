@@ -198,12 +198,19 @@ export const ttsSpeechSchema = z.object({
   rate: z.number().min(0.25).max(4).optional(),
 })
 
+export const ttsEdgeSpeechSchema = z.object({
+  text: z.string().trim().min(1).max(4000),
+  voice: z.string().max(200).optional(),
+  rate: z.number().min(0.5).max(2).optional(),
+})
+
 const aiContextSchema = z.object({
   chapterIndex: z.number().int().min(-1).max(1_000_000),
   chapterTitle: z.string().max(500).optional(),
   cfiRange: z.string().trim().min(1).max(2000),
   selection: z.string().trim().max(AI_MAX_CONTEXT_CHARS),
   before: z.string().max(2000).optional(),
+  paragraph: z.string().max(8_000).optional(),
   visibleTextVersion: z.string().trim().min(1).max(200).optional(),
   chapterReferences: z.array(z.object({
     chapterIndex: z.number().int().min(0).max(1_000_000),

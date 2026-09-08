@@ -12,6 +12,8 @@ import BookDetailDialog from '../features/library/components/BookDetailDialog'
 
 const apiPatch = vi.fn()
 const apiPut = vi.fn()
+const apiDelete = vi.fn()
+const apiUpload = vi.fn()
 const createShelfMutate = vi.fn()
 const createTagMutate = vi.fn()
 const updateBookMutate = vi.fn()
@@ -21,6 +23,8 @@ vi.mock('@/api/client', () => ({
   apiGet: vi.fn().mockResolvedValue({ data: [] }),
   apiPatch: (...args: unknown[]) => apiPatch(...args),
   apiPut: (...args: unknown[]) => apiPut(...args),
+  apiDelete: (...args: unknown[]) => apiDelete(...args),
+  apiUpload: (...args: unknown[]) => apiUpload(...args),
 }))
 
 vi.mock('@/api/hooks/useTransforms', () => ({
@@ -89,6 +93,10 @@ beforeEach(async () => {
   vi.clearAllMocks()
   apiPatch.mockResolvedValue({})
   apiPut.mockResolvedValue({})
+  apiDelete.mockResolvedValue({})
+  apiUpload.mockResolvedValue({})
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:cover-preview') })
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
   createShelfMutate.mockResolvedValue({ data: { id: 'shelf-new', name: '科幻' } })
   vi.mocked(useBookTransforms).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useBookTransforms>)
   createTagMutate.mockResolvedValue({ data: { id: 'tag-new' } })
@@ -237,6 +245,50 @@ describe('BookDetailDialog shelf chips', () => {
   })
 })
 
+describe('BookDetailDialog cover draft', () => {
+  it('previews a selected cover locally and uploads it only on save', async () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File(['cover'], 'cover.png', { type: 'image/png' })
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() => expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:cover-preview'))
+    expect(apiUpload).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(apiUpload).toHaveBeenCalledWith('/books/book-1/cover', file, 'PUT'))
+  })
+
+  it('discards a selected cover when editing is cancelled', async () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(input, { target: { files: [new File(['cover'], 'cover.png', { type: 'image/png' })] } })
+    await waitFor(() => expect(screen.getByRole('img')).toBeInTheDocument())
+
+    const cancelButtons = screen.getAllByRole('button', { name: '取消' })
+    fireEvent.click(cancelButtons[cancelButtons.length - 1])
+    expect(apiUpload).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  it('defers cover removal until save', async () => {
+    render(<BookDetailDialog book={{ ...book, coverKey: 'covers/book-1.jpg' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '移除封面' }))
+    expect(apiDelete).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/books/book-1/cover'))
+  })
+})
+
 describe('BookDetailDialog identity chips', () => {
   it('navigates to the exact author filter from the author link', () => {
     const onClose = vi.fn()
@@ -347,6 +399,22 @@ describe('BookDetailDialog metadata rows', () => {
     expect(screen.getByText('Pub House')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Trilogy #2' })).toBeInTheDocument()
     expect(screen.getByText('desc')).toBeInTheDocument()
+  })
+})
+
+describe('BookDetailDialog description draft', () => {
+  it('preserves leading whitespace when saving the description', async () => {
+    withMeta({ description: '原简介' })
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const description = screen.getByRole('textbox', { name: '简介' })
+    fireEvent.change(description, { target: { value: '  第一行\n第二行' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(apiPatch).toHaveBeenCalled())
+    const body = apiPatch.mock.calls[0][1] as { bookmeta: { description?: string } }
+    expect(body.bookmeta.description).toBe('  第一行\n第二行')
   })
 })
 

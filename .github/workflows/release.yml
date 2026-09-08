@@ -80,6 +80,8 @@ jobs:
 
           const tag = process.env.RELEASE_TAG
           const version = tag.slice(1)
+          const releaseDate = new Date().toISOString().slice(0, 10)
+          const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
           const lines = readFileSync('CHANGELOG.md', 'utf8').split(/\r?\n/)
           const englishStart = lines.findIndex((line) => line.startsWith(`## [${version}]`))
           const chineseHeader = lines.findIndex((line) => line === '## 中文')
@@ -105,7 +107,14 @@ jobs:
             .slice(chineseStart, chineseEnd < 0 ? lines.length : chineseEnd)
             .join('\n')
             .trim()
-          writeFileSync(process.env.NOTES_FILE, `${english}\n\n## 中文\n\n${chinese}\n`)
+          const normalizeReleaseHeading = (section) => section.replace(
+            new RegExp(`^(#+\\s*\\[${escapedVersion}\\])\\s+-\\s+(?:Unreleased|待发布)\\s*$`, 'm'),
+            `$1 - ${releaseDate}`,
+          )
+          writeFileSync(
+            process.env.NOTES_FILE,
+            `${normalizeReleaseHeading(english)}\n\n## 中文\n\n${normalizeReleaseHeading(chinese)}\n`,
+          )
           NODE
 
       - uses: docker/setup-buildx-action@v4
@@ -134,14 +143,16 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
           NOTES_FILE: ${{ runner.temp }}/bookdock-release-notes.md
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "GitHub Release $RELEASE_TAG already exists; leaving it unchanged."
+            gh release edit "$RELEASE_TAG" \
+              --title "Bookdock $RELEASE_TAG" \
+              --notes-file "$NOTES_FILE"
             exit 0
           fi
 

@@ -74,7 +74,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
               aria-label={_('reader.ttsTitle')}
               aria-pressed={ttsActive || !!ttsOpen}
               className={cn(
-                'pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border transition-colors hover:bg-stone-500/10',
+                'pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg border transition-colors hover:bg-stone-500/10 sm:h-8 sm:w-8',
                 ttsActive
                   ? 'border-current text-current'
                   : 'text-[var(--bd-read-text)]',
@@ -99,7 +99,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
             onClick={onAddBookmark}
             title="添加书签"
             className={cn(
-              'pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border bg-transparent transition-colors',
+              'pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg border bg-transparent transition-colors sm:h-8 sm:w-8',
               bookmarkActive
                 ? 'border-current text-current'
                 : 'border-[var(--bd-read-accent)] text-[var(--bd-read-sub)] hover:bg-stone-500/10',
@@ -120,7 +120,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
           <button
             onClick={onToggleFullscreen}
             title="全屏"
-            className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border text-[var(--bd-read-text)] transition-colors hover:bg-stone-500/10"
+            className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg border text-[var(--bd-read-text)] transition-colors hover:bg-stone-500/10 sm:h-8 sm:w-8"
             style={{ borderColor: 'var(--bd-read-accent)' }}
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -134,7 +134,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
               data-settings-toggle
               onClick={onToggleSettings}
               title="设置"
-              className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border text-[var(--bd-read-text)] transition-colors hover:bg-stone-500/10"
+              className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg border text-[var(--bd-read-text)] transition-colors hover:bg-stone-500/10 sm:h-8 sm:w-8"
               style={{ borderColor: 'var(--bd-read-accent)' }}
             >
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

@@ -113,6 +113,7 @@ describe('TtsController', () => {
     await Promise.resolve()
 
     expect(controller.getSnapshot()).toMatchObject({ status: 'starting', segment })
+    expect(speech.cancel).not.toHaveBeenCalled()
     speech.current?.onstart?.()
     await Promise.resolve()
     expect(controller.getSnapshot()).toMatchObject({ status: 'playing', segment })

@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import ShareCard, { SHARE_CARD_WIDTH } from '../features/reader/components/share/ShareCard'
-import { EXCERPT_MAX_CHARS } from '../features/reader/components/share/share-text'
+import { EXCERPT_MAX_CHARS, NOTE_MAX_CHARS, QUOTE_MAX_CHARS } from '../features/reader/components/share/share-text'
 
 const base = {
   text: '白君确实有招蜂引蝶的资本',
@@ -36,6 +36,19 @@ describe('ShareCard', () => {
   it('truncates over-limit excerpts for display', () => {
     render(<ShareCard {...base} text={'长'.repeat(EXCERPT_MAX_CHARS + 50)} />)
     expect(screen.getByText(`${'长'.repeat(EXCERPT_MAX_CHARS)}……`)).toBeTruthy()
+  })
+
+  it('truncates idea notes and quoted excerpts at their separate limits', () => {
+    render(
+      <ShareCard
+        {...base}
+        text={'原'.repeat(QUOTE_MAX_CHARS + 1)}
+        note={'想'.repeat(NOTE_MAX_CHARS + 1)}
+        authorName="愚者"
+      />,
+    )
+    expect(screen.getByText(`${'想'.repeat(NOTE_MAX_CHARS)}……`)).toBeTruthy()
+    expect(screen.getByText(`${'原'.repeat(QUOTE_MAX_CHARS)}……`)).toBeTruthy()
   })
 
   it('renders at the fixed card width', () => {

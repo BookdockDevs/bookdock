@@ -197,11 +197,11 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
       onClick={() => setShareTarget(null)}
     >
       <div
-        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-stone-200 bg-white shadow-xl sm:max-h-full sm:rounded-2xl dark:border-stone-800 dark:bg-stone-950"
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-stone-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-xl sm:max-h-full sm:rounded-2xl dark:border-stone-800 dark:bg-stone-950"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-end px-4 pt-3">

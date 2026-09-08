@@ -587,6 +587,7 @@ export class Paginator extends HTMLElement {
             grid-row: 1 / -1;
             overflow-x: auto;
             overflow-y: hidden;
+            touch-action: pan-x;
             -webkit-overflow-scrolling: touch;
             -ms-overflow-style: none;  /* Internet Explorer 10+ */
             scrollbar-width: none;  /* Firefox */
@@ -598,6 +599,10 @@ export class Paginator extends HTMLElement {
             grid-column: 1 / -1;
             grid-row: 2;
             overflow: auto;
+            touch-action: pan-y;
+        }
+        #top.vertical #container {
+            touch-action: pan-y;
         }
         #header {
             grid-column: 1 / -1;
@@ -1166,10 +1171,17 @@ export class Paginator extends HTMLElement {
     const currentOffset = Math.abs(currentScrollPos)
     const currentPage = Math.round(currentOffset / size)
     
-    // Determine target page based on velocity
-    const velocityThreshold = 0.3  // Higher threshold to reduce accidental triggers
+    // A slow swipe can end with almost no velocity, so use displacement as the
+    // primary signal and keep velocity as a fallback for short flicks.
+    const movement = this.#vertical
+      ? (state?.delta?.y ?? 0)
+      : (state?.delta?.x ?? 0)
+    const movementThreshold = Math.max(24, size * 0.12)
+    const velocityThreshold = 0.3
     let targetPage = currentPage
-    if (Math.abs(velocity) > velocityThreshold) {
+    if (Math.abs(movement) >= movementThreshold) {
+      targetPage += movement < 0 ? 1 : -1
+    } else if (Math.abs(velocity) > velocityThreshold) {
       targetPage += velocity > 0 ? 1 : -1
     }
     
@@ -1291,7 +1303,7 @@ export class Paginator extends HTMLElement {
     this.dispatchEvent(forwarded)
 
     if (state.pinched) return
-    state.pinched = globalThis.visualViewport.scale > 1
+    state.pinched = (globalThis.visualViewport?.scale ?? 1) > 1
     if (state.pinched) return
 
     if (e.touches.length > 1) {
@@ -1367,7 +1379,7 @@ export class Paginator extends HTMLElement {
     // at this point I'm basically throwing `requestAnimationFrame` at
     // anything that doesn't work
     requestAnimationFrame(() => {
-      if (globalThis.visualViewport.scale === 1 && state)
+      if ((globalThis.visualViewport?.scale ?? 1) === 1 && state)
         Promise.resolve(this.snap(state.vx, state.vy, state))
           .finally(() => { this.#touchState = null })
       else this.#touchState = null

@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import type { NavTab, SelectionInfo } from '../types'
 
+export interface AiPendingQuickCommand {
+  id: string
+  name: string
+  prompt: string
+}
+
 interface ReaderState {
   activeNavTab: NavTab
   tocItems: { label: string; href: string; level?: number }[]
@@ -9,8 +15,8 @@ interface ReaderState {
   selection: SelectionInfo | null
   /** Selection handed off to the AI panel; survives closing the native selection bubble. */
   aiContext: SelectionInfo | null
-  /** Prompt template handed off by a selection quick command; consumed by AiPanel. */
-  aiPendingPrompt: string | null
+  /** Quick-command invocation handed off by the selection toolbar; consumed by AiPanel. */
+  aiPendingCommand: AiPendingQuickCommand | null
   sidebarOpen: boolean
   /** Set by "search selection" actions; NavigationPanel consumes and clears it */
   pendingSearchQuery: string | null
@@ -33,7 +39,7 @@ interface ReaderState {
   setCurrentChapterIndex: (index: number | null) => void
   setSelection: (sel: SelectionInfo | null) => void
   setAiContext: (context: SelectionInfo | null) => void
-  setAiPendingPrompt: (prompt: string | null) => void
+  setAiPendingCommand: (command: AiPendingQuickCommand | null) => void
   setSidebarOpen: (open: boolean) => void
   setPendingSearchQuery: (query: string | null) => void
   setNoteEditorRange: (range: string | null) => void
@@ -50,7 +56,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   currentChapterIndex: null,
   selection: null,
   aiContext: null,
-  aiPendingPrompt: null,
+  aiPendingCommand: null,
   sidebarOpen: false,
   pendingSearchQuery: null,
   noteEditorRange: null,
@@ -64,7 +70,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   setCurrentChapterIndex: (currentChapterIndex) => set({ currentChapterIndex }),
   setSelection: (selection) => set({ selection }),
   setAiContext: (aiContext) => set({ aiContext }),
-  setAiPendingPrompt: (aiPendingPrompt) => set({ aiPendingPrompt }),
+  setAiPendingCommand: (aiPendingCommand) => set({ aiPendingCommand }),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
   setNoteEditorRange: (noteEditorRange) => set({ noteEditorRange }),

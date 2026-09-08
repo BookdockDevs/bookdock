@@ -24,4 +24,9 @@ describe('BookCover', () => {
     const img = screen.getByRole('img')
     expect(img).toHaveAttribute('src', '/api/v1/books/book-1/cover?v=covers%2Fbook-1.jpg')
   })
+
+  it('renders an explicitly supplied cover source', () => {
+    render(<BookCover book={baseBook} coverSrc="blob:cover-preview" />)
+    expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:cover-preview')
+  })
 })

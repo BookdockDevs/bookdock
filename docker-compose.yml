@@ -1,6 +1,7 @@
 services:
   bookdock:
-    image: ${BOOKDOCK_IMAGE:-bookdock:local}
+    container_name: bookdock
+    image: ${BOOKDOCK_IMAGE:-loofffff/bookdock:0.2.0}
     build:
       context: .
     ports:

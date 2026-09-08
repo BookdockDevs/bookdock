@@ -64,8 +64,9 @@ export default function Reader() {
   // Chapter-switch loading indicator (slow cross-chapter navigation)
   const [navPending, setNavPending] = useState(false)
   // Middle click-area tap reveals the top/bottom bars (mobile: no hover);
-  // any interaction (page turn, scroll, selection) hides them again
+  // reading-area interactions hide them again, while footer controls keep them open for consecutive navigation
   const [chromePinned, setChromePinned] = useState(false)
+  const keepChromePinnedRef = useRef(false)
   // Footer visibility state machine: the hot strip SUMMONS the footer; the
   // corner zones (wrapping the capsules) can only SUSTAIN it — they stay
   // pointer-inert while hidden, so approaching a capsule from the page never
@@ -82,11 +83,12 @@ export default function Reader() {
   }, [footerVisible])
   const setSelection = useReaderState((s) => s.setSelection)
   const setAiContext = useReaderState((s) => s.setAiContext)
-  const setAiPendingPrompt = useReaderState((s) => s.setAiPendingPrompt)
+  const setAiPendingCommand = useReaderState((s) => s.setAiPendingCommand)
   const replaceTarget = useReaderState((s) => s.replaceTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const setTocItems = useReaderState((s) => s.setTocItems)
   const sidebarOpen = useReaderState((s) => s.sidebarOpen)
+  const mobileDockVisible = isTouch && (chromePinned || sidebarOpen)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
@@ -493,7 +495,7 @@ export default function Reader() {
     deepLinkHandled.current = false
   }, [id, setReplaceTarget])
 
-  const { containerRef, renderer } = useReaderRenderer({
+  const { containerRef, renderer, fontStack, fontCss } = useReaderRenderer({
     url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
     bookId: id,
     // so it navigates exactly once (to the saved CFI, or to the book start
@@ -514,7 +516,7 @@ export default function Reader() {
     },
     onFootnoteClose: () => setFootnoteEntry(null),
     onRelocated: (e) => {
-      if (e.source !== 'tts') setChromePinned(false)
+      if (e.source !== 'tts' && !keepChromePinnedRef.current) setChromePinned(false)
       setSelection(null)
       if (e.source !== 'tts') pingReadingTimer()
       setPercent(e.percent)
@@ -579,9 +581,14 @@ export default function Reader() {
       jumpHistoryRef.current.push(e.cfi)
       syncHistoryCaps()
       historyAutoHideRef.current?.reset()
+      if (isTouch) {
+        keepChromePinnedRef.current = true
+        setChromePinned(true)
+      }
     },
     onNavigatePending: ({ pending }) => setNavPending(pending),
     onChromeToggle: () => {
+      keepChromePinnedRef.current = false
       // Tap-to-toggle: anything visible (pinned bars, the settings popover,
       // or a dismissible sidebar) closes on tap. A locked desktop sidebar is
       // persistent and must not participate in reading-chrome dismissal.
@@ -679,7 +686,7 @@ export default function Reader() {
     setCurrentChapter(null)
     setCurrentChapterIndex(null)
     setAiContext(null)
-    setAiPendingPrompt(null)
+    setAiPendingCommand(null)
     // chapterCount starts empty; the effect below syncs it when chapters arrive
     segmentTrackerRef.current = createSegmentTracker()
     lastSegmentStartRef.current = null
@@ -688,7 +695,7 @@ export default function Reader() {
     syncHistoryCaps()
     historyAutoHideRef.current?.dispose()
     currentCfiRef.current = null
-  }, [id, setAiContext, setAiPendingPrompt, setCurrentChapter, setCurrentChapterIndex, syncHistoryCaps])
+  }, [id, setAiContext, setAiPendingCommand, setCurrentChapter, setCurrentChapterIndex, syncHistoryCaps])
 
   // The displacement threshold scales with the chapter count (big books cap it
   // at two chapter widths); update it once the chapters arrive
@@ -800,14 +807,17 @@ export default function Reader() {
   const rendererContextValue = useMemo(() => ({ renderer }), [renderer])
 
   const onPrevChapter = useCallback(() => {
+    keepChromePinnedRef.current = true
     void rendererRef.current?.prev()
   }, [])
 
   const onNextChapter = useCallback(() => {
+    keepChromePinnedRef.current = true
     void rendererRef.current?.next()
   }, [])
 
   const onSeek = useCallback((value: number) => {
+    keepChromePinnedRef.current = true
     const renderer = rendererRef.current
     if (renderer?.scrollToPercent) {
       void renderer.scrollToPercent(value)
@@ -823,6 +833,7 @@ export default function Reader() {
   }, [containerRef, readingMode])
 
   const onPageUp = useCallback(() => {
+    keepChromePinnedRef.current = true
     const renderer = rendererRef.current
     if (renderer?.scrollByPages) {
       void renderer.scrollByPages(-1)
@@ -836,6 +847,7 @@ export default function Reader() {
   }, [containerRef, readingMode])
 
   const onPageDown = useCallback(() => {
+    keepChromePinnedRef.current = true
     const renderer = rendererRef.current
     if (renderer?.scrollByPages) {
       void renderer.scrollByPages(1)
@@ -1145,7 +1157,7 @@ export default function Reader() {
                   pageInfo={pageInfo ?? undefined}
                   visible={footerVisible}
                   pinned={chromePinned}
-                  mobileDockVisible={isTouch && (chromePinned || sidebarOpen)}
+                  mobileDockVisible={mobileDockVisible}
                   chapters={chaptersQuery.data?.data}
                   sectionFractions={sectionFractions}
                   onPrevChapter={onPrevChapter}
@@ -1158,8 +1170,13 @@ export default function Reader() {
               {(historyCaps.canBack || historyCaps.canForward) && (
                 <div
                   className={cn(
-                    'absolute bottom-0 left-0 h-24 w-28 transition-transform duration-300',
-                    footerVisible ? '-translate-y-10 pointer-events-auto' : 'pointer-events-none',
+                    'absolute left-0 z-[60] h-24 w-28 transition-[bottom,translate] duration-300',
+                    mobileDockVisible
+                      ? 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))]'
+                      : 'bottom-0',
+                    footerVisible
+                      ? '-translate-y-10 pointer-events-auto'
+                      : isTouch ? 'translate-y-full pointer-events-none' : 'pointer-events-none',
                   )}
                   onPointerEnter={isTouch ? undefined : () => setCornerDwell(true)}
                   onPointerLeave={isTouch ? undefined : () => setCornerDwell(false)}
@@ -1176,6 +1193,7 @@ export default function Reader() {
                 bookId={id}
                 footerVisible={footerVisible}
                 isTouch={isTouch}
+                mobileDockVisible={mobileDockVisible}
                 onPointerEnter={() => setCornerDwell(true)}
                 onPointerLeave={() => setCornerDwell(false)}
                 readingTimerMode={readingTimerMode}
@@ -1183,7 +1201,7 @@ export default function Reader() {
             </div>
           </div>
         </div>
-        <SelectionToolbar bookId={id} />
+        <SelectionToolbar bookId={id} fontStack={fontStack} fontCss={fontCss} />
         {footnoteEntry && (
           <FootnotePopup
             entry={footnoteEntry}

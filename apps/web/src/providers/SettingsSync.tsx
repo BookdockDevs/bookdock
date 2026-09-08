@@ -10,6 +10,7 @@ import { useUiStore } from '@/stores/ui.store'
 
 const SYNC_CHANNEL = 'bd-settings'
 const SESSION_ID = Math.random().toString(36).slice(2)
+const PENDING_SETTINGS_STORAGE_KEY = 'bd-settings-pending'
 
 // Only non-reading, non-device settings sync to the server. Flat reading
 // fields are deliberately excluded (intents sync, outcomes stay local):
@@ -55,6 +56,60 @@ function settingsChanged(
   })
 }
 
+interface PendingSettings {
+  userId: string
+  payload: SettingsRes
+}
+
+function persistPendingSettings(userId: string, payload: SettingsRes) {
+  try {
+    localStorage.setItem(PENDING_SETTINGS_STORAGE_KEY, JSON.stringify({ userId, payload }))
+  } catch {
+    // The normal localStorage setters still keep the UI usable when storage is unavailable.
+  }
+}
+
+function getPendingSettings(userId: string): SettingsRes | null {
+  try {
+    const raw = localStorage.getItem(PENDING_SETTINGS_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<PendingSettings>
+    if (parsed.userId !== userId || !parsed.payload || typeof parsed.payload !== 'object') return null
+    return parsed.payload
+  } catch {
+    return null
+  }
+}
+
+function clearPendingSettings(userId: string, payload: SettingsRes) {
+  const pending = getPendingSettings(userId)
+  if (!pending || JSON.stringify(pending) !== JSON.stringify(payload)) return
+  try {
+    localStorage.removeItem(PENDING_SETTINGS_STORAGE_KEY)
+  } catch {
+    // ignore localStorage errors in private/incognito modes
+  }
+}
+
+function applySettings(settings: Partial<SettingsRes>) {
+  useUiStore.setState((state) => {
+    const patch: Partial<typeof state> = {}
+    for (const key of SETTINGS_KEYS) {
+      if (key in settings) {
+        // @ts-expect-error dynamic settings keys
+        patch[key] = settings[key]
+      }
+    }
+    return patch
+  })
+  const syncedThemes = customThemesFromSync(settings.customThemes)
+  if (syncedThemes) useUiStore.getState().setCustomThemes(syncedThemes)
+  // The profiles blob is authoritative for the reading keys: re-apply the
+  // local resolution chain (bound > device active > global) so the flat fields
+  // follow the synced config.
+  useUiStore.getState().applyReadingResolution()
+}
+
 export function SettingsSync() {
   const { mutate: saveSettings } = useMutation({
     mutationFn: (settings: SettingsRes) => apiPut('/settings', settings),
@@ -71,26 +126,19 @@ export function SettingsSync() {
 
   useEffect(() => {
     if (!userId) return
+    const pending = getPendingSettings(userId)
+    if (pending) {
+      // A reload can happen before the debounced PUT completes. Keep the
+      // locally committed snapshot visible and retry it instead of allowing a
+      // stale server response to overwrite it.
+      applySettings(pending)
+      mutateRef.current(pending, { onSuccess: () => clearPendingSettings(userId, pending) })
+      return
+    }
     apiGet<{ data: SettingsRes }>('/settings')
       .then((res) => {
         if (!res.data) return
-        useUiStore.setState((state) => {
-          const patch: Partial<typeof state> = {}
-          for (const key of SETTINGS_KEYS) {
-            if (key in res.data) {
-              // @ts-expect-error dynamic settings keys
-              patch[key] = res.data[key]
-            }
-          }
-          return patch
-        })
-        // Applied via the store action so localStorage persistence runs too
-        const syncedThemes = customThemesFromSync(res.data.customThemes)
-        if (syncedThemes) useUiStore.getState().setCustomThemes(syncedThemes)
-        // The profiles blob is authoritative for the reading keys: re-apply
-        // the local resolution chain (bound > device active > global) so the
-        // flat fields follow the synced config.
-        useUiStore.getState().applyReadingResolution()
+        applySettings(res.data)
       })
       .catch(() => undefined)
   }, [userId])
@@ -102,18 +150,7 @@ export function SettingsSync() {
         if (event.data?.sessionId === SESSION_ID) return
         const data = event.data?.settings as Partial<Record<string, unknown>> | undefined
         if (!data) return
-        useUiStore.setState((state) => {
-          const patch: Partial<typeof state> = {}
-          for (const key of SETTINGS_KEYS) {
-            if (key in data) {
-              // @ts-expect-error dynamic settings keys
-              patch[key] = data[key]
-            }
-          }
-          return patch
-        })
-        const syncedThemes = customThemesFromSync(data.customThemes)
-        if (syncedThemes) useUiStore.getState().setCustomThemes(syncedThemes)
+        applySettings(data as Partial<SettingsRes>)
         // The device-local active rides the broadcast (never the PUT) so
         // every tab of this device shares one pointer; resolution follows.
         if (typeof data.activePresetId === 'string' || data.activePresetId === null) {
@@ -130,6 +167,7 @@ export function SettingsSync() {
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
+    let settingsDirty = false
     const bcRef: { current: BroadcastChannel | null } = { current: null }
     if (typeof BroadcastChannel !== 'undefined') {
       try { bcRef.current = new BroadcastChannel(SYNC_CHANNEL) } catch { /* ignore */ }
@@ -140,12 +178,24 @@ export function SettingsSync() {
       const activeTouched = state.activePresetId !== prevState.activePresetId
       if (!settingsTouched && !activeTouched) return
       if (!useAuthStore.getState().user) return
+      if (settingsTouched) {
+        const userId = useAuthStore.getState().user?.id
+        if (userId) persistPendingSettings(userId, pickSettings(state))
+        settingsDirty = true
+      }
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
-        const payload = pickSettings(state)
+        const latestState = useUiStore.getState()
+        const payload = pickSettings(latestState)
+        const user = useAuthStore.getState().user
+        const pending = user ? getPendingSettings(user.id) : null
         // The device-local active preset is broadcast-only, never PUT
-        if (settingsTouched) mutateRef.current(payload)
-        bcRef.current?.postMessage({ sessionId: SESSION_ID, settings: { ...payload, activePresetId: state.activePresetId } })
+        if (user && (settingsDirty || pending)) {
+          settingsDirty = false
+          const payloadToSave = pending ?? payload
+          mutateRef.current(payloadToSave, { onSuccess: () => clearPendingSettings(user.id, payloadToSave) })
+        }
+        bcRef.current?.postMessage({ sessionId: SESSION_ID, settings: { ...payload, activePresetId: latestState.activePresetId } })
       }, 1000)
     })
     return () => {

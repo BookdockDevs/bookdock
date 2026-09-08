@@ -63,7 +63,7 @@ export function FootnotePopup({ entry, onBack, onClose }: FootnotePopupProps) {
         data-testid="footnote-popup"
         className={`pointer-events-auto fixed flex flex-col overflow-hidden border shadow-2xl ${
           isTouch
-            ? 'inset-x-2 bottom-2 max-h-[70dvh] rounded-2xl'
+            ? 'inset-x-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom))] max-h-[70dvh] rounded-2xl'
             : 'rounded-xl'
         }`}
         style={{

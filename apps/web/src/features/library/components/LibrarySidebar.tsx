@@ -298,12 +298,14 @@ export default LibrarySidebar
 function NavItem({
   label,
   count,
+  hasMenu = false,
   active = false,
   icon,
   onClick,
 }: {
   label: string
   count?: number
+  hasMenu?: boolean
   active?: boolean
   icon?: React.ReactNode
   onClick: () => void
@@ -314,6 +316,7 @@ function NavItem({
       onClick={onClick}
       className={cn(
         'flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] transition-all',
+        hasMenu && 'pr-10 md:pr-3',
         active
           ? 'bg-white font-medium text-stone-900 shadow-sm ring-1 ring-stone-200/70 dark:bg-stone-900 dark:text-stone-50 dark:ring-stone-800'
           : 'text-stone-500 hover:bg-stone-200/50 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/50 dark:hover:text-stone-100',
@@ -413,6 +416,7 @@ function ShelfItem({
       <NavItem
         label={shelf.name}
         count={shelf.bookCount}
+        hasMenu
         active={active || dropHint}
         icon={
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -511,6 +515,7 @@ function TagItem({
       <NavItem
         label={tag.name}
         count={tag.bookCount}
+        hasMenu
         active={active}
         icon={
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

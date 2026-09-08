@@ -33,12 +33,18 @@ const AI_MENU_WIDTH = 184
 
 const iconBtn = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-stone-200 transition-colors hover:bg-white/10 hover:text-white'
 
-export function SelectionToolbar({ bookId }: { bookId: string }) {
+interface SelectionToolbarProps {
+  bookId: string
+  fontStack?: string
+  fontCss?: string
+}
+
+export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolbarProps) {
   const _ = useTranslation()
   const selection = useReaderState((s) => s.selection)
   const setSelection = useReaderState((s) => s.setSelection)
   const setAiContext = useReaderState((s) => s.setAiContext)
-  const setAiPendingPrompt = useReaderState((s) => s.setAiPendingPrompt)
+  const setAiPendingCommand = useReaderState((s) => s.setAiPendingCommand)
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
@@ -124,7 +130,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
         style: last.style,
         // rawText keeps block-level line breaks; `text` is whitespace-collapsed
         // and would squash the quote into one paragraph on the idea/share cards
-        text: (selection.rawText ?? selection.text).slice(0, 500),
+        text: (selection.rawText ?? selection.text).slice(0, 800),
         chapter: currentChapter ?? undefined,
       })
       // The optimistic cache entry (inserted by the mutation's onMutate) is
@@ -192,7 +198,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
           type: 'note',
           color: last.color,
           style: last.style,
-          text: (selection.rawText ?? selection.text).slice(0, 500),
+          text: (selection.rawText ?? selection.text).slice(0, 800),
           chapter: currentChapter ?? undefined,
           note: note || undefined,
         })
@@ -265,7 +271,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
       chapterIndex: selection.chapterIndex ?? currentChapterIndex ?? undefined,
       chapterTitle: selection.chapterTitle ?? currentChapter ?? undefined,
     })
-    setAiPendingPrompt(command.prompt)
+    setAiPendingCommand(command)
     renderer?.deselect()
     setSelection(null)
     setNoteEditorRange(null)
@@ -281,7 +287,7 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
       chapterIndex: selection.chapterIndex ?? currentChapterIndex ?? undefined,
       chapterTitle: selection.chapterTitle ?? currentChapter ?? undefined,
     })
-    setAiPendingPrompt(null)
+    setAiPendingCommand(null)
     renderer?.deselect()
     setSelection(null)
     setNoteEditorRange(null)
@@ -362,9 +368,12 @@ export function SelectionToolbar({ bookId }: { bookId: string }) {
       <IdeaOverlay
         entries={entries}
         quoteText={selection.text}
+        fontStack={fontStack}
+        fontCss={fontCss}
         onCopyQuote={() => void copyQuoteText()}
         onHighlight={() => void highlight()}
         onWriteNote={() => void createNote()}
+        onAiChat={openAiChat}
         onShareQuote={shareExcerpt}
         onSearch={searchSelection}
         onCopyNote={(entry) => void copyNote(entry)}

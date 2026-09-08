@@ -33,11 +33,11 @@ export function TtsSessionProvider({ renderer, children }: { renderer: BookReade
 
   useEffect(() => {
     if (!controller) return
-    const timer = window.setTimeout(() => controller.refreshVoices(), 0)
+    const timers = [0, 2_000].map((delay) => window.setTimeout(() => controller.refreshVoices(), delay))
     const synthesis = globalThis.speechSynthesis
     synthesis?.addEventListener?.('voiceschanged', controller.refreshVoices)
     return () => {
-      window.clearTimeout(timer)
+      timers.forEach((timer) => window.clearTimeout(timer))
       synthesis?.removeEventListener?.('voiceschanged', controller.refreshVoices)
       controller.dispose()
     }

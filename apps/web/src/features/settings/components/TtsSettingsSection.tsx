@@ -11,6 +11,8 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
 import { useToastStore } from '@/stores/toast.store'
 
+import TtsProviderIcon from './TtsProviderIcon'
+
 interface TtsFormState {
   id?: string
   provider: TtsProvider
@@ -158,13 +160,14 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
           </button>
           {providerMenuOpen && <div className="absolute right-0 z-10 mt-2 w-max min-w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg dark:border-stone-700 dark:bg-stone-900">
-            {providers.map((provider) => <button key={provider.id} type="button" onClick={() => openCreate(provider.id)} className="block w-full truncate whitespace-nowrap px-3 py-2 text-left text-xs text-stone-700 hover:bg-stone-50 dark:text-stone-200 dark:hover:bg-stone-800" title={PROVIDER_NAMES[provider.id]}>{PROVIDER_NAMES[provider.id]}</button>)}
+            {providers.map((provider) => <button key={provider.id} type="button" onClick={() => openCreate(provider.id)} className="flex w-full items-center gap-2 truncate whitespace-nowrap px-3 py-2 text-left text-xs text-stone-700 hover:bg-stone-50 dark:text-stone-200 dark:hover:bg-stone-800" title={PROVIDER_NAMES[provider.id]}><TtsProviderIcon provider={provider.id} className="h-5 w-5" /><span className="truncate">{PROVIDER_NAMES[provider.id]}</span></button>)}
           </div>}
         </div>}
       </div>
 
       {isGuest ? <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.ttsGuestHint')}</p> : services.length === 0 ? <SettingsEmptyState>{_('settings.ttsEmpty')}</SettingsEmptyState> : <div className="divide-y divide-stone-100 dark:divide-stone-800">
         {services.map((service) => <div key={service.id} className="flex items-center gap-3 py-3">
+          <TtsProviderIcon provider={service.provider} className="h-8 w-8" />
           <div className="min-w-0 flex-1"><p className="truncate text-sm text-stone-800 dark:text-stone-100">{service.name}</p><p className="mt-0.5 truncate text-xs text-stone-400">{PROVIDER_NAMES[service.provider]}{service.model ? ` · ${service.model}` : ''}</p></div>
           <div className="flex shrink-0 items-center gap-1">
             <button

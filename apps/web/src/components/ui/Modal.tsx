@@ -29,7 +29,7 @@ export default function Modal({ title, onClose, actions, containerProps, variant
   return (
     <div
       {...containerProps}
-      className="fixed inset-0 z-50 flex items-end justify-center overscroll-none bg-black/50 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center overscroll-none bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4"
       onClick={onClose}
       onWheel={(event) => { if (event.target === event.currentTarget) event.preventDefault() }}
     >
@@ -55,7 +55,7 @@ export default function Modal({ title, onClose, actions, containerProps, variant
             </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:px-5">{children}</div>
       </div>
     </div>
   )

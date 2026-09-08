@@ -47,6 +47,10 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
   const _ = useTranslation()
   const readingMode = useUiStore((s) => s.readingMode)
   const [draft, setDraft] = useState(initialNote)
+  const [viewport, setViewport] = useState(() => ({
+    width: window.visualViewport?.width ?? window.innerWidth,
+    height: window.visualViewport?.height ?? window.innerHeight,
+  }))
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -67,8 +71,26 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
     }
   }, [onClose])
 
+  useEffect(() => {
+    const visualViewport = window.visualViewport
+    const updateViewport = () => {
+      setViewport({
+        width: visualViewport?.width ?? window.innerWidth,
+        height: visualViewport?.height ?? window.innerHeight,
+      })
+    }
+    updateViewport()
+    window.addEventListener('resize', updateViewport)
+    visualViewport?.addEventListener('resize', updateViewport)
+    visualViewport?.addEventListener('scroll', updateViewport)
+    return () => {
+      window.removeEventListener('resize', updateViewport)
+      visualViewport?.removeEventListener('resize', updateViewport)
+      visualViewport?.removeEventListener('scroll', updateViewport)
+    }
+  }, [])
+
   const isPage = readingMode === 'page'
-  const viewport = { width: window.innerWidth, height: window.innerHeight }
   const base = isPage ? PAGE_SIZE : SCROLL_SIZE
   const size = { width: Math.min(base.width, viewport.width - VIEWPORT_MARGIN * 2), height: base.height }
   const pos = noteEditorPosition(rect, readingMode, size, viewport)

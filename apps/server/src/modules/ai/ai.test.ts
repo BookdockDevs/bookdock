@@ -613,6 +613,27 @@ describe('ai routes', () => {
     expect(payload.messages.at(-1)?.content).toContain('trust="untrusted"')
   })
 
+  it('ignores stale client history when an existing thread is supplied', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(
+      'data: {"choices":[{"delta":{"content":"继续回答"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+
+    const response = await createApp({ id: 'user-1', role: 'owner' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...requestBody,
+        threadId: 'ai-thread-test',
+        history: Array.from({ length: 13 }, (_, index) => ({ role: index % 2 === 0 ? 'user' : 'assistant', content: `旧消息 ${index}` })),
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('event: done')
+  })
+
   it('rebuilds quoted context from persisted user history', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValue(new Response(
@@ -668,6 +689,107 @@ describe('ai routes', () => {
     expect(payload.messages.at(-1)?.content).toContain('字'.repeat(10_000))
     const meta = JSON.parse(stream.match(/event: meta\ndata: ([^\n]+)/)?.[1] ?? '{}') as { receipt?: { contextPlan?: Record<string, unknown> } }
     expect(meta.receipt?.contextPlan).toEqual(expect.objectContaining({ visibleTextVersion: 'reader-visible-v1', directContextChars: expect.any(Number) }))
+  })
+
+  it('expands a paragraph placeholder while keeping the saved prompt template', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(
+      'data: {"choices":[{"delta":{"content":"已读取"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+    const response = await createApp({ id: 'user-1', role: 'owner' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...requestBody,
+        prompt: '请分析{SELPARA}',
+        context: { ...requestBody.context, selection: '', paragraph: '这是完整段落' },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await response.text()
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ content?: string }> }
+    expect(payload.messages.at(-1)?.content).toContain('请分析这是完整段落')
+    expect(payload.messages.at(-1)?.content).not.toContain('<paragraph>这是完整段落</paragraph>')
+    expect(saveAiMessage).toHaveBeenCalledWith('user-1', 'ai-thread-test', expect.objectContaining({ content: '请分析{SELPARA}' }))
+  })
+
+  it('expands a chapter placeholder from the current chapter reference', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(
+      'data: {"choices":[{"delta":{"content":"已概括"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+    const response = await createApp({ id: 'user-1', role: 'owner' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...requestBody,
+        prompt: '总结：{CHAPTER}',
+        context: {
+          ...requestBody.context,
+          chapterReferences: [{ chapterIndex: 2, chapterTitle: '第三章', text: '这是当前章节正文' }],
+        },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await response.text()
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ content?: string }> }
+    const currentMessage = payload.messages.at(-1)?.content ?? ''
+    expect(currentMessage).toContain('总结：这是当前章节正文')
+    expect(currentMessage).not.toContain('<chapter_reference chapter="第三章" chapter_index="2">')
+    expect(saveAiMessage).toHaveBeenCalledWith('user-1', 'ai-thread-test', expect.objectContaining({ content: '总结：{CHAPTER}' }))
+  })
+
+  it('leaves a placeholder unchanged when its context value is unavailable', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(
+      'data: {"choices":[{"delta":{"content":"保留占位符"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+    const response = await createApp({ id: 'user-1', role: 'owner' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...requestBody,
+        prompt: '解释：{SELTEXT}',
+        context: { ...requestBody.context, selection: '' },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await response.text()
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ content?: string }> }
+    expect(payload.messages.at(-1)?.content).toContain('解释：{SELTEXT}')
+  })
+
+  it('expands a selected-text placeholder without duplicating the selection context', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(
+      'data: {"choices":[{"delta":{"content":"已分析"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+    const response = await createApp({ id: 'user-1', role: 'owner' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...requestBody,
+        prompt: '解释：{SELTEXT}',
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await response.text()
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ content?: string }> }
+    const currentMessage = payload.messages.at(-1)?.content ?? ''
+    expect(currentMessage).toContain('解释：这是<需要分析>的内容')
+    expect(currentMessage).not.toContain('<selection>这是&lt;需要分析&gt;的内容</selection>')
   })
 
   it('does not send an empty book context for a follow-up question', async () => {

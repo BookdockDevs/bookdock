@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { BookListItem, BookMetadata } from '@bookdock/shared'
 
-import { apiPatch, apiPut } from '@/api/client'
+import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookTransforms } from '@/api/hooks/useTransforms'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatBytes, formatDate } from '@/lib/utils'
-import { computeFromAnchor, type SmartPosition } from '@/lib/position'
+import { computeFromAnchor, PADDING, type SmartPosition } from '@/lib/position'
 import { useToastStore } from '@/stores/toast.store'
 import { Button } from '@/components/ui/Button'
 import MenuFlyout from '@/components/ui/MenuFlyout'
@@ -20,12 +20,10 @@ import {
   useBookMembership,
   useCreateShelf,
   useCreateTag,
-  useRemoveCover,
   useResetMetadata,
   useShelves,
   useTags,
   useUpdateBook,
-  useUploadCover,
 } from '../hooks'
 import { downloadBook, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../download'
 
@@ -77,7 +75,7 @@ function draftToBookmeta(draft: MetaDraft): BookMetadata {
   if (draft.language.trim()) bookmeta.language = draft.language.trim()
   const subjects = draft.subjects.split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
   if (subjects.length > 0) bookmeta.subjects = subjects
-  if (draft.description.trim()) bookmeta.description = draft.description.trim()
+  if (draft.description.trim()) bookmeta.description = draft.description
   if (draft.series.trim()) bookmeta.series = draft.series.trim()
   const seriesIndex = parseFloat(draft.seriesIndex)
   if (!Number.isNaN(seriesIndex)) bookmeta.seriesIndex = seriesIndex
@@ -112,8 +110,6 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()
 
-  const uploadCover = useUploadCover()
-  const removeCover = useRemoveCover()
   const resetMetadata = useResetMetadata()
   const createShelf = useCreateShelf()
   const createTag = useCreateTag()
@@ -122,6 +118,9 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   const [saving, setSaving] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
   const [draft, setDraft] = useState<MetaDraft | null>(null)
+  const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null)
+  const [coverRemovalPending, setCoverRemovalPending] = useState(false)
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null)
   const [shelfSel, setShelfSel] = useState<string | null>(null)
   const [tagSel, setTagSel] = useState<Set<string>>(new Set())
   const [newShelf, setNewShelf] = useState('')
@@ -146,6 +145,16 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const [tocRuleOpen, setTocRuleOpen] = useState(false)
 
+  useEffect(() => {
+    if (!pendingCoverFile) {
+      setCoverPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(pendingCoverFile)
+    setCoverPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [pendingCoverFile])
+
   function toggleDownloadMenu() {
     const el = downloadAnchorRef.current
     if (!el) return
@@ -169,11 +178,19 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
       return
     }
     const rect = el.getBoundingClientRect()
-    setMoreMenu(computeFromAnchor(
+    const menuW = 176
+    const position = computeFromAnchor(
       { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      176,
+      menuW,
       88,
-    ))
+    )
+    // The button sits at the dialog's right edge. Keep this menu attached to
+    // that edge instead of opening into the page just because the viewport
+    // itself has spare space.
+    setMoreMenu({
+      ...position,
+      left: Math.max(PADDING, Math.min(rect.right - menuW, window.innerWidth - menuW - PADDING)),
+    })
   }
 
   async function onExport(format: 'epub' | 'txt', plain: boolean) {
@@ -191,20 +208,35 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
     }
   }
 
+  const discardEdit = useCallback(() => {
+    setEditing(false)
+    setConfirmReset(false)
+    setDraft(null)
+    setPendingCoverFile(null)
+    setCoverRemovalPending(false)
+  }, [])
+
+  const closeDialog = useCallback(() => {
+    discardEdit()
+    onClose()
+  }, [discardEdit, onClose])
+
   useEffect(() => {
     if (!book) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') closeDialog()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [book, onClose])
+  }, [book, closeDialog])
 
   // Reset transient state when switching books
   useEffect(() => {
     setEditing(false)
     setConfirmReset(false)
     setDraft(null)
+    setPendingCoverFile(null)
+    setCoverRemovalPending(false)
     setNewShelf('')
     setNewShelfOpen(false)
     setNewTag('')
@@ -230,6 +262,8 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   function enterEdit() {
     if (!book) return
     setDraft(draftFrom(displayBook, bookmeta))
+    setPendingCoverFile(null)
+    setCoverRemovalPending(false)
     setShelfSel(memShelves.data?.data ?? null)
     setTagSel(new Set(memTags.data?.data ?? []))
     setConfirmReset(false)
@@ -242,7 +276,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
     if (!title) return
     setSaving(true)
     try {
-      await Promise.all([
+      const requests: Promise<unknown>[] = [
         apiPatch(`/books/${book.id}`, {
           title,
           author: draft.author.trim(),
@@ -250,12 +284,18 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
         }),
         apiPut(`/books/${book.id}/shelves`, { shelfId: shelfSel }),
         apiPut(`/books/${book.id}/tags`, { tagIds: [...tagSel] }),
-      ])
+      ]
+      if (coverRemovalPending) {
+        requests.push(apiDelete(`/books/${book.id}/cover`))
+      } else if (pendingCoverFile) {
+        requests.push(apiUpload(`/books/${book.id}/cover`, pendingCoverFile, 'PUT'))
+      }
+      await Promise.all(requests)
       queryClient.invalidateQueries({ queryKey: ['books'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
       addToast(_('toast.bookUpdated'), 'success')
-      setEditing(false)
+      discardEdit()
     } catch {
       addToast(_('toast.updateBookFailed'), 'error')
     } finally {
@@ -267,20 +307,16 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
     if (!book) return
     try {
       await resetMetadata.mutateAsync(book.id)
-      setConfirmReset(false)
-      setEditing(false)
+      discardEdit()
     } catch {
       // toast handled by the hook
     }
   }
 
-  async function handleCoverFile(file: File | undefined) {
-    if (!book || !file) return
-    try {
-      await uploadCover.mutateAsync({ bookId: book.id, file })
-    } catch {
-      // toast handled by the hook
-    }
+  function handleCoverFile(file: File | undefined) {
+    if (!book || !file || saving) return
+    setPendingCoverFile(file)
+    setCoverRemovalPending(false)
   }
 
   async function handleCreateTag() {
@@ -359,8 +395,8 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
-      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4"
+      onClick={closeDialog}
     >
       <div
         className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:max-h-[85vh] sm:rounded-2xl dark:bg-stone-900"
@@ -412,7 +448,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
             )}
             <button
               type="button"
-              onClick={onClose}
+              onClick={closeDialog}
               className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
               aria-label={_('library.cancel')}
             >
@@ -423,7 +459,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:px-5">
           {editing && draft ? (
             <div>
               <section>
@@ -434,18 +470,25 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                       className="group relative cursor-pointer"
                       onClick={() => coverInputRef.current?.click()}
                     >
-                      <BookCover book={displayBook} />
+                      <BookCover
+                        book={displayBook}
+                        coverSrc={coverRemovalPending ? null : pendingCoverFile ? coverPreviewUrl : undefined}
+                      />
                       <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 rounded-xl bg-black/55 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                         <span className="rounded-md bg-white/90 px-2.5 py-1 text-xs font-medium text-stone-800">
                           {_('library.changeCover')}
                         </span>
-                        {displayBook.coverKey && (
+                        {(displayBook.coverKey || pendingCoverFile) && (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation()
-                              removeCover.mutate(book.id)
+                              if (!saving) {
+                                setPendingCoverFile(null)
+                                setCoverRemovalPending(Boolean(displayBook.coverKey))
+                              }
                             }}
+                            disabled={saving}
                             className="rounded-md bg-black/40 px-2.5 py-1 text-xs text-white/90 transition-colors hover:bg-black/60"
                           >
                             {_('library.removeCover')}
@@ -457,6 +500,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                         type="file"
                         accept="image/png,image/jpeg,image/webp"
                         className="hidden"
+                        disabled={saving}
                         onChange={(e) => {
                           void handleCoverFile(e.target.files?.[0])
                           e.target.value = ''
@@ -574,6 +618,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                             e.preventDefault()
                             void handleCreateShelf()
                           } else if (e.key === 'Escape') {
+                            e.stopPropagation()
                             setNewShelf('')
                             setNewShelfOpen(false)
                           }
@@ -626,6 +671,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                             e.preventDefault()
                             void handleCreateTag()
                           } else if (e.key === 'Escape') {
+                            e.stopPropagation()
                             setNewTag('')
                             setNewTagOpen(false)
                           }
@@ -853,7 +899,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
         </div>
 
         {editing && (
-          <div className="flex shrink-0 flex-col gap-3 border-t border-stone-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:px-5 dark:border-stone-800">
+          <div className="flex shrink-0 flex-col gap-3 border-t border-stone-100 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:px-5 dark:border-stone-800">
             {confirmReset ? (
               <div className="flex min-w-0 items-center gap-2">
                 <span className="truncate text-xs text-stone-500 dark:text-stone-400">{_('library.resetMetadataConfirm')}</span>
@@ -883,7 +929,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
               </button>
             )}
             <div className="flex shrink-0 items-center gap-2">
-              <Button variant="secondary" onClick={() => setEditing(false)} disabled={saving}>
+              <Button variant="secondary" onClick={discardEdit} disabled={saving}>
                 {_('library.cancel')}
               </Button>
               <Button onClick={() => void handleSave()} disabled={saving || !draft?.title.trim()}>

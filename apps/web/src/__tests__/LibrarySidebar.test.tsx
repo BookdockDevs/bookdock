@@ -61,6 +61,14 @@ describe('LibrarySidebar', () => {
     expect(screen.getByText('回收站')).toBeInTheDocument()
   })
 
+  it('reserves menu space on mobile while keeping desktop counts aligned to the row edge', () => {
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+
+    expect(screen.getByText('Favorites').closest('button')).toHaveClass('pr-10', 'md:pr-3')
+  })
+
   it('selects a shelf when clicked', () => {
     mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] })
 

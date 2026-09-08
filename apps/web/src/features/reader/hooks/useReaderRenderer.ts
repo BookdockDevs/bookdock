@@ -372,5 +372,5 @@ export function useReaderRenderer({
     current.setChapterWordCounts(chapterWordCounts)
   }, [chapterWordCounts, renderer])
 
-  return { containerRef, renderer }
+  return { containerRef, renderer, fontStack, fontCss }
 }

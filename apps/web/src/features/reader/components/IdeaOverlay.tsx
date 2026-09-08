@@ -6,7 +6,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
 
 import { getLastHighlightStyle } from './annotation-colors'
-import { BulbIcon, ChevronDownIcon, ChevronLeftIcon, CloseIcon, CopyIcon, ExcerptShareIcon, PencilIcon, QuoteLeftIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
+import { AiSparkleIcon, BulbIcon, ChevronDownIcon, ChevronLeftIcon, CloseIcon, CopyIcon, ExcerptShareIcon, PencilIcon, QuoteLeftIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
 import { formatFullDateTime } from './format-relative-time'
 import { markEscConsumed } from '../lib/esc-consumed'
 
@@ -25,9 +25,12 @@ export interface IdeaEntry {
 interface IdeaOverlayProps {
   entries: IdeaEntry[]
   quoteText?: string
+  fontStack?: string
+  fontCss?: string
   onCopyQuote: () => void
   onHighlight: () => void
   onWriteNote: () => void
+  onAiChat: () => void
   onShareQuote: () => void
   onSearch: () => void
   onCopyNote: (entry: IdeaEntry) => void
@@ -52,9 +55,12 @@ const detailActionBtn =
 export function IdeaOverlay({
   entries,
   quoteText,
+  fontStack,
+  fontCss,
   onCopyQuote,
   onHighlight,
   onWriteNote,
+  onAiChat,
   onShareQuote,
   onSearch,
   onCopyNote,
@@ -87,7 +93,7 @@ export function IdeaOverlay({
   }, [detail, entries])
 
   // While line-clamped, scrollHeight exceeding clientHeight means the quote
-  // overflows three lines — only then is the expand chevron shown
+  // overflows four lines — only then is the expand chevron shown
   useEffect(() => {
     const el = quoteRef.current
     if (el) setQuoteClamped(el.scrollHeight > el.clientHeight + 1)
@@ -97,17 +103,20 @@ export function IdeaOverlay({
     { key: 'copy', title: _('annotation.copy'), icon: <CopyIcon />, onClick: onCopyQuote },
     { key: 'highlight', title: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, onClick: onHighlight },
     { key: 'note', title: _('annotation.writeNote'), icon: <BulbIcon />, onClick: onWriteNote },
-    { key: 'share', title: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, onClick: onShareQuote },
+    { key: 'ai-chat', title: _('reader.aiChatSelection'), icon: <AiSparkleIcon size={20} />, onClick: onAiChat },
     { key: 'search', title: _('reader.search'), icon: <SearchIcon />, onClick: onSearch },
+    { key: 'share', title: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, onClick: onShareQuote },
   ]
+  const detailAvatarUrl = detail ? avatarUrl(detail.authorAvatarKey) : undefined
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex flex-col bg-black/50 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
+      {fontCss && <style data-reader-font>{fontCss}</style>}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div
           className="flex min-h-full flex-col items-center justify-center p-3 pb-20 sm:p-4 sm:pb-[14vh]"
@@ -124,8 +133,8 @@ export function IdeaOverlay({
               </div>
               <div className="px-5 pb-4">
                 <div className="flex items-center gap-2.5">
-                  {avatarUrl(detail.authorAvatarKey) ? (
-                    <img src={avatarUrl(detail.authorAvatarKey)} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+                  {detailAvatarUrl ? (
+                    <img src={detailAvatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
                   ) : (
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-stone-300">
                       <BulbIcon size={16} />
@@ -191,7 +200,8 @@ export function IdeaOverlay({
                   )}
                   <p
                     ref={quoteRef}
-                    className={`mt-2 whitespace-pre-wrap text-base leading-relaxed ${quoteExpanded ? '' : 'line-clamp-3'}`}
+                    className={`mt-2 whitespace-pre-wrap text-base leading-relaxed ${quoteExpanded ? '' : 'line-clamp-4'}`}
+                    style={fontStack ? { fontFamily: fontStack } : undefined}
                   >
                     {quoteText}
                   </p>
@@ -204,30 +214,33 @@ export function IdeaOverlay({
                   ))}
                 </div>
               </div>
-              {entries.map((entry) => (
-                <button
-                  key={entry.annotation.id}
-                  onClick={() => setDetail(entry)}
-                  className={`${card} mt-3 block w-full p-4 text-left transition-colors hover:bg-stone-600`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    {avatarUrl(entry.authorAvatarKey) ? (
-                      <img src={avatarUrl(entry.authorAvatarKey)} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
-                    ) : (
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-stone-300">
-                        <BulbIcon size={16} />
-                      </span>
-                    )}
-                    <span className="truncate text-sm font-medium">{entry.authorName ?? _('annotation.myNote')}</span>
-                    {entry.own && (
-                      <span className="ml-auto shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-xs text-stone-300">
-                        {_('annotation.myNote')}
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-base leading-relaxed">{entry.annotation.note}</p>
-                </button>
-              ))}
+              {entries.map((entry) => {
+                const entryAvatarUrl = avatarUrl(entry.authorAvatarKey)
+                return (
+                  <button
+                    key={entry.annotation.id}
+                    onClick={() => setDetail(entry)}
+                    className={`${card} mt-3 block w-full p-4 text-left transition-colors hover:bg-stone-600`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      {entryAvatarUrl ? (
+                        <img src={entryAvatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+                      ) : (
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-stone-300">
+                          <BulbIcon size={16} />
+                        </span>
+                      )}
+                      <span className="truncate text-sm font-medium">{entry.authorName ?? _('annotation.myNote')}</span>
+                      {entry.own && (
+                        <span className="ml-auto shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-xs text-stone-300">
+                          {_('annotation.myNote')}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-base leading-relaxed">{entry.annotation.note}</p>
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
@@ -235,7 +248,7 @@ export function IdeaOverlay({
       <button
         onClick={onClose}
         title={_('annotation.cancel')}
-        className="mb-6 mt-2 flex h-11 w-11 shrink-0 items-center justify-center self-center rounded-full bg-black/80 text-white shadow-xl transition-transform hover:scale-105"
+        className="mb-[calc(1.5rem+env(safe-area-inset-bottom))] mt-2 flex h-11 w-11 shrink-0 items-center justify-center self-center rounded-full bg-black/80 text-white shadow-xl transition-transform hover:scale-105"
       >
         <CloseIcon />
       </button>

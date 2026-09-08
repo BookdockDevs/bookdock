@@ -25,7 +25,7 @@ export function computeFromAnchor(
   const fitsRight = anchor.left + anchor.width + menuW + PADDING <= vw
   const left = fitsRight
     ? anchor.left + anchor.width
-    : Math.max(PADDING, anchor.left - menuW)
+    : Math.max(PADDING, anchor.left + anchor.width - menuW)
   return { left, top, dir }
 }
 

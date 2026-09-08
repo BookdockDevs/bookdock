@@ -130,7 +130,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       className={cn(
         'flex shrink-0 border-[var(--bd-read-accent)]',
         isTouch
-          ? 'order-2 h-14 w-full items-center border-t px-1'
+          ? 'order-2 h-[calc(3.5rem+env(safe-area-inset-bottom))] w-full items-center border-t px-1 pb-[env(safe-area-inset-bottom)]'
           : 'order-none h-full w-14 flex-col items-center border-r py-3',
         collapsed ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',
         !resizing && 'transition-all duration-200',

@@ -26,9 +26,9 @@ export default function ConfirmDialog({ message, confirmLabel, onConfirm, onClos
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-sm flex-col gap-4 overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl dark:bg-stone-900"
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-sm flex-col gap-4 overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl dark:bg-stone-900"
         onClick={(e) => e.stopPropagation()}
       >
         <p className="text-sm leading-relaxed text-stone-700 dark:text-stone-200">{message}</p>

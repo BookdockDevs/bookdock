@@ -7,6 +7,7 @@ interface ReaderFooterControlsProps {
   bookId: string
   footerVisible: boolean
   isTouch: boolean
+  mobileDockVisible: boolean
   onPointerEnter: () => void
   onPointerLeave: () => void
   readingTimerMode: string
@@ -16,6 +17,7 @@ export default function ReaderFooterControls({
   bookId,
   footerVisible,
   isTouch,
+  mobileDockVisible,
   onPointerEnter,
   onPointerLeave,
   readingTimerMode,
@@ -23,8 +25,13 @@ export default function ReaderFooterControls({
   return (
     <div
       className={cn(
-        'absolute bottom-0 right-0 flex h-24 w-max max-w-[calc(100vw-1rem)] items-end justify-end gap-2 pointer-events-auto pb-3 pr-3 transition-transform duration-300',
-        footerVisible && '-translate-y-10',
+        'absolute right-0 z-[60] flex h-24 w-max max-w-[calc(100vw-1rem)] items-end justify-end gap-2 pb-3 pr-3 transition-[bottom,translate] duration-300',
+        mobileDockVisible
+          ? 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))]'
+          : 'bottom-[env(safe-area-inset-bottom)]',
+        isTouch
+          ? footerVisible ? '-translate-y-10 pointer-events-auto' : 'translate-y-full pointer-events-none'
+          : footerVisible ? '-translate-y-10 pointer-events-auto' : 'pointer-events-auto',
       )}
       onPointerEnter={isTouch ? undefined : onPointerEnter}
       onPointerLeave={isTouch ? undefined : onPointerLeave}

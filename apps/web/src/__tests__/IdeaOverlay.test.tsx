@@ -32,6 +32,7 @@ function renderOverlay(props?: Partial<Parameters<typeof IdeaOverlay>[0]>) {
       onCopyQuote={vi.fn()}
       onHighlight={vi.fn()}
       onWriteNote={vi.fn()}
+      onAiChat={vi.fn()}
       onShareQuote={vi.fn()}
       onSearch={vi.fn()}
       onCopyNote={vi.fn()}
@@ -56,6 +57,14 @@ describe('IdeaOverlay', () => {
     delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight
   })
 
+  it('uses the entry avatar key when present', () => {
+    renderOverlay({
+      entries: [{ annotation: makeAnnotation(), own: true, authorAvatarKey: 'ab/abc123.png' }],
+    })
+
+    expect(document.querySelector('img')).toHaveAttribute('src', '/api/v1/avatars/ab/abc123.png')
+  })
+
   it('hides the expand chevron when the quote fits within three lines', () => {
     mockQuoteOverflow(false)
     renderOverlay()
@@ -66,18 +75,18 @@ describe('IdeaOverlay', () => {
     mockQuoteOverflow(true)
     renderOverlay()
     const quote = screen.getByText('quote text')
-    expect(quote.className).toContain('line-clamp-3')
+    expect(quote.className).toContain('line-clamp-4')
 
     const toggle = screen.getByTitle('annotation.expandQuote')
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(toggle)
 
-    expect(quote.className).not.toContain('line-clamp-3')
+    expect(quote.className).not.toContain('line-clamp-4')
     const collapse = screen.getByTitle('annotation.collapseQuote')
     expect(collapse).toHaveAttribute('aria-expanded', 'true')
     fireEvent.click(collapse)
 
-    expect(quote.className).toContain('line-clamp-3')
+    expect(quote.className).toContain('line-clamp-4')
     expect(screen.getByTitle('annotation.expandQuote')).toBeInTheDocument()
   })
 
@@ -85,5 +94,36 @@ describe('IdeaOverlay', () => {
     renderOverlay()
     fireEvent.click(screen.getByText('a thought'))
     expect(screen.getByText(/annotation\.publishedAt/)).toBeInTheDocument()
+  })
+
+  it('invokes AI chat from the quote actions', () => {
+    const onAiChat = vi.fn()
+    renderOverlay({ onAiChat })
+
+    fireEvent.click(screen.getByTitle('reader.aiChatSelection'))
+
+    expect(onAiChat).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the reader font for the quote', () => {
+    renderOverlay({ fontStack: '"Reader Font", serif', fontCss: '@font-face { font-family: "Reader Font"; }' })
+
+    const quote = screen.getByText('quote text')
+    expect(quote).toHaveStyle({ fontFamily: '"Reader Font", serif' })
+    expect(document.querySelector('style[data-reader-font]')).toHaveTextContent('@font-face')
+  })
+
+  it('keeps quote actions in the same order as the selection menu', () => {
+    renderOverlay()
+
+    const titles = screen.getAllByRole('button').map((button) => button.getAttribute('title'))
+    expect(titles.slice(0, 6)).toEqual([
+      'annotation.copy',
+      'annotation.drawHighlight',
+      'annotation.writeNote',
+      'reader.aiChatSelection',
+      'reader.search',
+      'annotation.shareExcerpt',
+    ])
   })
 })

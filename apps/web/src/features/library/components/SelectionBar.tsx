@@ -59,7 +59,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
 
   return (
     <>
-    <div className="fixed bottom-3 left-1/2 z-40 -translate-x-1/2 sm:bottom-5">
+    <div className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-1/2 z-40 -translate-x-1/2 sm:bottom-5">
         <div className="flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] items-center gap-2 overflow-x-auto rounded-2xl border border-stone-200/80 bg-white/95 py-2 pl-4 pr-2 shadow-xl shadow-stone-900/8 backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-auto sm:max-w-none dark:border-stone-700 dark:bg-stone-900/95">
           <span className="mr-1 whitespace-nowrap text-xs font-medium text-stone-600 dark:text-stone-300">
             {_('library.selectionCount', { count: selectedIds.length })}
@@ -176,8 +176,8 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
   const showSave = selectedShelf !== undefined || selectedTags.size > 0
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
-      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4">
+      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
         <h2 className="mb-4 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
           {_('library.batchClassify')}
         </h2>
@@ -311,8 +311,8 @@ function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: (
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
-      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4">
+      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
         <h2 className="mb-2 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
           {_('library.batchDelete')}
         </h2>
@@ -361,8 +361,8 @@ function BatchPermanentDeleteDialog({ ids, onClose, onDone }: { ids: string[]; o
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
-      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4">
+      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
         <h2 className="mb-2 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
           {_('library.permanentDelete')}
         </h2>
