@@ -4,14 +4,16 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { apiPost } from '@/api/client'
 import { Button } from '@/components/ui/Button'
-import { useAuthStore } from '@/stores/auth.store'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
+import { useAuthStore } from '@/stores/auth.store'
 import type { SetupRes } from '@bookdock/shared'
 
 import { INSTANCE_QUERY_KEY } from './hooks'
 
 export default function Setup() {
   const _ = useTranslation()
+  usePageTitle(_('auth.setupTitle'))
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const setAuth = useAuthStore((s) => s.setAuth)

@@ -1,7 +1,7 @@
 import JSZip from 'jszip'
 import { and, eq, isNull, or } from 'drizzle-orm'
 
-import { applyRuleToText, findPointMatch } from '@bookdock/shared'
+import { applyPointMatch, applyRuleToText, findPointMatch } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { textTransformOverrides, textTransforms } from '../../db/schema'
@@ -110,8 +110,7 @@ export function applyChapterTransforms(runs: { text: string }[], rules: ExportRu
     if (!snapshot || patch.textOffset == null) continue
     const found = findPointMatch(runs, snapshot, patch.textOffset, patch.caseSensitive)
     if (!found) continue
-    const run = runs[found.runIndex]!
-    run.text = run.text.slice(0, found.local) + (patch.replacement ?? '') + run.text.slice(found.local + snapshot.length)
+    applyPointMatch(runs, found, patch.replacement ?? '')
   }
 }
 

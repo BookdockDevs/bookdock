@@ -6,7 +6,7 @@
 >
 > 行号基于 2026-08-06 working tree（`9e36c55` 之后，未提交），升级后先 grep 标记再核对。
 
-## 1. 可追溯补丁（13 处）
+## 1. 可追溯补丁（14 处）
 
 ### 1.1 `overlayer.js:128-151` — `Overlayer.dashedUnderline`（想法标注）
 
@@ -90,6 +90,12 @@
 - **行为**：移除旧的 `window.isFootNoteOpen()` / `window.closeFootNote()` 空桩调用；正文点击继续发出既有 `click-view`，由 `FoliateReader` 统一关闭脚注、消费本次点击并避免误翻页。
 - **上游对照**：这是宿主接线所需的行为调整，不再让 React 状态泄漏到全局 window。
 
+### 1.14 `paginator.js` shadow `<style>` — scrolled flow 显示原生滚动条（working tree）
+
+- **行为**：只在 `flow="scrolled"` 时恢复 `#container` 的原生滚动条，并使用继承的 `--bd-read-sub` 主题色；paginated flow 继续隐藏滚动条。递进模式下滚动条反映当前章节，continuous 连卷模式下反映当前保留的连续视图。
+- **原因**：真正的滚动容器是 paginator shadow DOM 内的 `#container`，宿主 Reader 外层 div 的 `overflow-y-auto` 无法控制它；原有基线 CSS 对所有 flow 统一隐藏了滚动条。
+- **上游对照**：上游基线同样隐藏该滚动条；这是 Bookdock 的阅读交互调整。
+
 ## 2. vendored 基线专属机制（初始 vendored 自带，上游 main 没有，升级全部需要重放）
 
 以下机制在 `a8e48f2` vendored 时就存在（上游从未有过），与 §1 的"补丁"区分——它们没有 `// bookdock:` 标记，只能按功能定位：
@@ -109,7 +115,7 @@
 
 ### 2.3 continuous 无缝模式的视图管理
 
-- `#views` Map（`:455`）+ `#fillVisibleArea`（`:871`）/ `#trimDistantViews`（`:912`）；远距跳转保留目标 ±2 邻域（`:1682-1683`）；
+- `#views` + `#placeholders` Map、`#loadAdjacentBuffer`/`#fillInitialBuffer`/`#virtualizeDistantViews`；切换到连卷只按向下方向准备当前章节附近的一章，滚动稳定后按方向、剩余少于 2 个视口再加载一章；离视口超过 6 个视口的已渲染章节替换为同高度占位元素，接近时恢复，滚动高度不因释放 DOM 而改变；加载期间只保留最新滚动意图，向上优先恢复当前视口相交的占位章节，只有视口仍落在占位区时才逐个继续补齐，滚轮停在 `scrollTop=0`/最大值时也能触发边界加载；远距跳转才保留目标 ±2 邻域（`:1682-1683`）；
 - `#getVisibleRange`（`:1463`）连续模式按**视口中心**判定主章节（`:1493` 处使用）；
 - `#afterScroll` 的 anchor 以 fraction 保留（relayout 后按比例恢复，而非 Range）。
 - **上游对照**：上游 main 的连续模式实现不同（无 wheel、无中心判定）。
@@ -134,7 +140,7 @@
 ## 4. 升级 foliate 操作流程
 
 1. 以上游对应版本为基线整体替换未改动文件（§3）；
-2. 对 §1 的 13 处补丁逐条重放（grep `bookdock:` 核对，优先迁移到上游新抽象，如 1.3 的搜索配置项）；
+2. 对 §1 的 14 处补丁逐条重放（grep `bookdock:` 核对，优先迁移到上游新抽象，如 1.3 的搜索配置项）；
 3. 对 §2 的 4 项基线机制按功能重放（无标记，靠行为测试验证：滚轮翻页、iframe 键盘、continuous 无缝翻章、三格信息栏）；
 4. 跑阅读器相关测试 + 手动验证：搜索跳转锚点位置（28%）、想法虚线下划线、页眉页脚 padding=0 可见性、同 range 一划一想法渲染、页边距点击单次翻页；
 5. 更新本清单的行号与上游版本号。

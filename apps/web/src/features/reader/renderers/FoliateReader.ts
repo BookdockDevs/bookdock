@@ -97,6 +97,31 @@ function textBeforeSelection(doc: Document, range: Range, maxLength = 2_000): st
   }
 }
 
+function textContentSelection(doc: Document, range: Range): string {
+  try {
+    const fragment = range.cloneContents()
+    const walker = doc.createTreeWalker(fragment, NodeFilter.SHOW_TEXT)
+    let text = ''
+    let node = walker.nextNode()
+    while (node) {
+      let parent = node.parentElement
+      let skipped = false
+      while (parent) {
+        if (parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE') {
+          skipped = true
+          break
+        }
+        parent = parent.parentElement
+      }
+      if (!skipped) text += node.nodeValue ?? ''
+      node = walker.nextNode()
+    }
+    return text.trim()
+  } catch {
+    return ''
+  }
+}
+
 export function textParagraphSelection(range: Range, maxLength = 8_000): string {
   try {
     const node = range.startContainer.nodeType === Node.ELEMENT_NODE
@@ -533,7 +558,7 @@ export class FoliateReader implements BookReader {
   private resizeObserver: ResizeObserver | null = null
   private lastScrollVPad = -1
   private activeDocs = new Set<Document>()
-  private selectionDocs = new Map<Document, { index: number; handler: () => void; dblHandler: () => void; escHandler: (e: KeyboardEvent) => void }>()
+  private selectionDocs = new Map<Document, { index: number; handler: () => void; selectionChangeHandler: () => void; startHandler: () => void; dblHandler: () => void; escHandler: (e: KeyboardEvent) => void }>()
   private selectionActive = false
   private foliateOverlayer: any = null
   // `${cfiRange}|${type}` -> annotation; a range may hold a highlight and an
@@ -1651,7 +1676,7 @@ export class FoliateReader implements BookReader {
   }
 
   private handleSelection(doc: Document, index: number) {
-    // The selection is not final yet on mouseup/keyup — read it after this tick
+    // The selection is not final yet on the commit event — read it after this tick.
     setTimeout(() => {
       try {
         const sel = doc.defaultView?.getSelection?.()
@@ -1679,9 +1704,10 @@ export class FoliateReader implements BookReader {
           ...(beforeText ? { beforeText } : {}),
           ...(paragraphText ? { paragraphText } : {}),
           rect: this.popupRect(doc, range),
+          pointText: textContentSelection(doc, range),
           // Point-patch anchors (P2): the offset is counted on the rendered
           // document (conversion is length-preserving, so it equals the
-          // engine's coordinate system); singleTextNode gates point creation.
+          // engine's coordinate system); pointText preserves cross-node text.
           startOffset: startNode.nodeType === Node.TEXT_NODE
             ? textContentOffset(doc, startNode as Text, range.startOffset) ?? undefined
             : undefined,
@@ -1697,6 +1723,14 @@ export class FoliateReader implements BookReader {
         // ignore selection errors
       }
     }, 0)
+  }
+
+  private handleSelectionChange(doc: Document) {
+    const sel = doc.defaultView?.getSelection?.()
+    if ((!sel || sel.isCollapsed || sel.rangeCount === 0) && this.selectionActive) {
+      this.selectionActive = false
+      this.emit('selected', null)
+    }
   }
 
   deselect() {
@@ -2163,9 +2197,10 @@ export class FoliateReader implements BookReader {
           doc.removeEventListener('click', this.handleDocInteraction)
           const sel = this.selectionDocs.get(doc)
           if (sel) {
+            doc.removeEventListener('pointerdown', sel.startHandler)
             doc.removeEventListener('mouseup', sel.handler)
             doc.removeEventListener('keyup', sel.handler)
-            doc.removeEventListener('selectionchange', sel.handler)
+            doc.removeEventListener('selectionchange', sel.selectionChangeHandler)
             doc.removeEventListener('touchend', sel.handler)
             doc.removeEventListener('dblclick', sel.dblHandler)
             doc.removeEventListener('keydown', sel.escHandler)
@@ -2177,9 +2212,17 @@ export class FoliateReader implements BookReader {
         if (!doc || this.activeDocs.has(doc)) continue
         doc.addEventListener('click', this.handleDocInteraction)
         const handler = () => this.handleSelection(doc, index)
+        const selectionChangeHandler = () => this.handleSelectionChange(doc)
+        const startHandler = () => {
+          if (this.selectionActive) {
+            this.selectionActive = false
+            this.emit('selected', null)
+          }
+        }
+        doc.addEventListener('pointerdown', startHandler)
         doc.addEventListener('mouseup', handler)
         doc.addEventListener('keyup', handler)
-        doc.addEventListener('selectionchange', handler)
+        doc.addEventListener('selectionchange', selectionChangeHandler)
         doc.addEventListener('touchend', handler, { passive: true })
         const dblHandler = () => {
           setTimeout(() => {
@@ -2222,7 +2265,7 @@ export class FoliateReader implements BookReader {
           }
         }
         doc.addEventListener('keydown', escHandler)
-        this.selectionDocs.set(doc, { index, handler, dblHandler, escHandler })
+        this.selectionDocs.set(doc, { index, handler, selectionChangeHandler, startHandler, dblHandler, escHandler })
       }
       this.activeDocs = docs
     } catch {

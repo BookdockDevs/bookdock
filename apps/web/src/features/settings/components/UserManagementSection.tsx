@@ -126,7 +126,7 @@ function UserRow({ user, isSelf, onAction, onResetPassword }: {
           ref={menu.btnRef}
           type="button"
           aria-label={_('library.moreActions')}
-          onClick={() => menu.openFromButton()}
+          onClick={() => menu.toggleFromButton()}
           className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-200"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -135,7 +135,7 @@ function UserRow({ user, isSelf, onAction, onResetPassword }: {
             <circle cx="12" cy="19" r="2" />
           </svg>
         </button>
-        <SmartMenu innerRef={menu.menuRef} position={menu.position(176, isSelf ? 64 : 148)} onClose={menu.close}>
+        <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(176, isSelf ? 64 : 148)} onClose={menu.close}>
           {!isSelf && user.role !== 'guest' && (
             <button
               type="button"

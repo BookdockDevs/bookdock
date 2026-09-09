@@ -163,6 +163,23 @@ describe('txt export engine', () => {
     expect(runs[2]).toEqual({ text: '改' })
   })
 
+  it('applies a point patch across runs', () => {
+    const runs = [{ text: '前错' }, { text: '误后' }]
+    applyChapterTransforms(runs, [
+      rule({
+        id: 'p1',
+        matchType: 'point',
+        pattern: null,
+        replacement: '修正',
+        effectiveEnabled: true,
+        spineHref: 'ch.xhtml',
+        textOffset: 1,
+        originalText: '错误',
+      }),
+    ], 'ch.xhtml')
+    expect(runs).toEqual([{ text: '前修正' }, { text: '后' }])
+  })
+
   it('only touches the section the patch anchors to', () => {
     const runs = [{ text: '第二段' }]
     applyChapterTransforms(runs, [

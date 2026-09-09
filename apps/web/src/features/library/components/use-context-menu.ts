@@ -10,7 +10,7 @@ export function useContextMenu() {
 
   function close() { setOpen(false); setPos(null) }
   function openFromEvent(e: React.MouseEvent) { setPos({ x: e.clientX, y: e.clientY }); setOpen(true) }
-  function openFromButton() { setPos(null); setOpen(true) }
+  function toggleFromButton() { setPos(null); setOpen((value) => !value) }
 
   function position(menuW: number, menuH: number): SmartPosition | null {
     if (!open) return null
@@ -21,5 +21,5 @@ export function useContextMenu() {
     return computeFromAnchor({ left: r.left, top: r.top, width: r.width, height: r.height }, menuW, menuH)
   }
 
-  return { open, btnRef, menuRef, close, openFromEvent, openFromButton, position }
+  return { open, btnRef, menuRef, close, openFromEvent, toggleFromButton, position }
 }

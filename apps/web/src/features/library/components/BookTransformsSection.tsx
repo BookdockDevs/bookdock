@@ -1,6 +1,7 @@
 import type { TextTransformRes } from '@bookdock/shared'
 
 import { useBookTransforms, useSetTransformOverride, useUpdateTransform } from '@/api/hooks/useTransforms'
+import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
@@ -74,7 +75,7 @@ export default function BookTransformsSection({
   return (
     <section>
       {rows.length === 0 ? (
-        <p className="text-xs text-stone-400 dark:text-stone-500">{_('reader.transformsEmptyCreate')}</p>
+        <SettingsEmptyState>{_('reader.transformsEmptyCreate')}</SettingsEmptyState>
       ) : (
         <ul className="divide-y divide-stone-100 dark:divide-stone-800">
           {rows.map((rule) =>

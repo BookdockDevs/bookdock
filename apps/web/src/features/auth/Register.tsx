@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 
 import { Button } from '@/components/ui/Button'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { authErrorKey } from './errors'
 import { useRegister } from './hooks'
 
 export default function Register() {
   const _ = useTranslation()
+  usePageTitle(_('auth.registerTitle'))
   const navigate = useNavigate()
   const register = useRegister()
   const [username, setUsername] = useState('')

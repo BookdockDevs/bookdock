@@ -62,7 +62,7 @@ export default function AccountMenu() {
       <button
         ref={menu.btnRef}
         type="button"
-        onClick={() => menu.openFromButton()}
+        onClick={() => menu.toggleFromButton()}
         onContextMenu={(e) => {
           e.preventDefault()
           menu.openFromEvent(e)
@@ -86,7 +86,7 @@ export default function AccountMenu() {
         )}
       </button>
 
-      <SmartMenu innerRef={menu.menuRef} position={menu.position(176, menuHeight)} onClose={menu.close}>
+      <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(176, menuHeight)} onClose={menu.close}>
         <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
           <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{username}</p>
           <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">

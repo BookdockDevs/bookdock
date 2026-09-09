@@ -61,8 +61,9 @@ export interface SelectionInfo {
   startOffset?: number
   /** Point-patch anchor: current section's manifest href (book.sections[index].id) */
   sectionHref?: string
-  /** Point-patch anchor: true when the selection spans a single text node —
-   * only such selections can create a point patch. */
+  /** Point-patch snapshot using the selected text nodes' concatenated content. */
+  pointText?: string
+  /** Kept for compatibility with callers that need to know the selection shape. */
   singleTextNode?: boolean
   /** When set on instantAnnotation, the selection toolbar stays open so the
    * user can restyle right after auto-marking ("选中即划" mode). */

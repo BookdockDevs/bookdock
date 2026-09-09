@@ -19,6 +19,7 @@ import { arrayMove } from '@dnd-kit/sortable'
 
 import type { BookListItem } from '@bookdock/shared'
 
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore } from '@/stores/ui.store'
 
@@ -41,7 +42,7 @@ import RecentlyRead from './components/RecentlyRead'
 import SelectionBar from './components/SelectionBar'
 import UploadSheet from './components/UploadSheet'
 import { applyShelfOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
-import { useInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useMoveBooksToShelf, useReorderShelves } from './hooks'
+import { useInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves } from './hooks'
 
 const PAGE_SIZE = 20
 
@@ -263,6 +264,7 @@ export default function Library() {
   const total = data?.pages[0]?.total ?? 0
 
   const { data: shelvesData } = useShelves()
+  const { data: tagsData } = useTags()
   // Local mirror of the shelf order: dnd-kit clears its drag state in the same
   // event as our onDragEnd, but the react-query cache update lands a render
   // later — without this the rows would flash back to the old order for a
@@ -277,6 +279,7 @@ export default function Library() {
     [shelvesData, shelfOrderOverride],
   )
   const activeShelfName = shelfId ? shelvesData?.data.find((s) => s.id === shelfId)?.name : undefined
+  const activeTagName = tagId ? tagsData?.data.find((tag) => tag.id === tagId)?.name : undefined
   const metadataFilter = author
     ? { kind: 'author' as const, value: author }
     : series
@@ -288,9 +291,41 @@ export default function Library() {
       ? _('library.uncategorized')
       : metadataFilter?.kind === 'author'
         ? _('library.authorFilterTitle', { name: metadataFilter.value })
-        : metadataFilter?.kind === 'series'
-          ? _('library.seriesFilterTitle', { name: metadataFilter.value })
-          : (activeShelfName ?? _('library.allBooks'))
+          : metadataFilter?.kind === 'series'
+            ? _('library.seriesFilterTitle', { name: metadataFilter.value })
+            : (activeShelfName ?? _('library.allBooks'))
+
+  const readStatusName = readStatus === 'wishlist'
+    ? _('library.readStatusWishlist')
+    : readStatus === 'reading'
+      ? _('library.readStatusReading')
+      : readStatus === 'idle'
+        ? _('library.readStatusIdle')
+        : readStatus === 'finished'
+          ? _('library.readStatusFinished')
+          : readStatus === 'abandoned'
+            ? _('library.readStatusAbandoned')
+            : undefined
+  const libraryDocumentTitle = trash
+    ? _('library.trash')
+    : shelfId === 'none'
+      ? `${_('app.name')} · ${_('library.uncategorized')}`
+      : activeShelfName
+        ? _('library.shelfDocumentTitle', { name: activeShelfName })
+        : activeTagName
+          ? _('library.tagDocumentTitle', { name: activeTagName })
+          : readStatusName
+            ? `${_('app.name')} · ${readStatusName}`
+            : format
+              ? `${_('app.name')} · ${format.toUpperCase()}`
+              : metadataFilter?.kind === 'author'
+                ? _('library.authorFilterTitle', { name: metadataFilter.value })
+                : metadataFilter?.kind === 'series'
+                  ? _('library.seriesFilterTitle', { name: metadataFilter.value })
+                  : query
+                    ? _('library.searchDocumentTitle', { query })
+                    : _('app.name')
+  usePageTitle(libraryDocumentTitle)
 
   useEffect(() => {
     if (!selectionActive) return
@@ -773,7 +808,7 @@ export function ListItemWrapper({ book, selection, selectionActive, dragJustEnde
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                menu.openFromButton()
+                menu.toggleFromButton()
               }}
               className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-200"
               aria-label={_('library.moreActions')}
@@ -789,6 +824,7 @@ export function ListItemWrapper({ book, selection, selectionActive, dragJustEnde
       )}
       {menu.open && (
         <SmartMenu
+          triggerRef={menu.btnRef}
           innerRef={menu.menuRef}
           position={menu.position(184, 250)}
           width={184}

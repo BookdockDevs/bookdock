@@ -229,8 +229,10 @@ export { getAiModelCapabilityFlags, isAiEmbeddingModel } from './ai-models'
 
 export {
   applyRuleToText,
+  applyPointMatch,
   countRuleInText,
   findPointMatch,
+  type PointMatch,
   type TransformRuleLike,
   type TextRun,
 } from './text-transform-engine'

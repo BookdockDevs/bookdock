@@ -107,12 +107,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
           : 'hidden md:flex',
       )}>
       <div className="mb-8 flex items-center gap-2.5 px-2">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z" />
-            <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
-          </svg>
-        </span>
+        <img src="/favicon.svg?v=5" alt="" aria-hidden="true" className="h-8 w-8 shrink-0 dark:invert" />
         <span className="font-serif text-base font-semibold tracking-wide text-stone-900 dark:text-stone-50">{_('app.name')}</span>
       </div>
 
@@ -298,6 +293,7 @@ export default LibrarySidebar
 function NavItem({
   label,
   count,
+  countHidden = false,
   hasMenu = false,
   active = false,
   icon,
@@ -305,6 +301,7 @@ function NavItem({
 }: {
   label: string
   count?: number
+  countHidden?: boolean
   hasMenu?: boolean
   active?: boolean
   icon?: React.ReactNode
@@ -327,7 +324,9 @@ function NavItem({
         <span className="truncate">{label}</span>
       </span>
       {count !== undefined && count > 0 && (
-        <span className="ml-2 shrink-0 text-xs leading-none tabular-nums text-stone-400 transition-opacity group-hover:opacity-0 dark:text-stone-500">{count}</span>
+        <span className={cn('ml-2 shrink-0 text-xs leading-none tabular-nums text-stone-400 transition-opacity group-hover:opacity-0 dark:text-stone-500', countHidden && 'opacity-0')}>
+          {count}
+        </span>
       )}
     </button>
   )
@@ -416,6 +415,7 @@ function ShelfItem({
       <NavItem
         label={shelf.name}
         count={shelf.bookCount}
+        countHidden={menu.open}
         hasMenu
         active={active || dropHint}
         icon={
@@ -432,7 +432,7 @@ function ShelfItem({
           aria-label={_('library.moreActions')}
           onClick={(e) => {
             e.stopPropagation()
-            menu.openFromButton()
+            menu.toggleFromButton()
           }}
           className={cn(
             'flex h-6 w-6 items-center justify-center rounded-md text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
@@ -446,7 +446,7 @@ function ShelfItem({
           </svg>
         </button>
       </div>
-      <SmartMenu innerRef={menu.menuRef} position={menu.position(152, 148)} onClose={menu.close} width={152}>
+      <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, 148)} onClose={menu.close} width={152}>
         <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
           <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{shelf.name}</p>
           <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">
@@ -515,6 +515,7 @@ function TagItem({
       <NavItem
         label={tag.name}
         count={tag.bookCount}
+        countHidden={menu.open}
         hasMenu
         active={active}
         icon={
@@ -532,7 +533,7 @@ function TagItem({
           aria-label={_('library.moreActions')}
           onClick={(e) => {
             e.stopPropagation()
-            menu.openFromButton()
+            menu.toggleFromButton()
           }}
           className={cn(
             'flex h-6 w-6 items-center justify-center rounded-md text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
@@ -546,7 +547,7 @@ function TagItem({
           </svg>
         </button>
       </div>
-      <SmartMenu innerRef={menu.menuRef} position={menu.position(152, 148)} onClose={menu.close} width={152}>
+      <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, 148)} onClose={menu.close} width={152}>
         <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
           <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{tag.name}</p>
           <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">

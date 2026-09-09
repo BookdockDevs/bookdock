@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearch } from '@tanstack/react-router'
 
-import { useAuthStore } from '@/stores/auth.store'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
+import { useAuthStore } from '@/stores/auth.store'
 import { cn } from '@/lib/utils'
 
 import InstanceSettingsSection from './components/InstanceSettingsSection'
@@ -21,6 +22,7 @@ type SectionId = 'general' | 'account' | 'reading' | 'library' | 'admin'
 
 export default function Settings() {
   const _ = useTranslation()
+  usePageTitle(_('settings.title'))
   const user = useAuthStore((s) => s.user)
   const isOwner = user?.role === 'owner' && user.guest !== true
   const isGuest = user?.role === 'guest' || user?.guest === true

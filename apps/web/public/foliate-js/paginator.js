@@ -483,11 +483,15 @@ export class Paginator extends HTMLElement {
   #footer
   #view
   // Multi-view ("continuous" seamless scroll) state. #view stays the primary
-  // view; #views additionally holds adjacent preloaded sections. The map is
-  // only populated while #continuous is active, so the default single-view
-  // path is untouched.
+  // view; #views holds rendered sections and #placeholders holds virtualized
+  // sections whose height is retained without keeping their iframe alive.
   #views = new Map()
+  #placeholders = new Map()
   #filling = false
+  #scrollDuringFill = null
+  #lastScrollPosition = null
+  #lastScrollDirection = null
+  #continuousBufferTimer = null
   #lastLayout = null
   #headerText = ['']
   #footerText = ['']
@@ -600,6 +604,29 @@ export class Paginator extends HTMLElement {
             grid-row: 2;
             overflow: auto;
             touch-action: pan-y;
+            /* bookdock: expose the actual scrolled-flow viewport scrollbar */
+            -ms-overflow-style: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--bd-read-sub, currentColor) transparent;
+            scrollbar-gutter: stable;
+        }
+        /* bookdock: paginated flow keeps the hidden scrollbar above */
+        :host([flow="scrolled"]) #container::-webkit-scrollbar {
+            display: block;
+            width: 7px;
+            height: 7px;
+        }
+        :host([flow="scrolled"]) #container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        :host([flow="scrolled"]) #container::-webkit-scrollbar-thumb {
+            border-radius: 999px;
+            background: var(--bd-read-sub, currentColor);
+            background: color-mix(in srgb, var(--bd-read-sub, currentColor) 55%, transparent);
+        }
+        :host([flow="scrolled"]) #container::-webkit-scrollbar-thumb:hover {
+            background: var(--bd-read-sub, currentColor);
+            background: color-mix(in srgb, var(--bd-read-sub, currentColor) 80%, transparent);
         }
         #top.vertical #container {
             touch-action: pan-y;
@@ -733,6 +760,9 @@ export class Paginator extends HTMLElement {
   attributeChangedCallback(name, _, value) {
     switch (name) {
       case 'flow':
+        this.#clearContinuousBufferTimer()
+        this.#lastScrollPosition = null
+        this.#lastScrollDirection = null
         this.render()
         break
       case 'max-block-size':
@@ -763,14 +793,20 @@ export class Paginator extends HTMLElement {
         break
       case 'continuous':
         if (value === null) {
+          this.#clearContinuousBufferTimer()
           // Escape hatch off: drop every non-primary view so the single-view
           // path sees exactly the DOM it expects.
           for (const [i] of [...this.#views])
             if (i !== this.#index) this.#destroyViewAt(i)
+          for (const [i] of [...this.#placeholders]) this.#destroyViewAt(i)
           this.#views.clear()
+          this.#placeholders.clear()
+          this.#lastScrollPosition = null
+          this.#lastScrollDirection = null
         } else if (this.#continuous && this.#view) {
           this.#views.set(this.#index, this.#view)
-          this.#fillVisibleArea()
+          this.#lastScrollPosition = this.#renderedStart
+          this.#fillInitialBuffer()
         }
         break
     }
@@ -778,7 +814,9 @@ export class Paginator extends HTMLElement {
   open(book) {
     this.bookDir = book.dir
     this.sections = book.sections
+    for (const [i] of [...this.#placeholders]) this.#destroyViewAt(i)
     this.#views.clear()
+    this.#placeholders.clear()
   }
   #applyBackground() {
     const url = this.getAttribute('bgimg-url') ?? 'none'
@@ -810,10 +848,11 @@ export class Paginator extends HTMLElement {
     if (this.#continuous) {
       this.#views.set(this.#index, this.#view)
       // Keep DOM order matching section order so container coordinates stay
-      // a simple sum of preceding view sizes.
-      const sorted = this.#sortedViews()
+      // a simple sum of preceding rendered views and placeholders.
+      const sorted = this.#sortedSections()
       const nextEntry = sorted[sorted.findIndex(([i]) => i === this.#index) + 1]
-      if (nextEntry) this.#container.insertBefore(this.#view.element, nextEntry[1].element)
+      if (nextEntry) this.#container.insertBefore(
+        this.#view.element, this.#getSectionElement(nextEntry[1]))
       else this.#container.append(this.#view.element)
     } else {
       this.#container.append(this.#view.element)
@@ -828,12 +867,19 @@ export class Paginator extends HTMLElement {
   #sortedViews() {
     return [...this.#views.entries()].sort(([a], [b]) => a - b)
   }
+  #sortedSections() {
+    return [...this.#views.entries(), ...this.#placeholders.entries()]
+      .sort(([a], [b]) => a - b)
+  }
+  #getSectionElement(section) {
+    return section.element ?? section
+  }
   // Pixel offset of a view's start within the scroll container.
   #getViewOffset(index) {
     let offset = 0
-    for (const [i, view] of this.#sortedViews()) {
+    for (const [i, section] of this.#sortedSections()) {
       if (i === index) return offset
-      offset += view.element.getBoundingClientRect()[this.sideProp]
+      offset += this.#getSectionElement(section).getBoundingClientRect()[this.sideProp]
     }
     return offset
   }
@@ -845,17 +891,78 @@ export class Paginator extends HTMLElement {
   }
   get #renderedViewSize() {
     let total = 0
-    for (const [, view] of this.#views)
-      total += view.element.getBoundingClientRect()[this.sideProp]
+    for (const [, section] of this.#sortedSections())
+      total += this.#getSectionElement(section).getBoundingClientRect()[this.sideProp]
     return total
   }
   #destroyViewAt(index) {
     const view = this.#views.get(index)
-    if (!view) return
+    if (view) {
+      view.destroy()
+      if (view.element.parentNode === this.#container) this.#container.removeChild(view.element)
+      this.#views.delete(index)
+      this.sections[index]?.unload?.()
+      return
+    }
+    const placeholder = this.#placeholders.get(index)
+    if (placeholder) {
+      if (placeholder.parentNode === this.#container) this.#container.removeChild(placeholder)
+      this.#placeholders.delete(index)
+    }
+  }
+  #createPlaceholder(size) {
+    const element = document.createElement('div')
+    Object.assign(element.style, {
+      width: '100%',
+      height: `${Math.max(0, size)}px`,
+      flex: '0 0 auto',
+      contain: 'strict',
+      pointerEvents: 'none',
+    })
+    element.setAttribute('aria-hidden', 'true')
+    return element
+  }
+  #insertSectionElement(index, element) {
+    const nextEntry = this.#sortedSections().find(([i]) => i > index)
+    if (nextEntry) this.#container.insertBefore(
+      element, this.#getSectionElement(nextEntry[1]))
+    else this.#container.append(element)
+  }
+  #virtualizeViewAt(index) {
+    const view = this.#views.get(index)
+    if (!view || index === this.#index) return
+    const size = view.element.getBoundingClientRect()[this.sideProp]
+    if (!Number.isFinite(size) || size <= 0) return
+    const placeholder = this.#createPlaceholder(size)
+    view.element.replaceWith(placeholder)
     view.destroy()
-    this.#container.removeChild(view.element)
     this.#views.delete(index)
+    this.#placeholders.set(index, placeholder)
     this.sections[index]?.unload?.()
+  }
+  #bufferIndex(direction) {
+    const placeholderIndexes = [...this.#placeholders.keys()]
+      .filter(index => direction > 0 ? index > this.#index : index < this.#index)
+      .sort((a, b) => direction > 0 ? a - b : b - a)
+    const viewportPlaceholder = this.#getViewportPlaceholder(direction)
+    if (viewportPlaceholder != null) return viewportPlaceholder
+    if (placeholderIndexes.length) return placeholderIndexes[0]
+    const entries = this.#sortedSections()
+    const edgeIndex = direction > 0 ? entries.at(-1)?.[0] : entries[0]?.[0]
+    return edgeIndex != null ? this.#adjacentIndex(direction, edgeIndex) : null
+  }
+  #getViewportPlaceholder(direction) {
+    const viewportStart = this.#renderedStart
+    const viewportEnd = this.#renderedEnd
+    return [...this.#placeholders.keys()]
+      .filter(index => direction > 0 ? index > this.#index : index < this.#index)
+      .sort((a, b) => direction > 0 ? a - b : b - a)
+      .find(index => {
+        const placeholder = this.#placeholders.get(index)
+        const offset = this.#getViewOffset(index)
+        const size = placeholder.getBoundingClientRect()[this.sideProp]
+        return offset < viewportEnd && offset + size > viewportStart
+      })
   }
   // Load an adjacent section without changing the primary view.
   async #loadAdjacentSection(index) {
@@ -865,17 +972,33 @@ export class Paginator extends HTMLElement {
     // Prepending above every loaded view: browsers suppress scroll anchoring
     // near scrollTop 0, so capture the position and compensate manually after
     // the new view has its final size.
-    const firstIndex = this.#sortedViews()[0]?.[0]
-    const isPrepend = firstIndex != null && index < firstIndex
+    const placeholder = this.#placeholders.get(index)
+    const placeholderSize = placeholder
+      ? placeholder.getBoundingClientRect()[this.sideProp] : 0
+    const placeholderOffset = placeholder ? this.#getViewOffset(index) : 0
+    const firstIndex = this.#sortedSections()[0]?.[0]
+    const isPrepend = !placeholder && firstIndex != null && index < firstIndex
     const startBefore = isPrepend ? this.#renderedStart : 0
+    const currentSize = this.#view?.element.getBoundingClientRect()[this.sideProp]
+    // content-visibility can report zero for an offscreen iframe before it
+    // enters the viewport, so reserve a slot that lets the scrollbar reach it.
+    const reservedSize = placeholderSize || Math.max(
+      Number.isFinite(currentSize) ? currentSize : 0, this.size)
     try {
       const src = await section.load()
       const view = new View({ container: this, onExpand: () => {} })
+      if (placeholder) {
+        view.element.style[this.sideProp] = `${placeholderSize}px`
+        placeholder.replaceWith(view.element)
+        this.#placeholders.delete(index)
+      } else {
+        view.element.style[this.sideProp] = `${reservedSize}px`
+      }
+      // Measure an adjacent iframe while it is loading; content-visibility:auto
+      // can otherwise collapse its wrapper to zero before it enters the viewport.
+      view.element.style.contentVisibility = 'visible'
       this.#views.set(index, view)
-      const sorted = this.#sortedViews()
-      const nextEntry = sorted[sorted.findIndex(([i]) => i === index) + 1]
-      if (nextEntry) this.#container.insertBefore(view.element, nextEntry[1].element)
-      else this.#container.append(view.element)
+      if (!placeholder) this.#insertSectionElement(index, view.element)
       const afterLoad = doc => {
         if (doc.head) {
           const $styleBefore = doc.createElement('style')
@@ -890,9 +1013,19 @@ export class Paginator extends HTMLElement {
       // Adjacent views reuse the primary's cached layout; running #beforeRender
       // again would clobber global state (dir attribute, container overflow).
       await view.load(src, afterLoad, () => this.#lastLayout)
+      const measuredSize = view.element.getBoundingClientRect()[this.sideProp]
+      const loadedSize = Number.isFinite(measuredSize) && measuredSize > 0
+        ? measuredSize : reservedSize
+      if (loadedSize !== measuredSize)
+        view.element.style[this.sideProp] = `${loadedSize}px`
+      if (measuredSize > 0) view.element.style.contentVisibility = 'auto'
+      if (placeholder) {
+        const sizeDelta = loadedSize - placeholderSize
+        if (placeholderOffset < this.#renderedStart && Math.abs(sizeDelta) > 0.5)
+          this.#container[this.scrollProp] += sizeDelta
+      }
       if (isPrepend) {
-        const addedSize = view.element.getBoundingClientRect()[this.sideProp]
-        const correction = startBefore + addedSize - this.#renderedStart
+        const correction = startBefore + loadedSize - this.#renderedStart
         if (Math.abs(correction) > 0.5) this.#container[this.scrollProp] += correction
       }
       this.dispatchEvent(new CustomEvent('create-overlayer', {
@@ -905,59 +1038,109 @@ export class Paginator extends HTMLElement {
       console.warn(e)
       console.warn(new Error(`Failed to load adjacent section ${index}`))
       this.#destroyViewAt(index)
+      if (placeholder) {
+        const replacement = this.#createPlaceholder(placeholderSize)
+        this.#placeholders.set(index, replacement)
+        this.#insertSectionElement(index, replacement)
+      }
     }
   }
-  // Fill both directions until at least 5 viewport pages of buffer exist,
-  // capped at 8 loaded sections.
-  async #fillVisibleArea() {
-    if (!this.#continuous || this.#filling) return
+  // Load one adjacent section in the direction the reader is moving. Keeping
+  // this to one section per trigger prevents short chapters from cascading
+  // into a large eager preload.
+  async #loadAdjacentBuffer(direction) {
+    if (!this.#continuous || this.#filling || this.size <= 0) return
+    this.#scrollDuringFill = null
     this.#filling = true
+    let loaded = false
     try {
-      const minPages = 5
-      const maxSections = 8
-      let iterations = 0
-      while (this.#views.size < maxSections && iterations++ < maxSections) {
-        const pagesAhead = this.size > 0
-          ? Math.floor((this.#renderedViewSize - this.#renderedEnd) / this.size) : 0
-        if (pagesAhead >= minPages) break
-        const lastIndex = this.#sortedViews().at(-1)?.[0]
-        const next = lastIndex != null ? this.#adjacentIndex(1, lastIndex) : null
-        if (next == null || this.#views.has(next)) break
-        await this.#loadAdjacentSection(next)
-        if (!this.#views.has(next)) break
-      }
-      iterations = 0
-      while (this.#views.size < maxSections && iterations++ < maxSections) {
-        const pagesBehind = this.size > 0
-          ? Math.floor(this.#renderedStart / this.size) : 0
-        if (pagesBehind >= minPages) break
-        const firstIndex = this.#sortedViews()[0]?.[0]
-        const prev = firstIndex != null ? this.#adjacentIndex(-1, firstIndex) : null
-        if (prev == null || this.#views.has(prev)) break
-        await this.#loadAdjacentSection(prev)
-        if (!this.#views.has(prev)) break
-      }
+      const index = this.#bufferIndex(direction)
+      if (index == null || this.#views.has(index)) return
+      await this.#loadAdjacentSection(index)
+      loaded = this.#views.has(index)
     } finally {
+      const continueDirection = this.#scrollDuringFill
+      this.#scrollDuringFill = null
       this.#filling = false
+      if (loaded && continueDirection === 1
+        && this.#continuous && this.#bufferRemaining(1) < 2)
+        void this.#loadAdjacentBuffer(1)
+      else if (loaded && continueDirection === -1
+        && this.#continuous && this.#lastScrollDirection === -1
+        && this.#getViewportPlaceholder(-1) != null)
+        this.#scheduleContinuousBufferCheck(-1)
     }
+  }
+  #fillInitialBuffer() {
+    if (!this.#continuous || this.#filling || this.size <= 0) return
+    const minPagesAhead = 2
+    const pagesAhead = Math.floor((this.#renderedViewSize - this.#renderedEnd) / this.size)
+    if (pagesAhead >= minPagesAhead) return
+    void this.#loadAdjacentBuffer(1)
   }
   #checkBuffers() {
-    if (this.#filling || this.size <= 0) return
-    const minPages = 5
-    const pagesAhead = Math.floor((this.#renderedViewSize - this.#renderedEnd) / this.size)
-    const pagesBehind = Math.floor(this.#renderedStart / this.size)
-    if (pagesAhead < minPages || pagesBehind < minPages) this.#fillVisibleArea()
+    const position = this.#renderedStart
+    const previous = this.#lastScrollPosition
+    this.#lastScrollPosition = position
+    if (this.size <= 0 || previous == null || position === previous) return
+    const direction = position > previous ? 1 : -1
+    this.#lastScrollDirection = direction
+    if (this.#filling) {
+      this.#scrollDuringFill = direction
+      return
+    }
+    if (this.#continuousBufferTimer) {
+      clearTimeout(this.#continuousBufferTimer)
+      this.#continuousBufferTimer = null
+    }
+    if (direction < 0) {
+      this.#scheduleContinuousBufferCheck(direction)
+      return
+    }
+    const remaining = this.#bufferRemaining(direction)
+    if (remaining < 2) void this.#loadAdjacentBuffer(direction)
   }
-  // Unload views more than 10 pages past the viewport end. Never trims views
-  // before the primary — removing those would shift the scroll position.
-  #trimDistantViews() {
+  #scheduleContinuousBufferCheck(direction) {
+    if (this.#continuousBufferTimer) clearTimeout(this.#continuousBufferTimer)
+    this.#continuousBufferTimer = setTimeout(() => {
+      this.#continuousBufferTimer = null
+      if (!this.#continuous || this.#filling || this.#lastScrollDirection !== direction)
+        return
+      if (this.#bufferRemaining(direction) < 2) void this.#loadAdjacentBuffer(direction)
+    }, 180)
+  }
+  #clearContinuousBufferTimer() {
+    if (this.#continuousBufferTimer) {
+      clearTimeout(this.#continuousBufferTimer)
+      this.#continuousBufferTimer = null
+    }
+  }
+  #bufferRemaining(direction) {
+    const bufferIndex = this.#bufferIndex(direction)
+    const placeholder = bufferIndex == null ? null : this.#placeholders.get(bufferIndex)
+    return placeholder
+      ? direction > 0
+        ? Math.floor((this.#getViewOffset(bufferIndex) - this.#renderedEnd) / this.size)
+        : Math.floor((this.#renderedStart - this.#getViewOffset(bufferIndex)
+          - placeholder.getBoundingClientRect()[this.sideProp]) / this.size)
+      : direction > 0
+        ? Math.floor((this.#renderedViewSize - this.#renderedEnd) / this.size)
+        : Math.floor(this.#renderedStart / this.size)
+  }
+  #virtualizeDistantViews() {
     const { size } = this
     if (!size) return
-    const maxDistance = size * 10
-    for (const [index] of this.#sortedViews()) {
-      if (index <= this.#index) continue
-      if (this.#getViewOffset(index) - this.#renderedEnd > maxDistance)
-        this.#destroyViewAt(index)
+    const maxDistance = size * 6
+    const renderedStart = this.#renderedStart
+    const renderedEnd = this.#renderedEnd
+    for (const [index, view] of this.#sortedViews()) {
+      if (index === this.#index) continue
+      const offset = this.#getViewOffset(index)
+      const viewSize = view.element.getBoundingClientRect()[this.sideProp]
+      const distance = index < this.#index
+        ? renderedStart - (offset + viewSize)
+        : offset - renderedEnd
+      if (distance > maxDistance) this.#virtualizeViewAt(index)
     }
   }
   #beforeRender({ vertical, rtl }) {
@@ -1085,10 +1268,12 @@ export class Paginator extends HTMLElement {
     // must not leave stale adjacent views in the container — but the primary
     // view IS #view; destroying it blanks the page and the next removeChild
     // in #createView throws on the already-removed element.
-    if (!this.#continuous && this.#views.size) {
+    if (!this.#continuous && (this.#views.size || this.#placeholders.size)) {
       for (const [i] of [...this.#views])
         if (i !== this.#index) this.#destroyViewAt(i)
+      for (const [i] of [...this.#placeholders]) this.#destroyViewAt(i)
       this.#views.clear()
+      this.#placeholders.clear()
     }
     const layout = this.#beforeRender({
       vertical: this.#vertical,
@@ -1544,7 +1729,7 @@ export class Paginator extends HTMLElement {
       if (result && result.index !== this.#index && this.#views.has(result.index)) {
         this.#index = result.index
         this.#view = this.#views.get(result.index)
-        this.#trimDistantViews()
+        this.#virtualizeDistantViews()
       }
       const index = result?.index ?? this.#index
       const indexView = this.#views.get(index)
@@ -1603,7 +1788,16 @@ export class Paginator extends HTMLElement {
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.size : 1
     const delta = e.deltaY * unit
     if (!delta) return
-    if (this.scrolled) return this.#onWheelSnap(delta)
+    if (this.scrolled) {
+      // A wheel gesture can continue at scrollTop 0/max without producing a
+      // scroll event. Preserve that intent so an unloaded edge can be filled.
+      if (this.#continuous) {
+        const direction = delta > 0 ? 1 : -1
+        this.#lastScrollDirection = direction
+        this.#scheduleContinuousBufferCheck(direction)
+      }
+      return this.#onWheelSnap(delta)
+    }
     this.#onWheelPage(delta)
   }
   // "snap" continuous scroll: the section is still rendered on its own, but
@@ -1721,8 +1915,7 @@ export class Paginator extends HTMLElement {
         const resolvedAnchor = (typeof anchor === 'function'
           ? anchor(this.#view.document) : anchor) ?? 0
         await this.scrollToAnchor(resolvedAnchor, select)
-        this.#trimDistantViews()
-        await this.#fillVisibleArea()
+        this.#fillInitialBuffer()
         return
       }
       if (index !== this.#index) {
@@ -1730,7 +1923,10 @@ export class Paginator extends HTMLElement {
         // be wrong-side buffers around the new position.
         const keep = new Set([index])
         for (const [i] of this.#views) if (Math.abs(i - index) <= 2) keep.add(i)
+        for (const [i] of this.#placeholders) if (Math.abs(i - index) <= 2) keep.add(i)
         for (const [i] of [...this.#views]) if (!keep.has(i)) this.#destroyViewAt(i)
+        for (const [i] of [...this.#placeholders]) if (!keep.has(i)) this.#destroyViewAt(i)
+        if (this.#placeholders.has(index)) this.#destroyViewAt(index)
         const onLoad = detail => {
           this.setStyles(this.#styles)
           this.dispatchEvent(new CustomEvent('load', { detail }))
@@ -1742,13 +1938,13 @@ export class Paginator extends HTMLElement {
             console.warn(new Error(`Failed to load section ${index}`))
             return {}
           }))
-        await this.#fillVisibleArea()
+        this.#fillInitialBuffer()
         return
       }
     }
     if (index === this.#index) {
       await this.#display({ index, anchor, select })
-      if (this.#continuous) await this.#fillVisibleArea()
+      if (this.#continuous) this.#fillInitialBuffer()
     }
     else {
       const oldIndex = this.#index
@@ -1898,6 +2094,8 @@ export class Paginator extends HTMLElement {
     // skip the single-view teardown for indices the map covered.
     const primaryInMap = this.#views.has(this.#index)
     for (const [i] of [...this.#views]) this.#destroyViewAt(i)
+    for (const [i] of [...this.#placeholders]) this.#destroyViewAt(i)
+    this.#placeholders.clear()
     if (!primaryInMap) {
       this.#view.destroy()
       this.sections[this.#index]?.unload?.()
@@ -1912,6 +2110,7 @@ export class Paginator extends HTMLElement {
       clearTimeout(this.#pendingScrollTimer)
       this.#pendingScrollTimer = null
     }
+    this.#clearContinuousBufferTimer()
     this.#pendingRelocate = null
   }
 }

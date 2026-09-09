@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 
 import type { TextTransformRes } from '@bookdock/shared'
 
-import { useBookTransforms } from '@/api/hooks/useTransforms'
+import { useBookTransforms, useDeleteTransform } from '@/api/hooks/useTransforms'
 import i18n from '../i18n/i18n'
 import BookTransformsDialog from '../features/reader/components/BookTransformsDialog'
 import { useReaderApi } from '../features/reader/hooks/useReaderApi'
@@ -48,6 +48,7 @@ describe('BookTransformsDialog', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
     vi.mocked(useBookTransforms).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useBookTransforms>)
+    vi.mocked(useDeleteTransform).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useDeleteTransform>)
     vi.mocked(useReaderApi).mockReturnValue({ renderer: null })
   })
 
@@ -87,5 +88,19 @@ describe('BookTransformsDialog', () => {
     expect(screen.queryByText('保存')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument()
+  })
+
+  it('deletes a point patch from the reader settings dialog', () => {
+    const deleteTransform = { mutate: vi.fn(), isPending: false }
+    vi.mocked(useDeleteTransform).mockReturnValue(deleteTransform as unknown as ReturnType<typeof useDeleteTransform>)
+    mockRules([rule({ id: 'p1', bookId: 'b1', scope: 'book', matchType: 'point', pattern: null, originalText: '错字', replacement: '对字', spineHref: 'c1', textOffset: 1 })])
+    render(<BookTransformsDialog bookId="b1" onClose={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(screen.getByText(/确定删除这条规则吗/)).toBeInTheDocument()
+    const confirmButton = screen.getAllByRole('button', { name: '删除' }).find((button) => button.textContent === '删除')
+    fireEvent.click(confirmButton!)
+
+    expect(deleteTransform.mutate).toHaveBeenCalledWith('p1', expect.objectContaining({ onSuccess: expect.any(Function) }))
   })
 })

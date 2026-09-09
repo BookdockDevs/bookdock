@@ -203,6 +203,9 @@ export function useUploadBooks() {
     const duplicated = items.filter((it) => it.status === 'duplicate').length
     const failed = items.filter((it) => it.status === 'error').length
     queryClient.invalidateQueries({ queryKey: ['books'] })
+    // Shelf rows carry their own aggregated bookCount, so refreshing book
+    // lists alone leaves the sidebar count stale after an upload.
+    queryClient.invalidateQueries({ queryKey: ['shelves'] })
     if (failed > 0) {
       addToast(_('library.uploadSummary', { succeeded, duplicated, failed }), 'error')
     } else {

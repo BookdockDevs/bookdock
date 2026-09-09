@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 
 import { Button } from '@/components/ui/Button'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { authErrorKey } from './errors'
 import { useInstanceInfo, useLogin } from './hooks'
 
 export default function Login() {
   const _ = useTranslation()
+  usePageTitle(_('auth.signIn'))
   const navigate = useNavigate()
   const login = useLogin()
   const { data: instanceData } = useInstanceInfo()

@@ -4,13 +4,14 @@ import { PADDING, type SmartPosition } from '@/lib/position'
 
 interface SmartMenuProps {
   innerRef: React.RefObject<HTMLDivElement | null>
+  triggerRef?: React.RefObject<HTMLElement | null>
   position: SmartPosition | null
   onClose: () => void
   width?: number
   children: ReactNode
 }
 
-export default function SmartMenu({ innerRef, position, onClose, width = 176, children }: SmartMenuProps) {
+export default function SmartMenu({ innerRef, triggerRef, position, onClose, width = 176, children }: SmartMenuProps) {
   // `position` is computed from an estimated height; measure the real menu
   // after render and clamp it into the viewport so the bottom never overflows.
   const [clamped, setClamped] = useState<SmartPosition | null>(null)
@@ -32,7 +33,8 @@ export default function SmartMenu({ innerRef, position, onClose, width = 176, ch
       if (e.key === 'Escape') onClose()
     }
     const onPointerDown = (e: MouseEvent) => {
-      if (innerRef.current && !innerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      if (!innerRef.current?.contains(target) && !triggerRef?.current?.contains(target)) {
         onClose()
       }
     }
@@ -42,7 +44,7 @@ export default function SmartMenu({ innerRef, position, onClose, width = 176, ch
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('mousedown', onPointerDown)
     }
-  }, [position, onClose, innerRef])
+  }, [position, onClose, innerRef, triggerRef])
 
   if (!position) return null
 

@@ -81,7 +81,7 @@ describe('TransformForm', () => {
       })
     })
 
-    it('defaults to a book-scoped rule when the selection spans multiple text nodes', () => {
+    it('falls back to a book-scoped rule when the selection has no point anchors', () => {
       const createTransform = mockCreate()
       render(
         <TransformForm
@@ -91,11 +91,31 @@ describe('TransformForm', () => {
         />,
       )
 
-      expect(screen.getByText(/选区跨了多个文本块/)).toBeInTheDocument()
+      expect(screen.getByText(/无法建立定点锚点/)).toBeInTheDocument()
       fireEvent.click(screen.getByText('保存'))
       const [body] = createTransform.mutate.mock.calls[0]
       expect(body).toMatchObject({ matchType: 'pattern', pattern: '错字', bookId: 'b1' })
       expect(body).not.toHaveProperty('spineHref')
+    })
+
+    it('creates a point patch when the selection spans multiple text nodes', () => {
+      const createTransform = mockCreate()
+      render(
+        <TransformForm
+          bookId="b1"
+          selection={selection({ singleTextNode: false, pointText: '错字' })}
+          onDone={() => {}}
+        />,
+      )
+
+      fireEvent.change(screen.getByLabelText(/替换为/), { target: { value: '对字' } })
+      fireEvent.click(screen.getByText('保存'))
+      const [body] = createTransform.mutate.mock.calls[0]
+      expect(body).toMatchObject({
+        matchType: 'point',
+        originalText: '错字',
+        replacement: '对字',
+      })
     })
 
     it('creates a global pattern rule from "all matches" (no bookId)', () => {

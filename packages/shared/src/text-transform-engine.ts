@@ -50,32 +50,73 @@ export function applyRuleToText(text: string, rule: TransformRuleLike): string {
 // occurrence whose start lies closest to the recorded textOffset wins (exact
 // position when rules haven't shifted, nearest when they have — never a blind
 // first match, so repeated text keeps its patch on the right spot). Returns
-// the run and local offset to replace, or null when the snapshot is gone
-// (invalid patch — skipped, never misapplied).
+// the start and end runs plus their local offsets, or null when the snapshot
+// is gone (invalid patch — skipped, never misapplied).
+export interface PointMatch {
+  runIndex: number
+  local: number
+  endRunIndex: number
+  endLocal: number
+}
+
 export function findPointMatch(
   runs: TextRun[],
   snapshot: string,
   textOffset: number,
   caseSensitive: boolean,
-): { runIndex: number; local: number } | null {
+): PointMatch | null {
   if (!snapshot || textOffset == null || runs.length === 0) return null
+  const text = runs.map((run) => run.text).join('')
   const wanted = caseSensitive ? snapshot : snapshot.toLocaleLowerCase()
-  let best: { runIndex: number; local: number; dist: number } | null = null
-  let global = 0
-  for (let i = 0; i < runs.length; i++) {
-    const text = runs[i].text
-    const searchable = caseSensitive ? text : text.toLocaleLowerCase()
-    let from = 0
-    while (from <= searchable.length - wanted.length) {
-      const at = searchable.indexOf(wanted, from)
-      if (at < 0) break
-      const dist = Math.abs(global + at - textOffset)
-      if (!best || dist < best.dist) best = { runIndex: i, local: at, dist }
-      from = at + 1
-    }
-    global += text.length
+  const searchable = caseSensitive ? text : text.toLocaleLowerCase()
+  let best: { start: number; dist: number } | null = null
+  let from = 0
+  while (from <= searchable.length - wanted.length) {
+    const at = searchable.indexOf(wanted, from)
+    if (at < 0) break
+    const dist = Math.abs(at - textOffset)
+    if (!best || dist < best.dist) best = { start: at, dist }
+    from = at + 1
   }
-  return best ? { runIndex: best.runIndex, local: best.local } : null
+  if (!best) return null
+
+  const starts: number[] = []
+  let global = 0
+  for (const run of runs) {
+    starts.push(global)
+    global += run.text.length
+  }
+
+  function locate(offset: number, side: 'start' | 'end') {
+    for (let i = 0; i < runs.length; i++) {
+      if (!runs[i]!.text.length) continue
+      const start = starts[i]!
+      const end = start + runs[i]!.text.length
+      if (side === 'start' ? offset < end : offset <= end) {
+        return { runIndex: i, local: offset - start }
+      }
+    }
+    const last = runs.length - 1
+    return { runIndex: last, local: runs[last]!.text.length }
+  }
+
+  const start = locate(best.start, 'start')
+  const end = locate(best.start + snapshot.length, 'end')
+  return { ...start, endRunIndex: end.runIndex, endLocal: end.local }
+}
+
+export function applyPointMatch(runs: TextRun[], match: PointMatch, replacement: string): void {
+  if (match.runIndex === match.endRunIndex) {
+    const run = runs[match.runIndex]!
+    run.text = run.text.slice(0, match.local) + replacement + run.text.slice(match.endLocal)
+    return
+  }
+
+  const first = runs[match.runIndex]!
+  first.text = first.text.slice(0, match.local) + replacement
+  for (let i = match.runIndex + 1; i < match.endRunIndex; i++) runs[i]!.text = ''
+  const last = runs[match.endRunIndex]!
+  last.text = last.text.slice(match.endLocal)
 }
 
 // Match count of one pattern rule within a single text run — the per-section

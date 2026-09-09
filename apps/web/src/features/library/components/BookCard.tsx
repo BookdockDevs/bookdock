@@ -51,7 +51,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
   function handleMenuClick(e: React.MouseEvent) {
     e.preventDefault()
     e.stopPropagation()
-    menu.openFromButton()
+    menu.toggleFromButton()
   }
 
   return (
@@ -161,6 +161,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
 
       {showMenu && menu.open && (
         <SmartMenu
+          triggerRef={menu.btnRef}
           innerRef={menu.menuRef}
           position={menu.position(MENU_W, MENU_H)}
           width={MENU_W}

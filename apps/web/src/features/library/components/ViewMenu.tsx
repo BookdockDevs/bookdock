@@ -157,7 +157,7 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
           'relative inline-flex h-10 w-10 items-center justify-center rounded-xl border transition-colors',
           open
             ? 'border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100'
-            : 'border-stone-200 text-stone-400 hover:border-stone-300 hover:text-stone-700 dark:border-stone-800 dark:hover:border-stone-700 dark:hover:text-stone-200',
+            : 'border-stone-200 bg-white text-stone-400 hover:border-stone-300 hover:text-stone-700 dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-700 dark:hover:text-stone-200',
         )}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

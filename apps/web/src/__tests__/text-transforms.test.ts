@@ -152,6 +152,13 @@ describe('applyTransforms point patches', () => {
     expect(out).toContain('<p>a good fix text</p>')
   })
 
+  it('applies a point patch across text nodes without changing their tags', () => {
+    const out = applyTransforms(doc('<p>前错<strong>误</strong>后</p>'), [
+      point({ textOffset: 1, originalText: '错误', replacement: '修正' }),
+    ], 'text/html', 'ch1.xhtml')
+    expect(out).toContain('<p>前修正<strong></strong>后</p>')
+  })
+
   it('only touches the requested section', () => {
     const out = applyTransforms(doc('<p>bad</p>'), [point()], 'text/html', 'ch2.xhtml')
     expect(out).toContain('<p>bad</p>')

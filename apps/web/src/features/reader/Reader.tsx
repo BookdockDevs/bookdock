@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiPatch, apiPut } from '@/api/client'
 import { usePrefetchBookReadingStats } from '@/api/hooks/reading-records'
 import { useBookTransforms } from '@/api/hooks/useTransforms'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useToastStore } from '@/stores/toast.store'
 import { useUiStore, getEffectiveTheme } from '@/stores/ui.store'
@@ -132,6 +133,7 @@ export default function Reader() {
     queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${id}`),
     enabled: !!id,
   })
+  usePageTitle(bookQuery.data?.data?.title ?? _('reader.loading'))
 
   // --- Per-book reading settings (F1 layering) ---------------------------
   const fontSize = useUiStore((s) => s.fontSize)

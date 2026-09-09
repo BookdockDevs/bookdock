@@ -21,6 +21,8 @@ export default function AppProviders({ children }: { children?: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', effectiveTheme === 'dark')
+    const favicon = document.getElementById('bookdock-favicon') as HTMLLinkElement | null
+    if (favicon) favicon.href = effectiveTheme === 'dark' ? '/favicon-dark.svg?v=1' : '/favicon.svg?v=5'
   }, [effectiveTheme])
 
   // Preload the foliate engine (reader-entry.js + its module graph) at app

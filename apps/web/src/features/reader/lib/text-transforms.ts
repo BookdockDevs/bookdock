@@ -1,4 +1,4 @@
-import { applyRuleToText, countRuleInText, findPointMatch, type TextRun } from '@bookdock/shared'
+import { applyPointMatch, applyRuleToText, countRuleInText, findPointMatch, type TextRun } from '@bookdock/shared'
 import type { TextTransformRes } from '@bookdock/shared'
 
 // Only the fields the renderer needs; the API rows satisfy this structurally.
@@ -55,9 +55,9 @@ export function textContentOffset(doc: Document, target: Text, localOffset: numb
 }
 
 // Point patches (P2): snapshot-anchored single-spot edits. Run after pattern
-// rules on the same nodes. The shared findPointMatch searches the runs for the
-// occurrence closest to the recorded textOffset; a miss means the patch is
-// invalid: reported, never misapplied.
+// rules on the same nodes. The shared findPointMatch searches the concatenated
+// runs for the occurrence closest to the recorded textOffset; a match may span
+// multiple text nodes, while applyPointMatch changes only their text content.
 function applyPointPatches(
   nodes: Text[],
   patches: TextTransformRule[],
@@ -79,10 +79,8 @@ function applyPointPatches(
       invalid.push(patch.id)
       continue
     }
-    const node = nodes[found.runIndex]!
-    const text = node.nodeValue ?? ''
-    node.nodeValue =
-      text.slice(0, found.local) + (patch.replacement ?? '') + text.slice(found.local + snapshot.length)
+    applyPointMatch(runs, found, patch.replacement ?? '')
+    for (let i = found.runIndex; i <= found.endRunIndex; i++) nodes[i]!.nodeValue = runs[i]!.text
   }
   if (invalid.length) onInvalid?.(invalid)
 }

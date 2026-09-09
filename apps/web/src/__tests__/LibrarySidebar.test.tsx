@@ -163,6 +163,7 @@ describe('LibrarySidebar', () => {
 
     expect(screen.getByText('重命名')).toBeInTheDocument()
     expect(screen.getByText('删除')).toBeInTheDocument()
+    expect(screen.getByText('3', { exact: true })).toHaveClass('opacity-0')
   })
 
   it('confirms before deleting a tag and calls the delete mutation', () => {

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import SummaryCards from './components/SummaryCards'
@@ -14,6 +15,7 @@ import type { StatsPeriod } from './date-utils'
 
 export default function Stats() {
   const _ = useTranslation()
+  usePageTitle(_('stats.title'))
   const [period, setPeriod] = useState<StatsPeriod>('week')
   const [anchor, setAnchor] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState<string | null>(null)

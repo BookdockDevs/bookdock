@@ -55,11 +55,11 @@ export default function TransformForm({ bookId, initial, selection, onDone }: Tr
   const updateTransform = useUpdateTransform()
 
   const selectionText = selection ? (selection.rawText ?? selection.text).trim() : ''
-  // Point patches need anchor information: a fresh selection (single text
-  // node with a computed offset) or an existing point patch. Everything else
-  // gets the scope segment with 仅此一处 disabled.
+  // Point patches need a section and a text offset. The snapshot can span
+  // multiple text nodes; the renderer supplies the concatenated text for the
+  // point matcher while the visible field keeps the user's original text.
   const pointAvailable = selection
-    ? !!selection.singleTextNode && selection.startOffset !== undefined && !!selection.sectionHref
+    ? selection.startOffset !== undefined && !!selection.sectionHref && !!(selection.pointText ?? selection.text).trim()
     : initial?.matchType === 'point'
 
   const [name, setName] = useState(initial?.name ?? '')
@@ -136,6 +136,9 @@ export default function TransformForm({ bookId, initial, selection, onDone }: Tr
       }
       updateTransform.mutate({ id: initial.id, body }, { onSuccess: onDone, onError })
     } else {
+      const pointSnapshot = selection && trimmed === selectionText
+        ? (selection.pointText?.trim() || trimmed)
+        : trimmed
       const common = {
         replacement: replacement === '' ? null : replacement,
         caseSensitive,
@@ -149,7 +152,7 @@ export default function TransformForm({ bookId, initial, selection, onDone }: Tr
             bookId: bookId!,
             spineHref: selection!.sectionHref!,
             textOffset: selection!.startOffset!,
-            originalText: trimmed,
+            originalText: pointSnapshot,
           }
         : {
             ...common,
