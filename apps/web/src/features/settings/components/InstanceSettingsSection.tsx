@@ -1,20 +1,29 @@
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { useInstanceInfo, useUpdateInstance } from '@/features/auth/hooks'
 
 export default function InstanceSettingsSection() {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
-  const { data: instanceData } = useInstanceInfo()
+  const instanceQuery = useInstanceInfo()
   const updateInstance = useUpdateInstance()
 
-  const instance = instanceData?.data
+  const instance = instanceQuery.data?.data
+  if (instanceQuery.isError) {
+    return (
+      <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+        <h2 className="mb-4 text-sm font-medium">{_('admin.instanceSettings')}</h2>
+        <QueryErrorState className="py-4" isRetrying={instanceQuery.isFetching} onRetry={instanceQuery.refetch} />
+      </section>
+    )
+  }
   if (!instance) return null
 
   function toggle(key: 'allowRegistration' | 'allowGuestAccess', value: boolean) {
     updateInstance.mutate(
       { [key]: value },
-      { onError: () => addToast(_('auth.errors.generic'), 'error') },
+      { onError: (error) => notify.error(getUserErrorNotification(error, 'errors.updateFailed')) },
     )
   }
 

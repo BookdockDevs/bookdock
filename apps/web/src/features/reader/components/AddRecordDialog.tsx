@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react'
 import { localDateString, useAddReadingRecord } from '@/api/hooks/reading-records'
 import { Button } from '@/components/ui/Button'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { getUserErrorMessage } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 
 import { markEscConsumed } from '../lib/esc-consumed'
 
@@ -24,7 +25,6 @@ const labelCls = 'mb-1.5 block text-sm font-medium text-stone-600 dark:text-ston
  */
 export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProps) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const addRecord = useAddReadingRecord(bookId)
   const [date, setDate] = useState(localDateString())
   const [hours, setHours] = useState(0)
@@ -77,10 +77,10 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
       },
       {
         onSuccess: () => {
-          addToast(_('reader.addRecordSuccess'), 'success')
+          notify.success({ key: 'reader.addRecordSuccess' })
           onClose()
         },
-        onError: (err) => setError(err instanceof Error && err.message ? err.message : _('reader.sessionActionFailed')),
+        onError: (err) => setError(getUserErrorMessage(err, _, 'reader.sessionActionFailed')),
       },
     )
   }

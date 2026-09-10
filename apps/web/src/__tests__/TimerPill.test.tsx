@@ -73,7 +73,11 @@ describe('TimerPill', () => {
     act(() => vi.advanceTimersByTime(600))
     expect(timer.discard).toHaveBeenCalledTimes(1)
     expect(timer.terminate).not.toHaveBeenCalled()
-    expect(useToastStore.getState().toasts.some((t) => t.message === '已丢弃本次记录')).toBe(true)
+    expect(useToastStore.getState().toasts.some((t) => (
+      typeof t.message !== 'string'
+      && t.message.key === 'reader.manualTimerDiscarded'
+      && t.type === 'info'
+    ))).toBe(true)
     // Releasing after the discard must not also terminate
     fireEvent.pointerUp(stop)
     expect(timer.terminate).not.toHaveBeenCalled()

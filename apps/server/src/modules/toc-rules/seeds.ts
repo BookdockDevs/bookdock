@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 
 import type { TocRulePattern } from '@bookdock/shared'
 
@@ -8,21 +8,25 @@ import { createId } from '../../lib/id'
 
 /** Settings key that records that a user has been seeded (delete-all sticks). */
 const SEEDED_KEY = 'tocRuleSeeded'
+const SEED_ORDER_MIGRATED_KEY = 'tocRuleSeedOrderV4'
+const LEGACY_SEED_ORDER = ['toc.zh-flat', 'toc.zh-hierarchy', 'toc.numeric', 'toc.en']
 
 export interface SeedTocRule {
+  seedKey: string
   name: string
   patterns: TocRulePattern[]
 }
 
 /**
  * Built-in presets installed once per user on first access. The single-regex
- * patterns are merged into our multi-level presets. sortOrder 0 is the flat
- * preset so that the common web-novel shape (第X章 only) wins ties over the
- * nested preset; 卷·章·节
- * competes on volume/section headers, which push its count above the flat one.
+ * patterns are merged into our multi-level presets. The volume/chapter/section
+ * preset is first because it is the most specific built-in rule.
  */
+const DEFAULT_SEED_ORDER = ['toc.zh-hierarchy', 'toc.zh-flat', 'toc.numeric', 'toc.en']
+
 export const SEED_TOC_RULES: SeedTocRule[] = [
   {
+    seedKey: 'toc.zh-flat',
     name: '中文网文（章/回 平铺）',
     patterns: [
       {
@@ -34,6 +38,7 @@ export const SEED_TOC_RULES: SeedTocRule[] = [
     ],
   },
   {
+    seedKey: 'toc.zh-hierarchy',
     name: '中文网文（卷·章·节）',
     patterns: [
       {
@@ -57,6 +62,7 @@ export const SEED_TOC_RULES: SeedTocRule[] = [
     ],
   },
   {
+    seedKey: 'toc.en',
     name: 'English Chapter/Section/Part',
     patterns: [
       {
@@ -68,6 +74,7 @@ export const SEED_TOC_RULES: SeedTocRule[] = [
     ],
   },
   {
+    seedKey: 'toc.numeric',
     name: '数字/大写数字 分隔符 标题',
     patterns: [
       {
@@ -78,7 +85,7 @@ export const SEED_TOC_RULES: SeedTocRule[] = [
       },
     ],
   },
-]
+].sort((a, b) => DEFAULT_SEED_ORDER.indexOf(a.seedKey) - DEFAULT_SEED_ORDER.indexOf(b.seedKey))
 
 function hasSeeded(userId: string): boolean {
   const db = getDb()
@@ -96,20 +103,62 @@ function markSeeded(userId: string) {
   }
 }
 
-function insertSeeds(userId: string) {
+function hasSeedOrderMigrated(userId: string): boolean {
+  const db = getDb()
+  const row = db.select().from(settings).where(and(eq(settings.userId, userId), eq(settings.key, SEED_ORDER_MIGRATED_KEY))).get()
+  return row !== undefined
+}
+
+function markSeedOrderMigrated(userId: string) {
+  const db = getDb()
+  db.insert(settings).values({ id: createId('setting'), userId, key: SEED_ORDER_MIGRATED_KEY, value: 1 }).run()
+}
+
+function migrateLegacyDefaultOrder(userId: string) {
+  if (hasSeedOrderMigrated(userId)) return
+  const db = getDb()
+  const rows = db.select().from(tocRules).where(eq(tocRules.userId, userId)).all()
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt)
+  const currentSeedOrder = rows.map((row) => row.seedKey)
+  const isLegacyDefault = currentSeedOrder.length === LEGACY_SEED_ORDER.length
+    && currentSeedOrder.every((seedKey, index) => seedKey === LEGACY_SEED_ORDER[index])
+
+  if (isLegacyDefault) {
+    for (const [sortOrder, seedKey] of DEFAULT_SEED_ORDER.entries()) {
+      const row = rows.find((item) => item.seedKey === seedKey)
+      if (row) db.update(tocRules).set({ sortOrder }).where(eq(tocRules.id, row.id)).run()
+    }
+  }
+  markSeedOrderMigrated(userId)
+}
+
+function insertSeeds(userId: string, seeds: readonly SeedTocRule[] = SEED_TOC_RULES, startOrder = 0) {
   const db = getDb()
   const now = Date.now()
-  const rows = SEED_TOC_RULES.map((seed, index) => ({
+  const rows = seeds.map((seed, index) => ({
     id: createId('tocr'),
     userId,
+    seedKey: seed.seedKey,
     name: seed.name,
     enabled: 1,
-    sortOrder: index,
+    sortOrder: startOrder + index,
     patterns: seed.patterns,
     createdAt: now,
     updatedAt: now,
   }))
   db.insert(tocRules).values(rows).run()
+}
+
+function backfillLegacySeedKeys(userId: string) {
+  const db = getDb()
+  const legacyRows = db.select().from(tocRules)
+    .where(and(eq(tocRules.userId, userId), isNull(tocRules.seedKey)))
+    .all()
+
+  for (const row of legacyRows) {
+    const seed = SEED_TOC_RULES.find((candidate) => candidate.name === row.name && JSON.stringify(candidate.patterns) === JSON.stringify(row.patterns))
+    if (seed) db.update(tocRules).set({ seedKey: seed.seedKey }).where(eq(tocRules.id, row.id)).run()
+  }
 }
 
 function seedIfEmpty(userId: string) {
@@ -121,11 +170,25 @@ function seedIfEmpty(userId: string) {
 
 /** Seed once per user on first access. Delete-all afterwards stays empty. */
 export function ensureTocRuleSeeds(userId: string) {
-  if (hasSeeded(userId)) return
-  seedIfEmpty(userId)
+  backfillLegacySeedKeys(userId)
+  if (!hasSeeded(userId)) seedIfEmpty(userId)
+  migrateLegacyDefaultOrder(userId)
 }
 
-/** Re-import the presets for a user who deleted all of them (POST /seed). */
+/** Add missing built-in presets without changing any existing user rules. */
 export function restoreTocRuleSeeds(userId: string) {
-  seedIfEmpty(userId)
+  const db = getDb()
+  backfillLegacySeedKeys(userId)
+  const existingSeedKeys = new Set(
+    db.select({ seedKey: tocRules.seedKey }).from(tocRules).where(eq(tocRules.userId, userId)).all()
+      .map((rule) => rule.seedKey)
+      .filter((seedKey): seedKey is string => seedKey !== null),
+  )
+  const missing = SEED_TOC_RULES.filter((seed) => !existingSeedKeys.has(seed.seedKey))
+  if (missing.length > 0) {
+    const maxOrder = db.select({ max: sql<number>`max(${tocRules.sortOrder})` }).from(tocRules)
+      .where(eq(tocRules.userId, userId)).get()?.max ?? -1
+    insertSeeds(userId, missing, maxOrder + 1)
+  }
+  markSeeded(userId)
 }

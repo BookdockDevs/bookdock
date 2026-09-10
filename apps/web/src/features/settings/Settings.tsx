@@ -82,20 +82,22 @@ export default function Settings() {
 
         <div className="min-w-0 flex-1">
           {active === 'general' && (
-            <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-              <h2 className="mb-4 text-sm font-medium">{_('settings.general')}</h2>
-              <LanguageSwitcher />
-            </section>
+            <div className="flex flex-col gap-6">
+              <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+                <h2 className="mb-4 text-sm font-medium">{_('settings.general')}</h2>
+                <LanguageSwitcher />
+              </section>
+              <ReadingDataSettingsSection />
+            </div>
           )}
           {active === 'account' && !isGuest && <AccountSection />}
           {active === 'reading' && (
             <div className="flex flex-col gap-6">
-              <ReadingDataSettingsSection />
+              <TocRulesSettingsSection />
+              <FontsSettingsSection />
               <TtsSettingsSection id="tts-settings" />
               <AiSettingsSection id="ai-settings" />
-              <FontsSettingsSection />
               <TransformsSettingsSection />
-              <TocRulesSettingsSection />
             </div>
           )}
           {active === 'library' && (

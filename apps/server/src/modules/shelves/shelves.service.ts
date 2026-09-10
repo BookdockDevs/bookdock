@@ -1,4 +1,4 @@
-import { eq, and, inArray, sql, asc } from 'drizzle-orm'
+import { eq, and, inArray, sql, asc, ne } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import { books, shelves } from '../../db/schema'
@@ -23,18 +23,27 @@ export async function listShelves(userId: string) {
 
 export async function createShelf(userId: string, name: string) {
   const db = getDb()
-  const now = Date.now()
-  const id = createId('shelf')
-  // New shelves always land last: the list orders by (sortOrder, createdAt), so
-  // a default 0 would jump to the front once a reorder has written dense ranks.
-  const max = db
-    .select({ max: sql<number>`max(${shelves.sortOrder})` })
-    .from(shelves)
-    .where(eq(shelves.userId, userId))
-    .get()
-  const sortOrder = (max?.max ?? -1) + 1
-  db.insert(shelves).values({ id, userId, name, sortOrder, createdAt: now }).run()
-  return { id, userId, name, sortOrder, createdAt: now, bookCount: 0 }
+  return db.transaction((tx) => {
+    const existing = tx
+      .select({ id: shelves.id })
+      .from(shelves)
+      .where(and(eq(shelves.userId, userId), eq(shelves.name, name)))
+      .get()
+    if (existing) throw new AppError('SHELF_NAME_TAKEN', 'Shelf name is already in use')
+
+    const now = Date.now()
+    const id = createId('shelf')
+    // New shelves always land last: the list orders by (sortOrder, createdAt), so
+    // a default 0 would jump to the front once a reorder has written dense ranks.
+    const max = tx
+      .select({ max: sql<number>`max(${shelves.sortOrder})` })
+      .from(shelves)
+      .where(eq(shelves.userId, userId))
+      .get()
+    const sortOrder = (max?.max ?? -1) + 1
+    tx.insert(shelves).values({ id, userId, name, sortOrder, createdAt: now }).run()
+    return { id, userId, name, sortOrder, createdAt: now, bookCount: 0 }
+  })
 }
 
 export async function reorderShelves(userId: string, shelfIds: string[]) {
@@ -59,10 +68,18 @@ export async function reorderShelves(userId: string, shelfIds: string[]) {
 
 export async function updateShelf(userId: string, shelfId: string, name: string) {
   const db = getDb()
-  const existing = await getShelf(userId, shelfId)
-  if (!existing) throw new AppError('SHELF_NOT_FOUND')
-  db.update(shelves).set({ name }).where(eq(shelves.id, shelfId)).run()
-  return { ...existing, name }
+  return db.transaction((tx) => {
+    const existing = tx.select().from(shelves).where(and(eq(shelves.id, shelfId), eq(shelves.userId, userId))).get()
+    if (!existing) throw new AppError('SHELF_NOT_FOUND')
+    const duplicate = tx
+      .select({ id: shelves.id })
+      .from(shelves)
+      .where(and(eq(shelves.userId, userId), eq(shelves.name, name), ne(shelves.id, shelfId)))
+      .get()
+    if (duplicate) throw new AppError('SHELF_NAME_TAKEN', 'Shelf name is already in use')
+    tx.update(shelves).set({ name }).where(eq(shelves.id, shelfId)).run()
+    return { ...existing, name }
+  })
 }
 
 export async function deleteShelf(userId: string, shelfId: string) {

@@ -4,10 +4,10 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { ReadStatus } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPost, apiPut } from '@/api/client'
-import { useTranslation } from '@/hooks/useTranslation'
-import { cn } from '@/lib/utils'
-import { useToastStore } from '@/stores/toast.store'
 import { Button } from '@/components/ui/Button'
+import { useTranslation } from '@/hooks/useTranslation'
+import { notify } from '@/lib/notifications'
+import { cn } from '@/lib/utils'
 
 import { useShelves, useTags } from '../hooks'
 
@@ -29,7 +29,6 @@ const BATCH_STATUS_ACTIONS: { value: ReadStatus; labelKey: string }[] = [
 export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, trash = false }: SelectionBarProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
   const [dialog, setDialog] = useState<'classify' | 'delete' | 'permanent' | null>(null)
   const [marking, setMarking] = useState(false)
 
@@ -39,10 +38,11 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
     void queryClient.invalidateQueries({ queryKey: ['books'] })
-    addToast(
-      failed === 0 ? _('library.batchSucceeded', { count: succeeded }) : _('library.batchPartial', { succeeded, failed }),
-      failed === 0 ? 'success' : 'error',
-    )
+    if (failed === 0) {
+      notify.success({ key: 'library.batchSucceeded', params: { count: succeeded } })
+    } else {
+      notify.error({ key: 'library.batchPartial', params: { succeeded, failed } })
+    }
     setMarking(false)
     return failed === 0
   }
@@ -139,7 +139,6 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
 function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose: () => void; onDone: () => void }) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()
   const [activeTab, setActiveTab] = useState<'shelves' | 'tags'>('shelves')
@@ -163,10 +162,11 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
     void queryClient.invalidateQueries({ queryKey: ['books'] })
     void queryClient.invalidateQueries({ queryKey: ['shelves'] })
     void queryClient.invalidateQueries({ queryKey: ['tags'] })
-    addToast(
-      failed === 0 ? _('library.batchSucceeded', { count: succeeded }) : _('library.batchPartial', { succeeded, failed }),
-      failed === 0 ? 'success' : 'error',
-    )
+    if (failed === 0) {
+      notify.success({ key: 'library.batchSucceeded', params: { count: succeeded } })
+    } else {
+      notify.error({ key: 'library.batchPartial', params: { succeeded, failed } })
+    }
     if (failed === 0) {
       onDone()
       onClose()
@@ -287,7 +287,6 @@ function ShelfRadio({ label, count, checked, onChange }: { label: string; count?
 function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: () => void; onDone: () => void }) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
   const [deleting, setDeleting] = useState(false)
 
   async function handleDelete() {
@@ -298,10 +297,11 @@ function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: (
     void queryClient.invalidateQueries({ queryKey: ['books'] })
     void queryClient.invalidateQueries({ queryKey: ['shelves'] })
     void queryClient.invalidateQueries({ queryKey: ['tags'] })
-    addToast(
-      failed === 0 ? _('library.batchSucceeded', { count: succeeded }) : _('library.batchPartial', { succeeded, failed }),
-      failed === 0 ? 'success' : 'error',
-    )
+    if (failed === 0) {
+      notify.success({ key: 'library.batchSucceeded', params: { count: succeeded } })
+    } else {
+      notify.error({ key: 'library.batchPartial', params: { succeeded, failed } })
+    }
     if (failed === 0) {
       onDone()
       onClose()
@@ -339,7 +339,6 @@ function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: (
 function BatchPermanentDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: () => void; onDone: () => void }) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
   const [deleting, setDeleting] = useState(false)
 
   async function handleDelete() {
@@ -348,10 +347,11 @@ function BatchPermanentDeleteDialog({ ids, onClose, onDone }: { ids: string[]; o
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
     void queryClient.invalidateQueries({ queryKey: ['books'] })
-    addToast(
-      failed === 0 ? _('library.batchSucceeded', { count: succeeded }) : _('library.batchPartial', { succeeded, failed }),
-      failed === 0 ? 'success' : 'error',
-    )
+    if (failed === 0) {
+      notify.success({ key: 'library.batchSucceeded', params: { count: succeeded } })
+    } else {
+      notify.error({ key: 'library.batchPartial', params: { succeeded, failed } })
+    }
     if (failed === 0) {
       onDone()
       onClose()

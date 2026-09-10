@@ -1,27 +1,24 @@
-import { BASE_URL } from '@/api/client'
+import { ApiError, BASE_URL } from '@/api/client'
 
 export async function downloadBook(bookId: string, title: string) {
-  try {
-    const res = await fetch(`${BASE_URL}/books/${bookId}/file`)
-    if (!res.ok) return
-    const blob = await res.blob()
-    const safeName = title.replace(/[^\w　-〿＀-￯一-龥-]/g, '_')
-    const ext = blob.type.includes('epub') ? 'epub' : blob.type.includes('plain') ? 'txt' : 'epub'
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${safeName}.${ext}`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  } catch {
-    // download failed silently
+  const res = await fetch(`${BASE_URL}/books/${bookId}/file`)
+  if (!res.ok) {
+    throw new ApiError(res.status === 404 ? 'BOOK_NOT_FOUND' : 'DOWNLOAD_FAILED', 'Book download failed')
   }
+  const blob = await res.blob()
+  const safeName = title.replace(/[^\w　-〿＀-￯一-龥-]/g, '_')
+  const ext = blob.type.includes('epub') ? 'epub' : blob.type.includes('plain') ? 'txt' : 'epub'
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${safeName}.${ext}`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 
-// P4: export downloads — throw on failure so the caller can surface the
-// server's error message (the stored-file download stays silent).
+// P4: export downloads throw on failure so callers can show a localized error.
 async function downloadExport(
   bookId: string,
   title: string,
@@ -30,12 +27,7 @@ async function downloadExport(
 ) {
   const res = await fetch(`${BASE_URL}/books/${bookId}/${endpoint}`)
   if (!res.ok) {
-    let message = 'Export failed'
-    try {
-      const body = await res.json() as { error?: { message?: string } }
-      message = body.error?.message ?? message
-    } catch { /* non-JSON error body */ }
-    throw new Error(message)
+    throw new ApiError(res.status === 404 ? 'BOOK_NOT_FOUND' : 'EXPORT_FAILED', 'Book export failed')
   }
   const blob = await res.blob()
   const safeName = title.replace(/[^\w　-〿＀-￯一-龥-]/g, '_')

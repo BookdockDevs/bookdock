@@ -6,14 +6,15 @@ import type { BookListItem, BookMetadata } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookTransforms } from '@/api/hooks/useTransforms'
-import { useTranslation } from '@/hooks/useTranslation'
-import { formatBytes, formatDate } from '@/lib/utils'
-import { computeFromAnchor, PADDING, type SmartPosition } from '@/lib/position'
-import { useToastStore } from '@/stores/toast.store'
 import { Button } from '@/components/ui/Button'
 import MenuFlyout from '@/components/ui/MenuFlyout'
 import Modal from '@/components/ui/Modal'
 import SmartMenu from '@/components/ui/SmartMenu'
+import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { formatBytes, formatDate } from '@/lib/utils'
+import { computeFromAnchor, PADDING, type SmartPosition } from '@/lib/position'
+import { notify } from '@/lib/notifications'
 
 import {
   useBook,
@@ -99,7 +100,6 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   const _ = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
 
   const { data: detailData } = useBook(book?.id ?? null)
   const detail = detailData?.data
@@ -204,7 +204,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
         await downloadEditedTxt(book!.id, book!.title)
       }
     } catch (err) {
-      addToast(err instanceof Error ? err.message : String(err), 'error')
+      notify.error(getUserErrorNotification(err, 'errors.downloadFailed'))
     }
   }
 
@@ -294,10 +294,10 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
       queryClient.invalidateQueries({ queryKey: ['books'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
-      addToast(_('toast.bookUpdated'), 'success')
+      notify.success({ key: 'toast.bookUpdated' })
       discardEdit()
-    } catch {
-      addToast(_('toast.updateBookFailed'), 'error')
+    } catch (err) {
+      notify.error(getUserErrorNotification(err, 'errors.updateFailed'))
     } finally {
       setSaving(false)
     }
@@ -335,9 +335,9 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   async function copyText(value: string) {
     try {
       await navigator.clipboard.writeText(value)
-      addToast(_('library.copied'), 'success')
+      notify.success({ key: 'library.copied' })
     } catch {
-      addToast(_('library.copyFailed'), 'error')
+      notify.error({ key: 'library.copyFailed' })
     }
   }
 
@@ -777,7 +777,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                           label={_('library.download')}
                           onClick={displayBook.format === 'txt'
                             ? toggleDownloadMenu
-                            : () => void downloadBook(book!.id, book!.title)}
+                            : () => void Promise.resolve(downloadBook(book!.id, book!.title)).catch((err) => notify.error(getUserErrorNotification(err, 'errors.downloadFailed')))}
                         >
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                           <polyline points="7 10 12 15 17 10" />
@@ -849,16 +849,6 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                 </section>
               )}
 
-              {displayBook.format === 'txt' && tocRuleOpen && (
-                <Modal title={_('library.tocRuleSection')} onClose={() => setTocRuleOpen(false)}>
-                  <TocRulePicker
-                    bookId={book.id}
-                    currentRuleId={detail?.meta?.tocRuleId}
-                    autoScored={detail?.meta?.tocRuleAuto}
-                  />
-                </Modal>
-              )}
-
               <section className="mt-6">
                 <GroupLabel>{_('library.metaSection')}</GroupLabel>
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
@@ -895,6 +885,16 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                 </dl>
               </section>
             </div>
+          )}
+
+          {displayBook.format === 'txt' && tocRuleOpen && (
+            <Modal title={_('library.tocRuleSection')} onClose={() => setTocRuleOpen(false)}>
+              <TocRulePicker
+                bookId={book.id}
+                currentRuleId={detail?.meta?.tocRuleId}
+                autoScored={detail?.meta?.tocRuleAuto}
+              />
+            </Modal>
           )}
         </div>
 

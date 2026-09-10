@@ -841,10 +841,27 @@ export class Paginator extends HTMLElement {
         if (oldMapIndex != null) this.#views.delete(oldMapIndex)
       }
     }
-    this.#view = new View({
+    const viewIndex = this.#index
+    let previousSize
+    let view
+    view = new View({
       container: this,
-      onExpand: () => this.scrollToAnchor(this.#anchor),
+      onExpand: () => {
+        if (!this.#continuous) {
+          this.scrollToAnchor(this.#anchor)
+          return
+        }
+        const nextSize = view.element.getBoundingClientRect()[this.sideProp]
+        if (!Number.isFinite(nextSize) || nextSize <= 0) return
+        const sizeChanged = previousSize !== undefined
+          && Math.abs(nextSize - previousSize) > 0.5
+        previousSize = nextSize
+        if (!sizeChanged || this.#index !== viewIndex
+          || this.#views.get(viewIndex) !== view) return
+        this.scrollToAnchor(this.#anchor)
+      },
     })
+    this.#view = view
     if (this.#continuous) {
       this.#views.set(this.#index, this.#view)
       // Keep DOM order matching section order so container coordinates stay
@@ -984,9 +1001,26 @@ export class Paginator extends HTMLElement {
     // enters the viewport, so reserve a slot that lets the scrollbar reach it.
     const reservedSize = placeholderSize || Math.max(
       Number.isFinite(currentSize) ? currentSize : 0, this.size)
+    let previousSize = reservedSize
+    let loaded = false
     try {
       const src = await section.load()
-      const view = new View({ container: this, onExpand: () => {} })
+      const view = new View({
+        container: this,
+        onExpand: () => {
+          if (!loaded || this.#views.get(index) !== view || view.element.parentNode !== this.#container)
+            return
+          const nextSize = view.element.getBoundingClientRect()[this.sideProp]
+          if (!Number.isFinite(nextSize) || nextSize <= 0) return
+          const sizeDelta = nextSize - previousSize
+          previousSize = nextSize
+          if (Math.abs(sizeDelta) <= 0.5) return
+          if (this.#getViewOffset(index) < this.#renderedStart) {
+            this.#container[this.scrollProp] += sizeDelta
+            this.#lastScrollPosition = this.#renderedStart
+          }
+        },
+      })
       if (placeholder) {
         view.element.style[this.sideProp] = `${placeholderSize}px`
         placeholder.replaceWith(view.element)
@@ -1021,13 +1055,20 @@ export class Paginator extends HTMLElement {
       if (measuredSize > 0) view.element.style.contentVisibility = 'auto'
       if (placeholder) {
         const sizeDelta = loadedSize - placeholderSize
-        if (placeholderOffset < this.#renderedStart && Math.abs(sizeDelta) > 0.5)
+        if (placeholderOffset < this.#renderedStart && Math.abs(sizeDelta) > 0.5) {
           this.#container[this.scrollProp] += sizeDelta
+          this.#lastScrollPosition = this.#renderedStart
+        }
       }
       if (isPrepend) {
         const correction = startBefore + loadedSize - this.#renderedStart
-        if (Math.abs(correction) > 0.5) this.#container[this.scrollProp] += correction
+        if (Math.abs(correction) > 0.5) {
+          this.#container[this.scrollProp] += correction
+          this.#lastScrollPosition = this.#renderedStart
+        }
       }
+      previousSize = loadedSize
+      loaded = true
       this.dispatchEvent(new CustomEvent('create-overlayer', {
         detail: {
           doc: view.document, index,
@@ -1740,9 +1781,10 @@ export class Paginator extends HTMLElement {
       const fraction = viewSize > 0
         ? Math.max(0, Math.min(1,
           (this.#renderedStart - this.#getViewOffset(index)) / viewSize))
-        : 0
-      if (reason !== 'anchor') this.#anchor = fraction
-      else this.#justAnchored = true
+        : undefined
+      if (reason !== 'anchor') {
+        if (fraction !== undefined) this.#anchor = fraction
+      } else this.#justAnchored = true
 
       const detail = { reason, range: result?.range, index, fraction }
       this.#pendingRelocate = null

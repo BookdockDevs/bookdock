@@ -3,14 +3,17 @@ import { useQuery } from '@tanstack/react-query'
 import { Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 
 import { AppShell } from '@/components/layout/AppShell'
+import { Button } from '@/components/ui/Button'
 import { apiGet, UNAUTHORIZED_EVENT } from '@/api/client'
 import { useInstanceInfo, ME_QUERY_KEY } from '@/features/auth/hooks'
+import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
 import type { MeRes } from '@bookdock/shared'
 
 const PUBLIC_PATHS = ['/login', '/register', '/setup']
 
 export function RootComponent() {
+  const _ = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   const setAuth = useAuthStore((s) => s.setAuth)
@@ -72,6 +75,17 @@ export function RootComponent() {
     // No session: guests pass through only when guest access is enabled.
     if (!instance.allowGuestAccess) navigate({ to: '/login' })
   }, [instance, pathname, isPublic, meQuery.isPending, meQuery.data, navigate, setAuth, clearAuth])
+
+  if (instanceQuery.isError && !instance) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-stone-50 p-4 dark:bg-stone-950">
+        <div className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-6 text-center shadow-sm dark:border-stone-800 dark:bg-stone-900">
+          <p role="alert" className="mb-4 text-sm text-red-600">{_('auth.instanceLoadFailed')}</p>
+          <Button type="button" onClick={() => void instanceQuery.refetch()}>{_('auth.retry')}</Button>
+        </div>
+      </div>
+    )
+  }
 
   let ready = false
   if (instance) {

@@ -587,8 +587,7 @@ describe('AiPanel', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'reader.aiEditMode 自由助理' }))
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiRestoreDefault' }))
     expect(screen.getByText('reader.aiRestoreDefaultConfirm')).toBeInTheDocument()
-    const restoreButtons = screen.getAllByRole('button', { name: 'reader.aiRestoreDefault' })
-    fireEvent.click(restoreButtons[restoreButtons.length - 1]!)
+    fireEvent.click(screen.getByRole('button', { name: 'settings.confirmRestoreAction' }))
 
     await waitFor(() => expect(apiPatch).toHaveBeenLastCalledWith('/ai/config', { defaultAssistantMode: null }))
     expect(screen.getByRole('button', { name: 'reader.aiSelectAssistantMode' })).toHaveTextContent('reader.aiDefaultAssistantModeName')
@@ -627,8 +626,7 @@ describe('AiPanel', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'reader.aiEditMode 严谨书评人' }))
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiDelete' }))
     expect(screen.getByText('reader.aiModeDeleteConfirm')).toBeInTheDocument()
-    const deleteButtons = screen.getAllByRole('button', { name: 'reader.aiDelete' })
-    fireEvent.click(deleteButtons[deleteButtons.length - 1]!)
+    fireEvent.click(screen.getByRole('button', { name: 'settings.confirmDeleteAction' }))
     await waitFor(() => expect(apiPatch).toHaveBeenLastCalledWith('/ai/config', { modes: [] }))
     expect(screen.getByRole('button', { name: 'reader.aiSelectAssistantMode' })).toHaveTextContent('reader.aiDefaultAssistantModeName')
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiSelectAssistantMode' }))
@@ -1286,7 +1284,7 @@ describe('AiPanel', () => {
     await openMore()
     fireEvent.click(await screen.findByRole('button', { name: 'reader.aiIndexClear' }))
     expect(screen.getByText('reader.aiIndexClearConfirm')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'settings.fontsDelete' }))
+    fireEvent.click(screen.getByRole('button', { name: 'settings.confirmClearAction' }))
 
     await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/ai/retrieval/index?bookId=book-1'))
   })

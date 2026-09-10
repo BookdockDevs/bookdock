@@ -12,7 +12,7 @@ const SYNC_CHANNEL = 'bd-settings'
 const SESSION_ID = Math.random().toString(36).slice(2)
 const PENDING_SETTINGS_STORAGE_KEY = 'bd-settings-pending'
 
-// Only non-reading, non-device settings sync to the server. Flat reading
+// Only user-level settings that should travel across devices sync to the server. Flat reading
 // fields are deliberately excluded (intents sync, outcomes stay local):
 // preset/global edits travel inside the `readingConfig` blob, and the
 // device-local active preset (`activePresetId`) rides the BroadcastChannel
@@ -20,6 +20,8 @@ const PENDING_SETTINGS_STORAGE_KEY = 'bd-settings-pending'
 // gridColumns, library view prefs) stay in localStorage per device.
 const SETTINGS_KEYS = [
   'uiTheme',
+  'fontPreferences',
+  'fontOrder',
   'coverText',
   'coverFit',
   'readingTimerMode',
@@ -50,7 +52,9 @@ function settingsChanged(
   prevState: ReturnType<typeof useUiStore.getState>,
 ): boolean {
   if (state.customThemes !== prevState.customThemes) return true
-  return SETTINGS_KEYS.some((key) => {
+  if (JSON.stringify(state.fontPreferences) !== JSON.stringify(prevState.fontPreferences)) return true
+  if (JSON.stringify(state.fontOrder) !== JSON.stringify(prevState.fontOrder)) return true
+  return SETTINGS_KEYS.filter((key) => key !== 'fontPreferences' && key !== 'fontOrder').some((key) => {
     // @ts-expect-error dynamic settings keys
     return state[key] !== prevState[key]
   })
@@ -115,6 +119,8 @@ export function SettingsSync() {
     mutationFn: (settings: SettingsRes) => apiPut('/settings', settings),
   })
   const mutateRef = useRef(saveSettings)
+  const settingsUserRef = useRef<string | null>(null)
+  const suppressSyncRef = useRef(false)
   useEffect(() => {
     mutateRef.current = saveSettings
   }, [saveSettings])
@@ -125,6 +131,12 @@ export function SettingsSync() {
   const userId = useAuthStore((s) => s.user?.id ?? null)
 
   useEffect(() => {
+    if (settingsUserRef.current !== userId) {
+      settingsUserRef.current = userId
+      suppressSyncRef.current = true
+      useUiStore.setState({ fontPreferences: {}, fontOrder: [] })
+      suppressSyncRef.current = false
+    }
     if (!userId) return
     const pending = getPendingSettings(userId)
     if (pending) {
@@ -174,6 +186,7 @@ export function SettingsSync() {
     }
 
     const unsub = useUiStore.subscribe((state, prevState) => {
+      if (suppressSyncRef.current) return
       const settingsTouched = settingsChanged(state, prevState)
       const activeTouched = state.activePresetId !== prevState.activePresetId
       if (!settingsTouched && !activeTouched) return

@@ -113,4 +113,15 @@ describe('RootComponent guard', () => {
       expect(navigateMock).toHaveBeenCalledWith({ to: '/login' })
     })
   })
+
+  it('shows a retryable error when instance information cannot be loaded', async () => {
+    ;(apiGet as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('server unavailable'))
+    renderRoot()
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('auth.instanceLoadFailed')
+    })
+    expect(screen.getByRole('button', { name: 'auth.retry' })).toBeInTheDocument()
+    expect(screen.queryByTestId('outlet')).not.toBeInTheDocument()
+  })
 })

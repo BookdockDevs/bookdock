@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT_PROMPT_CHARS, AI_TOOL_NAMES, getAiPromptVariables, isAiEmbeddingModel, sanitizeAiCitationMarkers } from '@bookdock/shared'
 import type { AiAssistantMode, AiChapterReference, AiChatReq, AiCitation, AiContextReceipt, AiConversationSettings, AiHistoryMessage, AiMessageEventRes, AiMessageRes, AiReadingScope, AiRetryRecipe, AiStatusRes, AiThreadRes, AiToolName } from '@bookdock/shared'
 
-import { apiGet, apiPost, apiStreamAiChat, ApiError } from '@/api/client'
+import { apiGet, apiPost, apiStreamAiChat } from '@/api/client'
 import { AI_THREADS_KEY, useAiIndexStatus, useAiMessageRevisions, useAiThread, useAiThreads, useCancelAiBookIndex, useClearAiBookIndex, useDeleteAiThread, useIndexAiBook, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiProfile, useUpdateAiThread } from '@/api/hooks/useAi'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import AiBrandIcon from '@/components/ui/AiBrandIcon'
@@ -13,8 +13,9 @@ import Modal from '@/components/ui/Modal'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
 import { preloadAiBrandIcons } from '@/lib/aiBrandIcons'
+import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
-import { useToastStore } from '@/stores/toast.store'
 import { useUiStore } from '@/stores/ui.store'
 
 import { useReaderApi } from '../hooks/useReaderApi'
@@ -475,7 +476,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
   const initialMemoryRef = useRef<AiPanelMemory | null>(null)
   if (initialMemoryRef.current === null) initialMemoryRef.current = readAiPanelMemory(memoryUserId, bookId)
   const initialMemory = initialMemoryRef.current
-  const addToast = useToastStore((s) => s.addToast)
+  const showError = (error: unknown, fallback = 'errors.operationFailed') => notify.error(getUserErrorNotification(error, fallback))
   const queryClient = useQueryClient()
   const aiContext = useReaderState((s) => s.aiContext)
   const setAiContext = useReaderState((s) => s.setAiContext)
@@ -723,11 +724,11 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     if (savedSettings.readingScope === readingScope && toolsMatch && modeMatch) return
     const timer = window.setTimeout(() => {
       updateThreadSettings({ id: threadId, body: { settings: { readingScope, enabledTools, assistantModeId: selectedAssistantModeId } } }, {
-        onError: (error) => addToast(error.message, 'error'),
+        onError: (error) => notify.error(getUserErrorNotification(error)),
       })
     }, 250)
     return () => window.clearTimeout(timer)
-  }, [addToast, enabledTools, readingScope, selectedAssistantModeId, streaming, threadId, threadQuery.data, updateThreadSettings])
+  }, [enabledTools, readingScope, selectedAssistantModeId, streaming, threadId, threadQuery.data, updateThreadSettings])
   useEffect(() => {
     const memory: AiPanelMemory = {
       activeThreadId: threadId,
@@ -1165,7 +1166,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     updateAiConfig.mutate({
       lastUsedConversationSettings: nextSettings,
     }, {
-      onError: (error) => addToast(error.message, 'error'),
+      onError: (error) => showError(error),
     })
   }
 
@@ -1181,9 +1182,11 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     setToolsOpen(false)
     setHistoryOpen(false)
     setMoreOpen(false)
-    addToast(nextScope === 'full_book'
-      ? _('reader.aiReadingScopeFullWarning')
-      : _('reader.aiReadingScope', { scope: readingScopeLabel(nextScope, _) }))
+    if (nextScope === 'full_book') {
+      notify.warning({ key: 'reader.aiReadingScopeFullWarning' })
+    } else {
+      notify.info({ key: 'reader.aiReadingScope', params: { scope: readingScopeLabel(nextScope, _) } })
+    }
   }
 
   function toggleChapterReference(chapterIndex: number) {
@@ -1231,9 +1234,9 @@ export default function AiPanel({ bookId }: { bookId: string }) {
        setAssistantModes(response.data.modes)
        if (!assistantModeForm.id || assistantModeForm.id === selectedAssistantModeId) setSelectedAssistantModeId(id)
        setAssistantModeForm(null)
-       addToast(assistantModeForm.id ? _('reader.aiModeUpdated') : _('reader.aiModeAdded'), 'success')
+       notify.success({ key: assistantModeForm.id ? 'reader.aiModeUpdated' : 'reader.aiModeAdded' })
      },
-     onError: (error) => addToast(error.message, 'error'),
+     onError: (error) => showError(error),
    })
  }
 
@@ -1255,9 +1258,9 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         setAssistantModes(response.data.modes)
         setAssistantModeRestoreOpen(false)
         setAssistantModeForm(null)
-        addToast(_('reader.aiModeRestored'), 'success')
+        notify.success({ key: 'reader.aiModeRestored' })
       },
-      onError: (error) => addToast(error.message, 'error'),
+      onError: (error) => showError(error),
     })
   }
 
@@ -1271,9 +1274,9 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         if (selectedAssistantModeId === deletingId) setSelectedAssistantModeId(DEFAULT_ASSISTANT_MODE.id)
         setAssistantModeDeleteTarget(null)
         setAssistantModeForm(null)
-        addToast(_('reader.aiModeDeleted'), 'success')
+        notify.success({ key: 'reader.aiModeDeleted' })
       },
-      onError: (error) => addToast(error.message, 'error'),
+      onError: (error) => showError(error),
     })
   }
 
@@ -1290,7 +1293,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         setRenameThreadId(null)
         setRenameTitle('')
       },
-      onError: (error) => addToast(error.message, 'error'),
+      onError: (error) => showError(error),
     })
   }
 
@@ -1302,7 +1305,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         if (threadId === target.id) startNewChat()
         setDeleteTarget(null)
       },
-      onError: (error) => addToast(error.message, 'error'),
+      onError: (error) => showError(error),
     })
   }
 
@@ -1387,7 +1390,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
       if (requestGenerationRef.current !== requestGeneration) return
       setRetryRequest(activeThreadId ? { ...request, threadId: activeThreadId, regenerate: true } : request)
       if (!controller.signal.aborted) {
-        const message = error instanceof ApiError ? error.message : _('reader.aiRequestFailed')
+        const message = getUserErrorMessage(error, _, 'reader.aiRequestFailed')
         updateAssistant(assistantId, (current) => {
           const content = streamingTextStore.getText(assistantId) || current.content
           return { ...current, content: content ? `${content}\n\n${_('reader.aiRequestFailedWithMessage', { message })}` : _('reader.aiRequestFailedWithMessage', { message }) }
@@ -1425,7 +1428,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     const promptVariables = getAiPromptVariables(template)
     const selectedParagraph = aiContext?.paragraphText?.trim() || activeSelection?.paragraphText?.trim() || currentParagraph
     if (readingScope !== 'full_book' && chapterIndex >= 0 && selectedChapterReferences.some((referenceIndex) => referenceIndex > chapterIndex)) {
-      addToast(_('reader.aiFutureChapterWarning'))
+      notify.warning({ key: 'reader.aiFutureChapterWarning' })
     }
     const history: AiHistoryMessage[] = messages.map((message) => ({
       role: message.role,
@@ -1437,7 +1440,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     let chapterReferences: AiChapterReference[] | undefined
     if (referenceIndexes.size > 0) {
       if (!renderer?.getAiChapterText) {
-        addToast(_('reader.aiReaderNotReady'), 'error')
+        notify.error({ key: 'reader.aiReaderNotReady' })
         return
       }
       setPreparingReferences(true)
@@ -1452,14 +1455,14 @@ export default function AiPanel({ bookId }: { bookId: string }) {
           ...(reference.chapterTitle ? { chapterTitle: reference.chapterTitle } : {}),
         }))
       } catch (error) {
-        if (!(error instanceof Error && error.name === 'AbortError')) addToast(error instanceof Error ? error.message : _('reader.aiQuoteChapterFailed'), 'error')
+        if (!(error instanceof Error && error.name === 'AbortError')) showError(error, 'reader.aiQuoteChapterFailed')
         return
       } finally {
         setPreparingReferences(false)
       }
     }
     if (template.length > AI_MAX_CHAT_PROMPT_CHARS) {
-      addToast(_('reader.aiPromptTooLong'), 'error')
+      notify.error({ key: 'reader.aiPromptTooLong' })
       return
     }
     void runRequest({
@@ -1520,7 +1523,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         const refreshed = await threadQuery.refetch()
         if (refreshed.data?.data.id === threadId) setMessages(refreshed.data.data.messages.map(fromPersistedMessage))
       },
-      onError: (error) => addToast(error.message, 'error'),
+      onError: (error) => showError(error),
     })
   }
 
@@ -1534,9 +1537,9 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         setCopiedMessageId((current) => current === messageId ? null : current)
         copiedMessageTimerRef.current = null
       }, 1_800)
-      addToast(_('reader.aiCopied'))
+      notify.info({ key: 'reader.aiCopied' })
     } catch {
-      addToast(_('reader.aiCopyFailed'), 'error')
+      notify.error({ key: 'reader.aiCopyFailed' })
     }
   }
 
@@ -1553,9 +1556,9 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         note: message.content.trim(),
       })
       updateAssistant(message.id, (current) => ({ ...current, savedAsIdea: true }))
-      addToast(_('reader.aiSavedAsIdea'), 'success')
+      notify.success({ key: 'reader.aiSavedAsIdea' })
     } catch {
-      addToast(_('reader.aiSaveIdeaFailed'), 'error')
+      notify.error({ key: 'reader.aiSaveIdeaFailed' })
     }
   }
 
@@ -1582,16 +1585,16 @@ export default function AiPanel({ bookId }: { bookId: string }) {
       link.download = `${title.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim() || 'ai-conversation'}-${new Date().toISOString().slice(0, 10)}.md`
       link.click()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
-      addToast(_('reader.aiExported'), 'success')
+      notify.success({ key: 'reader.aiExported' })
     } catch {
-      addToast(_('reader.aiExportFailed'), 'error')
+      notify.error({ key: 'reader.aiExportFailed' })
     }
   }
 
   function selectModel(model: string) {
     const activeProfileId = statusQuery.data?.data.activeProfileId
     if (!model || model === statusQuery.data?.data.model || !activeProfileId || updateAiConfig.isPending || updateAiProfile.isPending) return
-    updateAiProfile.mutate({ id: activeProfileId, body: { model } }, { onError: (error) => addToast(error.message, 'error') })
+    updateAiProfile.mutate({ id: activeProfileId, body: { model } }, { onError: (error) => showError(error) })
   }
 
   async function buildBookIndex() {
@@ -1601,7 +1604,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     setPreparingIndex(true)
     try {
       if (!renderer?.getAiCorpus) {
-        addToast(_('reader.aiIndexReaderNotReady'), 'error')
+        notify.error({ key: 'reader.aiIndexReaderNotReady' })
         return
       }
       const corpus = await renderer.getAiCorpus(controller.signal)
@@ -1615,14 +1618,14 @@ export default function AiPanel({ bookId }: { bookId: string }) {
       }, {
         onError: (error) => {
           if (error instanceof Error && error.name === 'AbortError') return
-          addToast(error.message, 'error')
+          showError(error)
         },
         onSettled: () => {
           if (indexAbortRef.current === controller) indexAbortRef.current = null
         },
       })
     } catch (error) {
-      if (!(error instanceof Error && error.name === 'AbortError')) addToast(error instanceof Error ? error.message : _('reader.aiIndexBuildFailed'), 'error')
+      if (!(error instanceof Error && error.name === 'AbortError')) showError(error, 'reader.aiIndexBuildFailed')
       if (indexAbortRef.current === controller) indexAbortRef.current = null
     } finally {
       setPreparingIndex(false)
@@ -1636,16 +1639,16 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     }
     if (!indexBook.isPending && indexQuery.data?.data.status !== 'indexing') return
     indexAbortRef.current?.abort()
-    cancelIndex.mutate({ bookId }, { onError: (error) => addToast(error.message, 'error') })
+    cancelIndex.mutate({ bookId }, { onError: (error) => showError(error) })
   }
 
   function confirmClearIndex() {
     clearIndex.mutate(bookId, {
       onSuccess: () => {
         setClearIndexOpen(false)
-        addToast(_('reader.aiIndexCleared'), 'success')
+        notify.success({ key: 'reader.aiIndexCleared' })
       },
-      onError: (error) => addToast(error.message, 'error'),
+      onError: (error) => showError(error),
     })
   }
 
@@ -2084,10 +2087,10 @@ export default function AiPanel({ bookId }: { bookId: string }) {
           </div>
         </form>
       </Modal>}
-      {deleteTarget && <ConfirmDialog message={_('reader.aiDeleteConfirm')} onConfirm={confirmDelete} onClose={() => setDeleteTarget(null)} />}
-      {assistantModeDeleteTarget && <ConfirmDialog message={_('reader.aiModeDeleteConfirm', { name: assistantModeDeleteTarget.name })} confirmLabel={_('reader.aiDelete')} onConfirm={confirmDeleteAssistantMode} onClose={() => setAssistantModeDeleteTarget(null)} />}
-      {assistantModeRestoreOpen && <ConfirmDialog message={_('reader.aiRestoreDefaultConfirm')} confirmLabel={_('reader.aiRestoreDefault')} onConfirm={confirmRestoreAssistantMode} onClose={() => setAssistantModeRestoreOpen(false)} />}
-      {clearIndexOpen && <ConfirmDialog message={_('reader.aiIndexClearConfirm')} onConfirm={confirmClearIndex} onClose={() => setClearIndexOpen(false)} />}
+      {deleteTarget && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('reader.aiDeleteConfirm', { name: deleteTarget.title })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setDeleteTarget(null)} />}
+      {assistantModeDeleteTarget && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('reader.aiModeDeleteConfirm', { name: assistantModeDeleteTarget.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDeleteAssistantMode} onClose={() => setAssistantModeDeleteTarget(null)} />}
+      {assistantModeRestoreOpen && <ConfirmDialog title={_('settings.confirmRestoreTitle')} message={_('reader.aiRestoreDefaultConfirm')} confirmLabel={_('settings.confirmRestoreAction')} confirmVariant="primary" onConfirm={confirmRestoreAssistantMode} onClose={() => setAssistantModeRestoreOpen(false)} />}
+      {clearIndexOpen && <ConfirmDialog title={_('settings.confirmClearTitle')} message={_('reader.aiIndexClearConfirm')} confirmLabel={_('settings.confirmClearAction')} onConfirm={confirmClearIndex} onClose={() => setClearIndexOpen(false)} />}
     </div>
   )
 }

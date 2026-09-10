@@ -33,6 +33,11 @@ export interface TocScore {
   numE: number
 }
 
+interface ScoredPreset extends TocScore {
+  /** Number of levels with at least one reliable candidate. */
+  matchedLevels: number
+}
+
 /**
  * `$1`-replacement semantics for cleaning a matched line into a title.
  * `$1`..`$9` refer to capture groups; anything else is kept literally.
@@ -81,35 +86,49 @@ export function scorePattern(pattern: TocPatternLike, sample: string): TocScore 
 
 /** Aggregate a preset's score from its enabled patterns. */
 export function scorePreset(patterns: TocPatternLike[], sample: string): TocScore {
+  const scored = scorePresetDetails(patterns, sample)
+  return { csNum: scored.csNum, numE: scored.numE }
+}
+
+function scorePresetDetails(patterns: TocPatternLike[], sample: string): ScoredPreset {
   let csNum = 0
   let numE = 0
+  const matchedLevels = new Set<number>()
   for (const pattern of patterns) {
     if (pattern.enabled === false) continue
     const score = scorePattern(pattern, sample)
     csNum += score.csNum
     numE += score.numE
+    if (score.csNum > 0) matchedLevels.add(pattern.level)
   }
-  return { csNum, numE }
+  return { csNum, numE, matchedLevels: matchedLevels.size }
 }
 
 /**
  * Pick the best enabled preset for a sample.
- * Candidates need csNum >= numE*3; they must beat the current best by more
- * than 2. Stops early once a preset reaches maxNum > 70. Rules are expected to
- * be pre-sorted by sortOrder ascending (lower wins ties). Returns the rule id,
- * or null when nothing clears the bar.
+ * Candidates need csNum >= numE*3 and normally must beat the current best by
+ * more than 2. A preset that reliably matches more than one level may replace
+ * a near-tied flatter preset (within 2 candidates), because a volume heading
+ * can be sparse in the sample while still proving that the hierarchy exists.
+ * Rules are expected to be pre-sorted by sortOrder ascending (lower wins
+ * ties). Returns the rule id, or null when nothing clears the bar.
  */
 export function pickTocRule(rules: TocRuleLike[], sample: string): string | null {
   let maxNum = 0
   let bestId: string | null = null
+  let bestMatchedLevels = 0
 
   for (const rule of rules) {
     if (rule.patterns.length === 0) continue
-    const { csNum, numE } = scorePreset(rule.patterns, sample)
-    if (csNum >= numE * 3 && csNum > maxNum + 2) {
+    const { csNum, numE, matchedLevels } = scorePresetDetails(rule.patterns, sample)
+    if (csNum < numE * 3) continue
+
+    const clearlyBetter = csNum > maxNum + 2
+    const structuredNearTie = bestId !== null && matchedLevels > bestMatchedLevels && csNum >= maxNum - 2
+    if (clearlyBetter || structuredNearTie) {
       maxNum = csNum
       bestId = rule.id
-      if (maxNum > 70) break
+      bestMatchedLevels = matchedLevels
     }
   }
 

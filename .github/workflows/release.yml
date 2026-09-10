@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to publish, for example v0.2.0
+        description: Existing release tag to publish, for example v0.2.1
         required: true
         type: string
 
@@ -92,7 +92,7 @@ jobs:
             (line, index) => index > englishStart && (line === '## 中文' || line.startsWith('## [')),
           )
           const chineseEnd = lines.findIndex(
-            (line, index) => index > chineseStart && line.startsWith('## ['),
+            (line, index) => index > chineseStart && line.startsWith('### ['),
           )
 
           if (englishStart < 0 || chineseHeader < 0 || chineseStart < 0) {

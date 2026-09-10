@@ -66,6 +66,8 @@ export function useReaderRenderer({
   const readingThemeId = useUiStore((s) => s.readingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
   const fontFamily = useUiStore((s) => s.fontFamily)
+  const fontPreferences = useUiStore((s) => s.fontPreferences)
+  const fontOrder = useUiStore((s) => s.fontOrder)
   const storeFontSize = useUiStore((s) => s.fontSize)
   const fontWeight = useUiStore((s) => s.fontWeight)
   const storeLineHeight = useUiStore((s) => s.lineHeight)
@@ -110,7 +112,7 @@ export function useReaderRenderer({
   // fonts query is still loading an uploaded id resolves to the system
   // fallback; fontCss changing re-triggers the applyFont effect below.
   const { data: fontsData } = useFonts()
-  const resolvedFont = resolveFont(fontFamily, fontsData?.data ?? [])
+  const resolvedFont = resolveFont(fontFamily, fontsData?.data ?? [], fontPreferences, fontOrder)
   const fontStack = resolvedFont.stack
   const fontCss = fontCssFor(resolvedFont)
 

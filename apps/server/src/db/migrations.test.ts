@@ -7,9 +7,17 @@ import { describe, expect, it } from 'vitest'
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
 const baselineFile = path.join(migrationsDir, '0000_baseline.sql')
+const releaseMigrationFile = path.join(migrationsDir, '0001_release_0_2_1.sql')
 
 function applyBaseline(sqlite: Database.Database) {
   const sql = fs.readFileSync(baselineFile, 'utf8')
+  for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
+    sqlite.exec(statement)
+  }
+}
+
+function applyReleaseMigration(sqlite: Database.Database) {
+  const sql = fs.readFileSync(releaseMigrationFile, 'utf8')
   for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
     sqlite.exec(statement)
   }
@@ -64,6 +72,26 @@ describe('database baseline', () => {
 
     sqlite.exec("DELETE FROM ai_chunks WHERE id = 'c1'")
     expect(sqlite.prepare('SELECT text FROM ai_chunks_fts WHERE chunk_id = ?').all('c1')).toHaveLength(0)
+
+    sqlite.close()
+  })
+})
+
+describe('database release migration', () => {
+  it('upgrades the v0.2.0 baseline in one forward migration', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+
+    applyBaseline(sqlite)
+    applyReleaseMigration(sqlite)
+
+    const tagColumns = sqlite.prepare('PRAGMA table_info(tags)').all() as { name: string }[]
+    const tocRuleColumns = sqlite.prepare('PRAGMA table_info(toc_rules)').all() as { name: string }[]
+    const tocRuleIndexes = sqlite.prepare('PRAGMA index_list(toc_rules)').all() as { name: string }[]
+
+    expect(tagColumns.map((column) => column.name)).toContain('sort_order')
+    expect(tocRuleColumns.map((column) => column.name)).toContain('seed_key')
+    expect(tocRuleIndexes.map((index) => index.name)).toContain('toc_rules_user_seed_key_unique')
 
     sqlite.close()
   })

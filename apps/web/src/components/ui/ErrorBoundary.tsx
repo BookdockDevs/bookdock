@@ -1,6 +1,8 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 
+import i18n from '@/i18n/i18n'
+
 import { Button } from './Button'
 
 interface Props {
@@ -35,17 +37,17 @@ export default class ErrorBoundary extends Component<Props, State> {
             <line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
           <p className="text-lg font-medium text-stone-700 dark:text-stone-300">
-            Something went wrong
+            {i18n.t('errors.unexpectedTitle')}
           </p>
           <p className="max-w-sm text-sm text-stone-500">
-            {this.state.error?.message || 'An unexpected error occurred'}
+            {i18n.t('errors.unexpectedDescription')}
           </p>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => window.location.reload()}>
-              Refresh
+              {i18n.t('errors.refresh')}
             </Button>
             <Link to="/">
-              <Button variant="secondary">Back to Library</Button>
+              <Button variant="secondary">{i18n.t('errors.backToLibrary')}</Button>
             </Link>
           </div>
         </div>

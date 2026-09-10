@@ -1,7 +1,7 @@
 services:
   bookdock:
     container_name: bookdock
-    image: ${BOOKDOCK_IMAGE:-loofffff/bookdock:0.2.0}
+    image: ${BOOKDOCK_IMAGE:-loofffff/bookdock:0.2.1}
     build:
       context: .
     ports:
@@ -14,6 +14,7 @@ services:
       DATA_DIR: /data
       DEFAULT_USERNAME: ${DEFAULT_USERNAME:-admin}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      AUTH_RPM: ${AUTH_RPM:-5}
       # Optional: when omitted, a random secret is generated and persisted to /data/.jwt-secret.
       JWT_SECRET: ${JWT_SECRET:-}
     healthcheck:

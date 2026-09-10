@@ -1,4 +1,5 @@
 import { localDateString, useReadingByTag } from '@/api/hooks/reading-records'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
 import { cn } from '@/lib/utils'
@@ -30,9 +31,18 @@ export default function TagDistribution({ date, period, range }: TagDistribution
   const _ = useTranslation()
   const from = date ?? localDateString(range.from)
   const to = date ?? localDateString(range.to)
-  const { data } = useReadingByTag(from, to)
+  const tagsQuery = useReadingByTag(from, to)
+  const { data } = tagsQuery
   const items = data?.data ?? []
   const scopeLabel = date ?? formatPeriodLabel(period, range)
+
+  if (tagsQuery.isError) {
+    return (
+      <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+        <QueryErrorState isRetrying={tagsQuery.isFetching} onRetry={tagsQuery.refetch} />
+      </section>
+    )
+  }
 
   const total = items.reduce((sum, i) => sum + i.durationSeconds, 0)
   const kept = items.slice(0, MAX_SLICES)

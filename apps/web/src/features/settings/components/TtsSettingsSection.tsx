@@ -5,11 +5,13 @@ import type { TtsProvider, TtsServiceCreateReq, TtsServiceRes, TtsServiceUpdateR
 import { useCreateTtsService, useDeleteTtsService, useTestTtsService, useTestTtsServiceDraft, useTtsProviders, useTtsServices, useUpdateTtsService } from '@/api/hooks/useTts'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
-import { useToastStore } from '@/stores/toast.store'
 
 import TtsProviderIcon from './TtsProviderIcon'
 
@@ -78,10 +80,10 @@ function makeForm(provider: TtsProvider, catalog: typeof FALLBACK_PROVIDERS, ser
 
 export default function TtsSettingsSection({ id }: { id?: string }) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const user = useAuthStore((s) => s.user)
   const isGuest = user?.role === 'guest' || user?.guest === true
-  const { data: servicesData } = useTtsServices()
+  const servicesQuery = useTtsServices()
+  const { data: servicesData } = servicesQuery
   const { data: providersData } = useTtsProviders()
   const providers = providersData?.data ?? FALLBACK_PROVIDERS
   const create = useCreateTtsService()
@@ -94,6 +96,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
   const providerMenuRef = useRef<HTMLDivElement>(null)
   const [pendingDelete, setPendingDelete] = useState<TtsServiceRes | null>(null)
   const services = useMemo(() => servicesData?.data ?? [], [servicesData])
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
   useDismissiblePopup(providerMenuOpen, providerMenuRef, () => setProviderMenuOpen(false))
 
   function openCreate(provider: TtsProvider) {
@@ -117,23 +120,23 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
     }
     if (form.id) {
       const body: TtsServiceUpdateReq = { ...common, secrets: Object.fromEntries(Object.entries(form.secrets).filter(([, value]) => value.trim())) }
-      update.mutate({ id: form.id, body }, { onSuccess: () => { setForm(null); addToast(_('settings.ttsSaved'), 'success') }, onError: (error) => addToast(error.message, 'error') })
+      update.mutate({ id: form.id, body }, { onSuccess: () => { setForm(null); notify.success({ key: 'settings.ttsSaved' }) }, onError: showError })
     } else {
       const body: TtsServiceCreateReq = { ...common, secrets: Object.fromEntries(Object.entries(form.secrets).filter(([, value]) => value.trim())) }
-      create.mutate(body, { onSuccess: () => { setForm(null); addToast(_('settings.ttsSaved'), 'success') }, onError: (error) => addToast(error.message, 'error') })
+      create.mutate(body, { onSuccess: () => { setForm(null); notify.success({ key: 'settings.ttsSaved' }) }, onError: showError })
     }
   }
 
   function confirmDelete() {
     if (!pendingDelete) return
-    remove.mutate(pendingDelete.id, { onSuccess: () => { if (form?.id === pendingDelete.id) setForm(null); addToast(_('settings.ttsDeleted'), 'success') }, onError: (error) => addToast(error.message, 'error') })
+    remove.mutate(pendingDelete.id, { onSuccess: () => { if (form?.id === pendingDelete.id) setForm(null); notify.success({ key: 'settings.ttsDeleted' }) }, onError: showError })
     setPendingDelete(null)
   }
 
   function testCurrent() {
     if (!form) return
     if (form.id) {
-      test.mutate(form.id, { onSuccess: () => addToast(_('settings.ttsTestSuccess'), 'success'), onError: (error) => addToast(error.message, 'error') })
+      test.mutate(form.id, { onSuccess: () => notify.success({ key: 'settings.ttsTestSuccess' }), onError: showError })
       return
     }
     const body: TtsServiceCreateReq = {
@@ -145,7 +148,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
       options: form.options,
       secrets: Object.fromEntries(Object.entries(form.secrets).filter(([, value]) => value.trim())),
     }
-    testDraft.mutate(body, { onSuccess: () => addToast(_('settings.ttsTestSuccess'), 'success'), onError: (error) => addToast(error.message, 'error') })
+    testDraft.mutate(body, { onSuccess: () => notify.success({ key: 'settings.ttsTestSuccess' }), onError: showError })
   }
 
   return (
@@ -165,7 +168,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
         </div>}
       </div>
 
-      {isGuest ? <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.ttsGuestHint')}</p> : services.length === 0 ? <SettingsEmptyState>{_('settings.ttsEmpty')}</SettingsEmptyState> : <div className="divide-y divide-stone-100 dark:divide-stone-800">
+      {isGuest ? <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.ttsGuestHint')}</p> : servicesQuery.isError ? <QueryErrorState isRetrying={servicesQuery.isFetching} onRetry={servicesQuery.refetch} /> : services.length === 0 ? <SettingsEmptyState>{_('settings.ttsEmpty')}</SettingsEmptyState> : <div className="divide-y divide-stone-100 dark:divide-stone-800">
         {services.map((service) => <div key={service.id} className="flex items-center gap-3 py-3">
           <TtsProviderIcon provider={service.provider} className="h-8 w-8" />
           <div className="min-w-0 flex-1"><p className="truncate text-sm text-stone-800 dark:text-stone-100">{service.name}</p><p className="mt-0.5 truncate text-xs text-stone-400">{PROVIDER_NAMES[service.provider]}{service.model ? ` · ${service.model}` : ''}</p></div>
@@ -192,7 +195,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
         </div>)}
       </div>}
 
-      {pendingDelete && <ConfirmDialog message={_('settings.ttsDeleteConfirm')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
+      {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.ttsDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
       {form && <Modal title={_(form.id ? 'settings.ttsEdit' : 'settings.ttsAdd')} onClose={() => setForm(null)}>
         <TtsServiceForm form={form} setForm={setForm} onSave={save} onTest={testCurrent} saving={create.isPending || update.isPending} testing={test.isPending || testDraft.isPending} />
       </Modal>}

@@ -5,11 +5,13 @@ import type { TextTransformRes } from '@bookdock/shared'
 import { useDeleteTransform, useTransforms, useUpdateTransform } from '@/api/hooks/useTransforms'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
-import { useToastStore } from '@/stores/toast.store'
 
 import TransformForm from './TransformForm'
 
@@ -17,8 +19,8 @@ type FormState = { mode: 'create' } | { mode: 'edit'; rule: TextTransformRes } |
 
 export default function TransformsSettingsSection() {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
-  const { data } = useTransforms()
+  const transformsQuery = useTransforms()
+  const { data } = transformsQuery
   const updateTransform = useUpdateTransform()
   const deleteTransform = useDeleteTransform()
   // This section is the GLOBAL home: book-scoped rules and point patches are
@@ -55,18 +57,19 @@ export default function TransformsSettingsSection() {
 
   const [form, setForm] = useState<FormState>(null)
   const [pendingDelete, setPendingDelete] = useState<TextTransformRes | null>(null)
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
 
   function onToggle(rule: TextTransformRes) {
     updateTransform.mutate(
       { id: rule.id, body: { enabled: !rule.enabled } },
-      { onError: (err) => addToast(err.message, 'error') },
+      { onError: showError },
     )
   }
 
   function confirmDelete() {
     if (!pendingDelete) return
     deleteTransform.mutate(pendingDelete.id, {
-      onError: (err) => addToast(err.message, 'error'),
+      onError: showError,
     })
     setPendingDelete(null)
   }
@@ -75,10 +78,10 @@ export default function TransformsSettingsSection() {
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-4 flex items-center justify-between">
         <div className="min-w-0">
-          <h2 className="text-sm font-medium">{_('settings.transforms')}</h2>
-          <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">
-            {_('settings.transformsCount', { count: rules.length })}
-          </p>
+          <h2 className="flex items-baseline gap-1 text-sm font-medium">
+            <span>{_('settings.transforms')}</span>
+            {rules.length > 0 && <span className="text-xs font-normal tabular-nums text-stone-400 dark:text-stone-500">· {rules.length}</span>}
+          </h2>
         </div>
         <button
           type="button"
@@ -93,7 +96,9 @@ export default function TransformsSettingsSection() {
         </button>
       </div>
 
-      {rules.length === 0 ? (
+      {transformsQuery.isError ? (
+        <QueryErrorState isRetrying={transformsQuery.isFetching} onRetry={transformsQuery.refetch} />
+      ) : rules.length === 0 ? (
         <SettingsEmptyState>{_('settings.transformsEmpty')}</SettingsEmptyState>
       ) : (
         <div className="divide-y divide-stone-100 dark:divide-stone-800">
@@ -150,7 +155,9 @@ export default function TransformsSettingsSection() {
 
       {pendingDelete && (
         <ConfirmDialog
-          message={_('settings.transformsDeleteConfirm')}
+          title={_('settings.confirmDeleteTitle')}
+          message={_('settings.transformsDeleteConfirm', { name: pendingDelete.name?.trim() || pendingDelete.pattern || _('library.unknown') })}
+          confirmLabel={_('settings.confirmDeleteAction')}
           onConfirm={confirmDelete}
           onClose={() => setPendingDelete(null)}
         />
@@ -197,7 +204,6 @@ function TransformRow({ rule, onToggle, onEdit, onDelete }: { rule: TextTransfor
           </div>
         )}
       </div>
-      <Toggle checked={rule.enabled} onChange={onToggle} ariaLabel={_('settings.transformsEnabled')} />
       <button type="button" onClick={onEdit} aria-label={_('library.edit')} title={_('library.edit')} className={actionBtn}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
@@ -215,6 +221,7 @@ function TransformRow({ rule, onToggle, onEdit, onDelete }: { rule: TextTransfor
           <path d="M10 11v6M14 11v6" />
         </svg>
       </button>
+      <Toggle checked={rule.enabled} onChange={onToggle} ariaLabel={_('settings.transformsEnabled')} />
     </li>
   )
 }

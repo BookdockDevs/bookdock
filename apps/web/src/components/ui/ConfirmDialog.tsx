@@ -1,21 +1,24 @@
-import { useEffect } from 'react'
+import { useEffect, useId } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { Button } from './Button'
 
 interface ConfirmDialogProps {
+  title: string
   message: string
-  /** Primary action label; defaults to a danger-styled 删除 */
-  confirmLabel?: string
+  confirmLabel: string
+  confirmVariant?: 'danger' | 'primary'
   onConfirm: () => void
   onClose: () => void
 }
 
-/** Styled replacement for window.confirm — same blocking semantics (nothing
- *  else can be clicked while it is open), no browser chrome. */
-export default function ConfirmDialog({ message, confirmLabel, onConfirm, onClose }: ConfirmDialogProps) {
+/** Shared confirmation surface for destructive and reversible actions. */
+export default function ConfirmDialog({ title, message, confirmLabel, confirmVariant = 'danger', onConfirm, onClose }: ConfirmDialogProps) {
   const _ = useTranslation()
+  const dialogId = useId()
+  const titleId = `${dialogId}-title`
+  const messageId = `${dialogId}-message`
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -32,19 +35,53 @@ export default function ConfirmDialog({ message, confirmLabel, onConfirm, onClos
       onClick={onClose}
     >
       <div
-        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-sm flex-col gap-4 overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl dark:bg-stone-900"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={messageId}
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-md flex-col gap-5 overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl dark:bg-stone-900"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="text-sm leading-relaxed text-stone-700 dark:text-stone-200">{message}</p>
+        <div className="flex items-start gap-3">
+          <div className={confirmVariant === 'danger'
+            ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300'
+            : 'flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'}
+            aria-hidden="true"
+          >
+            {confirmVariant === 'danger' ? <WarningIcon /> : <RestoreIcon />}
+          </div>
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-sm font-semibold text-stone-900 dark:text-stone-100">{title}</h2>
+            <p id={messageId} className="mt-1.5 text-sm leading-relaxed text-stone-600 dark:text-stone-300">{message}</p>
+          </div>
+        </div>
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+          <Button type="button" variant="secondary" size="sm" onClick={onClose} autoFocus>
             {_('library.cancel')}
           </Button>
-          <Button type="button" size="sm" onClick={onConfirm} className="bg-red-600 text-white hover:bg-red-500 dark:bg-red-600 dark:hover:bg-red-500">
-            {confirmLabel ?? _('settings.fontsDelete')}
+          <Button type="button" variant={confirmVariant} size="sm" onClick={onConfirm}>
+            {confirmLabel}
           </Button>
         </div>
       </div>
     </div>
+  )
+}
+
+function WarningIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.3 3.8 2.5 17.5A2 2 0 0 0 4.2 20.5h15.6a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z" />
+      <path d="M12 9v4M12 17h.01" />
+    </svg>
+  )
+}
+
+function RestoreIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m9 14-5-5 5-5" />
+      <path d="M4 9h10.5A5.5 5.5 0 1 1 9 19H8" />
+    </svg>
   )
 }

@@ -41,6 +41,50 @@ describe('Register', () => {
     expect(navigateMock).toHaveBeenCalledWith({ to: '/' })
   })
 
+  it('trims the username before submitting', async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
+
+    render(<Register />)
+    fillForm('  newuser  ')
+    fireEvent.click(screen.getByText('auth.register'))
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith({ username: 'newuser', password: 'secret1' })
+    })
+  })
+
+  it('blocks registration when the username is missing or too long', async () => {
+    const mutateAsync = vi.fn()
+    ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
+
+    render(<Register />)
+    fireEvent.click(screen.getByText('auth.register'))
+    expect(screen.getByText('auth.errors.usernameRequired')).toBeInTheDocument()
+    expect(mutateAsync).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'x'.repeat(31) } })
+    fireEvent.click(screen.getByText('auth.register'))
+    expect(screen.getByText('auth.errors.registerUsernameTooLong')).toBeInTheDocument()
+    expect(mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('blocks registration when the password is missing or too long', async () => {
+    const mutateAsync = vi.fn()
+    ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
+
+    render(<Register />)
+    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'newuser' } })
+    fireEvent.click(screen.getByText('auth.register'))
+    expect(screen.getByText('auth.errors.passwordRequired')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: 'x'.repeat(257) } })
+    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'x'.repeat(257) } })
+    fireEvent.click(screen.getByText('auth.register'))
+    expect(screen.getByText('auth.errors.passwordTooLong')).toBeInTheDocument()
+    expect(mutateAsync).not.toHaveBeenCalled()
+  })
+
   it('blocks submit when passwords do not match', async () => {
     const mutateAsync = vi.fn()
     ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })

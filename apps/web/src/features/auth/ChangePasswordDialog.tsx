@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 
+import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH } from '@bookdock/shared'
+
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { notify } from '@/lib/notifications'
 import { authErrorKey } from './errors'
 import { useChangePassword } from './hooks'
 
@@ -14,7 +16,6 @@ interface ChangePasswordDialogProps {
 
 export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDialogProps) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const changePassword = useChangePassword()
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -35,17 +36,33 @@ export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDi
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    if (!oldPassword) {
+      setError(_('auth.errors.passwordRequired'))
+      return
+    }
+    if (oldPassword.length > AUTH_PASSWORD_MAX_LENGTH) {
+      setError(_('auth.errors.passwordTooLong'))
+      return
+    }
+    if (!newPassword) {
+      setError(_('auth.errors.passwordRequired'))
+      return
+    }
+    if (newPassword.length < AUTH_PASSWORD_MIN_LENGTH) {
+      setError(_('auth.passwordTooShort'))
+      return
+    }
+    if (newPassword.length > AUTH_PASSWORD_MAX_LENGTH) {
+      setError(_('auth.errors.passwordTooLong'))
+      return
+    }
     if (newPassword !== confirmPassword) {
       setError(_('auth.passwordMismatch'))
       return
     }
-    if (newPassword.length < 6) {
-      setError(_('auth.passwordTooShort'))
-      return
-    }
     try {
       await changePassword.mutateAsync({ oldPassword, newPassword })
-      addToast(_('auth.passwordChanged'), 'success')
+      notify.success({ key: 'auth.passwordChanged' })
       onClose()
     } catch (err) {
       setError(err instanceof ApiError && err.code === 'UNAUTHORIZED' ? _('auth.errors.wrongOldPassword') : _(authErrorKey(err)))
@@ -59,6 +76,7 @@ export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDi
     >
       <form
         onSubmit={handleSubmit}
+        noValidate
         className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
         onClick={(e) => e.stopPropagation()}
       >
@@ -71,8 +89,13 @@ export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDi
             id="oldPassword"
             type="password"
             value={oldPassword}
-            onChange={(e) => setOldPassword(e.target.value)}
+            onChange={(e) => {
+              setOldPassword(e.target.value)
+              setError(null)
+            }}
             required
+            maxLength={AUTH_PASSWORD_MAX_LENGTH}
+            autoComplete="current-password"
             className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
           />
         </div>
@@ -82,8 +105,13 @@ export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDi
             id="newPassword"
             type="password"
             value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
+            onChange={(e) => {
+              setNewPassword(e.target.value)
+              setError(null)
+            }}
             required
+            maxLength={AUTH_PASSWORD_MAX_LENGTH}
+            autoComplete="new-password"
             className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
           />
         </div>
@@ -93,12 +121,17 @@ export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDi
             id="confirmNewPassword"
             type="password"
             value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value)
+              setError(null)
+            }}
             required
+            maxLength={AUTH_PASSWORD_MAX_LENGTH}
+            autoComplete="new-password"
             className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
           />
         </div>
-        {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+        {error && <p role="alert" aria-live="polite" className="mb-4 text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-3">
           <Button type="button" variant="ghost" onClick={onClose}>
             {_('library.cancel')}

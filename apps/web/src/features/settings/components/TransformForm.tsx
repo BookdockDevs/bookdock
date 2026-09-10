@@ -3,13 +3,16 @@ import { useState } from 'react'
 import type { TextTransformRes, TransformCreateReq, TransformUpdateReq } from '@bookdock/shared'
 
 import { useCreateTransform, useUpdateTransform } from '@/api/hooks/useTransforms'
-import { Button } from '@/components/ui/Button'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
 import type { SelectionInfo } from '../../reader/types'
+import SettingsFormActions from './SettingsFormActions'
+import SettingsFormField from './SettingsFormField'
+import { settingsFormClass, settingsInputClass, settingsTextareaClass } from './settingsForm'
 
 interface TransformFormProps {
   /** Book context: unlocks the 本书规则 scope (and point creation from a selection) */
@@ -50,7 +53,6 @@ function initialScope(
 
 export default function TransformForm({ bookId, initial, selection, onDone }: TransformFormProps) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const createTransform = useCreateTransform()
   const updateTransform = useUpdateTransform()
 
@@ -83,8 +85,13 @@ export default function TransformForm({ bookId, initial, selection, onDone }: Tr
   // patch. In the settings page (global-only) it would be three dead buttons.
   const showScope = !!bookId || !!selection || initial?.matchType === 'point'
 
-  function onError(err: Error) {
-    addToast(err.message, 'error')
+  function onError(err: unknown) {
+    notify.error(getUserErrorNotification(err))
+  }
+
+  function onSaved() {
+    notify.success({ key: 'toast.transformSaved' })
+    onDone()
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -134,7 +141,7 @@ export default function TransformForm({ bookId, initial, selection, onDone }: Tr
           body.bookId = bookId
         }
       }
-      updateTransform.mutate({ id: initial.id, body }, { onSuccess: onDone, onError })
+      updateTransform.mutate({ id: initial.id, body }, { onSuccess: onSaved, onError })
     } else {
       const pointSnapshot = selection && trimmed === selectionText
         ? (selection.pointText?.trim() || trimmed)
@@ -161,12 +168,12 @@ export default function TransformForm({ bookId, initial, selection, onDone }: Tr
             pattern: trimmed,
             isRegex,
           }
-      createTransform.mutate(body, { onSuccess: onDone, onError })
+      createTransform.mutate(body, { onSuccess: onSaved, onError })
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <form onSubmit={handleSubmit} noValidate className={settingsFormClass}>
       {showScope && (
         <div>
           <div className="mb-2 flex rounded-lg border border-stone-200 p-0.5 dark:border-stone-700">
@@ -174,8 +181,9 @@ export default function TransformForm({ bookId, initial, selection, onDone }: Tr
               <button
                 key={value}
                 type="button"
-                disabled={value === 'point' ? !pointAvailable : value === 'book' && !bookId}
+                disabled={saving || (value === 'point' ? !pointAvailable : value === 'book' && !bookId)}
                 onClick={() => setScope(value)}
+                aria-pressed={scope === value}
                 className={cn(
                   'flex-1 rounded-md px-2 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40',
                   scope === value
@@ -197,39 +205,37 @@ export default function TransformForm({ bookId, initial, selection, onDone }: Tr
       )}
 
       <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
-        <label className={cn('block min-w-0', scope !== 'global' && 'col-span-2')}>
-          <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">{_('settings.transformsName')}</span>
+        <SettingsFormField label={_('settings.transformsName')} className={scope !== 'global' ? 'sm:col-span-2' : undefined}>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={_('settings.transformsNamePlaceholder')}
-            className={inputClass}
+            disabled={saving}
+            className={settingsInputClass}
           />
-        </label>
+        </SettingsFormField>
         {/* 分组 is a grouping tool for GLOBAL rules only (the settings page
             groups by it); book-scoped rules and point patches never display it,
             so the field is hidden and the stored value is cleared. */}
         {scope === 'global' && (
-          <label className="block min-w-0">
-            <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">{_('settings.transformsGroup')}</span>
+          <SettingsFormField label={_('settings.transformsGroup')}>
             <input
               type="text"
               value={group}
               onChange={(e) => setGroup(e.target.value)}
-              placeholder={_('settings.transformsGroupPlaceholder')}
-              className={inputClass}
+              disabled={saving}
+              className={settingsInputClass}
             />
-          </label>
+          </SettingsFormField>
         )}
       </div>
 
       <div className="min-w-0">
-        <label className="block">
-          <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">
-            {_('settings.transformsPattern')}
-            <span className="text-red-500"> *</span>
-          </span>
+        <SettingsFormField
+          label={_('settings.transformsPattern')}
+          required
+          error={patternError === 'required' ? _('settings.transformsPatternRequired') : patternError === 'invalidRegex' ? _('settings.transformsRegexInvalid') : undefined}
+        >
           <textarea
             rows={2}
             value={pattern}
@@ -237,49 +243,34 @@ export default function TransformForm({ bookId, initial, selection, onDone }: Tr
               setPattern(e.target.value)
               setPatternError(null)
             }}
-            className={textareaClass}
+            disabled={saving}
+            aria-invalid={patternError !== null || undefined}
+            className={settingsTextareaClass}
           />
-        </label>
-        {patternError === 'required' && (
-          <p className="mt-1 text-xs text-red-500">{_('settings.transformsPatternRequired')}</p>
-        )}
-        {patternError === 'invalidRegex' && (
-          <p className="mt-1 text-xs text-red-500">{_('settings.transformsRegexInvalid')}</p>
-        )}
+        </SettingsFormField>
       </div>
 
       <div className="min-w-0">
-        <label className="block">
-          <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">{_('settings.transformsReplacement')}</span>
+        <SettingsFormField label={_('settings.transformsReplacement')}>
           <textarea
             rows={2}
             value={replacement}
             onChange={(e) => setReplacement(e.target.value)}
             placeholder={_('settings.transformsReplacementPlaceholder')}
-            className={textareaClass}
+            disabled={saving}
+            className={settingsTextareaClass}
           />
-        </label>
+        </SettingsFormField>
       </div>
 
       <div className="flex flex-wrap gap-x-6 gap-y-2">
         {!isPoint && (
-          <Toggle label={_('settings.transformsRegex')} checked={isRegex} onChange={setIsRegex} />
+          <Toggle label={_('settings.transformsRegex')} checked={isRegex} onChange={setIsRegex} disabled={saving} />
         )}
-        <Toggle label={_('settings.transformsCaseSensitive')} checked={caseSensitive} onChange={setCaseSensitive} />
+        <Toggle label={_('settings.transformsCaseSensitive')} checked={caseSensitive} onChange={setCaseSensitive} disabled={saving} />
       </div>
 
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" size="sm" onClick={onDone} disabled={saving}>
-          {_('library.cancel')}
-        </Button>
-        <Button type="submit" size="sm" disabled={saving}>
-          {_('library.save')}
-        </Button>
-      </div>
+      <SettingsFormActions onCancel={onDone} cancelDisabled={saving} saveDisabled={saving} />
     </form>
   )
 }
-
-const inputClass = 'h-9 w-full rounded-lg border border-stone-200 bg-white px-2.5 text-sm text-stone-700 outline-none transition-colors placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500'
-
-const textareaClass = 'w-full resize-none rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-sm leading-relaxed text-stone-700 outline-none transition-colors placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500'

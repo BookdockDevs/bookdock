@@ -7,7 +7,8 @@ import { usePrefetchBookReadingStats } from '@/api/hooks/reading-records'
 import { useBookTransforms } from '@/api/hooks/useTransforms'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { useUiStore, getEffectiveTheme } from '@/stores/ui.store'
 
 import { cn } from '@/lib/utils'
@@ -95,7 +96,6 @@ export default function Reader() {
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setCurrentChapter = useReaderState((s) => s.setCurrentChapter)
   const setCurrentChapterIndex = useReaderState((s) => s.setCurrentChapterIndex)
-  const addToast = useToastStore((s) => s.addToast)
   const readingMode = useUiStore((s) => s.readingMode)
   const toolbarLocked = useUiStore((s) => s.toolbarLocked)
   const createAnnotation = useCreateAnnotation(id)
@@ -357,6 +357,7 @@ export default function Reader() {
       )
       void queryClient.invalidateQueries({ queryKey: ['progress', id], refetchType: 'none' })
     },
+    onError: (error) => notify.error(getUserErrorNotification(error, 'reader.progressSaveFailed')),
   })
 
   const pendingProgress = useRef<ReadingProgressUpdateReq | null>(null)
@@ -419,11 +420,34 @@ export default function Reader() {
 
   const chaptersQuery = useBookChapters(id)
 
+  const progressErrorShownRef = useRef(false)
+  const chaptersErrorShownRef = useRef(false)
+  useEffect(() => {
+    if (!progressQuery.isError) {
+      progressErrorShownRef.current = false
+      return
+    }
+    if (progressErrorShownRef.current) return
+    progressErrorShownRef.current = true
+    notify.error({ key: 'reader.progressLoadFailed' })
+  }, [progressQuery.isError])
+  useEffect(() => {
+    if (!chaptersQuery.isError) {
+      chaptersErrorShownRef.current = false
+      return
+    }
+    if (chaptersErrorShownRef.current) return
+    chaptersErrorShownRef.current = true
+    notify.error({ key: 'reader.chapterLoadFailed' })
+  }, [chaptersQuery.isError])
+
   // Gated on bookQuery resolution: the reader mounts only once the success
   // branch's container div exists — mounting earlier grabs the loading-branch
   // div, which React replaces when bookQuery resolves, leaving the view
   // appended to a detached subtree (iframe never loads -> first-open hang).
-  const contentUrl = id && bookQuery.data?.data ? `/api/v1/books/${id}/file` : ''
+  const contentUrl = id && bookQuery.data?.data
+    ? `/api/v1/books/${id}/file?v=${bookQuery.data.data.updatedAt}`
+    : ''
 
   // Latch initialCfi at first resolve: later refetches of ['progress'] (e.g.
   // StatsPanel mounting) must not remount the renderer
@@ -447,7 +471,7 @@ export default function Reader() {
   const [bookReady, setBookReady] = useState(false)
   // kind=timeout: watchdog fired, likely network-related; kind=parse: renderer
   // onError, the file itself failed to load
-  const [loadError, setLoadError] = useState<{ message: string; kind: 'timeout' | 'parse' } | null>(null)
+  const [loadError, setLoadError] = useState<{ kind: 'timeout' | 'parse' } | null>(null)
   useEffect(() => {
     setBookReady(false)
     setLoadError(null)
@@ -457,7 +481,7 @@ export default function Reader() {
   useEffect(() => {
     if (bookReady || !contentUrl) return
     const timer = setTimeout(() => {
-      if (!bookReady) setLoadError({ message: '书籍加载超时', kind: 'timeout' })
+      if (!bookReady) setLoadError({ kind: 'timeout' })
     }, 30000)
     return () => clearTimeout(timer)
   }, [bookReady, contentUrl])
@@ -510,7 +534,7 @@ export default function Reader() {
       setBookReady(true)
       setLoadError(null)
     },
-    onError: (err) => setLoadError({ message: err.message || '加载失败', kind: 'parse' }),
+    onError: () => setLoadError({ kind: 'parse' }),
     onFootnoteOpen: (entry) => {
       setSelection(null)
       setSettingsOpen(false)
@@ -610,7 +634,7 @@ export default function Reader() {
       const known = useReaderState.getState().invalidTransformIds
       const fresh = e.ids.filter((id) => !known.includes(id))
       if (fresh.length) {
-        addToast(_('reader.transformsInvalidToast', { count: fresh.length }), 'error')
+        notify.error({ key: 'reader.transformsInvalidToast', params: { count: fresh.length } })
       }
       useReaderState.getState().addInvalidTransformIds(e.ids)
     },
@@ -913,9 +937,9 @@ export default function Reader() {
     if (currentBookmark) {
       try {
         await deleteAnnotation.mutateAsync(currentBookmark.id)
-        addToast(_('reader.bookmarkRemoved'), 'success')
-      } catch {
-        addToast(_('reader.bookmarkFailed'), 'error')
+        notify.success({ key: 'reader.bookmarkRemoved' })
+      } catch (err) {
+        notify.error(getUserErrorNotification(err, 'reader.bookmarkFailed'))
       }
       return
     }
@@ -928,11 +952,11 @@ export default function Reader() {
         text: snippet?.trim() || currentChapter || _('reader.bookmark'),
         chapter: currentChapter ?? undefined,
       })
-      addToast(_('reader.bookmarkAdded'), 'success')
-    } catch {
-      addToast(_('reader.bookmarkFailed'), 'error')
+      notify.success({ key: 'reader.bookmarkAdded' })
+    } catch (err) {
+      notify.error(getUserErrorNotification(err, 'reader.bookmarkFailed'))
     }
-  }, [currentBookmark, currentChapter, currentCfi, createAnnotation, deleteAnnotation, addToast, _])
+  }, [currentBookmark, currentChapter, currentCfi, createAnnotation, deleteAnnotation, _])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1020,7 +1044,7 @@ export default function Reader() {
           <line x1="12" y1="8" x2="12" y2="12" />
           <line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
-        <span className="font-medium text-red-500">加载失败: {(bookQuery.error as Error)?.message || '未知错误'}</span>
+        <span className="font-medium text-red-500">{getUserErrorMessage(bookQuery.error, _, 'errors.loadFailed')}</span>
       </div>
     )
   }
@@ -1093,22 +1117,22 @@ export default function Reader() {
                       <line x1="12" y1="8" x2="12" y2="12" />
                       <line x1="12" y1="16" x2="12.01" y2="16" />
                     </svg>
-                    <span className="font-medium text-red-500">{loadError.message}</span>
+                    <span className="font-medium text-red-500">{loadError.kind === 'timeout' ? _('reader.bookLoadTimeout') : _('reader.bookLoadParseFailed')}</span>
                     <p className="max-w-xs text-center text-xs text-[var(--bd-read-sub)]">
                       {loadError.kind === 'timeout'
-                        ? '加载可能受网络影响，请检查网络连接后刷新重试'
-                        : '该文件可能格式不支持或已损坏，请确认文件完整性后重新上传'}
+                        ? _('reader.bookLoadNetworkHint')
+                        : _('reader.bookLoadFileHint')}
                     </p>
                     <div className="pointer-events-auto mt-2 flex gap-3">
                       <Link to="/">
                         <button className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700">
-                          返回书库
+                          {_('reader.back')}
                         </button>
                       </Link>
                       {loadError.kind === 'parse' && (
                         <Link to="/">
                           <button className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700">
-                            重新上传
+                            {_('reader.reupload')}
                           </button>
                         </Link>
                       )}
@@ -1116,7 +1140,7 @@ export default function Reader() {
                         className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
                         onClick={() => window.location.reload()}
                       >
-                        刷新
+                        {_('reader.refresh')}
                       </button>
                     </div>
                   </>

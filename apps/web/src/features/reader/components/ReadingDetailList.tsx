@@ -3,8 +3,11 @@ import { useEffect, useState } from 'react'
 import type { ReadingDetailManualItem, ReadingSessionUpdateReq } from '@bookdock/shared'
 
 import { useDeleteSession, useReadingDetailInfinite, useUpdateSession } from '@/api/hooks/reading-records'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 
 import AddRecordDialog from './AddRecordDialog'
 import SessionEditRow from './SessionEditRow'
@@ -39,13 +42,13 @@ interface ReadingDetailListProps {
  */
 export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const detail = useReadingDetailInfinite(bookId)
   const updateSession = useUpdateSession()
   const deleteSession = useDeleteSession()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!menu) return
@@ -65,16 +68,20 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
   }, [menu])
 
   const handleDelete = (id: string) => {
-    if (!window.confirm(_('reader.sessionDeleteConfirm'))) return
-    deleteSession.mutate(id, {
-      onSuccess: () => addToast(_('reader.sessionDeleted'), 'success'),
-      onError: toastError,
-    })
+    setPendingDeleteId(id)
   }
 
-  const toastError = (err: unknown) => {
-    const message = err instanceof Error && err.message ? err.message : _('reader.sessionActionFailed')
-    addToast(message, 'error')
+  const confirmDelete = () => {
+    if (!pendingDeleteId) return
+    deleteSession.mutate(pendingDeleteId, {
+      onSuccess: () => notify.success({ key: 'reader.sessionDeleted' }),
+      onError: notifyError,
+    })
+    setPendingDeleteId(null)
+  }
+
+  const notifyError = (err: unknown) => {
+    notify.error(getUserErrorNotification(err, 'reader.sessionActionFailed'))
   }
 
   // Global ordinal (index + 1), not chapter titles: novels with volumes restart
@@ -107,6 +114,14 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
           </svg>
         </button>
       </div>
+      {detail.isError ? (
+        <QueryErrorState
+          className="py-4"
+          isRetrying={detail.isFetching}
+          onRetry={detail.refetch}
+        />
+      ) : (
+        <>
       <ul className="flex flex-col gap-1.5">
         {items.map((item) =>
           item.kind === 'autoDay' ? (
@@ -140,10 +155,10 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
                   onSave={(body: ReadingSessionUpdateReq) => {
                     updateSession.mutate({ id: item.id, body }, {
                       onSuccess: () => {
-                        addToast(_('reader.sessionUpdated'), 'success')
+                        notify.success({ key: 'reader.sessionUpdated' })
                         setEditingId(null)
                       },
-                      onError: toastError,
+                      onError: notifyError,
                     })
                   }}
                 />
@@ -161,11 +176,15 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
       </ul>
       {detail.hasNextPage && (
         <button
-          onClick={() => detail.fetchNextPage()}
+          type="button"
+          disabled={detail.isFetchingNextPage}
+          onClick={() => void detail.fetchNextPage()}
           className="mt-2 w-full rounded-lg border border-[var(--bd-read-accent)] py-1.5 text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-[var(--bd-read-text)]"
         >
           {_('reader.sessionLoadMore')}
         </button>
+      )}
+        </>
       )}
       {addOpen && <AddRecordDialog bookId={bookId} onClose={() => setAddOpen(false)} />}
       {menu && (
@@ -198,6 +217,15 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
             {_('reader.sessionDelete')}
           </button>
         </div>
+      )}
+      {pendingDeleteId && (
+        <ConfirmDialog
+          title={_('settings.confirmDeleteTitle')}
+          message={_('reader.sessionDeleteConfirm')}
+          confirmLabel={_('settings.confirmDeleteAction')}
+          onConfirm={confirmDelete}
+          onClose={() => setPendingDeleteId(null)}
+        />
       )}
     </div>
   )

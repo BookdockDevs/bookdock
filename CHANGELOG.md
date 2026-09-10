@@ -2,7 +2,41 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.2.0] - Unreleased
+## [0.2.1] - Unreleased
+
+### Highlights
+
+- Expanded the reader workspace with richer AI conversations, annotation and sharing flows, speech playback, text transformations, and seamless continuous scrolling.
+- Improved library and settings management with responsive presentation, ordered tags, editable TOC presets, unified font management, and clearer recoverable feedback.
+- Hardened account validation and failed-login protection for self-hosted users.
+
+### Added
+
+- Reader assistant context slots for selected text, selected paragraphs, and chapters, plus chapter reference chips, durable conversations, stale-history protection, and shared request contracts.
+- AI chat from quoted selections, paragraph-aware selection handling, reader-font propagation, richer quote and idea previews, and consistent annotation/share limits and actions.
+- Stable browser speech playback with selected voice languages and delayed voice-list refresh, plus an authenticated same-origin Edge TTS gateway with timeout, cancellation, framing, ordering, and shared contracts.
+- Provider branding assets and icons for AI and TTS settings, including LM Studio detection.
+- Seamless continuous scrolling with viewport-aware adjacent-section loading, reserved heights, edge wheel intent, retained placeholders, and distant-view virtualization.
+- Stable point-patch range resolution across text nodes and shared web/server TXT export handling for patches spanning text runs.
+- User-defined tag ordering with duplicate-name protection for tags and shelves.
+- Stable built-in TOC preset identity, restore-missing-presets support, and an ordered pattern editor whose levels follow the visible rows.
+- A unified system, built-in, and uploaded font catalog with per-user visibility, display names, ordering, and uploaded-font scope management.
+- Configurable failed-login rate limiting through `AUTH_RPM`, shared validation limits for account credentials and user-owned names, inline error states, typed transient notifications, and a root error boundary.
+
+### Changed
+
+- Improved reader presentation and navigation on narrow screens, with more consistent touch interactions, selection lifecycle, history navigation, page titles, themed favicons, statistics, and settings editing.
+- Refined book details, cover editing, context menus, shelf/tag counts, empty states, filters, responsive library styling, settings synchronization, and mobile row layout.
+- Improved reader transformations, TXT exports, search/annotation behavior, sharing templates, quote actions, and user-visible text consistency across reading workflows.
+- Refined reader assistant controls, context handling, model selection, restored sessions, and provider behavior without exposing secrets or hidden execution details.
+
+### Fixed
+
+- Preserve continuous-scroll position when adjacent chapters load or late iframe layout expansion occurs; ignore no-op anchor recalculations and invalid transient fractions so loading a chapter cannot jump back to the current chapter start.
+- Prevent mixed view/placeholder geometry failures while distant continuous-scroll sections are virtualized and restored.
+- Preserve leading whitespace and line breaks in edited book descriptions, while still treating whitespace-only values as empty.
+
+## [0.2.0] - 2026-09-08
 
 ### Highlights
 
@@ -38,7 +72,41 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.2.0] - 待发布
+### [0.2.1] - 待发布
+
+#### 主要更新
+
+- 扩展阅读工作区，完善 AI 对话、标注与分享、语音朗读、正文变换和无缝连卷滚动。
+- 改进书库和设置管理，加入响应式展示、标签排序、可编辑目录规则、统一字体管理以及更清晰的可恢复反馈。
+- 加强自托管用户的账户校验和登录失败保护。
+
+#### 新增
+
+- 阅读助手支持选中文本、选中段落和章节上下文槽位，并加入章节引用 chips、持久化对话、旧历史保护和共享请求契约。
+- 支持从引用选区发起 AI 对话，完善段落级选区处理、阅读器字体传递、引用与想法预览，以及标注/分享长度限制和操作顺序。
+- 稳定浏览器系统朗读，支持指定声音语言和延迟声音列表刷新；新增带超时、取消、帧解析、顺序收集和共享契约的同源鉴权 Edge TTS 网关。
+- 新增 AI/TTS Provider 品牌资源和设置图标，并支持 LM Studio 识别。
+- 新增无缝连卷滚动，支持按视口加载相邻章节、预留高度、边界滚轮意图、保留占位和远处视图虚拟化。
+- 统一跨文本节点的 point patch 范围解析，并让 Web 与 server TXT 导出支持跨文本运行的替换。
+- 支持标签自定义排序，以及标签和书架的同用户重名保护。
+- 支持内置目录规则稳定来源标识、缺失规则恢复，以及按可见行顺序确定层级的目录模式编辑器。
+- 合并系统字体、内置字体和上传字体的统一目录，支持按用户控制可见性、显示名称、顺序和上传字体作用域。
+- 通过 `AUTH_RPM` 配置登录失败限流，统一账户凭据和用户自建名称的校验限制，并加入页面内错误、类型化临时通知和应用根级错误边界。
+
+#### 变更
+
+- 改进窄屏阅读器展示和导航，统一触控交互、选区生命周期、历史导航、页面标题、主题图标、统计和设置列表编辑体验。
+- 优化书籍详情、封面编辑、上下文菜单、书架/标签计数、空状态、筛选器、响应式书库样式、设置同步和移动端行布局。
+- 改进正文变换、TXT 导出、搜索/标注、分享模板、引用操作，以及阅读流程中的用户可见文本一致性。
+- 优化阅读助手控件、上下文处理、模型选择、恢复会话和 Provider 行为，不暴露密钥或隐藏执行细节。
+
+#### 修复
+
+- 相邻章节加载或 iframe 延迟布局展开时保持连卷滚动位置；忽略无变化的锚点重算和无效临时 fraction，避免加载新章节时跳回当前章开头。
+- 修复远处连卷章节虚拟化和恢复过程中的视图/占位几何冲突。
+- 编辑书籍简介时保留开头空白和换行，同时仍将纯空白内容视为空值。
+
+### [0.2.0] - 2026-09-08
 
 #### 主要更新
 

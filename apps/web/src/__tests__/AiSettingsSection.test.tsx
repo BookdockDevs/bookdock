@@ -328,11 +328,17 @@ describe('AiSettingsSection', () => {
 
     render(<AiSettingsSection />)
     expect(screen.getByText('快捷指令')).toBeInTheDocument()
+    expect(screen.getByText('· 5')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '保存快捷指令' })).toBeNull()
     expect(screen.queryByRole('button', { name: '上移' })).toBeNull()
     expect(screen.queryByRole('button', { name: '下移' })).toBeNull()
+    expect(screen.queryAllByRole('button', { name: '调整快捷指令顺序' })).toHaveLength(0)
+    expect(screen.queryAllByRole('button', { name: '删除快捷指令' })).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
     expect(screen.getAllByRole('button', { name: '调整快捷指令顺序' })).toHaveLength(5)
-    fireEvent.click(screen.getByRole('button', { name: '添加快捷指令' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存排序并退出编辑模式' }))
+    expect(screen.queryAllByRole('button', { name: '调整快捷指令顺序' })).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: '新建快捷指令' }))
     fireEvent.change(screen.getByLabelText('指令名称'), { target: { value: '线索提取' } })
     fireEvent.change(screen.getByLabelText('提示词模板'), { target: { value: '请列出当前内容中的关键线索。' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -345,14 +351,65 @@ describe('AiSettingsSection', () => {
     )
   })
 
+  it('shows inline validation for an empty quick command', () => {
+    useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+    const mutate = vi.fn()
+    vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
+
+    render(<AiSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '新建快捷指令' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(screen.getByText('指令名称不能为空')).toBeInTheDocument()
+    expect(screen.getByText('提示词模板不能为空')).toBeInTheDocument()
+    expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it('confirms quick command deletion before persisting', () => {
+    useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+    const mutate = vi.fn()
+    vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
+
+    render(<AiSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    fireEvent.click(screen.getAllByRole('button', { name: '删除快捷指令' })[0]!)
+
+    expect(screen.getByText('确定要删除快捷指令“解释这段”吗？')).toBeInTheDocument()
+    expect(mutate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+
+    expect(mutate).toHaveBeenCalledWith(
+      { prompts: expect.any(Array) },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    )
+  })
+
+  it('confirms before restoring quick command defaults', () => {
+    useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+    const mutate = vi.fn()
+    vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
+
+    render(<AiSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认快捷指令' }))
+
+    expect(screen.getByText('恢复默认会移除自定义快捷指令，并还原已修改的内置指令。确定继续吗？')).toBeInTheDocument()
+    expect(mutate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认' }))
+
+    expect(mutate).toHaveBeenCalledWith(
+      { prompts: null },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    )
+  })
+
   it('explains quick-command variables and inserts them at the prompt cursor', () => {
     useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
     vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
 
     render(<AiSettingsSection />)
-    fireEvent.click(screen.getByRole('button', { name: '添加快捷指令' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建快捷指令' }))
 
-    expect(screen.getByPlaceholderText('输入指令名称')).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('输入指令名称')).not.toBeInTheDocument()
     expect(screen.getByPlaceholderText('输入提示词模板，使用上方变量插入阅读内容…')).toBeInTheDocument()
     expect(screen.queryByText('点击变量可将其插入到提示词模板的光标位置')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '查看变量说明' }))

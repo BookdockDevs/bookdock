@@ -79,10 +79,23 @@ describe('shelves service', () => {
     expect(shelves[0].bookCount).toBe(0)
   })
 
+  it('should reject duplicate shelf names for the same user', async () => {
+    await createShelf(userId, 'Favorites')
+
+    await expect(createShelf(userId, 'Favorites')).rejects.toMatchObject({ code: 'SHELF_NAME_TAKEN' })
+  })
+
   it('should update a shelf name', async () => {
     const shelf = await createShelf(userId, 'Old Name')
     const updated = await updateShelf(userId, shelf.id, 'New Name')
     expect(updated.name).toBe('New Name')
+  })
+
+  it('should reject renaming a shelf to another shelf name', async () => {
+    const first = await createShelf(userId, 'Shelf A')
+    const second = await createShelf(userId, 'Shelf B')
+
+    await expect(updateShelf(userId, second.id, first.name)).rejects.toMatchObject({ code: 'SHELF_NAME_TAKEN' })
   })
 
   it('should move books into and out of a shelf', async () => {

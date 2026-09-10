@@ -48,6 +48,7 @@ describe('TransformsSettingsSection', () => {
     render(<TransformsSettingsSection />)
 
     expect(screen.getByText(/还没有变换规则/)).toBeInTheDocument()
+    expect(screen.queryByText('· 0')).not.toBeInTheDocument()
   })
 
   it('shows only global pattern rules, grouped by 分组 with 未分组 last', () => {
@@ -66,13 +67,13 @@ describe('TransformsSettingsSection', () => {
     expect(screen.getByText('未分组')).toBeInTheDocument()
     expect(screen.queryByText('book rule')).not.toBeInTheDocument()
     expect(screen.queryByText('错字')).not.toBeInTheDocument()
+    expect(screen.getByText('· 3')).toBeInTheDocument()
     // groups sort alphabetically, 未分组 pinned last
     const headers = screen.getAllByRole('button', { expanded: true })
     const names = headers.map((h) => h.textContent)
     expect(names[0]).toContain('a组')
     expect(names[1]).toContain('b组')
     expect(names[2]).toContain('未分组')
-    expect(screen.getByText('3 条规则')).toBeInTheDocument()
   })
 
   it('collapses and expands a group', () => {
@@ -110,7 +111,7 @@ describe('TransformsSettingsSection', () => {
     render(<TransformsSettingsSection />)
 
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
-    expect(screen.getByText(/确定删除这条规则吗/)).toBeInTheDocument()
+    expect(screen.getByText(/确定要删除正文变换规则/)).toBeInTheDocument()
     const confirmBtn = screen.getAllByRole('button', { name: '删除' }).find((b) => b.textContent === '删除')
     fireEvent.click(confirmBtn!)
     expect(deleteTransform.mutate).toHaveBeenCalledWith('t1', expect.objectContaining({ onError: expect.any(Function) }))
@@ -121,8 +122,8 @@ describe('TransformsSettingsSection', () => {
     vi.mocked(useCreateTransform).mockReturnValue(createTransform as unknown as ReturnType<typeof useCreateTransform>)
     render(<TransformsSettingsSection />)
 
-    fireEvent.click(screen.getByRole('button', { name: '新建规则' }))
-    expect(screen.getByText('新建规则')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '新建正文变换规则' }))
+    expect(screen.getByText('新建正文变换规则')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/匹配内容/), { target: { value: '新规则' } })
     fireEvent.click(screen.getByText('保存'))
     const [body] = createTransform.mutate.mock.calls[0]
@@ -139,7 +140,7 @@ describe('TransformsSettingsSection', () => {
     vi.mocked(useCreateTransform).mockReturnValue(createTransform as unknown as ReturnType<typeof useCreateTransform>)
     render(<TransformsSettingsSection />)
 
-    fireEvent.click(screen.getByRole('button', { name: '新建规则' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建正文变换规则' }))
     fireEvent.change(screen.getByLabelText(/匹配内容/), { target: { value: '([' } })
     fireEvent.click(screen.getByRole('switch', { name: '正则表达式' }))
     fireEvent.click(screen.getByText('保存'))
@@ -154,7 +155,7 @@ describe('TransformsSettingsSection', () => {
     render(<TransformsSettingsSection />)
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    expect(screen.getByText('编辑规则')).toBeInTheDocument()
+    expect(screen.getByText('编辑正文变换规则')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/替换为/), { target: { value: '**' } })
     fireEvent.click(screen.getByText('保存'))
     expect(updateTransform.mutate).toHaveBeenCalledWith(

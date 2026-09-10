@@ -1,4 +1,5 @@
 import { localDateString, useReadingDaily } from '@/api/hooks/reading-records'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
 import { cn } from '@/lib/utils'
@@ -40,7 +41,8 @@ export default function PeriodBarChart({
   onSelectDate,
 }: PeriodBarChartProps) {
   const _ = useTranslation()
-  const { data } = useReadingDaily(localDateString(range.from), localDateString(range.to))
+  const dailyQuery = useReadingDaily(localDateString(range.from), localDateString(range.to))
+  const { data } = dailyQuery
   const items = data?.data ?? []
 
   let bars: Bar[]
@@ -80,6 +82,14 @@ export default function PeriodBarChart({
   const peak = period !== 'year' && items.length > 0
     ? items.reduce((a, b) => (b.durationSeconds > a.durationSeconds ? b : a))
     : null
+
+  if (dailyQuery.isError) {
+    return (
+      <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+        <QueryErrorState isRetrying={dailyQuery.isFetching} onRetry={dailyQuery.refetch} />
+      </section>
+    )
+  }
 
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">

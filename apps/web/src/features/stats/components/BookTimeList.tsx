@@ -1,4 +1,5 @@
 import { localDateString, useReadingByBook } from '@/api/hooks/reading-records'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
 
@@ -16,9 +17,18 @@ export default function BookTimeList({ date, period, range }: BookTimeListProps)
   const _ = useTranslation()
   const from = date ?? localDateString(range.from)
   const to = date ?? localDateString(range.to)
-  const { data } = useReadingByBook(from, to)
+  const booksQuery = useReadingByBook(from, to)
+  const { data } = booksQuery
   const items = data?.data ?? []
   const scopeLabel = date ?? formatPeriodLabel(period, range)
+
+  if (booksQuery.isError) {
+    return (
+      <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+        <QueryErrorState isRetrying={booksQuery.isFetching} onRetry={booksQuery.refetch} />
+      </section>
+    )
+  }
 
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">

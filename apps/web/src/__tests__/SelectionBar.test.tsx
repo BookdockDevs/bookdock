@@ -32,6 +32,7 @@ function wrapper({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  useToastStore.getState().clearToasts()
   mockShelves = []
   apiPatch.mockResolvedValue({})
   apiPut.mockResolvedValue({})
@@ -73,7 +74,11 @@ describe('SelectionBar', () => {
     await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(3))
     await waitFor(() => {
       const toasts = useToastStore.getState().toasts
-      expect(toasts.some((t) => t.message === 'library.batchPartial' && t.type === 'error')).toBe(true)
+      expect(toasts.some((t) => (
+        typeof t.message !== 'string'
+        && t.message.key === 'library.batchPartial'
+        && t.type === 'error'
+      ))).toBe(true)
     })
     expect(onClear).not.toHaveBeenCalled()
   })

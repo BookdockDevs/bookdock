@@ -3,7 +3,7 @@ import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type Mo
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { notify } from '@/lib/notifications'
 
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
@@ -160,7 +160,6 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
   const { renderer } = useReaderApi()
   const deleteAnnotation = useDeleteAnnotation(bookId)
   const updateAnnotation = useUpdateAnnotation(bookId)
-  const addToast = useToastStore((s) => s.addToast)
   const setShareTarget = useReaderState((s) => s.setShareTarget)
   // Annotations whose CFI no longer resolves (P2): badge them and refuse to
   // navigate instead of silently landing nowhere
@@ -263,7 +262,7 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
 
   function goTo(item: AnnotationRes) {
     if (orphanedKeys.includes(`${item.cfiRange}|${item.type}`)) {
-      addToast(_('annotation.orphanedNotice'), 'info')
+      notify.info({ key: 'annotation.orphanedNotice' })
       return
     }
     renderer?.display(item.type === 'bookmark' ? item.cfiAnchor || item.cfiRange : item.cfiRange)
@@ -278,9 +277,9 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
   async function copyItem(item: AnnotationRes) {
     try {
       await navigator.clipboard.writeText(kindOf(item) === 'idea' ? (item.note ?? '') : item.text)
-      addToast(_('reader.copied'), 'success')
+      notify.success({ key: 'reader.copied' })
     } catch {
-      addToast(_('reader.copyFailed'), 'error')
+      notify.error({ key: 'reader.copyFailed' })
     }
   }
 

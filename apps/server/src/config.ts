@@ -11,6 +11,7 @@ export const config = Object.freeze({
   uploadMaxBytes: env.UPLOAD_MAX_BYTES,
   fontsMaxBytes: env.FONT_UPLOAD_MAX_BYTES,
   avatarMaxBytes: env.AVATAR_UPLOAD_MAX_BYTES,
+  authRpm: env.AUTH_RPM,
   storageDriver: env.STORAGE_DRIVER,
   logLevel: env.LOG_LEVEL,
   aiProvider: env.AI_PROVIDER,

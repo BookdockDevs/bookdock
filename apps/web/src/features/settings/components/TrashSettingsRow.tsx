@@ -3,8 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { SettingsRes, TrashSettings } from '@bookdock/shared'
 
 import { apiGet, apiPut } from '@/api/client'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
 import { cn } from '@/lib/utils'
+import { notify } from '@/lib/notifications'
 
 const AUTO_CLEAN_DAYS = [0, 7, 30] as const
 
@@ -17,15 +20,23 @@ const LABEL_KEYS: Record<TrashSettings['autoCleanDays'], string> = {
 export default function TrashSettingsRow() {
   const _ = useTranslation()
   const queryClient = useQueryClient()
-  const { data } = useQuery({
+  const settingsQuery = useQuery({
     queryKey: ['settings'],
     queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
   })
   const mutation = useMutation({
     mutationFn: (trash: TrashSettings) => apiPut('/settings', { trash }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
+    onError: (error) => notify.error(getUserErrorNotification(error, 'errors.updateFailed')),
   })
-  const current = data?.data.trash?.autoCleanDays ?? 30
+  if (settingsQuery.isError) {
+    return <QueryErrorState className="py-4" isRetrying={settingsQuery.isFetching} onRetry={settingsQuery.refetch} />
+  }
+  if (settingsQuery.isLoading) {
+    return <div className="py-2 text-sm text-stone-500">{_('reader.loading')}</div>
+  }
+
+  const current = settingsQuery.data?.data.trash?.autoCleanDays ?? 30
 
   return (
     <div className="flex items-center justify-between gap-4 py-2">

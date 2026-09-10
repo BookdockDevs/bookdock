@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-import type { FontListItem } from '@bookdock/shared'
+import type { FontListItem, FontPreferences } from '@bookdock/shared'
 
 import { BASE_URL } from '@/api/client'
 
@@ -55,16 +55,28 @@ export function uploadedFontAlias(id: string): string {
   return `bd-font-${id}`
 }
 
-export function resolveFont(id: string, uploaded: FontListItem[] = []): ResolvedFont {
-  const system = FONT_OPTIONS.find((f) => f.id === id)
-  if (system) return { name: system.name, stack: system.value }
-  const builtin = BUILTIN_FONTS.find((f) => f.id === id)
-  if (builtin) return { name: builtin.name, stack: builtin.family, builtin }
-  const uploadedFont = uploaded.find((f) => f.id === id)
-  if (uploadedFont) {
-    return { name: uploadedFont.family, stack: `"${uploadedFontAlias(id)}", serif`, uploaded: uploadedFont }
+export function resolveFont(
+  id: string,
+  uploaded: FontListItem[] = [],
+  preferences: FontPreferences = {},
+  fontOrder: string[] = [],
+): ResolvedFont {
+  const options = buildFontOptions(uploaded, useFontLoaderStore.getState(), preferences, fontOrder)
+  const candidates = options.filter((option) => option.id === id)
+  const selected = candidates.find((option) => option.source === 'system')
+    ?? candidates.find((option) => option.source === 'builtin')
+    ?? candidates[0]
+  const option = selected?.enabled
+    ? selected
+    : options.find((item) => item.source === 'system' && item.enabled)
+      ?? options.find((item) => item.enabled)
+      ?? options[0]
+  return {
+    name: option.name,
+    stack: option.stack,
+    builtin: option.builtin,
+    uploaded: option.uploaded,
   }
-  return { name: FONT_OPTIONS[0].name, stack: FONT_OPTIONS[0].value }
 }
 
 const FONT_FORMAT_MAP: Record<FontListItem['format'], string> = {
@@ -100,7 +112,8 @@ export function fontCssFor(resolved: ResolvedFont): string {
   return ''
 }
 
-const BUILTIN_LOADED_KEY = 'bd-builtin-fonts-loaded'
+const BUILTIN_LOADED_KEY = 'bd-builtin-fonts-loaded-v2'
+const BUILTIN_SAMPLE_TEXT = '汉'
 
 function readLoadedIds(): string[] {
   if (typeof window === 'undefined') return []
@@ -113,9 +126,9 @@ function readLoadedIds(): string[] {
 }
 
 interface FontLoaderState {
-  /** Builtin ids whose files were fetched before. Persisted so the pickers can
-   *  show a download icon only for never-fetched fonts — HTTP cache state is
-   *  not queryable from JS, and a stale marker after cache clearing is accepted */
+  /** Builtin ids whose font faces completed a browser font load. Persisted so
+   *  the pickers can reuse the result between sessions; the versioned key
+   *  avoids treating the old stylesheet-only marker as a real font download. */
   loadedIds: string[]
   /** Builtin ids with an in-flight stylesheet */
   loadingIds: string[]
@@ -134,13 +147,16 @@ const injectedBuiltinIds = new Set<string>()
 
 /** Idempotently inject the CDN stylesheet into the main document (settings
  *  panel / share card previews live outside the reader iframe). The persisted
- *  marker only means "files were fetched before" — the link is re-injected
- *  every session regardless, but only never-fetched fonts enter the loading
- *  state, and the marker is written once the stylesheet actually loads */
+ *  marker is written only after the browser font-loading API confirms that the
+ *  font face itself is available; a stylesheet load alone is not enough. */
 export function ensureBuiltinFontLoaded(id: string): void {
-  if (injectedBuiltinIds.has(id)) return
   const font = BUILTIN_FONTS.find((f) => f.id === id)
   if (!font) return
+  if (injectedBuiltinIds.has(id)) {
+    const linkExists = Array.from(document.head.querySelectorAll('link[data-bd-font]')).some((link) => link.getAttribute('data-bd-font') === id)
+    if (linkExists) return
+    injectedBuiltinIds.delete(id)
+  }
   injectedBuiltinIds.add(id)
   if (!isBuiltinFontLoaded(id)) {
     useFontLoaderStore.setState((s) => ({ loadingIds: [...s.loadingIds, id] }))
@@ -150,18 +166,42 @@ export function ensureBuiltinFontLoaded(id: string): void {
   link.href = font.cssUrl
   link.dataset.bdFont = id
   link.onload = () => {
-    useFontLoaderStore.setState((s) => {
-      const loadedIds = s.loadedIds.includes(id) ? s.loadedIds : [...s.loadedIds, id]
-      try {
-        localStorage.setItem(BUILTIN_LOADED_KEY, JSON.stringify(loadedIds))
-      } catch { /* private-mode quota failures are non-fatal */ }
-      return { loadedIds, loadingIds: s.loadingIds.filter((v) => v !== id) }
+    if (typeof document.fonts?.load !== 'function') {
+      useFontLoaderStore.setState((s) => {
+        const loadedIds = s.loadedIds.includes(id) ? s.loadedIds : [...s.loadedIds, id]
+        try {
+          localStorage.setItem(BUILTIN_LOADED_KEY, JSON.stringify(loadedIds))
+        } catch { /* private-mode quota failures are non-fatal */ }
+        return { loadedIds, loadingIds: s.loadingIds.filter((v) => v !== id) }
+      })
+      return
+    }
+
+    const familyName = font.family.split(',')[0].trim().replace(/^['"]|['"]$/g, '')
+    void document.fonts.load(`400 16px "${familyName}"`, BUILTIN_SAMPLE_TEXT).then((faces) => {
+      if (faces.length === 0) throw new Error(`font face unavailable: ${id}`)
+      useFontLoaderStore.setState((s) => {
+        const loadedIds = s.loadedIds.includes(id) ? s.loadedIds : [...s.loadedIds, id]
+        try {
+          localStorage.setItem(BUILTIN_LOADED_KEY, JSON.stringify(loadedIds))
+        } catch { /* private-mode quota failures are non-fatal */ }
+        return { loadedIds, loadingIds: s.loadingIds.filter((v) => v !== id) }
+      })
+    }).catch(() => {
+      injectedBuiltinIds.delete(id)
+      link.remove()
+      useFontLoaderStore.setState((s) => ({ loadingIds: s.loadingIds.filter((v) => v !== id) }))
     })
   }
   link.onerror = () => {
+    injectedBuiltinIds.delete(id)
     useFontLoaderStore.setState((s) => ({ loadingIds: s.loadingIds.filter((v) => v !== id) }))
   }
   document.head.appendChild(link)
+}
+
+export function ensureBuiltinFontsLoaded(): void {
+  BUILTIN_FONTS.forEach((font) => ensureBuiltinFontLoaded(font.id))
 }
 
 const injectedUploadedIds = new Set<string>()
@@ -180,7 +220,9 @@ export async function ensureUploadedFontLoaded(font: FontListItem): Promise<void
     style.dataset.bdUploadedFont = font.id
     style.textContent = uploadedFaceCss(font)
     document.head.appendChild(style)
-    await document.fonts.load(`16px "${uploadedFontAlias(font.id)}"`)
+    if (typeof document.fonts?.load === 'function') {
+      await document.fonts.load(`16px "${uploadedFontAlias(font.id)}"`)
+    }
   } catch (err) {
     // drop the marker so a later attempt can retry
     injectedUploadedIds.delete(font.id)
@@ -199,28 +241,40 @@ export interface FontOption {
   stack: string
   source: FontOptionSource
   status: FontOptionStatus
+  enabled: boolean
+  builtin?: BuiltinFont
+  uploaded?: FontListItem
 }
 
-/** Single ordered list shared by both font pickers: uploaded → builtin →
- *  system. The order is fixed on purpose — dynamic reordering breaks the
- *  user's position memory. The loader snapshot is an explicit parameter so
- *  callers can memoize on it (default: current store state) */
+function fontPresentation(id: string, fallbackName: string, preferences: FontPreferences) {
+  const preference = preferences[id]
+  return {
+    name: preference?.displayName?.trim() || fallbackName,
+    enabled: preference?.enabled !== false,
+  }
+}
+
+/** Single ordered list shared by the settings page and both font pickers.
+ *  The loader snapshot is an explicit parameter so callers can memoize on it
+ *  (default: current store state). */
 export function buildFontOptions(
   uploaded: FontListItem[] = [],
   loader: Pick<FontLoaderState, 'loadedIds' | 'loadingIds'> = useFontLoaderStore.getState(),
+  preferences: FontPreferences = {},
+  fontOrder: string[] = [],
 ): FontOption[] {
   const { loadedIds, loadingIds } = loader
-  return [
-    ...uploaded.map((f) => ({
+  const options: FontOption[] = [
+    ...FONT_OPTIONS.map((f) => ({
       id: f.id,
-      name: f.family,
-      stack: `"${uploadedFontAlias(f.id)}", serif`,
-      source: 'uploaded' as const,
+      ...fontPresentation(f.id, f.name, preferences),
+      stack: f.value,
+      source: 'system' as const,
       status: 'ready' as const,
     })),
     ...BUILTIN_FONTS.map((f) => ({
       id: f.id,
-      name: f.name,
+      ...fontPresentation(f.id, f.name, preferences),
       stack: f.family,
       source: 'builtin' as const,
       status: loadingIds.includes(f.id)
@@ -228,13 +282,26 @@ export function buildFontOptions(
         : loadedIds.includes(f.id)
           ? ('ready' as const)
           : ('idle' as const),
+      builtin: f,
     })),
-    ...FONT_OPTIONS.map((f) => ({
+    ...uploaded.map((f) => ({
       id: f.id,
-      name: f.name,
-      stack: f.value,
-      source: 'system' as const,
+      ...fontPresentation(f.id, f.family, preferences),
+      stack: `"${uploadedFontAlias(f.id)}", serif`,
+      source: 'uploaded' as const,
       status: 'ready' as const,
+      uploaded: f,
     })),
   ]
+
+  if (fontOrder.length === 0) return options
+  const positions = new Map(fontOrder.map((id, index) => [id, index]))
+  return [...options].sort((left, right) => {
+    const leftPosition = positions.get(left.id)
+    const rightPosition = positions.get(right.id)
+    if (leftPosition === undefined && rightPosition === undefined) return 0
+    if (leftPosition === undefined) return 1
+    if (rightPosition === undefined) return -1
+    return leftPosition - rightPosition
+  })
 }

@@ -4,7 +4,8 @@ import type { TextTransformRes } from '@bookdock/shared'
 
 import { useBookTransforms, useDeleteTransform } from '@/api/hooks/useTransforms'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 
 import TransformForm from '../../settings/components/TransformForm'
 import BookTransformsSection from '../../library/components/BookTransformsSection'
@@ -27,7 +28,6 @@ const countCache = new Map<string, { counts: Record<string, number> }>()
 
 export default function BookTransformsDialog({ bookId, onClose }: BookTransformsDialogProps) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const { renderer } = useReaderApi()
   const { data } = useBookTransforms(bookId)
   const deleteTransform = useDeleteTransform()
@@ -105,7 +105,7 @@ export default function BookTransformsDialog({ bookId, onClose }: BookTransforms
     if (!pendingDelete) return
     deleteTransform.mutate(pendingDelete.id, {
       onSuccess: () => { if (form?.mode === 'edit' && form.rule.id === pendingDelete.id) setForm(null) },
-      onError: (err) => addToast(err.message, 'error'),
+      onError: (err) => notify.error(getUserErrorNotification(err, 'errors.deleteFailed')),
     })
     setPendingDelete(null)
   }
@@ -162,7 +162,9 @@ export default function BookTransformsDialog({ bookId, onClose }: BookTransforms
       </Modal>
       {pendingDelete && (
         <ConfirmDialog
-          message={_('settings.transformsDeleteConfirm')}
+          title={_('settings.confirmDeleteTitle')}
+          message={_('settings.transformsDeleteConfirm', { name: pendingDelete.name?.trim() || pendingDelete.pattern || _('library.unknown') })}
+          confirmLabel={_('settings.confirmDeleteAction')}
           onConfirm={confirmDelete}
           onClose={() => setPendingDelete(null)}
         />

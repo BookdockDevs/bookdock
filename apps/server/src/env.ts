@@ -23,6 +23,7 @@ const envSchema = z.object({
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(104857600),
   FONT_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
   AVATAR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(2097152),
+  AUTH_RPM: z.coerce.number().int().min(1).max(120).default(5),
   STORAGE_DRIVER: z.enum(['localfs']).default('localfs'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   AI_PROVIDER: aiProviderSchema.default('openai'),

@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { AUTH_REGISTER_USERNAME_MAX_LENGTH } from '@bookdock/shared'
+
 import { Button } from '@/components/ui/Button'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import ChangePasswordDialog from '@/features/auth/ChangePasswordDialog'
 import { authErrorKey } from '@/features/auth/errors'
 import { useDeleteAvatar, useUpdateUsername, useUploadAvatar } from '@/features/auth/hooks'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
-import { useToastStore } from '@/stores/toast.store'
 
 const MAX_AVATAR_SIDE = 512
 
@@ -33,7 +37,6 @@ async function compressAvatar(file: File): Promise<File> {
 
 export default function AccountSection() {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const user = useAuthStore((s) => s.user)
   const uploadAvatar = useUploadAvatar()
   const deleteAvatar = useDeleteAvatar()
@@ -44,6 +47,7 @@ export default function AccountSection() {
   const [nameDraft, setNameDraft] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
+  const [removeAvatarOpen, setRemoveAvatarOpen] = useState(false)
 
   // Preview URLs are object URLs; revoke on unmount to avoid leaking them
   useEffect(() => {
@@ -67,7 +71,7 @@ export default function AccountSection() {
         return { file: compressed, url: URL.createObjectURL(compressed) }
       })
     } catch {
-      addToast(_('settings.avatarProcessFailed'), 'error')
+      notify.error({ key: 'settings.avatarProcessFailed' })
     }
   }
 
@@ -82,28 +86,39 @@ export default function AccountSection() {
       await uploadAvatar.mutateAsync(preview.file)
       URL.revokeObjectURL(preview.url)
       setPreview(null)
-      addToast(_('settings.avatarUpdated'), 'success')
+      notify.success({ key: 'settings.avatarUpdated' })
     } catch (err) {
-      addToast(err instanceof Error ? err.message : String(err), 'error')
+      notify.error(getUserErrorNotification(err, 'errors.updateFailed'))
     }
   }
 
   function onRemoveAvatar() {
-    if (!window.confirm(_('settings.avatarRemoveConfirm'))) return
+    setRemoveAvatarOpen(true)
+  }
+
+  function confirmRemoveAvatar() {
     deleteAvatar.mutate(undefined, {
-      onSuccess: () => addToast(_('settings.avatarRemoved'), 'success'),
-      onError: (err) => addToast(err.message, 'error'),
+      onSuccess: () => notify.success({ key: 'settings.avatarRemoved' }),
+      onError: (err) => notify.error(getUserErrorNotification(err, 'errors.deleteFailed')),
     })
+    setRemoveAvatarOpen(false)
   }
 
   async function onSaveUsername() {
     const username = nameDraft.trim()
-    if (!username) return
     setNameError(null)
+    if (!username) {
+      setNameError(_('auth.errors.usernameRequired'))
+      return
+    }
+    if (username.length > AUTH_REGISTER_USERNAME_MAX_LENGTH) {
+      setNameError(_('auth.errors.registerUsernameTooLong'))
+      return
+    }
     try {
       await updateUsername.mutateAsync({ username })
       setEditingName(false)
-      addToast(_('settings.usernameUpdated'), 'success')
+      notify.success({ key: 'settings.usernameUpdated' })
     } catch (err) {
       setNameError(_(authErrorKey(err)))
     }
@@ -167,7 +182,7 @@ export default function AccountSection() {
               <input
                 value={nameDraft}
                 onChange={(e) => setNameDraft(e.target.value)}
-                maxLength={30}
+                maxLength={AUTH_REGISTER_USERNAME_MAX_LENGTH}
                 className="w-full max-w-xs rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
               />
               <Button size="sm" disabled={updateUsername.isPending || !nameDraft.trim()} onClick={() => void onSaveUsername()}>
@@ -203,6 +218,16 @@ export default function AccountSection() {
           {_('auth.changePassword')}
         </Button>
       </div>
+
+      {removeAvatarOpen && (
+        <ConfirmDialog
+          title={_('settings.confirmRemoveTitle')}
+          message={_('settings.avatarRemoveConfirm')}
+          confirmLabel={_('settings.confirmRemoveAction')}
+          onConfirm={confirmRemoveAvatar}
+          onClose={() => setRemoveAvatarOpen(false)}
+        />
+      )}
 
       <ChangePasswordDialog open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
     </section>

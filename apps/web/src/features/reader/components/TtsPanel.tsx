@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 
 import { useTtsServices } from '@/api/hooks/useTts'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
@@ -169,7 +170,8 @@ export default function TtsPanel() {
   const setSelection = useReaderState((s) => s.setSelection)
   const [menuOpen, setMenuOpen] = useState(false)
   const startMenuRef = useRef<HTMLDivElement>(null)
-  const { data: servicesData } = useTtsServices()
+  const servicesQuery = useTtsServices()
+  const { data: servicesData } = servicesQuery
   const services = servicesData?.data ?? []
   const ttsEngine = useUiStore((s) => s.ttsEngine)
   const ttsServiceId = useUiStore((s) => s.ttsServiceId)
@@ -293,6 +295,9 @@ export default function TtsPanel() {
       </div>
 
       <div className="flex flex-col gap-4 p-4">
+        {servicesQuery.isError && (
+          <QueryErrorState className="py-2" isRetrying={servicesQuery.isFetching} onRetry={servicesQuery.refetch} />
+        )}
         <ReaderSelect
           label={_('reader.ttsEngine')}
           value={selectedEngine}
@@ -358,7 +363,7 @@ export default function TtsPanel() {
             {_('reader.ttsManageServices')}
           </Link>
         </div>
-        {state.error && <p role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{state.error}</p>}
+        {state.error && <p role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{_('reader.ttsPlaybackFailed')}</p>}
       </div>
     </div>
   )

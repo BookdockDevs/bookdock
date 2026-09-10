@@ -94,6 +94,24 @@ describe('pickTocRule', () => {
     expect(pickTocRule(rules(weak, good), sample)).toBe('good')
   })
 
+  it('prefers a reliable hierarchy when a flat preset is only a near tie', () => {
+    const flat: TocRuleLike = { id: 'flat', patterns: [{ level: 1, regex: CHAPTER_REGEX }] }
+    const nested: TocRuleLike = {
+      id: 'nested',
+      patterns: [
+        { level: 1, regex: '^第[一二三四五六七八九十]+卷 .+' },
+        { level: 2, regex: CHAPTER_REGEX },
+      ],
+    }
+    const numerals = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
+    const chapters = Array.from({ length: 80 }, (_, index) =>
+      `第${numerals[index % numerals.length]}章 第${index + 1}节\n\n${longBody()}`,
+    ).join('\n\n')
+    const sample = `第一卷 崛起\n\n${chapters}`
+
+    expect(pickTocRule(rules(flat, nested), sample)).toBe('nested')
+  })
+
   it('prefers the earlier sortOrder on a tie', () => {
     const a: TocRuleLike = { id: 'a', patterns: [{ level: 1, regex: CHAPTER_REGEX }] }
     const b: TocRuleLike = { id: 'b', patterns: [{ level: 1, regex: CHAPTER_REGEX }] }

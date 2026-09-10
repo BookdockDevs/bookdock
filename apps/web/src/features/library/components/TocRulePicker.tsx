@@ -1,8 +1,10 @@
 import { useState } from 'react'
 
 import { useReToc, useTocRules } from '@/api/hooks/useTocRules'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
 interface TocRulePickerProps {
@@ -17,11 +19,15 @@ interface TocRulePickerProps {
  *  rule pins it and re-splits the book immediately; "auto" clears the pin. */
 export default function TocRulePicker({ bookId, currentRuleId, autoScored }: TocRulePickerProps) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
-  const { data } = useTocRules()
+  const rulesQuery = useTocRules()
+  const { data } = rulesQuery
   const rules = data?.data ?? []
   const reToc = useReToc(bookId)
   const [busyId, setBusyId] = useState<string | null>(null)
+
+  if (rulesQuery.isError) {
+    return <QueryErrorState className="py-4" isRetrying={rulesQuery.isFetching} onRetry={rulesQuery.refetch} />
+  }
 
   function pick(tocRuleId: string | null) {
     if (busyId) return
@@ -31,11 +37,11 @@ export default function TocRulePicker({ bookId, currentRuleId, autoScored }: Toc
       {
         onSuccess: () => {
           setBusyId(null)
-          addToast(tocRuleId ? _('library.tocRulePinSuccess') : _('library.tocRuleUnpinned'), 'success')
+          notify.success(tocRuleId ? { key: 'library.tocRulePinSuccess' } : { key: 'library.tocRuleUnpinned' })
         },
         onError: (err) => {
           setBusyId(null)
-          addToast(err.message || _('library.tocRulePinFailed'), 'error')
+          notify.error(getUserErrorNotification(err, 'library.tocRulePinFailed'))
         },
       },
     )

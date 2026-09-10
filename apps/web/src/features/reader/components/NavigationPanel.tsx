@@ -1,6 +1,7 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useReaderState } from '../state/reader-state'
 import type { SearchResult } from '../types'
@@ -94,7 +95,8 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const { renderer } = useReaderApi()
-  const { data: annotations } = useAnnotations(bookId)
+  const annotationsQuery = useAnnotations(bookId)
+  const { data: annotations } = annotationsQuery
   const chaptersQuery = useBookChapters(bookId)
 
   const listRef = useRef<HTMLDivElement>(null)
@@ -765,7 +767,13 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             {renderSubtree(rootNodes.map((n) => n.index))}
           </ul>
         ))}
-        {tab === 'notes' && (
+        {tab === 'notes' && annotationsQuery.isError ? (
+          <QueryErrorState
+            className="py-8 text-[var(--bd-read-sub)]"
+            isRetrying={annotationsQuery.isFetching}
+            onRetry={annotationsQuery.refetch}
+          />
+        ) : tab === 'notes' && (
           <NotesPanel
             items={notesFilter.filtered}
             allItems={annotationItems}

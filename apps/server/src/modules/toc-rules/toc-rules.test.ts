@@ -176,7 +176,9 @@ describe('toc-rules service', () => {
     expect(first).toHaveLength(SEED_TOC_RULES.length)
     expect(first.map((r) => r.sortOrder)).toEqual(SEED_TOC_RULES.map((_, i) => i))
     expect(first.every((r) => r.enabled)).toBe(true)
+    expect(first.every((r) => r.builtIn)).toBe(true)
     expect(first.map((r) => r.name)).toEqual(SEED_TOC_RULES.map((s) => s.name))
+    expect(first[0]?.name).toBe('中文网文（卷·章·节）')
     expect(await listTocRules(ownerId)).toHaveLength(SEED_TOC_RULES.length)
   })
 
@@ -191,16 +193,57 @@ describe('toc-rules service', () => {
     expect(restored.map((r) => r.name)).toEqual(SEED_TOC_RULES.map((s) => s.name))
   })
 
-  it('restore is a no-op when the user still has rules', async () => {
-    createTocRule(ownerId, sampleRule('mine'))
+  it('restores missing built-ins without changing user rules', async () => {
+    const initial = await listTocRules(ownerId)
+    await deleteTocRule(ownerId, initial[1]!.id)
+    const mine = createTocRule(ownerId, sampleRule('mine'))
+    const mineBefore = (await listTocRules(ownerId)).find((rule) => rule.id === mine.id)!
+
     restoreTocRuleSeeds(ownerId)
     const items = await listTocRules(ownerId)
-    expect(items.map((r) => r.name)).toEqual(['mine'])
+    expect(items.map((rule) => rule.name)).toEqual([
+      initial[0]!.name,
+      initial[2]!.name,
+      initial[3]!.name,
+      'mine',
+      initial[1]!.name,
+    ])
+    expect(items.find((rule) => rule.id === mine.id)).toMatchObject({
+      name: mineBefore.name,
+      sortOrder: mineBefore.sortOrder,
+      patterns: mineBefore.patterns,
+    })
+
+    restoreTocRuleSeeds(ownerId)
+    expect(await listTocRules(ownerId)).toHaveLength(SEED_TOC_RULES.length + 1)
   })
 
   it('seeds are per-user', async () => {
     listTocRules(ownerId)
     expect(await listTocRules(otherId)).toHaveLength(SEED_TOC_RULES.length)
+  })
+
+  it('does not mark user-created rules as built-in', () => {
+    const created = createTocRule(ownerId, sampleRule('mine'))
+    expect(created.builtIn).toBe(false)
+  })
+
+  it('backfills the source marker for an exact legacy built-in rule', async () => {
+    const seed = SEED_TOC_RULES[0]!
+    db.insert(schema.tocRules).values({
+      id: createId('tocr'),
+      userId: ownerId,
+      seedKey: null,
+      name: seed.name,
+      enabled: 1,
+      sortOrder: 0,
+      patterns: seed.patterns,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }).run()
+
+    const [rule] = await listTocRules(ownerId)
+    expect(rule?.builtIn).toBe(true)
   })
 })
 
@@ -315,6 +358,23 @@ describe('toc-rule schemas', () => {
     expect(tocRuleCreateSchema.safeParse({
       name: 'x',
       patterns: [{ level: 0, regex: '^x' }],
+    }).success).toBe(false)
+  })
+
+  it('requires pattern levels to follow their array positions', () => {
+    expect(tocRuleCreateSchema.safeParse({
+      name: 'x',
+      patterns: [
+        { level: 1, regex: '^卷' },
+        { level: 1, regex: '^章' },
+      ],
+    }).success).toBe(false)
+    expect(tocRuleCreateSchema.safeParse({
+      name: 'x',
+      patterns: [
+        { level: 1, regex: '^卷' },
+        { level: 3, regex: '^节' },
+      ],
     }).success).toBe(false)
   })
 

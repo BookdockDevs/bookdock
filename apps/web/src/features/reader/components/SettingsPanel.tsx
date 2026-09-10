@@ -11,7 +11,7 @@ import { useViewSettings } from '../view-settings-context'
 import { MARGINAL_FIELDS } from '../lib/marginals'
 import type { MarginalField } from '../types'
 import type { PerBookSettingKey } from '../lib/view-settings'
-import { buildFontOptions, ensureBuiltinFontLoaded, ensureUploadedFontLoaded, useFontLoaderStore, type FontOption } from '../fonts'
+import { buildFontOptions, ensureBuiltinFontLoaded, ensureBuiltinFontsLoaded, ensureUploadedFontLoaded, useFontLoaderStore, type FontOption } from '../fonts'
 import { useReaderState } from '../state/reader-state'
 import { DownloadIcon, SpinnerIcon } from './annotation-icons'
 import ReadingPresetPicker from './ReadingPresetPicker'
@@ -235,6 +235,8 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
   const {
     fontFamily,
     setFontFamily,
+    fontPreferences,
+    fontOrder,
     fontSize,
     setFontSize,
     fontWeight,
@@ -301,10 +303,11 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
   } = useUiStore()
 
   const fontOptions = useMemo(
-    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds }),
+    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds }, fontPreferences, fontOrder),
     // loaded/loading ids feed a builtin option's status icon
-    [uploadedFonts, fontLoadedIds, fontLoadingIds],
+    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontPreferences, fontOrder],
   )
+  const enabledFontOptions = useMemo(() => fontOptions.filter((option) => option.enabled), [fontOptions])
   const [fontsExpanded, setFontsExpanded] = useState(false)
 
   // Selecting applies immediately (font-display: swap renders the fallback
@@ -314,22 +317,27 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
     if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
   }
 
-  // Uploaded previews load eagerly; the selected builtin loads too so its
-  // chip preview is accurate — idle builtins stay untouched behind the icon
+  // Mount the public builtin stylesheets when the font list is visible. The
+  // browser fetches each font file only when a rendered chip needs that face.
   useEffect(() => {
     if (section !== 'font') return
+    ensureBuiltinFontsLoaded()
     uploadedFonts.forEach((f) => void ensureUploadedFontLoaded(f))
-    const selected = fontOptions.find((o) => o.id === fontFamily)
-    if (selected?.source === 'builtin') ensureBuiltinFontLoaded(selected.id)
-  }, [section, uploadedFonts, fontOptions, fontFamily])
+  }, [section, uploadedFonts])
 
-  let visibleFontOptions = fontsExpanded ? fontOptions : fontOptions.slice(0, FONT_CHIPS_VISIBLE)
+  useEffect(() => {
+    if (enabledFontOptions.some((option) => option.id === fontFamily)) return
+    const fallback = enabledFontOptions[0]
+    if (fallback) setFontFamily(fallback.id)
+  }, [enabledFontOptions, fontFamily, setFontFamily])
+
+  let visibleFontOptions = fontsExpanded ? enabledFontOptions : enabledFontOptions.slice(0, FONT_CHIPS_VISIBLE)
   if (!fontsExpanded) {
-    const selectedIndex = fontOptions.findIndex((o) => o.id === fontFamily)
+    const selectedIndex = enabledFontOptions.findIndex((o) => o.id === fontFamily)
     if (selectedIndex >= FONT_CHIPS_VISIBLE) {
       // The selection must stay visible: it takes the last visible slot and
       // the original occupant shifts into the hidden tail
-      visibleFontOptions = [...fontOptions.slice(0, FONT_CHIPS_VISIBLE - 1), fontOptions[selectedIndex]]
+      visibleFontOptions = [...enabledFontOptions.slice(0, FONT_CHIPS_VISIBLE - 1), enabledFontOptions[selectedIndex]]
     }
   }
 
@@ -471,7 +479,7 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
                   {opt.status === 'loading' && <SpinnerIcon size={12} />}
                 </button>
               ))}
-              {fontOptions.length > FONT_CHIPS_VISIBLE && (
+              {enabledFontOptions.length > FONT_CHIPS_VISIBLE && (
                 <button onClick={() => setFontsExpanded((v) => !v)} className={fontChipClass(false)}>
                   {_(fontsExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
                 </button>

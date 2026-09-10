@@ -12,6 +12,11 @@ export const PAGINATION = {
   MAX_PAGE_SIZE: 100,
 } as const
 
+export const AUTH_PASSWORD_MIN_LENGTH = 6
+export const AUTH_PASSWORD_MAX_LENGTH = 256
+export const AUTH_USERNAME_MAX_LENGTH = 100
+export const AUTH_REGISTER_USERNAME_MAX_LENGTH = 30
+
 export const SORT_FIELDS = ['title', 'author', 'createdAt', 'updatedAt', 'lastReadAt', 'size'] as const
 export type SortField = (typeof SORT_FIELDS)[number]
 

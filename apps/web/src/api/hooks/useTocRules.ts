@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { TocRuleCreateReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
+import type { BookDetailRes, TocRuleCreateReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../client'
 
@@ -69,9 +69,16 @@ export function useReToc(bookId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ tocRuleId }: { tocRuleId: string | null }) =>
-      apiPost<{ data: { meta?: { tocRuleId?: string; tocRuleAuto?: boolean } } }>(`/books/${bookId}/re-toc`, { tocRuleId }),
-    onSuccess: () => {
+      apiPost<{ data: BookDetailRes }>(`/books/${bookId}/re-toc`, { tocRuleId }),
+    onSuccess: (response) => {
       void queryClient.invalidateQueries({ queryKey: ['books'] })
+      queryClient.setQueryData(['books', 'detail', bookId], response)
+      queryClient.setQueryData(['book', bookId], response)
+      void queryClient.invalidateQueries({ queryKey: ['book', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['chapters', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['progress', bookId] })
+      queryClient.removeQueries({ queryKey: ['chapters', bookId], type: 'inactive' })
+      queryClient.removeQueries({ queryKey: ['progress', bookId], type: 'inactive' })
     },
   })
 }

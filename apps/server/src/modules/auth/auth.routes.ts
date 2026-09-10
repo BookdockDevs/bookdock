@@ -13,6 +13,8 @@ import {
   type SetupRequiredRes,
 } from '@bookdock/shared'
 
+import { AppError } from '../../middleware/error'
+import { requireOwner } from '../../middleware/auth.guard'
 import {
   changePassword,
   changeUsername,
@@ -23,7 +25,7 @@ import {
   setupUser,
   updateInstanceSettings,
 } from './auth.service'
-import { requireOwner } from '../../middleware/auth.guard'
+import { assertLoginAllowed, clearLoginFailures, createLoginRateLimitKey, recordLoginFailure } from './auth.rate-limit'
 
 const TOKEN_COOKIE = 'bd_token'
 const TOKEN_MAX_AGE = 7 * 24 * 60 * 60
@@ -44,7 +46,7 @@ authRoutes.get('/instance', (c) => {
 })
 
 authRoutes.patch('/instance', requireOwner(), async (c) => {
-  const body = await c.req.json()
+  const body = await c.req.json().catch(() => null)
   const parsed = updateInstanceSchema.safeParse(body)
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
@@ -58,7 +60,7 @@ authRoutes.get('/setup-required', async (c) => {
 })
 
 authRoutes.post('/setup', async (c) => {
-  const body = await c.req.json()
+  const body = await c.req.json().catch(() => null)
   const parsed = setupSchema.safeParse(body)
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
@@ -69,7 +71,7 @@ authRoutes.post('/setup', async (c) => {
 })
 
 authRoutes.post('/register', async (c) => {
-  const body = await c.req.json()
+  const body = await c.req.json().catch(() => null)
   const parsed = registerSchema.safeParse(body)
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
@@ -80,12 +82,21 @@ authRoutes.post('/register', async (c) => {
 })
 
 authRoutes.post('/login', async (c) => {
-  const body = await c.req.json()
+  const body = await c.req.json().catch(() => null)
   const parsed = loginSchema.safeParse(body)
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  const result = await login(parsed.data.username, parsed.data.password)
+  const rateLimitKey = createLoginRateLimitKey(c, parsed.data.username)
+  assertLoginAllowed(rateLimitKey)
+  let result
+  try {
+    result = await login(parsed.data.username, parsed.data.password)
+  } catch (err) {
+    if (err instanceof AppError && err.code === 'UNAUTHORIZED') recordLoginFailure(rateLimitKey)
+    throw err
+  }
+  clearLoginFailures(rateLimitKey)
   setTokenCookie(c, result.token)
   return c.json({ data: result })
 })
@@ -100,7 +111,7 @@ authRoutes.post('/password', async (c) => {
   if (!user || c.get('guest')) {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
   }
-  const body = await c.req.json()
+  const body = await c.req.json().catch(() => null)
   const parsed = changePasswordSchema.safeParse(body)
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
@@ -114,7 +125,7 @@ authRoutes.post('/username', async (c) => {
   if (!user || c.get('guest')) {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
   }
-  const body = await c.req.json()
+  const body = await c.req.json().catch(() => null)
   const parsed = updateUsernameSchema.safeParse(body)
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)

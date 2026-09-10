@@ -20,6 +20,7 @@ import { authGuard, resetAuthCaches } from '../../middleware/auth.guard'
 import { config } from '../../config'
 import { hashPassword, verifyPassword } from '../../lib/password'
 import authRoutes from './auth.routes'
+import { resetLoginRateLimit } from './auth.rate-limit'
 import { changePassword, getDefaultUser, getInstanceInfo, register, setupUser, updateInstanceSettings } from './auth.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -92,6 +93,7 @@ describe('auth module', () => {
     db = createTestDb()
     vi.spyOn(client, 'getDb').mockReturnValue(db)
     resetAuthCaches()
+    resetLoginRateLimit()
   })
 
   describe('register', () => {
@@ -114,6 +116,17 @@ describe('auth module', () => {
       seedInstanceSettings(db, true, false)
       await register('alice', 'secret6')
       await expect(register('alice', 'other6')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
+    })
+
+    it('maps a concurrent duplicate username write to USERNAME_TAKEN', async () => {
+      seedInstanceSettings(db, true, false)
+      const results = await Promise.allSettled([
+        register('race-user', 'secret6'),
+        register('race-user', 'secret6'),
+      ])
+
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+      expect(results.find((result) => result.status === 'rejected')).toMatchObject({ reason: { code: 'USERNAME_TAKEN' } })
     })
   })
 
@@ -211,6 +224,101 @@ describe('auth module', () => {
       const body = await res.json()
       expect(body.data.user.username).toBe('carol')
     })
+
+    it('rejects invalid credentials without revealing whether the username exists', async () => {
+      seedInstanceSettings(db, false, false)
+      await insertUser(db, { username: 'carol', password: 'secret6', role: 'owner' })
+      const app = createAuthApp(null)
+
+      const wrongPassword = await app.request('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'carol', password: 'wrong6' }),
+      })
+      const unknownUsername = await app.request('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'nobody', password: 'wrong6' }),
+      })
+
+      expect(wrongPassword.status).toBe(401)
+      expect(unknownUsername.status).toBe(401)
+      expect(await wrongPassword.json()).toEqual({ error: { code: 'UNAUTHORIZED', message: 'Invalid credentials' } })
+      expect(await unknownUsername.json()).toEqual({ error: { code: 'UNAUTHORIZED', message: 'Invalid credentials' } })
+    })
+
+    it('rejects a disabled account after verifying its password', async () => {
+      seedInstanceSettings(db, false, false)
+      await insertUser(db, { username: 'dave', password: 'secret6', disabled: 1 })
+      const app = createAuthApp(null)
+
+      const res = await app.request('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'dave', password: 'secret6' }),
+      })
+
+      expect(res.status).toBe(403)
+      expect(await res.json()).toEqual({ error: { code: 'ACCOUNT_DISABLED', message: 'Account is disabled' } })
+    })
+
+    it('returns validation errors for incomplete or malformed request bodies', async () => {
+      seedInstanceSettings(db, false, false)
+      const app = createAuthApp(null)
+
+      const incomplete = await app.request('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: '   ', password: '' }),
+      })
+      const malformed = await app.request('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{',
+      })
+
+      expect(incomplete.status).toBe(400)
+      expect(malformed.status).toBe(400)
+      expect((await incomplete.json()).error.code).toBe('VALIDATION_ERROR')
+      expect((await malformed.json()).error.code).toBe('VALIDATION_ERROR')
+    })
+
+    it('rate-limits repeated credential failures with retry metadata', async () => {
+      seedInstanceSettings(db, false, false)
+      const app = createAuthApp(null)
+      const attempt = () => app.request('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'nobody', password: 'wrong6' }),
+      })
+
+      for (let i = 0; i < config.authRpm; i += 1) {
+        expect((await attempt()).status).toBe(401)
+      }
+      const limited = await attempt()
+
+      expect(limited.status).toBe(429)
+      expect(limited.headers.get('retry-after')).toMatch(/^\d+$/)
+      expect(await limited.json()).toMatchObject({ error: { code: 'AUTH_RATE_LIMITED', details: { retryAfterSeconds: expect.any(Number) } } })
+    })
+
+    it('clears failed attempts after a successful login', async () => {
+      seedInstanceSettings(db, false, false)
+      await insertUser(db, { username: 'erin', password: 'secret6', role: 'owner' })
+      const app = createAuthApp(null)
+      const request = (password: string) => app.request('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'erin', password }),
+      })
+
+      expect((await request('wrong6')).status).toBe(401)
+      expect((await request('secret6')).status).toBe(200)
+      for (let i = 0; i < config.authRpm; i += 1) {
+        expect((await request('wrong6')).status).toBe(401)
+      }
+      expect((await request('wrong6')).status).toBe(429)
+    })
   })
 
   describe('setup', () => {
@@ -225,6 +333,17 @@ describe('auth module', () => {
       seedInstanceSettings(db, false, true)
       await setupUser('admin', 'secret6')
       await expect(setupUser('admin2', 'secret6')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    })
+
+    it('allows only one concurrent setup request to create an owner', async () => {
+      seedInstanceSettings(db, false, false)
+      const results = await Promise.allSettled([
+        setupUser('owner-one', 'secret6'),
+        setupUser('owner-two', 'secret6'),
+      ])
+
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+      expect(results.find((result) => result.status === 'rejected')).toMatchObject({ reason: { code: 'FORBIDDEN' } })
     })
   })
 

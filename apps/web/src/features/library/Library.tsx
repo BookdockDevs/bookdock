@@ -23,6 +23,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore } from '@/stores/ui.store'
 
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import SmartMenu from '@/components/ui/SmartMenu'
 
 import { indexRoute, type LibrarySearch } from '@/routes/index'
@@ -41,8 +42,8 @@ import ReadingStatsCard from './components/ReadingStatsCard'
 import RecentlyRead from './components/RecentlyRead'
 import SelectionBar from './components/SelectionBar'
 import UploadSheet from './components/UploadSheet'
-import { applyShelfOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
-import { useInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves } from './hooks'
+import { applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
+import { useInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags } from './hooks'
 
 const PAGE_SIZE = 20
 
@@ -147,16 +148,20 @@ export default function Library() {
   const dragJustEndedRef = useRef(false)
   const moveBooksToShelf = useMoveBooksToShelf()
   const reorderShelves = useReorderShelves()
+  const reorderTags = useReorderTags()
   // Which drag is in flight: drives the manual autoscroll (page for book
-  // drags, sidebar nav for shelf drags) and the overlay shape.
-  const [dragKind, setDragKind] = useState<'book' | 'shelf' | null>(null)
+  // drags, sidebar nav for shelf/tag drags) and the overlay shape.
+  const [dragKind, setDragKind] = useState<'book' | 'shelf' | 'tag' | null>(null)
   // The shelf row that was just released: its transform reset gets a short
   // transition so it glides from the release position into its slot instead
   // of snapping (a snapped reset reads as a flicker).
   const [settleShelfId, setSettleShelfId] = useState<string | null>(null)
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [settleTagId, setSettleTagId] = useState<string | null>(null)
+  const tagSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
+    if (tagSettleTimerRef.current) clearTimeout(tagSettleTimerRef.current)
   }, [])
   const sidebarNavRef = useRef<HTMLDivElement | null>(null)
 
@@ -168,7 +173,8 @@ export default function Library() {
       setDragBookIds(payload.bookIds)
       setDragKind('book')
     } else {
-      setDragKind('shelf')
+      const dragType = (payload as { type?: unknown } | null)?.type
+      setDragKind(dragType === 'tag' ? 'tag' : 'shelf')
     }
   }
 
@@ -197,6 +203,24 @@ export default function Library() {
       moveBooksToShelf.mutate({ bookIds: moved, shelfId: targetShelfId })
       return
     }
+    const dragType = (payload as { type?: unknown } | null)?.type
+    if (dragType === 'tag') {
+      const ordered = tags.map((tag) => tag.id)
+      const oldIndex = ordered.indexOf(String(active.id))
+      const newIndex = ordered.indexOf(String(over.id))
+      if (oldIndex < 0 || newIndex < 0) return
+      const next = arrayMove(ordered, oldIndex, newIndex)
+      setTagOrderOverride(next)
+      setSettleTagId(String(active.id))
+      if (tagSettleTimerRef.current) clearTimeout(tagSettleTimerRef.current)
+      tagSettleTimerRef.current = setTimeout(() => {
+        tagSettleTimerRef.current = null
+        setSettleTagId(null)
+      }, 160)
+      reorderTags.mutate(next)
+      return
+    }
+    if (dragType !== 'shelf') return
     // Shelf drag: active/over are shelf row ids (sortable); over may be the
     // uncategorized droppable or empty space, both of which reorder to no-op.
     const ordered = shelves.map((s) => s.id)
@@ -219,8 +243,8 @@ export default function Library() {
   }
 
   // dnd-kit autoscroll is disabled: it scrolls the document too, which looks
-  // broken when dragging a shelf near the sidebar bottom. Manual autoscroll
-  // instead — the page for book drags, the sidebar nav for shelf drags.
+  // broken when dragging a sidebar row near the bottom. Manual autoscroll
+  // instead — the page for book drags, the sidebar nav for shelf/tag drags.
   useEffect(() => {
     if (dragKind === null) return
     let lastScroll = 0
@@ -244,7 +268,7 @@ export default function Library() {
     return () => window.removeEventListener('pointermove', onPointerMove)
   }, [dragKind])
 
-  const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage } = useInfiniteBooks({
+  const { data, isLoading, isError, isFetching, isFetchingNextPage, isFetchNextPageError, hasNextPage, fetchNextPage, refetch } = useInfiniteBooks({
     pageSize: PAGE_SIZE,
     search: query,
     sortBy,
@@ -263,8 +287,10 @@ export default function Library() {
 
   const total = data?.pages[0]?.total ?? 0
 
-  const { data: shelvesData } = useShelves()
-  const { data: tagsData } = useTags()
+  const shelvesQuery = useShelves()
+  const tagsQuery = useTags()
+  const shelvesData = shelvesQuery.data
+  const tagsData = tagsQuery.data
   // Local mirror of the shelf order: dnd-kit clears its drag state in the same
   // event as our onDragEnd, but the react-query cache update lands a render
   // later — without this the rows would flash back to the old order for a
@@ -274,9 +300,17 @@ export default function Library() {
   useEffect(() => {
     setShelfOrderOverride(null)
   }, [shelvesData])
+  const [tagOrderOverride, setTagOrderOverride] = useState<string[] | null>(null)
+  useEffect(() => {
+    setTagOrderOverride(null)
+  }, [tagsData])
   const shelves = useMemo(
     () => applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride),
     [shelvesData, shelfOrderOverride],
+  )
+  const tags = useMemo(
+    () => applyTagOrder(tagsData?.data ?? [], tagOrderOverride),
+    [tagsData, tagOrderOverride],
   )
   const activeShelfName = shelfId ? shelvesData?.data.find((s) => s.id === shelfId)?.name : undefined
   const activeTagName = tagId ? tagsData?.data.find((tag) => tag.id === tagId)?.name : undefined
@@ -293,7 +327,7 @@ export default function Library() {
         ? _('library.authorFilterTitle', { name: metadataFilter.value })
           : metadataFilter?.kind === 'series'
             ? _('library.seriesFilterTitle', { name: metadataFilter.value })
-            : (activeShelfName ?? _('library.allBooks'))
+            : (activeShelfName ?? activeTagName ?? _('library.allBooks'))
 
   const readStatusName = readStatus === 'wishlist'
     ? _('library.readStatusWishlist')
@@ -393,6 +427,8 @@ export default function Library() {
           navRef={sidebarNavRef}
           shelfOrderOverride={shelfOrderOverride}
           settleShelfId={settleShelfId}
+          tagOrderOverride={tagOrderOverride}
+          settleTagId={settleTagId}
         />
 
       <main className="flex min-w-0 flex-1 flex-col px-3 py-5 sm:px-4 sm:py-8 md:px-8">
@@ -416,12 +452,22 @@ export default function Library() {
           onResetMetadataFilter={metadataFilter ? () => navSearch({ author: undefined, series: undefined }) : undefined}
         />
 
+        {(shelvesQuery.isError || tagsQuery.isError) && (
+          <QueryErrorState
+            className="py-4"
+            isRetrying={shelvesQuery.isFetching || tagsQuery.isFetching}
+            onRetry={() => Promise.all([shelvesQuery.refetch(), tagsQuery.refetch()])}
+          />
+        )}
+
         {recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <ReadingStatsCard />}
         {recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <RecentlyRead style={recentlyReadStyle} />}
 
         <div ref={containerRef} className={`min-h-0 flex-1 ${selection.size > 0 ? 'pb-16' : ''}`}>
           {isLoading ? (
             <InitialLoading />
+          ) : isError && !data ? (
+            <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
           ) : isEmpty ? (
             trash ? (
               <EmptyTrash />
@@ -528,7 +574,9 @@ export default function Library() {
           )}
         </div>
 
-        {isFetchingNextPage && (
+        {isFetchNextPageError ? (
+          <QueryErrorState className="py-4" isRetrying={isFetchingNextPage} onRetry={fetchNextPage} />
+        ) : isFetchingNextPage && (
           <p className="py-4 text-center text-xs text-stone-400">{_('reader.loading')}</p>
         )}
       </main>

@@ -2,9 +2,10 @@ import type { ReactNode } from 'react'
 
 import type { BookListItem } from '@bookdock/shared'
 
-import { useTranslation } from '@/hooks/useTranslation'
 import MenuFlyout from '@/components/ui/MenuFlyout'
-import { useToastStore } from '@/stores/toast.store'
+import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 
 import { useUpdateBook } from '../hooks'
 
@@ -84,7 +85,6 @@ export function ContextMenuContent({ book, onShowDetails, onDelete, onClose }: {
 }) {
   const _ = useTranslation()
   const updateBook = useUpdateBook()
-  const addToast = useToastStore((s) => s.addToast)
   return (
     <>
       <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
@@ -120,7 +120,7 @@ export function ContextMenuContent({ book, onShowDetails, onDelete, onClose }: {
           e.stopPropagation()
           onClose()
           void downloadDefault(book).catch((err) => {
-            addToast(err instanceof Error ? err.message : String(err), 'error')
+            notify.error(getUserErrorNotification(err, 'errors.downloadFailed'))
           })
         }}
         className={itemClass}

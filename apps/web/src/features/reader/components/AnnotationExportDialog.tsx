@@ -6,8 +6,9 @@ import { useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '@/api/client'
 import Modal from '@/components/ui/Modal'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { notify } from '@/lib/notifications'
 
 import {
   buildAnnotationExport,
@@ -70,7 +71,6 @@ interface AnnotationExportDialogProps {
 
 export default function AnnotationExportDialog({ bookId, annotations, sort, chapterOrder, onClose, quickExport = false }: AnnotationExportDialogProps) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const [options, setOptions] = useState<AnnotationExportOptions>(loadOptions)
   const [openMenu, setOpenMenu] = useState<'copy' | 'download' | null>(null)
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null)
@@ -78,10 +78,11 @@ export default function AnnotationExportDialog({ bookId, annotations, sort, chap
   const quickExported = useRef(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
-  const { data } = useQuery({
+  const bookQuery = useQuery({
     queryKey: ['book', bookId],
     queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
   })
+  const { data } = bookQuery
   const book = data?.data
   const ordered = useMemo(() => {
     const next = [...annotations]
@@ -127,8 +128,8 @@ export default function AnnotationExportDialog({ bookId, annotations, sort, chap
     const content = buildAnnotationExport(format, ordered, bookInfo, exportOptions, exportLabels)
     if (mode === 'copy') {
       void navigator.clipboard.writeText(content).then(
-        () => addToast(_('annotation.exportCopied', { n: ordered.length, format: format.toUpperCase() }), 'success'),
-        () => addToast(_('reader.copyFailed'), 'error'),
+        () => notify.success({ key: 'annotation.exportCopied', params: { n: ordered.length, format: format.toUpperCase() } }),
+        () => notify.error({ key: 'reader.copyFailed' }),
       )
     } else {
       const extension = format === 'markdown' ? 'md' : format === 'text' ? 'txt' : 'csv'
@@ -138,11 +139,11 @@ export default function AnnotationExportDialog({ bookId, annotations, sort, chap
         timestamp: exportTimestamp(),
       }).replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim()
       download(content, `${filename || _('annotation.exportFilenameFallback')}.${extension}`, format === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8')
-      addToast(_('annotation.exportDownloaded', { n: ordered.length, format: format.toUpperCase() }), 'success')
+      notify.success({ key: 'annotation.exportDownloaded', params: { n: ordered.length, format: format.toUpperCase() } })
     }
     setOpenMenu(null)
     setMenuPosition(null)
-  }, [_, addToast, bookInfo, exportLabels, exportOptions, ordered])
+  }, [_, bookInfo, exportLabels, exportOptions, ordered])
 
   useEffect(() => {
     if (quickExport && bookInfo && !quickExported.current) {
@@ -197,6 +198,14 @@ export default function AnnotationExportDialog({ bookId, annotations, sort, chap
   return (
     <Modal title={_('annotation.exportTitle')} onClose={onClose} variant="reader">
       <div onClick={() => setOpenMenu(null)} className="space-y-4 text-sm">
+        {bookQuery.isError ? (
+          <QueryErrorState
+            className="py-6 text-[var(--bd-read-sub)]"
+            isRetrying={bookQuery.isFetching}
+            onRetry={bookQuery.refetch}
+          />
+        ) : (
+          <>
         <p className="text-xs text-[var(--bd-read-sub)]">{_('annotation.exportSelected', { n: ordered.length })}</p>
         <div>
           <div className="mb-2 text-xs text-[var(--bd-read-sub)]">{_('annotation.exportExtra')}</div>
@@ -232,6 +241,8 @@ export default function AnnotationExportDialog({ bookId, annotations, sort, chap
             {actionMenu('download')}
           </div>
         </div>
+          </>
+        )}
       </div>
     </Modal>
   )

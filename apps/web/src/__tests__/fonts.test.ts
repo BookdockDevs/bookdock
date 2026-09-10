@@ -64,6 +64,15 @@ describe('resolveFont', () => {
     expect(resolved.uploaded).toBeUndefined()
     expect(resolved.stack).toBe(FONT_OPTIONS[0].value)
   })
+
+  it('falls back when the selected font is disabled', () => {
+    const resolved = resolveFont('kaiti', [], {
+      kaiti: { enabled: false },
+      serif: { displayName: '正文' },
+    })
+    expect(resolved.name).toBe('正文')
+    expect(resolved.stack).toBe(FONT_OPTIONS[0].value)
+  })
 })
 
 describe('uploadedFaceCss', () => {
@@ -103,7 +112,7 @@ describe('ensureBuiltinFontLoaded', () => {
     expect((links[0] as HTMLLinkElement).href).toBe(BUILTIN_FONTS.find((f) => f.id === 'noto-sans-sc')!.cssUrl)
   })
 
-  it('tracks loading, then persists the loaded marker on stylesheet load', () => {
+  it('tracks loading, then persists the loaded marker after the font face loads', () => {
     ensureBuiltinFontLoaded('lxgw-wenkai')
     expect(useFontLoaderStore.getState().loadingIds).toContain('lxgw-wenkai')
     expect(isBuiltinFontLoaded('lxgw-wenkai')).toBe(false)
@@ -113,7 +122,7 @@ describe('ensureBuiltinFontLoaded', () => {
 
     expect(useFontLoaderStore.getState().loadingIds).not.toContain('lxgw-wenkai')
     expect(isBuiltinFontLoaded('lxgw-wenkai')).toBe(true)
-    expect(JSON.parse(localStorage.getItem('bd-builtin-fonts-loaded')!)).toContain('lxgw-wenkai')
+    expect(JSON.parse(localStorage.getItem('bd-builtin-fonts-loaded-v2')!)).toContain('lxgw-wenkai')
   })
 
   it('clears the loading state without persisting on stylesheet error', () => {
@@ -127,24 +136,47 @@ describe('ensureBuiltinFontLoaded', () => {
 })
 
 describe('buildFontOptions', () => {
-  it('orders uploaded → builtin → system at fixed positions', () => {
+  it('orders system → builtin → uploaded by default', () => {
     const options = buildFontOptions([uploadedFont])
     expect(options.map((o) => o.id)).toEqual([
-      'abc123',
-      'lxgw-wenkai',
-      'noto-serif-sc',
-      'noto-sans-sc',
       'serif',
       'sans-serif',
       'kaiti',
       'fangsong',
+      'lxgw-wenkai',
+      'noto-serif-sc',
+      'noto-sans-sc',
+      'abc123',
     ])
-    expect(options[0]).toMatchObject({
+    expect(options.at(-1)).toMatchObject({
       source: 'uploaded',
       status: 'ready',
       name: 'My Handwriting',
       stack: '"bd-font-abc123", serif',
     })
+  })
+
+  it('applies a saved order to all available font ids', () => {
+    const options = buildFontOptions([uploadedFont], { loadedIds: [], loadingIds: [] }, {}, [
+      'abc123',
+      'noto-sans-sc',
+      'serif',
+      'lxgw-wenkai',
+      'noto-serif-sc',
+      'sans-serif',
+      'kaiti',
+      'fangsong',
+    ])
+    expect(options.map((option) => option.id)).toEqual([
+      'abc123',
+      'noto-sans-sc',
+      'serif',
+      'lxgw-wenkai',
+      'noto-serif-sc',
+      'sans-serif',
+      'kaiti',
+      'fangsong',
+    ])
   })
 
   it('derives the builtin status tri-state from the loader store', () => {
@@ -160,6 +192,15 @@ describe('buildFontOptions', () => {
   it('keeps uploaded and system options always ready', () => {
     const options = buildFontOptions([uploadedFont])
     expect(options.filter((o) => o.source !== 'builtin').every((o) => o.status === 'ready')).toBe(true)
+  })
+
+  it('applies per-user names and visibility overrides', () => {
+    const options = buildFontOptions([uploadedFont], { loadedIds: [], loadingIds: [] }, {
+      abc123: { enabled: false, displayName: '手写' },
+      serif: { displayName: '正文宋体' },
+    })
+    expect(options.find((o) => o.id === 'abc123')).toMatchObject({ name: '手写', enabled: false })
+    expect(options.find((o) => o.id === 'serif')).toMatchObject({ name: '正文宋体', enabled: true })
   })
 
   it('uses the variable fontsource packages for the noto fonts', () => {

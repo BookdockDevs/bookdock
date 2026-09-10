@@ -468,6 +468,19 @@ describe('BookDetailDialog primary action', () => {
   })
 })
 
+describe('BookDetailDialog TOC rule menu', () => {
+  it('opens the TOC rule picker from edit mode', async () => {
+    bookDetail = { data: { ...book, format: 'txt', meta: {} } }
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    fireEvent.click(await screen.findByRole('button', { name: '修改分章规则' }))
+
+    expect(await screen.findByRole('heading', { name: '分章规则' })).toBeInTheDocument()
+  })
+})
+
 describe('BookDetailDialog download menu (2×2)', () => {
   const transformRule = (overrides: Record<string, unknown> = {}) => ({
     id: 'r1',

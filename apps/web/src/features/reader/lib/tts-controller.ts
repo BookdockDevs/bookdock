@@ -290,10 +290,10 @@ export class TtsController {
     try {
       if (this.isBufferedClient()) await this.runBufferedSession(segment, generation, controller)
       else await this.playSystemSegment(segment, generation, controller)
-    } catch (error) {
+    } catch {
       if (generation !== this.generation || controller.signal.aborted) return
       this.renderer.clearTtsHighlight()
-      this.state = { ...this.state, status: 'error', error: error instanceof Error ? error.message : '朗读失败' }
+      this.state = { ...this.state, status: 'error', error: 'reader.ttsPlaybackFailed' }
       this.emit()
     }
   }

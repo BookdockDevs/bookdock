@@ -4,13 +4,14 @@ import type { AdminUserRes, UpdateUserReq } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useAdminUsers, useUpdateUser } from '@/features/auth/hooks'
-import { authErrorKey } from '@/features/auth/errors'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
 import DeleteConfirm from '@/features/library/components/DeleteConfirm'
 import { Button } from '@/components/ui/Button'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
-import { useToastStore } from '@/stores/toast.store'
 
 interface PendingAction {
   user: AdminUserRes
@@ -21,9 +22,8 @@ interface PendingAction {
 
 export default function UserManagementSection() {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const currentUser = useAuthStore((s) => s.user)
-  const { data: usersData, isLoading } = useAdminUsers()
+  const { data: usersData, isError, isFetching, isLoading, refetch } = useAdminUsers()
   const updateUser = useUpdateUser()
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [resetTarget, setResetTarget] = useState<AdminUserRes | null>(null)
@@ -33,7 +33,7 @@ export default function UserManagementSection() {
   function runUpdate(id: string, req: UpdateUserReq) {
     updateUser.mutate(
       { id, ...req },
-      { onError: (err) => addToast(_(authErrorKey(err)), 'error') },
+      { onError: (err) => notify.error(getUserErrorNotification(err, 'auth.errors.generic')) },
     )
   }
 
@@ -42,6 +42,8 @@ export default function UserManagementSection() {
       <h2 className="mb-4 text-sm font-medium">{_('admin.userManagement')}</h2>
       {isLoading ? (
         <p className="text-xs text-stone-400">{_('reader.loading')}</p>
+      ) : isError ? (
+        <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
       ) : (
         <div className="-mx-1 overflow-x-auto px-1">
           <table className="min-w-[42rem] w-full text-left text-sm">

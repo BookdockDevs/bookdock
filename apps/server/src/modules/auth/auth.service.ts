@@ -20,6 +20,13 @@ export interface InstanceSettings {
 
 let instanceCache: { value: InstanceSettings; at: number } | null = null
 
+function isUsernameUniqueConstraint(err: unknown) {
+  return err instanceof Error
+    && 'code' in err
+    && (err as { code?: unknown }).code === 'SQLITE_CONSTRAINT_UNIQUE'
+    && err.message.includes('users.username')
+}
+
 export function resetInstanceCache() {
   instanceCache = null
 }
@@ -105,14 +112,19 @@ export async function register(username: string, password: string) {
   }
   const id = createId('user')
   const now = Date.now()
-  db.insert(users).values({
-    id,
-    username,
-    passwordHash: await hashPassword(password),
-    role: 'member',
-    createdAt: now,
-    updatedAt: now,
-  }).run()
+  try {
+    db.insert(users).values({
+      id,
+      username,
+      passwordHash: await hashPassword(password),
+      role: 'member',
+      createdAt: now,
+      updatedAt: now,
+    }).run()
+  } catch (err) {
+    if (isUsernameUniqueConstraint(err)) throw new AppError('USERNAME_TAKEN', 'Username is already taken')
+    throw err
+  }
   const user = db.select().from(users).where(eq(users.id, id)).get()
   if (!user) throw new AppError('INTERNAL_ERROR', 'Failed to create user')
   return { token: await issueToken(user), user: toAuthPayload(user) }
@@ -144,7 +156,12 @@ export function changeUsername(userId: string, username: string): AccountRes {
   if (taken) {
     throw new AppError('USERNAME_TAKEN', 'Username is already taken')
   }
-  db.update(users).set({ username, updatedAt: Date.now() }).where(eq(users.id, userId)).run()
+  try {
+    db.update(users).set({ username, updatedAt: Date.now() }).where(eq(users.id, userId)).run()
+  } catch (err) {
+    if (isUsernameUniqueConstraint(err)) throw new AppError('USERNAME_TAKEN', 'Username is already taken')
+    throw err
+  }
   // The guard caches username/avatarKey for /me; drop the stale entry
   invalidateUserCache(userId)
   const row = db.select().from(users).where(eq(users.id, userId)).get()
@@ -157,22 +174,39 @@ export async function setupUser(username: string, password: string) {
     throw new AppError('FORBIDDEN', 'Setup already completed')
   }
   const db = getDb()
-  const existing = db.select().from(users).where(eq(users.username, config.defaultUsername)).get()
   const hash = await hashPassword(password)
-  const now = Date.now()
-  if (existing) {
-    db.update(users)
-      .set({ username, passwordHash: hash, updatedAt: now })
-      .where(eq(users.id, existing.id))
-      .run()
-    const updated = db.select().from(users).where(eq(users.id, existing.id)).get()
-    if (!updated) throw new AppError('INTERNAL_ERROR', 'Failed to setup user')
-    return { token: await issueToken(updated), user: toAuthPayload(updated) }
-  }
-  const id = createId('user')
-  db.insert(users).values({ id, username, passwordHash: hash, role: 'owner', createdAt: now, updatedAt: now }).run()
-  const user = db.select().from(users).where(eq(users.id, id)).get()
-  if (!user) throw new AppError('INTERNAL_ERROR', 'Failed to create user')
+  const user = db.transaction((tx) => {
+    const passwordUser = tx.select({ id: users.id }).from(users).where(isNotNull(users.passwordHash)).get()
+    if (passwordUser) throw new AppError('FORBIDDEN', 'Setup already completed')
+
+    const existing = tx.select().from(users).where(eq(users.username, config.defaultUsername)).get()
+    const now = Date.now()
+    if (existing) {
+      try {
+        tx.update(users)
+          .set({ username, passwordHash: hash, updatedAt: now })
+          .where(eq(users.id, existing.id))
+          .run()
+      } catch (err) {
+        if (isUsernameUniqueConstraint(err)) throw new AppError('USERNAME_TAKEN', 'Username is already taken')
+        throw err
+      }
+      const updated = tx.select().from(users).where(eq(users.id, existing.id)).get()
+      if (!updated) throw new AppError('INTERNAL_ERROR', 'Failed to setup user')
+      return updated
+    }
+
+    const id = createId('user')
+    try {
+      tx.insert(users).values({ id, username, passwordHash: hash, role: 'owner', createdAt: now, updatedAt: now }).run()
+    } catch (err) {
+      if (isUsernameUniqueConstraint(err)) throw new AppError('USERNAME_TAKEN', 'Username is already taken')
+      throw err
+    }
+    const created = tx.select().from(users).where(eq(users.id, id)).get()
+    if (!created) throw new AppError('INTERNAL_ERROR', 'Failed to create user')
+    return created
+  })
   return { token: await issueToken(user), user: toAuthPayload(user) }
 }
 
@@ -189,8 +223,15 @@ export async function getDefaultUser() {
       role: 'guest' as const,
       createdAt: Date.now(),
     }
-    db.insert(users).values(newUser).run()
-    return newUser
+    try {
+      db.insert(users).values(newUser).run()
+      return newUser
+    } catch (err) {
+      if (!isUsernameUniqueConstraint(err)) throw err
+      const racedUser = db.select().from(users).where(eq(users.username, config.defaultUsername)).get()
+      if (racedUser) return racedUser
+      throw err
+    }
   }
   return user
 }

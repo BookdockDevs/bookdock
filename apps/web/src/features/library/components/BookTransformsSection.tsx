@@ -1,11 +1,13 @@
 import type { TextTransformRes } from '@bookdock/shared'
 
 import { useBookTransforms, useSetTransformOverride, useUpdateTransform } from '@/api/hooks/useTransforms'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
-import { useToastStore } from '@/stores/toast.store'
 
 import { nextOverrideValue } from '../transform-overrides'
 
@@ -34,8 +36,8 @@ export default function BookTransformsSection({
   onDelete,
 }: BookTransformsSectionProps) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
-  const { data } = useBookTransforms(bookId)
+  const transformsQuery = useBookTransforms(bookId)
+  const { data } = transformsQuery
   const setOverride = useSetTransformOverride()
   const updateTransform = useUpdateTransform()
 
@@ -54,27 +56,29 @@ export default function BookTransformsSection({
   function onGlobalToggle(rule: TextTransformRes) {
     setOverride.mutate(
       { transformId: rule.id, body: { bookId, enabled: nextOverrideValue(rule) } },
-      { onError: (err) => addToast(err.message, 'error') },
+      { onError: (err) => notify.error(getUserErrorNotification(err, 'errors.updateFailed')) },
     )
   }
 
   function onBookRuleToggle(rule: TextTransformRes) {
     updateTransform.mutate(
       { id: rule.id, body: { enabled: !rule.enabled } },
-      { onError: (err) => addToast(err.message, 'error') },
+      { onError: (err) => notify.error(getUserErrorNotification(err, 'errors.updateFailed')) },
     )
   }
 
   function onPointToggle(rule: TextTransformRes) {
     updateTransform.mutate(
       { id: rule.id, body: { enabled: !rule.enabled } },
-      { onError: (err) => addToast(err.message, 'error') },
+      { onError: (err) => notify.error(getUserErrorNotification(err, 'errors.updateFailed')) },
     )
   }
 
   return (
     <section>
-      {rows.length === 0 ? (
+      {transformsQuery.isError ? (
+        <QueryErrorState isRetrying={transformsQuery.isFetching} onRetry={transformsQuery.refetch} />
+      ) : rows.length === 0 ? (
         <SettingsEmptyState>{_('reader.transformsEmptyCreate')}</SettingsEmptyState>
       ) : (
         <ul className="divide-y divide-stone-100 dark:divide-stone-800">

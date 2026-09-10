@@ -52,6 +52,7 @@ export const tags = sqliteTable('tags', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
   name: text('name').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
 })
 
 export const bookTags = sqliteTable('book_tags', {
@@ -309,6 +310,7 @@ export const tocRules = sqliteTable('toc_rules', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
+  seedKey: text('seed_key'),
   enabled: integer('enabled').notNull().default(1),
   sortOrder: integer('sort_order').notNull().default(0),
   patterns: text('patterns', { mode: 'json' }).$type<TocRulePattern[]>().notNull().default([]),
@@ -316,6 +318,7 @@ export const tocRules = sqliteTable('toc_rules', {
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   userIdx: index('toc_rules_user_idx').on(table.userId, table.sortOrder),
+  userSeedKeyUnique: uniqueIndex('toc_rules_user_seed_key_unique').on(table.userId, table.seedKey),
 }))
 
 export const readingRecords = sqliteTable('reading_records', {

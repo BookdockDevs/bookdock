@@ -1,4 +1,5 @@
 import { useReadingDaily } from '@/api/hooks/reading-records'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
 import { cn } from '@/lib/utils'
@@ -22,10 +23,19 @@ function levelClass(seconds: number, max: number): string {
 export default function YearHeatmap({ selectedDate, onSelectDate }: YearHeatmapProps) {
   const _ = useTranslation()
   const year = new Date().getFullYear()
-  const { data } = useReadingDaily(`${year}-01-01`, `${year}-12-31`)
+  const dailyQuery = useReadingDaily(`${year}-01-01`, `${year}-12-31`)
+  const { data } = dailyQuery
   const secondsByDate = new Map((data?.data ?? []).map((i) => [i.date, i.durationSeconds]))
   const max = Math.max(0, ...secondsByDate.values())
   const weeks = heatmapWeeks(year)
+
+  if (dailyQuery.isError) {
+    return (
+      <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+        <QueryErrorState isRetrying={dailyQuery.isFetching} onRetry={dailyQuery.refetch} />
+      </section>
+    )
+  }
 
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">

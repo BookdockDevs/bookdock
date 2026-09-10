@@ -135,6 +135,10 @@ export interface SettingsRes {
   lightReadingThemeId?: 'paper' | 'sepia' | 'night' | 'cream'
   /** Open font id (system stack / builtin CDN / uploaded font id), resolved client-side */
   fontFamily?: string
+  /** Per-user font visibility and display-name overrides, keyed by stable font id. */
+  fontPreferences?: FontPreferences
+  /** Per-user display order of stable system, builtin, and uploaded font ids. */
+  fontOrder?: string[]
   fontSize?: number
   fontWeight?: number
   lineHeight?: number
@@ -805,6 +809,13 @@ export interface SettingsUpdateReq {
 
 export type FontScope = 'user' | 'instance'
 
+export interface FontPreference {
+  enabled?: boolean
+  displayName?: string
+}
+
+export type FontPreferences = Record<string, FontPreference>
+
 export interface FontListItem {
   id: string
   /** Family name parsed from the sfnt name table, falling back to the file name */
@@ -844,6 +855,7 @@ export interface TagListItem {
   id: string
   userId: string
   name: string
+  sortOrder: number
   bookCount: number
 }
 
@@ -853,6 +865,11 @@ export interface TagCreateReq {
 
 export interface TagUpdateReq {
   name: string
+}
+
+/** Full ordered tag id list; the server rewrites each tag's sortOrder to its index. */
+export interface TagReorderReq {
+  tagIds: string[]
 }
 
 export interface BookMembershipReq {
@@ -1191,6 +1208,7 @@ export interface TocRuleRes {
   enabled: boolean
   sortOrder: number
   patterns: TocRulePattern[]
+  builtIn: boolean
   createdAt: number
   updatedAt: number
 }

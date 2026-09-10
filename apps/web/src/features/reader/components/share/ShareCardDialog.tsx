@@ -6,15 +6,17 @@ import type { BookDetailRes } from '@bookdock/shared'
 
 import { apiGet } from '@/api/client'
 import { useFonts } from '@/api/hooks/useFonts'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
+import { notify } from '@/lib/notifications'
 import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
-import { useToastStore } from '@/stores/toast.store'
+import { useUiStore } from '@/stores/ui.store'
 
 import { markEscConsumed } from '../../lib/esc-consumed'
 
 import { useReaderState } from '../../state/reader-state'
-import { buildFontOptions, ensureBuiltinFontLoaded, ensureUploadedFontLoaded, resolveFont, useFontLoaderStore, type FontOption } from '../../fonts'
+import { buildFontOptions, ensureBuiltinFontLoaded, ensureBuiltinFontsLoaded, ensureUploadedFontLoaded, resolveFont, useFontLoaderStore, type FontOption } from '../../fonts'
 import { ChevronLeftIcon, CloseIcon, DownloadIcon, ShareIcon, SpinnerIcon, TemplateIcon } from '../annotation-icons'
 import ShareCard, { SHARE_CARD_WIDTH } from './ShareCard'
 import { BACKGROUND_OPTIONS, SHARE_CARD_TEMPLATES, loadShareCardPrefs, nextBrand, saveShareCardPrefs, type ShareCardPrefs } from './card-prefs'
@@ -40,11 +42,12 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const _ = useTranslation()
   const shareTarget = useReaderState((s) => s.shareTarget)
   const setShareTarget = useReaderState((s) => s.setShareTarget)
-  const addToast = useToastStore((s) => s.addToast)
   const user = useAuthStore((s) => s.user)
   const authorName = getUserDisplayName(user, _('auth.guest'))
   const avatarKey = useAuthStore((s) => s.user?.avatarKey)
-  const { data: bookData } = useQuery({
+  const fontPreferences = useUiStore((s) => s.fontPreferences)
+  const fontOrder = useUiStore((s) => s.fontOrder)
+  const bookQuery = useQuery({
     queryKey: ['book', bookId],
     queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
   })
@@ -53,10 +56,11 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
   const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
   const fontOptions = useMemo(
-    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds }),
+    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds }, fontPreferences, fontOrder),
     // loaded/loading ids feed a builtin option's status icon
-    [uploadedFonts, fontLoadedIds, fontLoadingIds],
+    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontPreferences, fontOrder],
   )
+  const enabledFontOptions = useMemo(() => fontOptions.filter((option) => option.enabled), [fontOptions])
 
   const previewRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
@@ -65,7 +69,13 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const [customizing, setCustomizing] = useState(false)
   const [prefs, setPrefs] = useState<ShareCardPrefs>(loadShareCardPrefs)
 
-  const book = bookData?.data
+  useEffect(() => {
+    if (!shareTarget || enabledFontOptions.some((option) => option.id === prefs.font)) return
+    const fallback = enabledFontOptions[0]
+    if (fallback) setPrefs((current) => ({ ...current, font: fallback.id }))
+  }, [enabledFontOptions, prefs.font, shareTarget])
+
+  const book = bookQuery.data?.data
 
   /** Snapshot of everything the exported image depends on — any change
    *  invalidates the cached render */
@@ -118,17 +128,18 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
 
   // The card preview/export renders in the main document: the selected font
   // must be loaded there (export already awaits document.fonts.ready). While
-  // customizing, uploaded fonts load so chip previews are accurate — idle
-  // builtins stay untouched behind their download icon.
+  // The card preview renders in the main document. Mount all public builtin
+  // stylesheets while the font list is open so each chip uses its real face.
   useEffect(() => {
     if (!shareTarget) return
     const fonts = fontsData?.data ?? []
-    const resolved = resolveFont(prefs.font, fonts)
+    const resolved = resolveFont(prefs.font, fonts, fontPreferences, fontOrder)
     if (resolved.builtin) ensureBuiltinFontLoaded(resolved.builtin.id)
     if (resolved.uploaded) void ensureUploadedFontLoaded(resolved.uploaded)
     if (!customizing) return
+    ensureBuiltinFontsLoaded()
     fonts.forEach((f) => void ensureUploadedFontLoaded(f))
-  }, [shareTarget, prefs.font, customizing, fontsData])
+  }, [shareTarget, prefs.font, customizing, fontsData, fontPreferences, fontOrder])
 
   // Warm the export cache in the background while the user reads the preview,
   // so copy/save resolve from cache instead of paying the render cost on
@@ -143,10 +154,38 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     return () => clearTimeout(timer)
   }, [shareTarget, renderKey])
 
-  if (!shareTarget || !book) return null
+  if (!shareTarget) return null
+
+  if (bookQuery.isError) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
+        onClick={() => setShareTarget(null)}
+      >
+        <div
+          className="w-full max-w-xl rounded-t-2xl border border-stone-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-xl sm:rounded-2xl dark:border-stone-800 dark:bg-stone-950"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex justify-end px-4 pt-3">
+            <button
+              type="button"
+              onClick={() => setShareTarget(null)}
+              title={_('share.close')}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-500/10 hover:text-stone-600 dark:hover:text-stone-200"
+            >
+              <CloseIcon />
+            </button>
+          </div>
+          <QueryErrorState className="px-6 pb-6 pt-2" isRetrying={bookQuery.isFetching} onRetry={bookQuery.refetch} />
+        </div>
+      </div>
+    )
+  }
+
+  if (!book) return null
 
   const fileName = shareFileName(book.title)
-  const fontStack = resolveFont(prefs.font, uploadedFonts).stack
+  const fontStack = resolveFont(prefs.font, uploadedFonts, fontPreferences, fontOrder).stack
 
   function patchPrefs(patch: Partial<ShareCardPrefs>) {
     setPrefs((prev) => {
@@ -171,7 +210,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
       const blob = await getCardBlob(node, renderKey)
       downloadCardBlob(blob, fileName)
     } catch {
-      addToast(_('share.exportFailed'), 'error')
+      notify.error({ key: 'share.exportFailed' })
     } finally {
       setExporting(false)
     }
@@ -184,12 +223,12 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     try {
       const blob = await getCardBlob(node, renderKey)
       if (await copyCardBlob(blob)) {
-        addToast(_('share.copied'), 'success')
+        notify.success({ key: 'share.copied' })
         return
       }
-      addToast(_('share.copyFailed'), 'error')
+      notify.error({ key: 'share.copyFailed' })
     } catch {
-      addToast(_('share.exportFailed'), 'error')
+      notify.error({ key: 'share.exportFailed' })
     } finally {
       setExporting(false)
     }
@@ -261,7 +300,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
               </div>
               <div className="flex items-center gap-2 overflow-x-auto">
                 <span className="w-8 shrink-0 text-xs text-stone-500 dark:text-stone-400">{_('share.font')}</span>
-                {fontOptions.map((opt) => (
+                {enabledFontOptions.map((opt) => (
                   <button
                     key={opt.id}
                     onClick={() => onSelectFont(opt)}

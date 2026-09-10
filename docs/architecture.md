@@ -48,12 +48,15 @@ Conventions:
 **Current domain model**:
 - `User(id, username, passwordHash?, role, disabled, avatarKey?, createdAt, updatedAt?)` — `avatarKey` is the content-hash addressed avatar blob key (`<hh>/<sha256>.<ext>`, stored at `avatars/<key>`); physical file ref-checked across users before delete, same pattern as fonts/books
 - `Book(id, userId, title, author, format, filePath, coverKey?, size, meta, createdAt, updatedAt, deletedAt?, shelfId?)` — `shelfId` is the book's single shelf (FK `shelves.id`, `ON DELETE SET NULL`); `null` = 未分类 (a legitimate state). A book belongs to at most one shelf.
-- `Shelf(id, userId, name, sortOrder, createdAt)`
-- `Tag(id, userId, name)`
-- `Settings(id, userId, key, value)`
+- `Shelf(id, userId, name, sortOrder, createdAt)` — `name` is unique per user after trimming surrounding whitespace
+- `Tag(id, userId, name, sortOrder)` — user-defined order for the library sidebar; new tags are appended and the list endpoint returns this order; `name` is unique per user after trimming surrounding whitespace
+- `Settings(id, userId, key, value)` — the `ui` value may include per-user `fontPreferences` keyed by stable system/builtin/uploaded font ids and a `fontOrder` list of those ids; these preferences control display name, visibility, and display order without turning non-file fonts into database rows
 - `InstanceSettings(key, value)` — instance-level KV, no userId (see ADR-12)
 - `Annotation(id, userId, bookId, cfiRange, cfiAnchor?, type, color, style, text, note?, chapter?, createdAt, updatedAt)`
-- `Font(id, userId, scope, family, fileName, format, contentHash, size, createdAt)` — uploaded fonts; `scope: user|instance` (instance = owner-shared, visible to all users); physical file content-hash deduped, ref-counted on delete (see ADR-13)
+- `TextTransform(id, userId, bookId?, matchType, pattern?, replacement?, enabled, ...)` — user-global pattern rules and book-local point patches share one table; per-book pattern overrides live in `text_transform_overrides`.
+- `TextTransformOverride(id, userId, bookId, transformId, enabled, createdAt, updatedAt)` — per-book enablement for pattern transforms.
+- `Font(id, userId, scope, family, fileName, format, contentHash, size, createdAt)` — uploaded fonts; `scope: user|instance` (instance = owner-shared, visible to all users); physical file content-hash deduped, ref-counted on delete (see ADR-13). The web font catalog also exposes stable system and CDN-builtin entries; user-level display-name/enabled overrides and display ordering live in `Settings.ui.fontPreferences` and `Settings.ui.fontOrder` so users can hide or reorder any font without deleting shared assets.
+- `TocRule(id, userId, seedKey?, name, enabled, sortOrder, patterns, createdAt, updatedAt)` — user-owned TXT chapter presets; `seedKey` identifies product-provided presets for safe backfill and restore, while `patterns` stores one continuous level per array position.
 - `ReadingRecord(id, userId, bookId, date, durationSeconds)` — per-day per-book accumulated reading seconds; `date` is the client-local calendar day `YYYY-MM-DD` (sessions bucket to the start-day)
 
 Reading position fields live in the `books` row; progress history and interval data live in storage files under `DATA_DIR`.
@@ -91,7 +94,7 @@ apps/server/src/
     settings.routes.ts      # user-level KV
     annotations.routes.ts   # highlight/note/comment CRUD
     avatars/                # user avatar upload/delete + immutable content-hash file serving
-    fonts/                  # custom font upload/list/delete/scope + immutable file serving
+    fonts/                  # custom font upload/list/delete/scope + immutable file serving; web merges these rows with the stable system/builtin catalog and user font preferences
     reading-records.routes.ts # duration upsert + aggregation
     ai/                   # Chat LLM gateway, user configuration, reader context, and bounded read-only tools
     tts/                  # user-owned AI voice services and server-side speech gateways
@@ -184,15 +187,18 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 |---|---|---|
 | `users` | id (text PK), username (unique), passwordHash?, role, disabled, avatarKey?, createdAt, updatedAt? | role: owner\|member\|guest; disabled → deny; avatarKey = content-hash blob key under `avatars/`, ref-checked before physical delete |
 | `books` | id, userId FK, title, author, format (epub\|txt), filePath, coverKey?, size, meta (json), createdAt, updatedAt, **deletedAt**, **shelfId?** | deletedAt soft-delete (回收站); auto-clean purges rows older than per-user `trash.autoCleanDays` (0=never/7/30, default 30) — full scan for all users at startup (fail-silent) + lazy per-user scan on `GET /books?trash=1`; purge reuses `deleteBook` (ref-counted blob deletion). shelfId FK → shelves (SET NULL): single-shelf membership, NULL = 未分类; `GET /books?shelfId=<id>` filters by shelf, `shelfId=none` filters uncategorized books |
-| `shelves` | id, userId FK, name, sortOrder, createdAt | deleting a shelf sets its books' shelfId to NULL (books become 未分类, never deleted) |
-| `tags` | id, userId FK, name | |
+| `shelves` | id, userId FK, name, sortOrder, createdAt | name is unique per user after trimming; deleting a shelf sets its books' shelfId to NULL (books become 未分类, never deleted) |
+| `tags` | id, userId FK, name, sortOrder | name is unique per user after trimming; sortOrder is rewritten from the submitted full tag id list; the library sidebar and active library heading use the selected tag's name |
 | `book_tags` | bookId FK (cascade), tagId FK (cascade) | composite PK, M2M |
-| `settings` | id, userId FK, key, value (json) | unique (userId, key); keys: `ui` (reader/UI prefs), `trash` (`{ autoCleanDays }`), `ai` (encrypted user AI provider configuration) |
+| `settings` | id, userId FK, key, value (json) | unique (userId, key); keys: `ui` (reader/UI prefs plus `fontPreferences` display-name/enabled overrides and `fontOrder`), `trash` (`{ autoCleanDays }`), `ai` (encrypted user AI provider configuration) |
 | `instance_settings` | key (text PK), value | no userId (ADR-12); auth policy only |
 | `annotations` | id, userId FK, bookId FK, cfiRange, cfiAnchor?, type, color, style, text, note?, chapter?, createdAt, updatedAt, **deletedAt?** | unique (userId, bookId, cfiRange); soft delete |
+| `text_transforms` | id, userId FK, bookId?, matchType, pattern/replacement?, enabled, metadata fields | pattern rules are user-global; point patches require a book; per-book pattern enablement is stored separately |
+| `text_transform_overrides` | id, userId FK, bookId FK, transformId FK, enabled, createdAt, updatedAt | unique (bookId, transformId); existence means a book-specific override |
 | `reading_records` | id, userId FK, bookId FK (cascade), date (text), durationSeconds | unique (userId, bookId, date); upsert snapshot |
 | `reading_sessions` | id, userId FK, bookId FK (cascade), date (text), startedAt, durationSeconds | per-session detail for hourly distribution |
-| `fonts` | id, userId FK, scope (user\|instance), family, fileName, format, contentHash, size, createdAt | unique (userId, contentHash); file at `fonts/<hash>` in storage, ref-counted delete |
+| `fonts` | id, userId FK, scope (user\|instance), family, fileName, format, contentHash, size, createdAt | uploaded font assets only; unique (userId, contentHash); file at `fonts/<hash>` in storage, ref-counted delete; system/CDN-builtin entries are catalog definitions rather than rows |
+| `toc_rules` | id, userId FK, seedKey?, name, enabled, sortOrder, patterns (json), createdAt, updatedAt | unique (userId, seedKey); stable seed keys identify restorable built-in presets without taking ownership away from the user |
 | `tts_services` | id, userId FK, name, provider, baseUrl?, model?, defaultVoice?, options (json), encryptedSecrets?, createdAt, updatedAt | multiple user-owned AI voice services; credentials are encrypted at rest and never returned; built-in system/Edge engines are not rows; guest accounts cannot configure or use user AI services |
 | `ai_threads` | id, userId FK, bookId FK (cascade), title, settings (json)?, createdAt, updatedAt | per-user, per-book persisted AI conversation; settings store the thread's reading-scope, read-tool, and assistant-mode snapshot, while new threads copy the user-level latest conversation settings; title is local metadata and contains no generated provider content |
 | `ai_messages` | id, userId FK, threadId FK (cascade), role, content, context (json)?, retry (json)?, citations (json)?, revisionGroupId?, revision, isSelected, createdAt, aborted | user-visible prompt/answer plus bounded book-source metadata; assistant revisions share a user-turn group and only the selected revision enters the active conversation; context stores the direct receipt and per-request chapter-level scope/tool/model/mode snapshot, while citations store only chapter/offset/excerpt references; neither stores secrets, system prompt, reasoning, or raw tool payload |
@@ -208,7 +214,8 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 ### Drizzle conventions
 - All ids are nanoid strings (from `lib/id.ts`), never auto-increment ints → prevents count leaks, multi-client friendliness.
 - Timestamps uniform INTEGER unix ms.
-- Single `db/client.ts` (WAL + foreign_keys ON); migrations via drizzle-kit (committed). The private 0.2.0 release intentionally starts a new database baseline and does not support upgrading 0.1.0 data. Future schema changes add forward migrations from that baseline.
+- Single `db/client.ts` (WAL + foreign_keys ON); migrations via drizzle-kit (committed). The 0.2.0 release intentionally starts a new database baseline and does not support upgrading 0.1.0 data. The 0.2.1 release keeps that baseline and adds one forward migration for the tag order and TOC seed metadata.
+- The release migration path is append-only and fully represented by Drizzle metadata: a `v0.2.0` database applies `0001_release_0_2_1.sql` once, while fresh databases apply the baseline followed by the same single forward migration. Startup retains only a narrow idempotent guard for local databases that recorded a partial development migration before the release tree was consolidated; it never rebuilds or deletes user data.
 
 ---
 
@@ -216,6 +223,8 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 
 - **Version prefix**: everything under `/api/v1/...`. Future breaking changes go to `/v2`.
 - **Auth**: JWT (jose, HS256, 7d) delivered via HttpOnly Cookie `bd_token` (SameSite=Strict, Path=/); Bearer header also accepted (web client transition). CSRF: cookie is same-site only + API is JSON-only.
+- **Login protection**: failed credential attempts use a process-local 60-second sliding window keyed by client address + trimmed username. `AUTH_RPM` (default 5, max 120) returns `AUTH_RATE_LIMITED` (429) with `Retry-After`; validation errors, successful logins, and disabled-account responses are not counted. The window resets on process restart and is not shared across replicas.
+- **Setup concurrency**: the first owner write rechecks initialization inside a SQLite transaction so concurrent `/setup` requests can create at most one password user; a later request receives `FORBIDDEN`.
 - **Guard**: verify → load **fresh user** from DB (30s short-TTL cache, invalidated on writes) → disabled → `ACCOUNT_DISABLED` (403); injected role is authoritative from DB. No token → inject default guest if `allowGuestAccess`, else 401.
 - **Roles**: `owner` (instance admin), `member` (registered), `guest` (anonymous → default user). First boot must create owner via `/setup` (web guard redirects when `initialized=false`).
 - **Instance settings**: `allowRegistration` / `allowGuestAccess` (default false), owner-edited via `PATCH /api/v1/auth/instance`, 5s module-level read cache. AI configuration is user-owned and edited from the reading settings; the `settings.ai` value stores up to 12 named provider profiles, the active Chat profile id, an optional independent Embedding profile id, protocol-specific endpoint/model fields, one user-curated `models` catalog per profile, an independently encrypted API key per profile, bounded user-editable quick-command templates, and bounded user-authored assistant modes, and the user-level `lastUsedConversationSettings` snapshot for the next new AI thread. The settings and reader surfaces consistently call these presets “quick commands”. Their editor exposes the supported `{SELTEXT}`, `{SELPARA}`, and `{CHAPTER}` context slots as cursor-insertable controls with concise behavior descriptions; the literal slot text remains in the visible/persisted user prompt and is resolved at request time only when its context value exists. The corresponding Reader-visible source remains attached as context once, so the provider does not receive a second copy through the direct context wrapper. Model discovery is a server-side draft operation: the provider response is a candidate list only, and the browser persists only models explicitly added by the user. The active Chat model must come from that added catalog; model selectors never fetch or expose the provider's full catalog. Chat and Embedding share the same added model catalog; embedding-capable entries are identified by explicit provider metadata when available and otherwise by the shared conservative model classifier (for example, `embedding`/`embed` model ids), and the retrieval gateway selects the configured/first matching added entry without a second model field in the settings UI. Provider capability metadata is preserved when returned by a provider, while inferred capabilities are treated as hints and unknown capabilities are not presented as unsupported. Quick-command templates are presentation-level input presets only. The server always includes an invariant core system prompt with safety, source-boundary, tool-truthfulness, and citation rules; the built-in `助理` mode and user-authored modes supply optional mode instructions that are appended before that core. User-selected tool sets, reading boundaries, ownership, size limits, and other gateway controls remain enforced by the server independently of mode prompt text. User-authored modes can be edited or deleted through the same mode editor; the built-in `助理` mode can also be edited, while its fixed id cannot be deleted and its name/prompt can be restored to defaults. The provider catalog includes OpenAI-compatible, Anthropic, Gemini, and Ollama protocol adapters plus presets for common compatible providers. The catalog also declares whether a provider requires an API key, so local providers and hosted providers share one contract without duplicating auth rules in the UI. Connection tests remain server-side draft operations, so provider keys never enter the browser's persistent state. Members may use only the catalog default endpoint for their selected provider; custom endpoints remain Owner-controlled to prevent the AI gateway from becoming an open proxy. Chat threads persist a reading scope and user-selected read-tool defaults; the default `to_here` scope includes all chapters through the current server reading-progress chapter, including the entire current chapter, while `current_chapter` includes only the current chapter and `full_book` removes the chapter boundary. Chat requests may carry a bounded per-request tool allowlist selected by the user for that request; when omitted, the thread snapshot is used. The server validates names against the read-only registry before exposing or executing tools and does not apply a hidden scene-based tool filter. Chat context may also carry at most eight explicit chapter references whose text is produced by the current Reader-visible transformation pipeline; explicitly selected chapters are user-authorized direct context and do not widen server-initiated AI tool access. The server still enforces ownership, size and context budgets before forwarding them. Chat requests are limited to one active request per user and a configurable `AI_RPM` sliding window (default 6); both protections are enforced before provider calls. Environment variables remain optional headless defaults. `AUTH_MODE` env removed.
@@ -247,7 +256,10 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | `/api/v1/avatars` | avatars | `POST /`(multipart, jpeg/png/webp/gif ≤ 2MB) `DELETE /` `GET /<hh>/<sha256>.<ext>` (immutable content-hash blob) |
 | `/api/v1/books` | books | `GET /` (supports title/author search plus exact metadata filters `author` and `series`) `POST /` `GET /:id` `DELETE /:id` `GET /:id/file` `GET /:id/cover` `PUT /:id/shelves` (set single shelf, `{shelfId: string|null}`) `GET /:id/shelves` `PUT /:id/tags` `GET /:id/tags` `GET /:id/chapters` |
 | `/api/v1/shelves` | shelves | `GET /` `POST /` `PUT /:id` `DELETE /:id` `POST /:id/books` (batch move in) `DELETE /:id/books` (batch move out) |
-| `/api/v1/tags` | tags | `GET /` `POST /` `PUT /:id` `DELETE /:id` |
+| `/api/v1/tags` | tags | `GET /` `POST /` `PUT /:id` `PUT /order` `DELETE /:id` |
+| `/api/v1/fonts` | fonts | `GET /` `POST /` `PATCH /:id/scope`(owner) `DELETE /:id` `GET /:id/file` |
+| `/api/v1/transforms` | transforms | pattern and point-transform CRUD plus per-book enablement |
+| `/api/v1/toc-rules` | toc-rules | `GET /` `POST /` `PUT /:id` `DELETE /:id` `PUT /reorder` `POST /seed` |
 | `/api/v1/annotations` | annotations | `GET /`(?bookId=) `POST /` `PUT /:id` `DELETE /:id` |
 | `/api/v1/progress` | reading | `GET /:bookId` `PUT /:bookId` |
 
@@ -299,6 +311,23 @@ apps/web/src/
 - **Client state** (per-book, auth, UI prefs): Zustand stores in `stores/`.
 - **URL state** (searchParams, pagination, filters): TanStack Router searchParams schema.
 - Never put API data in Zustand — Query cache is the single source of truth.
+- **Editable settings lists**: settings-page lists that support reordering (TOC rules, quick commands, and fonts) keep drag handles and edit/delete actions hidden in normal mode. A compact two-state edit control enters a temporary editing mode; the active mode exposes the handles and row actions, stages the reordered list locally, and the same control exits the mode and commits one ordered update. Add/restore actions are disabled while a list is being edited, and a failed commit keeps editing mode open so the user can retry.
+- **TOC rule pattern editor**: within one TOC preset, each pattern row represents exactly one directory level. The row order is canonical and simultaneously defines ascending levels (`1..N`) and matching order; the editor derives these numbers from position instead of exposing a separate priority field. A single regex may contain alternatives for multiple heading forms at the same level. Saving normalizes the submitted pattern levels to the visible row positions, and the request contract requires the submitted levels to remain continuous and unique.
+- **Settings row controls**: normal rows place the enable/disable switch at the trailing edge; edit mode keeps the switch first and reveals edit/delete actions to its right, so the action group remains stable and aligned across editable lists.
+- **Settings list counts**: compact list counts appear immediately after the module title as a muted numeric suffix, and are omitted when the count is zero; the list body and empty state remain responsible for their own explanatory text.
+- **Font catalog**: the settings page and reader font pickers merge system, CDN-builtin, and uploaded entries. Without a saved order, this is the default order; a user's `Settings.ui.fontOrder` then reorders the stable ids and any newly available ids are appended. Stable per-user display-name/enabled overrides stay in `Settings.ui.fontPreferences`; opening a picker mounts public builtin CSS in the main document so each font name can render in its own face, while the reader iframe continues to receive the selected font's CSS separately. Font rows use only source and, for uploaded fonts, scope badges; file format, size, and disabled state are not repeated as badges in the list. In the settings list, the builtin load/download control sits immediately to the right of the rendered font name, before source/scope badges and the trailing enable switch; it is replaced by a spinner while loading and disappears after the font is ready.
+
+### 6.1.1 User feedback and transient notifications
+
+The web client distinguishes three user-feedback surfaces:
+
+- **Toast**: a transient global notification for a completed action or an immediately actionable problem.
+- **Inline error**: a persistent error rendered beside the page, panel, or field that failed to load or validate, with a local retry or correction path when available.
+- **Task status**: persistent progress and final outcome for work that can outlive the initiating interaction, such as uploads and AI index builds.
+
+Not every notification is a toast. Toasts must not be the only status for page-load failures or ongoing work. The transient notification host is mounted once at the application root and owns presentation concerns such as stacking, dismissal, timing, accessibility, and responsive placement. Notification producers provide a typed intent with a severity, translation key, interpolation parameters, optional action, and optional deduplication identity; they do not provide ad hoc visual classes or raw backend error text.
+
+Notification state is ephemeral client state: it is not persisted, is independent from TanStack Query cache, and is cleared when the authenticated session changes. Toast styling uses the application semantic theme and must not inherit per-book reading-theme variables. Success and informational notifications are polite status updates; errors and warnings remain discoverable long enough to be read and expose an explicit dismissal or recovery action when one exists.
 
 ### 6.2 Reader
 - Rendering engine is vendored **foliate-js** (`public/foliate-js/`, not npm epubjs). `FoliateReader.ts` adapts the vendored engine: dynamic `import()` of `reader-entry.js`, manages reader lifecycle (render, pagination, annotations, progress). See `docs/local/reader/` for vendoring notes.
@@ -324,6 +353,7 @@ Single `config.ts`, zod-validated then `Object.freeze`:
 | `DEFAULT_USERNAME` | `admin` | default owner username |
 | `LOG_LEVEL` | `info` | minimum structured log level; all output is one JSON object per line |
 | `UPLOAD_MAX_BYTES` | `104857600` | max upload (100MB) |
+| `AUTH_RPM` | `5` | per-client-address + username sliding-window failed login attempt limit |
 | `AI_RPM` | `6` | per-user sliding-window chat request limit; active-request concurrency remains 1 |
 | `AI_TIMEOUT_MS` | `300000` | maximum wall-clock time for one provider chat/embedding operation |
 
@@ -348,7 +378,7 @@ Prod exposes only the port + `DATA_DIR` volume. Backup = tarball `DATA_DIR`.
 - **docker-compose.yml**: source checkout deployment mounts `./data:/data`, sets `restart: unless-stopped`, and exposes the health check. A published registry image may use the same runtime layout and volume contract; Docker Hub is a distribution option, not a runtime dependency.
 - **Health**: `GET /api/v1/health` → `{ data: { ok: true } }`; both the image and Compose configuration use this endpoint for health checks.
 - **Persistence**: all mutable state lives under `DATA_DIR`, including SQLite, uploaded files, generated content, progress, and `.jwt-secret`. A cold backup copies the complete directory while the container is stopped; restore replaces the complete directory before startup. The `.jwt-secret` file must be preserved to keep existing sessions valid.
-- **Initialization**: migrations run during startup. The private 0.2.0 release requires a fresh `DATA_DIR`; existing 0.1.0 data is not an upgrade target. Back up any local data before reinitializing, start the new image, and verify `/api/v1/health` plus the web setup/login flow.
+- **Initialization**: migrations run during startup. The 0.2.1 release upgrades an existing 0.2.0 `DATA_DIR` through one forward migration; existing 0.1.0 data is not an upgrade target. Back up any local data before upgrading, start the new image, and verify `/api/v1/health` plus the web setup/login flow.
 - **Registry publishing**: `.github/workflows/docker-publish.yml` publishes `v*` git tags to Docker Hub as both a version tag and `latest`. It requires the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`; no registry credentials are stored in the repository.
 
 ---

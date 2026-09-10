@@ -83,19 +83,21 @@ describe('SettingsPanel', () => {
     ])
     render(<SettingsPanel />)
 
-    // 9 options total; the tail (楷体/仿宋) is hidden behind the More chip
-    expect(screen.getByText('我的手写体')).toBeInTheDocument()
+    // 9 options total; the two uploaded fonts are hidden behind the More chip
+    expect(screen.getByText('霞鹜文楷')).toBeInTheDocument()
     expect(screen.getByText('更多')).toBeInTheDocument()
-    expect(screen.queryByText('楷体')).not.toBeInTheDocument()
-    expect(screen.queryByText('仿宋')).not.toBeInTheDocument()
+    expect(screen.getByText('楷体')).toBeInTheDocument()
+    expect(screen.getByText('仿宋')).toBeInTheDocument()
+    expect(screen.queryByText('我的手写体')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByText('更多'))
     expect(screen.getByText('收起')).toBeInTheDocument()
-    expect(screen.getByText('楷体')).toBeInTheDocument()
-    expect(screen.getByText('仿宋')).toBeInTheDocument()
+    expect(screen.getByText('我的手写体')).toBeInTheDocument()
+    expect(screen.getByText('另一款字体')).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('收起'))
-    expect(screen.queryByText('楷体')).not.toBeInTheDocument()
+    expect(screen.getByText('楷体')).toBeInTheDocument()
+    expect(screen.queryByText('我的手写体')).not.toBeInTheDocument()
     expect(screen.getByText('更多')).toBeInTheDocument()
   })
 
@@ -104,21 +106,24 @@ describe('SettingsPanel', () => {
       { id: 'up1', family: '我的手写体', fileName: 'a.ttf', format: 'ttf', size: 1024, scope: 'user', mine: true, createdAt: 0 },
       { id: 'up2', family: '另一款字体', fileName: 'b.ttf', format: 'ttf', size: 1024, scope: 'user', mine: true, createdAt: 0 },
     ])
-    useUiStore.setState({ fontFamily: 'fangsong' })
+    useUiStore.setState({ fontFamily: 'up2' })
     render(<SettingsPanel />)
 
-    // 仿宋 sits at index 8 (hidden); it is promoted while 黑体 (index 6) shifts out
-    expect(screen.getByText('仿宋')).toBeInTheDocument()
-    expect(screen.queryByText('黑体')).not.toBeInTheDocument()
-    expect(screen.queryByText('楷体')).not.toBeInTheDocument()
+    // The selected second uploaded font is hidden by default and is promoted
+    // while the last visible builtin font shifts out.
+    expect(screen.getByText('另一款字体')).toBeInTheDocument()
+    expect(screen.getByText('黑体')).toBeInTheDocument()
+    expect(screen.getByText('楷体')).toBeInTheDocument()
+    expect(screen.queryByText('思源黑体')).not.toBeInTheDocument()
   })
 
-  it('lists uploaded fonts first and selects them by id', () => {
+  it('lists uploaded fonts at the end and selects them by id', () => {
     mockUploadedFonts([
       { id: 'up1', family: '我的手写体', fileName: 'hand.ttf', format: 'ttf', size: 1024, scope: 'user', mine: true, createdAt: 0 },
     ])
     render(<SettingsPanel />)
 
+    fireEvent.click(screen.getByText('更多'))
     fireEvent.click(screen.getByText('我的手写体'))
     expect(useUiStore.getState().fontFamily).toBe('up1')
   })

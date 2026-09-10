@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { TtsEngine } from '@bookdock/shared'
+import type { FontPreferences, TtsEngine } from '@bookdock/shared'
 import type { FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField } from '../features/reader/types'
 import type { CustomReadingTheme } from '../lib/reading-theme'
 import {
@@ -63,6 +63,8 @@ interface UiState {
   lightReadingThemeId: string
   customThemes: CustomReadingTheme[]
   fontFamily: FontFamily
+  fontPreferences: FontPreferences
+  fontOrder: string[]
   fontSize: number
   fontWeight: number
   lineHeight: number
@@ -192,6 +194,9 @@ interface UiState {
   /** Replace the whole list (settings sync); persists without theme side effects */
   setCustomThemes: (themes: CustomReadingTheme[]) => void
   setFontFamily: (f: FontFamily) => void
+  setFontPreference: (id: string, preference: FontPreferences[string]) => void
+  removeFontPreference: (id: string) => void
+  setFontOrder: (order: string[]) => void
   setFontSize: (n: number) => void
   setFontWeight: (n: number) => void
   setLineHeight: (n: number) => void
@@ -346,6 +351,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   lightReadingThemeId: getInitial<string>('bd-read-theme-light', 'paper'),
   customThemes: getInitialCustomThemes(),
   fontFamily: getInitial<FontFamily>('bd-font-family', 'serif'),
+  fontPreferences: {},
+  fontOrder: [],
   fontSize: getInitialNumber('bd-font-size', 18, 12, 64),
   fontWeight: getInitialNumber('bd-font-weight', 400, 100, 900),
   lineHeight: getInitialNumber('bd-line-height', 1.8, 1.2, 2.5),
@@ -555,6 +562,19 @@ export const useUiStore = create<UiState>((set, get) => ({
   setFontFamily: (fontFamily) => {
     setStorage('bd-font-family', fontFamily)
     set({ fontFamily })
+  },
+  setFontPreference: (id, preference) => {
+    const current = get().fontPreferences[id] ?? {}
+    const next = { ...get().fontPreferences, [id]: { ...current, ...preference } }
+    set({ fontPreferences: next })
+  },
+  removeFontPreference: (id) => {
+    const next = { ...get().fontPreferences }
+    delete next[id]
+    set({ fontPreferences: next })
+  },
+  setFontOrder: (order) => {
+    set({ fontOrder: [...new Set(order)] })
   },
   setFontSize: (fontSize) => {
     setStorage('bd-font-size', String(fontSize))

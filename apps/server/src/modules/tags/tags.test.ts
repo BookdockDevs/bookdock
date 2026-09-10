@@ -12,6 +12,7 @@ import {
   listTags,
   createTag,
   updateTag,
+  reorderTags,
   deleteTag,
   addBooksToTag,
   removeBooksFromTag,
@@ -73,10 +74,23 @@ describe('tags service', () => {
     expect(tags[0].bookCount).toBe(0)
   })
 
+  it('should reject duplicate tag names for the same user', async () => {
+    await createTag(userId, 'Classic')
+
+    await expect(createTag(userId, 'Classic')).rejects.toMatchObject({ code: 'TAG_NAME_TAKEN' })
+  })
+
   it('should update a tag name', async () => {
     const tag = await createTag(userId, 'Old Tag')
     const updated = await updateTag(userId, tag.id, 'New Tag')
     expect(updated.name).toBe('New Tag')
+  })
+
+  it('should reject renaming a tag to another tag name', async () => {
+    const first = await createTag(userId, 'Tag A')
+    const second = await createTag(userId, 'Tag B')
+
+    await expect(updateTag(userId, second.id, first.name)).rejects.toMatchObject({ code: 'TAG_NAME_TAKEN' })
   })
 
   it('should add and remove books from a tag', async () => {
@@ -96,5 +110,35 @@ describe('tags service', () => {
     await deleteTag(userId, tag.id)
     const tags = await listTags(userId)
     expect(tags).toHaveLength(0)
+  })
+
+  it('should reorder tags by the submitted id list', async () => {
+    const a = await createTag(userId, 'A')
+    const b = await createTag(userId, 'B')
+    const c = await createTag(userId, 'C')
+
+    await reorderTags(userId, [c.id, a.id, b.id])
+    const ordered = (await listTags(userId)).map((tag) => tag.id)
+    expect(ordered).toEqual([c.id, a.id, b.id])
+  })
+
+  it('should reject reorder lists that are not the full tag set', async () => {
+    const a = await createTag(userId, 'A')
+    const b = await createTag(userId, 'B')
+    await createTag(userId, 'C')
+
+    await expect(reorderTags(userId, [a.id, b.id])).rejects.toThrow('TAG_NOT_FOUND')
+    await expect(reorderTags(userId, [a.id, b.id, 'foreign'])).rejects.toThrow('TAG_NOT_FOUND')
+    await expect(reorderTags(userId, [a.id, a.id, b.id])).rejects.toThrow('TAG_NOT_FOUND')
+  })
+
+  it('should append new tags after the saved order', async () => {
+    const a = await createTag(userId, 'A')
+    const b = await createTag(userId, 'B')
+    await reorderTags(userId, [b.id, a.id])
+
+    const c = await createTag(userId, 'C')
+    const ordered = (await listTags(userId)).map((tag) => tag.id)
+    expect(ordered).toEqual([b.id, a.id, c.id])
   })
 })

@@ -5,7 +5,8 @@ import type { BookDetailRes, BookFormat, BookListItem, BookMetadata, PaginatedRe
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 
 export interface UseBooksParams {
   page: number
@@ -113,7 +114,6 @@ const UPLOAD_CONCURRENCY = 3
  */
 export function useUploadBooks() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
   const _ = useTranslation()
   const [items, setItems] = useState<UploadItem[]>([])
   const runningRef = useRef(0)
@@ -207,11 +207,11 @@ export function useUploadBooks() {
     // lists alone leaves the sidebar count stale after an upload.
     queryClient.invalidateQueries({ queryKey: ['shelves'] })
     if (failed > 0) {
-      addToast(_('library.uploadSummary', { succeeded, duplicated, failed }), 'error')
+      notify.error({ key: 'library.uploadSummary', params: { succeeded, duplicated, failed } })
     } else {
-      addToast(_('library.uploadSuccess'), 'success')
+      notify.success({ key: 'library.uploadSuccess' })
     }
-  }, [items, queryClient, addToast, _])
+  }, [items, queryClient])
 
   const addFiles = useCallback(
     (files: FileList | File[], opts?: { autoStart?: boolean } & UploadAssignment) => {
@@ -233,9 +233,9 @@ export function useUploadBooks() {
           tagIds: opts?.tagIds,
         })),
       ])
-      if (rejected > 0) addToast(_('library.uploadIgnored', { count: rejected }), 'info')
+      if (rejected > 0) notify.info({ key: 'library.uploadIgnored', params: { count: rejected } })
     },
-    [addToast, _],
+    [],
   )
 
   const startUpload = useCallback((assignment?: UploadAssignment) => {
@@ -262,68 +262,60 @@ export function useUploadBooks() {
 
 export function useDeleteBook() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: (id: string) => apiDelete<{ data: null }>(`/books/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      addToast(_('library.movedToTrash'), 'success')
+      notify.success({ key: 'library.movedToTrash' })
     },
-    onError: () => {
-      addToast(_('reader.deleteFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.deleteFailed'))
     },
   })
 }
 
 export function useRestoreBook() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: (id: string) => apiPost<{ data: null }>(`/books/${id}/restore`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      addToast(_('library.restored'), 'success')
+      notify.success({ key: 'library.restored' })
     },
-    onError: () => {
-      addToast(_('reader.deleteFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.restoreFailed'))
     },
   })
 }
 
 export function usePermanentDeleteBook() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: (id: string) => apiDelete<{ data: null }>(`/books/${id}/permanent`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      addToast(_('reader.deleted'), 'success')
+      notify.success({ key: 'reader.deleted' })
     },
-    onError: () => {
-      addToast(_('reader.deleteFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.permanentDeleteFailed'))
     },
   })
 }
 
 export function useEmptyTrash() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: () => apiDelete<{ data: { count: number } }>('/books/trash'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      addToast(_('reader.deleted'), 'success')
+      notify.success({ key: 'reader.deleted' })
     },
-    onError: () => {
-      addToast(_('reader.deleteFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.permanentDeleteFailed'))
     },
   })
 }
@@ -344,59 +336,51 @@ export function useTags(): QueryObserverResult<{ data: TagListItem[] }> {
 
 export function useCreateShelf() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: (name: string) => apiPost<{ data: ShelfListItem }>('/shelves', { name }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
-      addToast(_('toast.shelfCreated'), 'success')
+      notify.success({ key: 'toast.shelfCreated' })
     },
-    onError: () => {
-      addToast(_('toast.createShelfFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.createFailed'))
     },
   })
 }
 
 export function useRenameShelf() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => apiPut<{ data: ShelfListItem }>(`/shelves/${id}`, { name }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
-      addToast(_('toast.shelfRenamed'), 'success')
+      notify.success({ key: 'toast.shelfRenamed' })
     },
-    onError: () => {
-      addToast(_('toast.renameShelfFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.renameFailed'))
     },
   })
 }
 
 export function useDeleteShelf() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: (id: string) => apiDelete<{ data: null }>(`/shelves/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
-      addToast(_('toast.shelfDeleted'), 'success')
+      notify.success({ key: 'toast.shelfDeleted' })
     },
-    onError: () => {
-      addToast(_('toast.deleteShelfFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.deleteFailed'))
     },
   })
 }
 
 export function useReorderShelves() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: (shelfIds: string[]) => apiPut<{ data: null }>('/shelves/order', { shelfIds }),
@@ -411,27 +395,48 @@ export function useReorderShelves() {
       }
       return { prev }
     },
-    onError: (_error, _shelfIds, ctx) => {
+    onError: (error, _shelfIds, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(['shelves'], ctx.prev)
-      addToast(_('toast.reorderShelvesFailed'), 'error')
+      notify.error(getUserErrorNotification(error, 'errors.reorderFailed'))
+    },
+  })
+}
+
+export function useReorderTags() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (tagIds: string[]) => apiPut<{ data: null }>('/tags/order', { tagIds }),
+    onMutate: (tagIds) => {
+      const prev = queryClient.getQueryData<{ data: TagListItem[] }>(['tags'])
+      if (prev) {
+        const byId = new Map(prev.data.map((tag) => [tag.id, tag]))
+        const next = tagIds
+          .map((id) => byId.get(id))
+          .filter((tag): tag is TagListItem => Boolean(tag))
+        queryClient.setQueryData(['tags'], { data: next })
+      }
+      return { prev }
+    },
+    onError: (error, _tagIds, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['tags'], ctx.prev)
+      notify.error(getUserErrorNotification(error, 'errors.reorderFailed'))
     },
   })
 }
 
 export function useUpdateBook() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: ({ bookId, ...data }: { bookId: string } & Partial<{ readStatus: string; progress: number; pinned: boolean; title: string; author: string; bookmeta: BookMetadata }>) =>
       apiPatch<{ data: BookListItem }>(`/books/${bookId}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      addToast(_('toast.bookUpdated'), 'success')
+      notify.success({ key: 'toast.bookUpdated' })
     },
-    onError: () => {
-      addToast(_('toast.updateBookFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.updateFailed'))
     },
   })
 }
@@ -446,112 +451,98 @@ export function useBook(bookId: string | null) {
 
 export function useUploadCover() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: ({ bookId, file }: { bookId: string; file: File }) =>
       apiUpload<{ data: BookListItem }>(`/books/${bookId}/cover`, file, 'PUT'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      addToast(_('toast.bookUpdated'), 'success')
+      notify.success({ key: 'toast.bookUpdated' })
     },
-    onError: () => {
-      addToast(_('toast.updateBookFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.updateFailed'))
     },
   })
 }
 
 export function useRemoveCover() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: (bookId: string) => apiDelete<{ data: BookListItem }>(`/books/${bookId}/cover`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      addToast(_('toast.bookUpdated'), 'success')
+      notify.success({ key: 'toast.bookUpdated' })
     },
-    onError: () => {
-      addToast(_('toast.updateBookFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.updateFailed'))
     },
   })
 }
 
 export function useResetMetadata() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: (bookId: string) => apiPost<{ data: BookListItem }>(`/books/${bookId}/reset-metadata`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      addToast(_('toast.metadataReset'), 'success')
+      notify.success({ key: 'toast.metadataReset' })
     },
-    onError: () => {
-      addToast(_('toast.updateBookFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.resetFailed'))
     },
   })
 }
 
 export function useCreateTag() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: (name: string) => apiPost<{ data: TagListItem }>('/tags', { name }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tags'] })
-      addToast(_('toast.tagCreated'), 'success')
+      notify.success({ key: 'toast.tagCreated' })
     },
-    onError: () => {
-      addToast(_('toast.createTagFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.createFailed'))
     },
   })
 }
 
 export function useRenameTag() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => apiPut<{ data: TagListItem }>(`/tags/${id}`, { name }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tags'] })
-      addToast(_('toast.tagRenamed'), 'success')
+      notify.success({ key: 'toast.tagRenamed' })
     },
-    onError: () => {
-      addToast(_('toast.renameTagFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.renameFailed'))
     },
   })
 }
 
 export function useDeleteTag() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: (id: string) => apiDelete<{ data: null }>(`/tags/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tags'] })
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      addToast(_('toast.tagDeleted'), 'success')
+      notify.success({ key: 'toast.tagDeleted' })
     },
-    onError: () => {
-      addToast(_('toast.deleteTagFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.deleteFailed'))
     },
   })
 }
 
 export function useUpdateBookMembership() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: async ({ bookId, shelfId, tagIds }: { bookId: string; shelfId?: string | null; tagIds?: string[] }) => {
@@ -564,10 +555,10 @@ export function useUpdateBookMembership() {
       queryClient.invalidateQueries({ queryKey: ['books'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
-      addToast(_('toast.membershipUpdated'), 'success')
+      notify.success({ key: 'toast.membershipUpdated' })
     },
-    onError: () => {
-      addToast(_('toast.updateMembershipFailed'), 'error')
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.membershipUpdateFailed'))
     },
   })
 }
@@ -589,8 +580,6 @@ export function useBookMembership(bookId: string | null) {
 
 export function useMoveBooksToShelf() {
   const queryClient = useQueryClient()
-  const addToast = useToastStore((s) => s.addToast)
-  const _ = useTranslation()
 
   return useMutation({
     mutationFn: ({ bookIds, shelfId }: { bookIds: string[]; shelfId: string | null }) =>
@@ -602,12 +591,14 @@ export function useMoveBooksToShelf() {
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       const failed = results.filter((r) => r.status === 'rejected').length
       if (failed > 0) {
-        addToast(_('toast.updateMembershipFailed'), 'error')
+        notify.error({ key: 'errors.membershipUpdateFailed' })
         return
       }
       const shelves = queryClient.getQueryData<{ data: ShelfListItem[] }>(['shelves'])
       const name = shelves?.data.find((s) => s.id === variables.shelfId)?.name
-      addToast(name ? _('toast.movedToShelf', { name }) : _('toast.movedOutOfShelf'), 'success')
+      notify.success(name
+        ? { key: 'toast.movedToShelf', params: { name } }
+        : { key: 'toast.movedOutOfShelf' })
     },
   })
 }

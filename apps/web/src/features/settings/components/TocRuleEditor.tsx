@@ -1,14 +1,20 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
 import type { TocRulePattern, TocRuleRes } from '@bookdock/shared'
 
 import { useCreateTocRule, useUpdateTocRule } from '@/api/hooks/useTocRules'
-import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
-import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useToastStore } from '@/stores/toast.store'
-import { cn } from '@/lib/utils'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
+
+import TocPatternRow, { type TocPatternError } from './TocPatternRow'
+import SettingsFormActions from './SettingsFormActions'
+import SettingsFormField from './SettingsFormField'
+import { settingsFormClass, settingsInputClass } from './settingsForm'
 
 interface TocRuleEditorProps {
   /** Null = create mode */
@@ -17,17 +23,14 @@ interface TocRuleEditorProps {
 }
 
 interface PatternDraft {
-  level: number
+  id: string
   regex: string
   replacement: string
   enabled: boolean
 }
 
-type PatternError = 'required' | 'invalidRegex' | null
-
-function toDrafts(patterns: TocRulePattern[]): PatternDraft[] {
+function toDrafts(patterns: TocRulePattern[]): Omit<PatternDraft, 'id'>[] {
   return patterns.map((p) => ({
-    level: p.level,
     regex: p.regex,
     replacement: p.replacement ?? '',
     enabled: p.enabled,
@@ -36,18 +39,22 @@ function toDrafts(patterns: TocRulePattern[]): PatternDraft[] {
 
 export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const createRule = useCreateTocRule()
   const updateRule = useUpdateTocRule()
 
   const editing = initial != null
   const [name, setName] = useState(initial?.name ?? '')
-  const [enabled, setEnabled] = useState(initial?.enabled ?? true)
-  const [drafts, setDrafts] = useState<PatternDraft[]>(() => toDrafts(initial?.patterns ?? [{ level: 1, regex: '', replacement: '', enabled: true }]))
-  const [errors, setErrors] = useState<PatternError[]>(drafts.map(() => null))
+  const [nameError, setNameError] = useState(false)
+  const initialPatterns = initial?.patterns ?? [{ level: 1, regex: '', replacement: '', enabled: true }]
+  const [drafts, setDrafts] = useState<PatternDraft[]>(() => toDrafts(initialPatterns).map((draft, index) => ({ ...draft, id: `pattern-${index}` })))
+  const nextPatternId = useRef(initialPatterns.length)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const patternInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const [errors, setErrors] = useState<TocPatternError[]>(drafts.map(() => null))
   const saving = createRule.isPending || updateRule.isPending
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
-  function setDraft(index: number, patch: Partial<PatternDraft>) {
+  function setDraft(index: number, patch: Partial<Pick<PatternDraft, 'regex' | 'replacement'>>) {
     setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)))
     if (patch.regex !== undefined) {
       setErrors((prev) => prev.map((e, i) => (i === index ? null : e)))
@@ -55,22 +62,33 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
   }
 
   function addPattern() {
-    const nextLevel = drafts.length === 0 ? 1 : drafts[drafts.length - 1].level + 1
-    setDrafts((prev) => [...prev, { level: nextLevel, regex: '', replacement: '', enabled: true }])
+    const id = `pattern-${nextPatternId.current++}`
+    setDrafts((prev) => [...prev, { id, regex: '', replacement: '', enabled: true }])
     setErrors((prev) => [...prev, null])
   }
 
   function removePattern(index: number) {
+    if (drafts.length <= 1) return
     setDrafts((prev) => prev.filter((_, i) => i !== index))
     setErrors((prev) => prev.filter((_, i) => i !== index))
   }
 
-  function onError(err: Error) {
-    addToast(err.message, 'error')
+  function onDragEnd({ active, over }: DragEndEvent) {
+    if (saving || !over || active.id === over.id) return
+    const oldIndex = drafts.findIndex((draft) => draft.id === active.id)
+    const newIndex = drafts.findIndex((draft) => draft.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    setDrafts((current) => arrayMove(current, oldIndex, newIndex))
+    setErrors((current) => arrayMove(current, oldIndex, newIndex))
+  }
+
+  function onError(err: unknown) {
+    notify.error(getUserErrorNotification(err))
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const emptyName = !name.trim()
     const newErrors = drafts.map((d) => {
       const trimmed = d.regex.trim()
       if (!trimmed) return 'required' as const
@@ -81,125 +99,94 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
       }
       return null
     })
+    setNameError(emptyName)
     setErrors(newErrors)
-    if (newErrors.some((e) => e)) return
+    if (emptyName || newErrors.some((e) => e)) {
+      if (emptyName) nameInputRef.current?.focus()
+      else {
+        const firstErrorIndex = newErrors.findIndex((error) => error !== null)
+        if (firstErrorIndex >= 0) patternInputRefs.current[drafts[firstErrorIndex]?.id ?? '']?.focus()
+      }
+      return
+    }
 
-    const patterns: TocRulePattern[] = drafts.map((d) => ({
-      level: d.level,
+    const patterns: TocRulePattern[] = drafts.map((d, index) => ({
+      level: index + 1,
       regex: d.regex.trim(),
       replacement: d.replacement === '' ? null : d.replacement,
       enabled: d.enabled,
     }))
 
     const done = () => {
-      addToast(_('toast.tocRuleSaved'), 'success')
+      notify.success({ key: 'toast.tocRuleSaved' })
       onClose()
     }
     if (editing) {
-      updateRule.mutate({ id: initial.id, body: { name: name.trim(), enabled, patterns } }, { onSuccess: done, onError })
+      updateRule.mutate({ id: initial.id, body: { name: name.trim(), enabled: initial.enabled, patterns } }, { onSuccess: done, onError })
     } else {
-      createRule.mutate({ name: name.trim(), enabled, patterns }, { onSuccess: done, onError })
+      createRule.mutate({ name: name.trim(), enabled: true, patterns }, { onSuccess: done, onError })
     }
   }
 
   return (
-    <Modal title={editing ? _('settings.tocRulesEdit') : _('settings.tocRulesNew')} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="grid grid-cols-1 gap-4">
-          <label className="block min-w-0">
-            <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">{_('settings.tocRulesName')}</span>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={_('settings.tocRulesNamePlaceholder')}
-              className={inputClass}
-            />
-          </label>
-        </div>
-
-        <p className="text-xs text-stone-400 dark:text-stone-500">{_('settings.tocRulesLevelHint')}</p>
-
-        <div className="flex flex-col gap-2">
-          {drafts.map((d, index) => (
-            <div key={index} className="flex flex-col gap-2 rounded-lg border border-stone-200 p-3 dark:border-stone-700">
-              <div className="flex items-center gap-2">
-                <label className="flex shrink-0 items-center gap-1.5">
-                  <span className="text-xs text-stone-400 dark:text-stone-500">{_('settings.tocRulesLevel')}</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={d.level}
-                    onChange={(e) => setDraft(index, { level: Math.max(1, Number(e.target.value)) })}
-                    className="h-8 w-16 rounded-lg border border-stone-200 bg-white px-2 text-sm text-stone-700 outline-none focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() => removePattern(index)}
-                  title={_('settings.tocRulesRemovePattern')}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/40"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <div>
-                <label className="block">
-                  <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">
-                    {_('settings.tocRulesRegex')}
-                    <span className="text-red-500"> *</span>
-                  </span>
-                  <input
-                    type="text"
-                    value={d.regex}
-                    onChange={(e) => setDraft(index, { regex: e.target.value })}
-                    className={cn(inputClass, 'font-mono')}
-                  />
-                </label>
-                {errors[index] === 'required' && (
-                  <p className="mt-1 text-xs text-red-500">{_('settings.tocRulesPatternRequired')}</p>
-                )}
-                {errors[index] === 'invalidRegex' && (
-                  <p className="mt-1 text-xs text-red-500">{_('settings.tocRulesRegexInvalid')}</p>
-                )}
-              </div>
-              <label className="block">
-                <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">{_('settings.tocRulesReplacement')}</span>
-                <input
-                  type="text"
-                  value={d.replacement}
-                  onChange={(e) => setDraft(index, { replacement: e.target.value })}
-                  placeholder={_('settings.tocRulesReplacementPlaceholder')}
-                  className={inputClass}
-                />
-              </label>
-            </div>
-          ))}
-        </div>
-
-        <Button type="button" variant="secondary" size="sm" onClick={addPattern} className="self-start">
-          {_('settings.tocRulesAddPattern')}
-        </Button>
-
-        <p className="text-xs text-amber-600 dark:text-amber-400">{_('settings.tocRulesLookbehindHint')}</p>
+    <Modal title={editing ? _('settings.tocRulesEdit') : _('settings.tocRulesNew')} onClose={onClose} size="wide">
+      <form onSubmit={handleSubmit} noValidate className={settingsFormClass}>
+        <SettingsFormField label={_('settings.tocRulesName')} required error={nameError ? _('settings.tocRulesNameRequired') : undefined}>
+          <input
+            ref={nameInputRef}
+            type="text"
+            autoFocus
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value)
+              setNameError(false)
+            }}
+            aria-invalid={nameError || undefined}
+            disabled={saving}
+            className={settingsInputClass}
+          />
+        </SettingsFormField>
 
         <div className="flex items-center justify-between">
-          <Toggle label={_('settings.tocRulesEnabled')} checked={enabled} onChange={setEnabled} />
+          <span className="text-xs font-medium text-stone-700 dark:text-stone-200">{_('settings.tocRulesLevels')}</span>
+          <button
+            type="button"
+            onClick={addPattern}
+            disabled={saving}
+            aria-label={_('settings.tocRulesAddPattern')}
+            title={_('settings.tocRulesAddPattern')}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
         </div>
 
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={saving}>
-            {_('library.cancel')}
-          </Button>
-          <Button type="submit" size="sm" disabled={saving}>
-            {_('library.save')}
-          </Button>
-        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={drafts.map((draft) => draft.id)} strategy={verticalListSortingStrategy}>
+            <div className="flex flex-col gap-2">
+              {drafts.map((draft, index) => (
+                <TocPatternRow
+                  key={draft.id}
+                  id={draft.id}
+                  level={index + 1}
+                  regex={draft.regex}
+                  replacement={draft.replacement}
+                  error={errors[index] ?? null}
+                  disabled={saving}
+                  canRemove={drafts.length > 1}
+                  inputRef={(element) => { patternInputRefs.current[draft.id] = element }}
+                  onChange={(patch) => setDraft(index, patch)}
+                  onRemove={() => removePattern(index)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+
+        <SettingsFormActions onCancel={onClose} cancelDisabled={saving} saveDisabled={saving} />
       </form>
     </Modal>
   )
 }
-
-const inputClass = 'h-9 w-full rounded-lg border border-stone-200 bg-white px-2.5 text-sm text-stone-700 outline-none transition-colors placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500'

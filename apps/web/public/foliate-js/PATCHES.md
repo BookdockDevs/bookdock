@@ -118,6 +118,7 @@
 - `#views` + `#placeholders` Map、`#loadAdjacentBuffer`/`#fillInitialBuffer`/`#virtualizeDistantViews`；切换到连卷只按向下方向准备当前章节附近的一章，滚动稳定后按方向、剩余少于 2 个视口再加载一章；离视口超过 6 个视口的已渲染章节替换为同高度占位元素，接近时恢复，滚动高度不因释放 DOM 而改变；加载期间只保留最新滚动意图，向上优先恢复当前视口相交的占位章节，只有视口仍落在占位区时才逐个继续补齐，滚轮停在 `scrollTop=0`/最大值时也能触发边界加载；远距跳转才保留目标 ±2 邻域（`:1682-1683`）；
 - `#getVisibleRange`（`:1463`）连续模式按**视口中心**判定主章节（`:1493` 处使用）；
 - `#afterScroll` 的 anchor 以 fraction 保留（relayout 后按比例恢复，而非 Range）。
+- 相邻章节加载后的 `setStyles()` 会让所有已加载 iframe 再次执行 `fonts.ready → View.expand()`；连续模式主视图的 `onExpand` 必须先确认自身尺寸真的变化，再按 fraction 重定位。无变化回调若直接写回旧 anchor，会在每次新增章节时把滚动位置跳回当前章起点；相邻视图则只在自身位于视口上方且尺寸变化时补偿滚动距离。
 - **上游对照**：上游 main 的连续模式实现不同（无 wheel、无中心判定）。
 
 ### 2.4 页眉页脚信息栏三格化 + 字号可调（`paginator.js`）

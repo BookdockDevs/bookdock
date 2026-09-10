@@ -84,6 +84,32 @@ describe('SettingsSync persistence', () => {
     expect(body.readingConfig).toContain('"fontSize":26')
   })
 
+  it('saves font visibility and display-name preferences with user settings', async () => {
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    useUiStore.getState().setFontPreference('serif', { enabled: false, displayName: '正文' })
+    await vi.advanceTimersByTimeAsync(1000)
+
+    const put = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(put).toBeDefined()
+    const body = JSON.parse(String(put?.[1]?.body)) as { fontPreferences: Record<string, unknown> }
+    expect(body.fontPreferences).toEqual({ serif: { enabled: false, displayName: '正文' } })
+  })
+
+  it('saves the custom font display order with user settings', async () => {
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    useUiStore.getState().setFontOrder(['noto-sans-sc', 'serif', 'custom-1'])
+    await vi.advanceTimersByTimeAsync(1000)
+
+    const put = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(put).toBeDefined()
+    const body = JSON.parse(String(put?.[1]?.body)) as { fontOrder: string[] }
+    expect(body.fontOrder).toEqual(['noto-sans-sc', 'serif', 'custom-1'])
+  })
+
   it('keeps a locally pending change ahead of stale settings on reload', async () => {
     const first = mountSync()
     await vi.runAllTimersAsync()

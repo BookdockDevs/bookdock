@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
-import { useToastStore } from '@/stores/toast.store'
 import { useReaderState } from '../state/reader-state'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useAiQuickCommands, type AiQuickCommand } from '../hooks/useAiQuickCommands'
@@ -55,7 +56,6 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const { renderer } = useReaderApi()
   const { controller: ttsController } = useTtsSession()
-  const addToast = useToastStore((s) => s.addToast)
   const create = useCreateAnnotation(bookId)
   const update = useUpdateAnnotation(bookId)
   const del = useDeleteAnnotation(bookId)
@@ -140,8 +140,8 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       const res = await promise
       performance.mark('bd:hl:post-done')
       setCreatedLocal(res.data)
-    } catch {
-      addToast(_('annotation.saveFailed'), 'error')
+    } catch (err) {
+      notify.error(getUserErrorNotification(err, 'annotation.saveFailed'))
     }
   }
 
@@ -154,8 +154,8 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     if (createdLocal && created) setCreatedLocal({ ...created, color, style })
     try {
       await update.mutateAsync({ id: target.id, body: patch.color ? patch : { style, color } })
-    } catch {
-      addToast(_('annotation.saveFailed'), 'error')
+    } catch (err) {
+      notify.error(getUserErrorNotification(err, 'annotation.saveFailed'))
     }
   }
 
@@ -164,7 +164,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     if (!annotationId) return
     try {
       await del.mutateAsync(annotationId)
-      addToast(_('reader.deleted'), 'success')
+      notify.success({ key: 'reader.deleted' })
       if (createdLocal?.id === annotationId) setCreatedLocal(null)
       // Deleting one of several ideas at the same range drops back to the
       // overlay's list level; only the last remaining idea closes it
@@ -174,8 +174,8 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           )
         : []
       if (remaining.length === 0) close()
-    } catch {
-      addToast(_('reader.deleteFailed'), 'error')
+    } catch (err) {
+      notify.error(getUserErrorNotification(err, 'reader.deleteFailed'))
     }
   }
 
@@ -206,8 +206,8 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         await update.mutateAsync({ id: target.id, body: { note: note || undefined } })
       }
       close()
-    } catch {
-      addToast(_('annotation.saveFailed'), 'error')
+    } catch (err) {
+      notify.error(getUserErrorNotification(err, 'annotation.saveFailed'))
     }
   }
 
@@ -224,11 +224,11 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     if (!text) return
     try {
       await navigator.clipboard.writeText(text)
-      addToast(_('reader.copied'), 'success')
+      notify.success({ key: 'reader.copied' })
       // Keep the toolbar open only right after creating a highlight (restyle context)
       if (!createdLocal) close()
     } catch {
-      addToast(_('reader.copyFailed'), 'error')
+      notify.error({ key: 'reader.copyFailed' })
     }
   }
 
@@ -237,9 +237,9 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     if (!text) return
     try {
       await navigator.clipboard.writeText(text)
-      addToast(_('reader.copied'), 'success')
+      notify.success({ key: 'reader.copied' })
     } catch {
-      addToast(_('reader.copyFailed'), 'error')
+      notify.error({ key: 'reader.copyFailed' })
     }
   }
 
@@ -250,9 +250,9 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     if (!text) return
     try {
       await navigator.clipboard.writeText(text)
-      addToast(_('reader.copied'), 'success')
+      notify.success({ key: 'reader.copied' })
     } catch {
-      addToast(_('reader.copyFailed'), 'error')
+      notify.error({ key: 'reader.copyFailed' })
     }
   }
 

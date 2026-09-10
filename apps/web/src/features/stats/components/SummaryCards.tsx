@@ -4,6 +4,7 @@ import {
   useReadingDaily,
   useReadingSummary,
 } from '@/api/hooks/reading-records'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
 
@@ -22,7 +23,8 @@ function formatWords(n: number): string {
 
 export default function SummaryCards() {
   const _ = useTranslation()
-  const { data } = useReadingSummary()
+  const summaryQuery = useReadingSummary()
+  const { data } = summaryQuery
   const s = data?.data
 
   const now = new Date()
@@ -34,10 +36,25 @@ export default function SummaryCards() {
   // Same-period comparison: clamp to the same day-of-month, capped at last month's end
   const sameDayLastMonth = new Date(lastMonth.from.getFullYear(), lastMonth.from.getMonth(), now.getDate())
   const lastTo = localDateString(sameDayLastMonth > lastMonth.to ? lastMonth.to : sameDayLastMonth)
-  const dailyThis = useReadingDaily(thisFrom, thisTo).data?.data
-  const dailyLast = useReadingDaily(lastFrom, lastTo).data?.data
-  const booksThis = useReadingByBook(thisFrom, thisTo).data?.data
-  const booksLast = useReadingByBook(lastFrom, lastTo).data?.data
+  const dailyThisQuery = useReadingDaily(thisFrom, thisTo)
+  const dailyLastQuery = useReadingDaily(lastFrom, lastTo)
+  const booksThisQuery = useReadingByBook(thisFrom, thisTo)
+  const booksLastQuery = useReadingByBook(lastFrom, lastTo)
+  const dailyThis = dailyThisQuery.data?.data
+  const dailyLast = dailyLastQuery.data?.data
+  const booksThis = booksThisQuery.data?.data
+  const booksLast = booksLastQuery.data?.data
+
+  const queries = [summaryQuery, dailyThisQuery, dailyLastQuery, booksThisQuery, booksLastQuery]
+  if (queries.some((query) => query.isError)) {
+    return (
+      <QueryErrorState
+        className="col-span-full rounded-2xl border border-stone-200 bg-white px-4 dark:border-stone-800 dark:bg-stone-900"
+        isRetrying={queries.some((query) => query.isFetching)}
+        onRetry={() => Promise.all(queries.map((query) => query.refetch()))}
+      />
+    )
+  }
 
   const secondsThis = dailyThis?.reduce((sum, d) => sum + d.durationSeconds, 0)
   const secondsLast = dailyLast?.reduce((sum, d) => sum + d.durationSeconds, 0)

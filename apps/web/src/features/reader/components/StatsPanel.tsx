@@ -6,6 +6,7 @@ import type { BookDetailRes, ReadingProgressRes } from '@bookdock/shared'
 
 import { apiGet } from '@/api/client'
 import { localDateString, useBookReadingRecords } from '@/api/hooks/reading-records'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
 
@@ -35,7 +36,8 @@ function formatWordCount(n: number): string {
  */
 export default function StatsPanel({ bookId }: StatsPanelProps) {
   const _ = useTranslation()
-  const { data } = useBookReadingRecords(bookId)
+  const recordsQuery = useBookReadingRecords(bookId)
+  const { data } = recordsQuery
   const detail = data?.data
   const records = useMemo(() => detail?.records ?? [], [detail])
   const summary = useMemo(
@@ -92,6 +94,16 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
     }
     return days
   }, [records])
+
+  if (recordsQuery.isError || bookQuery.isError || progressQuery.isError) {
+    return (
+      <QueryErrorState
+        className="text-[var(--bd-read-sub)]"
+        isRetrying={recordsQuery.isFetching || bookQuery.isFetching || progressQuery.isFetching}
+        onRetry={() => Promise.all([recordsQuery.refetch(), bookQuery.refetch(), progressQuery.refetch()])}
+      />
+    )
+  }
 
   if (!detail || !summary) return null
 

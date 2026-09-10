@@ -35,7 +35,7 @@ describe('AccountSection', () => {
 
     const img = screen.getByRole('img')
     expect(img).toHaveAttribute('src', '/api/v1/avatars/ab/abc123.png')
-    expect(screen.getByText('删除头像')).toBeInTheDocument()
+    expect(screen.getByText('移除头像')).toBeInTheDocument()
   })
 
   it('accepts only whitelisted image types in the file picker', () => {
@@ -75,11 +75,11 @@ describe('AccountSection', () => {
     })
     const deleteAvatar = { mutate: vi.fn(), isPending: false }
     vi.mocked(useDeleteAvatar).mockReturnValue(deleteAvatar as unknown as ReturnType<typeof useDeleteAvatar>)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<AccountSection />)
 
-    fireEvent.click(screen.getByText('删除头像'))
-    expect(window.confirm).toHaveBeenCalled()
+    fireEvent.click(screen.getByText('移除头像'))
+    expect(screen.getByText('确定要移除头像吗？')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '移除' }))
     expect(deleteAvatar.mutate).toHaveBeenCalledWith(undefined, expect.objectContaining({ onSuccess: expect.any(Function) }))
   })
 })

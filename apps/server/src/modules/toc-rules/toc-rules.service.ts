@@ -17,6 +17,7 @@ function toRes(row: TocRuleRow): TocRuleRes {
     enabled: row.enabled === 1,
     sortOrder: row.sortOrder,
     patterns: row.patterns,
+    builtIn: row.seedKey !== null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -47,6 +48,7 @@ export function createTocRule(userId: string, data: TocRuleCreateReq) {
   const row: TocRuleRow = {
     id: createId('tocr'),
     userId,
+    seedKey: null,
     name: data.name,
     enabled: data.enabled === false ? 0 : 1,
     sortOrder: data.sortOrder ?? maxOrder + 1,

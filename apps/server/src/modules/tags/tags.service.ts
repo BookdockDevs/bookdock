@@ -1,4 +1,4 @@
-import { eq, and, inArray, sql, asc } from 'drizzle-orm'
+import { eq, and, inArray, sql, asc, ne } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import { books, tags, bookTags } from '../../db/schema'
@@ -16,24 +16,65 @@ export async function listTags(userId: string) {
     .leftJoin(bookTags, eq(tags.id, bookTags.tagId))
     .where(eq(tags.userId, userId))
     .groupBy(tags.id)
-    .orderBy(asc(tags.name))
+    .orderBy(asc(tags.sortOrder), asc(tags.name))
     .all()
   return rows.map((r) => ({ ...r.tag, bookCount: r.bookCount }))
 }
 
 export async function createTag(userId: string, name: string) {
   const db = getDb()
-  const id = createId('tag')
-  db.insert(tags).values({ id, userId, name }).run()
-  return { id, userId, name, bookCount: 0 }
+  return db.transaction((tx) => {
+    const existing = tx
+      .select({ id: tags.id })
+      .from(tags)
+      .where(and(eq(tags.userId, userId), eq(tags.name, name)))
+      .get()
+    if (existing) throw new AppError('TAG_NAME_TAKEN', 'Tag name is already in use')
+
+    const id = createId('tag')
+    const max = tx
+      .select({ max: sql<number>`max(${tags.sortOrder})` })
+      .from(tags)
+      .where(eq(tags.userId, userId))
+      .get()
+    const sortOrder = (max?.max ?? -1) + 1
+    tx.insert(tags).values({ id, userId, name, sortOrder }).run()
+    return { id, userId, name, sortOrder, bookCount: 0 }
+  })
+}
+
+export async function reorderTags(userId: string, tagIds: string[]) {
+  const db = getDb()
+  const existing = db
+    .select({ id: tags.id })
+    .from(tags)
+    .where(eq(tags.userId, userId))
+    .all()
+  const owned = new Set(existing.map((tag) => tag.id))
+  if (tagIds.length !== owned.size || new Set(tagIds).size !== owned.size || tagIds.some((id) => !owned.has(id))) {
+    throw new AppError('TAG_NOT_FOUND')
+  }
+  db.transaction((tx) => {
+    for (const [index, id] of tagIds.entries()) {
+      tx.update(tags).set({ sortOrder: index }).where(eq(tags.id, id)).run()
+    }
+  })
 }
 
 export async function updateTag(userId: string, tagId: string, name: string) {
   const db = getDb()
-  const existing = await getTag(userId, tagId)
-  if (!existing) throw new AppError('TAG_NOT_FOUND')
-  db.update(tags).set({ name }).where(eq(tags.id, tagId)).run()
-  return { ...existing, name }
+  return db.transaction((tx) => {
+    const existing = tx.select().from(tags).where(and(eq(tags.id, tagId), eq(tags.userId, userId))).get()
+    if (!existing) throw new AppError('TAG_NOT_FOUND')
+    const duplicate = tx
+      .select({ id: tags.id })
+      .from(tags)
+      .where(and(eq(tags.userId, userId), eq(tags.name, name), ne(tags.id, tagId)))
+      .get()
+    if (duplicate) throw new AppError('TAG_NAME_TAKEN', 'Tag name is already in use')
+    tx.update(tags).set({ name }).where(eq(tags.id, tagId)).run()
+    return { ...existing, name }
+  })
 }
 
 export async function deleteTag(userId: string, tagId: string) {

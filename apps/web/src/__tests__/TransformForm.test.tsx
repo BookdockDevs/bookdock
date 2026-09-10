@@ -194,10 +194,11 @@ describe('TransformForm', () => {
     })
 
     it('hides the scope segment entirely without a book context (settings manager)', () => {
-      const createTransform = mockCreate()
-      render(<TransformForm onDone={() => {}} />)
+    const createTransform = mockCreate()
+    render(<TransformForm onDone={() => {}} />)
 
-      expect(screen.queryByRole('button', { name: '仅此一处' })).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/可选/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '仅此一处' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '本书所有匹配处' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '所有匹配处' })).not.toBeInTheDocument()
       fireEvent.change(screen.getByLabelText(/匹配内容/), { target: { value: '新规则' } })

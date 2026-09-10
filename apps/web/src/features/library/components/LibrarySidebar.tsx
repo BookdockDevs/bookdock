@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import type { LibrarySearch } from '@/routes/index'
 import SmartMenu from '@/components/ui/SmartMenu'
 import AccountMenu from '@/features/auth/AccountMenu'
-import { applyShelfOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
+import { applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
 import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag } from '../hooks'
 import DeleteConfirm from './DeleteConfirm'
 import ShelfDialog from './ShelfDialog'
@@ -36,9 +36,13 @@ interface LibrarySidebarProps {
   shelfOrderOverride?: string[] | null
   /** Shelf row that was just released; its transform reset glides into place. */
   settleShelfId?: string | null
+  /** Same-frame tag order during drag end. */
+  tagOrderOverride?: string[] | null
+  /** Tag row that was just released; its transform reset glides into place. */
+  settleTagId?: string | null
 }
 
-const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId, author, series, trash, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId, author, series, trash, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const { data: shelvesData, isLoading: shelvesLoading } = useShelves()
@@ -47,6 +51,10 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
   const shelves = useMemo(
     () => applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride),
     [shelvesData, shelfOrderOverride],
+  )
+  const tags = useMemo(
+    () => applyTagOrder(tagsData?.data ?? [], tagOrderOverride),
+    [tagsData, tagOrderOverride],
   )
   const { data: trashData } = useBooks({
     page: 1,
@@ -176,19 +184,22 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
             </svg>
           </button>
         </div>
-        {(tagsData?.data ?? []).length === 0 ? (
+        {tags.length === 0 ? (
           <div className="px-3 py-1 text-xs text-stone-400">{_('library.noTags')}</div>
         ) : (
-          (tagsData?.data ?? []).map((tag) => (
-            <TagItem
-              key={tag.id}
-              tag={tag}
-              active={!trash && tagId === tag.id}
-              onClick={() => selectNavigation({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
-              onRename={() => setTagDialog({ tagId: tag.id, initialName: tag.name })}
-              onDelete={() => setDeleteTagTarget(tag)}
-            />
-          ))
+          <SortableContext items={tags.map((tag) => tag.id)} strategy={verticalListSortingStrategy}>
+            {tags.map((tag) => (
+              <TagItem
+                key={tag.id}
+                tag={tag}
+                settling={settleTagId === tag.id}
+                active={!trash && tagId === tag.id}
+                onClick={() => selectNavigation({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
+                onRename={() => setTagDialog({ tagId: tag.id, initialName: tag.name })}
+                onDelete={() => setDeleteTagTarget(tag)}
+              />
+            ))}
+          </SortableContext>
         )}
 
         <div className="mt-6 border-t border-stone-200/60 pt-4 dark:border-stone-800/50">
@@ -391,6 +402,7 @@ function ShelfItem({
   // 120ms transition on the reset lets it settle into its slot smoothly.
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: shelf.id,
+    data: { type: 'shelf' },
     animateLayoutChanges: () => false,
   })
   const { active: dragActive, over } = useDndContext()
@@ -489,12 +501,14 @@ const shelfMenuItemClass = 'flex w-full items-center gap-2.5 rounded-lg px-2.5 p
 
 function TagItem({
   tag,
+  settling,
   active,
   onClick,
   onRename,
   onDelete,
 }: {
   tag: TagListItem
+  settling: boolean
   active: boolean
   onClick: () => void
   onRename: () => void
@@ -502,10 +516,22 @@ function TagItem({
 }) {
   const _ = useTranslation()
   const menu = useContextMenu()
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: tag.id,
+    data: { type: 'tag' },
+    animateLayoutChanges: () => false,
+  })
 
   return (
     <div
-      className="group relative"
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition: settling ? 'transform 120ms ease-out' : transition,
+      }}
+      className={cn('group relative', isDragging && 'z-10 opacity-60')}
+      {...attributes}
+      {...listeners}
       onContextMenu={(e) => {
         e.preventDefault()
         e.stopPropagation()

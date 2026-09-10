@@ -79,7 +79,7 @@ describe('BookTransformsDialog', () => {
     render(<BookTransformsDialog bookId="b1" onClose={() => {}} />)
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    expect(screen.getByText('编辑规则')).toBeInTheDocument()
+    expect(screen.getByText('编辑正文变换规则')).toBeInTheDocument()
     expect(screen.getByText('保存')).toBeInTheDocument()
 
     // The header X cancels the edit (back semantics) and shows the list again
@@ -97,7 +97,7 @@ describe('BookTransformsDialog', () => {
     render(<BookTransformsDialog bookId="b1" onClose={() => {}} />)
 
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
-    expect(screen.getByText(/确定删除这条规则吗/)).toBeInTheDocument()
+    expect(screen.getByText(/确定要删除正文变换规则/)).toBeInTheDocument()
     const confirmButton = screen.getAllByRole('button', { name: '删除' }).find((button) => button.textContent === '删除')
     fireEvent.click(confirmButton!)
 

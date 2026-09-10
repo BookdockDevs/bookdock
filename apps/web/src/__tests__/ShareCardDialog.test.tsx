@@ -11,6 +11,7 @@ import { useFontLoaderStore } from '../features/reader/fonts'
 import { useReaderState } from '../features/reader/state/reader-state'
 
 vi.mock('@/api/client', () => ({
+  BASE_URL: '/api/v1',
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiPut: vi.fn(),
@@ -53,13 +54,14 @@ describe('ShareCardDialog', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
     localStorage.clear()
+    document.head.querySelectorAll('link[data-bd-font]').forEach((link) => link.remove())
     useFontLoaderStore.setState({ loadedIds: [], loadingIds: [] })
     vi.mocked(apiGet).mockResolvedValue({ data: { title: '不平静的日常', author: '惰天使' } })
     vi.mocked(useFonts).mockReturnValue({ data: { data: [uploadedFont] } } as ReturnType<typeof useFonts>)
     useReaderState.setState({ shareTarget: { text: '白君确实有招蜂引蝶的资本', chapter: '第三十二章' } })
   })
 
-  it('renders the font row as a single list: uploaded first, no group labels', async () => {
+  it('renders the font row as a single list in the default order, without group labels', async () => {
     renderDialog()
     fireEvent.click(await screen.findByText('更换模板'))
 
@@ -69,34 +71,33 @@ describe('ShareCardDialog', () => {
 
     const fontRow = screen.getByText('字体', { selector: 'span' }).parentElement!
     const chips = Array.from(fontRow.querySelectorAll('button'))
-    expect(chips[0]).toHaveTextContent('我的手写体')
+    expect(chips[0]).toHaveTextContent('宋体')
     expect(chips.map((c) => c.textContent)).toEqual([
-      '我的手写体',
-      '霞鹜文楷',
-      '思源宋体',
-      '思源黑体',
       '宋体',
       '黑体',
       '楷体',
       '仿宋',
+      '霞鹜文楷',
+      '思源宋体',
+      '思源黑体',
+      '我的手写体',
     ])
     // no collapse control in the share card dialog
     expect(screen.queryByText('更多')).not.toBeInTheDocument()
   })
 
-  it('marks an unselected builtin with a download icon and spins after clicking it', async () => {
+  it('loads builtin stylesheets when the font customization list opens', async () => {
     const { container } = renderDialog()
     fireEvent.click(await screen.findByText('更换模板'))
 
     const wenkaiChip = screen.getByText('霞鹜文楷').closest('button')!
-    expect(wenkaiChip.querySelector('svg')).toBeTruthy()
-    expect(container.querySelector('.animate-spin')).toBeNull()
+    expect(wenkaiChip.querySelector('.animate-spin')).toBeTruthy()
+    expect(document.head.querySelectorAll('link[data-bd-font]')).toHaveLength(3)
 
     fireEvent.click(wenkaiChip)
     expect(loadShareCardPrefs().font).toBe('lxgw-wenkai')
-    // loading state flips the icon to a spinner
     expect(container.querySelector('.animate-spin')).toBeTruthy()
-    // loaded/system chips never carry a status icon
+    // System and uploaded chips never carry a builtin loading status icon.
     expect(screen.getByText('宋体').closest('button')!.querySelector('svg')).toBeNull()
     expect(screen.getByText('我的手写体').closest('button')!.querySelector('svg')).toBeNull()
   })

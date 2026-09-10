@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { useToastStore } from '@/stores/toast.store'
 import { useTranslation } from '@/hooks/useTranslation'
+import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import { useManualTimer } from '../hooks/useManualTimer'
 
@@ -147,16 +147,15 @@ const actionBtn =
  */
 export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const timer = useManualTimer(bookId)
   const { phase, elapsedMs, graceMs, lastSummary, clearSummary, start, pause, resume, terminate, discard } = timer
   const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     if (!lastSummary) return
-    addToast(_('reader.manualTimerSummary', { duration: formatDuration(lastSummary.durationSeconds * 1000) }), 'success')
+    notify.success({ key: 'reader.manualTimerSummary', params: { duration: formatDuration(lastSummary.durationSeconds * 1000) } })
     clearSummary()
-  }, [lastSummary, addToast, clearSummary, _])
+  }, [lastSummary, clearSummary])
 
   if (phase === 'idle') {
     return (
@@ -178,7 +177,7 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
       onTerminate={terminate}
       onDiscard={() => {
         discard()
-        addToast(_('reader.manualTimerDiscarded'), 'info')
+        notify.info({ key: 'reader.manualTimerDiscarded' })
       }}
     />
   )

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { Hono } from 'hono'
 import {
   tagCreateSchema,
+  tagReorderSchema,
   tagUpdateSchema,
   type TagListItem,
 } from '@bookdock/shared'
@@ -10,6 +11,7 @@ import {
   listTags,
   createTag,
   updateTag,
+  reorderTags,
   deleteTag,
   addBooksToTag,
   removeBooksFromTag,
@@ -34,6 +36,18 @@ tagsRoutes.post('/', async (c) => {
   }
   const tag = await createTag(user.id, parsed.data.name)
   return c.json({ data: tag }, 201)
+})
+
+// Registered before '/:id' so 'order' never matches as a tag id.
+tagsRoutes.put('/order', async (c) => {
+  const user = c.get('user')
+  const body = await c.req.json()
+  const parsed = tagReorderSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  await reorderTags(user.id, parsed.data.tagIds)
+  return c.json({ data: null })
 })
 
 tagsRoutes.put('/:id', async (c) => {

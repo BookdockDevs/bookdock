@@ -10,15 +10,21 @@ import { useActivateAiProfile, useAiConfig, useAiProviders, useCreateAiProfile, 
 import AiBrandIcon from '@/components/ui/AiBrandIcon'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
-import { useToastStore } from '@/stores/toast.store'
 
 import AiModelIcon from './AiModelIcon'
 import AiModelPicker from './AiModelPicker'
 import AiPromptRow from './AiPromptRow'
+import EditModeButton from './EditModeButton'
+import SettingsFormActions from './SettingsFormActions'
+import SettingsFormField from './SettingsFormField'
+import { settingsFormClass, settingsInputClass, settingsTextareaClass } from './settingsForm'
 
 interface AiFormState {
   id?: string
@@ -113,10 +119,9 @@ function defaultPromptTemplates(_: (key: string) => string): AiPromptTemplate[] 
 
 export default function AiSettingsSection({ id }: { id?: string }) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
   const user = useAuthStore((s) => s.user)
   const isGuest = user?.role === 'guest' || user?.guest === true
-  const { data, isLoading } = useAiConfig({ enabled: !isGuest })
+  const { data, isError, isFetching, isLoading, refetch } = useAiConfig({ enabled: !isGuest })
   const { data: providersData } = useAiProviders({ enabled: !isGuest })
   const create = useCreateAiProfile()
   const updateProfile = useUpdateAiProfile()
@@ -159,6 +164,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   const modelListIsStale = Boolean(form && availableModels.length && modelsLoadedFingerprint && currentFingerprint !== modelsLoadedFingerprint)
   const saving = create.isPending || updateProfile.isPending || updateConfig.isPending
   const defaultPrompts = useMemo(() => defaultPromptTemplates(_), [_])
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
   formRef.current = form
 
   useEffect(() => {
@@ -201,8 +207,8 @@ export default function AiSettingsSection({ id }: { id?: string }) {
     if (!form) return
     const selectedModel = form.models.some((item) => item.id === form.model.trim()) && !isAiEmbeddingModel({ id: form.model.trim(), name: form.model.trim() }) ? form.model.trim() : ''
     const body = { name: form.name.trim(), provider: form.provider, baseUrl: form.baseUrl.trim() || null, model: selectedModel || null, models: form.models, ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}) }
-    const onSuccess = () => { setForm(null); addToast(_('settings.aiSaved'), 'success') }
-    const onError = (error: Error) => addToast(error.message, 'error')
+    const onSuccess = () => { setForm(null); notify.success({ key: 'settings.aiSaved' }) }
+    const onError = showError
     if (form.id) updateProfile.mutate({ id: form.id, body }, { onSuccess, onError })
     else create.mutate(body, { onSuccess, onError })
   }
@@ -217,14 +223,18 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         setModelsLoadedFingerprint(requestFingerprint)
         setAvailableModels(response.data)
         setModelPickerOpen(true)
-        addToast(response.data.length ? _('settings.aiModelsFetched', { count: response.data.length }) : _('settings.aiModelsEmpty'), response.data.length ? 'success' : 'info')
+        if (response.data.length) {
+          notify.success({ key: 'settings.aiModelsFetched', params: { count: response.data.length } })
+        } else {
+          notify.info({ key: 'settings.aiModelsEmpty' })
+        }
       },
       onError: (error) => {
         const current = formRef.current
         if (!current || fingerprint(`${current.id ?? ''}\0${current.provider}\0${current.baseUrl.trim()}\0${current.apiKey.trim()}`) !== requestFingerprint) return
         setModelsLoadedFingerprint('')
         setAvailableModels([])
-        addToast(error.message, 'error')
+        showError(error)
       },
     })
   }
@@ -265,16 +275,16 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
       },
       {
-        onSuccess: (response) => { setTestingModel(null); addToast(_('settings.aiTestSuccess', { model: response.data.model, latency: response.data.latencyMs }), 'success') },
-        onError: (error) => { setTestingModel(null); addToast(error.message, 'error') },
+        onSuccess: (response) => { setTestingModel(null); notify.success({ key: 'settings.aiTestSuccess', params: { model: response.data.model, latency: response.data.latencyMs } }) },
+        onError: (error) => { setTestingModel(null); showError(error) },
       },
     )
   }
 
   function clearApiKey() {
     if (!form) return
-    const onSuccess = () => { setForm((current) => current ? { ...current, apiKey: '' } : current); addToast(_('settings.aiKeyCleared'), 'success') }
-    const onError = (error: Error) => addToast(error.message, 'error')
+    const onSuccess = () => { setForm((current) => current ? { ...current, apiKey: '' } : current); notify.success({ key: 'settings.aiKeyCleared' }) }
+    const onError = showError
     if (form.id) updateProfile.mutate({ id: form.id, body: { apiKey: null } }, { onSuccess, onError })
   }
 
@@ -288,7 +298,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
     updateConfig.mutate({ embeddingProfileId: null, embeddingModel: null }, {
       onError: (error) => {
         setEmbeddingMode('semantic')
-        addToast(error.message, 'error')
+        showError(error)
       },
     })
   }
@@ -296,12 +306,12 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   function selectEmbeddingModel(selection: string) {
     const option = embeddingOptions.find((item) => item.key === selection)
     if (!option) return
-    updateConfig.mutate({ embeddingProfileId: option.profileId, embeddingModel: option.model.id }, { onError: (error) => addToast(error.message, 'error') })
+    updateConfig.mutate({ embeddingProfileId: option.profileId, embeddingModel: option.model.id }, { onError: showError })
   }
 
   function confirmDelete() {
     if (!pendingDelete) return
-    remove.mutate(pendingDelete.id, { onSuccess: () => { if (form?.id === pendingDelete.id) setForm(null); setPendingDelete(null); addToast(_('settings.aiDeleted'), 'success') }, onError: (error) => addToast(error.message, 'error') })
+    remove.mutate(pendingDelete.id, { onSuccess: () => { if (form?.id === pendingDelete.id) setForm(null); setPendingDelete(null); notify.success({ key: 'settings.aiDeleted' }) }, onError: showError })
   }
 
   return (
@@ -321,11 +331,11 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         </div>}
       </div>
 
-      {isGuest ? <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiGuestHint')}</p> : isLoading || !config ? <p className="text-xs text-stone-400">{_('reader.loading')}</p> : profiles.length === 0 ? <SettingsEmptyState>{_('settings.aiEmpty')}</SettingsEmptyState> : <div className="divide-y divide-stone-100 dark:divide-stone-800">
+      {isGuest ? <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiGuestHint')}</p> : isError ? <QueryErrorState isRetrying={isFetching} onRetry={refetch} /> : isLoading || !config ? <p className="text-xs text-stone-400">{_('reader.loading')}</p> : profiles.length === 0 ? <SettingsEmptyState>{_('settings.aiEmpty')}</SettingsEmptyState> : <div className="divide-y divide-stone-100 dark:divide-stone-800">
         {profiles.map((profile) => <div key={profile.id} className="flex items-center gap-3 py-3">
           <AiBrandIcon provider={providers.find((item) => item.id === profile.provider) ?? profile.provider} className="h-8 w-8" />
           <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-sm text-stone-800 dark:text-stone-100">{profile.name || providers.find((item) => item.id === profile.provider)?.name || profile.provider}</p>{config.activeProfileId === profile.id && <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiActive')}</span>}</div><p className="mt-0.5 truncate text-xs text-stone-400">{providers.find((item) => item.id === profile.provider)?.name ?? profile.provider}{profile.model ? ` · ${profile.model}` : ''}</p></div>
-          <div className="flex shrink-0 items-center gap-1"><button type="button" onClick={() => openEdit(profile)} aria-label={_('settings.aiEdit')} title={_('settings.aiEdit')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"><EditIcon /></button>{config.activeProfileId !== profile.id && <button type="button" onClick={() => activate.mutate(profile.id, { onError: (error) => addToast(error.message, 'error') })} className="rounded-lg px-2 py-1 text-[11px] text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200">{_('settings.aiUse')}</button>}<button type="button" onClick={() => setPendingDelete(profile)} aria-label={_('settings.aiDelete')} title={_('settings.aiDelete')} className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-stone-200"><TrashIcon /></button></div>
+          <div className="flex shrink-0 items-center gap-1"><button type="button" onClick={() => openEdit(profile)} aria-label={_('settings.aiEdit')} title={_('settings.aiEdit')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"><EditIcon /></button>{config.activeProfileId !== profile.id && <button type="button" onClick={() => activate.mutate(profile.id, { onError: (error) => showError(error) })} className="rounded-lg px-2 py-1 text-[11px] text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200">{_('settings.aiUse')}</button>}<button type="button" onClick={() => setPendingDelete(profile)} aria-label={_('settings.aiDelete')} title={_('settings.aiDelete')} className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"><TrashIcon /></button></div>
         </div>)}
       </div>}
 
@@ -354,7 +364,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
 
       {!isGuest && config && <AiPromptTemplates prompts={config.prompts ?? defaultPrompts} update={updateConfig} />}
 
-      {pendingDelete && <ConfirmDialog message={_('settings.aiDeleteConfirm')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
+      {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.aiDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
 
       {form && <Modal title={_(form.id ? 'settings.aiEdit' : 'settings.aiAdd')} size="wide" onClose={() => setForm(null)}>
         <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); save() }}>
@@ -432,15 +442,22 @@ export default function AiSettingsSection({ id }: { id?: string }) {
 
 function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; update: ReturnType<typeof useUpdateAiConfig> }) {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
   const [drafts, setDrafts] = useState(prompts)
   const [form, setForm] = useState<AiPromptFormState | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<AiPromptTemplate | null>(null)
+  const [restoreOpen, setRestoreOpen] = useState(false)
+  const [sorting, setSorting] = useState(false)
   const [variableHelpOpen, setVariableHelpOpen] = useState(false)
+  const [formErrors, setFormErrors] = useState({ name: false, prompt: false })
   const variableHelpRef = useRef<HTMLDivElement>(null)
+  const promptNameInputRef = useRef<HTMLInputElement>(null)
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const normalizedPrompts = prompts
-  useEffect(() => setDrafts(normalizedPrompts), [normalizedPrompts])
+  useEffect(() => {
+    if (!sorting) setDrafts(normalizedPrompts)
+  }, [normalizedPrompts, sorting])
   useDismissiblePopup(variableHelpOpen, variableHelpRef, () => setVariableHelpOpen(false))
 
   function persist(next: AiPromptTemplate[], onSuccess?: () => void) {
@@ -449,30 +466,34 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
       onSuccess,
       onError: (error) => {
         setDrafts(normalizedPrompts)
-        addToast(error.message, 'error')
+        showError(error)
       },
     })
   }
 
-  function reset() {
+  function confirmReset() {
     update.mutate({ prompts: null }, {
-      onSuccess: () => addToast(_('settings.aiPromptsReset'), 'success'),
-      onError: (error) => addToast(error.message, 'error'),
+      onSuccess: () => notify.success({ key: 'settings.aiPromptsReset' }),
+      onError: showError,
     })
+    setRestoreOpen(false)
   }
 
   function openCreate() {
     setVariableHelpOpen(false)
+    setFormErrors({ name: false, prompt: false })
     setForm({ name: '', prompt: '' })
   }
 
   function openEdit(prompt: AiPromptTemplate) {
     setVariableHelpOpen(false)
+    setFormErrors({ name: false, prompt: false })
     setForm({ id: prompt.id, name: prompt.name, prompt: prompt.prompt })
   }
 
   function closeForm() {
     setVariableHelpOpen(false)
+    setFormErrors({ name: false, prompt: false })
     setForm(null)
   }
 
@@ -491,44 +512,101 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
   }
 
   function submitForm() {
-    if (!form || !form.name.trim() || !form.prompt.trim()) return
+    if (!form) return
+    const nextErrors = { name: !form.name.trim(), prompt: !form.prompt.trim() }
+    setFormErrors(nextErrors)
+    if (nextErrors.name || nextErrors.prompt) {
+      if (nextErrors.name) promptNameInputRef.current?.focus()
+      else promptTextareaRef.current?.focus()
+      return
+    }
     const next = form.id
       ? drafts.map((prompt) => prompt.id === form.id ? { ...prompt, name: form.name.trim(), prompt: form.prompt.trim() } : prompt)
       : [...drafts, { id: `custom-${Date.now().toString(36)}`, name: form.name.trim(), prompt: form.prompt.trim(), scope: 'both' as const, enabled: true, order: drafts.length ? Math.max(...drafts.map((prompt) => prompt.order)) + 10 : 10, builtIn: false }]
-    persist(next, closeForm)
+    persist(next, () => {
+      notify.success({ key: 'toast.aiPromptSaved' })
+      closeForm()
+    })
+  }
+
+  function toggleSorting() {
+    if (update.isPending) return
+    if (!sorting) {
+      setDrafts(normalizedPrompts)
+      setSorting(true)
+      return
+    }
+    const draftIds = drafts.map((prompt) => prompt.id)
+    const sourceIds = normalizedPrompts.map((prompt) => prompt.id)
+    if (draftIds.length === sourceIds.length && draftIds.every((id, index) => id === sourceIds[index])) {
+      setSorting(false)
+      return
+    }
+    update.mutate({ prompts: drafts.map(toPromptInput) }, {
+      onSuccess: () => setSorting(false),
+      onError: showError,
+    })
   }
 
   function onDragEnd({ active, over }: DragEndEvent) {
-    if (update.isPending || !over || active.id === over.id) return
+    if (!sorting || update.isPending || !over || active.id === over.id) return
     const oldIndex = drafts.findIndex((prompt) => prompt.id === active.id)
     const newIndex = drafts.findIndex((prompt) => prompt.id === over.id)
     if (oldIndex < 0 || newIndex < 0) return
     const next = arrayMove(drafts, oldIndex, newIndex).map((prompt, order) => ({ ...prompt, order: (order + 1) * 10 }))
-    persist(next)
+    setDrafts(next)
   }
 
   function remove(id: string) {
     persist(drafts.filter((prompt) => prompt.id !== id).map((prompt, order) => ({ ...prompt, order: (order + 1) * 10 })))
   }
 
+  function confirmDelete() {
+    if (!pendingDelete) return
+    remove(pendingDelete.id)
+    setPendingDelete(null)
+  }
+
   return <section className="mt-6 border-t border-stone-100 pt-5 dark:border-stone-800">
     <div className="mb-3 flex items-start justify-between gap-3">
-      <div className="min-w-0"><h3 className="text-sm font-medium">{_('settings.aiPrompts')}</h3></div>
+      <div className="min-w-0">
+        <h3 className="flex items-baseline gap-1 text-sm font-medium">
+          <span>{_('settings.aiPrompts')}</span>
+          {drafts.length > 0 && <span className="text-xs font-normal tabular-nums text-stone-400 dark:text-stone-500">· {drafts.length}</span>}
+        </h3>
+      </div>
       <div className="flex shrink-0 items-center gap-1">
-        <button type="button" onClick={reset} disabled={update.isPending} aria-label={_('settings.aiPromptsReset')} title={_('settings.aiPromptsReset')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-stone-200"><RestoreDefaultsIcon /></button>
-        <button type="button" onClick={openCreate} aria-label={_('settings.aiPromptAdd')} title={_('settings.aiPromptAdd')} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>
+        <EditModeButton active={sorting} disabled={update.isPending} onClick={toggleSorting} />
+        <button type="button" onClick={() => setRestoreOpen(true)} disabled={update.isPending || sorting} aria-label={_('settings.aiPromptsReset')} title={_('settings.aiPromptsReset')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-stone-200"><RestoreDefaultsIcon /></button>
+        <button type="button" onClick={openCreate} disabled={update.isPending || sorting} aria-label={_('settings.aiPromptAdd')} title={_('settings.aiPromptAdd')} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>
       </div>
     </div>
     {drafts.length === 0 ? <p className="rounded-lg border border-dashed border-stone-200 px-3 py-4 text-center text-xs text-stone-400 dark:border-stone-700">{_('settings.aiPromptsEmpty')}</p> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={drafts.map((prompt) => prompt.id)} strategy={verticalListSortingStrategy}>
         <ul className="divide-y divide-stone-100 dark:divide-stone-800">
-          {drafts.map((prompt) => <AiPromptRow key={prompt.id} prompt={prompt} disabled={update.isPending} onToggle={(enabled) => persist(drafts.map((item) => item.id === prompt.id ? { ...item, enabled } : item))} onEdit={() => openEdit(prompt)} onDelete={() => remove(prompt.id)} />)}
+          {drafts.map((prompt) => <AiPromptRow key={prompt.id} prompt={prompt} disabled={update.isPending} sorting={sorting} onToggle={(enabled) => persist(drafts.map((item) => item.id === prompt.id ? { ...item, enabled } : item))} onEdit={() => openEdit(prompt)} onDelete={() => setPendingDelete(prompt)} />)}
         </ul>
       </SortableContext>
     </DndContext>}
+    {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.aiPromptDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
+    {restoreOpen && <ConfirmDialog title={_('settings.confirmRestoreTitle')} message={_('settings.aiPromptsRestoreConfirm')} confirmLabel={_('settings.confirmRestoreAction')} confirmVariant="primary" onConfirm={confirmReset} onClose={() => setRestoreOpen(false)} />}
     {form && <Modal title={_(form.id ? 'settings.aiPromptEdit' : 'settings.aiPromptAdd')} onClose={closeForm}>
-      <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); submitForm() }}>
-        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.aiPromptName')}</span><input required autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={_('settings.aiPromptNamePlaceholder')} className="h-9 rounded-lg border border-stone-200 bg-transparent px-3 text-sm outline-none focus:border-blue-500 dark:border-stone-700" /></label>
+      <form noValidate className={settingsFormClass} onSubmit={(event) => { event.preventDefault(); submitForm() }}>
+        <SettingsFormField label={_('settings.aiPromptName')} required error={formErrors.name ? _('settings.aiPromptNameRequired') : undefined}>
+          <input
+            ref={promptNameInputRef}
+            autoFocus
+            value={form.name}
+            onChange={(event) => {
+              setForm({ ...form, name: event.target.value })
+              setFormErrors((current) => ({ ...current, name: false }))
+            }}
+            aria-label={_('settings.aiPromptName')}
+            aria-invalid={formErrors.name || undefined}
+            disabled={update.isPending}
+            className={settingsInputClass}
+          />
+        </SettingsFormField>
         <div className="flex flex-col gap-2 text-xs text-stone-600 dark:text-stone-300">
           <div ref={variableHelpRef} className="relative flex items-center gap-1.5">
             <span>{_('settings.aiPromptVariables')}</span>
@@ -545,11 +623,26 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
             </div>}
           </div>
           <div className="flex flex-wrap gap-2">
-            {AI_PROMPT_VARIABLES.map((variable) => <button key={variable} type="button" onClick={() => insertVariable(variable)} aria-label={_('settings.aiPromptInsertVariable', { variable })} className="rounded-lg border border-stone-200 px-2.5 py-1.5 font-mono text-xs text-stone-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-stone-700 dark:text-stone-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300">{variable}</button>)}
+            {AI_PROMPT_VARIABLES.map((variable) => <button key={variable} type="button" onClick={() => insertVariable(variable)} disabled={update.isPending} aria-label={_('settings.aiPromptInsertVariable', { variable })} className="rounded-lg border border-stone-200 px-2.5 py-1.5 font-mono text-xs text-stone-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-stone-700 dark:text-stone-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300">{variable}</button>)}
           </div>
         </div>
-        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.aiPromptText')}</span><textarea ref={promptTextareaRef} required rows={5} value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} placeholder={_('settings.aiPromptTextPlaceholder')} className="resize-y rounded-lg border border-stone-200 bg-transparent px-3 py-2 text-sm leading-5 outline-none focus:border-blue-500 dark:border-stone-700" /></label>
-        <div className="flex justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800"><button type="button" onClick={closeForm} className="rounded-lg border border-stone-200 px-4 py-2 text-xs text-stone-600 dark:border-stone-700 dark:text-stone-300">{_('library.cancel')}</button><button type="submit" disabled={!form.name.trim() || !form.prompt.trim() || update.isPending} className="rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-40 dark:bg-stone-100 dark:text-stone-900">{_('settings.aiPromptApply')}</button></div>
+        <SettingsFormField label={_('settings.aiPromptText')} required error={formErrors.prompt ? _('settings.aiPromptTextRequired') : undefined}>
+          <textarea
+            ref={promptTextareaRef}
+            rows={5}
+            value={form.prompt}
+            onChange={(event) => {
+              setForm({ ...form, prompt: event.target.value })
+              setFormErrors((current) => ({ ...current, prompt: false }))
+            }}
+            placeholder={_('settings.aiPromptTextPlaceholder')}
+            aria-label={_('settings.aiPromptText')}
+            aria-invalid={formErrors.prompt || undefined}
+            disabled={update.isPending}
+            className={settingsTextareaClass}
+          />
+        </SettingsFormField>
+        <SettingsFormActions onCancel={closeForm} cancelDisabled={update.isPending} saveDisabled={update.isPending} />
       </form>
     </Modal>}
   </section>

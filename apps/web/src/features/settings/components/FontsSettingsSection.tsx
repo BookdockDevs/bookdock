@@ -1,18 +1,21 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { FontListItem } from '@bookdock/shared'
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
-import { useDeleteFont, useFonts, useUpdateFontScope, useUploadFont } from '@/api/hooks/useFonts'
-import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
-import { ensureUploadedFontLoaded, uploadedFontAlias } from '@/features/reader/fonts'
+import { useDeleteFont, useFonts, useUploadFont } from '@/api/hooks/useFonts'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import QueryErrorState from '@/components/ui/QueryErrorState'
+import { buildFontOptions, ensureBuiltinFontLoaded, ensureBuiltinFontsLoaded, ensureUploadedFontLoaded, useFontLoaderStore, type FontOption } from '@/features/reader/fonts'
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
-import { useToastStore } from '@/stores/toast.store'
+import { useUiStore } from '@/stores/ui.store'
 
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${Math.ceil(bytes / 1024)} KB`
-}
+import EditModeButton from './EditModeButton'
+import FontEditor from './FontEditor'
+import FontRow from './FontRow'
 
 function PlusIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
@@ -20,115 +23,164 @@ function PlusIcon() {
 
 export default function FontsSettingsSection() {
   const _ = useTranslation()
-  const addToast = useToastStore((s) => s.addToast)
-  const isOwner = useAuthStore((s) => s.user?.role === 'owner' && s.user.guest !== true)
-  const { data } = useFonts()
-  const fonts = useMemo(() => data?.data ?? [], [data])
+  const isOwner = useAuthStore((state) => state.user?.role === 'owner' && state.user.guest !== true)
+  const fontsQuery = useFonts()
+  const uploadedFonts = useMemo(() => fontsQuery.data?.data ?? [], [fontsQuery.data])
+  const fontPreferences = useUiStore((state) => state.fontPreferences)
+  const fontOrder = useUiStore((state) => state.fontOrder)
+  const setFontPreference = useUiStore((state) => state.setFontPreference)
+  const removeFontPreference = useUiStore((state) => state.removeFontPreference)
+  const setFontOrder = useUiStore((state) => state.setFontOrder)
   const uploadFont = useUploadFont()
   const deleteFont = useDeleteFont()
-  const updateScope = useUpdateFontScope()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [pendingDelete, setPendingDelete] = useState<FontOption | null>(null)
+  const [editingFont, setEditingFont] = useState<FontOption | null>(null)
+  const fontLoadedIds = useFontLoaderStore((state) => state.loadedIds)
+  const fontLoadingIds = useFontLoaderStore((state) => state.loadingIds)
+  const fonts = useMemo(
+    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds }, fontPreferences, fontOrder),
+    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontPreferences, fontOrder],
+  )
+  const [sorting, setSorting] = useState(false)
+  const [draftFonts, setDraftFonts] = useState<FontOption[] | null>(null)
+  const displayFonts = sorting ? draftFonts ?? fonts : fonts
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  const enabledCount = displayFonts.filter((font) => font.enabled).length
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
 
-  // Family names render in their own font, so every listed font must be
-  // registered in the main document
   useEffect(() => {
-    fonts.forEach((f) => void ensureUploadedFontLoaded(f))
-  }, [fonts])
+    uploadedFonts.forEach((font) => void ensureUploadedFontLoaded(font))
+  }, [uploadedFonts])
+
+  useEffect(() => {
+    ensureBuiltinFontsLoaded()
+  }, [])
 
   async function onFilesSelected(fileList: FileList | null) {
     if (!fileList?.length) return
     for (const file of Array.from(fileList)) {
       try {
         await uploadFont.mutateAsync(file)
-      } catch (err) {
-        addToast(err instanceof Error ? err.message : String(err), 'error')
+      } catch (error) {
+        showError(error)
       }
     }
-    // Reset so picking the same file again still fires onChange
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  function onDelete(font: FontListItem) {
-    if (!window.confirm(_('settings.fontsDeleteConfirm', { name: font.family }))) return
-    deleteFont.mutate(font.id, {
-      onError: (err) => addToast(err.message, 'error'),
+  function onToggle(font: FontOption) {
+    if (font.enabled && enabledCount <= 1) {
+      notify.warning({ key: 'settings.fontsKeepOneEnabled' })
+      return
+    }
+    const enabled = !font.enabled
+    if (sorting) setDraftFonts((current) => current?.map((item) => item.id === font.id ? { ...item, enabled } : item) ?? current)
+    setFontPreference(font.id, { enabled })
+  }
+
+  function confirmDelete() {
+    const uploaded = pendingDelete?.uploaded
+    if (!uploaded) return
+    deleteFont.mutate(uploaded.id, {
+      onSuccess: () => {
+        removeFontPreference(uploaded.id)
+        if (sorting) setDraftFonts((current) => current?.filter((font) => font.id !== uploaded.id) ?? current)
+        notify.success({ key: 'toast.fontDeleted' })
+      },
+      onError: showError,
     })
+    setPendingDelete(null)
   }
 
-  function onToggleScope(font: FontListItem) {
-    updateScope.mutate(
-      { id: font.id, scope: font.scope === 'instance' ? 'user' : 'instance' },
-      { onError: (err) => addToast(err.message, 'error') },
-    )
+  function toggleSorting() {
+    if (deleteFont.isPending || uploadFont.isPending) return
+    if (!sorting) {
+      setDraftFonts(fonts)
+      setSorting(true)
+      return
+    }
+    const next = draftFonts ?? fonts
+    setFontOrder(next.map((font) => font.id))
+    setDraftFonts(null)
+    setSorting(false)
   }
 
-  const badge = 'rounded border border-stone-200 px-1.5 py-0.5 text-[11px] text-stone-500 dark:border-stone-700 dark:text-stone-400'
+  function onDragEnd({ active, over }: DragEndEvent) {
+    if (!sorting || !over || active.id === over.id || deleteFont.isPending || uploadFont.isPending) return
+    const currentFonts = draftFonts ?? fonts
+    const oldIndex = currentFonts.findIndex((font) => font.id === active.id)
+    const newIndex = currentFonts.findIndex((font) => font.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    setDraftFonts(arrayMove(currentFonts, oldIndex, newIndex))
+  }
 
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-medium">{_('settings.fonts')}</h2>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".ttf,.otf,.woff,.woff2"
-          multiple
-          className="hidden"
-          onChange={(e) => void onFilesSelected(e.target.files)}
-        />
-        <button
-          type="button"
-          disabled={uploadFont.isPending}
-          onClick={() => fileInputRef.current?.click()}
-          aria-label={_('settings.fontsUpload')}
-          title={_('settings.fontsUpload')}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-        >
-          <PlusIcon />
-        </button>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="flex items-baseline gap-1 text-sm font-medium">
+            <span>{_('settings.fonts')}</span>
+            {fonts.length > 0 && <span className="text-xs font-normal tabular-nums text-stone-400 dark:text-stone-500">· {fonts.length}</span>}
+          </h2>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <EditModeButton active={sorting} disabled={deleteFont.isPending || uploadFont.isPending} onClick={toggleSorting} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".ttf,.otf,.woff,.woff2"
+            multiple
+            className="hidden"
+            onChange={(event) => void onFilesSelected(event.target.files)}
+          />
+          <button
+            type="button"
+            disabled={sorting || uploadFont.isPending}
+            onClick={() => fileInputRef.current?.click()}
+            aria-label={_('settings.fontsUpload')}
+            title={_('settings.fontsUpload')}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+          >
+            <PlusIcon />
+          </button>
+        </div>
       </div>
-      {fonts.length === 0 ? (
-        <SettingsEmptyState>{_('settings.fontsEmpty')}</SettingsEmptyState>
+
+      {fontsQuery.isError ? (
+        <QueryErrorState className="py-4" isRetrying={fontsQuery.isFetching} onRetry={fontsQuery.refetch} />
       ) : (
-        <ul className="divide-y divide-stone-200 dark:divide-stone-800">
-          {fonts.map((f) => (
-            <li key={f.id} className="flex items-center gap-3 py-2.5">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm" style={{ fontFamily: `"${uploadedFontAlias(f.id)}", serif` }}>
-                  {f.family}
-                </p>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  <span className={badge}>{f.format}</span>
-                  <span className={badge}>{formatSize(f.size)}</span>
-                  <span className={badge}>
-                    {_(f.scope === 'instance' ? 'settings.fontsScopeInstance' : 'settings.fontsScopeUser')}
-                  </span>
-                </div>
-              </div>
-              {isOwner && (
-                <button
-                  type="button"
-                  disabled={updateScope.isPending}
-                  onClick={() => onToggleScope(f)}
-                  className="shrink-0 rounded-lg border border-stone-200 px-2 py-1 text-xs text-stone-500 transition-colors hover:text-stone-800 disabled:opacity-50 dark:border-stone-700 dark:text-stone-400 dark:hover:text-stone-200"
-                >
-                  {_(f.scope === 'instance' ? 'settings.fontsToUser' : 'settings.fontsToInstance')}
-                </button>
-              )}
-              {(f.mine || isOwner) && (
-                <button
-                  type="button"
-                  disabled={deleteFont.isPending}
-                  onClick={() => onDelete(f)}
-                  className="shrink-0 rounded-lg border border-stone-200 px-2 py-1 text-xs text-red-500 transition-colors hover:border-red-300 hover:text-red-600 disabled:opacity-50 dark:border-stone-700"
-                >
-                  {_('settings.fontsDelete')}
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={displayFonts.map((font) => font.id)} strategy={verticalListSortingStrategy}>
+            <ul className="divide-y divide-stone-200 dark:divide-stone-800">
+              {displayFonts.map((font) => (
+                <FontRow
+                  key={`${font.source}:${font.id}`}
+                  font={font}
+                  isOwner={isOwner}
+                  disabled={deleteFont.isPending || uploadFont.isPending}
+                  sorting={sorting}
+                  onToggle={() => onToggle(font)}
+                  onLoad={() => { if (font.builtin) ensureBuiltinFontLoaded(font.builtin.id) }}
+                  onEdit={() => setEditingFont(font)}
+                  onDelete={() => setPendingDelete(font)}
+                />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
+
+      {pendingDelete?.uploaded && (
+        <ConfirmDialog
+          title={_('settings.confirmDeleteTitle')}
+          message={_('settings.fontsDeleteConfirm', { name: pendingDelete.name })}
+          confirmLabel={_('settings.confirmDeleteAction')}
+          onConfirm={confirmDelete}
+          onClose={() => setPendingDelete(null)}
+        />
+      )}
+      {editingFont && <FontEditor font={editingFont} isOwner={isOwner} onClose={() => setEditingFont(null)} />}
     </section>
   )
 }

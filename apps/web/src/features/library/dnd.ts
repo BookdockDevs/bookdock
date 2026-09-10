@@ -1,9 +1,9 @@
-import type { ShelfListItem } from '@bookdock/shared'
+import type { ShelfListItem, TagListItem } from '@bookdock/shared'
 
-// Shared dnd-kit contracts for the book-drag-to-shelf feature.
+// Shared dnd-kit contracts for library drag interactions.
 // Drag sources (book cards / list rows) carry a BookDragPayload; drop targets
-// are the sortable shelf rows (droppable id = shelf id) plus the uncategorized
-// entry (SHELF_NONE_DROPPABLE).
+// are the sortable shelf/tag rows plus the uncategorized entry
+// (SHELF_NONE_DROPPABLE).
 
 export interface BookDragPayload {
   bookIds: string[]
@@ -30,5 +30,14 @@ export function applyShelfOrder(base: ShelfListItem[], override: string[] | null
   const ordered = override
     .map((id) => byId.get(id))
     .filter((s): s is ShelfListItem => Boolean(s))
+  return ordered.length === base.length ? ordered : base
+}
+
+export function applyTagOrder(base: TagListItem[], override: string[] | null | undefined): TagListItem[] {
+  if (!override) return base
+  const byId = new Map(base.map((tag) => [tag.id, tag]))
+  const ordered = override
+    .map((id) => byId.get(id))
+    .filter((tag): tag is TagListItem => Boolean(tag))
   return ordered.length === base.length ? ordered : base
 }

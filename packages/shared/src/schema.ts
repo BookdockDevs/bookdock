@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, PAGINATION } from './constants'
+import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, PAGINATION } from './constants'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
 
@@ -10,8 +10,8 @@ export const marginalFieldSchema = z.enum(['none', 'bookTitle', 'chapter', 'chap
 export const clickAreaModeSchema = z.enum(['standard', 'fullscreen', 'swap', 'none'])
 
 export const loginSchema = z.object({
-  username: z.string().min(1).max(100),
-  password: z.string().min(1).max(256),
+  username: z.string().trim().min(1).max(AUTH_USERNAME_MAX_LENGTH),
+  password: z.string().min(1).max(AUTH_PASSWORD_MAX_LENGTH),
 })
 
 export const paginationSchema = z.object({
@@ -110,6 +110,11 @@ export const settingsUpdateSchema = z.object({
   // Open font id: system stack ids (serif/sans-serif/kaiti/fangsong), builtin CDN
   // font ids, or uploaded font ids — resolved client-side against the font registry.
   fontFamily: z.string().min(1).max(100).optional(),
+  fontPreferences: z.record(z.object({
+    enabled: z.boolean().optional(),
+    displayName: z.string().trim().min(1).max(100).optional(),
+  })).optional(),
+  fontOrder: z.array(z.string().min(1).max(100)).optional(),
   fontSize: z.number().min(12).max(64).optional(),
   fontWeight: z.number().min(100).max(900).optional(),
   lineHeight: z.number().min(1.2).max(2.5).optional(),
@@ -505,11 +510,23 @@ export const tocRulePatternSchema = z.object({
   enabled: z.boolean().default(true),
 })
 
+const tocRulePatternsSchema = z.array(tocRulePatternSchema).min(1).superRefine((patterns, context) => {
+  patterns.forEach((pattern, index) => {
+    if (pattern.level !== index + 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [index, 'level'],
+        message: 'pattern levels must match their array positions',
+      })
+    }
+  })
+})
+
 export const tocRuleCreateSchema = z.object({
   name: z.string().min(1).max(200),
   enabled: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
-  patterns: z.array(tocRulePatternSchema).min(1),
+  patterns: tocRulePatternsSchema,
 }).refine((v) => v.patterns.every((p) => p.regex === undefined || isValidRegex(p.regex)), {
   message: 'pattern is not a valid regular expression',
   path: ['patterns'],
@@ -519,7 +536,7 @@ export const tocRuleUpdateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   enabled: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
-  patterns: z.array(tocRulePatternSchema).min(1).optional(),
+  patterns: tocRulePatternsSchema.optional(),
 }).refine((v) => v.patterns === undefined || v.patterns.every((p) => p.regex === undefined || isValidRegex(p.regex)), {
   message: 'pattern is not a valid regular expression',
   path: ['patterns'],
@@ -530,8 +547,8 @@ export const tocRuleReorderSchema = z.object({
 })
 
 export const setupSchema = z.object({
-  username: z.string().min(1).max(100),
-  password: z.string().min(6).max(256),
+  username: z.string().trim().min(1).max(AUTH_USERNAME_MAX_LENGTH),
+  password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH),
 })
 
 export const setupRequiredSchema = z.object({
@@ -539,17 +556,17 @@ export const setupRequiredSchema = z.object({
 })
 
 export const registerSchema = z.object({
-  username: z.string().min(1).max(30),
-  password: z.string().min(6).max(256),
+  username: z.string().trim().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH),
+  password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH),
 })
 
 export const changePasswordSchema = z.object({
-  oldPassword: z.string().min(1).max(256),
-  newPassword: z.string().min(6).max(256),
+  oldPassword: z.string().min(1).max(AUTH_PASSWORD_MAX_LENGTH),
+  newPassword: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH),
 })
 
 export const updateUsernameSchema = z.object({
-  username: z.string().min(1).max(30),
+  username: z.string().trim().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH),
 })
 
 export const updateInstanceSchema = z.object({
@@ -563,11 +580,12 @@ export const updateUserSchema = z.object({
   newPassword: z.string().min(6).max(256).optional(),
 })
 
-export const shelfCreateSchema = z.object({ name: z.string().min(1).max(100) })
-export const shelfUpdateSchema = z.object({ name: z.string().min(1).max(100) })
+export const shelfCreateSchema = z.object({ name: z.string().trim().min(1).max(100) })
+export const shelfUpdateSchema = z.object({ name: z.string().trim().min(1).max(100) })
 export const shelfReorderSchema = z.object({ shelfIds: z.array(z.string().min(1)) })
-export const tagCreateSchema = z.object({ name: z.string().min(1).max(100) })
-export const tagUpdateSchema = z.object({ name: z.string().min(1).max(100) })
+export const tagCreateSchema = z.object({ name: z.string().trim().min(1).max(100) })
+export const tagUpdateSchema = z.object({ name: z.string().trim().min(1).max(100) })
+export const tagReorderSchema = z.object({ tagIds: z.array(z.string().min(1)) })
 export const bookMembershipSchema = z.object({
   shelfId: z.string().min(1).nullable().optional(),
   tagIds: z.array(z.string().min(1)).optional(),

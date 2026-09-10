@@ -1,4 +1,5 @@
 import { localDateString, useReadingHourly } from '@/api/hooks/reading-records'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
 import { cn } from '@/lib/utils'
@@ -18,7 +19,8 @@ export default function HourDistribution({ date, period, range }: HourDistributi
   const _ = useTranslation()
   const from = date ?? localDateString(range.from)
   const to = date ?? localDateString(range.to)
-  const { data } = useReadingHourly(from, to)
+  const hourlyQuery = useReadingHourly(from, to)
+  const { data } = hourlyQuery
   const items = data?.data ?? []
 
   const byHour = new Map(items.map((i) => [i.hour, i.durationSeconds]))
@@ -28,6 +30,14 @@ export default function HourDistribution({ date, period, range }: HourDistributi
     ? items.reduce((a, b) => (b.durationSeconds > a.durationSeconds ? b : a))
     : null
   const scopeLabel = date ?? formatPeriodLabel(period, range)
+
+  if (hourlyQuery.isError) {
+    return (
+      <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+        <QueryErrorState isRetrying={hourlyQuery.isFetching} onRetry={hourlyQuery.refetch} />
+      </section>
+    )
+  }
 
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
