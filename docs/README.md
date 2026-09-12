@@ -10,6 +10,8 @@ A self-hosted web e-book library. pnpm monorepo — `@bookdock/shared` (contract
 | [`architecture.md`](./architecture.md) | Authoritative architecture blueprint (design principles, module layout, schema, API, ADRs) |
 | [`plan.md`](./plan.md) | Curated public roadmap (P0/P1/P2/P3) |
 
+The planned companion browser extension is documented in [`local/extension/00-index.md`](./local/extension/00-index.md). Its competitor research is indexed at [`local/research/browser-extensions/00-index.md`](./local/research/browser-extensions/00-index.md).
+
 > Private development tracking lives under `docs/local/` (git-ignored): full dev-log plan, ADRs, and domain glossary.
 
 ## Quick start

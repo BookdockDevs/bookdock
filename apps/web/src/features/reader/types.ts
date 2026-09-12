@@ -85,6 +85,8 @@ export interface TtsSegment {
 export interface RendererEvents {
   relocated: (e: ReaderLocation) => void
   selected: (e: SelectionInfo | null) => void
+  /** A non-collapsed text selection has started in the reading content. */
+  textSelectionStart: () => void
   annotationClicked: (e: { cfiRange: string; rect?: PopupRect }) => void
   instantAnnotation: (e: SelectionInfo) => void
   rendered: () => void
@@ -126,6 +128,12 @@ export interface RendererEvents {
   footnoteOpen: (e: FootnoteEntry) => void
   footnoteClose: () => void
   ttsInvalidated: () => void
+  /** A direct user gesture changed or intends to change the reading position. */
+  userInteraction: () => void
+  /** A touch gesture that changed the reading position has ended. */
+  userInteractionEnd: () => void
+  /** A live reader setting changed and may invalidate the current layout. */
+  readingSettingsChanged: () => void
 }
 
 export interface TocItem {
@@ -170,7 +178,11 @@ export interface BookReader {
    */
   getSectionFractions(): number[] | null
   scrollToPercent(percent: number): Promise<void>
-  scrollByPages(delta: number): Promise<void>
+  scrollByPages(delta: number, distanceOverride?: number, opts?: { internal?: boolean }): Promise<void>
+  scrollByPixels(delta: number): Promise<void>
+  isAtEnd(): boolean
+  /** Temporarily disables the user's snap-turn setting for smooth auto reading. */
+  setAutoReadingActive(active: boolean): void
   /**
    * Search the book. onProgress fires with partial results and the fraction of
    * the book covered so far (throttled), so callers can stream them to the UI.
@@ -276,6 +288,8 @@ export interface ParagraphStyle {
 }
 
 export type ReadingMode = 'scroll' | 'page'
+
+export type AutoReadingMode = 'smooth' | 'timed'
 
 export type ChineseConversion = 'off' | 'simplified' | 'traditional'
 

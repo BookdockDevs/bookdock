@@ -51,7 +51,7 @@ describe('TransformsSettingsSection', () => {
     expect(screen.queryByText('· 0')).not.toBeInTheDocument()
   })
 
-  it('shows only global pattern rules, grouped by 分组 with 未分组 last', () => {
+  it('shows only global pattern rules with ungrouped rules at the top level', () => {
     mockRules([
       rule({ id: 't1', name: '广告组规则', group: 'a组', createdAt: 100 }),
       rule({ id: 't2', name: '无组规则', createdAt: 200 }),
@@ -64,16 +64,17 @@ describe('TransformsSettingsSection', () => {
 
     expect(screen.getByText('a组')).toBeInTheDocument()
     expect(screen.getByText('b组')).toBeInTheDocument()
-    expect(screen.getByText('未分组')).toBeInTheDocument()
+    expect(screen.getByText('无组规则')).toBeInTheDocument()
+    expect(screen.queryByText('未分组')).not.toBeInTheDocument()
     expect(screen.queryByText('book rule')).not.toBeInTheDocument()
     expect(screen.queryByText('错字')).not.toBeInTheDocument()
     expect(screen.getByText('· 3')).toBeInTheDocument()
-    // groups sort alphabetically, 未分组 pinned last
+    // named groups sort alphabetically; ungrouped rules have no group header
     const headers = screen.getAllByRole('button', { expanded: true })
     const names = headers.map((h) => h.textContent)
     expect(names[0]).toContain('a组')
     expect(names[1]).toContain('b组')
-    expect(names[2]).toContain('未分组')
+    expect(names).toHaveLength(2)
   })
 
   it('collapses and expands a group', () => {
@@ -89,6 +90,31 @@ describe('TransformsSettingsSection', () => {
     expect(screen.getByText('B规则')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /广告/ }))
     expect(screen.getByText('A规则')).toBeInTheDocument()
+  })
+
+  it('shows edit and delete actions only while editing', () => {
+    mockRules([rule({ name: '去广告' })])
+    render(<TransformsSettingsSection />)
+
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '退出编辑模式' }))
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
+  })
+
+  it('fades disabled rules without a strikethrough', () => {
+    mockRules([rule({ name: '停用规则', enabled: false })])
+    render(<TransformsSettingsSection />)
+
+    const name = screen.getByText('停用规则')
+    expect(name).not.toHaveClass('line-through')
+    expect(name.closest('li')).toHaveClass('opacity-60')
   })
 
   it('toggles a rule via the update mutation (global default switch)', () => {
@@ -110,6 +136,7 @@ describe('TransformsSettingsSection', () => {
     mockRules([rule()])
     render(<TransformsSettingsSection />)
 
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     expect(screen.getByText(/确定要删除正文变换规则/)).toBeInTheDocument()
     const confirmBtn = screen.getAllByRole('button', { name: '删除' }).find((b) => b.textContent === '删除')
@@ -154,6 +181,7 @@ describe('TransformsSettingsSection', () => {
     mockRules([rule({ name: '去广告', replacement: '' })])
     render(<TransformsSettingsSection />)
 
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(screen.getByText('编辑正文变换规则')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/替换为/), { target: { value: '**' } })
@@ -168,6 +196,7 @@ describe('TransformsSettingsSection', () => {
     mockRules([rule({ pattern: 'foo' })])
     render(<TransformsSettingsSection />)
 
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(screen.queryByRole('button', { name: '仅此一处' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '本书所有匹配处' })).not.toBeInTheDocument()

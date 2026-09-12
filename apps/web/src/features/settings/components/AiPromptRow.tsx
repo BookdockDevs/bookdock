@@ -26,7 +26,7 @@ export default function AiPromptRow({ prompt, disabled, sorting, onToggle, onEdi
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn('flex items-center gap-3 py-2.5', isDragging && 'relative z-10 opacity-60')}
+      className={cn('flex items-center gap-3 py-2.5', !prompt.enabled && 'opacity-60', isDragging && 'relative z-10 opacity-60')}
     >
       {sorting && (
         <button
@@ -50,7 +50,7 @@ export default function AiPromptRow({ prompt, disabled, sorting, onToggle, onEdi
       )}
 
       <div className="min-w-0 flex-1">
-        <p className={cn('truncate text-xs', !prompt.enabled && 'text-stone-400 line-through dark:text-stone-500')}>
+        <p className="truncate text-xs">
           {prompt.name}
         </p>
         <p className="truncate text-[11px] text-stone-400">

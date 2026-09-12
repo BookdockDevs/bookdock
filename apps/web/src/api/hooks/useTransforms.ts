@@ -60,9 +60,8 @@ export function useUpdateTransform() {
     onMutate: async ({ id, body }) => {
       // Only the enabled flip is optimistic; edits go through the refetch
       if (body.enabled === undefined) return undefined
-      await queryClient.cancelQueries({ queryKey: TRANSFORMS_KEY })
       const previous = snapshotTransforms(queryClient)
-      patchTransformRows(queryClient, id, (r) => {
+      const applyOptimisticPatch = () => patchTransformRows(queryClient, id, (r) => {
         const next = { ...r, enabled: body.enabled! }
         // Book-scoped rows show the effective value: a per-book override still
         // wins; without one the global flip is the effective flip
@@ -71,6 +70,12 @@ export function useUpdateTransform() {
         }
         return next
       })
+      // Apply before awaiting cancellation so a slow in-flight query cannot
+      // delay the switch feedback; reapply after cancellation to prevent it
+      // from overwriting the optimistic value.
+      applyOptimisticPatch()
+      await queryClient.cancelQueries({ queryKey: TRANSFORMS_KEY })
+      applyOptimisticPatch()
       return { previous }
     },
     onError: (_err, _vars, ctx) => {
@@ -99,13 +104,15 @@ export function useSetTransformOverride() {
     mutationFn: ({ transformId, body }: { transformId: string; body: TransformOverrideReq }) =>
       apiPut<{ data: TextTransformRes }>(`/transforms/${transformId}/override`, body),
     onMutate: async ({ transformId, body }) => {
-      await queryClient.cancelQueries({ queryKey: TRANSFORMS_KEY })
       const previous = snapshotTransforms(queryClient)
-      patchTransformRows(queryClient, transformId, (r) =>
+      const applyOptimisticPatch = () => patchTransformRows(queryClient, transformId, (r) =>
         body.enabled === null
           ? { ...r, hasOverride: false, effectiveEnabled: r.enabled }
           : { ...r, hasOverride: true, effectiveEnabled: body.enabled },
       )
+      applyOptimisticPatch()
+      await queryClient.cancelQueries({ queryKey: TRANSFORMS_KEY })
+      applyOptimisticPatch()
       return { previous }
     },
     onError: (_err, _vars, ctx) => {

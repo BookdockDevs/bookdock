@@ -130,6 +130,34 @@ export function useUpdateAiConfig() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: AiConfigUpdateReq) => apiPatch<{ data: AiConfigRes }>('/ai/config', body),
+    onMutate: async (body) => {
+      if (body.prompts === undefined || body.prompts === null) return undefined
+      const previous = queryClient.getQueryData<{ data: AiConfigRes }>(AI_CONFIG_KEY)
+      const next = previous ? {
+        data: {
+          ...previous.data,
+          prompts: body.prompts.map((prompt, index) => {
+            const previousPrompt = previous.data.prompts.find((item) => item.id === prompt.id)
+            return {
+              id: prompt.id,
+              name: prompt.name,
+              prompt: prompt.prompt,
+              scope: previousPrompt?.scope ?? prompt.scope ?? 'both',
+              enabled: prompt.enabled ?? previousPrompt?.enabled ?? true,
+              order: prompt.order ?? previousPrompt?.order ?? (index + 1) * 10,
+              builtIn: previousPrompt?.builtIn ?? false,
+            }
+          }),
+        },
+      } : undefined
+      if (next) queryClient.setQueryData(AI_CONFIG_KEY, next)
+      await queryClient.cancelQueries({ queryKey: AI_CONFIG_KEY })
+      if (next) queryClient.setQueryData(AI_CONFIG_KEY, next)
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(AI_CONFIG_KEY, context.previous)
+    },
     onSuccess: (response) => {
       queryClient.setQueryData(AI_CONFIG_KEY, response)
       void queryClient.invalidateQueries({ queryKey: ['ai-status'] })

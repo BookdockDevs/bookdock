@@ -1,10 +1,16 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 
 import type { BookDetailRes, TocRuleCreateReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../client'
 
 const TOC_RULES_KEY = ['toc-rules'] as const
+
+type TocRulesCache = { data: TocRuleRes[] }
+
+function snapshotTocRules(queryClient: QueryClient) {
+  return queryClient.getQueryData<TocRulesCache>(TOC_RULES_KEY)
+}
 
 export function useTocRules() {
   return useQuery({
@@ -28,6 +34,19 @@ export function useUpdateTocRule() {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: TocRuleUpdateReq }) =>
       apiPut<{ data: TocRuleRes }>(`/toc-rules/${id}`, body),
+    onMutate: async ({ id, body }) => {
+      const previous = snapshotTocRules(queryClient)
+      const applyOptimisticPatch = () => queryClient.setQueryData<TocRulesCache>(TOC_RULES_KEY, (old) =>
+        old ? { data: old.data.map((rule) => rule.id === id ? { ...rule, ...body } : rule) } : old,
+      )
+      applyOptimisticPatch()
+      await queryClient.cancelQueries({ queryKey: TOC_RULES_KEY })
+      applyOptimisticPatch()
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(TOC_RULES_KEY, context.previous)
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: TOC_RULES_KEY })
     },

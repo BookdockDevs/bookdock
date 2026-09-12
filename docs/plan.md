@@ -38,7 +38,7 @@ The following are intentionally excluded from this Web milestone: brightness con
 - Further EPUB/TXT quality improvements after the current TTS/AI queue: vertical-writing feasibility, annotation UX, and demand-driven settings coverage
 - Library organization: shelf grouping only when a real hierarchy need appears; batch metadata editing is not planned without concrete maintenance pain
 - JSON import/export after the backup data model is defined
-- Browser extension after the Web library and reader are stable
+- Browser extension after the Web library and reader are stable: first milestone is a lightweight local EPUB/TXT reader with a flat local library, plus Bookdock Instance connection, drag-to-upload, and automatic opening by `bookId`; Web-only custom fonts/themes/TOC rules, annotations, AI, TTS, and web clipping remain out of scope.
 - Open API, feed, and note-taking integrations based on real consumers
 - Additional deployment examples where operational use justifies them
 

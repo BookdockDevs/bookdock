@@ -1,6 +1,6 @@
 # Bookdock Architecture
 
-> Last updated: 2026-09-08 · This document is the authoritative architecture blueprint; the code follows it. When an architectural decision changes, update this document first, then change the code.
+> Last updated: 2026-09-12 · This document is the authoritative architecture blueprint; the code follows it. When an architectural decision changes, update this document first, then change the code.
 
 ---
 
@@ -21,8 +21,9 @@
 | `@bookdock/shared` | pure types + zod validation + API contracts + error codes + constants, **zero runtime deps exc. zod** | TypeScript 5 |
 | `@bookdock/server` | API service, data access, storage, format parsing | Hono 4 / Drizzle / better-sqlite3 / jose / nanoid |
 | `@bookdock/web` | browser entry (SPA) | React 19 / Vite 8 / Tailwind 4 / TanStack Router / TanStack Query / Zustand |
+| `@bookdock/extension` (planned) | first-party browser extension: local reader + Bookdock instance connector | React / Vite / browser extension APIs |
 
-**Package-splitting strategy**: do not pre-extract `@bookdock/db` / `@bookdock/storage`. The server is organized as cohesive modules + interfaces so future extraction is "move files + change imports" rather than a rewrite. Trigger for extraction: a second consumer (CLI / Tauri / Flutter) actually needs to reuse the capability.
+**Package-splitting strategy**: do not pre-extract `@bookdock/db` / `@bookdock/storage`. The server is organized as cohesive modules + interfaces so future extraction is "move files + change imports" rather than a rewrite. Trigger for extraction: a second consumer (CLI / Tauri / Flutter) actually needs to reuse the capability. The planned extension is a separate app in this workspace, not a second entry point inside `@bookdock/web`; it may justify a narrowly scoped reader-core extraction once the second consumer is real.
 
 ---
 
@@ -140,6 +141,26 @@ platform bridge in a future client.
 R09 does not include word-level timing, persistent/offline audio, background/media-session
 playback, sleep timers, pitch-preserving time-stretching, or multi-role narration; these remain
 explicit follow-up capabilities rather than implicit promises of the baseline.
+
+### 3.3 Reader auto-reading playback
+
+Auto-reading owns a single cancellable movement loop for the reader viewport: smooth mode uses
+pixel increments and paginated mode uses the reader's existing next-page navigation. It remains
+the active playback owner while the user adjusts the reading position. A user scroll, page turn,
+chapter jump, or seek invalidates only the pending automatic movement and lets the manual action
+settle; the next automatic movement starts from the latest reader position without changing the
+session to paused or idle. Explicit pause/stop, an end-of-book condition, an unrecoverable error,
+hidden document visibility, layout-affecting settings, or TTS takeover still ends or pauses the
+automatic loop according to the session state machine. Speed changes apply to the next movement
+without pausing. Switching between smooth and timed movement is also a live playback-parameter
+change: it cancels the old loop, keeps the session running, and starts the new loop from the
+current reader position. This rebase behavior keeps user navigation and automatic movement in one
+reader position model and avoids a second persisted progress format. Starting a non-collapsed text
+selection is different from navigation: it immediately transitions auto-reading to paused and
+requires an explicit resume, so the selection toolbar can be used without the viewport moving
+under it. When a click dismisses an active text selection, the renderer consumes the paired
+click-to-turn/chrome-toggle event as part of the dismissal, so one gesture cannot both close the
+selection UI and change reader position or chrome visibility.
 - Tests live beside modules (`shelves.test.ts`, `tags.test.ts`) or centralized under `__tests__/` (books).
 
 ### 3.2 StorageDriver interface
@@ -292,7 +313,7 @@ apps/web/src/
   features/
     auth/                  # Login/Setup pages, auth hooks, error-code→message
     books/                 # hooks, components (BookCard/BookCover/Dialog…)
-    reader/                # Reader orchestration + FoliateReader adapter + TtsController
+    reader/                # Reader orchestration + FoliateReader adapter + TtsController + AutoReadingController
     search/                # useSearch (TanStack Query), search params
     stats/                 # stats page + charts + hooks
   components/
@@ -337,6 +358,19 @@ Notification state is ephemeral client state: it is not persisted, is independen
 - EPUB footnote references are handled by the vendored `FootnoteHandler`: explicit `epub:type`/ARIA references are preferred, conservative superscript heuristics require a note-like target, and the host renders the result in a disposable temporary `foliate-view` popup. Nested footnotes have local back history; parsing/rendering failures fall back to ordinary internal navigation and do not alter the main reader jump history.
 - Reader sidebar has three tabs: TOC, notes, and stats (数据). The stats tab shows per-book reading stats sourced from `GET /reading-records/book/:bookId` (totalSeconds + full daily records, no pagination), derived client-side by pure functions in `features/reader/stats/`; opening the tab flushes the in-progress reading timer first so the numbers include the current session. Below the daily-duration chart it also renders a 24-hour distribution module from `GET /reading-records/hourly` with the optional `bookId` filter (from = book start date, to = today), skipped when the book has no records. A "已读字数" card shows `readFraction × meta.wordCount` (from `GET /progress/:bookId` + book detail), formatted as `X.X万字` for ≥10000, with a `全书 N` sub-line; the card shows `-` when word counts are unavailable.
 - Jump history (后退/前进): browser-style session history, in-memory only and cleared on book switch. `FoliateReader.display`/`scrollToPercent` is the chokepoint — every user jump (TOC, note/bookmark, search result, progress drag) emits `willJump` with the position being left, which `Reader.tsx` pushes into `features/reader/jump-history.ts` (back/forward stacks, cap 50; a new jump clears the forward stack). Internal navigation opts out via `display(target, { internal: true })`: the initial open, saved-progress re-display, and the history back/forward buttons themselves. Page turns and scrolling never enter the history.
+
+### 6.3 Planned browser extension
+
+The companion extension is a separate client application under `apps/extension/`. It is developed in this monorepo so API contracts, upload/auth behavior, and any deliberately extracted reader-core code can evolve with the server and Web client. Its build output is independent: the extension does not bundle `@bookdock/server` or the full `@bookdock/web` application.
+
+The extension has two explicit modes:
+
+- **Local mode**: an extension-local flat `LocalLibrary` stores EPUB/TXT files, editable title/author metadata, a single reading position, and the minimum reader preferences. It supports reading, TOC navigation, progress recovery, and basic reading settings; it does not implement the Web client's custom fonts, custom themes, custom TXT TOC rules, annotations, AI, or TTS.
+- **Connected mode**: an `InstanceConnection` identifies a configured Bookdock instance and authentication state. Dropped files are uploaded to `POST /api/v1/books`; the returned `bookId` is opened through the extension reader using the instance's remote file endpoint. A configured but unreachable instance must not silently report a successful local upload.
+
+The extension must not import the whole `@bookdock/web` entry point. Shared code is limited to `@bookdock/shared` and, only after a stable second consumer exists, a small reader-core boundary for source adapters, TOC/progress primitives, or vendored foliate assets. Browser-only persistence and instance profiles remain extension-owned concerns.
+
+The first extension milestone intentionally excludes `file://` takeover, annotations/bookmarks/notes, full-text indexing, multi-shelf organization, cloud synchronization, PDF/MOBI/CBZ support, and offline upload queues. See `docs/local/extension/` for the scoped product and implementation documents, and `docs/local/research/browser-extensions/` for competitor research.
 
 ---
 
@@ -409,3 +443,4 @@ Each ADR is a short standalone file. They live in `docs/local/adr/` (private wor
 | ADR-18 | persisted AI citations and source navigation | `docs/local/adr/0019-ai-citations-source-navigation.md` |
 | ADR-19 | bounded AI search over user-owned book annotations | `docs/local/adr/0020-ai-annotation-search.md` |
 | ADR-21 | bounded recipe for historical AI retry | `docs/local/adr/0021-ai-historical-retry-recipe.md` |
+| ADR-22 | companion browser extension as an isolated app in the monorepo | `docs/local/adr/0022-companion-extension-monorepo.md` |

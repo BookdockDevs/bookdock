@@ -1,6 +1,7 @@
 import type { TtsEngine, TtsServiceRes } from '@bookdock/shared'
 
 import type { BookReader, TtsSegment } from '../types'
+import type { PlaybackClaim } from './playback-coordinator'
 import { EdgeSpeechClient, ServiceAudioClient, SystemSpeechClient, type TtsClient, type TtsPreparedAudio, type TtsVoice } from './tts-client'
 
 export type TtsStatus = 'idle' | 'starting' | 'playing' | 'paused' | 'error'
@@ -62,10 +63,12 @@ export class TtsController {
   private preparationGeneration = 0
   private activePreparations = 0
   private preparedCache = new Map<string, TtsPreparedAudio>()
+  private activation?: () => Promise<PlaybackClaim>
 
-  constructor(private renderer: BookReader, preferences: TtsPreferences, clientOverride?: TtsClient) {
+  constructor(private renderer: BookReader, preferences: TtsPreferences, clientOverride?: TtsClient, activation?: () => Promise<PlaybackClaim>) {
     this.preferences = preferences
     this.client = clientOverride ?? this.createClient(preferences)
+    this.activation = activation
     this.state = {
       status: 'idle',
       engine: preferences.engine,
@@ -164,7 +167,10 @@ export class TtsController {
 
   async start(startCfi?: string) {
     void this.client.unlock?.()
+    const claim = this.activation ? await this.activation() : undefined
+    if (claim && (!claim.accepted || !claim.isCurrent())) return
     const segment = await this.renderer.getTtsSegment(startCfi)
+    if (claim && !claim.isCurrent()) return
     if (!segment) {
       this.state = { ...this.state, status: 'error', error: '当前正文没有可朗读内容' }
       this.emit()
@@ -175,7 +181,10 @@ export class TtsController {
 
   async startFromChapter() {
     void this.client.unlock?.()
+    const claim = this.activation ? await this.activation() : undefined
+    if (claim && (!claim.accepted || !claim.isCurrent())) return
     const segment = await this.renderer.getTtsChapterStartSegment()
+    if (claim && !claim.isCurrent()) return
     if (!segment) {
       this.state = { ...this.state, status: 'error', error: '当前章节没有可朗读内容' }
       this.emit()

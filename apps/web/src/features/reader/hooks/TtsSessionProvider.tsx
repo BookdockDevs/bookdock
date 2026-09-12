@@ -3,11 +3,12 @@ import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from
 import { useTtsServiceVoices, useTtsServices } from '@/api/hooks/useTts'
 import { useUiStore } from '@/stores/ui.store'
 
+import type { ReaderPlaybackCoordinator } from '../lib/playback-coordinator'
 import type { BookReader } from '../types'
 import { TtsController, type TtsPreferences } from '../lib/tts-controller'
 import { IDLE_TTS_STATE, TtsSessionContext } from './tts-session-context'
 
-export function TtsSessionProvider({ renderer, children }: { renderer: BookReader | null; children: ReactNode }) {
+export function TtsSessionProvider({ renderer, coordinator, children }: { renderer: BookReader | null; coordinator: ReaderPlaybackCoordinator; children: ReactNode }) {
   const { data } = useTtsServices()
   const engine = useUiStore((state) => state.ttsEngine)
   const serviceId = useUiStore((state) => state.ttsServiceId)
@@ -23,13 +24,18 @@ export function TtsSessionProvider({ renderer, children }: { renderer: BookReade
   if (!renderer) {
     controllerRef.current = null
   } else if (controllerRef.current?.renderer !== renderer) {
-    controllerRef.current = { renderer, controller: new TtsController(renderer, preferences) }
+    controllerRef.current = { renderer, controller: new TtsController(renderer, preferences, undefined, () => coordinator.claim('tts')) }
   }
   const controller = controllerRef.current?.controller ?? null
 
   useEffect(() => {
     controller?.setPreferences(preferences)
   }, [controller, preferences])
+
+  useEffect(() => {
+    if (!controller) return
+    return coordinator.register('tts', () => controller.stop())
+  }, [controller, coordinator])
 
   useEffect(() => {
     if (!controller) return

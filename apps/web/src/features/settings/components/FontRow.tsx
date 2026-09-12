@@ -88,7 +88,7 @@ export default function FontRow({ font, isOwner, disabled, sorting, onToggle, on
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
           <p
-            className={cn('truncate text-sm', !font.enabled && 'text-stone-400 line-through dark:text-stone-500')}
+            className="truncate text-sm"
             style={{ fontFamily: font.stack }}
           >
             {font.name}

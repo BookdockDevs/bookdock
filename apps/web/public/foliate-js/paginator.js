@@ -15,6 +15,9 @@ const animate = (a, b, duration, ease, render) => new Promise(resolve => {
   requestAnimationFrame(step)
 })
 
+export const continuousScrollNeedsBuffer = (remaining, distance) =>
+  Number.isFinite(remaining) && Number.isFinite(distance) && remaining <= distance + 2
+
 // collapsed range doesn't return client rects sometimes (or always?)
 // try make get a non-collapsed range or element
 const uncollapse = range => {
@@ -488,9 +491,11 @@ export class Paginator extends HTMLElement {
   #views = new Map()
   #placeholders = new Map()
   #filling = false
+  #fillingPromise = null
   #scrollDuringFill = null
   #lastScrollPosition = null
   #lastScrollDirection = null
+  #backwardEdgePending = false
   #continuousBufferTimer = null
   #lastLayout = null
   #headerText = ['']
@@ -744,11 +749,25 @@ export class Paginator extends HTMLElement {
       doc.addEventListener('touchstart', this.#onTouchStart.bind(this), opts)
       doc.addEventListener('touchmove', this.#onTouchMove.bind(this), opts)
       doc.addEventListener('touchend', this.#onTouchEnd.bind(this), opts)
-      doc.addEventListener('wheel', e => this.#onWheel(e), { passive: true })
+      doc.addEventListener('wheel', e => {
+        this.dispatchEvent(new CustomEvent('docwheel', { bubbles: true, composed: true }))
+        this.#onWheel(e)
+      }, { passive: true })
       // Key events inside the iframe never reach the top window, so page-mode
       // keyboard turns must be handled here; the app-level window handler
       // covers the iframe-unfocused case, and the two never fire together.
-      doc.addEventListener('keydown', e => this.#onDocKey(e))
+      doc.addEventListener('keydown', e => {
+        const target = e.target
+        const isEditable = target && (target.isContentEditable
+          || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
+        const isNavigationKey = e.key === 'ArrowLeft' || e.key === 'ArrowRight'
+          || e.key === 'ArrowUp' || e.key === 'ArrowDown'
+          || e.key === 'PageUp' || e.key === 'PageDown' || e.key === ' '
+        if (!isEditable && isNavigationKey) {
+          this.dispatchEvent(new CustomEvent('dockeydown', { bubbles: true, composed: true }))
+        }
+        this.#onDocKey(e)
+      })
     })
 
     this.#mediaQueryListener = () => {
@@ -763,6 +782,7 @@ export class Paginator extends HTMLElement {
         this.#clearContinuousBufferTimer()
         this.#lastScrollPosition = null
         this.#lastScrollDirection = null
+        this.#backwardEdgePending = false
         this.render()
         break
       case 'max-block-size':
@@ -806,6 +826,7 @@ export class Paginator extends HTMLElement {
         } else if (this.#continuous && this.#view) {
           this.#views.set(this.#index, this.#view)
           this.#lastScrollPosition = this.#renderedStart
+          this.#backwardEdgePending = false
           this.#fillInitialBuffer()
         }
         break
@@ -995,15 +1016,17 @@ export class Paginator extends HTMLElement {
     const placeholderOffset = placeholder ? this.#getViewOffset(index) : 0
     const firstIndex = this.#sortedSections()[0]?.[0]
     const isPrepend = !placeholder && firstIndex != null && index < firstIndex
-    const startBefore = isPrepend ? this.#renderedStart : 0
     const currentSize = this.#view?.element.getBoundingClientRect()[this.sideProp]
     // content-visibility can report zero for an offscreen iframe before it
     // enters the viewport, so reserve a slot that lets the scrollbar reach it.
     const reservedSize = placeholderSize || Math.max(
       Number.isFinite(currentSize) ? currentSize : 0, this.size)
+    const startBefore = isPrepend ? this.#renderedStart : 0
+    const previousOverflowAnchor = isPrepend ? this.#container.style.overflowAnchor : ''
     let previousSize = reservedSize
     let loaded = false
     try {
+      if (isPrepend) this.#container.style.overflowAnchor = 'none'
       const src = await section.load()
       const view = new View({
         container: this,
@@ -1084,33 +1107,53 @@ export class Paginator extends HTMLElement {
         this.#placeholders.set(index, replacement)
         this.#insertSectionElement(index, replacement)
       }
+    } finally {
+      if (isPrepend) this.#container.style.overflowAnchor = previousOverflowAnchor
+    }
+    if (loaded && isPrepend && this.#lastScrollDirection === -1
+      && this.#continuous && this.#renderedStart > 0) {
+      await this.#scrollTo(
+        Math.max(0, this.#renderedStart - this.size), null, { animate: true })
     }
   }
   // Load one adjacent section in the direction the reader is moving. Keeping
   // this to one section per trigger prevents short chapters from cascading
   // into a large eager preload.
   async #loadAdjacentBuffer(direction) {
-    if (!this.#continuous || this.#filling || this.size <= 0) return
+    if (!this.#continuous || this.size <= 0) return
+    if (this.#fillingPromise) {
+      await this.#fillingPromise
+      return
+    }
     this.#scrollDuringFill = null
     this.#filling = true
     let loaded = false
+    let continueDirection = null
+    const fillingPromise = (async () => {
+      try {
+        const index = this.#bufferIndex(direction)
+        if (index == null || this.#views.has(index)) return
+        await this.#loadAdjacentSection(index)
+        loaded = this.#views.has(index)
+      } finally {
+        continueDirection = this.#scrollDuringFill
+        this.#scrollDuringFill = null
+        this.#filling = false
+      }
+    })()
+    this.#fillingPromise = fillingPromise
     try {
-      const index = this.#bufferIndex(direction)
-      if (index == null || this.#views.has(index)) return
-      await this.#loadAdjacentSection(index)
-      loaded = this.#views.has(index)
+      await fillingPromise
     } finally {
-      const continueDirection = this.#scrollDuringFill
-      this.#scrollDuringFill = null
-      this.#filling = false
-      if (loaded && continueDirection === 1
-        && this.#continuous && this.#bufferRemaining(1) < 2)
-        void this.#loadAdjacentBuffer(1)
-      else if (loaded && continueDirection === -1
-        && this.#continuous && this.#lastScrollDirection === -1
-        && this.#getViewportPlaceholder(-1) != null)
-        this.#scheduleContinuousBufferCheck(-1)
+      if (this.#fillingPromise === fillingPromise) this.#fillingPromise = null
     }
+    if (loaded && continueDirection === 1
+      && this.#continuous && this.#bufferRemaining(1) < 2)
+      void this.#loadAdjacentBuffer(1)
+    else if (loaded && continueDirection === -1
+      && this.#continuous && this.#lastScrollDirection === -1
+      && this.#getViewportPlaceholder(-1) != null)
+      this.#scheduleContinuousBufferCheck(-1)
   }
   #fillInitialBuffer() {
     if (!this.#continuous || this.#filling || this.size <= 0) return
@@ -1126,6 +1169,7 @@ export class Paginator extends HTMLElement {
     if (this.size <= 0 || previous == null || position === previous) return
     const direction = position > previous ? 1 : -1
     this.#lastScrollDirection = direction
+    if (direction > 0) this.#backwardEdgePending = false
     if (this.#filling) {
       this.#scrollDuringFill = direction
       return
@@ -1135,6 +1179,7 @@ export class Paginator extends HTMLElement {
       this.#continuousBufferTimer = null
     }
     if (direction < 0) {
+      if (this.#renderedStart > 0) return
       this.#scheduleContinuousBufferCheck(direction)
       return
     }
@@ -1147,6 +1192,12 @@ export class Paginator extends HTMLElement {
       this.#continuousBufferTimer = null
       if (!this.#continuous || this.#filling || this.#lastScrollDirection !== direction)
         return
+      if (direction < 0 && this.#renderedStart > 0) return
+      if (direction < 0 && !this.#backwardEdgePending) {
+        this.#backwardEdgePending = true
+        return
+      }
+      if (direction < 0) this.#backwardEdgePending = false
       if (this.#bufferRemaining(direction) < 2) void this.#loadAdjacentBuffer(direction)
     }, 180)
   }
@@ -1658,6 +1709,7 @@ export class Paginator extends HTMLElement {
     
     const finish = () => {
       this.#afterScroll(reason)
+      if (this.scrolled && this.#continuous) this.#checkBuffers()
       this.#ignoreNativeScroll = false
     }
 
@@ -1770,7 +1822,6 @@ export class Paginator extends HTMLElement {
       if (result && result.index !== this.#index && this.#views.has(result.index)) {
         this.#index = result.index
         this.#view = this.#views.get(result.index)
-        this.#virtualizeDistantViews()
       }
       const index = result?.index ?? this.#index
       const indexView = this.#views.get(index)
@@ -2009,10 +2060,29 @@ export class Paginator extends HTMLElement {
     const resolved = await target
     if (this.#canGoToIndex(resolved.index)) return this.#goTo(resolved)
   }
-  #scrollPrev(distance) {
+  async #ensureContinuousBuffer(direction, distance) {
+    if (!this.#continuous || this.size <= 0) return true
+    if (direction < 0 && this.#renderedStart <= 0) {
+      if (!this.#backwardEdgePending) {
+        this.#backwardEdgePending = true
+        return false
+      }
+      this.#backwardEdgePending = false
+    }
+    const requestedDistance = distance ?? this.size
+    const remaining = direction > 0
+      ? this.#renderedViewSize - this.#renderedEnd
+      : this.#renderedStart
+    if (continuousScrollNeedsBuffer(remaining, requestedDistance))
+      await this.#loadAdjacentBuffer(direction)
+    return true
+  }
+  async #scrollPrev(distance) {
     if (!this.#view) return true
     if (this.scrolled) {
       if (this.#continuous) {
+        const canScroll = await this.#ensureContinuousBuffer(-1, distance)
+        if (!canScroll) return false
         if (this.#renderedStart > 0) return this.#scrollTo(
           Math.max(0, this.#renderedStart - (distance ?? this.size)), null, { animate: true })
         return true
@@ -2025,10 +2095,11 @@ export class Paginator extends HTMLElement {
     const page = this.page - 1
     return this.#scrollToPage(page, 'page', { animate: true }).then(() => page <= 0)
   }
-  #scrollNext(distance) {
+  async #scrollNext(distance) {
     if (!this.#view) return true
     if (this.scrolled) {
       if (this.#continuous) {
+        await this.#ensureContinuousBuffer(1, distance)
         if (this.#renderedViewSize - this.#renderedEnd > 2) return this.#scrollTo(
           Math.min(this.#renderedViewSize,
             distance ? this.#renderedStart + distance : this.#renderedEnd), null, { animate: true })
@@ -2048,6 +2119,10 @@ export class Paginator extends HTMLElement {
   }
   get atEnd() {
     return this.#adjacentIndex(1) == null && this.page >= this.pages - 2
+  }
+  get atBookEnd() {
+    if (!this.#continuous) return this.atEnd
+    return this.#adjacentIndex(1) == null && this.#renderedViewSize - this.#renderedEnd <= 2
   }
   #adjacentIndex(dir, fromIndex) {
     if (fromIndex === undefined) fromIndex = this.#index

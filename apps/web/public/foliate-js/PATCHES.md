@@ -115,7 +115,8 @@
 
 ### 2.3 continuous 无缝模式的视图管理
 
-- `#views` + `#placeholders` Map、`#loadAdjacentBuffer`/`#fillInitialBuffer`/`#virtualizeDistantViews`；切换到连卷只按向下方向准备当前章节附近的一章，滚动稳定后按方向、剩余少于 2 个视口再加载一章；离视口超过 6 个视口的已渲染章节替换为同高度占位元素，接近时恢复，滚动高度不因释放 DOM 而改变；加载期间只保留最新滚动意图，向上优先恢复当前视口相交的占位章节，只有视口仍落在占位区时才逐个继续补齐，滚轮停在 `scrollTop=0`/最大值时也能触发边界加载；远距跳转才保留目标 ±2 邻域（`:1682-1683`）；
+- `#views` + `#placeholders` Map、`#loadAdjacentBuffer`/`#fillInitialBuffer`/`#virtualizeDistantViews`；切换到连卷只按向下方向准备当前章节附近的一章，滚动稳定后按方向、剩余少于 2 个视口再加载一章；普通文本连卷保留已加载历史，不再按距离回收 iframe；向上到达当前历史区顶部时第一次只停住，第二次独立上滚才加载更早章节。向上插入前暂时关闭浏览器滚动锚定，加载完成后按最终高度补偿，并消费本次上滚的一页距离，避免停在当前章顶部后再出现可见跳变；`#virtualizeDistantViews` 保留给图片密集格式等需要时启用；远距目录跳转继续主动清理旧位置，仅保留目标附近内容（`:1682-1683`）；
+- 程序化的键盘/底栏滚动会屏蔽原生 `scroll` 事件；`#scrollTo` 完成后主动检查缓冲，且 `#scrollNext/#scrollPrev` 在本次整屏距离会撞到已渲染末端时等待共享的相邻章加载任务，避免章尾先停在残屏、下一次按键才进下一章；
 - `#getVisibleRange`（`:1463`）连续模式按**视口中心**判定主章节（`:1493` 处使用）；
 - `#afterScroll` 的 anchor 以 fraction 保留（relayout 后按比例恢复，而非 Range）。
 - 相邻章节加载后的 `setStyles()` 会让所有已加载 iframe 再次执行 `fonts.ready → View.expand()`；连续模式主视图的 `onExpand` 必须先确认自身尺寸真的变化，再按 fraction 重定位。无变化回调若直接写回旧 anchor，会在每次新增章节时把滚动位置跳回当前章起点；相邻视图则只在自身位于视口上方且尺寸变化时补偿滚动距离。

@@ -22,6 +22,7 @@ import { useIsTouch } from './hooks/useIsTouch'
 import { useReaderState } from './state/reader-state'
 import { RendererContext } from './hooks/useReaderApi'
 import { TtsSessionProvider } from './hooks/TtsSessionProvider'
+import { AutoReadingSessionProvider } from './hooks/AutoReadingSessionProvider'
 import { useBookChapters } from './hooks/useBookChapters'
 import { createSegmentTracker, trackPosition, closeSegment } from './stats/reading-segments'
 import { createJumpHistory } from './jump-history'
@@ -36,6 +37,7 @@ import ShareCardDialog from './components/share/ShareCardDialog'
 import { ProgressStrip } from './components/ProgressStrip'
 import HistoryCapsule from './components/HistoryCapsule'
 import ReaderFooterControls from './components/ReaderFooterControls'
+import AutoReadingProgressBar from './components/AutoReadingProgressBar'
 import { getLastHighlightStyle } from './components/annotation-colors'
 import { setActiveTransforms, setAutoMarkSelectionMode } from './renderers/FoliateReader'
 import TransformForm from '../settings/components/TransformForm'
@@ -44,6 +46,7 @@ import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './li
 import { readingRateOf, RATE_SAMPLE_MIN_INTERVAL_MS } from './lib/progress-model'
 import type { PerBookSettingKey, GlobalViewSettings } from './lib/view-settings'
 import type { FootnoteEntry, ReaderAnnotation } from './types'
+import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
 import { FootnotePopup } from './components/FootnotePopup'
 import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 
@@ -62,6 +65,7 @@ export default function Reader() {
   const [_atChapterStart, setAtChapterStart] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ttsOpen, setTtsOpen] = useState(false)
+  const [autoReadingOpen, setAutoReadingOpen] = useState(false)
   const [footnoteEntry, setFootnoteEntry] = useState<FootnoteEntry | null>(null)
   // Chapter-switch loading indicator (slow cross-chapter navigation)
   const [navPending, setNavPending] = useState(false)
@@ -538,6 +542,7 @@ export default function Reader() {
     onFootnoteOpen: (entry) => {
       setSelection(null)
       setSettingsOpen(false)
+      setAutoReadingOpen(false)
       setFootnoteEntry(entry)
     },
     onFootnoteClose: () => setFootnoteEntry(null),
@@ -657,6 +662,8 @@ export default function Reader() {
     },
   })
 
+  const playbackCoordinator = useMemo(() => new ReaderPlaybackCoordinator(), [])
+
   useEffect(() => {
     if (deepLinkHandled.current || !bookReady || !renderer) return
     const annotation = deepLinkAnnotation
@@ -758,6 +765,7 @@ export default function Reader() {
     const handler = () => {
       setSettingsOpen(false)
       setTtsOpen(false)
+      setAutoReadingOpen(false)
       setSelection(null)
     }
     containerEl.addEventListener('content-click', handler)
@@ -768,7 +776,7 @@ export default function Reader() {
   // popover), the click that dismisses it must not also turn a page or toggle
   // chrome — the renderer swallows click-to-turn while the guard is held
   const selection = useReaderState((s) => s.selection)
-  const popupOpen = !!selection || settingsOpen || ttsOpen || !!footnoteEntry
+  const popupOpen = !!selection || settingsOpen || ttsOpen || autoReadingOpen || !!footnoteEntry
   useEffect(() => {
     if (!popupOpen || !renderer) return
     renderer.pushPopupGuard()
@@ -916,12 +924,20 @@ export default function Reader() {
   const onToggleSettings = useCallback(() => {
     if (!toolbarLocked) setSidebarOpen(false)
     setTtsOpen(false)
+    setAutoReadingOpen(false)
     setSettingsOpen((v) => !v)
   }, [setSidebarOpen, toolbarLocked])
 
   const onToggleTts = useCallback(() => {
     setSettingsOpen(false)
+    setAutoReadingOpen(false)
     setTtsOpen((v) => !v)
+  }, [])
+
+  const onToggleAutoReading = useCallback(() => {
+    setSettingsOpen(false)
+    setTtsOpen(false)
+    setAutoReadingOpen((v) => !v)
   }, [])
 
   const onToggleFullscreen = useCallback(() => {
@@ -1064,7 +1080,8 @@ export default function Reader() {
     <ErrorBoundary>
       <ViewSettingsContext.Provider value={viewSettingsContextValue}>
       <RendererContext.Provider value={rendererContextValue}>
-      <TtsSessionProvider renderer={renderer}>
+      <AutoReadingSessionProvider renderer={renderer} coordinator={playbackCoordinator}>
+      <TtsSessionProvider renderer={renderer} coordinator={playbackCoordinator}>
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div className="flex h-full w-full">
             <ReaderSidebar bookId={id} onStatsTabOpen={flushReadingTimer} chromePinned={chromePinned} />
@@ -1079,11 +1096,14 @@ export default function Reader() {
                 pinned={chromePinned}
                 settingsOpen={settingsOpen}
                 ttsOpen={ttsOpen}
+                autoReadingOpen={autoReadingOpen}
+                readingMode={readingMode}
                 bookId={id}
                 estimatedMinutes={estimatedMinutes}
                 onAddBookmark={onAddBookmark}
                 onToggleSettings={onToggleSettings}
                 onToggleTts={onToggleTts}
+                onToggleAutoReading={onToggleAutoReading}
                 onToggleFullscreen={onToggleFullscreen}
                 bookmarkActive={!!currentBookmark}
               />
@@ -1096,6 +1116,7 @@ export default function Reader() {
                 readingMode === 'page' ? 'overflow-hidden' : 'overflow-y-auto',
               )}
             />
+            <AutoReadingProgressBar readingMode={readingMode} />
             {navPending && (
               <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
                 <div className="rounded-full bg-black/10 p-3 shadow-sm backdrop-blur-sm dark:bg-white/10">
@@ -1247,6 +1268,7 @@ export default function Reader() {
         )}
       </div>
       </TtsSessionProvider>
+      </AutoReadingSessionProvider>
     </RendererContext.Provider>
     </ViewSettingsContext.Provider>
     </ErrorBoundary>

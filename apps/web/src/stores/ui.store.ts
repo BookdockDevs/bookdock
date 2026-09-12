@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { FontPreferences, TtsEngine } from '@bookdock/shared'
-import type { FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField } from '../features/reader/types'
+import type { AutoReadingMode, FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField } from '../features/reader/types'
 import type { CustomReadingTheme } from '../lib/reading-theme'
 import {
   CONFIG_STORAGE_KEY,
@@ -134,6 +134,9 @@ interface UiState {
   ttsRate: number
   ttsAutoNext: boolean
   ttsFollow: boolean
+  autoReadingMode: AutoReadingMode
+  autoReadingSpeed: number
+  autoReadingProgressBar: boolean
   setReadingTimerMode: (v: 'auto' | 'manual' | 'off') => void
   setManualTimerGraceMinutes: (v: 1 | 5 | 10 | 30) => void
   setTtsEngine: (v: TtsEngine) => void
@@ -142,6 +145,9 @@ interface UiState {
   setTtsRate: (v: number) => void
   setTtsAutoNext: (v: boolean) => void
   setTtsFollow: (v: boolean) => void
+  setAutoReadingMode: (v: AutoReadingMode) => void
+  setAutoReadingSpeed: (v: number) => void
+  setAutoReadingProgressBar: (v: boolean) => void
 
   // Named reading-setting profiles (阅读设置预设): serialized JSON of the
   // multi-config blob (`{ global, presets[] }`). The blob syncs across
@@ -306,6 +312,13 @@ const initialReadingConfig = getInitialReadingConfig()
 
 const initialReadingMode = getInitial<ReadingMode>('bd-reading-mode', 'scroll')
 
+function getInitialAutoReadingMode(): AutoReadingMode {
+  if (typeof window === 'undefined') return initialReadingMode === 'page' ? 'timed' : 'smooth'
+  const stored = localStorage.getItem('bd-auto-reading-mode')
+  if (stored === 'smooth' || stored === 'timed') return stored
+  return initialReadingMode === 'page' ? 'timed' : 'smooth'
+}
+
 function getInitialClickAreaMode(): ClickAreaMode {
   if (typeof window === 'undefined') return 'standard'
   const stored = localStorage.getItem('bd-click-area-mode')
@@ -401,6 +414,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   ttsRate: getInitialNumber('bd-tts-rate', 1, 0.5, 3),
   ttsAutoNext: getInitialBoolean('bd-tts-auto-next', true),
   ttsFollow: getInitialBoolean('bd-tts-follow', true),
+  autoReadingMode: getInitialAutoReadingMode(),
+  autoReadingSpeed: getInitialNumber('bd-auto-reading-speed', 30, 1, 100),
+  autoReadingProgressBar: getInitialBoolean('bd-auto-reading-progress-bar', true),
   // Seeded right after store creation (initialReadingConfig, or a fresh config
   // picked from the flat values); '' only during that same module tick.
   readingConfig: '',
@@ -525,6 +541,19 @@ export const useUiStore = create<UiState>((set, get) => ({
   setTtsFollow: (ttsFollow) => {
     setStorage('bd-tts-follow', String(ttsFollow))
     set({ ttsFollow })
+  },
+  setAutoReadingMode: (autoReadingMode) => {
+    setStorage('bd-auto-reading-mode', autoReadingMode)
+    set({ autoReadingMode })
+  },
+  setAutoReadingSpeed: (autoReadingSpeed) => {
+    const next = Math.max(1, Math.min(100, Math.round(autoReadingSpeed)))
+    setStorage('bd-auto-reading-speed', String(next))
+    set({ autoReadingSpeed: next })
+  },
+  setAutoReadingProgressBar: (autoReadingProgressBar) => {
+    setStorage('bd-auto-reading-progress-bar', String(autoReadingProgressBar))
+    set({ autoReadingProgressBar })
   },
 
   setUiTheme: (uiTheme) => {

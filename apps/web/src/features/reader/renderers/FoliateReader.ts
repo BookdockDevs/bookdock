@@ -555,11 +555,14 @@ export class FoliateReader implements BookReader {
   private showFooter = true
   private currentSectionIndex = 0
   private ttsNavigation = false
+  private autoReadingActive = false
+  private autoReadingSnapTurn: boolean | null = null
   private resizeObserver: ResizeObserver | null = null
   private lastScrollVPad = -1
   private activeDocs = new Set<Document>()
   private selectionDocs = new Map<Document, { index: number; handler: () => void; selectionChangeHandler: () => void; startHandler: () => void; dblHandler: () => void; escHandler: (e: KeyboardEvent) => void }>()
   private selectionActive = false
+  private selectionDismissPending = false
   private foliateOverlayer: any = null
   // `${cfiRange}|${type}` -> annotation; a range may hold a highlight and an
   // idea at once, so the bare cfiRange cannot be the key
@@ -771,6 +774,10 @@ export class FoliateReader implements BookReader {
   }
 
   private handleClickView = (event: Event) => {
+    if (this.selectionDismissPending) {
+      this.selectionDismissPending = false
+      return
+    }
     if (this.popupGuardCount > 0) {
       if (this.footnoteEntries.length > 0) this.closeFootnote()
       return
@@ -780,9 +787,11 @@ export class FoliateReader implements BookReader {
     const detail = (event as CustomEvent).detail
     const direction = resolveClickDirection(Number(detail?.x), rect.left, rect.width, this.clickAreaMode)
     if (direction === 'prev') {
+      this.emit('userInteraction')
       if (this.readingMode === 'page') void this.prev()
       else void this.scrollByPages(-1)
     } else if (direction === 'next') {
+      this.emit('userInteraction')
       if (this.readingMode === 'page') void this.next()
       else void this.scrollByPages(1)
     } else if (direction === 'toggle') {
@@ -911,6 +920,11 @@ export class FoliateReader implements BookReader {
       })
       view.addEventListener('load', () => this.syncDoc())
       view.addEventListener('click-view', this.handleClickView)
+      view.addEventListener('wheel', () => this.emit('userInteraction'), { passive: true })
+      view.addEventListener('doctouchstart', () => this.emit('userInteraction'))
+      view.addEventListener('doctouchend', () => this.emit('userInteractionEnd'))
+      view.addEventListener('docwheel', () => this.emit('userInteraction'), { passive: true })
+      view.addEventListener('dockeydown', () => this.emit('userInteraction'))
       view.addEventListener('draw-annotation', (event: Event) =>
         this.handleDrawAnnotation((event as CustomEvent).detail))
       view.addEventListener('show-annotation', (event: Event) =>
@@ -1219,6 +1233,7 @@ export class FoliateReader implements BookReader {
   // fast to need the spinner (see shouldArmPending).
   async next() {
     if (!this.view) return
+    this.emit('userInteraction')
     if (this.readingMode === 'page'
       && !turnsCrossChapter(1, this.view.renderer?.page, this.view.renderer?.pages)) {
       await this.view.next()
@@ -1244,6 +1259,7 @@ export class FoliateReader implements BookReader {
 
   async prev() {
     if (!this.view) return
+    this.emit('userInteraction')
     if (this.readingMode === 'page'
       && !turnsCrossChapter(-1, this.view.renderer?.page, this.view.renderer?.pages)) {
       await this.view.prev()
@@ -1266,6 +1282,7 @@ export class FoliateReader implements BookReader {
 
   applyReadingMode(mode: ReadingMode) {
     this.readingMode = mode
+    this.emit('readingSettingsChanged')
     if (!this.view?.renderer) return
     this.view.renderer.setAttribute('flow', mode === 'page' ? 'paginated' : 'scrolled')
     this.updateLayout()
@@ -1274,30 +1291,35 @@ export class FoliateReader implements BookReader {
 
   applyPageColumns(columns: number) {
     this.pageColumns = Math.max(1, Math.min(3, columns))
+    this.emit('readingSettingsChanged')
     if (!this.view?.renderer) return
     this.view.renderer.setAttribute('max-column-count', String(this.pageColumns))
   }
 
   applyColumnGap(gapPercent: number) {
     this.columnGap = Math.max(0, Math.min(15, gapPercent))
+    this.emit('readingSettingsChanged')
     if (!this.view?.renderer) return
     this.view.renderer.setAttribute('gap', `${this.columnGap}%`)
   }
 
   applyPageAnimation(enabled: boolean) {
     this.pageAnimation = enabled
+    this.emit('readingSettingsChanged')
     if (!this.view?.renderer) return
     this.view.renderer.toggleAttribute('animated', enabled)
   }
 
   applyShowHeader(enabled: boolean) {
     this.showHeader = enabled
+    this.emit('readingSettingsChanged')
     if (!this.view?.renderer) return
     this.view.renderer.toggleAttribute('show-header', enabled)
   }
 
   applyShowFooter(enabled: boolean) {
     this.showFooter = enabled
+    this.emit('readingSettingsChanged')
     if (!this.view?.renderer) return
     this.view.renderer.toggleAttribute('show-footer', enabled)
   }
@@ -1309,6 +1331,7 @@ export class FoliateReader implements BookReader {
 
   applyReadingTheme(theme: { bg: string; text: string; primary?: string }) {
     this.theme = theme
+    this.emit('readingSettingsChanged')
     if (!this.view?.renderer) return
     this.view.renderer.style.setProperty('--bd-tts-highlight', ttsHighlightColor(theme))
     this.view.renderer.setAttribute('background-color', theme.bg)
@@ -1317,17 +1340,20 @@ export class FoliateReader implements BookReader {
 
   applyFont(cfg: FontConfig) {
     this.font = cfg
+    this.emit('readingSettingsChanged')
     this.applyStyles()
   }
 
   applyParagraphStyle(cfg: ParagraphStyle) {
     this.paragraph = cfg
+    this.emit('readingSettingsChanged')
     this.applyStyles()
     this.updateLayout()
   }
 
   applyPageWidth(width: number) {
     this.pageWidth = width
+    this.emit('readingSettingsChanged')
     this.updateLayout()
   }
 
@@ -1357,6 +1383,7 @@ export class FoliateReader implements BookReader {
   applyChineseConversion(mode: ChineseConversion): Promise<void> {
     if (mode === this.conversion) return this.conversionReload
     this.conversion = mode
+    this.emit('readingSettingsChanged')
     conversionMode = mode
     if (!this.view || !this.book) return Promise.resolve()
     // Serialize reloads: rapid toggles must not interleave close/open, or two
@@ -1376,6 +1403,7 @@ export class FoliateReader implements BookReader {
     const json = JSON.stringify(rules)
     if (json === this.transformsJson) return this.conversionReload
     this.transformsJson = json
+    this.emit('readingSettingsChanged')
     setActiveTransforms(rules)
     if (!this.view || !this.book) return Promise.resolve()
     this.conversionReload = this.conversionReload
@@ -1411,6 +1439,7 @@ export class FoliateReader implements BookReader {
 
   applyContinuousScroll(mode: ContinuousScroll) {
     this.continuousScroll = mode
+    this.emit('readingSettingsChanged')
     if (mode === 'seamless') this.applyReadingMode('scroll')
     const renderer = this.view?.renderer
     if (!renderer) return
@@ -1441,7 +1470,8 @@ export class FoliateReader implements BookReader {
     }
   }
 
-  async scrollByPages(delta: number, distanceOverride?: number) {
+  async scrollByPages(delta: number, distanceOverride?: number, opts?: { internal?: boolean }) {
+    if (!opts?.internal) this.emit('userInteraction')
     // In scrolled mode a full-viewport jump drops the half line at the page
     // edge; overlap 8% so the old page's last line reappears on the new one.
     // renderer.size is the paginator's viewport size (height when scrolled).
@@ -1455,6 +1485,42 @@ export class FoliateReader implements BookReader {
       if (delta > 0) await this.view?.next(distance)
       else await this.view?.prev(distance)
     }
+  }
+
+  async scrollByPixels(delta: number) {
+    const renderer = this.view?.renderer
+    if (!renderer || this.readingMode !== 'scroll' || !Number.isFinite(delta) || delta === 0) return
+    const horizontal = renderer.scrollProp === 'scrollLeft'
+    renderer.scrollBy(horizontal ? delta : 0, horizontal ? 0 : delta)
+    if (renderer.hasAttribute('continuous')) return
+    if (delta > 0 && renderer.start + renderer.size >= renderer.viewSize - 2) {
+      await renderer.next(0)
+    } else if (delta < 0 && renderer.start <= 2) {
+      await renderer.prev(0)
+    }
+  }
+
+  isAtEnd(): boolean {
+    const renderer = this.view?.renderer
+    if (!renderer) return false
+    return Boolean(renderer.atBookEnd ?? renderer.atEnd)
+  }
+
+  setAutoReadingActive(active: boolean) {
+    if (active === this.autoReadingActive) return
+    this.autoReadingActive = active
+    const renderer = this.view?.renderer
+    if (active) {
+      if (this.continuousScroll !== 'snap' || this.readingMode !== 'scroll' || !renderer) return
+      this.autoReadingSnapTurn = renderer.hasAttribute('snap-turn')
+      renderer.removeAttribute('snap-turn')
+      return
+    }
+    if (this.autoReadingSnapTurn !== null && renderer) {
+      if (this.autoReadingSnapTurn) renderer.setAttribute('snap-turn', '')
+      else renderer.removeAttribute('snap-turn')
+    }
+    this.autoReadingSnapTurn = null
   }
 
   private ensureTts(): any | null {
@@ -1727,6 +1793,10 @@ export class FoliateReader implements BookReader {
 
   private handleSelectionChange(doc: Document) {
     const sel = doc.defaultView?.getSelection?.()
+    if (sel && !sel.isCollapsed && sel.rangeCount > 0 && !this.selectionActive) {
+      this.selectionDismissPending = false
+      this.emit('textSelectionStart')
+    }
     if ((!sel || sel.isCollapsed || sel.rangeCount === 0) && this.selectionActive) {
       this.selectionActive = false
       this.emit('selected', null)
@@ -2215,6 +2285,7 @@ export class FoliateReader implements BookReader {
         const selectionChangeHandler = () => this.handleSelectionChange(doc)
         const startHandler = () => {
           if (this.selectionActive) {
+            this.selectionDismissPending = true
             this.selectionActive = false
             this.emit('selected', null)
           }
@@ -2274,6 +2345,7 @@ export class FoliateReader implements BookReader {
   }
 
   destroy() {
+    this.setAutoReadingActive(false)
     this.destroyed = true
     // stop any in-flight search loop at the next chapter boundary; the
     // highlight overlays die with the view, so only the bookkeeping is dropped

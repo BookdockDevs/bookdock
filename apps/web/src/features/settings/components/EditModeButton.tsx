@@ -3,12 +3,13 @@ import { useTranslation } from '@/hooks/useTranslation'
 interface EditModeButtonProps {
   active: boolean
   disabled?: boolean
+  activeLabel?: string
   onClick: () => void
 }
 
-export default function EditModeButton({ active, disabled = false, onClick }: EditModeButtonProps) {
+export default function EditModeButton({ active, disabled = false, activeLabel, onClick }: EditModeButtonProps) {
   const _ = useTranslation()
-  const label = _(active ? 'settings.editModeExit' : 'settings.editModeEnter')
+  const label = active ? activeLabel ?? _('settings.editModeExit') : _('settings.editModeEnter')
 
   return (
     <button

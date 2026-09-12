@@ -33,7 +33,7 @@ export default function TocRuleRow({ rule, disabled, sorting, onToggle, onEdit, 
         transform: CSS.Transform.toString(transform),
         transition,
       }}
-      className={cn('flex items-center gap-3 py-2.5', isDragging && 'relative z-10 opacity-60')}
+      className={cn('flex items-center gap-3 py-2.5', !rule.enabled && 'opacity-60', isDragging && 'relative z-10 opacity-60')}
     >
       {sorting && (
         <button
@@ -57,7 +57,7 @@ export default function TocRuleRow({ rule, disabled, sorting, onToggle, onEdit, 
       )}
 
       <div className="min-w-0 flex-1">
-        <p className={cn('truncate text-sm', !rule.enabled && 'text-stone-400 line-through dark:text-stone-500')}>
+        <p className="truncate text-sm">
           {rule.name || '—'}
         </p>
         {patterns.length > 0 && (

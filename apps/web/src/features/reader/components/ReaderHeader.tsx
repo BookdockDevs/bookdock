@@ -3,16 +3,29 @@ import { Link } from '@tanstack/react-router'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { formatDuration } from '@/lib/format-duration'
+import { useAutoReadingSession } from '../hooks/useAutoReadingSession'
 import { useTtsSession } from '../hooks/useTtsSession'
 import { SettingsPopover } from './SettingsPopover'
 import { SettingsPanel } from './SettingsPanel'
 import TtsPanel from './TtsPanel'
+import AutoReadingPanel from './AutoReadingPanel'
 
 function TtsActiveIcon() {
   return (
     <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M4 9h3l5-4v14l-5-4H4V9Z" />
       <path d="M16 9.5a3.5 3.5 0 010 5M18.7 7a7 7 0 010 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function AutoReadingIcon({ status }: { status: 'idle' | 'running' | 'paused' }) {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M 2.82 5.71 H 9.89 L 16.46 3.78 V 20.27 C 15.47 20.02 10.88 18.76 9.98 18.51 H 2.82 Z" />
+      <path d="M 17.21 5.71 H 21.18 V 18.51 H 17.21" />
+      {status === 'running' && <path d="M 12.8 12 H 6.8 M 9.3 9.5 L 6.8 12 L 9.3 14.5" />}
+      {status === 'paused' && <path d="M 8.19 8.9 V 15.1 M 12.15 8.9 V 15.1" />}
     </svg>
   )
 }
@@ -26,24 +39,28 @@ interface ReaderHeaderProps {
   estimatedMinutes?: number
   settingsOpen?: boolean
   ttsOpen?: boolean
+  autoReadingOpen?: boolean
+  readingMode?: 'scroll' | 'page'
   bookId?: string
   onAddBookmark?: () => void
   onToggleSettings?: () => void
   onToggleTts?: () => void
+  onToggleAutoReading?: () => void
   onToggleFullscreen?: () => void
   bookmarkActive?: boolean
 }
 
-export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, bookId, onAddBookmark, onToggleSettings, onToggleTts, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
   const _ = useTranslation()
   const { state: ttsState } = useTtsSession()
+  const { state: autoReadingState } = useAutoReadingSession()
   const ttsActive = ttsState.status === 'starting' || ttsState.status === 'playing' || ttsState.status === 'paused'
   return (
     <header
       className={cn(
         'pointer-events-none absolute left-0 right-0 top-0 z-40 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] transition-transform duration-300 sm:px-4',
         visible ? 'group-hover:translate-y-0' : '',
-        settingsOpen || ttsOpen || pinned ? 'translate-y-0' : '-translate-y-full',
+        settingsOpen || ttsOpen || autoReadingOpen || pinned ? 'translate-y-0' : '-translate-y-full',
         className,
       )}
     >
@@ -91,6 +108,28 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
             </button>
             <SettingsPopover open={!!ttsOpen} onClose={() => onToggleTts?.()} toggleSelector="[data-tts-toggle]">
               <TtsPanel />
+            </SettingsPopover>
+          </div>
+        )}
+        {onToggleAutoReading && (
+          <div className="relative">
+            <button
+              data-auto-reading-toggle
+              onClick={onToggleAutoReading}
+              title={_('reader.autoReadingTitle')}
+              aria-label={_('reader.autoReadingTitle')}
+              aria-pressed={autoReadingState.status !== 'idle' || !!autoReadingOpen}
+              className={cn(
+                'pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg border transition-colors hover:bg-stone-500/10 sm:h-8 sm:w-8',
+                autoReadingState.status !== 'idle' ? 'border-current text-current' : 'text-[var(--bd-read-text)]',
+                autoReadingState.status === 'idle' && autoReadingOpen && 'bg-stone-500/10',
+              )}
+              style={autoReadingState.status === 'idle' ? { borderColor: 'var(--bd-read-accent)' } : undefined}
+            >
+              <AutoReadingIcon status={autoReadingState.status} />
+            </button>
+            <SettingsPopover open={!!autoReadingOpen} onClose={() => onToggleAutoReading?.()} toggleSelector="[data-auto-reading-toggle]">
+              <AutoReadingPanel readingMode={readingMode} onClose={() => onToggleAutoReading?.()} />
             </SettingsPopover>
           </div>
         )}
