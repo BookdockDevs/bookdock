@@ -237,4 +237,76 @@ describe('NotesPanel', () => {
     const highlightCard = screen.getByText('直线划线甲').closest('.group')!
     expect(highlightCard.querySelector('[title="annotation.editNote"]')).toBeNull()
   })
+
+  it('shows expand toggle for long highlights and toggles expand state', () => {
+    const longText = '这是一段超过六十五个字符的长文本划线，在阅读器侧栏中需要支持就地展开查看全文，而不是只能点击跳转。'.repeat(2)
+    const longItem = makeAnnotation({ id: 'long-1', cfiRange: 'cfi:long', text: longText })
+    render(<NotesPanel items={[longItem]} total={1} sort="chapter" chapterOrder={[]} bookId="book-1" />)
+    const expandBtn = screen.getByText('annotation.expand')
+    expect(expandBtn).toBeInTheDocument()
+    fireEvent.click(expandBtn)
+    expect(screen.getByText('annotation.collapse')).toBeInTheDocument()
+  })
+
+  it('expands all items when allExpanded is true', () => {
+    const longText = '这是一段超过六十五个字符的长文本划线，在阅读器侧栏中需要支持就地展开查看全文，而不是只能点击跳转。'.repeat(2)
+    const longItem = makeAnnotation({
+      id: 'long-2',
+      cfiRange: 'cfi:long-2',
+      text: longText,
+    })
+    render(<NotesPanel items={[longItem]} total={1} sort="chapter" chapterOrder={[]} bookId="book-1" allExpanded={true} />)
+    expect(screen.getByText('annotation.collapse')).toBeInTheDocument()
+  })
+
+  it('arranges card action buttons in order: edit, copy, share, delete', () => {
+    renderPanel()
+    const ideaCard = screen.getByText('我的想法丙').closest('.group')!
+    const actionButtons = Array.from(ideaCard.querySelectorAll('button[title]')).map((btn) => btn.getAttribute('title'))
+    // Exclude the card-level click button if it has title
+    const footerButtons = actionButtons.filter((title) =>
+      ['annotation.editNote', 'annotation.copy', 'annotation.share', 'annotation.deleteHighlight'].includes(title ?? ''),
+    )
+    expect(footerButtons).toEqual([
+      'annotation.editNote',
+      'annotation.copy',
+      'annotation.share',
+      'annotation.deleteHighlight',
+    ])
+  })
+
+  it('highlights selected cards in selectionMode', () => {
+    const item = makeAnnotation({ id: 'sel-1', cfiRange: 'cfi:sel', text: '选择测试' })
+    render(
+      <NotesPanel
+        items={[item]}
+        total={1}
+        sort="chapter"
+        chapterOrder={[]}
+        bookId="book-1"
+        selectionMode={true}
+        selectedIds={new Set(['sel-1'])}
+      />,
+    )
+    const card = screen.getByText('选择测试').closest('.group')!
+    expect(card.className).toContain('border-[var(--bd-read-primary)]/50')
+  })
+
+  it('renders hover-swappable relative and exact datetime in footer', () => {
+    const item = makeAnnotation({ id: 'time-1', cfiRange: 'cfi:t1', text: '时间测试', createdAt: 1726200000000 })
+    render(
+      <NotesPanel
+        items={[item]}
+        total={1}
+        sort="chapter"
+        chapterOrder={[]}
+        bookId="book-1"
+      />,
+    )
+    const timeContainer = screen.getByLabelText(/annotation\.timeFull|2026/)
+    expect(timeContainer).toBeInTheDocument()
+    // Contains relative time element and full datetime element
+    expect(timeContainer.querySelector('.group-hover\\/time\\:hidden')).toBeInTheDocument()
+    expect(timeContainer.querySelector('.group-hover\\/time\\:inline')).toBeInTheDocument()
+  })
 })

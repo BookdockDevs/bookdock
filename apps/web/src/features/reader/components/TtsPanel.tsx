@@ -100,7 +100,7 @@ function ReaderSelect({ label, value, options, onChange, disabled = false }: Rea
           </span>
         </button>
         {open && !disabled && (
-          <div role="listbox" aria-label={label} className="absolute inset-x-0 top-full z-20 mt-1 max-h-52 overflow-y-auto rounded-lg border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1 shadow-xl">
+          <div role="listbox" aria-label={label} className="absolute inset-x-0 top-full z-20 mt-1 max-h-52 overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] rounded-lg border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1 shadow-xl">
             {options.map((option) => (
               <button
                 key={option.value}
@@ -241,7 +241,6 @@ export default function TtsPanel() {
 
   return (
     <div className="flex flex-col" style={sliderVars}>
-      <style>{`\n.bd-slider {\n  -webkit-appearance: none;\n  appearance: none;\n  background: transparent;\n  cursor: pointer;\n  display: block;\n  width: 100%;\n  height: 20px;\n}\n.bd-slider::-webkit-slider-runnable-track {\n  height: 6px;\n  border-radius: 3px;\n  background: linear-gradient(to right, var(--slider-accent) 0%, var(--slider-accent) var(--slider-fill, 50%), var(--slider-track) var(--slider-fill, 50%), var(--slider-track) 100%);\n}\n.bd-slider::-webkit-slider-thumb {\n  -webkit-appearance: none;\n  width: 16px;\n  height: 16px;\n  border-radius: 50%;\n  background: var(--slider-accent);\n  margin-top: -5px;\n}\n.bd-slider::-moz-range-track {\n  height: 6px;\n  border-radius: 3px;\n  background: linear-gradient(to right, var(--slider-accent) 0%, var(--slider-accent) var(--slider-fill, 50%), var(--slider-track) var(--slider-fill, 50%), var(--slider-track) 100%);\n  border: none;\n}\n.bd-slider::-moz-range-thumb {\n  width: 16px;\n  height: 16px;\n  border-radius: 50%;\n  background: var(--slider-accent);\n  border: none;\n}\n.bd-slider:focus-visible {\n  outline: 2px solid var(--slider-accent);\n  outline-offset: 2px;\n}\n`}</style>
       <div className="border-b border-[var(--bd-read-accent)] p-4">
         <div ref={startMenuRef} className="relative flex w-full">
           <button

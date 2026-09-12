@@ -43,7 +43,7 @@ export function SettingsPopover({ open, onClose, children, toggleSelector = '[da
   return (
     <div
       ref={ref}
-      className="pointer-events-auto fixed right-3 top-14 z-50 max-h-[60dvh] w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-lg border shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-4 sm:max-h-[80dvh] sm:w-80"
+      className="pointer-events-auto fixed right-3 top-14 z-50 max-h-[min(34rem,calc(100dvh-4.5rem))] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] overscroll-contain rounded-xl border shadow-2xl animate-modal-panel origin-top-right sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-3 sm:max-h-[min(44rem,calc(100dvh-5rem))] sm:w-80"
       style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)', borderColor: 'var(--bd-read-accent)' }}
       onClick={(e) => e.stopPropagation()}
     >

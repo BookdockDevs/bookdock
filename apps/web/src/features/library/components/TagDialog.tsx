@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { useCreateTag, useRenameTag } from '../hooks'
@@ -24,15 +25,6 @@ export default function TagDialog({ open, tagId, initialName = '', onClose }: Ta
     if (open) setName(initialName)
   }, [open, initialName])
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
   if (!open) return null
 
   const submit = () => {
@@ -46,56 +38,48 @@ export default function TagDialog({ open, tagId, initialName = '', onClose }: Ta
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={onClose}
+    <Modal
+      title={isRename ? _('library.renameTag') : _('library.newTag')}
+      onClose={onClose}
+      size="sm"
     >
-      <div
-        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="mb-5 text-center font-serif text-base font-medium text-stone-900 dark:text-stone-100">
-          {isRename ? _('library.renameTag') : _('library.newTag')}
-        </h2>
-
-        <div className="mb-8 flex items-center gap-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-stone-400 dark:bg-stone-800 dark:text-stone-500">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.42 0l8.58-8.58a1 1 0 0 0 0-1.42z" />
-              <circle cx="7" cy="7" r="1" />
-            </svg>
-          </div>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit()
-            }}
-            placeholder={_('library.tagName')}
-            autoFocus
-            className="h-11 min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 outline-none placeholder:text-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
-          />
+      <div className="mb-6 mt-1 flex items-center gap-3">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-stone-400 dark:bg-stone-800 dark:text-stone-500">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.42 0l8.58-8.58a1 1 0 0 0 0-1.42z" />
+            <circle cx="7" cy="7" r="1" />
+          </svg>
         </div>
-
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-11 flex-1 rounded-xl bg-stone-100 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
-          >
-            {_('library.cancel')}
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!name.trim() || isPending}
-            className="h-11 flex-1 rounded-xl bg-stone-900 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300"
-          >
-            {isRename ? _('library.save') : _('library.create')}
-          </button>
-        </div>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+          placeholder={_('library.tagName')}
+          autoFocus
+          className="h-11 min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 outline-none placeholder:text-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
+        />
       </div>
-    </div>
+
+      <div className="flex gap-3">
+        <button
+          type="button"
+          onClick={onClose}
+          className="h-11 flex-1 rounded-xl bg-stone-100 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+        >
+          {_('library.cancel')}
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!name.trim() || isPending}
+          className="h-11 flex-1 rounded-xl bg-stone-900 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300"
+        >
+          {isRename ? _('library.save') : _('library.create')}
+        </button>
+      </div>
+    </Modal>
   )
 }

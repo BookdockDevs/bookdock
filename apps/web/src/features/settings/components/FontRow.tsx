@@ -108,38 +108,46 @@ export default function FontRow({ font, isOwner, disabled, sorting, onToggle, on
         </div>
       </div>
 
-      {uploaded && <span className={badge}>{_(uploaded.scope === 'instance' ? 'settings.fontsScopeInstance' : 'settings.fontsScopeUser')}</span>}
-      <span className={badge}>
-        {_(font.source === 'builtin' ? 'settings.fontsBuiltIn' : font.source === 'system' ? 'settings.fontsSystem' : 'settings.fontsCustom')}
-      </span>
+      {!sorting && (
+        <>
+          {uploaded && <span className={badge}>{_(uploaded.scope === 'instance' ? 'settings.fontsScopeInstance' : 'settings.fontsScopeUser')}</span>}
+          <span className={badge}>
+            {_(font.source === 'builtin' ? 'settings.fontsBuiltIn' : font.source === 'system' ? 'settings.fontsSystem' : 'settings.fontsCustom')}
+          </span>
+          <div className="flex shrink-0 items-center gap-1">
+            <Toggle checked={font.enabled} onChange={onToggle} disabled={disabled} ariaLabel={font.name} />
+          </div>
+        </>
+      )}
 
-      <div className="flex shrink-0 items-center gap-1">
-        <Toggle checked={font.enabled} onChange={onToggle} disabled={disabled} ariaLabel={font.name} />
-        {sorting && font.source === 'uploaded' && (
-          <button
-            type="button"
-            onClick={onEdit}
-            disabled={disabled}
-            aria-label={_('settings.fontsEdit')}
-            title={_('settings.fontsEdit')}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-          >
-            <EditIcon />
-          </button>
-        )}
-        {sorting && canDelete && (
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={disabled}
-            aria-label={_('settings.fontsDelete')}
-            title={_('settings.fontsDelete')}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40"
-          >
-            <TrashIcon />
-          </button>
-        )}
-      </div>
+      {sorting && (
+        <div className="flex shrink-0 items-center gap-1">
+          {font.source === 'uploaded' && (
+            <button
+              type="button"
+              onClick={onEdit}
+              disabled={disabled}
+              aria-label={_('settings.fontsEdit')}
+              title={_('settings.fontsEdit')}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+            >
+              <EditIcon />
+            </button>
+          )}
+          {canDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={disabled}
+              aria-label={_('settings.fontsDelete')}
+              title={_('settings.fontsDelete')}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40"
+            >
+              <TrashIcon />
+            </button>
+          )}
+        </div>
+      )}
     </li>
   )
 }

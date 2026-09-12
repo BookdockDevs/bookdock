@@ -16,9 +16,15 @@ function periodDelta(current: number, previous: number, format: (v: number) => s
   return _(vsKey, { delta })
 }
 
-// Same shape as the reader StatsPanel word count: >=10000 renders as X.X万
-function formatWords(n: number): string {
-  return n >= 10000 ? `${(n / 10000).toFixed(1)}万字` : `${Math.round(n)}字`
+function formatWords(n: number, _: (key: string, options?: Record<string, string | number>) => string): string {
+  if (n >= 10000) {
+    const formatted = (n / 10000).toFixed(1).replace(/\.0$/, '')
+    const localized = _('stats.wordsWan', { n: formatted })
+    return localized === 'stats.wordsWan' ? `${formatted}万字` : localized
+  }
+  const rounded = Math.round(n)
+  const localized = _('stats.words', { n: rounded })
+  return localized === 'stats.words' ? `${rounded}字` : localized
 }
 
 export default function SummaryCards() {
@@ -99,7 +105,7 @@ export default function SummaryCards() {
     },
     {
       label: _('stats.totalWords'),
-      value: s ? formatWords(s.totalWordsRead) : '-',
+      value: s ? formatWords(s.totalWordsRead, _) : '-',
     },
   ]
 

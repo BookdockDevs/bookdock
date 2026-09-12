@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
+import i18n from '@/i18n/i18n'
 import { composeMarginalLine, composeMarginalText } from '../marginals'
 
 const ctx = {
@@ -12,6 +13,10 @@ const ctx = {
 }
 
 describe('composeMarginalText', () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('zh-CN')
+  })
+
   it('none renders empty', () => {
     expect(composeMarginalText('none', ctx)).toBe('')
   })
@@ -36,6 +41,12 @@ describe('composeMarginalText', () => {
     expect(composeMarginalText('chapterWordCount', { ...ctx, chapterWordCount: 12000 })).toBe('1.2万字')
     expect(composeMarginalText('chapterWordCount', { ...ctx, chapterWordCount: 20000 })).toBe('2万字')
     expect(composeMarginalText('chapterWordCount', { ...ctx, chapterWordCount: undefined })).toBe('')
+  })
+
+  it('chapter word count renders English format when language is en', async () => {
+    await i18n.changeLanguage('en')
+    expect(composeMarginalText('chapterWordCount', { ...ctx, chapterWordCount: 3215 })).toBe('3215 words')
+    expect(composeMarginalText('chapterWordCount', ctx)).toBe('1.2k words')
   })
 
   it('time renders HH:mm', () => {

@@ -188,4 +188,47 @@ describe('LibrarySidebar', () => {
 
     expect(screen.getByPlaceholderText('标签名称')).toBeInTheDocument()
   })
+
+  it('updates scroll shadows based on scroll position', () => {
+    mockHooks({
+      shelves: Array.from({ length: 15 }, (_, i) => ({ id: `shelf-${i}`, name: `Shelf ${i}`, bookCount: i })),
+    })
+
+    const { container } = render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    const topShadow = screen.getByTestId('sidebar-scroll-shadow-top')
+    const bottomShadow = screen.getByTestId('sidebar-scroll-shadow-bottom')
+    const nav = container.querySelector('nav')!
+
+    expect(topShadow).toHaveClass('opacity-0')
+    expect(bottomShadow).toBeInTheDocument()
+
+    // Mock dimensions to simulate overflow
+    Object.defineProperty(nav, 'clientHeight', { value: 300, configurable: true })
+    Object.defineProperty(nav, 'scrollHeight', { value: 600, configurable: true })
+    Object.defineProperty(nav, 'scrollTop', { value: 50, configurable: true })
+
+    fireEvent.scroll(nav)
+
+    expect(topShadow).toHaveClass('opacity-100')
+    expect(bottomShadow).toHaveClass('opacity-100')
+
+    // Scroll to bottom
+    Object.defineProperty(nav, 'scrollTop', { value: 300, configurable: true })
+    fireEvent.scroll(nav)
+
+    expect(topShadow).toHaveClass('opacity-100')
+    expect(bottomShadow).toHaveClass('opacity-0')
+  })
+
+  it('applies elevated contrast active styles and pill badge classes when a shelf is selected', () => {
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 5 }] })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId="shelf-1" tagId={null} trash={false} />)
+
+    const button = screen.getByText('Favorites').closest('button')!
+    expect(button).toHaveClass('dark:bg-stone-800', 'dark:text-stone-50')
+
+    const badge = screen.getByText('5')
+    expect(badge).toHaveClass('rounded-full', 'dark:bg-stone-700/60', 'dark:text-stone-200')
+  })
 })

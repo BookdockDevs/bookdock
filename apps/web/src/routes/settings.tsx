@@ -1,6 +1,5 @@
-import { createRoute } from '@tanstack/react-router'
+import { createRoute, lazyRouteComponent } from '@tanstack/react-router'
 import { rootRoute } from './__root'
-import Settings from '@/features/settings/Settings'
 
 export interface SettingsSearch {
   section?: 'general' | 'account' | 'reading' | 'library' | 'admin'
@@ -18,5 +17,5 @@ export const settingsRoute = createRoute({
       : undefined,
     focus: input.focus === 'tts' ? 'tts' : undefined,
   }),
-  component: Settings,
+  component: lazyRouteComponent(() => import('@/features/settings/Settings')),
 })

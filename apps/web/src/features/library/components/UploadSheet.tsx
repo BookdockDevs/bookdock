@@ -81,9 +81,11 @@ export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadShe
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
       onClick={handleClose}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => e.preventDefault()}
     >
       <div
-        className="max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
+        className="max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-2xl border border-stone-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
@@ -138,7 +140,7 @@ export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadShe
         )}
 
         {items.length > 0 && (
-          <ul className="mt-4 max-h-52 space-y-2 overflow-y-auto pr-1">
+          <ul className="mt-4 max-h-52 space-y-2 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
             {items.map((item) => {
               const key = statusLabel(item)
               return (

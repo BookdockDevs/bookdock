@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import { SettingsPanel } from '../features/reader/components/SettingsPanel'
 import { useFontLoaderStore } from '../features/reader/fonts'
@@ -49,6 +49,7 @@ describe('SettingsPanel', () => {
       showHeader: true,
       showFooter: true,
       chineseConversion: 'off',
+      clickAreaMode: 'standard',
     })
   })
 
@@ -57,9 +58,17 @@ describe('SettingsPanel', () => {
 
     expect(screen.getByText('宋体')).toBeInTheDocument()
     expect(screen.getByText('字号')).toBeInTheDocument()
+    expect(screen.getByText('信息栏字号')).toBeInTheDocument()
     expect(screen.getByText('字体粗细')).toBeInTheDocument()
     expect(screen.getByText('两端对齐')).toBeInTheDocument()
     expect(screen.getByText('覆盖书籍字体')).toBeInTheDocument()
+  })
+
+  it('hides marginal font size when both info bar sections are disabled', () => {
+    useUiStore.setState({ showHeader: false, showFooter: false })
+    render(<SettingsPanel />)
+
+    expect(screen.queryByText('信息栏字号')).not.toBeInTheDocument()
   })
 
   it('renders a single font list without group labels', () => {
@@ -142,8 +151,8 @@ describe('SettingsPanel', () => {
     fireEvent.click(layoutButton)
 
     expect(screen.getByText('页面宽度')).toBeInTheDocument()
-    expect(screen.getByText('垂直边距')).toBeInTheDocument()
-    expect(screen.getByText('水平边距')).toBeInTheDocument()
+    expect(screen.getByText('上下边距')).toBeInTheDocument()
+    expect(screen.getByText('左右边距')).toBeInTheDocument()
     expect(screen.getByText('覆盖书籍布局')).toBeInTheDocument()
   })
 
@@ -157,8 +166,8 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('滚动')).toBeInTheDocument()
     expect(screen.getByText('翻页')).toBeInTheDocument()
     // header/footer info bar toggles show in both reading modes now
-    expect(screen.getByText('显示页眉')).toBeInTheDocument()
-    expect(screen.getByText('显示页脚')).toBeInTheDocument()
+    expect(screen.getByText('页眉')).toBeInTheDocument()
+    expect(screen.getByText('页脚')).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('翻页'))
     expect(screen.getByText('分栏数')).toBeInTheDocument()
@@ -187,21 +196,23 @@ describe('SettingsPanel', () => {
     expect(useUiStore.getState().textAlignJustify).toBe(true)
   })
 
-  it('shows continuous scroll options in scroll mode with deselect-to-off', () => {
+  it('shows continuous scroll options in scroll mode', () => {
     render(<SettingsPanel />)
 
     fireEvent.click(screen.getByTitle('显示'))
 
     expect(screen.getByText('连续滚动')).toBeInTheDocument()
-    expect(screen.getByText('递进')).toBeInTheDocument()
-    expect(screen.getByText('连卷')).toBeInTheDocument()
-    // no explicit "off" button: deselecting the active option means off
-    expect(screen.queryByText('分章')).not.toBeInTheDocument()
+    expect(screen.getByText('关闭')).toBeInTheDocument()
+    expect(screen.getByText('跳章')).toBeInTheDocument()
+    expect(screen.getByText('长卷')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('递进'))
+    fireEvent.click(screen.getByText('跳章'))
     expect(useUiStore.getState().continuousScroll).toBe('snap')
 
-    fireEvent.click(screen.getByText('递进'))
+    fireEvent.click(screen.getByText('长卷'))
+    expect(useUiStore.getState().continuousScroll).toBe('seamless')
+
+    fireEvent.click(screen.getByText('关闭'))
     expect(useUiStore.getState().continuousScroll).toBe('off')
   })
 
@@ -257,16 +268,45 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(screen.getByTitle('行为'))
 
-    expect(screen.getByRole('button', { name: /标准三区/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /标准/ })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /任意侧翻下一页/ }))
+    fireEvent.click(screen.getByRole('button', { name: /单手/ }))
     expect(useUiStore.getState().clickAreaMode).toBe('fullscreen')
 
-    fireEvent.click(screen.getByRole('button', { name: /任意侧翻下一页/ }))
+    fireEvent.click(screen.getByRole('button', { name: /单手/ }))
     expect(useUiStore.getState().clickAreaMode).toBe('none')
 
-    fireEvent.click(screen.getByRole('button', { name: /左右交换/ }))
+    fireEvent.click(screen.getByRole('button', { name: /反向/ }))
     expect(useUiStore.getState().clickAreaMode).toBe('swap')
+  })
+
+  it('toggles click-area info popover and dismisses on outside click or close button', () => {
+    render(<SettingsPanel />)
+
+    fireEvent.click(screen.getByTitle('行为'))
+
+    const hintBtn = screen.getByTitle('翻页点击区说明')
+    expect(hintBtn).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '翻页点击区说明' })).not.toBeInTheDocument()
+
+    // open popover card
+    fireEvent.click(hintBtn)
+    const dialog = screen.getByRole('dialog', { name: '翻页点击区说明' })
+    expect(dialog).toBeInTheDocument()
+    expect(screen.getByText(/左侧上一页 · 右侧下一页 · 中间菜单/)).toBeInTheDocument()
+    expect(screen.getByText(/两侧均翻下一页 · 中间菜单/)).toBeInTheDocument()
+    expect(screen.getByText(/左侧下一页 · 右侧上一页 · 中间菜单/)).toBeInTheDocument()
+
+    // close via close button
+    const closeBtn = within(dialog).getByRole('button', { name: '取消' })
+    fireEvent.click(closeBtn)
+    expect(screen.queryByRole('dialog', { name: '翻页点击区说明' })).not.toBeInTheDocument()
+
+    // reopen and close via outside click
+    fireEvent.click(hintBtn)
+    expect(screen.getByRole('dialog', { name: '翻页点击区说明' })).toBeInTheDocument()
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole('dialog', { name: '翻页点击区说明' })).not.toBeInTheDocument()
   })
 
   it('hides the text-transforms entry without a bookId', () => {
@@ -288,5 +328,53 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('正文变换')).toBeInTheDocument()
     // point patch enabled + pattern rule effective via override = 2 active
     expect(screen.getByText('2 条生效')).toBeInTheDocument()
+  })
+
+  it('adjusts font size using stepper buttons', () => {
+    useUiStore.setState({ fontSize: 18 })
+    render(<SettingsPanel />)
+
+    const incBtn = screen.getByRole('button', { name: '放大字号' })
+    const decBtn = screen.getByRole('button', { name: '缩小字号' })
+
+    fireEvent.click(incBtn)
+    expect(useUiStore.getState().fontSize).toBe(19)
+
+    fireEvent.click(decBtn)
+    expect(useUiStore.getState().fontSize).toBe(18)
+  })
+
+  it('toggles switch when clicking on the row text container', () => {
+    render(<SettingsPanel />)
+
+    const labelText = screen.getByText('两端对齐')
+    const justifySwitch = screen.getByRole('switch', { name: /两端对齐/ })
+    expect(justifySwitch).toHaveAttribute('aria-checked', 'false')
+
+    fireEvent.click(labelText)
+    expect(justifySwitch).toHaveAttribute('aria-checked', 'true')
+    expect(useUiStore.getState().textAlignJustify).toBe(true)
+  })
+
+  it('displays group labels and auto width in layout section', () => {
+    useUiStore.setState({ readingMode: 'page', pageWidth: 0 })
+    render(<SettingsPanel />)
+
+    fireEvent.click(screen.getByTitle('布局'))
+
+    expect(screen.getByText('页面与边距')).toBeInTheDocument()
+    expect(screen.getByText('文本与排版')).toBeInTheDocument()
+    expect(screen.getByText('自适应')).toBeInTheDocument()
+  })
+
+  it('only displays column gap when page columns is greater than 1', () => {
+    useUiStore.setState({ readingMode: 'page', pageColumns: 1 })
+    render(<SettingsPanel />)
+
+    fireEvent.click(screen.getByTitle('显示'))
+    expect(screen.queryByText('分栏间距')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '2' }))
+    expect(screen.getByText('分栏间距')).toBeInTheDocument()
   })
 })

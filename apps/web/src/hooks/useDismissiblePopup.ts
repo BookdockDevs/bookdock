@@ -15,20 +15,30 @@ export function useDismissiblePopup(
     const onPointerDown = (event: PointerEvent) => {
       if (!isInside(event)) onClose()
     }
+    const onMouseDown = (event: MouseEvent) => {
+      if (!isInside(event)) onClose()
+    }
     const onClick = (event: MouseEvent) => {
       if (!isInside(event)) onClose()
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        event.stopImmediatePropagation()
+        onClose()
+      }
     }
     const onContentClick = () => onClose()
 
     document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('mousedown', onMouseDown, true)
     document.addEventListener('click', onClick, true)
     document.addEventListener('content-click', onContentClick)
     document.addEventListener('keydown', onKeyDown)
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('mousedown', onMouseDown, true)
       document.removeEventListener('click', onClick, true)
       document.removeEventListener('content-click', onContentClick)
       document.removeEventListener('keydown', onKeyDown)

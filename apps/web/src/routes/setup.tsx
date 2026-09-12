@@ -1,9 +1,8 @@
-import { createRoute } from '@tanstack/react-router'
+import { createRoute, lazyRouteComponent } from '@tanstack/react-router'
 import { rootRoute } from './__root'
-import Setup from '@/features/auth/Setup'
 
 export const setupRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/setup',
-  component: Setup,
+  component: lazyRouteComponent(() => import('@/features/auth/Setup')),
 })

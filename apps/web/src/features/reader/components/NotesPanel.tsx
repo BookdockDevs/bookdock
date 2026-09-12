@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type Mo
 
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
+import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 
@@ -12,7 +13,7 @@ import { markEscConsumed } from '../lib/esc-consumed'
 import { useReaderState } from '../state/reader-state'
 import AnnotationExportDialog from './AnnotationExportDialog'
 import { HIGHLIGHT_COLORS } from './annotation-colors'
-import { BookmarkIcon, BulbIcon, CheckIcon, CopyIcon, PencilIcon, SelectionIcon, ShareIcon, StyleGlyph, TemplateIcon, TrashIcon } from './annotation-icons'
+import { BookmarkIcon, BulbIcon, CheckIcon, CloseIcon, CopyIcon, DocumentExportIcon, PencilIcon, SelectionIcon, ShareIcon, TrashIcon } from './annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from './format-relative-time'
 
 function hexOf(a: AnnotationRes): string {
@@ -41,16 +42,6 @@ function highlightDecoration(style: AnnotationStyle, hex: string): CSSProperties
 
 const actionBtn =
   'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current'
-
-/** Subtle one-line note total pinned to the top of the notes tab */
-function BookOverviewStrip({ total }: { total: number }) {
-  const _ = useTranslation()
-  return (
-    <p className="px-1 text-xs tabular-nums text-[var(--bd-read-sub)]">
-      {_('annotation.notesTotal', { n: total })}
-    </p>
-  )
-}
 
 function autoGrow(el: HTMLTextAreaElement): void {
   el.style.height = 'auto'
@@ -145,7 +136,7 @@ function InlineEditor({
 interface NotesPanelProps {
   items: AnnotationRes[]
   allItems?: AnnotationRes[]
-  total: number
+  total?: number
   sort: NoteSort
   locked?: boolean
   onClose?: () => void
@@ -153,9 +144,29 @@ interface NotesPanelProps {
   chapterOrder: string[]
   bookId: string
   selectionMode?: boolean
+  onExitSelection?: () => void
+  allExpanded?: boolean
+  selectedIds?: Set<string>
+  onToggleSelected?: (id: string) => void
+  hideSelectionToolbar?: boolean
 }
 
-export const NotesPanel = memo(function NotesPanel({ items, allItems = items, total, sort, locked, onClose, chapterOrder, bookId, selectionMode = false }: NotesPanelProps) {
+export const NotesPanel = memo(function NotesPanel({
+  items,
+  allItems = items,
+  total: _total,
+  sort,
+  locked,
+  onClose,
+  chapterOrder,
+  bookId,
+  selectionMode = false,
+  onExitSelection,
+  allExpanded,
+  selectedIds: externalSelectedIds,
+  onToggleSelected,
+  hideSelectionToolbar = false,
+}: NotesPanelProps) {
   const _ = useTranslation()
   const { renderer } = useReaderApi()
   const deleteAnnotation = useDeleteAnnotation(bookId)
@@ -166,22 +177,41 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
   const orphanedKeys = useReaderState((s) => s.orphanedAnnotationKeys)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: AnnotationRes } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [exportOpen, setExportOpen] = useState<'configure' | 'quick' | null>(null)
+  const [internalSelectedIds, setInternalSelectedIds] = useState<Set<string>>(new Set())
+  const selectedIds = externalSelectedIds ?? internalSelectedIds
+  const [exportOpen, setExportOpen] = useState(false)
+  const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set())
+  const [expandedQuoteIds, setExpandedQuoteIds] = useState<Set<string>>(new Set())
   const wasSelectionMode = useRef(false)
 
   useEffect(() => {
+    if (externalSelectedIds) return
     if (selectionMode && !wasSelectionMode.current) {
-      setSelectedIds(new Set(items.map((item) => item.id)))
+      setInternalSelectedIds(new Set(items.map((item) => item.id)))
     } else if (!selectionMode) {
-      setSelectedIds(new Set())
-      setExportOpen(null)
+      setInternalSelectedIds(new Set())
+      setExportOpen(false)
     }
     wasSelectionMode.current = selectionMode
-  }, [items, selectionMode])
+  }, [items, selectionMode, externalSelectedIds])
+
+  useEffect(() => {
+    if (allExpanded === undefined) return
+    if (allExpanded) {
+      setExpandedCardIds(new Set(items.map((item) => item.id)))
+      setExpandedQuoteIds(new Set(items.map((item) => item.id)))
+    } else {
+      setExpandedCardIds(new Set())
+      setExpandedQuoteIds(new Set())
+    }
+  }, [allExpanded, items])
 
   function toggleSelected(id: string) {
-    setSelectedIds((previous) => {
+    if (onToggleSelected) {
+      onToggleSelected(id)
+      return
+    }
+    setInternalSelectedIds((previous) => {
       const next = new Set(previous)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -192,12 +222,32 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
   function selectAll() {
     const visibleIds = items.map((item) => item.id)
     const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
-    setSelectedIds((previous) => {
+    setInternalSelectedIds((previous) => {
       const next = new Set(previous)
       for (const id of visibleIds) {
         if (allVisibleSelected) next.delete(id)
         else next.add(id)
       }
+      return next
+    })
+  }
+
+  function toggleNoteExpand(id: string, e: MouseEvent) {
+    e.stopPropagation()
+    setExpandedCardIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleQuoteExpand(id: string, e: MouseEvent) {
+    e.stopPropagation()
+    setExpandedQuoteIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
@@ -308,10 +358,26 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
     const hex = hexOf(a)
     const kind = kindOf(a)
     const orphaned = orphanedKeys.includes(`${a.cfiRange}|${a.type}`)
+    const isNoteExpanded = expandedCardIds.has(a.id)
+    const isQuoteExpanded = expandedQuoteIds.has(a.id)
+    const isLongIdeaNote =
+      kind === 'idea' &&
+      ((a.note?.length ?? 0) > 60 || (a.note?.includes('\n') ?? false))
+    const isLongQuote =
+      kind === 'idea' &&
+      ((a.text?.length ?? 0) > 40 || (a.text?.includes('\n') ?? false))
+    const isLongHighlight =
+      kind === 'highlight' &&
+      ((a.text?.length ?? 0) > 65 || (a.text?.includes('\n') ?? false))
+
     return (
       <div
         onContextMenu={(e) => handleContextMenu(e, a)}
-        className={`group relative rounded-lg transition-colors hover:bg-stone-500/5 ${orphaned ? 'opacity-60' : ''}`}
+        className={cn(
+          'group relative rounded-xl border border-stone-200/50 bg-stone-500/[0.03] p-2.5 transition-all hover:border-stone-300/80 hover:bg-stone-500/[0.07] hover:shadow-xs dark:border-stone-800/60 dark:bg-stone-500/[0.05] dark:hover:border-stone-700/70 dark:hover:bg-stone-500/[0.1]',
+          orphaned && 'opacity-60',
+          selectionMode && selectedIds.has(a.id) && 'border-[var(--bd-read-primary)]/50 bg-[var(--bd-read-primary)]/[0.06] ring-1 ring-[var(--bd-read-primary)]/20',
+        )}
       >
         {orphaned && (
           <span
@@ -330,75 +396,179 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
           />
         ) : (
           <>
-            <button onClick={() => selectionMode ? toggleSelected(a.id) : goTo(a)} className={`w-full p-3 text-left ${selectionMode ? 'pr-12' : ''}`}>
+            <button
+              onClick={() => (selectionMode ? toggleSelected(a.id) : goTo(a))}
+              className={cn('w-full text-left', selectionMode && 'pr-8')}
+            >
               {selectionMode && (
-                <span className={`absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border ${selectedIds.has(a.id) ? 'border-stone-500 bg-stone-500/15 text-current dark:border-stone-400' : 'border-stone-300 bg-transparent dark:border-stone-600'}`}>
-                  {selectedIds.has(a.id) && <CheckIcon />}
+                <span
+                  className={cn(
+                    'absolute right-2.5 top-3 flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
+                    selectedIds.has(a.id)
+                      ? 'border-[var(--bd-read-primary)] bg-[var(--bd-read-primary)] text-[var(--bd-read-bg)]'
+                      : 'border-stone-300 bg-transparent dark:border-stone-600',
+                  )}
+                >
+                  {selectedIds.has(a.id) && <CheckIcon size={13} strokeWidth={2.4} />}
                 </span>
               )}
               {kind === 'bookmark' && (
-                <div className="flex items-start gap-2">
-                  <span className="mt-0.5 shrink-0 text-stone-400 dark:text-stone-500">
+                <div className="flex items-start gap-2.5">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-500 dark:text-blue-400">
                     <BookmarkIcon />
                   </span>
-                  <p className="line-clamp-2 flex-1 text-sm text-current">{a.text || _('reader.bookmark')}</p>
+                  <p className="line-clamp-2 flex-1 text-sm font-medium text-current">{a.text || _('reader.bookmark')}</p>
                 </div>
               )}
               {kind === 'idea' && (
-                <>
-                  <div className="flex items-start gap-2">
-                    <span className="mt-0.5 shrink-0 text-[var(--bd-read-sub)]">
+                <div className="space-y-2">
+                  <div className="group/note flex items-start gap-2.5">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-500 dark:text-amber-400">
                       <BulbIcon />
                     </span>
-                    <p className="line-clamp-3 flex-1 whitespace-pre-wrap text-sm text-current">{a.note}</p>
+                    <div className={cn('relative flex-1 min-w-0', isNoteExpanded && isLongIdeaNote && 'pb-5')}>
+                      <p
+                        className={cn(
+                          'text-sm font-medium leading-relaxed text-current whitespace-pre-wrap break-words',
+                          !isNoteExpanded && 'line-clamp-3',
+                        )}
+                      >
+                        {a.note}
+                      </p>
+                      {isLongIdeaNote && (
+                        <button
+                          type="button"
+                          onClick={(e) => toggleNoteExpand(a.id, e)}
+                          className="absolute bottom-0 right-0 inline-flex items-center gap-0.5 rounded-md border border-stone-200/80 bg-[var(--bd-read-bg)]/95 px-1.5 py-0.5 text-[11px] text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover/note:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80"
+                        >
+                          <span>{isNoteExpanded ? _('annotation.collapse') : _('annotation.expand')}</span>
+                          <svg
+                            className={cn('h-2.5 w-2.5 transition-transform duration-150', isNoteExpanded && 'rotate-180')}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
                   </div>
                   {a.text && (
-                    <div className="ml-7 mt-2 border-l-2 border-stone-300 pl-2 dark:border-stone-600">
-                      <p className="line-clamp-2 text-xs text-[var(--bd-read-sub)]">{a.text}</p>
+                    <div
+                      className={cn(
+                        'group/quote relative ml-7 rounded-lg border-l-2 border-[var(--bd-read-accent)]/70 bg-stone-500/5 px-2.5 py-1.5 text-xs text-[var(--bd-read-sub)]',
+                        isQuoteExpanded && isLongQuote && 'pb-5',
+                      )}
+                    >
+                      <p className={cn('leading-relaxed', !isQuoteExpanded && 'line-clamp-2')}>{a.text}</p>
+                      {isLongQuote && (
+                        <button
+                          type="button"
+                          onClick={(e) => toggleQuoteExpand(a.id, e)}
+                          className="absolute bottom-1 right-1.5 inline-flex items-center gap-0.5 rounded border border-stone-200/80 bg-[var(--bd-read-bg)]/95 px-1.5 py-0.5 text-[10px] text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover/quote:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80"
+                        >
+                          <span>{isQuoteExpanded ? _('annotation.collapse') : _('annotation.expand')}</span>
+                          <svg
+                            className={cn('h-2.5 w-2.5 transition-transform duration-150', isQuoteExpanded && 'rotate-180')}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
                   )}
-                </>
+                </div>
               )}
               {kind === 'highlight' && (
-                <div className="flex items-start gap-2">
-                  <span className="mt-0.5 shrink-0" style={{ color: hex }}>
-                    <StyleGlyph style={a.style} />
-                  </span>
-                  <p className="line-clamp-3 flex-1 text-sm leading-relaxed text-current">
-                    <span style={highlightDecoration(a.style, hex)}>{a.text}</span>
-                  </p>
+                <div className="flex items-start gap-2.5">
+                  <span
+                    className="mt-1 flex h-3.5 w-1 shrink-0 rounded-full"
+                    style={{ backgroundColor: hex }}
+                    aria-hidden="true"
+                  />
+                  <div className={cn('relative flex-1 min-w-0', isNoteExpanded && isLongHighlight && 'pb-5')}>
+                    <p
+                      className={cn(
+                        'text-sm leading-relaxed text-current',
+                        !isNoteExpanded && 'line-clamp-4',
+                      )}
+                    >
+                      <span style={highlightDecoration(a.style, hex)}>{a.text}</span>
+                    </p>
+                    {isLongHighlight && (
+                      <button
+                        type="button"
+                        onClick={(e) => toggleNoteExpand(a.id, e)}
+                        className="absolute bottom-0 right-0 inline-flex items-center gap-0.5 rounded-md border border-stone-200/80 bg-[var(--bd-read-bg)]/95 px-1.5 py-0.5 text-[11px] text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80"
+                      >
+                        <span>{isNoteExpanded ? _('annotation.collapse') : _('annotation.expand')}</span>
+                        <svg
+                          className={cn('h-2.5 w-2.5 transition-transform duration-150', isNoteExpanded && 'rotate-180')}
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </button>
-            {!selectionMode && <div className="flex max-h-0 items-center gap-0.5 overflow-hidden px-3 opacity-0 transition-all duration-200 group-hover:max-h-8 group-hover:pb-2 group-hover:opacity-100 max-md:max-h-8 max-md:pb-2 max-md:opacity-100">
-              <span
-                title={formatFullDateTime(_, a.createdAt)}
-                className="text-[11px] text-[var(--bd-read-sub)]"
-              >
-                {formatRelativeTime(_, a.createdAt)}
-              </span>
-              <div className="flex-1" />
-              <button onClick={() => copyItem(a)} title={_('annotation.copy')} className={actionBtn}>
-                <CopyIcon />
-              </button>
-              {a.type !== 'bookmark' && (
-                <button onClick={() => shareItem(a)} title={_('annotation.share')} className={actionBtn}>
-                  <ShareIcon />
-                </button>
-              )}
-              {a.type === 'bookmark' ? (
-                <button onClick={() => setEditingId(a.id)} title={_('annotation.rename')} className={actionBtn}>
-                  <PencilIcon />
-                </button>
-              ) : kind === 'idea' ? (
-                <button onClick={() => setEditingId(a.id)} title={_('annotation.editNote')} className={actionBtn}>
-                  <PencilIcon />
-                </button>
-              ) : null}
-              <button onClick={() => deleteItem(a)} title={_('annotation.deleteHighlight')} className={`${actionBtn} text-red-500 hover:bg-red-500/10 hover:text-red-500`}>
-                <TrashIcon />
-              </button>
-            </div>}
+            {!selectionMode && (
+              <div className="mt-2 flex h-6 items-center px-0.5 text-xs text-[var(--bd-read-sub)]">
+                <span
+                  aria-label={formatFullDateTime(_, a.createdAt)}
+                  className="group/time text-[11px] tabular-nums text-[var(--bd-read-sub)] opacity-70 transition-opacity cursor-default select-none hover:opacity-100 truncate"
+                >
+                  <span className="inline group-hover/time:hidden">{formatRelativeTime(_, a.createdAt)}</span>
+                  <span className="hidden group-hover/time:inline font-normal text-[var(--bd-read-text)]">
+                    {formatFullDateTime(_, a.createdAt)}
+                  </span>
+                </span>
+                <div className="flex-1" />
+                <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 max-md:opacity-100">
+                  {a.type === 'bookmark' ? (
+                    <button onClick={() => setEditingId(a.id)} title={_('annotation.rename')} className={actionBtn}>
+                      <PencilIcon />
+                    </button>
+                  ) : kind === 'idea' ? (
+                    <button onClick={() => setEditingId(a.id)} title={_('annotation.editNote')} className={actionBtn}>
+                      <PencilIcon />
+                    </button>
+                  ) : null}
+                  <button onClick={() => copyItem(a)} title={_('annotation.copy')} className={actionBtn}>
+                    <CopyIcon />
+                  </button>
+                  {a.type !== 'bookmark' && (
+                    <button onClick={() => shareItem(a)} title={_('annotation.share')} className={actionBtn}>
+                      <ShareIcon />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => deleteItem(a)}
+                    title={_('annotation.deleteHighlight')}
+                    className={cn(actionBtn, 'ml-0.5 hover:bg-red-500/10 hover:text-red-500 dark:hover:text-red-400')}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -406,33 +576,96 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
   }
 
   return (
-    <div className="space-y-3">
-      {selectionMode ? (
-        <div className="sticky top-0 z-10 flex items-center gap-2 rounded-lg bg-[var(--bd-read-bg)] py-1 text-xs">
-          <span className="tabular-nums text-[var(--bd-read-sub)]">{_('annotation.exportSelected', { n: selectedIds.size })}</span>
-          <button type="button" onClick={selectAll} title={_('annotation.selectAll')} aria-label={_('annotation.selectAll')} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current">
-            <SelectionIcon state={items.length > 0 && items.every((item) => selectedIds.has(item.id)) ? 'all' : items.some((item) => selectedIds.has(item.id)) ? 'partial' : 'none'} />
+    <div className={cn('space-y-4 pt-3 pb-6', items.length === 0 && 'flex flex-1 flex-col pt-0 pb-0')}>
+      {selectionMode && !hideSelectionToolbar && (
+        <div className="sticky top-0 z-10 -mx-1 flex items-center gap-2 rounded-xl border border-stone-200/60 bg-[var(--bd-read-bg)] px-3 py-2 text-xs shadow-xs dark:border-stone-800/60">
+          <button
+            type="button"
+            onClick={selectAll}
+            title={_('annotation.selectAll')}
+            aria-label={_('annotation.selectAll')}
+            className="flex items-center gap-1.5 text-[var(--bd-read-sub)] hover:text-current transition-colors"
+          >
+            <SelectionIcon
+              state={
+                items.length > 0 && items.every((item) => selectedIds.has(item.id))
+                  ? 'all'
+                  : items.some((item) => selectedIds.has(item.id))
+                    ? 'partial'
+                    : 'none'
+              }
+            />
+            <span className="tabular-nums font-medium text-current">
+              {_('annotation.exportSelected', { n: selectedIds.size })}
+            </span>
           </button>
           <div className="flex-1" />
-          <button type="button" onClick={() => setExportOpen('configure')} disabled={selectedIds.size === 0} title={_('annotation.exportNext')} aria-label={_('annotation.exportNext')} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current disabled:opacity-40">
-            <TemplateIcon />
+          <button
+            type="button"
+            onClick={() => setExportOpen(true)}
+            disabled={selectedIds.size === 0}
+            title={_('annotation.exportTitle')}
+            aria-label={_('annotation.exportTitle')}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current disabled:opacity-35 transition-colors"
+          >
+            <DocumentExportIcon size={16} />
           </button>
-          <button type="button" onClick={() => setExportOpen('quick')} disabled={selectedIds.size === 0} title={_('annotation.export')} aria-label={_('annotation.export')} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current disabled:opacity-40">
-            <ShareIcon />
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-center justify-between">
-          <BookOverviewStrip total={total} />
+          {onExitSelection && (
+            <button
+              type="button"
+              onClick={onExitSelection}
+              title={_('annotation.cancel')}
+              aria-label={_('annotation.cancel')}
+              className="ml-1 flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current transition-colors"
+            >
+              <CloseIcon size={16} />
+            </button>
+          )}
         </div>
       )}
       {items.length === 0 ? (
-        <p className="mt-8 text-center text-xs text-[var(--bd-read-sub)]">{_('reader.noNotes')}</p>
+        <div className="flex flex-1 flex-col items-center justify-center pb-24 px-4 text-center">
+          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]">
+            <svg
+              className="h-7 w-7"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+          </div>
+          <p className="text-base font-normal text-current">{_('reader.noNotes')}</p>
+          <p className="mt-1.5 text-xs text-[var(--bd-read-sub)] max-w-64 leading-relaxed">
+            {_('reader.noNotesHint')}
+          </p>
+        </div>
       ) : groups ? (
         <div className="space-y-4">
           {groups.map((g) => (
-            <div key={g.chapter}>
-              <div className="mb-1.5 px-1 text-sm font-semibold text-current">{g.chapter}</div>
+            <div key={g.chapter} className="space-y-2">
+              <div className="group flex items-center justify-between px-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const first = g.list[0]
+                    if (first) goTo(first)
+                  }}
+                  className="font-semibold text-sm text-current hover:text-[var(--bd-read-primary)] transition-colors text-left truncate"
+                  title={g.chapter}
+                >
+                  {g.chapter}
+                </button>
+                {g.list.length > 1 && (
+                  <span className="shrink-0 text-xs text-[var(--bd-read-sub)] tabular-nums opacity-0 transition-opacity duration-150 group-hover:opacity-80">
+                    {g.list.length}
+                  </span>
+                )}
+              </div>
               <ul className="space-y-2">
                 {g.list.map((a) => (
                   <li key={a.id}>{renderCard(a)}</li>
@@ -456,44 +689,69 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
-            onClick={() => { void copyItem(contextMenu.item); setContextMenu(null) }}
+            onClick={() => {
+              void copyItem(contextMenu.item)
+              setContextMenu(null)
+            }}
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
           >
-            <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><CopyIcon /></span>
+            <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4">
+              <CopyIcon />
+            </span>
             {_('annotation.copy')}
           </button>
           {contextMenu.item.type !== 'bookmark' && (
             <button
-              onClick={() => { shareItem(contextMenu.item); setContextMenu(null) }}
+              onClick={() => {
+                shareItem(contextMenu.item)
+                setContextMenu(null)
+              }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><ShareIcon /></span>
+              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4">
+                <ShareIcon />
+              </span>
               {_('annotation.share')}
             </button>
           )}
           {contextMenu.item.type === 'bookmark' && (
             <button
-              onClick={() => { setEditingId(contextMenu.item.id); setContextMenu(null) }}
+              onClick={() => {
+                setEditingId(contextMenu.item.id)
+                setContextMenu(null)
+              }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><PencilIcon /></span>
+              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4">
+                <PencilIcon />
+              </span>
               {_('annotation.rename')}
             </button>
           )}
           {kindOf(contextMenu.item) === 'idea' && (
             <button
-              onClick={() => { setEditingId(contextMenu.item.id); setContextMenu(null) }}
+              onClick={() => {
+                setEditingId(contextMenu.item.id)
+                setContextMenu(null)
+              }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><PencilIcon /></span>
+              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4">
+                <PencilIcon />
+              </span>
               {_('annotation.editNote')}
             </button>
           )}
           <button
-            onClick={() => { deleteItem(contextMenu.item); setContextMenu(null) }}
+            onClick={() => {
+              deleteItem(contextMenu.item)
+              setContextMenu(null)
+            }}
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-500/5"
           >
-            <span className="[&>svg]:h-4 [&>svg]:w-4"><TrashIcon /></span>
+            <span className="[&>svg]:h-4 [&>svg]:w-4">
+              <TrashIcon />
+            </span>
             {_('reader.delete')}
           </button>
         </div>
@@ -504,8 +762,7 @@ export const NotesPanel = memo(function NotesPanel({ items, allItems = items, to
           annotations={allItems.filter((item) => selectedIds.has(item.id))}
           sort={sort}
           chapterOrder={chapterOrder}
-          quickExport={exportOpen === 'quick'}
-          onClose={() => setExportOpen(null)}
+          onClose={() => setExportOpen(false)}
         />
       )}
     </div>

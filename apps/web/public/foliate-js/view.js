@@ -351,8 +351,8 @@ export class View extends HTMLElement {
           return
         }
         const range = doc ? anchor(doc) : anchor
-        // bookdock: search hits draw as soft amber fill (upstream: cyan outline)
-        overlayer.add(value, range, Overlayer.highlight, { color: '#fbbf2459' });
+        // bookdock: search hits draw with dynamic theme highlight (fallback to soft amber)
+        overlayer.add(value, range, Overlayer.highlight, { color: 'var(--bd-search-highlight, #fbbf2459)' });
       }
       return
     }

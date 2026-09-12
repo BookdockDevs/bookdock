@@ -7,6 +7,7 @@ import {
   buildAnnotationBuckets,
   cfiSpinePrefix,
   sectionSpinePrefix,
+  convertTocLabels,
 } from '../features/reader/renderers/FoliateReader'
 import type { ReaderAnnotation } from '../features/reader/types'
 
@@ -134,5 +135,28 @@ describe('memoizeLoadText', () => {
     expect(loadText.has('a.xhtml')).toBe(true)
     await expect(loadText('fail.xhtml')).rejects.toThrow('boom')
     expect(loadText.has('fail.xhtml')).toBe(false)
+  })
+})
+
+describe('convertTocLabels', () => {
+  it('converts nested TOC labels from the original text', async () => {
+    const source = [{
+      label: '第一章 內容',
+      href: 'chapter-1.xhtml',
+      subitems: [{ label: '閱讀設定', href: 'chapter-1.xhtml#settings' }],
+    }]
+
+    const simplified = await convertTocLabels(source, 'simplified')
+    expect(simplified).toEqual([{
+      label: '第一章 内容',
+      href: 'chapter-1.xhtml',
+      subitems: [{ label: '阅读设定', href: 'chapter-1.xhtml#settings' }],
+    }])
+    expect(source[0]?.label).toBe('第一章 內容')
+    expect(source[0]?.subitems?.[0]?.label).toBe('閱讀設定')
+
+    const traditional = await convertTocLabels(source, 'traditional')
+    expect(traditional[0]?.label).toBe('第一章 內容')
+    expect(traditional[0]?.subitems?.[0]?.label).toBe('閱讀設定')
   })
 })

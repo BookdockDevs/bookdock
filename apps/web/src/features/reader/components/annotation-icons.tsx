@@ -1,31 +1,131 @@
 import type { AnnotationStyle } from '@bookdock/shared'
 
-export function StyleGlyph({ style, active, color }: { style: AnnotationStyle; active?: boolean; color?: string }) {
-  // Accent carries the annotation color so the marker tint follows the picked color
-  const accent = color ?? 'currentColor'
-  // Geometric 'A' drawn as a path: <text> renders blurry and font-dependent at this size
+// Shared letter 'A' geometry across all styles: apex at (12, 5), feet at (7.5, 16.5) and (16.5, 16.5), bar at y=12.8
+const A_GLYPH_PATH = 'M7.5 16.5 12 5l4.5 11.5M9 12.8h6'
+
+export function StyleGlyph({
+  style,
+  active,
+  color,
+  className,
+  size = 20,
+}: {
+  style: AnnotationStyle
+  active?: boolean
+  color?: string
+  className?: string
+  size?: number
+}) {
+  // If an explicit highlight color is given, use it for the marker tint / line
+  const hasColor = Boolean(color)
+
   if (style === 'highlight') {
+    if (hasColor) {
+      return (
+        <svg viewBox="0 0 24 24" className={className} width={size} height={size}>
+          <rect x="4" y="3" width="16" height="16" rx="4.5" fill={color} />
+          <path
+            d={A_GLYPH_PATH}
+            fill="none"
+            stroke="#1c1917"
+            strokeWidth={1.85}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )
+    }
+
+    if (active) {
+      return (
+        <svg viewBox="0 0 24 24" className={className} width={size} height={size}>
+          <rect x="4" y="3" width="16" height="16" rx="4.5" fill="currentColor" />
+          <path
+            d={A_GLYPH_PATH}
+            fill="none"
+            stroke="var(--bd-read-bg, #ffffff)"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )
+    }
+
     return (
-      <svg viewBox="0 0 24 24" className={active ? 'text-amber-400' : undefined} width="20" height="20">
-        <rect x="4.5" y="4.5" width="15" height="15" rx="3" fill={accent} />
-        <path d="M8 16 12 8l4 8M9.4 13.2h5.2" fill="none" stroke="#292524" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <svg viewBox="0 0 24 24" className={className} width={size} height={size}>
+        <rect
+          x="4"
+          y="3"
+          width="16"
+          height="16"
+          rx="4.5"
+          fill="currentColor"
+          fillOpacity={0.12}
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeOpacity={0.35}
+        />
+        <path
+          d={A_GLYPH_PATH}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.75}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     )
   }
-  const line = style === 'squiggly'
-    ? <path d="M4.5 20q1.9-2.5 3.75 0t3.75 0t3.75 0t3.75 0" fill="none" stroke={accent} strokeWidth="1.8" strokeLinecap="round" />
-    : <path d="M4.5 20h15" fill="none" stroke={accent} strokeWidth="1.8" strokeLinecap="round" />
+
+  const lineStroke = hasColor ? color! : 'currentColor'
+
+  if (style === 'underline') {
+    return (
+      <svg viewBox="0 0 24 24" className={className} width={size} height={size}>
+        <path
+          d={A_GLYPH_PATH}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={active ? 1.85 : 1.7}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M4 20h16"
+          fill="none"
+          stroke={lineStroke}
+          strokeWidth={active || hasColor ? 2.8 : 1.8}
+          strokeLinecap="round"
+        />
+      </svg>
+    )
+  }
+
+  // Squiggly
   return (
-    <svg viewBox="0 0 24 24" className={active ? 'text-amber-400' : undefined} width="20" height="20">
-      <path d="M6.5 15 12 4.5 17.5 15M8.9 10.7h6.2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      {line}
+    <svg viewBox="0 0 24 24" className={className} width={size} height={size}>
+      <path
+        d={A_GLYPH_PATH}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={active ? 1.85 : 1.7}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4 20q2 -2.2 4 0t4 0t4 0t4 0"
+        fill="none"
+        stroke={lineStroke}
+        strokeWidth={active || hasColor ? 2.6 : 1.8}
+        strokeLinecap="round"
+      />
     </svg>
   )
 }
-
-export function CopyIcon() {
+export function CopyIcon({ size = 16, strokeWidth = 1.75, className }: { size?: number; strokeWidth?: number; className?: string } = {}) {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
       <rect x="9" y="9" width="11" height="11" rx="2" />
       <path d="M5 15V5a2 2 0 0 1 2-2h10" />
     </svg>
@@ -52,11 +152,41 @@ export function AiChatIcon({ size = 28 }: { size?: number }) {
   )
 }
 
-export function AiSparkleIcon({ size = 20 }: { size?: number }) {
+export function AiSparkleIcon({ size = 20, strokeWidth = 1.8 }: { size?: number; strokeWidth?: number } = {}) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
       <path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" />
       <path d="m19 15 .75 2.25L22 18l-2.25.75L19 21l-.75-2.25L16 18l2.25-.75z" />
+    </svg>
+  )
+}
+
+export function TtsIcon({
+  size,
+  className,
+  strokeWidth = 1.8,
+  viewBox = '0 0 24 24',
+}: {
+  size?: number
+  className?: string
+  strokeWidth?: number
+  /** Crop tighter than 24x24 to optically upscale the glyph without redrawing its shape */
+  viewBox?: string
+} = {}) {
+  return (
+    <svg
+      viewBox={viewBox}
+      width={size ?? (className ? undefined : 20)}
+      height={size ?? (className ? undefined : 20)}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9.6 7 4.3 19.2M9.6 7l4.8 12.2M6.4 14.7h6" />
+      <path d="M13.3 7.5c2.7 1.5 3.7 3.7 3.7 5.8M13.9 4.8c3.7 2.1 5.8 5 5.8 8.5" />
     </svg>
   )
 }
@@ -70,30 +200,58 @@ export function SearchIcon() {
   )
 }
 
-export function TrashIcon() {
+export function TrashIcon({
+  size = 16,
+  strokeWidth = 1.75,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
     </svg>
   )
 }
 
-/** Replace glyph for the selection toolbar's 正文变换 action — a pencil
- *  rewriting two text lines (an edit/write gesture, distinct from the note
- *  bulb and the highlight "A") */
+/** Replace glyph for the selection toolbar's 正文变换 action — opposing
+ *  horizontal exchange arrows representing text replacement */
 export function ReplaceIcon() {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3.5 8.5h7" />
-      <path d="M3.5 15.5h13" />
-      <path transform="translate(1.5 -1) scale(0.85)" d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+      <path d="M4 8h15M15 4l4 4-4 4" />
+      <path d="M20 16H5M9 12l-4 4 4 4" />
     </svg>
   )
 }
 
-export function CheckIcon() {
+export function CheckIcon({
+  size = 18,
+  strokeWidth = 1.8,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
       <path d="m5 13 4 4 10-10" />
     </svg>
   )
@@ -109,10 +267,28 @@ export function SelectionIcon({ state = 'none' }: { state?: 'none' | 'partial' |
   )
 }
 
-export function CloseIcon() {
+export function CloseIcon({
+  size = 16,
+  strokeWidth = 1.75,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-      <path d="M6 6l12 12M18 6L6 18" />
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M18 6 6 18M6 6l12 12" />
     </svg>
   )
 }
@@ -161,9 +337,9 @@ export function ChevronLeftIcon() {
   )
 }
 
-export function ChevronDownIcon() {
+export function ChevronDownIcon({ size = 16, strokeWidth = 2, className }: { size?: number; strokeWidth?: number; className?: string } = {}) {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
       <path d="m6 9 6 6 6-6" />
     </svg>
   )
@@ -177,24 +353,40 @@ export function BookmarkIcon() {
   )
 }
 
-export function ShareIcon() {
+export function ShareIcon({
+  size = 16,
+  strokeWidth = 1.75,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M12 3v12M8 6.5 12 3l4 3.5" />
       <path d="M5 12v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
     </svg>
   )
 }
 
-/** Card-with-quote glyph for the "书摘" (excerpt card) action — distinct from
- * the generic outbound ShareIcon used in the notes panel and dialog */
+/** Double-quote glyph for the "书摘" (excerpt/quote card) action — clean linear
+ *  outline quotation marks distinct from generic outbound share */
 export function ExcerptShareIcon() {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
-      <g fill="currentColor" stroke="none" transform="translate(3.9 5.6) scale(0.68)">
-        <path d="M6 17h3l2-4V7H5v6h3l-2 4zm8 0h3l2-4V7h-6v6h3l-2 4z" />
-      </g>
+      <path d="M10 11H5.5a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1H9a1 1 0 0 1 1 1v5.5c0 2.8-1.4 4.5-4.5 5.5" />
+      <path d="M19.5 11H15a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1v5.5c0 2.8-1.4 4.5-4.5 5.5" />
     </svg>
   )
 }
@@ -240,6 +432,57 @@ export function PinIcon() {
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 17v5" />
       <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+    </svg>
+  )
+}
+
+export function BatchSelectIcon({ size = 18 }: { size?: number } = {}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m3 5 2 2 4-4" />
+      <path d="M13 6h8" />
+      <path d="m3 12 2 2 4-4" />
+      <path d="M13 13h8" />
+      <path d="m3 19 2 2 4-4" />
+      <path d="M13 20h8" />
+    </svg>
+  )
+}
+
+export function DocumentExportIcon({
+  size = 16,
+  strokeWidth = 1.75,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <path d="M12 18v-6" />
+      <path d="m9 15 3 3 3-3" />
     </svg>
   )
 }

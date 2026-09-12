@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { isDark } from '@/lib/color'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { resolveReadingTheme } from '@/lib/reading-theme'
+import { cn } from '@/lib/utils'
 import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
+import { useUiStore } from '@/stores/ui.store'
 import { useReaderState } from '../state/reader-state'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useAiQuickCommands, type AiQuickCommand } from '../hooks/useAiQuickCommands'
@@ -24,15 +28,13 @@ import {
   popupPosition,
   setLastHighlightStyle,
 } from './annotation-colors'
-import { AiSparkleIcon, BulbIcon, CopyIcon, ExcerptShareIcon, ReplaceIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
+import { AiSparkleIcon, BulbIcon, CopyIcon, ExcerptShareIcon, ReplaceIcon, SearchIcon, StyleGlyph, TrashIcon, TtsIcon } from './annotation-icons'
 
 const BAR_WIDTH = 356
 const BAR_HEIGHT = 44
 const STYLE_WIDTH = 236
 const STYLE_HEIGHT = 40
 const AI_MENU_WIDTH = 184
-
-const iconBtn = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-stone-200 transition-colors hover:bg-white/10 hover:text-white'
 
 interface SelectionToolbarProps {
   bookId: string
@@ -73,6 +75,27 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   const user = useAuthStore((s) => s.user)
   const authorName = getUserDisplayName(user, _('auth.guest'))
   const avatarKey = useAuthStore((s) => s.user?.avatarKey)
+  const readingThemeId = useUiStore((s) => s.readingThemeId)
+  const customThemes = useUiStore((s) => s.customThemes)
+  const isDarkTheme = useMemo(() => {
+    const theme = resolveReadingTheme(readingThemeId, customThemes)
+    return isDark(theme.bg)
+  }, [readingThemeId, customThemes])
+
+  const iconBtn = (active?: boolean, danger?: boolean) => cn(
+    'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors',
+    danger
+      ? isDarkTheme
+        ? 'text-red-400 hover:bg-white/10 hover:text-red-300'
+        : 'text-red-600 hover:bg-red-50 hover:text-red-700'
+      : active
+        ? isDarkTheme
+          ? 'bg-white/15 text-white'
+          : 'bg-stone-200/80 text-stone-900 font-medium'
+        : isDarkTheme
+          ? 'text-stone-200 hover:bg-white/10 hover:text-white'
+          : 'text-stone-600 hover:bg-stone-100 hover:text-stone-900',
+  )
   useEffect(() => {
     setCreatedLocal(null)
     setNoteEditing(false)
@@ -332,14 +355,17 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     close()
   }
 
-  const bar = popupPosition(selection.rect, BAR_WIDTH, BAR_HEIGHT)
+  const hasStyleBar = Boolean(target)
+  const bar = popupPosition(selection.rect, BAR_WIDTH, BAR_HEIGHT, hasStyleBar ? STYLE_HEIGHT + 8 : 0)
+  const effectiveBarWidth = Math.min(BAR_WIDTH, Math.max(32, window.innerWidth - 16))
+  const effectiveStyleWidth = Math.min(STYLE_WIDTH, Math.max(32, window.innerWidth - 16))
   const styleLeft = Math.min(
-    Math.max(8, bar.left + BAR_WIDTH / 2 - STYLE_WIDTH / 2),
-    Math.max(8, window.innerWidth - STYLE_WIDTH - 8),
+    Math.max(8, bar.left + effectiveBarWidth / 2 - effectiveStyleWidth / 2),
+    Math.max(8, window.innerWidth - effectiveStyleWidth - 8),
   )
   const styleTop = bar.dir === 'above'
     ? Math.max(8, bar.top - STYLE_HEIGHT - 8)
-    : bar.top + BAR_HEIGHT + 8
+    : Math.min(window.innerHeight - STYLE_HEIGHT - 8, bar.top + BAR_HEIGHT + 8)
 
   if (noteEditing) {
     return (
@@ -397,23 +423,18 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       ? { key: 'delete', label: _('annotation.deleteHighlight'), icon: <TrashIcon />, danger: true, onClick: () => removeAnnotation() }
       : { key: 'highlight', label: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, danger: false, onClick: highlight },
     { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
-    { key: 'ai-chat', label: _('reader.aiChatSelection'), icon: <AiSparkleIcon size={18} />, danger: false, onClick: openAiChat },
+    { key: 'ai-chat', label: _('reader.aiChatSelection'), icon: <AiSparkleIcon size={20} />, danger: false, onClick: openAiChat },
     { key: 'ai-commands', label: _('reader.aiQuickCommands'), icon: (
-      <span className="flex items-center gap-px">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <span className="flex items-center justify-center gap-0.5">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="m13 2-8 12h7l-1 8 8-12h-7z" />
         </svg>
-        <svg className={`h-2.5 w-2.5 transition-transform ${aiMenuAnchor ? 'rotate-180' : ''}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="m3 4.5 3 3 3-3" />
+        <svg className={`h-2 w-2 transition-transform ${aiMenuAnchor ? 'rotate-180' : ''}`} viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="m2.5 3.5 2.5 2.5 2.5-2.5" />
         </svg>
       </span>
     ), danger: false, onClick: toggleAiMenu },
-    { key: 'tts', label: _('reader.ttsFromSelection'), icon: (
-      <svg width="18" height="18" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 6 2 29M12 6l9 23M5 20.5h14" />
-        <path d="M19 7c5 2.8 7 7 7 11M20 2c7 4 11 9.5 11 16" />
-      </svg>
-    ), danger: false, onClick: readSelection },
+    { key: 'tts', label: _('reader.ttsFromSelection'), icon: <TtsIcon />, danger: false, onClick: readSelection },
     { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
     { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: shareExcerpt },
     // Low-frequency text-editing action sits last so the common actions stay put.
@@ -431,20 +452,29 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     <>
       {target && (
         <div
-          className="fixed z-50 flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl bg-stone-900/95 px-2 shadow-xl backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className={cn(
+            'fixed z-50 flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl px-2 shadow-xl backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+            isDarkTheme
+              ? 'border border-stone-800/80 bg-stone-900/95 text-stone-200'
+              : 'border border-stone-200/90 bg-white/95 text-stone-700',
+          )}
           style={{ left: styleLeft, top: styleTop }}
         >
           {HIGHLIGHT_STYLES.map((s) => (
             <button
               key={s}
               onClick={() => restyle({ style: s })}
-              className={`${iconBtn} ${target.style === s ? 'bg-white/15 text-white' : ''}`}
+              className={iconBtn(target.style === s)}
               title={_(STYLE_LABEL_KEYS[s])}
             >
-              <StyleGlyph style={s} color={target.style === s ? highlightHex(target.color) : undefined} />
+              <StyleGlyph
+                style={s}
+                active={target.style === s}
+                color={target.style === s ? highlightHex(target.color) : undefined}
+              />
             </button>
           ))}
-          <span className="mx-1 h-5 w-px bg-white/15" />
+          <span className={cn('mx-1 h-5 w-px', isDarkTheme ? 'bg-white/15' : 'bg-stone-200')} />
           {HIGHLIGHT_COLORS.map((c) => (
             <button key={c.name} onClick={() => restyle({ color: c.name })} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform hover:scale-110" title={_(COLOR_LABEL_KEYS[c.name])}>
               <span className="flex h-4 w-4 items-center justify-center rounded-full" style={{ backgroundColor: c.hex }}>
@@ -459,7 +489,12 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         </div>
       )}
       <div
-        className="fixed z-50 flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl bg-stone-900/95 px-2 shadow-xl backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className={cn(
+          'fixed z-50 flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl px-2 shadow-xl backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+          isDarkTheme
+            ? 'border border-stone-800/80 bg-stone-900/95 text-stone-200'
+            : 'border border-stone-200/90 bg-white/95 text-stone-700',
+        )}
         style={{ left: bar.left, top: bar.top }}
       >
         {actions.map((a) => (
@@ -470,25 +505,38 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
             title={a.label}
             aria-haspopup={a.key === 'ai-commands' ? 'menu' : undefined}
             aria-expanded={a.key === 'ai-commands' ? Boolean(aiMenuAnchor) : undefined}
-            className={`${iconBtn} ${a.key === 'ai-commands' && aiMenuAnchor ? 'bg-white/15 text-white' : ''} ${a.danger ? 'text-red-400 hover:text-red-300' : ''}`}
+            className={iconBtn(a.key === 'ai-commands' && Boolean(aiMenuAnchor), a.danger)}
           >
             {a.icon}
           </button>
         ))}
-        <span
-          className={`absolute h-3 w-3 rotate-45 bg-stone-900/95 ${
-            bar.dir === 'above' ? '-bottom-1' : '-top-1'
-          }`}
-          style={{ left: bar.caretLeft - 6 }}
-        />
       </div>
+      <span
+        data-testid="selection-toolbar-caret"
+        className={cn(
+          'fixed z-[49] h-3 w-3 rotate-45 pointer-events-none',
+          isDarkTheme
+            ? 'border-stone-800/80 bg-stone-900/95'
+            : 'border-stone-200/90 bg-white/95',
+          bar.dir === 'above' ? 'border-b border-r' : 'border-t border-l',
+        )}
+        style={{
+          left: bar.left + bar.caretLeft - 6,
+          top: bar.dir === 'above' ? bar.top + BAR_HEIGHT - 6 : bar.top - 6,
+        }}
+      />
       {aiMenuAnchor && (
         <div
           ref={aiMenuRef}
           role="menu"
           data-testid="selection-ai-commands"
           aria-label={_('reader.aiQuickCommands')}
-          className="fixed z-[51] overflow-y-auto rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1.5 text-[var(--bd-read-text)] shadow-2xl"
+          className={cn(
+            'fixed z-[51] overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] rounded-xl p-1.5 shadow-2xl backdrop-blur-md',
+            isDarkTheme
+              ? 'border border-stone-800/80 bg-stone-900/95 text-stone-200'
+              : 'border border-stone-200/90 bg-white/95 text-stone-700',
+          )}
           style={{
             left: Math.min(
               Math.max(8, aiMenuAnchor.left - 8),
@@ -506,11 +554,20 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
               type="button"
               role="menuitem"
               onClick={() => runAiCommand(command)}
-              className="flex min-h-10 w-full items-center rounded-lg px-3 text-left text-sm transition-colors hover:bg-[var(--bd-read-page-bg)]"
+              className={cn(
+                'flex min-h-9 w-full items-center rounded-lg px-3 text-left text-sm transition-colors',
+                isDarkTheme
+                  ? 'text-stone-200 hover:bg-white/10 hover:text-white focus-visible:bg-white/10'
+                  : 'text-stone-700 hover:bg-stone-100 hover:text-stone-900 focus-visible:bg-stone-100',
+              )}
             >
               <span className="min-w-0 flex-1 truncate">{command.name}</span>
             </button>
-          )) : <p className="px-3 py-3 text-xs text-[var(--bd-read-sub)]">{_('reader.aiPromptsEmpty')}</p>}
+          )) : (
+            <p className={cn('px-3 py-3 text-xs', isDarkTheme ? 'text-stone-400' : 'text-stone-500')}>
+              {_('reader.aiPromptsEmpty')}
+            </p>
+          )}
         </div>
       )}
     </>

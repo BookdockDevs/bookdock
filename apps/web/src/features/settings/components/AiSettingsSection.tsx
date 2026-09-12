@@ -608,19 +608,33 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
           />
         </SettingsFormField>
         <div className="flex flex-col gap-2 text-xs text-stone-600 dark:text-stone-300">
-          <div ref={variableHelpRef} className="relative flex items-center gap-1.5">
+          <div ref={variableHelpRef} className="relative flex w-fit items-center gap-1.5">
             <span>{_('settings.aiPromptVariables')}</span>
             <button type="button" onClick={() => setVariableHelpOpen((open) => !open)} aria-label={_('settings.aiPromptVariablesHelp')} aria-expanded={variableHelpOpen} className={`flex h-5 w-5 items-center justify-center rounded-full transition-colors ${variableHelpOpen ? 'bg-stone-200 text-stone-800 dark:bg-stone-700 dark:text-stone-100' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'}`}>
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
             </button>
-            {variableHelpOpen && <div role="dialog" aria-label={_('settings.aiPromptVariablesHelpTitle')} className="absolute left-0 top-7 z-20 w-80 max-w-[calc(100vw-3rem)] rounded-xl border border-stone-200 bg-white p-3 shadow-xl dark:border-stone-700 dark:bg-stone-900">
-              <p className="mb-3 text-sm font-medium text-stone-900 dark:text-stone-100">{_('settings.aiPromptVariablesHelpTitle')}</p>
-              <dl className="space-y-3">
-                <div><dt className="font-mono text-xs text-stone-800 dark:text-stone-100">{'{SELTEXT}'}</dt><dd className="mt-1 leading-relaxed text-stone-500 dark:text-stone-400">{_('settings.aiPromptVariableSelText')}</dd></div>
-                <div><dt className="font-mono text-xs text-stone-800 dark:text-stone-100">{'{SELPARA}'}</dt><dd className="mt-1 leading-relaxed text-stone-500 dark:text-stone-400">{_('settings.aiPromptVariableSelPara')}</dd></div>
-                <div><dt className="font-mono text-xs text-stone-800 dark:text-stone-100">{'{CHAPTER}'}</dt><dd className="mt-1 leading-relaxed text-stone-500 dark:text-stone-400">{_('settings.aiPromptVariableChapter')}</dd></div>
-              </dl>
-            </div>}
+            {variableHelpOpen && (
+              <div role="dialog" aria-label={_('settings.aiPromptVariablesHelpTitle')} className="absolute left-0 top-7 z-20 w-80 max-w-[calc(100vw-3rem)] rounded-xl border border-stone-200 bg-white p-3 shadow-xl dark:border-stone-700 dark:bg-stone-900 animate-in fade-in zoom-in-95 duration-100">
+                <div className="mb-2.5 flex items-center justify-between border-b border-stone-100 pb-2 dark:border-stone-800">
+                  <span className="text-xs font-semibold text-stone-900 dark:text-stone-100">{_('settings.aiPromptVariablesHelpTitle')}</span>
+                  <button
+                    type="button"
+                    onClick={() => setVariableHelpOpen(false)}
+                    className="flex h-5 w-5 items-center justify-center rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-700 active:scale-90 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                    aria-label={_('library.cancel')}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <dl className="space-y-2.5">
+                  <div><dt className="font-mono text-xs font-semibold text-stone-800 dark:text-stone-100">{'{SELTEXT}'}</dt><dd className="mt-0.5 leading-relaxed text-stone-500 dark:text-stone-400">{_('settings.aiPromptVariableSelText')}</dd></div>
+                  <div><dt className="font-mono text-xs font-semibold text-stone-800 dark:text-stone-100">{'{SELPARA}'}</dt><dd className="mt-0.5 leading-relaxed text-stone-500 dark:text-stone-400">{_('settings.aiPromptVariableSelPara')}</dd></div>
+                  <div><dt className="font-mono text-xs font-semibold text-stone-800 dark:text-stone-100">{'{CHAPTER}'}</dt><dd className="mt-0.5 leading-relaxed text-stone-500 dark:text-stone-400">{_('settings.aiPromptVariableChapter')}</dd></div>
+                </dl>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             {AI_PROMPT_VARIABLES.map((variable) => <button key={variable} type="button" onClick={() => insertVariable(variable)} disabled={update.isPending} aria-label={_('settings.aiPromptInsertVariable', { variable })} className="rounded-lg border border-stone-200 px-2.5 py-1.5 font-mono text-xs text-stone-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-stone-700 dark:text-stone-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300">{variable}</button>)}

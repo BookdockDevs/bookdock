@@ -27,8 +27,8 @@ describe('ToolDock', () => {
       <ToolDock activeNavTab="notes" sidebarOpen={true} locked={false} onNavTab={onNavTab} onToggleLock={onToggleLock} />
     )
 
-    expect(screen.getByTitle('笔记')).toHaveClass('border-current', 'text-current')
-    expect(screen.getByTitle('目录')).toHaveClass('border-[var(--bd-read-accent)]', 'text-[var(--bd-read-sub)]')
+    expect(screen.getByTitle('笔记')).toHaveClass('text-[var(--bd-read-primary)]', 'bg-[var(--bd-read-primary)]/15')
+    expect(screen.getByTitle('目录')).toHaveClass('text-[var(--bd-read-sub)]')
   })
 
   it('does not highlight any tab when sidebar is closed', () => {
@@ -39,8 +39,8 @@ describe('ToolDock', () => {
       <ToolDock activeNavTab="notes" sidebarOpen={false} locked={false} onNavTab={onNavTab} onToggleLock={onToggleLock} />
     )
 
-    expect(screen.getByTitle('目录')).toHaveClass('border-[var(--bd-read-accent)]', 'text-[var(--bd-read-sub)]')
-    expect(screen.getByTitle('笔记')).toHaveClass('border-[var(--bd-read-accent)]', 'text-[var(--bd-read-sub)]')
+    expect(screen.getByTitle('目录')).toHaveClass('text-[var(--bd-read-sub)]')
+    expect(screen.getByTitle('笔记')).toHaveClass('text-[var(--bd-read-sub)]')
   })
 
   it('switches tab when clicking a different button', () => {

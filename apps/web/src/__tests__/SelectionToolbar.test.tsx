@@ -1,10 +1,13 @@
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 
 import type { AnnotationRes } from '@bookdock/shared'
 
+import { useUiStore } from '../stores/ui.store'
 import { useReaderState } from '../features/reader/state/reader-state'
 import { SelectionToolbar } from '../features/reader/components/SelectionToolbar'
+import { popupPosition } from '../features/reader/components/annotation-colors'
 
 const createMutate = vi.fn()
 const updateMutate = vi.fn()
@@ -392,5 +395,56 @@ describe('SelectionToolbar', () => {
     fireEvent.click(screen.getByTitle('annotation.deleteAnnotation'))
     await waitFor(() => expect(deleteMutate).toHaveBeenCalledWith('a1'))
     await waitFor(() => expect(useReaderState.getState().selection).toBeNull())
+  })
+
+  it('renders with light theme styling in paper/cream themes and adapts to dark theme in night mode', () => {
+    act(() => useUiStore.setState({ readingThemeId: 'paper' }))
+    setSelection()
+    const { rerender } = render(<SelectionToolbar bookId="b1" />)
+    const copyButton = screen.getByTitle('annotation.copy')
+    const mainBar = copyButton.parentElement!
+    expect(mainBar.className).toContain('bg-white/95')
+    expect(mainBar.className).toContain('text-stone-700')
+    expect(mainBar.className).toContain('border-stone-200/90')
+
+    const caret = screen.getByTestId('selection-toolbar-caret')
+    expect(caret.className).toContain('bg-white/95')
+    expect(caret.className).toContain('border-stone-200/90')
+
+    act(() => useUiStore.setState({ readingThemeId: 'night' }))
+    rerender(<SelectionToolbar bookId="b1" />)
+    expect(mainBar.className).toContain('bg-stone-900/95')
+    expect(mainBar.className).toContain('text-stone-200')
+    expect(mainBar.className).toContain('border-stone-800/80')
+    expect(caret.className).toContain('bg-stone-900/95')
+    expect(caret.className).toContain('border-stone-800/80')
+  })
+
+  it('clamps caret and bar positions within bounds on narrow mobile viewports', () => {
+    const originalInnerWidth = window.innerWidth
+    try {
+      window.innerWidth = 320
+      const pos = popupPosition({ left: 300, top: 200, width: 80, height: 20 }, 356, 44)
+      expect(pos.left).toBeGreaterThanOrEqual(8)
+      expect(pos.left).toBeLessThanOrEqual(320 - 8)
+      // Caret must be clamped within effective width bounds
+      expect(pos.caretLeft).toBeLessThanOrEqual(320 - 16 - 16)
+      expect(pos.caretLeft).toBeGreaterThanOrEqual(16)
+    } finally {
+      window.innerWidth = originalInnerWidth
+    }
+  })
+
+  it('switches to below direction when there is insufficient space above for both bars', () => {
+    const originalInnerHeight = window.innerHeight
+    try {
+      window.innerHeight = 800
+      // When extraHeight (style bar) is needed and top space is small (< 100px)
+      const pos = popupPosition({ left: 100, top: 80, width: 200, height: 20 }, 356, 44, 48)
+      expect(pos.dir).toBe('below')
+      expect(pos.top).toBeGreaterThanOrEqual(80 + 20)
+    } finally {
+      window.innerHeight = originalInnerHeight
+    }
   })
 })

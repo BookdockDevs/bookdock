@@ -82,6 +82,7 @@ describe('RecentlyRead covers style', () => {
     mockScrollable(true)
     const { container: container2 } = render(<RecentlyRead style="covers" />)
     expect(container2.querySelector('.bg-gradient-to-l')).not.toBeNull()
+    expect(screen.getByRole('button', { name: '向右滚动' })).toBeInTheDocument()
   })
 })
 

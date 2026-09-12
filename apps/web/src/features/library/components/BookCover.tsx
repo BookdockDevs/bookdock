@@ -4,32 +4,16 @@ import type { BookListItem } from '@bookdock/shared'
 import { useUiStore } from '@/stores/ui.store'
 import { cn } from '@/lib/utils'
 
+import { getCoverPalette } from './cover-palettes'
+
 interface BookCoverProps {
   book: BookListItem
   size?: 'sm' | 'md'
   coverSrc?: string | null
+  coverPaletteId?: string | null
 }
-
-const STONE_PALETTES = [
-  'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400',
-  'bg-stone-200 text-stone-600 dark:bg-stone-700 dark:text-stone-300',
-  'bg-amber-50 text-stone-600 dark:bg-amber-950 dark:text-amber-300',
-  'bg-orange-50 text-stone-600 dark:bg-orange-950 dark:text-orange-300',
-  'bg-yellow-50 text-stone-500 dark:bg-yellow-950 dark:text-yellow-300',
-  'bg-neutral-100 text-stone-600 dark:bg-neutral-800 dark:text-neutral-400',
-  'bg-stone-50 text-stone-500 dark:bg-stone-800 dark:text-stone-400',
-  'bg-zinc-100 text-stone-600 dark:bg-zinc-800 dark:text-zinc-400',
-]
 
 const EXT_RE = /\.(epub|txt|pdf|mobi|azw3?|fb2)$/i
-
-function hashHue(id: string): number {
-  let h = 0
-  for (let i = 0; i < id.length; i++) {
-    h = (h * 31 + id.charCodeAt(i)) >>> 0
-  }
-  return h
-}
 
 // Titles of parsed txt files can still look like raw file names.
 function displayTitle(title: string): string {
@@ -37,10 +21,11 @@ function displayTitle(title: string): string {
   return trimmed.replace(EXT_RE, '') || trimmed
 }
 
-export default function BookCover({ book, size = 'md', coverSrc }: BookCoverProps) {
+export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId }: BookCoverProps) {
   const [error, setError] = useState(false)
   const coverFit = useUiStore((s) => s.coverFit)
-  const palette = STONE_PALETTES[hashHue(book.id) % STONE_PALETTES.length]
+  const paletteKey = book.title?.trim() || book.id
+  const palette = getCoverPalette(paletteKey, coverPaletteId)
   const isSm = size === 'sm'
   const source = coverSrc === undefined
     ? (book.coverKey ? `/api/v1/books/${book.id}/cover?v=${encodeURIComponent(book.coverKey)}` : null)
@@ -77,7 +62,7 @@ export default function BookCover({ book, size = 'md', coverSrc }: BookCoverProp
       <div
         className={cn(
           'relative flex h-16 w-12 items-center justify-center overflow-hidden rounded-xl border border-stone-200/70 dark:border-stone-800/60',
-          palette,
+          palette.className,
         )}
       >
         <span className="absolute inset-y-0 left-0 w-0.5 bg-black/8 dark:bg-black/25" />
@@ -89,13 +74,14 @@ export default function BookCover({ book, size = 'md', coverSrc }: BookCoverProp
   return (
     <div
       className={cn(
-        'relative flex aspect-[2/3] w-full select-none flex-col overflow-hidden rounded-xl border border-stone-200/70 dark:border-stone-800/60',
-        palette,
+        'relative flex aspect-[2/3] w-full select-none flex-col overflow-hidden rounded-xl border border-stone-200/70 shadow-xs dark:border-stone-800/60',
+        palette.className,
       )}
     >
       <span className="absolute inset-y-0 left-0 w-1 bg-black/8 dark:bg-black/25" />
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-3.5">
-        <span className="line-clamp-4 text-center font-serif text-[13px] font-medium leading-snug">
+      <span className="absolute inset-y-0 left-2 w-px bg-black/4 dark:bg-black/15" />
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-3.5 pl-4">
+        <span className="line-clamp-4 text-center font-serif text-[13px] font-medium leading-snug tracking-wide">
           {title}
         </span>
       </div>

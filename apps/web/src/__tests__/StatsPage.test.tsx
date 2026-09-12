@@ -143,6 +143,18 @@ describe('Stats page', () => {
     expect(hasText(`${today.getFullYear()}`)).toBe(true)
   })
 
+  it('shows the selected hour details on the time distribution chart', () => {
+    render(<Stats />)
+
+    const hourBar = screen.getByRole('button', { name: /^21:00:/ })
+    expect(hourBar).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(hourBar)
+
+    expect(hourBar).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(/21:00 ·/)).toBeInTheDocument()
+  })
+
   it('navigates to the previous and next period', () => {
     render(<Stats />)
     fireEvent.click(screen.getByLabelText('stats.nextPeriod'))

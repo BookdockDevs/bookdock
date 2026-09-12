@@ -951,6 +951,7 @@ function useGlobalDragToggle(setOpen: (open: boolean) => void) {
   useEffect(() => {
     const onDragOver = (e: DragEvent) => {
       if (e.dataTransfer?.types.includes('Files')) {
+        e.preventDefault()
         setOpen(true)
         if (timer.current) clearTimeout(timer.current)
       }
@@ -959,11 +960,18 @@ function useGlobalDragToggle(setOpen: (open: boolean) => void) {
       if (timer.current) clearTimeout(timer.current)
       timer.current = setTimeout(() => setOpen(false), 200)
     }
+    const onDrop = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) {
+        e.preventDefault()
+      }
+    }
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
     return () => {
       window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
       if (timer.current) clearTimeout(timer.current)
     }
   }, [setOpen])

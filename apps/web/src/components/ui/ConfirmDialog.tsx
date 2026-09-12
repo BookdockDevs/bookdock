@@ -22,7 +22,12 @@ export default function ConfirmDialog({ title, message, confirmLabel, confirmVar
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
+        onClose()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -31,7 +36,7 @@ export default function ConfirmDialog({ title, message, confirmLabel, confirmVar
   return (
     <div
       data-settings-toggle=""
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4 animate-modal-backdrop"
       onClick={onClose}
     >
       <div
@@ -39,7 +44,7 @@ export default function ConfirmDialog({ title, message, confirmLabel, confirmVar
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={messageId}
-        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-md flex-col gap-5 overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl dark:bg-stone-900"
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-md flex-col gap-5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl dark:bg-stone-900 animate-modal-panel"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3">

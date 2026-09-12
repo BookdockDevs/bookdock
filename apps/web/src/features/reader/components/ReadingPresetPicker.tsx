@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore } from '@/stores/ui.store'
-import { resolveReadingTheme } from '@/lib/reading-theme'
+import { cn } from '@/lib/utils'
 
 import { useViewSettings } from '../view-settings-context'
 import { useIsTouch } from '../hooks/useIsTouch'
@@ -27,7 +27,6 @@ export default function ReadingPresetPicker() {
   const _ = useTranslation()
   const readingConfig = useUiStore((s) => s.readingConfig)
   const activeId = useUiStore((s) => s.activePresetId)
-  const customThemes = useUiStore((s) => s.customThemes)
   const createReadingPreset = useUiStore((s) => s.createReadingPreset)
   const renameReadingPreset = useUiStore((s) => s.renameReadingPreset)
   const deleteReadingPreset = useUiStore((s) => s.deleteReadingPreset)
@@ -122,21 +121,29 @@ export default function ReadingPresetPicker() {
   if (!cfg) return null
 
   return (
-    <div className="mb-5">
-      <label className="mb-2 flex items-center gap-1.5 text-xs text-[var(--bd-read-sub)]" title={_('reader.presetSection')}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="12 2 2 7 12 12 22 7 12 2" />
-          <polyline points="2 17 12 22 22 17" />
-          <polyline points="2 12 12 17 22 12" />
-        </svg>
-        {_('reader.presetSection')}
-      </label>
+    <div>
+      <div className="mb-2.5 flex items-center justify-between">
+        <span className="text-sm font-medium text-current" title={_('reader.presetSection')}>
+          {_('reader.presetSection')}
+        </span>
+        <button
+          type="button"
+          onClick={startCreate}
+          title={_('reader.presetCreate')}
+          aria-label={_('reader.presetCreate')}
+          className="flex h-6 items-center gap-1 rounded-md border border-stone-200/80 bg-stone-500/5 px-2 text-xs font-normal text-[var(--bd-read-sub)] transition-all hover:border-stone-300/90 hover:bg-stone-500/10 hover:text-current active:scale-95 dark:border-stone-800/80"
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span>{_('reader.presetCreate')}</span>
+        </button>
+      </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
         {presets.map((preset) => {
           const effective = preset.id === effectiveId
           const bound = preset.id === boundPresetId
-          const theme = resolveReadingTheme(preset.snapshot.readingThemeId as string, customThemes)
           return (
             <div
               key={preset.id}
@@ -157,24 +164,24 @@ export default function ReadingPresetPicker() {
                   }}
                   onBlur={commitRename}
                   placeholder={_('reader.presetNamePlaceholder')}
-                  className="h-7 w-24 rounded-lg border border-current bg-transparent px-2 text-xs text-current outline-none placeholder:text-[var(--bd-read-sub)]"
+                  className="h-8 w-24 rounded-lg border border-stone-400/50 bg-[var(--bd-read-bg)] px-2 text-xs text-current outline-none shadow-sm placeholder:text-[var(--bd-read-sub)]"
                 />
               ) : (
                 <button
                   type="button"
                   onClick={() => onChipClick(preset)}
                   title={effective ? (bound ? _('reader.presetUnbind') : _('reader.presetBackToGlobal')) : preset.name}
-                  className={`relative flex h-7 items-center gap-1.5 rounded-lg border px-2 text-xs transition-colors ${
+                  className={cn(
+                    'relative flex min-h-[2rem] items-center gap-1.5 rounded-lg px-3 py-1 text-xs select-none transition-all duration-150 active:scale-[0.98]',
                     effective
-                      ? 'border-current bg-current/10 text-current'
-                      : 'border-stone-200 text-[var(--bd-read-sub)] hover:text-current dark:border-stone-800'
-                  }`}
+                      ? 'border border-stone-400/50 bg-[var(--bd-read-bg)] font-medium text-current shadow-sm ring-1 ring-stone-400/20 dark:border-stone-600/50 dark:ring-stone-600/20'
+                      : 'border border-stone-300/60 bg-[var(--bd-read-bg)]/80 font-normal text-[var(--bd-read-sub)] shadow-xs hover:border-stone-400 hover:text-current dark:border-stone-700/60 dark:bg-stone-800/30',
+                  )}
                 >
-                  <span
-                    className="h-3 w-3 shrink-0 rounded-full border border-stone-400/40"
-                    style={{ backgroundColor: theme.bg }}
-                  />
-                  <span className="max-w-20 truncate">{preset.name}</span>
+                  {effective && (
+                    <span className="text-[10px] font-bold text-current">✓</span>
+                  )}
+                  <span className="max-w-24 truncate">{preset.name}</span>
                   {/* Bound-to-this-book marker: plain text suffix — the tiny
                       pin badge rendered as an unreadable dot at 8px */}
                   {bound && (
@@ -230,7 +237,7 @@ export default function ReadingPresetPicker() {
           )
         })}
 
-        {creating ? (
+        {creating && (
           <input
             autoFocus
             value={draftName}
@@ -241,19 +248,13 @@ export default function ReadingPresetPicker() {
             }}
             onBlur={commitCreate}
             placeholder={_('reader.presetNamePlaceholder')}
-            className="h-7 w-24 rounded-lg border border-current bg-transparent px-2 text-xs text-current outline-none placeholder:text-[var(--bd-read-sub)]"
+            className="h-8 w-24 rounded-lg border border-stone-400/50 bg-[var(--bd-read-bg)] px-2 text-xs text-current outline-none shadow-sm placeholder:text-[var(--bd-read-sub)]"
           />
-        ) : (
-          <button
-            type="button"
-            onClick={startCreate}
-            title={_('reader.presetCreate')}
-            className="flex h-7 w-7 items-center justify-center rounded-lg border border-dashed border-stone-300 text-[var(--bd-read-sub)] transition-colors hover:border-current hover:text-current dark:border-stone-700"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
+        )}
+        {presets.length === 0 && !creating && (
+          <p className="py-0.5 text-xs text-[var(--bd-read-sub)] opacity-70">
+            {_('reader.presetNone')}
+          </p>
         )}
       </div>
 

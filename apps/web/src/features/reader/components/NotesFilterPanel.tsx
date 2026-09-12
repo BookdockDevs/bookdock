@@ -1,17 +1,14 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 
 import type { AnnotationStyle } from '@bookdock/shared'
 
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
+import { markEscConsumed } from '../lib/esc-consumed'
 
 import type { ItemKind, NoteSort } from '../hooks/useNotesFilter'
 import { COLOR_LABEL_KEYS, HIGHLIGHT_COLORS, HIGHLIGHT_STYLES, STYLE_LABEL_KEYS } from './annotation-colors'
-import { StyleGlyph } from './annotation-icons'
-
-const filterPill = 'flex-1 rounded-lg border px-2 py-1.5 text-xs transition-colors'
-const pillActive = 'border-current bg-current/10 text-current'
-const pillIdle = 'border-stone-200/60 text-[var(--bd-read-sub)] hover:bg-stone-500/5 dark:border-stone-800/60'
+import { CheckIcon, StyleGlyph } from './annotation-icons'
 
 interface NotesFilterPanelProps {
   open: boolean
@@ -44,103 +41,267 @@ export function NotesFilterPanel({
 }: NotesFilterPanelProps) {
   const _ = useTranslation()
   const rootRef = useRef<HTMLDivElement>(null)
-  // fixed-position panel: the sidebar's scroll container would clip an absolute one
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  const [pos, setPos] = useState<{ top: number; left?: number; right?: number } | null>(null)
+  const [placement, setPlacement] = useState<'right' | 'down'>('right')
 
   useEffect(() => {
     if (!open) return
-    const rect = anchorRef.current?.getBoundingClientRect()
-    if (rect) setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
-    function handle(e: Event) {
+    const btn = anchorRef.current
+    if (!btn) return
+
+    const rect = btn.getBoundingClientRect()
+    const sidebarEl = btn.closest('[data-sidebar-panel]') as HTMLElement | null
+    const sidebarRect = sidebarEl ? sidebarEl.getBoundingClientRect() : rect
+
+    const panelWidth = 288
+    const margin = 8
+    const availableRight = window.innerWidth - sidebarRect.right
+
+    if (availableRight >= panelWidth + margin * 2) {
+      // Spacious enough to pop out to the right of the sidebar into the reader area
+      setPlacement('right')
+      setPos({
+        top: Math.max(margin, Math.min(rect.top - 4, window.innerHeight - 380)),
+        left: sidebarRect.right + margin,
+      })
+    } else {
+      // Narrow screen fallback: pop below anchor within viewport
+      setPlacement('down')
+      setPos({
+        top: rect.bottom + margin,
+        right: Math.max(margin, window.innerWidth - rect.right - 2),
+      })
+    }
+
+    function handleMouseDown(e: Event) {
       const target = e.target as Node
       if (!rootRef.current?.contains(target) && !anchorRef.current?.contains(target)) {
         onClose()
       }
     }
-    // Clicks inside the foliate iframe never reach document; the renderer
-    // relays them as a bubbling `content-click` on the reader container
-    document.addEventListener('mousedown', handle)
-    document.addEventListener('content-click', handle)
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        markEscConsumed()
+        onClose()
+      }
+    }
+
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('content-click', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.removeEventListener('mousedown', handle)
-      document.removeEventListener('content-click', handle)
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('content-click', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
     }
   }, [open, anchorRef, onClose])
+
+  const isChapter = sort === 'chapter' || sort === 'chapter-desc'
+  const isChapterDesc = sort === 'chapter-desc'
+  const isTime = sort === 'time-desc' || sort === 'time-asc'
+  const isTimeAsc = sort === 'time-asc'
+
+  function handleChapterSort() {
+    if (isChapter) {
+      onSortChange(isChapterDesc ? 'chapter' : 'chapter-desc')
+    } else {
+      onSortChange('chapter')
+    }
+  }
+
+  function handleTimeSort() {
+    if (isTime) {
+      onSortChange(isTimeAsc ? 'time-desc' : 'time-asc')
+    } else {
+      onSortChange('time-desc')
+    }
+  }
+
+  const isFiltered = useMemo(
+    () => displayTypes.size < 3 || styleFilter.size > 0 || colorFilter.size > 0 || sort !== 'chapter',
+    [displayTypes, styleFilter, colorFilter, sort],
+  )
 
   if (!open || !pos) return null
 
   return (
     <div
       ref={rootRef}
-      className="fixed z-[60] w-56 rounded-xl border border-stone-200/60 bg-[var(--bd-read-bg)] p-3 shadow-xl dark:border-stone-800/60"
-      style={{ top: pos.top, right: pos.right }}
+      className={cn(
+        'fixed z-[60] w-72 rounded-2xl border p-3.5 space-y-3.5 select-none shadow-2xl animate-modal-panel',
+        placement === 'right' ? 'origin-top-left' : 'origin-top-right',
+      )}
+      style={{
+        top: pos.top,
+        left: pos.left,
+        right: pos.right,
+        backgroundColor: 'var(--bd-read-bg)',
+        color: 'var(--bd-read-text)',
+        borderColor: 'var(--bd-read-accent)',
+      }}
     >
-      <div className="text-xs text-[var(--bd-read-sub)]">{_('annotation.filterType')}</div>
-      <div className="mt-1.5 flex gap-1.5">
-        {([
-          { key: 'highlight', label: _('annotation.drawHighlight') },
-          { key: 'idea', label: _('annotation.idea') },
-          { key: 'bookmark', label: _('annotation.bookmark') },
-        ] as const).map((item) => (
-          <button
-            key={item.key}
-            onClick={() => onToggleType(item.key)}
-            className={cn(filterPill, displayTypes.has(item.key) ? pillActive : pillIdle)}
-          >
-            {item.label}
-          </button>
-        ))}
+      {/* 笔记类型 */}
+      <div>
+        <div className="mb-1.5 text-[11px] font-semibold text-[var(--bd-read-sub)] tracking-wide">
+          {_('annotation.filterType')}
+        </div>
+        <div className="grid grid-cols-3 gap-1 rounded-xl bg-stone-500/10 p-1 dark:bg-stone-500/15">
+          {([
+            { key: 'highlight', label: _('annotation.drawHighlight') },
+            { key: 'idea', label: _('annotation.idea') },
+            { key: 'bookmark', label: _('annotation.bookmark') },
+          ] as const).map((item) => {
+            const isActive = displayTypes.has(item.key)
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onToggleType(item.key)}
+                className={cn(
+                  'flex h-7.5 items-center justify-center rounded-lg text-xs transition-all duration-150 select-none active:scale-[0.98]',
+                  isActive
+                    ? 'bg-[var(--bd-read-bg)] font-semibold text-[var(--bd-read-text)] shadow-sm border border-black/8 dark:border-white/12'
+                    : 'text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] hover:bg-stone-500/5',
+                )}
+              >
+                {item.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
-      <div className="mt-3 text-xs text-[var(--bd-read-sub)]">{_('annotation.filterStyle')}</div>
-      <div className="mt-1.5 flex gap-1.5">
-        {HIGHLIGHT_STYLES.map((s) => (
+
+      {/* 划线类型 */}
+      <div>
+        <div className="mb-1.5 text-[11px] font-semibold text-[var(--bd-read-sub)] tracking-wide">
+          {_('annotation.filterStyle')}
+        </div>
+        <div className="grid grid-cols-3 gap-1 rounded-xl bg-stone-500/10 p-1 dark:bg-stone-500/15">
+          {HIGHLIGHT_STYLES.map((s) => {
+            const isActive = styleFilter.has(s)
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onToggleStyle(s)}
+                title={_(STYLE_LABEL_KEYS[s])}
+                className={cn(
+                  'flex h-8 items-center justify-center rounded-lg text-xs transition-all duration-150 select-none active:scale-[0.98]',
+                  isActive
+                    ? 'bg-[var(--bd-read-bg)] font-semibold text-[var(--bd-read-text)] shadow-sm border border-black/8 dark:border-white/12'
+                    : 'text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] hover:bg-stone-500/5',
+                )}
+              >
+                <StyleGlyph style={s} active={isActive} />
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* 划线颜色 */}
+      <div>
+        <div className="mb-1.5 text-[11px] font-semibold text-[var(--bd-read-sub)] tracking-wide">
+          {_('annotation.filterColor')}
+        </div>
+        <div className="flex items-center justify-between rounded-xl bg-stone-500/10 p-1.5 px-3 dark:bg-stone-500/15">
+          {HIGHLIGHT_COLORS.map((c) => {
+            const isSelected = colorFilter.has(c.name)
+            return (
+              <button
+                key={c.name}
+                type="button"
+                onClick={() => onToggleColor(c.name)}
+                className={cn(
+                  'relative flex h-6.5 w-6.5 items-center justify-center rounded-full transition-all duration-150 select-none',
+                  isSelected
+                    ? 'scale-110 ring-2 ring-[var(--bd-read-primary)] ring-offset-2 ring-offset-[var(--bd-read-bg)] shadow-xs'
+                    : 'hover:scale-105 opacity-80 hover:opacity-100',
+                )}
+                style={{ backgroundColor: c.hex }}
+                title={_(COLOR_LABEL_KEYS[c.name])}
+                aria-label={_(COLOR_LABEL_KEYS[c.name])}
+                aria-pressed={isSelected}
+              >
+                {isSelected && (
+                  <CheckIcon size={12} strokeWidth={2.6} className="text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]" />
+                )}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* 排序 */}
+      <div>
+        <div className="mb-1.5 text-[11px] font-semibold text-[var(--bd-read-sub)] tracking-wide">
+          {_('reader.sort')}
+        </div>
+        <div className="grid grid-cols-2 gap-1 rounded-xl bg-stone-500/10 p-1 dark:bg-stone-500/15">
           <button
-            key={s}
-            onClick={() => onToggleStyle(s)}
-            title={_(STYLE_LABEL_KEYS[s])}
+            type="button"
+            onClick={handleChapterSort}
             className={cn(
-              'flex h-9 flex-1 items-center justify-center rounded-lg border transition-colors',
-              styleFilter.has(s) ? pillActive : pillIdle,
+              'flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-xs transition-all duration-150 select-none active:scale-[0.98]',
+              isChapter
+                ? 'bg-[var(--bd-read-bg)] font-semibold text-[var(--bd-read-text)] shadow-sm border border-black/8 dark:border-white/12'
+                : 'text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] hover:bg-stone-500/5',
             )}
+            title={isChapterDesc ? _('reader.sortChapterReverse') : _('reader.sortChapter')}
           >
-            <StyleGlyph style={s} active={styleFilter.has(s)} />
+            <span className="truncate">
+              {isChapterDesc ? _('reader.sortChapterReverse') : _('reader.sortChapter')}
+            </span>
+            <span className={cn('shrink-0 transition-transform duration-200', isChapter && isChapterDesc && 'rotate-180')}>
+              <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={isChapter ? 'text-current' : 'opacity-40'}>
+                <path d="M12 5v14M19 12l-7 7-7-7" />
+              </svg>
+            </span>
           </button>
-        ))}
-      </div>
-      <div className="mt-3 text-xs text-[var(--bd-read-sub)]">{_('annotation.filterColor')}</div>
-      <div className="mt-1.5 flex gap-2">
-        {HIGHLIGHT_COLORS.map((c) => (
           <button
-            key={c.name}
-            onClick={() => onToggleColor(c.name)}
+            type="button"
+            onClick={handleTimeSort}
             className={cn(
-              'h-5 w-5 rounded-full transition-all',
-              colorFilter.has(c.name) ? 'ring-2 ring-current ring-offset-1' : 'hover:scale-110',
+              'flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-xs transition-all duration-150 select-none active:scale-[0.98]',
+              isTime
+                ? 'bg-[var(--bd-read-bg)] font-semibold text-[var(--bd-read-text)] shadow-sm border border-black/8 dark:border-white/12'
+                : 'text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] hover:bg-stone-500/5',
             )}
-            style={{ backgroundColor: c.hex }}
-            title={_(COLOR_LABEL_KEYS[c.name])}
-          />
-        ))}
+            title={isTimeAsc ? _('reader.sortTimeAsc') : _('reader.sortTimeDesc')}
+          >
+            <span className="truncate">
+              {isTimeAsc ? _('reader.sortTimeAsc') : _('reader.sortTimeDesc')}
+            </span>
+            <span className={cn('shrink-0 transition-transform duration-200', isTime && isTimeAsc && 'rotate-180')}>
+              <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={isTime ? 'text-current' : 'opacity-40'}>
+                <path d="M12 5v14M19 12l-7 7-7-7" />
+              </svg>
+            </span>
+          </button>
+        </div>
       </div>
-      <div className="mt-3 text-xs text-[var(--bd-read-sub)]">{_('reader.sort')}</div>
-      <div className="mt-1.5 flex gap-1.5">
+
+      {/* 底部重置操作栏 */}
+      <div className="flex items-center justify-between border-t border-[var(--bd-read-accent)]/50 pt-2.5">
+        <div className="flex items-center gap-1.5 text-[11px]">
+          {isFiltered && (
+            <span className="inline-flex items-center gap-1 font-medium text-[var(--bd-read-primary)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--bd-read-primary)]" />
+              {_('annotation.filterActive')}
+            </span>
+          )}
+        </div>
         <button
-          onClick={() => onSortChange(sort === 'chapter' ? 'chapter-desc' : 'chapter')}
-          className={cn(filterPill, sort === 'chapter' || sort === 'chapter-desc' ? pillActive : pillIdle)}
-        >
-          {sort === 'chapter-desc' ? _('reader.sortChapterReverse') : _('reader.sortChapter')}
-        </button>
-        <button
-          onClick={() => onSortChange(sort === 'time-desc' ? 'time-asc' : 'time-desc')}
-          className={cn(filterPill, sort === 'time-desc' || sort === 'time-asc' ? pillActive : pillIdle)}
-        >
-          {sort === 'time-asc' ? _('reader.sortTimeAsc') : _('reader.sortTimeDesc')}
-        </button>
-      </div>
-      <div className="mt-3 flex justify-end border-t border-stone-200/60 pt-2 dark:border-stone-800/60">
-        <button
+          type="button"
           onClick={onReset}
-          className="rounded-lg px-3 py-1 text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+          disabled={!isFiltered}
+          className={cn(
+            'rounded-lg px-2.5 py-1 text-xs font-medium transition-colors',
+            isFiltered
+              ? 'text-[var(--bd-read-primary)] hover:bg-[var(--bd-read-primary)]/10 active:scale-95'
+              : 'text-[var(--bd-read-sub)]/35 cursor-not-allowed',
+          )}
         >
           {_('annotation.reset')}
         </button>

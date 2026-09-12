@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveClickDirection, shouldArmPending, ttsHighlightColor, turnsCrossChapter, ttsViewportAction } from '../FoliateReader'
+import { resolveClickDirection, searchHighlightColor, shouldArmPending, ttsHighlightColor, turnsCrossChapter, ttsViewportAction } from '../FoliateReader'
 
 // container spans x = 100..700 (width 600)
 function dir(x: number, mode: 'standard' | 'fullscreen' | 'swap' | 'none' = 'standard') {
@@ -98,7 +98,6 @@ describe('shouldArmPending', () => {
     expect(shouldArmPending(1, { sections: [{ id: 'a.xhtml' }, { id: 'b.xhtml' }] }, 0)).toBe(true)
   })
 })
-
 describe('ttsViewportAction', () => {
   const viewport = { top: 100, bottom: 900, height: 800 }
 
@@ -144,5 +143,16 @@ describe('ttsHighlightColor', () => {
 
   it('falls back to the theme text when a primary color is unavailable', () => {
     expect(ttsHighlightColor({ bg: '#ffffff', text: '#000000' })).toBe('#404040')
+  })
+})
+
+describe('searchHighlightColor', () => {
+  it('uses the theme primary color when available', () => {
+    expect(searchHighlightColor({ bg: '#ffffff', text: '#000000', primary: '#336699' })).toBe('#336699')
+    expect(searchHighlightColor({ bg: '#111111', text: '#d6d6d6', primary: '#8a8a8a' })).toBe('#8a8a8a')
+  })
+
+  it('falls back to theme text when primary is omitted', () => {
+    expect(searchHighlightColor({ bg: '#ffffff', text: '#1c1917' })).toBe('#1c1917')
   })
 })

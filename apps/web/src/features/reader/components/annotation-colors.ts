@@ -93,18 +93,23 @@ export function popupPosition(
   rect: { left: number; top: number; width: number; height: number } | undefined,
   popupWidth: number,
   popupHeight: number,
+  extraHeight = 0,
 ) {
   const gap = 10
   const vw = window.innerWidth
   const vh = window.innerHeight
+  const effectiveWidth = Math.min(popupWidth, Math.max(32, vw - 16))
   if (!rect) {
-    return { left: Math.max(8, (vw - popupWidth) / 2), top: 80, caretLeft: popupWidth / 2, dir: 'above' as const }
+    return { left: Math.max(8, (vw - popupWidth) / 2), top: 80, caretLeft: effectiveWidth / 2, dir: 'above' as const }
   }
   const center = rect.left + rect.width / 2
   const left = Math.min(Math.max(8, center - popupWidth / 2), Math.max(8, vw - popupWidth - 8))
-  const above = rect.top - popupHeight - gap
-  const isAbove = above >= 56
-  const top = isAbove ? above : Math.min(rect.top + rect.height + gap, Math.max(56, vh - popupHeight - 8))
-  const caretLeft = Math.min(Math.max(16, center - left), popupWidth - 16)
+  const totalHeight = popupHeight + extraHeight
+  const above = rect.top - totalHeight - gap
+  const isAbove = above >= 8
+  const top = isAbove
+    ? rect.top - popupHeight - gap
+    : Math.min(rect.top + rect.height + gap, Math.max(8, vh - totalHeight - 8))
+  const caretLeft = Math.min(Math.max(16, center - left), effectiveWidth - 16)
   return { left, top, caretLeft, dir: isAbove ? 'above' as const : 'below' as const }
 }

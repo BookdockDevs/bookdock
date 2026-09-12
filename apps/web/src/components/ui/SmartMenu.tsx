@@ -30,7 +30,12 @@ export default function SmartMenu({ innerRef, triggerRef, position, onClose, wid
   useLayoutEffect(() => {
     if (!position) return
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
+        onClose()
+      }
     }
     const onPointerDown = (e: MouseEvent) => {
       const target = e.target as Node
@@ -53,6 +58,7 @@ export default function SmartMenu({ innerRef, triggerRef, position, onClose, wid
   return (
     <div
       ref={innerRef}
+      data-smart-menu="true"
       className="fixed z-50 rounded-xl border border-stone-200/80 bg-white/95 p-1 shadow-xl shadow-stone-900/8 backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
       style={{
         left: finalPos.left,

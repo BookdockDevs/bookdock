@@ -175,7 +175,7 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
           className={cn(
             'z-30 rounded-xl border border-stone-200/80 bg-white/95 p-1.5 shadow-xl shadow-stone-900/8 backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95',
             isNarrow
-              ? 'fixed right-3 max-h-[60dvh] w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto'
+              ? 'fixed right-3 max-h-[60dvh] w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto custom-scrollbar [scrollbar-gutter:stable]'
               : 'absolute right-0 top-11 w-72',
           )}
           style={isNarrow && menuTop !== null ? { top: menuTop } : undefined}

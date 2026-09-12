@@ -85,6 +85,10 @@ export function ttsHighlightColor(theme: { bg: string; text: string; primary?: s
   return mix(theme.primary ?? theme.text, theme.bg, 0.25)
 }
 
+export function searchHighlightColor(theme: { bg: string; text: string; primary?: string }): string {
+  return theme.primary ?? theme.text
+}
+
 function textBeforeSelection(doc: Document, range: Range, maxLength = 2_000): string {
   try {
     if (!doc.body) return ''
@@ -412,6 +416,44 @@ function getParsedBook(url: string, foliate: any): Promise<any> {
 // content. The parse cache reuses the same book object across view mounts —
 // track which books already carry the listener to avoid stacking duplicates.
 const transformedBooks = new WeakSet<object>()
+
+interface FoliateTocItem {
+  label?: string
+  href?: string
+  subitems?: FoliateTocItem[] | null
+  [key: string]: unknown
+}
+
+const originalTocs = new WeakMap<object, FoliateTocItem[]>()
+
+function cloneToc(items: FoliateTocItem[]): FoliateTocItem[] {
+  return items.map((item) => ({
+    ...item,
+    ...(Array.isArray(item.subitems) ? { subitems: cloneToc(item.subitems) } : {}),
+  }))
+}
+
+function originalToc(book: object & { toc?: unknown }): FoliateTocItem[] {
+  const cached = originalTocs.get(book)
+  if (cached) return cached
+  const source = Array.isArray(book.toc) ? cloneToc(book.toc as FoliateTocItem[]) : []
+  originalTocs.set(book, source)
+  return source
+}
+
+export async function convertTocLabels(items: FoliateTocItem[], mode: ChineseConversion): Promise<FoliateTocItem[]> {
+  if (mode === 'off') return cloneToc(items)
+  return Promise.all(items.map(async (item) => ({
+    ...item,
+    ...(typeof item.label === 'string' ? { label: await convertChinese(item.label, mode) } : {}),
+    ...(Array.isArray(item.subitems) ? { subitems: await convertTocLabels(item.subitems, mode) } : {}),
+  })))
+}
+
+async function applyTocConversion(book: object & { toc?: unknown }, mode: ChineseConversion) {
+  if (!Array.isArray(book.toc)) return
+  book.toc = await convertTocLabels(originalToc(book), mode)
+}
 
 // The transform listener outlives any single FoliateReader (the parse cache
 // keeps the book alive after destroy), so the current mode is module-level;
@@ -755,6 +797,7 @@ export class FoliateReader implements BookReader {
         background: ${this.theme.bg} !important;
         background-color: ${this.theme.bg} !important;
         --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
+        --bd-search-highlight: ${searchHighlightColor(this.theme)} !important;
       }
       body {
         box-sizing: border-box !important;
@@ -906,6 +949,7 @@ export class FoliateReader implements BookReader {
       // listener is shared with the load-time data pipeline.
       setTransformInvalidListener((ids) => this.emit('transformInvalid', { ids }))
       attachChineseTransform(epub)
+      await applyTocConversion(epub, this.conversion)
 
       const view = document.createElement('foliate-view') as any
       view.style.display = 'block'
@@ -966,6 +1010,7 @@ export class FoliateReader implements BookReader {
         view.remove()
         return
       }
+      this.emitTocReady()
 
       this.applyAllSettings()
       // Navigate to saved position before mount completes, so the user never
@@ -1334,6 +1379,7 @@ export class FoliateReader implements BookReader {
     this.emit('readingSettingsChanged')
     if (!this.view?.renderer) return
     this.view.renderer.style.setProperty('--bd-tts-highlight', ttsHighlightColor(theme))
+    this.view.renderer.style.setProperty('--bd-search-highlight', searchHighlightColor(theme))
     this.view.renderer.setAttribute('background-color', theme.bg)
     this.applyStyles()
   }
@@ -1424,8 +1470,10 @@ export class FoliateReader implements BookReader {
     const fraction = this.lastFraction
     try { this.view.close() } catch { /* partial init */ }
     if (this.destroyed) return
+    await applyTocConversion(this.book, this.conversion)
     await this.view.open(this.book)
     if (this.destroyed) return
+    this.emitTocReady()
     // close() drops the renderer element, so renderer-level attributes and
     // styles must be re-applied.
     this.applyAllSettings()
@@ -2239,18 +2287,28 @@ export class FoliateReader implements BookReader {
     if (this.book?.toc) visit(this.book.toc, 0)
   }
 
+  private tocItems(): { label: string; href: string; level: number }[] {
+    const result: { label: string; href: string; level: number }[] = []
+    const visit = (items: FoliateTocItem[], level: number) => {
+      for (const item of items) {
+        if (typeof item.label === 'string' && typeof item.href === 'string') {
+          result.push({ label: item.label, href: item.href, level })
+        }
+        if (Array.isArray(item.subitems)) visit(item.subitems, level + 1)
+      }
+    }
+    if (Array.isArray(this.book?.toc)) visit(this.book.toc, 1)
+    return result
+  }
+
+  private emitTocReady() {
+    this.buildTocIndex()
+    this.emit('tocReady', this.tocItems())
+  }
+
   on<K extends keyof RendererEvents>(type: K, fn: RendererEvents[K]) {
     this.listeners.push({ type, fn: fn as (...args: unknown[]) => void })
-    if (type === 'tocReady') {
-      this.buildTocIndex()
-      const toc =
-        this.book?.toc?.map((item: any) => ({
-          label: item.label,
-          href: item.href,
-          level: item.level ?? 1,
-        })) ?? []
-      ;(fn as RendererEvents['tocReady'])(toc)
-    }
+    if (type === 'tocReady' && this.book) this.emitTocReady()
     return () => {
       this.listeners = this.listeners.filter((l) => l.fn !== fn)
     }
@@ -2428,6 +2486,7 @@ export class FoliateReader implements BookReader {
         background: ${this.theme.bg} !important;
         background-color: ${this.theme.bg} !important;
         --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
+        --bd-search-highlight: ${searchHighlightColor(this.theme)} !important;
       }
       ::selection {
         background: ${this.theme.text}19 !important;

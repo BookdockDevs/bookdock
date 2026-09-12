@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { isPresetThemeId } from '@/lib/reading-theme'
 import ErrorBoundary from '@/components/ui/ErrorBoundary'
 import Modal from '@/components/ui/Modal'
+import { Button } from '@/components/ui/Button'
 
 import { useReaderRenderer } from './hooks/useReaderRenderer'
 import { useReadingTimer } from './hooks/useReadingTimer'
@@ -994,7 +995,7 @@ export default function Reader() {
         // defer the decision and exit the reader only when nothing else
         // handled the press. Progress is flushed on unmount.
         setTimeout(() => {
-          if (consumeEscFlag()) return
+          if (e.defaultPrevented || consumeEscFlag()) return
           navigate({ to: '/' })
         }, 0)
         return
@@ -1053,23 +1054,54 @@ export default function Reader() {
 
   if (bookQuery.isError) {
     return (
-      <div className="fixed inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
+      <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div ref={containerCallbackRef} />
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="8" x2="12" y2="12" />
-          <line x1="12" y1="16" x2="12.01" y2="16" />
-        </svg>
-        <span className="font-medium text-red-500">{getUserErrorMessage(bookQuery.error, _, 'errors.loadFailed')}</span>
+        <div className="flex max-w-sm flex-col items-center gap-4 rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] p-6 text-center shadow-lg">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-500">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <span className="text-sm font-medium text-red-500">{getUserErrorMessage(bookQuery.error, _, 'errors.loadFailed')}</span>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={bookQuery.isFetching}
+              onClick={() => void bookQuery.refetch()}
+            >
+              {bookQuery.isFetching ? _('errors.retrying') : _('errors.retry')}
+            </Button>
+            <Link
+              to="/"
+              className="inline-flex h-8 items-center justify-center rounded-xl bg-stone-900 px-3 text-xs font-medium text-white transition-colors hover:bg-stone-800 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300"
+            >
+              {_('errors.backToLibrary')}
+            </Link>
+          </div>
+        </div>
       </div>
     )
   }
 
   if (!bookQuery.data?.data) {
     return (
-      <div className="fixed inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
+      <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div ref={containerCallbackRef} />
-        <span className="text-sm text-[var(--bd-read-sub)]">{_('reader.notFound')}</span>
+        <div className="flex max-w-sm flex-col items-center gap-4 rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] p-6 text-center shadow-lg">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--bd-read-sub)]">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="8" y1="12" x2="16" y2="12" />
+          </svg>
+          <span className="text-sm text-[var(--bd-read-sub)]">{_('reader.notFound')}</span>
+          <Link
+            to="/"
+            className="inline-flex h-8 items-center justify-center rounded-xl bg-stone-900 px-3 text-xs font-medium text-white transition-colors hover:bg-stone-800 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300"
+          >
+            {_('errors.backToLibrary')}
+          </Link>
+        </div>
       </div>
     )
   }
@@ -1114,6 +1146,7 @@ export default function Reader() {
               className={cn(
                 'flex-1',
                 readingMode === 'page' ? 'overflow-hidden' : 'overflow-y-auto',
+                isTouch && 'pb-[calc(6rem+env(safe-area-inset-bottom))]',
               )}
             />
             <AutoReadingProgressBar readingMode={readingMode} />

@@ -1,3 +1,4 @@
+import i18n from 'i18next'
 import type { MarginalField } from '../types'
 
 export interface MarginalContext {
@@ -41,8 +42,12 @@ function formatTime(now: number): string {
 // Same shape as the removed bottom word-count badge: >=10000 renders as X.X万.
 export function formatWordCount(count: number | undefined): string {
   if (count === undefined || !Number.isFinite(count) || count <= 0) return ''
-  if (count >= 10000) return `${(count / 10000).toFixed(1).replace(/\.0$/, '')}万字`
-  return `${count}字`
+  if (count >= 10000) {
+    const formatted = (count / 10000).toFixed(1).replace(/\.0$/, '')
+    return i18n.isInitialized ? i18n.t('stats.wordsWan', { n: formatted, defaultValue: `${formatted}万字` }) : `${formatted}万字`
+  }
+  const rounded = Math.round(count)
+  return i18n.isInitialized ? i18n.t('stats.words', { n: rounded, defaultValue: `${rounded}字` }) : `${rounded}字`
 }
 
 // Pure field -> text composition (F4). Returns '' for 'none' and for fields

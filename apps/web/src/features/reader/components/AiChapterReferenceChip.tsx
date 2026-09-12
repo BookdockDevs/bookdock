@@ -13,7 +13,7 @@ const CHIP_CLASS_NAME = 'flex min-h-8 max-w-full min-w-0 items-center gap-2 roun
 
 export function ChapterReferenceIcon() {
   return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M6 3.5h8l4 4V20.5H6z" />
       <path d="M14 3.5v4h4M9 12h6M9 15.5h6" />
     </svg>
@@ -28,7 +28,7 @@ export default function AiChapterReferenceChip({ title, onActivate, onRemove, re
   </>
 
   if (onActivate) {
-    return <button type="button" disabled={disabled} onClick={onActivate} aria-label={ariaLabel ?? title} className={`${CHIP_CLASS_NAME} text-left transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-default disabled:opacity-70`} data-testid="ai-chapter-reference-chip">
+    return <button type="button" disabled={disabled} onClick={onActivate} aria-label={ariaLabel ?? title} className={`${CHIP_CLASS_NAME} text-left transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-70`} data-testid="ai-chapter-reference-chip">
       {content}
     </button>
   }

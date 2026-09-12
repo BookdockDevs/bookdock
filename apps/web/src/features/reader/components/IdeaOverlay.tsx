@@ -117,7 +117,7 @@ export function IdeaOverlay({
       }}
     >
       {fontCss && <style data-reader-font>{fontCss}</style>}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto reader-scrollbar [scrollbar-gutter:stable]">
         <div
           className="flex min-h-full flex-col items-center justify-center p-3 pb-20 sm:p-4 sm:pb-[14vh]"
           onMouseDown={(e) => {
@@ -156,6 +156,11 @@ export function IdeaOverlay({
                     {_('annotation.publishedAt')} {formatFullDateTime(_, detail.annotation.createdAt)}
                   </span>
                   <div className="flex-1" />
+                  {detail.own && (
+                    <button onClick={() => onEdit(detail)} title={_('annotation.editNote')} className={detailActionBtn}>
+                      <PencilIcon />
+                    </button>
+                  )}
                   <button onClick={() => onCopyNote(detail)} title={_('annotation.copy')} className={detailActionBtn}>
                     <CopyIcon />
                   </button>
@@ -163,18 +168,13 @@ export function IdeaOverlay({
                     <ExcerptShareIcon />
                   </button>
                   {detail.own && (
-                    <>
-                      <button onClick={() => onEdit(detail)} title={_('annotation.editNote')} className={detailActionBtn}>
-                        <PencilIcon />
-                      </button>
-                      <button
-                        onClick={() => onDelete(detail)}
-                        title={_('annotation.deleteAnnotation')}
-                        className={`${detailActionBtn} hover:bg-red-500/10 hover:text-red-400`}
-                      >
-                        <TrashIcon />
-                      </button>
-                    </>
+                    <button
+                      onClick={() => onDelete(detail)}
+                      title={_('annotation.deleteAnnotation')}
+                      className={`${detailActionBtn} ml-0.5 hover:bg-red-500/10 hover:text-red-400`}
+                    >
+                      <TrashIcon />
+                    </button>
                   )}
                 </div>
               </div>

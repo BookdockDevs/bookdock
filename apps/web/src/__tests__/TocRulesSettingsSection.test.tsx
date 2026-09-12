@@ -40,10 +40,13 @@ describe('TocRulesSettingsSection', () => {
   it('keeps the rule toggle in the list instead of the editor', () => {
     render(<TocRulesSettingsSection />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'settings.editModeEnter' }))
-    fireEvent.click(screen.getAllByRole('button', { name: 'settings.tocRulesEditShort' })[0]!)
-
     expect(screen.getAllByRole('switch')).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.editModeEnter' }))
+    expect(screen.queryAllByRole('switch')).toHaveLength(0)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'settings.tocRulesEditShort' })[0]!)
+    expect(screen.queryAllByRole('switch')).toHaveLength(0)
   })
 
   it('shows the rule source badge', () => {

@@ -48,7 +48,7 @@ export function Toast() {
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`pointer-events-auto flex items-center gap-3 rounded-xl border px-4 py-2.5 text-sm text-stone-800 shadow-lg backdrop-blur-md dark:text-stone-100 ${typeStyles[toast.type].surface}`}
+          className={`pointer-events-auto flex items-center gap-3 rounded-xl border px-4 py-2.5 text-sm text-stone-800 shadow-lg backdrop-blur-md dark:text-stone-100 ${typeStyles[toast.type].surface} animate-toast-in`}
           onPointerEnter={() => pauseToast(toast.id)}
           onPointerLeave={() => resumeToast(toast.id)}
           onFocus={() => pauseToast(toast.id)}

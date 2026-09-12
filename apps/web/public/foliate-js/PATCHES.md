@@ -20,11 +20,11 @@
 - **行为**：scrolled 模式 `contextOffset = this.size * 0.28`，`offset = rect.left - margin - contextOffset (+continuous 视图偏移)` + `Math.max(0, …)`——搜索/笔记/书签跳转锚点落在视口上方 28% 处，保留前文上下文。
 - **上游对照**：上游直接把锚点贴到视口顶。
 
-### 1.3 `view.js:362` — 搜索高亮样式
+### 1.3 `view.js:355` — 搜索高亮样式动态跟随主题
 
-- **提交**：`2161acf`
-- **行为**：搜索命中高亮从上游 `Overlayer.outline #39c5bbaa`（半透明描边）改为 `Overlayer.highlight { color: '#fbbf2459' }`（半透明黄色填充，与标注同风格）。
-- **上游对照**：上游后来抽象为可配置 `#searchDraw/#searchDrawOptions`；bookdock 直接改字面量（vendored 基线早于该重构）——升级时优先迁移到上游配置项。
+- **提交**：`2161acf`（初始改为黄色高亮）；后续接入 `Overlayer.highlight { color: 'var(--bd-search-highlight, #fbbf2459)' }`
+- **行为**：搜索命中高亮接入 CSS 变量 `--bd-search-highlight`，由 `FoliateReader.ts` 动态注入 `searchHighlightColor(theme)`，在读者切换日间/护眼/夜间等主题时实时联动换色，无需重载书籍或重启服务。
+- **上游对照**：上游后来抽象为可配置 `#searchDraw/#searchDrawOptions`；bookdock 使用 CSS 变量以实现零 JS 运行开销的主题即时响应。升级时优先迁移到上游配置项。
 
 ### 1.4 `paginator.js:367-369` — `expand()` 空文档守卫
 

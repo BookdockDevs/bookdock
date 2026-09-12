@@ -107,47 +107,6 @@ export default function AutoReadingPanel({ readingMode, onClose }: AutoReadingPa
 
   return (
     <div className="flex flex-col" style={sliderVars}>
-      <style>{`
-.bd-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-  cursor: pointer;
-  display: block;
-  width: 100%;
-  height: 20px;
-}
-.bd-slider::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 3px;
-  background: linear-gradient(to right, var(--slider-accent) 0%, var(--slider-accent) var(--slider-fill, 50%), var(--slider-track) var(--slider-fill, 50%), var(--slider-track) 100%);
-}
-.bd-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--slider-accent);
-  margin-top: -5px;
-}
-.bd-slider::-moz-range-track {
-  height: 6px;
-  border-radius: 3px;
-  background: linear-gradient(to right, var(--slider-accent) 0%, var(--slider-accent) var(--slider-fill, 50%), var(--slider-track) var(--slider-fill, 50%), var(--slider-track) 100%);
-  border: none;
-}
-.bd-slider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--slider-accent);
-  border: none;
-}
-.bd-slider:focus-visible {
-  outline: 2px solid var(--slider-accent);
-  outline-offset: 2px;
-}
-`}</style>
       <div className="border-b border-[var(--bd-read-accent)] p-4">
         <div className="flex w-full">
           <button

@@ -73,7 +73,7 @@ export default function AiModelPicker({ title, models, addedModels, provider, fe
         </div>
         {stale && <p className="text-[11px] text-amber-600 dark:text-amber-400">{_('settings.aiModelsStale')}</p>}
 
-        <div className="max-h-[46vh] overflow-y-auto rounded-xl border border-stone-200 dark:border-stone-700">
+        <div className="max-h-[46vh] overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-xl border border-stone-200 dark:border-stone-700">
           {groups.length === 0 ? <p className="px-4 py-10 text-center text-sm text-stone-400">{models.length ? _('settings.aiModelSearchEmpty') : _('settings.aiModelPickerEmpty')}</p> : groups.map(([group, groupModels]) => (
             <section key={group}>
               <div className="sticky top-0 flex items-center justify-between bg-stone-100 px-4 py-2 text-xs font-semibold text-stone-700 dark:bg-stone-800 dark:text-stone-200">

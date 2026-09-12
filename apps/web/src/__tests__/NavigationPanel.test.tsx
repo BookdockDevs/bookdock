@@ -19,11 +19,13 @@ vi.mock('../features/reader/components/AiPanel', () => ({
 
 const deleteMutate = vi.fn()
 const updateMutate = vi.fn()
+const batchDeleteMutateAsync = vi.fn()
 
 vi.mock('../features/reader/hooks/useAnnotations', () => ({
   useAnnotations: vi.fn(),
   useDeleteAnnotation: () => ({ mutate: deleteMutate }),
   useUpdateAnnotation: () => ({ mutate: updateMutate }),
+  useBatchDeleteAnnotations: () => ({ mutateAsync: batchDeleteMutateAsync }),
 }))
 
 vi.mock('../features/reader/hooks/useBookChapters', () => ({
@@ -34,7 +36,6 @@ vi.mock('@/api/hooks/reading-records', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/api/hooks/reading-records')>()
   return { ...original, useBookReadingRecords: () => ({ data: undefined }) }
 })
-
 vi.mock('@tanstack/react-query', async () => {
   const actual = await vi.importActual('@tanstack/react-query')
   return {
@@ -72,6 +73,22 @@ describe('NavigationPanel', () => {
 
     const currentButton = screen.getByRole('button', { name: '第二章 续篇' })
     expect(currentButton).toHaveClass('font-medium')
+  })
+
+  it('renders volume header with distinct styling and chapter count on volume items', () => {
+    useReaderState.setState({
+      tocItems: [
+        { label: '第一卷 启程', href: 'chapter:0', level: 1 },
+        { label: '第一章 初入江湖', href: 'chapter:1', level: 2 },
+        { label: '第二章 风云突变', href: 'chapter:2', level: 2 },
+      ],
+    })
+
+    render(<NavigationPanel bookId="book-1" open />)
+
+    const volumeButton = screen.getByRole('button', { name: /第一卷 启程/ })
+    expect(volumeButton).toHaveClass('font-semibold')
+    expect(screen.getByText(/2 reader\.chapters/)).toBeInTheDocument()
   })
 
   it('scrolls current chapter into view when panel opens', async () => {
@@ -243,12 +260,13 @@ describe('NavigationPanel', () => {
       })
     })
 
-    it('expands the search bar from the header icon and overlays grouped results', async () => {
-      render(<NavigationPanel bookId="book-1" open />)
-      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
-      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-0')
+    it('opens dedicated search mode from the header icon and displays grouped results', async () => {
+      const { container } = render(<NavigationPanel bookId="book-1" open />)
+      expect(screen.queryByPlaceholderText('reader.searchPlaceholder')).toBeNull()
       fireEvent.click(screen.getByTitle('reader.search'))
-      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-16')
+      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
+      expect(input).toBeInTheDocument()
+      expect(screen.getByText('reader.searchScopeBook')).toBeInTheDocument()
       fireEvent.change(input, { target: { value: '高中' } })
       await new Promise((r) => setTimeout(r, 500))
 
@@ -258,6 +276,10 @@ describe('NavigationPanel', () => {
       expect(screen.getByText('第五章 死鱼眼')).toBeInTheDocument()
       // 3 result marks plus the keyword in the bottom nav card
       expect(screen.getAllByText('高中')).toHaveLength(4)
+      // verify theme-adaptive mark highlight styling
+      const marks = container.querySelectorAll('mark')
+      expect(marks.length).toBeGreaterThan(0)
+      expect(marks[0]).toHaveClass('bg-[var(--bd-read-primary)]/25', 'rounded-xs')
       // TOC list is replaced by the overlay
       expect(screen.queryByText('第一章 开篇')).toBeNull()
     })
@@ -275,7 +297,7 @@ describe('NavigationPanel', () => {
       expect(onClose).toHaveBeenCalled()
     })
 
-    it('returns to the TOC list after clearing the query', async () => {
+    it('returns to search home on clearing query, and returns to TOC on back button', async () => {
       render(<NavigationPanel bookId="book-1" open />)
       fireEvent.click(screen.getByTitle('reader.search'))
       fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
@@ -283,27 +305,30 @@ describe('NavigationPanel', () => {
       expect(screen.queryByText('第一章 开篇')).toBeNull()
 
       fireEvent.click(screen.getByLabelText('清除'))
+      expect(screen.getByText('reader.searchScopeBook')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTitle('reader.backToToc'))
       expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
     })
 
-    it('keeps the query and results when collapsing and reopening the bar', async () => {
+    it('keeps the query and results when returning to TOC and reopening search', async () => {
       render(<NavigationPanel bookId="book-1" open />)
-      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
       fireEvent.click(screen.getByTitle('reader.search'))
+      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
       fireEvent.change(input, { target: { value: '高中' } })
       await new Promise((r) => setTimeout(r, 500))
       expect(search).toHaveBeenCalledTimes(1)
       expect(screen.getAllByText('高中')).toHaveLength(4)
 
-      // collapse: the bar hides and the TOC returns, but nothing is discarded
-      fireEvent.click(screen.getByTitle('reader.search'))
-      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-0')
+      // return to TOC via back button: the search panel hides and the TOC returns, but nothing is discarded
+      fireEvent.click(screen.getByTitle('reader.backToToc'))
+      expect(screen.queryByPlaceholderText('reader.searchPlaceholder')).toBeNull()
       expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
 
       // reopen: query and results are restored instantly, without re-searching
       fireEvent.click(screen.getByTitle('reader.search'))
-      expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-16')
-      expect(input).toHaveValue('高中')
+      const reopenedInput = screen.getByPlaceholderText('reader.searchPlaceholder')
+      expect(reopenedInput).toHaveValue('高中')
       expect(screen.getAllByText('高中')).toHaveLength(4)
       expect(search).toHaveBeenCalledTimes(1)
     })
@@ -388,14 +413,13 @@ describe('NavigationPanel', () => {
       expect(screen.queryByTestId('search-progress')).toBeNull()
     })
 
-    it('closes the options menu when clicking the search input', async () => {
+    it('toggles search options directly via filter pills', async () => {
       render(<NavigationPanel bookId="book-1" open />)
       fireEvent.click(screen.getByTitle('reader.search'))
-      fireEvent.click(screen.getByTitle('reader.searchOptions'))
-      expect(screen.getByText('reader.searchModeRegex')).toBeInTheDocument()
-
-      fireEvent.mouseDown(screen.getByPlaceholderText('reader.searchPlaceholder'))
-      expect(screen.queryByText('reader.searchModeRegex')).toBeNull()
+      const chapterPill = screen.getByText('reader.searchScopeChapter')
+      expect(chapterPill).not.toHaveClass('font-medium')
+      fireEvent.click(chapterPill)
+      expect(chapterPill).toHaveClass('font-medium')
     })
 
     it('enters search mode from a pending selection query', async () => {
@@ -500,6 +524,31 @@ describe('NavigationPanel', () => {
       expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-0')
       expect(screen.queryByText('annotation.filterColor')).toBeNull()
       expect(screen.getByText('直线划线甲')).toBeInTheDocument()
+    })
+
+    it('enters batch selection mode, shows selection actions and opens confirm dialog on delete', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      // click batch manage button in header
+      fireEvent.click(screen.getByTitle('annotation.batchManage'))
+
+      // Selected count is displayed (initially selects all 3 visible items)
+      expect(screen.getByText('annotation.exportSelected')).toBeInTheDocument()
+
+      // Header buttons for export, batch delete and cancel exist
+      expect(screen.getByTitle('annotation.exportTitle')).toBeInTheDocument()
+      const deleteBtn = screen.getByTitle('annotation.batchDelete')
+      expect(deleteBtn).toBeInTheDocument()
+      const cancelBtn = screen.getByTitle('annotation.cancel')
+      expect(cancelBtn).toBeInTheDocument()
+
+      // Click batch delete opens confirm dialog
+      fireEvent.click(deleteBtn)
+      expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+      expect(screen.getByText('annotation.batchDeleteConfirm')).toBeInTheDocument()
+
+      // Click cancel in selection header exits selection mode
+      fireEvent.click(cancelBtn)
+      expect(screen.queryByText('annotation.exportSelected')).toBeNull()
     })
   })
 })

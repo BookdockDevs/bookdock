@@ -29,4 +29,27 @@ describe('BookCover', () => {
     render(<BookCover book={baseBook} coverSrc="blob:cover-preview" />)
     expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:cover-preview')
   })
+
+  it('renders fallback cover with title, format, author, and book spine simulation', () => {
+    const bookWithAuthor = { ...baseBook, author: 'Author Name' }
+    const { container } = render(<BookCover book={bookWithAuthor} />)
+
+    expect(screen.getByText('Test Book')).toBeInTheDocument()
+    expect(screen.getByText('txt')).toBeInTheDocument()
+
+    // Spine simulation line elements
+    expect(container.querySelector('.w-1')).toBeInTheDocument()
+    expect(container.querySelector('.left-2.w-px')).toBeInTheDocument()
+  })
+
+  it('supports custom coverPaletteId override', () => {
+    const { container } = render(<BookCover book={baseBook} coverPaletteId="sage" />)
+    const card = container.firstChild as HTMLElement
+    expect(card.className).toContain('bg-emerald-100/70')
+  })
+
+  it('renders compact initial fallback for size="sm"', () => {
+    render(<BookCover book={baseBook} size="sm" />)
+    expect(screen.getByText('T')).toBeInTheDocument()
+  })
 })

@@ -252,7 +252,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
             <CloseIcon />
           </button>
         </div>
-        <div ref={previewRef} className="flex min-h-0 flex-1 justify-center overflow-y-auto px-4 pb-2 sm:px-6">
+        <div ref={previewRef} className="flex min-h-0 flex-1 justify-center overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] px-4 pb-2 sm:px-6">
           <div style={{ width: SHARE_CARD_WIDTH * scale, height }} className="shrink-0">
             <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: SHARE_CARD_WIDTH }}>
               <ShareCard

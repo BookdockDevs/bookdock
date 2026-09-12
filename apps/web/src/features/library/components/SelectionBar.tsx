@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { ReadStatus } from '@bookdock/shared'
@@ -31,6 +31,26 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
   const queryClient = useQueryClient()
   const [dialog, setDialog] = useState<'classify' | 'delete' | 'permanent' | null>(null)
   const [marking, setMarking] = useState(false)
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+
+  const updateScrollState = useCallback(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    const { scrollLeft, scrollWidth, clientWidth } = el
+    setCanScrollLeft(scrollLeft > 2)
+    setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 2)
+  }, [])
+
+  useEffect(() => {
+    updateScrollState()
+    const el = scrollerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(updateScrollState)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [updateScrollState, selectedIds.length, trash])
 
   async function runBatch(action: (bookId: string) => Promise<unknown>) {
     setMarking(true)
@@ -59,11 +79,34 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
 
   return (
     <>
-    <div className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-1/2 z-40 -translate-x-1/2 sm:bottom-5">
-        <div className="flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] items-center gap-2 overflow-x-auto rounded-2xl border border-stone-200/80 bg-white/95 py-2 pl-4 pr-2 shadow-xl shadow-stone-900/8 backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-auto sm:max-w-none dark:border-stone-700 dark:bg-stone-900/95">
-          <span className="mr-1 whitespace-nowrap text-xs font-medium text-stone-600 dark:text-stone-300">
-            {_('library.selectionCount', { count: selectedIds.length })}
-          </span>
+      <div className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-1/2 z-40 -translate-x-1/2 sm:bottom-5">
+        <div className="relative flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] items-center rounded-2xl border border-stone-200/80 bg-white/95 shadow-xl shadow-stone-900/8 backdrop-blur-md animate-selection-bar-in sm:w-auto sm:max-w-none dark:border-stone-700 dark:bg-stone-900/95">
+          {/* Left fade shadow */}
+          <div
+            data-testid="selection-bar-fade-left"
+            aria-hidden="true"
+            className={cn(
+              'pointer-events-none absolute inset-y-0 left-0 z-10 w-6 rounded-l-2xl bg-gradient-to-r from-white via-white/80 to-transparent transition-opacity duration-200 dark:from-stone-900 dark:via-stone-900/80',
+              canScrollLeft ? 'opacity-100' : 'opacity-0',
+            )}
+          />
+          {/* Right fade shadow */}
+          <div
+            data-testid="selection-bar-fade-right"
+            aria-hidden="true"
+            className={cn(
+              'pointer-events-none absolute inset-y-0 right-0 z-10 w-6 rounded-r-2xl bg-gradient-to-l from-white via-white/80 to-transparent transition-opacity duration-200 dark:from-stone-900 dark:via-stone-900/80',
+              canScrollRight ? 'opacity-100' : 'opacity-0',
+            )}
+          />
+          <div
+            ref={scrollerRef}
+            onScroll={updateScrollState}
+            className="flex w-full items-center gap-2 overflow-x-auto py-2 pl-4 pr-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-auto"
+          >
+            <span className="mr-1 whitespace-nowrap text-xs font-medium text-stone-600 dark:text-stone-300">
+              {_('library.selectionCount', { count: selectedIds.length })}
+            </span>
           {trash ? (
             <>
               <Button className="shrink-0 whitespace-nowrap" variant="secondary" size="sm" disabled={marking} onClick={() => void handleBatchRestore()}>
@@ -106,6 +149,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
           </button>
+          </div>
         </div>
       </div>
 
@@ -177,7 +221,7 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4">
-      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
+      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
         <h2 className="mb-4 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
           {_('library.batchClassify')}
         </h2>
@@ -213,7 +257,7 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
         </div>
 
         {activeTab === 'shelves' ? (
-          <div className="flex max-h-60 flex-col gap-1 overflow-y-auto">
+          <div className="flex max-h-60 flex-col gap-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
             <ShelfRadio
               label={_('library.uncategorized')}
               checked={selectedShelf === null}
@@ -232,7 +276,7 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
         ) : tags.length === 0 ? (
           <div className="py-4 text-center text-sm text-stone-400">{_('library.noTags')}</div>
         ) : (
-          <div className="flex max-h-60 flex-col gap-1 overflow-y-auto">
+          <div className="flex max-h-60 flex-col gap-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
             {tags.map((tag) => (
               <label
                 key={tag.id}
@@ -312,7 +356,7 @@ function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: (
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4">
-      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
+      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
         <h2 className="mb-2 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
           {_('library.batchDelete')}
         </h2>
@@ -362,7 +406,7 @@ function BatchPermanentDeleteDialog({ ids, onClose, onDone }: { ids: string[]; o
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4">
-      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
+      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
         <h2 className="mb-2 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
           {_('library.permanentDelete')}
         </h2>

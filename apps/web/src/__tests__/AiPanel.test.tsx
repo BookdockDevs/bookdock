@@ -1093,6 +1093,23 @@ describe('AiPanel', () => {
     expect(heading.closest('div')).toHaveClass('space-y-3', 'text-[13.5px]', 'leading-[1.75]')
   })
 
+  it('preserves start counter on ordered lists interrupted by sub-items or paragraphs', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
+    vi.mocked(apiStreamAiChat).mockImplementation(async (_body, handlers) => {
+      handlers.onDelta?.('1. 第一项\n- 补充说明\n2. 第二项\n3. 第三项')
+    })
+
+    renderPanel()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '测试列表' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiSend' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'reader.aiSend' }))
+
+    const lists = await screen.findAllByRole('list')
+    expect(lists.length).toBe(3)
+    expect(lists[0]).toHaveAttribute('start', '1')
+    expect(lists[2]).toHaveAttribute('start', '2')
+  })
+
   it('keeps closing punctuation attached to the preceding markdown line', () => {
     expect(normalizeMarkdownParagraphLines(['回答内容[1]', '。'])).toEqual(['回答内容[1]。'])
   })

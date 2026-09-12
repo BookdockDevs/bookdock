@@ -179,4 +179,38 @@ describe('SelectionBar', () => {
     expect(apiDelete).toHaveBeenCalledTimes(2)
     expect(apiDelete).toHaveBeenCalledWith('/books/a/permanent')
   })
+
+  it('renders fade shadow elements and updates opacity on scroll', () => {
+    const { container } = render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} />, { wrapper })
+
+    const leftFade = screen.getByTestId('selection-bar-fade-left')
+    const rightFade = screen.getByTestId('selection-bar-fade-right')
+
+    expect(leftFade).toBeInTheDocument()
+    expect(rightFade).toBeInTheDocument()
+    expect(leftFade.className).toContain('opacity-0')
+
+    const barContainer = container.querySelector('.animate-selection-bar-in')
+    expect(barContainer).toBeInTheDocument()
+
+    const scroller = leftFade.parentElement?.querySelector('.overflow-x-auto')
+    expect(scroller).toBeInTheDocument()
+
+    if (scroller) {
+      Object.defineProperty(scroller, 'scrollLeft', { value: 50, writable: true, configurable: true })
+      Object.defineProperty(scroller, 'scrollWidth', { value: 300, writable: true, configurable: true })
+      Object.defineProperty(scroller, 'clientWidth', { value: 100, writable: true, configurable: true })
+
+      fireEvent.scroll(scroller)
+
+      expect(leftFade.className).toContain('opacity-100')
+      expect(rightFade.className).toContain('opacity-100')
+
+      Object.defineProperty(scroller, 'scrollLeft', { value: 200, writable: true, configurable: true })
+      fireEvent.scroll(scroller)
+
+      expect(leftFade.className).toContain('opacity-100')
+      expect(rightFade.className).toContain('opacity-0')
+    }
+  })
 })

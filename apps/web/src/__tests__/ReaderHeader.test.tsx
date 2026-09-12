@@ -40,7 +40,7 @@ describe('ReaderHeader', () => {
     )
 
     const bookmarkButton = screen.getByTitle('添加书签')
-    expect(bookmarkButton).toHaveClass('border-[var(--bd-read-accent)]')
+    expect(bookmarkButton).toHaveClass('border-[var(--bd-read-accent)]', 'text-[var(--bd-read-text)]')
     const svg = bookmarkButton.querySelector('svg')
     expect(svg).toHaveAttribute('fill', 'none')
   })
@@ -59,7 +59,7 @@ describe('ReaderHeader', () => {
     const ttsButton = screen.getByTitle('reader.ttsTitle')
     expect(ttsButton).toHaveClass('border-current', 'text-current')
     expect(ttsButton).not.toHaveClass('bg-[var(--bd-read-primary)]')
-    expect(ttsButton.querySelector('svg')).toHaveClass('h-5', 'w-5')
+    expect(ttsButton.querySelector('svg')).toHaveClass('h-4', 'w-4')
     expect(ttsButton.querySelector('svg')).toHaveAttribute('fill', 'currentColor')
   })
 

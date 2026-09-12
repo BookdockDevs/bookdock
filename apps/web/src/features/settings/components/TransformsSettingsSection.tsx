@@ -217,36 +217,38 @@ function TransformRow({ rule, editing, disabled, onToggle, onEdit, onDelete }: {
         </p>
         {/* Only the regex badge stays: the settings page shows global rules
             only, where the toggle already carries the on/off state. */}
-        {rule.isRegex && (
+        {!editing && rule.isRegex && (
           <div className="mt-1 flex flex-wrap gap-1.5">
             <span className={badge}>{_('settings.transformsRegex')}</span>
           </div>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <Toggle checked={rule.enabled} onChange={onToggle} disabled={disabled} ariaLabel={_('settings.transformsEnabled')} />
-        {editing && (
-          <>
-            <button type="button" onClick={onEdit} disabled={disabled} aria-label={_('settings.transformsEditShort')} title={_('settings.transformsEditShort')} className={actionBtn}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={onDelete}
-              disabled={disabled}
-              aria-label={_('settings.transformsDelete')}
-              title={_('settings.transformsDelete')}
-              className={deleteBtn}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M3 6h18M19 6v14c0 1-2 2-2 2H7a2 2 0 0 1-2-2V6M8 6V4c0-1 2-2 2-2h4c1 0 2 2 2 2v2" />
-              </svg>
-            </button>
-          </>
-        )}
-      </div>
+      {!editing && (
+        <div className="flex shrink-0 items-center gap-1">
+          <Toggle checked={rule.enabled} onChange={onToggle} disabled={disabled} ariaLabel={_('settings.transformsEnabled')} />
+        </div>
+      )}
+      {editing && (
+        <div className="flex shrink-0 items-center gap-1">
+          <button type="button" onClick={onEdit} disabled={disabled} aria-label={_('settings.transformsEditShort')} title={_('settings.transformsEditShort')} className={actionBtn}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={disabled}
+            aria-label={_('settings.transformsDelete')}
+            title={_('settings.transformsDelete')}
+            className={deleteBtn}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 6h18M19 6v14c0 1-2 2-2 2H7a2 2 0 0 1-2-2V6M8 6V4c0-1 2-2 2-2h4c1 0 2 2 2 2v2" />
+            </svg>
+          </button>
+        </div>
+      )}
     </li>
   )
 }

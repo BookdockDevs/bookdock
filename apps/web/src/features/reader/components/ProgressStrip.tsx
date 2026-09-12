@@ -83,18 +83,6 @@ export const ProgressStrip = memo(function ProgressStrip({
         className,
       )}
     >
-      {dragChapterTitle && dragValue !== null && (
-        <div
-          className="pointer-events-none absolute bottom-full left-0 mb-3 -translate-x-1/2"
-          style={{ left: `max(8%, min(${dragValue}%, 92%))` }}
-        >
-          <div className="min-w-0 max-w-[70vw] rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 px-4 py-2 shadow-lg backdrop-blur-sm">
-            <p className="truncate font-serif text-sm font-medium text-[var(--bd-read-text)]">
-              {dragChapterTitle}
-            </p>
-          </div>
-        </div>
-      )}
       <style>{`
 .bd-progress-slider {
   -webkit-appearance: none;
@@ -102,62 +90,111 @@ export const ProgressStrip = memo(function ProgressStrip({
   background: transparent;
   cursor: pointer;
   width: 100%;
-  height: 20px;
+  height: 28px;
 }
 .bd-progress-slider::-webkit-slider-runnable-track {
   height: 6px;
-  border-radius: 3px;
-  background: linear-gradient(to right, color-mix(in srgb, var(--bd-read-text), var(--bd-read-bg) 45%) 0%, color-mix(in srgb, var(--bd-read-text), var(--bd-read-bg) 45%) var(--slider-fill, 50%), color-mix(in srgb, var(--bd-read-text) 10%, transparent) var(--slider-fill, 50%), color-mix(in srgb, var(--bd-read-text) 10%, transparent) 100%);
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--bd-read-text) 80%, var(--bd-read-bg)) 0%,
+    color-mix(in srgb, var(--bd-read-text) 80%, var(--bd-read-bg)) var(--slider-fill, 50%),
+    color-mix(in srgb, var(--bd-read-text) 18%, var(--bd-read-bg)) var(--slider-fill, 50%),
+    color-mix(in srgb, var(--bd-read-text) 18%, var(--bd-read-bg)) 100%
+  );
 }
 .bd-progress-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--bd-read-text), var(--bd-read-bg) 45%);
+  background: color-mix(in srgb, var(--bd-read-text) 85%, var(--bd-read-bg));
   margin-top: -5px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 0 1.5px var(--bd-read-bg, #ffffff);
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.15s ease;
+}
+.bd-progress-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.12);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25), 0 0 0 2px var(--bd-read-bg, #ffffff);
+}
+.bd-progress-slider:active::-webkit-slider-thumb {
+  transform: scale(1.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 2.5px var(--bd-read-bg, #ffffff);
 }
 .bd-progress-slider::-moz-range-track {
   height: 6px;
-  border-radius: 3px;
-  background: linear-gradient(to right, color-mix(in srgb, var(--bd-read-text), var(--bd-read-bg) 45%) 0%, color-mix(in srgb, var(--bd-read-text), var(--bd-read-bg) 45%) var(--slider-fill, 50%), color-mix(in srgb, var(--bd-read-text) 10%, transparent) var(--slider-fill, 50%), color-mix(in srgb, var(--bd-read-text) 10%, transparent) 100%);
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--bd-read-text) 80%, var(--bd-read-bg)) 0%,
+    color-mix(in srgb, var(--bd-read-text) 80%, var(--bd-read-bg)) var(--slider-fill, 50%),
+    color-mix(in srgb, var(--bd-read-text) 18%, var(--bd-read-bg)) var(--slider-fill, 50%),
+    color-mix(in srgb, var(--bd-read-text) 18%, var(--bd-read-bg)) 100%
+  );
   border: none;
 }
 .bd-progress-slider::-moz-range-thumb {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--bd-read-text), var(--bd-read-bg) 45%);
+  background: color-mix(in srgb, var(--bd-read-text) 85%, var(--bd-read-bg));
   border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 0 1.5px var(--bd-read-bg, #ffffff);
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.15s ease;
+}
+.bd-progress-slider:hover::-moz-range-thumb {
+  transform: scale(1.12);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25), 0 0 0 2px var(--bd-read-bg, #ffffff);
+}
+.bd-progress-slider:active::-moz-range-thumb {
+  transform: scale(1.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 2.5px var(--bd-read-bg, #ffffff);
 }
 .bd-progress-slider:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--bd-read-text), var(--bd-read-bg) 45%);
+  outline: 2px solid color-mix(in srgb, var(--bd-read-text) 85%, var(--bd-read-bg));
   outline-offset: 2px;
+}
+.bd-drag-badge-text {
+  text-autospace: normal;
+  -webkit-text-autospace: normal;
 }
 `}</style>
       <button
         type="button"
         onClick={onPrevChapter}
-        className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)] sm:h-8 sm:w-8"
+        className="pointer-events-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-all duration-150 hover:bg-[var(--bd-read-bg)] active:scale-95 sm:h-8 sm:w-8"
         aria-label="上一章"
       >
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M19 12H5M12 19l-7-7 7-7" />
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M19 12H5m0 0 6-6m-6 6 6 6" />
         </svg>
       </button>
       <button
         type="button"
         onClick={onNextChapter}
-        className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)] sm:h-8 sm:w-8"
+        className="pointer-events-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-all duration-150 hover:bg-[var(--bd-read-bg)] active:scale-95 sm:h-8 sm:w-8"
         aria-label="下一章"
       >
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M5 12h14M12 5l7 7-7 7" />
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 12h14m0 0-6-6m6 6-6 6" />
         </svg>
       </button>
-      <div className="pointer-events-none flex flex-1 items-center gap-3">
-        <span className="shrink-0 tabular-nums text-[var(--bd-read-sub)]">{showingChapterText}</span>
+      <div className="pointer-events-none flex flex-1 items-center gap-2 sm:gap-3">
+        <span className="min-w-[3.25rem] shrink-0 text-right tabular-nums text-[var(--bd-read-sub)]">{showingChapterText}</span>
         <div className="relative flex-1">
+          {dragChapterTitle && dragValue !== null && (
+            <div
+              className="pointer-events-none absolute bottom-full mb-6 -translate-x-1/2"
+              style={{ left: `calc(8px + (100% - 16px) * ${dragValue / 100})` }}
+            >
+              <div className="relative min-w-0 max-w-[min(70vw,20rem)] rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 px-4 py-2 shadow-lg backdrop-blur-sm [text-autospace:normal]">
+                <p className="truncate font-sans text-xs font-medium text-[var(--bd-read-text)] tabular-nums lining-nums sm:text-sm [text-autospace:normal] bd-drag-badge-text">
+                  {dragChapterTitle}
+                </p>
+                <div className="absolute -bottom-1.5 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-b border-r border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]" />
+              </div>
+            </div>
+          )}
           <input
             ref={sliderRef}
             type="range"
@@ -194,26 +231,26 @@ export const ProgressStrip = memo(function ProgressStrip({
             aria-label="阅读进度"
           />
         </div>
-        <span className="shrink-0 tabular-nums text-[var(--bd-read-sub)]">{showingPercent}%</span>
+        <span className="min-w-[2.5rem] shrink-0 text-left tabular-nums text-[var(--bd-read-sub)]">{showingPercent}%</span>
       </div>
       <button
         type="button"
         onClick={onPageUp}
-        className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)] sm:h-8 sm:w-8"
+        className="pointer-events-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-all duration-150 hover:bg-[var(--bd-read-bg)] active:scale-95 sm:h-8 sm:w-8"
         aria-label="上一页"
       >
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M18 15l-6-6-6 6" />
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m18 15-6-6-6 6" />
         </svg>
       </button>
       <button
         type="button"
         onClick={onPageDown}
-        className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-colors hover:bg-[var(--bd-read-bg)] sm:h-8 sm:w-8"
+        className="pointer-events-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] text-[var(--bd-read-text)] transition-all duration-150 hover:bg-[var(--bd-read-bg)] active:scale-95 sm:h-8 sm:w-8"
         aria-label="下一页"
       >
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M6 9l6 6 6-6" />
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m6 9 6 6 6-6" />
         </svg>
       </button>
     </div>

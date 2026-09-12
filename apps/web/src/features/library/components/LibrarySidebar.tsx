@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 
 import { useDndContext, useDroppable } from '@dnd-kit/core'
@@ -93,6 +93,39 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
 
   const isAllActive = !shelfId && !tagId && !author && !series && !trash
 
+  const localNavRef = useRef<HTMLElement | null>(null)
+  const [canScrollUp, setCanScrollUp] = useState(false)
+  const [canScrollDown, setCanScrollDown] = useState(false)
+
+  const updateScrollShadows = useCallback(() => {
+    const el = localNavRef.current
+    if (!el) return
+    setCanScrollUp(el.scrollTop > 2)
+    setCanScrollDown(el.scrollTop + el.clientHeight < el.scrollHeight - 2)
+  }, [])
+
+  const setNavRef = useCallback(
+    (el: HTMLElement | null) => {
+      localNavRef.current = el
+      if (navRef) {
+        ;(navRef as unknown as React.MutableRefObject<HTMLElement | null>).current = el
+      }
+    },
+    [navRef],
+  )
+
+  useEffect(() => {
+    updateScrollShadows()
+  }, [shelves, tags, shelvesLoading, mobileOpen, updateScrollShadows])
+
+  useEffect(() => {
+    const el = localNavRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(updateScrollShadows)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [updateScrollShadows])
+
   function selectNavigation(patch: Partial<LibrarySearch>) {
     navSearch({ ...patch, author: undefined, series: undefined })
     onMobileClose?.()
@@ -119,7 +152,21 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
         <span className="font-serif text-base font-semibold tracking-wide text-stone-900 dark:text-stone-50">{_('app.name')}</span>
       </div>
 
-      <nav ref={navRef} className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          data-testid="sidebar-scroll-shadow-top"
+          aria-hidden="true"
+          className={cn(
+            'pointer-events-none absolute inset-x-0 top-0 z-10 h-3.5 bg-gradient-to-b from-stone-400/20 to-transparent transition-opacity duration-200 dark:from-stone-950/80',
+            canScrollUp ? 'opacity-100' : 'opacity-0',
+          )}
+        />
+
+        <nav
+          ref={setNavRef}
+          onScroll={updateScrollShadows}
+          className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1"
+        >
         <NavItem
           label={_('library.allBooks')}
           active={isAllActive}
@@ -132,7 +179,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
           onClick={() => selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })}
         />
         <div className="mb-1 mt-6 flex items-center justify-between px-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
             {_('library.shelves')}
           </span>
           <button
@@ -170,7 +217,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
         ) : null}
 
         <div className="mb-1 mt-6 flex items-center justify-between px-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
             {_('library.tags')}
           </span>
           <button
@@ -216,6 +263,16 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
           />
         </div>
       </nav>
+
+      <div
+        data-testid="sidebar-scroll-shadow-bottom"
+        aria-hidden="true"
+        className={cn(
+          'pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3.5 bg-gradient-to-t from-stone-400/20 to-transparent transition-opacity duration-200 dark:from-stone-950/80',
+          canScrollDown ? 'opacity-100' : 'opacity-0',
+        )}
+      />
+    </div>
 
       <div className="mt-auto px-2 pt-6">
         <NavItem
@@ -326,16 +383,34 @@ function NavItem({
         'flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] transition-all',
         hasMenu && 'pr-10 md:pr-3',
         active
-          ? 'bg-white font-medium text-stone-900 shadow-sm ring-1 ring-stone-200/70 dark:bg-stone-900 dark:text-stone-50 dark:ring-stone-800'
+          ? 'bg-white font-medium text-stone-900 shadow-sm ring-1 ring-stone-200/70 dark:bg-stone-800 dark:text-stone-50 dark:ring-stone-700/60 dark:shadow-xs'
           : 'text-stone-500 hover:bg-stone-200/50 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/50 dark:hover:text-stone-100',
       )}
     >
       <span className="flex min-w-0 items-center gap-2.5">
-        {icon && <span className={cn('shrink-0', active ? 'text-stone-700 dark:text-stone-300' : 'text-stone-400 dark:text-stone-500')}>{icon}</span>}
+        {icon && (
+          <span
+            className={cn(
+              'shrink-0 transition-colors',
+              active ? 'text-stone-700 dark:text-stone-200' : 'text-stone-400 dark:text-stone-500',
+            )}
+          >
+            {icon}
+          </span>
+        )}
         <span className="truncate">{label}</span>
       </span>
       {count !== undefined && count > 0 && (
-        <span className={cn('ml-2 shrink-0 text-xs leading-none tabular-nums text-stone-400 transition-opacity group-hover:opacity-0 dark:text-stone-500', countHidden && 'opacity-0')}>
+        <span
+          className={cn(
+            'ml-2 shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums transition-all',
+            hasMenu && 'group-hover:opacity-0',
+            countHidden && 'opacity-0',
+            active
+              ? 'bg-stone-100 text-stone-700 dark:bg-stone-700/60 dark:text-stone-200'
+              : 'text-stone-400 bg-stone-200/40 group-hover:bg-stone-200/70 group-hover:text-stone-600 dark:text-stone-400 dark:bg-stone-900/60 dark:group-hover:bg-stone-800/70 dark:group-hover:text-stone-300',
+          )}
+        >
           {count}
         </span>
       )}

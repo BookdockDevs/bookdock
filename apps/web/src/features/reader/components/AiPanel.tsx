@@ -77,8 +77,8 @@ const AI_PROMPT_PLACEHOLDER_PATTERN = /(\{SELTEXT\}|\{SELPARA\}|\{CHAPTER\})/g
 const AI_PROMPT_PLACEHOLDERS = new Set(['{SELTEXT}', '{SELPARA}', '{CHAPTER}'])
 const COMPOSER_MIN_HEIGHT = 48
 const COMPOSER_MAX_HEIGHT = 144
-const READ_SCROLLBAR_CLASSES = '[scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:var(--bd-read-sub)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[var(--bd-read-sub)]/50'
-const ATTACHMENT_SCROLLBAR_CLASSES = '[scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:var(--bd-read-sub)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[var(--bd-read-sub)]/25 [&::-webkit-scrollbar-thumb:hover]:bg-[var(--bd-read-sub)]/45'
+const READ_SCROLLBAR_CLASSES = 'reader-scrollbar [scrollbar-gutter:stable]'
+const ATTACHMENT_SCROLLBAR_CLASSES = 'reader-scrollbar [scrollbar-gutter:stable]'
 
 const AI_PERMISSION_OPTIONS: ReadonlyArray<{ id: string; toolNames: AiToolName[]; labelKey: string; descriptionKey: string }> = [
   { id: 'book-chapter-content', toolNames: ['get_chapter_content'], labelKey: 'reader.aiToolChapter', descriptionKey: 'reader.aiToolChapterDescription' },
@@ -121,7 +121,7 @@ function fromPersistedMessage(message: AiMessageRes): AiMessage {
 
 function AttachmentIcon() {
   return (
-    <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m8.5 12.5 6.8-6.8a3.2 3.2 0 0 1 4.5 4.5L10.5 19.5a5 5 0 0 1-7.1-7.1l9-9" />
       <path d="m6.5 14.5 8.8-8.8" />
     </svg>
@@ -130,17 +130,33 @@ function AttachmentIcon() {
 
 function ReadingScopeIcon({ scope }: { scope: AiReadingScope }) {
   if (scope === 'current_chapter') {
-    return <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 3.5h8l4 4v13H6z" /><path d="M14 3.5v4h4M9 12h6M9 15.5h4" /></svg>
+    return (
+      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <path d="M14 2v6h6M9 13h6M9 17h4" />
+      </svg>
+    )
   }
   if (scope === 'full_book') {
-    return <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 5.5c3.2-.8 6-.1 8.5 2v12c-2.5-2.1-5.3-2.8-8.5-2zM20.5 5.5c-3.2-.8-6-.1-8.5 2v12c2.5-2.1 5.3-2.8 8.5-2z" /></svg>
+    return (
+      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+      </svg>
+    )
   }
-  return <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5.5c3-.8 5.7-.1 8 2v12c-2.3-2.1-5-2.8-8-2zM20 5.5c-3-.8-5.7-.1-8 2v12c2.3-2.1 5-2.8 8-2z" /><path d="M7 12h3M7 15h2" /></svg>
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+      <path d="M12 7v7l2-1.5 2 1.5V7" />
+    </svg>
+  )
 }
 
 function SendIcon() {
   return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <path d="m4 4 16 8-16 8 3-8Z" />
       <path d="M7 12h13" />
     </svg>
@@ -149,7 +165,7 @@ function SendIcon() {
 
 function StopIcon() {
   return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <rect x="6" y="6" width="12" height="12" rx="1.5" />
     </svg>
   )
@@ -194,7 +210,7 @@ function DownloadIcon() {
 
 function ToolsIcon() {
   return (
-    <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M14.7 6.3a4 4 0 0 0-5 5l-6.2 6.2a2.1 2.1 0 0 0 3 3l6.2-6.2a4 4 0 0 0 5-5l-2.4 2.4-3-3z" />
     </svg>
   )
@@ -247,7 +263,7 @@ function renderInline(value: string, citations: AiCitation[] = [], onCitationCli
 type MarkdownBlock =
   | { type: 'heading'; level: number; text: string }
   | { type: 'paragraph'; lines: string[] }
-  | { type: 'list'; ordered: boolean; items: string[] }
+  | { type: 'list'; ordered: boolean; items: string[]; start?: number }
   | { type: 'blockquote'; lines: string[] }
   | { type: 'code'; language: string; text: string }
   | { type: 'table'; header: string[]; rows: string[][] }
@@ -309,18 +325,26 @@ function parseMarkdownBlocks(content: string): MarkdownBlock[] {
     }
 
     const unordered = line.match(/^\s*[-+*]\s+(.+)$/)
-    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/)
+    const ordered = line.match(/^\s*(\d+)[.)]\s+(.+)$/)
     if (unordered || ordered) {
       const orderedList = Boolean(ordered)
+      const start = ordered ? Number(ordered[1]) : undefined
       const items: string[] = []
       while (index < lines.length) {
         const current = lines[index] ?? ''
         const match = orderedList ? current.match(/^\s*\d+[.)]\s+(.+)$/) : current.match(/^\s*[-+*]\s+(.+)$/)
-        if (!match) break
+        if (!match) {
+          if (items.length > 0 && /^\s{2,}\S/.test(current) && !/^\s*[-+*]\s+/.test(current) && !/^\s*\d+[.)]\s+/.test(current)) {
+            items[items.length - 1] += `\n${current.trim()}`
+            index += 1
+            continue
+          }
+          break
+        }
         items.push(match[1] ?? '')
         index += 1
       }
-      blocks.push({ type: 'list', ordered: orderedList, items })
+      blocks.push({ type: 'list', ordered: orderedList, items, start })
       continue
     }
 
@@ -365,7 +389,7 @@ function MarkdownText({ content, citations, onCitationClick, citationLabel, stre
         }
         if (block.type === 'list') {
           const List = block.ordered ? 'ol' : 'ul'
-          return <List key={index} className={`m-0 space-y-1 pl-5 [&>li]:pl-1 ${block.ordered ? 'list-decimal' : 'list-disc'}`}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item, citations, onCitationClick, citationLabel)}</li>)}</List>
+          return <List key={index} start={block.ordered ? (block.start ?? 1) : undefined} className={`m-0 space-y-1 pl-5 [&>li]:pl-1 ${block.ordered ? 'list-decimal' : 'list-disc'}`}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item, citations, onCitationClick, citationLabel)}</li>)}</List>
         }
         if (block.type === 'blockquote') {
           return <blockquote key={index} className="m-0 border-l-2 border-[var(--bd-read-primary)]/35 pl-3 text-[var(--bd-read-sub)]">{block.lines.map((line, lineIndex) => <Fragment key={lineIndex}>{lineIndex > 0 && <br />}{renderInline(line, citations, onCitationClick, citationLabel)}</Fragment>)}</blockquote>
@@ -1717,7 +1741,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
           </button>
           {assistantModeMenuOpen && (
             <div role="menu" aria-label={_('reader.aiSelectAssistantMode')} className="absolute left-0 top-full z-30 mt-2 min-w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1.5 shadow-xl">
-              {availableAssistantModes.map((mode) => <div key={mode.id} role="none" className={`group/mode-row flex min-h-9 items-center gap-1 overflow-hidden rounded-lg transition-colors hover:bg-[var(--bd-read-page-bg)] ${mode.id === selectedAssistantMode.id ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'text-current'}`}>
+              {availableAssistantModes.map((mode) => <div key={mode.id} role="none" className={`group/mode-row flex min-h-9 items-center gap-1 overflow-hidden rounded-lg transition-colors ${mode.id === selectedAssistantMode.id ? 'bg-[var(--bd-read-primary)]/15 font-medium text-[var(--bd-read-primary)] hover:bg-[var(--bd-read-primary)]/20' : 'text-current hover:bg-stone-500/15'}`}>
                 <button type="button" role="menuitemradio" aria-checked={mode.id === selectedAssistantMode.id} onClick={() => selectAssistantMode(mode)} className="flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--bd-read-primary)]">
                   <span className="min-w-0 flex-1 truncate">{assistantModeLabel(mode)}</span>
                 </button>
@@ -1726,7 +1750,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                 </button>
               </div>)}
               <div className="mt-1 border-t border-[var(--bd-read-accent)] pt-1">
-                <button type="button" role="menuitem" onClick={() => openAssistantModeForm()} className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-sm text-[var(--bd-read-primary)] transition-colors hover:bg-[var(--bd-read-page-bg)]">
+                <button type="button" role="menuitem" onClick={() => openAssistantModeForm()} className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-sm text-[var(--bd-read-primary)] transition-colors hover:bg-stone-500/15">
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
                   <span>{_('reader.aiAddMode')}</span>
                 </button>
@@ -1734,7 +1758,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
             </div>
           )}
         </div>
-        <button type="button" onClick={cycleReadingScope} aria-label={_('reader.aiReadingScopeToggle', { scope: readingScopeLabel(readingScope, _) })} title={_('reader.aiReadingScopeCurrent', { scope: readingScopeLabel(readingScope, _) })} className={`ml-2 flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-stone-500/10 @max-[240px]/ai-panel:ml-1 ${readingScope === 'full_book' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'text-[var(--bd-read-sub)] hover:text-current'}`}>
+        <button type="button" onClick={cycleReadingScope} aria-label={_('reader.aiReadingScopeToggle', { scope: readingScopeLabel(readingScope, _) })} title={_('reader.aiReadingScopeCurrent', { scope: readingScopeLabel(readingScope, _) })} className={`ml-2 flex h-7 w-7 items-center justify-center rounded-md transition-all active:scale-95 hover:bg-stone-500/10 @max-[240px]/ai-panel:ml-1 ${readingScope === 'full_book' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'text-[var(--bd-read-sub)] hover:text-current'}`}>
           <ReadingScopeIcon scope={readingScope} />
         </button>
         <div className="ml-auto flex items-center gap-2 text-[var(--bd-read-sub)] @max-[240px]/ai-panel:gap-1">
@@ -1815,17 +1839,17 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                         <button type="button" onClick={cancelEditMessage} className="rounded-md px-2.5 py-1.5 text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current">{_('reader.aiCancel')}</button>
                         <button type="submit" disabled={!editDraft.trim()} className="rounded-md bg-[var(--bd-read-primary)] px-2.5 py-1.5 text-xs text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50">{_('reader.aiRegenerate')}</button>
                       </div>
-                    </form> : isActiveStreamMessage || hasStreamContent ? <StreamingMarkdownText store={streamingTextStore} messageId={message.id} citations={message.citations} onCitationClick={jumpToCitation} citationLabel={(n) => _('reader.aiCitationJump', { n })} thinkingLabel={_('reader.aiThinking')} toolStatus={toolStatus} streaming={isActiveStreamMessage} /> : hasVisibleContent ? (message.role === 'assistant' ? <MarkdownText content={message.content} citations={message.citations} onCitationClick={jumpToCitation} citationLabel={(n) => _('reader.aiCitationJump', { n })} /> : <div className="whitespace-pre-wrap break-words leading-relaxed">{message.content.split(AI_PROMPT_PLACEHOLDER_PATTERN).map((part, partIndex) => AI_PROMPT_PLACEHOLDERS.has(part) ? <span key={`${part}-${partIndex}`} className="rounded border border-[var(--bd-read-primary)]/40 bg-[var(--bd-read-primary)]/10 px-1 font-mono text-[0.9em] text-[var(--bd-read-primary)]">{part}</span> : <Fragment key={`${part}-${partIndex}`}>{part}</Fragment>)}</div>) : null}
+                    </form> : isActiveStreamMessage || hasStreamContent ? <StreamingMarkdownText store={streamingTextStore} messageId={message.id} citations={message.citations} onCitationClick={jumpToCitation} citationLabel={(n) => _('reader.aiCitationJump', { n })} thinkingLabel={_('reader.aiThinking')} toolStatus={toolStatus} streaming={isActiveStreamMessage} /> : hasVisibleContent ? (message.role === 'assistant' ? <MarkdownText content={message.content} citations={message.citations} onCitationClick={jumpToCitation} citationLabel={(n) => _('reader.aiCitationJump', { n })} /> : <div className="whitespace-pre-wrap break-words leading-relaxed">{message.content.split(AI_PROMPT_PLACEHOLDER_PATTERN).map((part, partIndex) => AI_PROMPT_PLACEHOLDERS.has(part) ? <span key={`${part}-${partIndex}`} className="mx-0.5 inline-flex items-center rounded-md border border-[var(--bd-read-primary)]/30 bg-[var(--bd-read-primary)]/10 px-1.5 py-0.5 font-mono text-[11.5px] font-medium tracking-tight text-[var(--bd-read-primary)] select-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] align-baseline">{part}</span> : <Fragment key={`${part}-${partIndex}`}>{part}</Fragment>)}</div>) : null}
                   {message.aborted && <div className="mt-2 text-[11px] text-[var(--bd-read-sub)]">{_('reader.aiStoppedLabel')}</div>}
                   </div>
                   {hasBasis && (
                     <div className="mt-1 w-full max-w-[92%] pl-2 text-[11px] text-[var(--bd-read-sub)] [text-autospace:normal]">
-                      <button type="button" aria-expanded={basisOpen} aria-controls={`answer-basis-${message.id}`} onClick={() => setOpenBasisId(basisOpen ? null : message.id)} className="flex max-w-full items-center gap-1 rounded px-1 py-0.5 text-left transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current">
+                      <button type="button" aria-expanded={basisOpen} aria-controls={`answer-basis-${message.id}`} onClick={() => setOpenBasisId(basisOpen ? null : message.id)} className="flex max-w-full items-center gap-1 rounded px-1 py-0.5 text-left transition-colors hover:bg-stone-500/15 hover:text-current">
                         <span>{_('reader.aiBasisSummary', { n: message.citations.length })}</span>
                         <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${basisOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
                       </button>
                       {basisOpen && <div id={`answer-basis-${message.id}`} className="mt-2 space-y-1 rounded-lg bg-stone-500/5 p-2.5">
-                        {message.citations.map((citation, citationIndex) => <button key={`${citation.id}-${citationIndex}`} type="button" disabled={!renderer} onClick={() => jumpToCitation(citation)} title={citation.excerpt} aria-label={_('reader.aiBasisJump', { n: citationIndex + 1, label: citation.sourceType === 'annotation' ? citation.chapterTitle || _('reader.aiNotes') : citation.chapterTitle || _('reader.aiChapterNumber', { n: citation.chapterIndex + 1 }) })} className="flex min-h-9 w-full items-start gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-default disabled:opacity-70">
+                        {message.citations.map((citation, citationIndex) => <button key={`${citation.id}-${citationIndex}`} type="button" disabled={!renderer} onClick={() => jumpToCitation(citation)} title={citation.excerpt} aria-label={_('reader.aiBasisJump', { n: citationIndex + 1, label: citation.sourceType === 'annotation' ? citation.chapterTitle || _('reader.aiNotes') : citation.chapterTitle || _('reader.aiChapterNumber', { n: citation.chapterIndex + 1 }) })} className="flex min-h-9 w-full items-start gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-70">
                           <span className="shrink-0 pt-0.5">{citationIndex + 1}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium text-current">{citation.sourceType === 'annotation' ? citation.chapterTitle || _('reader.aiNotes') : citation.chapterTitle || _('reader.aiChapterNumber', { n: citation.chapterIndex + 1 })}</span><span className="block max-h-10 overflow-hidden leading-relaxed">{citation.excerpt}</span></span>
                         </button>)}
                       </div>}
@@ -1833,18 +1857,18 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                   )}
                   {message.role === 'assistant' && (hasVisibleContent || message.aborted) && !streaming && (
                     <div className="mt-1 flex max-h-7 items-center gap-1 overflow-hidden pl-2 text-[var(--bd-read-sub)] opacity-100 transition-[max-height,margin,opacity] [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:mt-0 [@media(hover:hover)]:max-h-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:mt-1 [@media(hover:hover)]:group-hover:max-h-7 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:pointer-events-auto [@media(hover:hover)]:group-focus-within:mt-1 [@media(hover:hover)]:group-focus-within:max-h-7 [@media(hover:hover)]:group-focus-within:opacity-100">
-                      <button type="button" disabled={!hasVisibleContent} onClick={() => void copyAssistantMessage(message.id, message.content)} aria-label={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} title={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} className={`flex h-7 w-7 items-center justify-center rounded transition-colors active:scale-95 ${copiedMessageId === message.id ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-default disabled:opacity-50'}`}>{copiedMessageId === message.id ? <CheckIcon /> : <CopyIcon />}</button>
-                      {message.ideaTarget && !message.aborted && <button type="button" onClick={() => void saveAssistantAsIdea(message)} disabled={message.savedAsIdea || createAnnotation.isPending} aria-label={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} title={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-default disabled:opacity-60"><BulbIcon size={14} /></button>}
-                      {retryRequest && index === messages.length - 1 && <button type="button" onClick={() => void runRequest(retryRequest, 2)} aria-label={_('reader.aiRetry')} title={_('reader.aiRetry')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current"><RetryIcon /></button>}
+                      <button type="button" disabled={!hasVisibleContent} onClick={() => void copyAssistantMessage(message.id, message.content)} aria-label={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} title={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} className={`flex h-7 w-7 items-center justify-center rounded transition-colors active:scale-95 ${copiedMessageId === message.id ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-50'}`}>{copiedMessageId === message.id ? <CheckIcon /> : <CopyIcon />}</button>
+                      {message.ideaTarget && !message.aborted && <button type="button" onClick={() => void saveAssistantAsIdea(message)} disabled={message.savedAsIdea || createAnnotation.isPending} aria-label={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} title={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-60"><BulbIcon size={14} /></button>}
+                      {retryRequest && index === messages.length - 1 && <button type="button" onClick={() => void runRequest(retryRequest, 2)} aria-label={_('reader.aiRetry')} title={_('reader.aiRetry')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current"><RetryIcon /></button>}
                       {revisionOptions.length > 1 && <div className="ml-1 flex items-center gap-0.5 rounded-md bg-stone-500/5 px-0.5" aria-label={_('reader.aiAnswerVersions')}>
-                        <button type="button" disabled={selectedRevisionIndex <= 0 || selectRevisionMutation.isPending} onClick={() => selectRevision(revisionOptions[selectedRevisionIndex - 1]!.id)} aria-label={_('reader.aiPreviousAnswer')} title={_('reader.aiPreviousAnswer')} className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14.5 6-6 6 6 6" /></svg></button>
+                        <button type="button" disabled={selectedRevisionIndex <= 0 || selectRevisionMutation.isPending} onClick={() => selectRevision(revisionOptions[selectedRevisionIndex - 1]!.id)} aria-label={_('reader.aiPreviousAnswer')} title={_('reader.aiPreviousAnswer')} className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14.5 6-6 6 6 6" /></svg></button>
                         <span className="min-w-8 text-center text-[10px] tabular-nums" aria-live="polite">{selectedRevisionIndex + 1}/{revisionOptions.length}</span>
-                        <button type="button" disabled={selectedRevisionIndex >= revisionOptions.length - 1 || selectRevisionMutation.isPending} onClick={() => selectRevision(revisionOptions[selectedRevisionIndex + 1]!.id)} aria-label={_('reader.aiNextAnswer')} title={_('reader.aiNextAnswer')} className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9.5 6 6 6-6 6" /></svg></button>
+                        <button type="button" disabled={selectedRevisionIndex >= revisionOptions.length - 1 || selectRevisionMutation.isPending} onClick={() => selectRevision(revisionOptions[selectedRevisionIndex + 1]!.id)} aria-label={_('reader.aiNextAnswer')} title={_('reader.aiNextAnswer')} className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9.5 6 6 6-6 6" /></svg></button>
                       </div>}
                     </div>
                   )}
                   {isLatestEditableUser && !isEditingMessage && <div className="mt-1 flex max-h-7 items-center justify-end overflow-hidden pr-2 text-[var(--bd-read-sub)] opacity-100 transition-[max-height,margin,opacity] [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:mt-0 [@media(hover:hover)]:max-h-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:mt-1 [@media(hover:hover)]:group-hover:max-h-7 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:pointer-events-auto [@media(hover:hover)]:group-focus-within:mt-1 [@media(hover:hover)]:group-focus-within:max-h-7 [@media(hover:hover)]:group-focus-within:opacity-100">
-                    <button type="button" onClick={() => beginEditMessage(message)} aria-label={_('reader.aiEditMessage')} title={_('reader.aiEditMessage')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current"><EditIcon /></button>
+                    <button type="button" onClick={() => beginEditMessage(message)} aria-label={_('reader.aiEditMessage')} title={_('reader.aiEditMessage')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current"><EditIcon /></button>
                   </div>}
                 </div>
               )
@@ -1857,7 +1881,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
               <p className="text-base font-normal text-current">{_('reader.aiStartChat')}</p>
             </div>
           )}
-          {messages.length > 0 && (!isAtLatest || hasPendingLatest) && <button type="button" onClick={scrollToLatest} aria-label={_('reader.aiBackToLatest')} title={hasPendingLatest ? _('reader.aiViewNewAnswer') : _('reader.aiBackToLatest')} className="absolute bottom-3 left-1/2 flex h-8 -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-2.5 text-xs text-[var(--bd-read-sub)] shadow-md transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current">
+          {messages.length > 0 && (!isAtLatest || hasPendingLatest) && <button type="button" onClick={scrollToLatest} aria-label={_('reader.aiBackToLatest')} title={hasPendingLatest ? _('reader.aiViewNewAnswer') : _('reader.aiBackToLatest')} className="absolute bottom-3 left-1/2 flex h-8 -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-2.5 text-xs text-[var(--bd-read-sub)] shadow-md transition-colors hover:bg-stone-500/15 hover:text-current">
             <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v15M6.5 13.5 12 19l5.5-5.5" /></svg>
             {hasPendingLatest && <span>{_('reader.aiNewAnswer')}</span>}
           </button>}
@@ -1874,7 +1898,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                     const chapterIndex = node.index
                     const selected = selectedChapterReferences.includes(chapterIndex)
                     const collapsed = collapsedChapterReferences.has(chapterIndex)
-                    return <li key={chapter.id} style={{ paddingLeft: `${node.depth * 0.75}rem` }}><div className={`flex min-h-9 items-center rounded-lg transition-colors ${selected ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'text-current hover:bg-[var(--bd-read-page-bg)]'}`}>
+                    return <li key={chapter.id} style={{ paddingLeft: `${node.depth * 0.75}rem` }}><div className={`flex min-h-9 items-center rounded-lg transition-colors ${selected ? 'bg-[var(--bd-read-primary)]/15 font-medium text-[var(--bd-read-primary)] hover:bg-[var(--bd-read-primary)]/20' : 'text-current hover:bg-stone-500/15'}`}>
                       {node.hasChildren ? <button type="button" onClick={() => toggleChapterReferenceGroup(chapterIndex)} aria-label={`${collapsed ? _('reader.aiExpand') : _('reader.aiCollapse')} ${chapter.title}`} title={collapsed ? _('reader.aiExpand') : _('reader.aiCollapse')} className="flex h-9 w-7 shrink-0 items-center justify-center text-[var(--bd-read-sub)] hover:text-current">
                         <svg className={`h-3.5 w-3.5 transition-transform ${collapsed ? '' : 'rotate-90'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
                       </button> : <span className="w-7 shrink-0" />}
@@ -1890,17 +1914,40 @@ export default function AiPanel({ bookId }: { bookId: string }) {
             {toolsOpen && (
               <aside ref={toolsRef} data-testid="ai-tools-menu" aria-label={_('reader.aiTools')} className="absolute bottom-full left-0 z-30 mb-2 w-full overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] shadow-xl">
                 <h3 className="border-b border-[var(--bd-read-accent)] px-3 py-3 text-sm font-medium text-current">{_('reader.aiTools')}</h3>
-                <ul className="divide-y divide-[var(--bd-read-accent)]/60 px-2 py-1">
+                <ul className="divide-y divide-[var(--bd-read-accent)]/60 px-1.5 py-1">
                   {AI_PERMISSION_OPTIONS.map((option) => {
                     const enabled = option.toolNames.every((name) => enabledTools.includes(name))
-                    return <li key={option.id} className="flex items-center gap-3 px-1 py-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm text-current">{_(option.labelKey)}</p>
-                        <p className="mt-0.5 truncate text-[11px] text-[var(--bd-read-sub)]">{_(option.descriptionKey)}</p>
+                    return <li key={option.id}>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => togglePermission(option.toolNames)}
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault()
+                            togglePermission(option.toolNames)
+                          }
+                        }}
+                        className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-stone-500/15"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-current">{_(option.labelKey)}</p>
+                          <p className="mt-0.5 truncate text-[11px] text-[var(--bd-read-sub)]">{_(option.descriptionKey)}</p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={enabled}
+                          aria-label={_(option.labelKey)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            togglePermission(option.toolNames)
+                          }}
+                          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${enabled ? 'bg-[var(--bd-read-primary)]' : 'bg-[var(--bd-read-accent)]'}`}
+                        >
+                          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-[var(--bd-read-bg)] shadow-sm transition-transform ${enabled ? 'left-4' : 'left-0.5'}`} />
+                        </button>
                       </div>
-                      <button type="button" role="switch" aria-checked={enabled} aria-label={_(option.labelKey)} onClick={() => togglePermission(option.toolNames)} className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${enabled ? 'bg-[var(--bd-read-primary)]' : 'bg-[var(--bd-read-accent)]'}`}>
-                        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-[var(--bd-read-bg)] shadow-sm transition-transform ${enabled ? 'left-4' : 'left-0.5'}`} />
-                      </button>
                     </li>
                   })}
                 </ul>
@@ -1922,9 +1969,9 @@ export default function AiPanel({ bookId }: { bookId: string }) {
               </div>}
               <textarea ref={promptTextareaRef} value={prompt} onChange={(event) => { const value = event.target.value; setPrompt(value); const slashOpen = value.startsWith('/'); setQuickCommandMenuOpen(slashOpen); if (slashOpen) { setAttachmentOpen(false); setToolsOpen(false) } }} onKeyDown={handlePromptKeyDown} rows={2} placeholder={_('reader.aiInputPlaceholder')} className={`${READ_SCROLLBAR_CLASSES} min-h-12 max-h-36 w-full resize-none overflow-y-hidden overscroll-contain bg-transparent text-sm leading-relaxed text-current outline-none placeholder:text-[var(--bd-read-sub)]`} />
               {quickCommandMenuOpen && slashQuery !== null && (
-                <div ref={quickCommandMenuRef} role="menu" aria-label={_('reader.aiQuickCommands')} data-testid="ai-quick-command-menu" className="absolute bottom-full left-0 z-30 mb-2 flex max-h-[min(360px,calc(100vh-4rem))] w-full flex-col overflow-y-auto rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1.5 shadow-xl">
+                <div ref={quickCommandMenuRef} role="menu" aria-label={_('reader.aiQuickCommands')} data-testid="ai-quick-command-menu" className="absolute bottom-full left-0 z-30 mb-2 flex max-h-[min(360px,calc(100vh-4rem))] w-full flex-col overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1.5 shadow-xl">
                   {visibleQuickCommands.length > 0 ? visibleQuickCommands.map((command) => (
-                    <button key={command.id} type="button" role="menuitem" aria-selected={command.id === visibleQuickCommands[quickCommandIndex]?.id} onClick={() => applyQuickCommand(command)} className={`flex min-h-10 w-full items-center rounded-lg px-3 text-left text-sm text-current transition-colors hover:bg-[var(--bd-read-page-bg)] ${command.id === visibleQuickCommands[quickCommandIndex]?.id ? 'bg-[var(--bd-read-page-bg)]' : ''}`}>
+                    <button key={command.id} type="button" role="menuitem" aria-selected={command.id === visibleQuickCommands[quickCommandIndex]?.id} onClick={() => applyQuickCommand(command)} className={`flex min-h-10 w-full items-center rounded-lg px-3 text-left text-sm text-current transition-colors hover:bg-stone-500/15 ${command.id === visibleQuickCommands[quickCommandIndex]?.id ? 'bg-stone-500/15 font-medium' : ''}`}>
                       <span className="min-w-0 flex-1 truncate">{command.name}</span>
                     </button>
                   )) : <div className="flex min-h-14 items-start gap-2 px-2.5 py-2.5">
@@ -1953,16 +2000,16 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                     disabled={!modelReady || modelOptions.length < 2 || updateAiConfig.isPending || updateAiProfile.isPending}
                     ref={modelButtonRef}
                     onClick={() => { setAttachmentOpen(false); setToolsOpen(false); setAssistantModeMenuOpen(false); setQuickCommandMenuOpen(false); setMoreOpen(false); setModelMenuOpen((open) => !open) }}
-                    className={`flex min-w-0 w-full max-w-full items-center gap-1 rounded py-0.5 pl-1 pr-1 text-left text-xs text-current outline-none transition-colors hover:bg-stone-500/10 focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)] disabled:cursor-not-allowed disabled:text-[var(--bd-read-sub)] ${modelMenuOpen ? 'bg-stone-500/10' : ''}`}
+                    className={`flex h-7 min-w-0 w-full max-w-full items-center gap-1.5 rounded-md px-1.5 text-left text-xs font-medium text-[var(--bd-read-text)] outline-none transition-colors hover:bg-stone-500/10 focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)] disabled:cursor-not-allowed disabled:text-[var(--bd-read-sub)] ${modelMenuOpen ? 'bg-stone-500/10' : ''}`}
                   >
                     {modelReady && <AiBrandIcon name={selectedModel?.name ?? statusQuery.data?.data.model} model={selectedModel} provider={statusQuery.data?.data.provider} className="h-5 w-5 shrink-0 @max-[280px]/composer:hidden" />}
                     <span className="min-w-0 flex-1 truncate">{selectedModelLabel}</span>
-                    <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${modelMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+                    <svg className={`h-3.5 w-3.5 shrink-0 text-[var(--bd-read-sub)] transition-transform ${modelMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
                   </button>
                   {modelMenuOpen && modelOptions.length > 1 && modelMenuPosition && createPortal(
                     <div ref={modelMenuPopupRef} role="listbox" aria-label={_('reader.aiSelectModel')} className={`${READ_SCROLLBAR_CLASSES} fixed z-[70] max-h-52 min-w-56 w-max max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain rounded-lg border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1 shadow-xl`} style={modelMenuPosition}>
                       {modelOptions.map((model) => {
-                        const label = model.name === model.id ? model.id : `${model.name} · ${model.id}`
+                        const hasId = model.name !== model.id
                         const selected = model.id === statusQuery.data?.data.model
                         return (
                           <button
@@ -1970,15 +2017,18 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                             type="button"
                             role="option"
                             aria-selected={selected}
-                            title={label}
+                            title={hasId ? `${model.name} (${model.id})` : model.name}
                             onClick={() => {
                               selectModel(model.id)
                               setModelMenuOpen(false)
                             }}
-                            className={`flex h-9 min-w-0 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm transition-colors hover:bg-[var(--bd-read-page-bg)] ${selected ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'text-[var(--bd-read-text)]'}`}
+                            className={`flex min-h-10 min-w-0 w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1 text-left text-sm transition-colors ${selected ? 'bg-[var(--bd-read-primary)]/15 font-medium text-[var(--bd-read-primary)] hover:bg-[var(--bd-read-primary)]/20' : 'text-[var(--bd-read-text)] hover:bg-stone-500/15'}`}
                           >
-                            <AiBrandIcon name={model.name} model={model} className="h-5 w-5" />
-                            <span className="min-w-0 flex-1 truncate">{label}</span>
+                            <AiBrandIcon name={model.name} model={model} className="h-5 w-5 shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-medium">{model.name}</p>
+                              {hasId && <p className="truncate text-[10px] text-[var(--bd-read-sub)]">{model.id}</p>}
+                            </div>
                             {selected && <span className="ml-2 shrink-0 text-[var(--bd-read-primary)]"><CheckIcon /></span>}
                           </button>
                         )
@@ -1988,7 +2038,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                   )}
                 </div>
                 </div>
-                {streaming ? <button type="button" onClick={stop} aria-label={_('reader.aiStopGenerating')} title={_('reader.aiStopGenerating')} className="ml-auto shrink-0 rounded-full p-1.5 text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"><StopIcon /></button> : <button type="submit" disabled={!canSend} aria-label={_('reader.aiSend')} title={_('reader.aiSend')} className="ml-auto shrink-0 rounded-full p-1.5 text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><SendIcon /></button>}
+                {streaming ? <button type="button" onClick={stop} aria-label={_('reader.aiStopGenerating')} title={_('reader.aiStopGenerating')} className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"><StopIcon /></button> : <button type="submit" disabled={!canSend} aria-label={_('reader.aiSend')} title={_('reader.aiSend')} className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><SendIcon /></button>}
               </div>
             </div>
           </form>
@@ -2023,9 +2073,13 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         </aside>
       )}
       {historyOpen && (
-        <aside ref={historyRef} data-testid="ai-history" className="absolute right-2 top-12 z-20 flex max-h-[min(360px,calc(100vh-5rem))] w-80 max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-2 shadow-xl">
+        <aside ref={historyRef} data-testid="ai-history" className="absolute right-2 top-12 z-20 flex max-h-[min(380px,calc(100vh-5rem))] w-80 max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] shadow-xl">
+          <div className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--bd-read-accent)] px-3.5">
+            <h3 className="text-xs font-semibold text-current">{_('reader.aiHistory')}</h3>
+            <span className="rounded-full bg-stone-500/10 px-2 py-0.5 text-[11px] tabular-nums text-[var(--bd-read-sub)]">{historyThreads.length}</span>
+          </div>
           {threadsQuery.isFetching && historyThreads.length === 0 ? <p className="px-3 py-8 text-center text-xs text-[var(--bd-read-sub)]">{_('reader.loading')}</p> : historyThreads.length === 0 ? <p className="px-3 py-8 text-center text-xs text-[var(--bd-read-sub)]">{_('reader.aiHistoryEmpty')}</p> : (
-            <ul className={`${READ_SCROLLBAR_CLASSES} min-h-0 overflow-y-auto overscroll-contain`}>
+            <ul className="reader-scrollbar [scrollbar-gutter:stable] min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-2 pr-1.5">
               {historyThreads.map((thread) => {
                 const createdAt = new Date(thread.createdAt)
                 const now = new Date()
@@ -2033,8 +2087,9 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                 const timeLabel = isToday
                   ? createdAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
                   : createdAt.toLocaleDateString('zh-CN')
+                const isActive = thread.id === threadId
                 return (
-                <li key={thread.id} className={`group rounded-lg p-1 transition-colors hover:bg-stone-500/5 ${thread.id === threadId ? 'bg-[var(--bd-read-page-bg)]' : ''}`}>
+                <li key={thread.id} className={`group mr-1 rounded-lg p-1 transition-colors ${isActive ? 'bg-[var(--bd-read-primary)]/10' : 'hover:bg-stone-500/5'}`}>
                   {renameThreadId === thread.id ? (
                     <form className="flex items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); submitRename(thread) }}>
                       <input autoFocus value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} maxLength={100} aria-label={_('reader.aiRenamePlaceholder')} className="min-w-0 flex-1 rounded border border-[var(--bd-read-accent)] bg-transparent px-2 py-1 text-sm outline-none" />
@@ -2048,10 +2103,10 @@ export default function AiPanel({ bookId }: { bookId: string }) {
                   ) : (
                     <div className="flex items-center gap-1">
                       <button type="button" onClick={() => selectThread(thread.id)} className="min-w-0 flex-1 rounded-md px-2 py-1 text-left">
-                        <span className="block truncate text-sm text-current">{thread.title}</span>
+                        <span className={`block truncate text-sm ${isActive ? 'font-medium text-[var(--bd-read-primary)]' : 'text-current'}`}>{thread.title}</span>
                         <span className="mt-0.5 block text-[11px] text-[var(--bd-read-sub)]">{timeLabel} · {thread.messageCount} {_(thread.messageCount === 1 ? 'reader.aiMessageOne' : 'reader.aiMessageMany')}</span>
                       </button>
-                      <button type="button" onClick={() => beginRename(thread)} aria-label={`${_('reader.aiRename')} ${thread.title}`} title={_('reader.aiRename')} className="pointer-events-none flex h-7 w-7 shrink-0 items-center justify-center rounded p-1 text-[var(--bd-read-sub)] opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:bg-[var(--bd-read-page-bg)] hover:text-current focus-visible:pointer-events-auto focus-visible:opacity-100">
+                      <button type="button" onClick={() => beginRename(thread)} aria-label={`${_('reader.aiRename')} ${thread.title}`} title={_('reader.aiRename')} className="pointer-events-none flex h-7 w-7 shrink-0 items-center justify-center rounded p-1 text-[var(--bd-read-sub)] opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:bg-stone-500/10 hover:text-current focus-visible:pointer-events-auto focus-visible:opacity-100">
                         <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="m4 16 9.5-9.5a2.1 2.1 0 0 1 3 3L7 19H4v-3Z" /><path d="m13.5 7.5 3 3" /></svg>
                       </button>
                       <button type="button" onClick={() => setDeleteTarget(thread)} aria-label={`${_('reader.aiDelete')} ${thread.title}`} title={_('reader.aiDelete')} className="pointer-events-none flex h-7 w-7 shrink-0 items-center justify-center rounded p-1 text-[var(--bd-read-sub)] opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:bg-red-500/10 hover:text-red-600 focus-visible:pointer-events-auto focus-visible:opacity-100">
@@ -2068,14 +2123,37 @@ export default function AiPanel({ bookId }: { bookId: string }) {
       )}
       {assistantModeForm && <Modal title={assistantModeForm.id ? _('reader.aiEditMode') : _('reader.aiAddMode')} variant="reader" onClose={() => setAssistantModeForm(null)}>
         <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); submitAssistantMode() }}>
-          <label className="flex flex-col gap-1 text-xs text-[var(--bd-read-sub)]">
-            <span>{_('reader.aiModeName')}</span>
-            <input required autoFocus maxLength={80} value={assistantModeForm.name} onChange={(event) => setAssistantModeForm({ ...assistantModeForm, name: event.target.value })} placeholder={_('reader.aiModeNamePlaceholder')} className="h-10 rounded-lg border border-[var(--bd-read-accent)] bg-transparent px-3 text-sm text-current outline-none focus:border-[var(--bd-read-primary)]" />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-[var(--bd-read-sub)]">
-            <span>{_('reader.aiModePrompt')}</span>
-            <textarea required maxLength={2_000} rows={6} value={assistantModeForm.prompt} onChange={(event) => setAssistantModeForm({ ...assistantModeForm, prompt: event.target.value })} placeholder={_('reader.aiModePromptPlaceholder')} className="resize-y rounded-lg border border-[var(--bd-read-accent)] bg-transparent px-3 py-2 text-sm leading-5 text-current outline-none focus:border-[var(--bd-read-primary)]" />
-          </label>
+          <div className="flex flex-col gap-1 text-xs text-[var(--bd-read-sub)]">
+            <div className="flex items-center justify-between">
+              <label htmlFor="ai-mode-name" className="cursor-pointer">{_('reader.aiModeName')}</label>
+              <span className="text-[10px] tabular-nums text-[var(--bd-read-sub)]/70">{assistantModeForm.name.length}/80</span>
+            </div>
+            <input id="ai-mode-name" required autoFocus maxLength={80} value={assistantModeForm.name} onChange={(event) => setAssistantModeForm({ ...assistantModeForm, name: event.target.value })} placeholder={_('reader.aiModeNamePlaceholder')} className="h-10 rounded-lg border border-[var(--bd-read-accent)] bg-transparent px-3 text-sm text-current outline-none focus:border-[var(--bd-read-primary)]" />
+          </div>
+          <div className="flex flex-col gap-1 text-xs text-[var(--bd-read-sub)]">
+            <div className="flex items-center justify-between">
+              <label htmlFor="ai-mode-prompt" className="cursor-pointer">{_('reader.aiModePrompt')}</label>
+              <span className="text-[10px] tabular-nums text-[var(--bd-read-sub)]/70">{assistantModeForm.prompt.length}/2000</span>
+            </div>
+            <textarea id="ai-mode-prompt" required maxLength={2_000} rows={6} value={assistantModeForm.prompt} onChange={(event) => setAssistantModeForm({ ...assistantModeForm, prompt: event.target.value })} placeholder={_('reader.aiModePromptPlaceholder')} className="resize-y rounded-lg border border-[var(--bd-read-accent)] bg-transparent px-3 py-2 text-sm leading-5 text-current outline-none focus:border-[var(--bd-read-primary)]" />
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {['{SELTEXT}', '{CHAPTER}', '{SELPARA}'].map((placeholder) => (
+                <button
+                  key={placeholder}
+                  type="button"
+                  onClick={() => {
+                    setAssistantModeForm({
+                      ...assistantModeForm,
+                      prompt: `${assistantModeForm.prompt}${assistantModeForm.prompt.endsWith(' ') || assistantModeForm.prompt.length === 0 ? '' : ' '}${placeholder}`,
+                    })
+                  }}
+                  className="inline-flex items-center rounded-md border border-[var(--bd-read-accent)] bg-stone-500/5 px-2 py-0.5 font-mono text-[11px] text-[var(--bd-read-sub)] transition-colors hover:border-[var(--bd-read-primary)]/40 hover:bg-[var(--bd-read-primary)]/10 hover:text-[var(--bd-read-primary)] active:scale-95"
+                >
+                  {placeholder}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex items-center justify-between gap-2 border-t border-[var(--bd-read-accent)] pt-4">
             {assistantModeForm.id === DEFAULT_ASSISTANT_MODE.id
               ? <button type="button" onClick={requestRestoreAssistantMode} disabled={updateAiConfig.isPending} className="rounded-lg border border-[var(--bd-read-accent)] px-4 py-2 text-sm text-[var(--bd-read-primary)] transition-colors hover:bg-[var(--bd-read-page-bg)] disabled:cursor-not-allowed disabled:opacity-50">{_('reader.aiRestoreDefault')}</button>

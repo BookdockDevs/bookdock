@@ -84,7 +84,6 @@ export function useCreateAnnotation(bookId: string) {
     },
   })
 }
-
 export function useUpdateAnnotation(bookId: string) {
   const queryClient = useQueryClient()
   const key = ['annotations', bookId] as const
@@ -110,7 +109,6 @@ export function useUpdateAnnotation(bookId: string) {
     },
   })
 }
-
 export function useDeleteAnnotation(bookId: string) {
   const queryClient = useQueryClient()
   const key = ['annotations', bookId] as const
@@ -132,3 +130,29 @@ export function useDeleteAnnotation(bookId: string) {
     },
   })
 }
+
+export function useBatchDeleteAnnotations(bookId: string) {
+  const queryClient = useQueryClient()
+  const key = ['annotations', bookId] as const
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map((id) => apiDelete(`/annotations/${id}`)))
+    },
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey: key })
+      const previous = queryClient.getQueryData<AnnotationsCache>(key)
+      const toDelete = new Set(ids)
+      queryClient.setQueryData<AnnotationsCache>(key, (old) =>
+        old ? { data: old.data.filter((a) => !toDelete.has(a.id)) } : old,
+      )
+      return { previous }
+    },
+    onError: (_err, _ids, context) => {
+      if (context?.previous) queryClient.setQueryData(key, context.previous)
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: key })
+    },
+  })
+}
+

@@ -56,4 +56,16 @@ describe('SettingsPopover', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).toHaveBeenCalled()
   })
+
+  it('renders popover container with smooth entrance and reader scrollbar classes', () => {
+    const { container } = render(
+      <SettingsPopover open onClose={vi.fn()}>
+        <div>settings</div>
+      </SettingsPopover>,
+    )
+    const popover = container.firstElementChild as HTMLElement
+    expect(popover).toHaveClass('animate-modal-panel')
+    expect(popover).toHaveClass('reader-scrollbar')
+    expect(popover).toHaveClass('rounded-xl')
+  })
 })
