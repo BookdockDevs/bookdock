@@ -14,7 +14,7 @@
 
 - [x] Close the current reader regression pass
 - [x] Make in-book search respect visible text transforms, including Simplified/Traditional conversion
-- [ ] Publish v0.2 with a reproducible Docker image, Compose setup, health check, CI smoke test, and `DATA_DIR` persistence
+- [x] Publish v0.2 with a reproducible Docker image, Compose setup, health check, CI smoke test, and `DATA_DIR` persistence
 - [x] Deliver the read-only AI reading workflow with provider profiles, bounded tools, retrieval, citations, durable history, retry, and cancellation
 - [x] Start v0.2 from a clean database baseline without the 0.1 schema upgrade path
 - [x] Document manual volume backup and restore

@@ -2,7 +2,31 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.2.1] - Unreleased
+## [0.2.2] - Unreleased
+
+### Highlights
+
+- Added automatic reading in scroll mode with smooth scrolling and timed page turns, speed control, pause/resume, progress display, and coordination with TTS.
+- Improved continuous-scroll loading and navigation stability when adjacent sections load or the reader moves across buffer boundaries.
+- Continued the reader and library UI polish pass with responsive layouts, touch-friendly controls, themed surfaces, clearer overlays, and empty/error states.
+
+### Added
+
+- Automatic-reading sessions with selection-aware pausing, manual-navigation rebasing, and a dedicated progress indicator.
+- Batch deletion for annotations from the reader notes panel.
+
+### Changed
+
+- Refined the existing TOC, search, notes, annotation export, reading-history, and statistics interfaces, including expandable long notes, clearer batch-selection controls, export previews, and localized duration/word-count display.
+- Polished the existing book-detail and cover-editing screens, library selection flows, settings edit modes, and modal/flyout placement.
+- Improved reader text-conversion synchronization for TOC labels and theme-aware search highlighting, plus popup and selection dismissal across pointer, keyboard, and iframe interactions.
+- Updated English and Chinese localization and reader visual tokens for the revised presentation.
+
+### Fixed
+
+- Prevented continuous-scroll jumps and buffer races during adjacent-section loading and backward navigation.
+
+## [0.2.1] - 2026-09-11
 
 ### Highlights
 
@@ -72,7 +96,31 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.2.1] - 待发布
+### [0.2.2] - 待发布
+
+#### 主要更新
+
+- 新增滚动阅读模式下的自动阅读，支持平滑滚动、定时翻页、速度调节、暂停/继续、进度显示以及与 TTS 的协作。
+- 改进连卷滚动加载和导航稳定性，减少相邻章节加载或跨缓冲区导航时的位置跳动。
+- 延续阅读器和书库界面优化，改进响应式布局、触控操作、主题表面、弹层以及空状态和错误状态。
+
+#### 新增
+
+- 自动阅读会话，支持选区感知暂停、手动导航重定位以及独立的进度提示。
+- 阅读器笔记面板支持批量删除标注。
+
+#### 变更
+
+- 优化既有目录、搜索、笔记、标注导出、阅读记录和统计界面，包括长笔记展开、批量选择控件、导出预览以及时长/字数本地化显示。
+- 优化既有书籍详情、封面编辑、书库选择、设置编辑模式以及模态框/弹出菜单定位的呈现。
+- 改进目录文本转换与主题搜索高亮同步，并修正指针、键盘和 iframe 场景下的弹层关闭与选区生命周期。
+- 更新中英文文案和阅读器视觉变量。
+
+#### 修复
+
+- 修复相邻章节加载和向后导航过程中的连卷滚动跳动与缓冲竞争问题。
+
+### [0.2.1] - 2026-09-11
 
 #### 主要更新
 
