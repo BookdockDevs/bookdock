@@ -56,6 +56,23 @@ describe('ProgressStrip drag preview', () => {
     expect(screen.getByText('第二章')).toBeInTheDocument()
   })
 
+  it('uses Foliate section-to-TOC labels when server chapters are not spine-aligned', () => {
+    renderStrip({
+      chapters: [
+        ...chapters,
+        { id: 'ch-2', title: '服务端第三章', level: 1, startOffset: 200, endOffset: 300, wordCount: 100 },
+      ],
+      sectionTocLabels: ['Foliate 第一章', 'Foliate 第二章'],
+    })
+    const slider = screen.getByRole('slider', { name: '阅读进度' })
+    fireEvent.pointerDown(slider)
+    fireEvent.change(slider, { target: { value: '75' } })
+
+    expect(screen.getByText('Foliate 第二章')).toBeInTheDocument()
+    expect(screen.queryByText('第二章')).not.toBeInTheDocument()
+    expect(screen.queryByText('2 / 3')).not.toBeInTheDocument()
+  })
+
   it('seeks the dragged value and clears the preview on release', () => {
     const { onSeek } = renderStrip()
     const slider = screen.getByRole('slider', { name: '阅读进度' })

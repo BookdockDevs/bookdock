@@ -274,7 +274,7 @@ describe('BookDetailDialog cover draft', () => {
     expect(apiUpload).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    expect(screen.getByRole('img')).toHaveAttribute('src', '/api/v1/books/book-1/cover?v=auto')
   })
 
   it('defers cover removal until save', async () => {

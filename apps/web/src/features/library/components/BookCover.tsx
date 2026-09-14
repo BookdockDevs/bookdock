@@ -28,7 +28,9 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
   const palette = getCoverPalette(paletteKey, coverPaletteId)
   const isSm = size === 'sm'
   const source = coverSrc === undefined
-    ? (book.coverKey ? `/api/v1/books/${book.id}/cover?v=${encodeURIComponent(book.coverKey)}` : null)
+    ? (book.coverKey || book.format === 'epub'
+      ? `/api/v1/books/${book.id}/cover?v=${encodeURIComponent(book.coverKey ?? 'auto')}`
+      : null)
     : coverSrc
   const hasCover = Boolean(source) && !error
 

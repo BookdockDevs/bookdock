@@ -11,9 +11,10 @@ import { scanTxtChapters, normalizeText, decodeTextBuffer } from '../../formats/
 import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
-import { convertTxtToEpub } from '../../lib/txt-to-epub'
+import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { sha256 } from '../../lib/hash'
 import { countWords } from '../../lib/word-count'
+import { log } from '../../lib/logger'
 import type { BookFormat, BookMetadata, Chapter, TocRulePattern, TrashSettings, ViewSettings } from '@bookdock/shared'
 
 /**
@@ -153,7 +154,10 @@ function detectImageExtension(buffer: Buffer): string | null {
   if (buffer.length < 4) return null
   if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'png'
   if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpg'
+  if (buffer.length >= 6 && (buffer.toString('ascii', 0, 6) === 'GIF87a' || buffer.toString('ascii', 0, 6) === 'GIF89a')) return 'gif'
   if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'webp'
+  const header = buffer.toString('utf8', 0, Math.min(buffer.length, 4096)).replace(/^\uFEFF/, '')
+  if (/<svg(?:\s|>)/i.test(header)) return 'svg'
   return null
 }
 
@@ -180,7 +184,7 @@ export async function uploadBook(userId: string, file: File, membership?: { shel
 
   const buffer = Buffer.from(await file.arrayBuffer())
   const parsed = await parser.parse(buffer)
-  const format = fileName.endsWith('.txt') ? 'txt' : 'epub'
+  const format = fileName.toLowerCase().endsWith('.txt') ? 'txt' : 'epub'
   const bookId = createId('book')
   const db = getDb()
   const tagIds = [...new Set(membership?.tagIds ?? [])]
@@ -240,6 +244,7 @@ export async function uploadBook(userId: string, file: File, membership?: { shel
       meta.tocRuleId = scored.id
       meta.tocRuleAuto = true
     }
+    meta.txtArtifactVersion = TXT_EPUB_ARTIFACT_VERSION
 
     // Generate EPUB eagerly and save as the only file. Chapter content is
     // sliced on demand (B5): holding every chapter's slice at once roughly
@@ -326,6 +331,59 @@ export async function getBookChapters(userId: string, bookId: string) {
   return (book.meta?.chapters ?? []) as Chapter[]
 }
 
+const LEGACY_TXT_FONT_DECLARATION = /font-family\s*:\s*"Noto Serif SC"\s*,\s*"Source Han Serif SC"\s*,\s*"SimSun"\s*,\s*serif\s*;/i
+
+export interface TxtArtifactMigrationResult {
+  examined: number
+  migrated: number
+  skipped: number
+  failed: number
+}
+
+/** Upgrade stored TXT-derived EPUB styles without changing chapter files or CFIs. */
+export async function migrateTxtArtifacts(): Promise<TxtArtifactMigrationResult> {
+  const db = getDb()
+  const storage = getStorage()
+  const txtBooks = db.select().from(books).where(eq(books.format, 'txt')).all()
+  const result: TxtArtifactMigrationResult = { examined: txtBooks.length, migrated: 0, skipped: 0, failed: 0 }
+
+  for (const book of txtBooks) {
+    if (book.meta.txtArtifactVersion === TXT_EPUB_ARTIFACT_VERSION) {
+      result.skipped++
+      continue
+    }
+
+    try {
+      const buffer = await bufferFromStream(await storage.get(book.filePath))
+      const zip = await JSZip.loadAsync(buffer)
+      const styleEntry = zip.file('OEBPS/style.css')
+      let migratedBuffer: Buffer | null = null
+      if (styleEntry) {
+        const css = await styleEntry.async('string')
+        const migratedCss = css.replace(LEGACY_TXT_FONT_DECLARATION, '')
+        if (migratedCss !== css) {
+          zip.file('OEBPS/style.css', migratedCss)
+          migratedBuffer = await zip.generateAsync({ type: 'nodebuffer' })
+          await storage.put(book.filePath, migratedBuffer)
+        }
+      }
+
+      const meta = { ...book.meta, txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION }
+      db.update(books).set({
+        meta,
+        size: migratedBuffer?.length ?? book.size,
+        updatedAt: Date.now(),
+      }).where(eq(books.id, book.id)).run()
+      result.migrated++
+    } catch (error) {
+      result.failed++
+      log('error', 'books.txt_artifact_migration.failed', { error, meta: { bookId: book.id } })
+    }
+  }
+
+  return result
+}
+
 /**
  * Rebuild a TXT book's chapters and stored EPUB from the effective TOC preset.
  * The normalized text is recovered from the server-generated EPUB, then the
@@ -356,7 +414,12 @@ async function rebuildTocBook(
     wordCount: countWords(normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)),
   }))
   const wordCount = metaChapters.reduce((sum, c) => sum + c.wordCount, 0)
-  const meta: Record<string, unknown> = { ...book.meta, chapters: metaChapters, wordCount }
+  const meta: Record<string, unknown> = {
+    ...book.meta,
+    chapters: metaChapters,
+    wordCount,
+    txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION,
+  }
   const oldChapters = (book.meta as { chapters?: { id?: string }[] } | undefined)?.chapters
   // CFIs address the EPUB by chapter-file index, so only the chapter
   // boundaries (ids = start offsets) decide whether the saved position is
@@ -606,19 +669,46 @@ export async function updateBookCover(userId: string, bookId: string, file: File
   const buffer = Buffer.from(await file.arrayBuffer())
   if (buffer.length > 5 * 1024 * 1024) throw new AppError('UPLOAD_TOO_LARGE')
   const ext = detectImageExtension(buffer)
-  if (!ext) throw new AppError('UNSUPPORTED_FORMAT', 'Cover must be a PNG, JPEG or WebP image')
+  if (!ext) throw new AppError('UNSUPPORTED_FORMAT', 'Cover must be a PNG, JPEG, GIF, SVG or WebP image')
   const storage = getStorage()
   const coverKey = blobKey(sha256(buffer), `.cover.${ext}`)
   await storage.put(coverKey, buffer)
-  db.update(books).set({ coverKey, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
+  const meta = { ...(book.meta as Record<string, unknown>) }
+  delete meta.coverSuppressed
+  db.update(books).set({ coverKey, meta, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
   return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+}
+
+export async function getBookCover(userId: string, bookId: string): Promise<{ coverKey: string } | null> {
+  const db = getDb()
+  const book = await getActiveBook(userId, bookId)
+  const storage = getStorage()
+  if (book.coverKey && await storage.exists(book.coverKey)) return { coverKey: book.coverKey }
+  if (book.format !== 'epub' || book.meta?.coverSuppressed === true) return null
+  if (!(await storage.exists(book.filePath))) return null
+  const parser = getParser(book.filePath, '')
+  if (!parser) return null
+  if (!book.contentHash) return null
+  try {
+    const parsed = await parser.parse(await storage.get(book.filePath))
+    if (!parsed.meta.cover) return null
+    const ext = detectImageExtension(parsed.meta.cover)
+    if (!ext) return null
+    const coverKey = blobKey(book.contentHash, `.cover.${ext}`)
+    await storage.put(coverKey, parsed.meta.cover)
+    db.update(books).set({ coverKey, updatedAt: Date.now() }).where(eq(books.id, book.id)).run()
+    return { coverKey }
+  } catch {
+    return null
+  }
 }
 
 export async function removeBookCover(userId: string, bookId: string) {
   const db = getDb()
   const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
-  db.update(books).set({ coverKey: null, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
+  const meta = { ...(book.meta as Record<string, unknown>), coverSuppressed: true }
+  db.update(books).set({ coverKey: null, meta, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
   return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
 }
 

@@ -159,10 +159,11 @@ ${navPoints}
 </ncx>`
 }
 
+export const TXT_EPUB_ARTIFACT_VERSION = 2
+
 const STYLE_CSS = `body {
   margin: 0;
   padding: 1em;
-  font-family: "Noto Serif SC", "Source Han Serif SC", "SimSun", serif;
   line-height: 1.8;
   color: #000;
   background: #fff;

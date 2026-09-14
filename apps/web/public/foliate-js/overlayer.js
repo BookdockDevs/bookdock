@@ -1,18 +1,68 @@
 const createSVGElement = tag =>
     document.createElementNS('http://www.w3.org/2000/svg', tag)
 
+let overlayerCounter = 0
+
 export class Overlayer {
     #svg = createSVGElement('svg')
     #map = new Map()
     #doc = null
+    #clipPath = null
+    #clipPathPath = null
+    #clipPathId
+
     constructor(doc) {
         this.#doc = doc
+        this.#clipPathId = `foliate-loupe-clip-${overlayerCounter++}`
         Object.assign(this.#svg.style, {
             position: 'absolute', top: '0', left: '0',
             width: '100%', height: '100%',
             pointerEvents: 'none',
         })
+
+        // Create a clipPath to cut a hole for the loupe.
+        // We use clip-rule="evenodd" with a large outer rect and inner circle
+        // to create the hole effect efficiently without mask compositing.
+        const defs = createSVGElement('defs')
+        this.#clipPath = createSVGElement('clipPath')
+        this.#clipPath.setAttribute('id', this.#clipPathId)
+        this.#clipPath.setAttribute('clipPathUnits', 'userSpaceOnUse')
+
+        this.#clipPathPath = createSVGElement('path')
+        this.#clipPathPath.setAttribute('clip-rule', 'evenodd')
+        this.#clipPathPath.setAttribute('fill-rule', 'evenodd') // for older renderers
+
+        this.#clipPath.append(this.#clipPathPath)
+        defs.append(this.#clipPath)
+        this.#svg.append(defs)
+}
+    setHole(cx, cy, w, h, r) {
+        // Define a path with a large outer rect and a capsule-shaped hole.
+        // The capsule is a rounded rectangle (stadium shape) centred at (cx, cy).
+        const outer = 'M -2000000 -2000000 H 4000000 V 4000000 H -2000000 Z'
+        const hw = w / 2, hh = h / 2
+        const cr = Math.min(r, hw, hh) // clamp corner radius
+        const inner = `M ${cx - hw + cr} ${cy - hh}`
+            + ` H ${cx + hw - cr}`
+            + ` A ${cr} ${cr} 0 0 1 ${cx + hw} ${cy - hh + cr}`
+            + ` V ${cy + hh - cr}`
+            + ` A ${cr} ${cr} 0 0 1 ${cx + hw - cr} ${cy + hh}`
+            + ` H ${cx - hw + cr}`
+            + ` A ${cr} ${cr} 0 0 1 ${cx - hw} ${cy + hh - cr}`
+            + ` V ${cy - hh + cr}`
+            + ` A ${cr} ${cr} 0 0 1 ${cx - hw + cr} ${cy - hh} Z`
+        this.#clipPathPath.setAttribute('d', `${outer} ${inner}`)
+
+        this.#svg.setAttribute('clip-path', `url(#${this.#clipPathId})`)
+        this.#svg.style.webkitClipPath = `url(#${this.#clipPathId})`
     }
+
+    clearHole() {
+        this.#svg.removeAttribute('clip-path')
+        this.#svg.style.webkitClipPath = ''
+        this.#clipPathPath.removeAttribute('d')
+    }
+
     get element() {
         return this.#svg
     }
@@ -23,42 +73,61 @@ export class Overlayer {
         }
         return 1.0
     }
-    #splitRangeByParagraph(range) {
+    // Split a range into per-text-node sub-ranges (plus replaced elements
+    // like images), so `getClientRects()` only ever returns line-level boxes.
+    // Collecting rects on the whole range would also include the border boxes
+    // of fully contained block elements, over-highlighting blank space.
+    #splitRange(range) {
         const ancestor = range.commonAncestorContainer
-        const paragraphs = Array.from(ancestor.querySelectorAll?.('p, h1, h2, h3, h4') || [])
-
+        if (ancestor.nodeType !== Node.ELEMENT_NODE
+            && ancestor.nodeType !== Node.DOCUMENT_NODE) return [range]
+        const doc = ancestor.ownerDocument ?? ancestor
+        const walker = doc.createTreeWalker(ancestor,
+            NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+                acceptNode: node => {
+                    if (!range.intersectsNode(node)) return NodeFilter.FILTER_REJECT
+                    if (node.nodeType === Node.TEXT_NODE) return NodeFilter.FILTER_ACCEPT
+                    return node.matches?.('img, svg')
+                        ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+                },
+            })
         const splitRanges = []
-        paragraphs.forEach((p) => {
-            const pRange = document.createRange()
-            if (range.intersectsNode(p)) {
-                pRange.selectNodeContents(p)
-                if (pRange.compareBoundaryPoints(Range.START_TO_START, range) < 0) {
-                    pRange.setStart(range.startContainer, range.startOffset)
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const subRange = doc.createRange()
+            if (node.nodeType === Node.TEXT_NODE) {
+                subRange.selectNodeContents(node)
+                if (subRange.compareBoundaryPoints(Range.START_TO_START, range) < 0) {
+                    subRange.setStart(range.startContainer, range.startOffset)
                 }
-                if (pRange.compareBoundaryPoints(Range.END_TO_END, range) > 0) {
-                    pRange.setEnd(range.endContainer, range.endOffset)
+                if (subRange.compareBoundaryPoints(Range.END_TO_END, range) > 0) {
+                    subRange.setEnd(range.endContainer, range.endOffset)
                 }
-                splitRanges.push(pRange)
-            }
-        })
+            } else subRange.selectNode(node)
+            splitRanges.push(subRange)
+        }
         return splitRanges.length === 0 ? [range] : splitRanges
+    }
+    #getRects(range) {
+        const zoom = this.#zoom
+        const rects = []
+        for (const subRange of this.#splitRange(range)) {
+            for (const rect of subRange.getClientRects()) {
+                rects.push({
+                    left: rect.left * zoom,
+                    top: rect.top * zoom,
+                    right: rect.right * zoom,
+                    bottom: rect.bottom * zoom,
+                    width: rect.width * zoom,
+                    height: rect.height * zoom,
+                })
+            }
+        }
+        return rects
     }
     add(key, range, draw, options) {
         if (this.#map.has(key)) this.remove(key)
         if (typeof range === 'function') range = range(this.#svg.getRootNode())
-        const zoom = this.#zoom
-        let rects = []
-        this.#splitRangeByParagraph(range).forEach((pRange) => {
-            const pRects = Array.from(pRange.getClientRects()).map(rect => ({
-                left: rect.left * zoom,
-                top: rect.top * zoom,
-                right: rect.right * zoom,
-                bottom: rect.bottom * zoom,
-                width: rect.width * zoom,
-                height: rect.height * zoom,
-            }))
-            rects = rects.concat(pRects)
-        })
+        const rects = this.#getRects(range)
         const element = draw(rects, options)
         this.#svg.append(element)
         this.#map.set(key, { range, draw, options, element, rects })
@@ -72,19 +141,7 @@ export class Overlayer {
         for (const obj of this.#map.values()) {
             const { range, draw, options, element } = obj
             this.#svg.removeChild(element)
-            const zoom = this.#zoom
-            let rects = []
-            this.#splitRangeByParagraph(range).forEach((pRange) => {
-                const pRects = Array.from(pRange.getClientRects()).map(rect => ({
-                    left: rect.left * zoom,
-                    top: rect.top * zoom,
-                    right: rect.right * zoom,
-                    bottom: rect.bottom * zoom,
-                    width: rect.width * zoom,
-                    height: rect.height * zoom,
-                }))
-                rects = rects.concat(pRects)
-            })
+            const rects = this.#getRects(range)
             const el = draw(rects, options)
             this.#svg.append(el)
             obj.element = el
@@ -95,10 +152,18 @@ export class Overlayer {
         const arr = Array.from(this.#map.entries())
         // loop in reverse to hit more recently added items first
         for (let i = arr.length - 1; i >= 0; i--) {
+            const tolerance = 5
             const [key, obj] = arr[i]
-            for (const { left, top, right, bottom } of obj.rects)
-                if (top <= y && left <= x && bottom > y && right > x)
-                    return [key, obj.range]
+            for (const { left, top, right, bottom } of obj.rects) {
+                if (
+                    top <= y + tolerance &&
+                    left <= x + tolerance &&
+                    bottom > y - tolerance &&
+                    right > x - tolerance
+                ) {
+                    return [key, obj.range, { left, top, right, bottom }]
+                }
+            }
         }
         return []
     }
@@ -125,7 +190,6 @@ export class Overlayer {
         }
         return g
     }
-    // bookdock: dashed underline for idea annotations (WeChat Reading style)
     static dashedUnderline(rects, options = {}) {
         const { color = 'red', width: strokeWidth = 1.5, padding = 0, writingMode } = options
         const g = createSVGElement('g')
@@ -134,22 +198,24 @@ export class Overlayer {
         g.setAttribute('stroke-width', strokeWidth)
         g.setAttribute('stroke-dasharray', '4 3')
         g.setAttribute('stroke-linecap', 'round')
-        if (writingMode === 'vertical-rl' || writingMode === 'vertical-lr')
+        if (writingMode === 'vertical-rl' || writingMode === 'vertical-lr') {
             for (const { right, top, height } of rects) {
                 const el = createSVGElement('line')
                 el.setAttribute('x1', right - strokeWidth / 2 + padding)
-                el.setAttribute('y1', top)
                 el.setAttribute('x2', right - strokeWidth / 2 + padding)
+                el.setAttribute('y1', top)
                 el.setAttribute('y2', top + height)
                 g.append(el)
             }
-        else for (const { left, bottom, width } of rects) {
-            const el = createSVGElement('line')
-            el.setAttribute('x1', left)
-            el.setAttribute('y1', bottom + strokeWidth / 2 + padding)
-            el.setAttribute('x2', left + width)
-            el.setAttribute('y2', bottom + strokeWidth / 2 + padding)
-            g.append(el)
+        } else {
+            for (const { left, bottom, width } of rects) {
+                const el = createSVGElement('line')
+                el.setAttribute('x1', left)
+                el.setAttribute('x2', left + width)
+                el.setAttribute('y1', bottom - strokeWidth / 2 + padding)
+                el.setAttribute('y2', bottom - strokeWidth / 2 + padding)
+                g.append(el)
+            }
         }
         return g
     }
@@ -205,18 +271,76 @@ export class Overlayer {
         return g
     }
     static highlight(rects, options = {}) {
-        const { color = 'red', padding = 0 } = options
+        const {
+            color = 'red',
+            padding = 0,
+            radius = 4,
+            radiusPadding = 2,
+            vertical = false,
+        } = options
+
         const g = createSVGElement('g')
         g.setAttribute('fill', color)
         g.style.opacity = 'var(--overlayer-highlight-opacity, .3)'
         g.style.mixBlendMode = 'var(--overlayer-highlight-blend-mode, normal)'
-        for (const { left, top, height, width } of rects) {
-            const el = createSVGElement('rect')
-            el.setAttribute('x', left - padding)
-            el.setAttribute('y', top - padding)
-            el.setAttribute('height', height + padding * 2)
-            el.setAttribute('width', width + padding * 2)
-            g.append(el)
+
+        for (const [index, { left, top, height, width }] of rects.entries()) {
+            const isFirst = index === 0
+            const isLast = index === rects.length - 1
+
+            let x, y, w, h
+
+            let radiusTopLeft, radiusTopRight, radiusBottomRight, radiusBottomLeft
+
+            if (vertical) {
+                x = left - padding
+                y = top - padding - (isFirst ? radiusPadding : 0)
+                w = width + padding * 2
+                h = height + padding * 2 + (isFirst ? radiusPadding : 0) + (isLast ? radiusPadding : 0)
+                radiusTopLeft = isFirst ? radius : 0
+                radiusTopRight = isFirst ? radius : 0
+                radiusBottomRight = isLast ? radius : 0
+                radiusBottomLeft = isLast ? radius : 0
+            } else {
+                x = left - padding - (isFirst ? radiusPadding : 0)
+                y = top - padding
+                w = width + padding * 2 + (isFirst ? radiusPadding : 0) + (isLast ? radiusPadding : 0)
+                h = height + padding * 2
+                radiusTopLeft = isFirst ? radius : 0
+                radiusTopRight = isLast ? radius : 0
+                radiusBottomRight = isLast ? radius : 0
+                radiusBottomLeft = isFirst ? radius : 0
+            }
+
+            const rtl = Math.min(radiusTopLeft, w / 2, h / 2)
+            const rtr = Math.min(radiusTopRight, w / 2, h / 2)
+            const rbr = Math.min(radiusBottomRight, w / 2, h / 2)
+            const rbl = Math.min(radiusBottomLeft, w / 2, h / 2)
+
+            if (rtl === 0 && rtr === 0 && rbr === 0 && rbl === 0) {
+                const el = createSVGElement('rect')
+                el.setAttribute('x', x)
+                el.setAttribute('y', y)
+                el.setAttribute('height', h)
+                el.setAttribute('width', w)
+                g.append(el)
+            } else {
+                const el = createSVGElement('path')
+                const d = `
+                M ${x + rtl} ${y}
+                L ${x + w - rtr} ${y}
+                ${rtr > 0 ? `Q ${x + w} ${y} ${x + w} ${y + rtr}` : `L ${x + w} ${y}`}
+                L ${x + w} ${y + h - rbr}
+                ${rbr > 0 ? `Q ${x + w} ${y + h} ${x + w - rbr} ${y + h}` : `L ${x + w} ${y + h}`}
+                L ${x + rbl} ${y + h}
+                ${rbl > 0 ? `Q ${x} ${y + h} ${x} ${y + h - rbl}` : `L ${x} ${y + h}`}
+                L ${x} ${y + rtl}
+                ${rtl > 0 ? `Q ${x} ${y} ${x + rtl} ${y}` : `L ${x} ${y}`}
+                Z
+            `.trim().replace(/\s+/g, ' ')
+                el.setAttribute('d', d)
+                g.append(el)
+            }
         }
         return g
     }
@@ -235,6 +359,83 @@ export class Overlayer {
             el.setAttribute('rx', radius)
             g.append(el)
         }
+        return g
+    }
+    static bubble(rects, options = {}) {
+        const { color = '#fbbf24', writingMode, opacity = 0.85, size = 20, padding = 10 } = options
+        const isVertical = writingMode === 'vertical-rl' || writingMode === 'vertical-lr'
+        const g = createSVGElement('g')
+        g.style.opacity = opacity
+        if (rects.length === 0) return g
+        rects.splice(1)
+        const firstRect = rects[0]
+        const x = isVertical ? firstRect.right - size + padding : firstRect.right - size + padding
+        const y = isVertical ? firstRect.bottom - size + padding : firstRect.top - size + padding
+        firstRect.top = y - padding
+        firstRect.right = x + size + padding
+        firstRect.bottom = y + size + padding
+        firstRect.left = x - padding
+        const bubble = createSVGElement('path')
+        const s = size
+        const r = s * 0.15
+        // Speech bubble shape with a small tail
+        // Main rounded rectangle body
+        const d = `
+            M ${x + r} ${y}
+            h ${s - 2 * r}
+            a ${r} ${r} 0 0 1 ${r} ${r}
+            v ${s * 0.65 - 2 * r}
+            a ${r} ${r} 0 0 1 ${-r} ${r}
+            h ${-s * 0.3}
+            l ${-s * 0.15} ${s * 0.2}
+            l ${s * 0.05} ${-s * 0.2}
+            h ${-s * 0.6 + 2 * r}
+            a ${r} ${r} 0 0 1 ${-r} ${-r}
+            v ${-s * 0.65 + 2 * r}
+            a ${r} ${r} 0 0 1 ${r} ${-r}
+            z
+        `.replace(/\s+/g, ' ').trim()
+
+        bubble.setAttribute('d', d)
+        bubble.setAttribute('fill', color)
+        bubble.setAttribute('stroke', 'rgba(0, 0, 0, 0.2)')
+        bubble.setAttribute('stroke-width', '1')
+        // Add horizontal lines inside to represent text
+        const lineGroup = createSVGElement('g')
+        lineGroup.setAttribute('stroke', 'rgba(0, 0, 0, 0.3)')
+        lineGroup.setAttribute('stroke-width', '1.5')
+        lineGroup.setAttribute('stroke-linecap', 'round')
+        const lineY1 = y + s * 0.18
+        const lineY2 = y + s * 0.33
+        const lineY3 = y + s * 0.48
+        const lineX1 = x + s * 0.2
+        const lineX2 = x + s * 0.8
+        const line1 = createSVGElement('line')
+        line1.setAttribute('x1', lineX1)
+        line1.setAttribute('y1', lineY1)
+        line1.setAttribute('x2', lineX2)
+        line1.setAttribute('y2', lineY1)
+        const line2 = createSVGElement('line')
+        line2.setAttribute('x1', lineX1)
+        line2.setAttribute('y1', lineY2)
+        line2.setAttribute('x2', lineX2)
+        line2.setAttribute('y2', lineY2)
+        const line3 = createSVGElement('line')
+        line3.setAttribute('x1', lineX1)
+        line3.setAttribute('y1', lineY3)
+        line3.setAttribute('x2', x + s * 0.6)
+        line3.setAttribute('y2', lineY3)
+        lineGroup.append(line1, line2, line3)
+
+        if (isVertical) {
+            const centerX = x + s / 2
+            const centerY = y + s / 2
+            bubble.setAttribute('transform', `rotate(90 ${centerX} ${centerY})`)
+            lineGroup.setAttribute('transform', `rotate(90 ${centerX} ${centerY})`)
+        }
+
+        g.append(bubble)
+        g.append(lineGroup)
         return g
     }
     // make an exact copy of an image in the overlay

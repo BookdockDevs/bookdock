@@ -22,23 +22,17 @@ const acceptNode = node => {
     if (node.nodeType === 1) {
         const name = node.tagName.toLowerCase()
         if (name === 'script' || name === 'style') return NodeFilter.FILTER_REJECT
-        
-        // Skip translation elements to preserve CFI calculations
-        if (node.classList && node.classList.contains('translated-text')) {
-            return NodeFilter.FILTER_REJECT
-        }
-        
         return NodeFilter.FILTER_SKIP
     }
     return NodeFilter.FILTER_ACCEPT
 }
 
-export const textWalker = function* (x, func) {
+export const textWalker = function* (x, func, filterFunc) {
     const root = x.commonAncestorContainer ?? x.body ?? x
-    const walker = document.createTreeWalker(root, filter, { acceptNode })
+    const walker = document.createTreeWalker(root, filter, { acceptNode: filterFunc || acceptNode })
     const walk = x.commonAncestorContainer ? walkRange : walkDocument
     const nodes = walk(x, walker)
-    const strs = nodes.map(node => node.nodeValue)
+    const strs = nodes.map(node => node.nodeValue ?? '')
     const makeRange = (startIndex, startOffset, endIndex, endOffset) => {
         const range = document.createRange()
         range.setStart(nodes[startIndex], startOffset)

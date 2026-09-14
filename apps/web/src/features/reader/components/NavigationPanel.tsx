@@ -353,19 +353,23 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const rootNodes = useMemo(() => tree.filter((n) => n.parent === null), [tree])
 
   const currentIndex = useMemo(() => {
-    if (currentChapterIndex !== null && currentChapterIndex >= 0 && currentChapterIndex < tree.length) {
-      return currentChapterIndex
+    if (currentChapter) {
+      const trimmed = currentChapter.trim()
+      let idx = tree.findIndex((n) => n.label.trim() === trimmed)
+      if (idx < 0) {
+        idx = tree.findIndex((n) => {
+          const label = n.label.trim()
+          return label.includes(trimmed) || trimmed.includes(label)
+        })
+      }
+      if (idx >= 0) return idx
     }
-    if (!currentChapter) return -1
-    const trimmed = currentChapter.trim()
-    let idx = tree.findIndex((n) => n.label.trim() === trimmed)
-    if (idx < 0) {
-      idx = tree.findIndex((n) => {
-        const label = n.label.trim()
-        return label.includes(trimmed) || trimmed.includes(label)
-      })
-    }
-    return idx
+    // The renderer index is a spine index, while `tree` also contains volume
+    // nodes. Use it only when no TOC label is available to avoid highlighting
+    // the next chapter after a volume header.
+    return currentChapterIndex !== null && currentChapterIndex >= 0 && currentChapterIndex < tree.length
+      ? currentChapterIndex
+      : -1
   }, [currentChapter, currentChapterIndex, tree])
 
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())

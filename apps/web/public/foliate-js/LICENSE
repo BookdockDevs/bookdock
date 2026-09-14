@@ -1,15 +1,26 @@
 MIT License Notice
 
-The files in this folder are derived from foliate-js, originally by johnfactotum
-(<https://github.com/johnfactotum/foliate-js>), and further forked by the
+The current runtime core in this folder is based on the Readest
+`packages/foliate-js` snapshot recorded in `PATCHES.md`, whose upstream
+project is foliate-js by John Factotum (<https://github.com/johnfactotum/foliate-js>).
+Historical Bookdock/ANX-derived notices are retained below for files that
+originated from those sources; ANX is not a parallel runtime core.
+
+The files include changes from the readest/foliate-js fork
+(<https://github.com/readest/foliate-js>) and historical changes from the
 anx-reader project (<https://github.com/Anxcye/anx-reader>).
 
-foliate-js and the anx-reader foliate-js fork are MIT licensed:
+foliate-js, readest/foliate-js and the anx-reader foliate-js fork are MIT licensed:
   https://github.com/johnfactotum/foliate-js/blob/main/LICENSE
+  https://github.com/readest/foliate-js/blob/main/LICENSE
   https://github.com/Anxcye/anx-reader/blob/main/LICENSE
 
 This subset was copied into bookdock solely for EPUB rendering via the
 foliate-js engine. The original license terms are retained.
+
+Relevant upstream copyright notices:
+  Copyright (c) 2022 John Factotum
+  Copyright (c) 2025 Anxcye
 
 The full MIT license text from the anx-reader project is reproduced below:
 

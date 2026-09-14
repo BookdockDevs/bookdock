@@ -127,6 +127,19 @@ describe('AutoReadingController', () => {
     controller.dispose()
   })
 
+  it('stops smooth auto reading when the active mode blocks a chapter crossing', async () => {
+    const fake = fakeRenderer()
+    fake.renderer.scrollByPixels = vi.fn(async () => false)
+    const controller = new AutoReadingController(fake.renderer, { mode: 'smooth', speed: 30, readingMode: 'scroll' })
+
+    await controller.start()
+    await vi.advanceTimersByTimeAsync(150)
+
+    expect(controller.getSnapshot().status).toBe('idle')
+    expect(fake.renderer.scrollByPixels).toHaveBeenCalled()
+    controller.dispose()
+  })
+
   it('waits between timed advances and stops at the end', async () => {
     const fake = fakeRenderer()
     const controller = new AutoReadingController(fake.renderer, { mode: 'timed', speed: 100, readingMode: 'page' })

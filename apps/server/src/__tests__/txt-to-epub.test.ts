@@ -45,6 +45,19 @@ describe('convertTxtToEpub', () => {
     expect(parsed.chapters[1].title).toBe('第二章 旅途')
   })
 
+  it('leaves the generated text stylesheet font-neutral for reader defaults', async () => {
+    const buffer = await convertTxtToEpub(
+      { title: '字体回退' },
+      [{ id: 'ch-0', title: '全文', level: 1 }],
+      () => '正文',
+    )
+    const zip = await JSZip.loadAsync(buffer)
+    const css = await zip.file('OEBPS/style.css')?.async('string')
+
+    expect(css).toBeDefined()
+    expect(css).not.toMatch(/font-family\s*:/i)
+  })
+
   it('handles a single chapter fallback', async () => {
     const buffer = await convertTxtToEpub(
       { title: 'Only' },

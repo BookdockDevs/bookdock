@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveClickDirection, searchHighlightColor, shouldArmPending, ttsHighlightColor, turnsCrossChapter, ttsViewportAction } from '../FoliateReader'
+import { resolveClickDirection, searchHighlightColor, scrollForwardSign, shouldArmPending, ttsHighlightColor, turnsCrossChapter, ttsViewportAction } from '../FoliateReader'
 
 // container spans x = 100..700 (width 600)
 function dir(x: number, mode: 'standard' | 'fullscreen' | 'swap' | 'none' = 'standard') {
@@ -98,6 +98,17 @@ describe('shouldArmPending', () => {
     expect(shouldArmPending(1, { sections: [{ id: 'a.xhtml' }, { id: 'b.xhtml' }] }, 0)).toBe(true)
   })
 })
+
+describe('scrollForwardSign', () => {
+  it('keeps forward movement positive on the normal scroll axis', () => {
+    expect(scrollForwardSign('scrollTop')).toBe(1)
+  })
+
+  it('moves toward negative scrollLeft for vertical writing', () => {
+    expect(scrollForwardSign('scrollLeft')).toBe(-1)
+  })
+})
+
 describe('ttsViewportAction', () => {
   const viewport = { top: 100, bottom: 900, height: 800 }
 

@@ -86,6 +86,28 @@ describe('vendored FootnoteHandler', () => {
     expect(book.documents[0].body.textContent).toBe('同章脚注内容')
   })
 
+  it('keeps a dt definition and its following dd entries together', async () => {
+    const documents = Array.from({ length: 2 }, () => document.implementation.createHTMLDocument())
+    documents[1].body.innerHTML = '<dl><dt id="term">术语</dt><dd>第一段定义</dd><dd>第二段定义</dd><dt>下一个术语</dt><dd>其它内容</dd></dl>'
+    const book: MockBook = {
+      documents,
+      resolveHref: async () => ({
+        index: 1,
+        anchor: (doc) => doc.querySelector('#term'),
+      }),
+    }
+    const anchor = document.createElement('a')
+    anchor.href = 'chapter-2.xhtml#term'
+    anchor.setAttribute('epub:type', 'noteref')
+    const event = new CustomEvent('link', { cancelable: true, detail: { a: anchor, href: 'chapter-2.xhtml#term' } })
+
+    const result = await new FootnoteHandler().handle(book, event)
+
+    expect(result.kind).toBe('open')
+    expect(book.documents[1].body.textContent).toContain('术语第一段定义第二段定义')
+    expect(book.documents[1].body.textContent).not.toContain('下一个术语')
+  })
+
   it('returns fallback when an explicit reference cannot be extracted', async () => {
     const book = bookFor(null)
     book.resolveHref = async () => ({

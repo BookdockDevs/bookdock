@@ -296,9 +296,13 @@ export class AutoReadingController {
       const scrollDistance = Math.floor(distance)
       this.smoothDistanceRemainder = distance - scrollDistance
       Promise.resolve()
-        .then(() => scrollDistance > 0 ? this.renderer.scrollByPixels(scrollDistance) : undefined)
-        .then(() => {
+        .then(() => scrollDistance > 0 ? this.renderer.scrollByPixels(scrollDistance) : true)
+        .then((canContinue) => {
           if (generation !== this.generation || this.state.status !== 'running' || !this.isClaimCurrent()) return
+          if (canContinue === false) {
+            void this.stop()
+            return
+          }
           if (this.renderer.isAtEnd()) {
             void this.stop()
             return

@@ -14,6 +14,13 @@ const range = (start: number, end: number, chapter = 4) =>
 const overlap = (a: string, b: string) => cfiRangesOverlap(cfi, a, b)
 
 describe('cfiRangesOverlap', () => {
+  it('compares CFIs with different indirection depths without throwing', () => {
+    expect(() => cfi.compare(
+      'epubcfi(/6/2)',
+      'epubcfi(/6/2!/4/2)',
+    )).not.toThrow()
+  })
+
   it('detects partial overlap in the same chapter', () => {
     expect(overlap(range(0, 10), range(5, 15))).toBe(true)
     expect(overlap(range(5, 15), range(0, 10))).toBe(true)

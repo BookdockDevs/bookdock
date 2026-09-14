@@ -7,6 +7,7 @@ import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
+import JSZip from 'jszip'
 
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
@@ -14,6 +15,7 @@ import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import { TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
 import booksRoutes from './books.routes'
@@ -30,7 +32,10 @@ import {
   setBookShelf,
   getBookShelf,
   uploadBook,
+  migrateTxtArtifacts,
   reTocBook,
+  getBookCover,
+  removeBookCover,
 } from './books.service'
 import { createTocRule } from '../toc-rules/toc-rules.service'
 
@@ -110,6 +115,40 @@ function seedBook(
   return book
 }
 
+describe('legacy TXT artifact migration', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let files: Map<string, Buffer>
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    const memory = createMemoryStorage()
+    files = memory.files
+    vi.spyOn(storage, 'getStorage').mockReturnValue(memory.driver)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  it('removes the released TXT font declaration and records the artifact version', async () => {
+    const book = seedBook(db, ownerId, { meta: {} })
+    const zip = new JSZip()
+    zip.file('OEBPS/style.css', 'body {\n  font-family: "Noto Serif SC", "Source Han Serif SC", "SimSun", serif;\n  line-height: 1.8;\n}')
+    const legacyBuffer = await zip.generateAsync({ type: 'nodebuffer' })
+    files.set(book.filePath, legacyBuffer)
+
+    await expect(migrateTxtArtifacts()).resolves.toMatchObject({ examined: 1, migrated: 1, skipped: 0, failed: 0 })
+
+    const migratedZip = await JSZip.loadAsync(files.get(book.filePath)!)
+    const css = await migratedZip.file('OEBPS/style.css')!.async('string')
+    expect(css).not.toContain('font-family: "Noto Serif SC"')
+    const stored = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()!
+    expect(stored.meta.txtArtifactVersion).toBe(2)
+    expect(stored.size).toBe(files.get(book.filePath)!.length)
+
+    await expect(migrateTxtArtifacts()).resolves.toMatchObject({ examined: 1, migrated: 0, skipped: 1, failed: 0 })
+  })
+})
+
 describe('uploadBook dedup flag', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
@@ -117,6 +156,13 @@ describe('uploadBook dedup flag', () => {
   beforeAll(() => {
     // parsers are registered in app.ts at runtime; register here for service-level tests
     registerParser(new TxtParser())
+    registerParser({
+      match: (fileName) => fileName.toLowerCase().endsWith('.epub'),
+      parse: async (_data: Buffer | Readable) => ({
+        meta: { title: 'Repaired', cover: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+        chapters: [],
+      }),
+    })
   })
 
   beforeEach(() => {
@@ -136,6 +182,15 @@ describe('uploadBook dedup flag', () => {
     expect(second.book.id).toBe(first.book.id)
   })
 
+  it('keeps uppercase TXT uploads on the TXT pipeline', async () => {
+    const { book } = await uploadBook(ownerId, new File(['第一章\n正文'], 'BOOK.TXT', {
+      type: 'application/octet-stream',
+    }))
+
+    expect(book.format).toBe('txt')
+    expect(book.filePath).toMatch(/\.epub$/)
+  })
+
   it('treats identical content from different users as separate rows but shared blob', async () => {
     const otherId = seedUser(db, 'other')
     const file = new File(['shared content abc'], 'book.txt', { type: 'text/plain' })
@@ -150,6 +205,7 @@ describe('uploadBook dedup flag', () => {
     const file = new File(['chapter one text'], 'book.txt', { type: 'text/plain' })
     const { book } = await uploadBook(ownerId, file)
     expect((book.meta as Record<string, unknown>).bookmeta).toEqual({})
+    expect((book.meta as Record<string, unknown>).txtArtifactVersion).toBe(TXT_EPUB_ARTIFACT_VERSION)
 
     // getBook would trigger a full-file re-parse if bookmeta were undefined;
     // with it persisted the row comes back as-is.
@@ -200,6 +256,45 @@ describe('uploadBook membership', () => {
   })
 })
 
+describe('lazy EPUB cover repair', () => {
+  let db: ReturnType<typeof createTestDb>
+  let mem: ReturnType<typeof createMemoryStorage>
+  let userId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    mem = createMemoryStorage()
+    vi.spyOn(storage, 'getStorage').mockReturnValue(mem.driver)
+    userId = seedUser(db, 'cover-owner')
+  })
+
+  it('rebuilds a missing cover key from the stored EPUB', async () => {
+    const filePath = 'blobs/ep/book.epub'
+    const book = seedBook(db, userId, {
+      format: 'epub',
+      filePath,
+      contentHash: 'a'.repeat(64),
+    })
+    mem.files.set(filePath, Buffer.from('epub-bytes'))
+
+    const cover = await getBookCover(userId, book.id)
+
+    expect(cover?.coverKey).toBe(`blobs/aa/${'a'.repeat(64)}.cover.jpg`)
+    expect(mem.files.get(cover!.coverKey)).toEqual(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
+    expect(db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()?.coverKey).toBe(cover?.coverKey)
+  })
+
+  it('does not resurrect a cover after the user removes it', async () => {
+    const filePath = 'blobs/ep/book.epub'
+    const book = seedBook(db, userId, { format: 'epub', filePath, contentHash: 'b'.repeat(64) })
+    mem.files.set(filePath, Buffer.from('epub-bytes'))
+
+    await removeBookCover(userId, book.id)
+
+    expect(await getBookCover(userId, book.id)).toBeNull()
+  })
+})
 describe('POST /api/v1/books upload membership', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string

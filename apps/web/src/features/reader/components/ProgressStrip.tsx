@@ -19,6 +19,8 @@ interface ProgressStripProps {
    * preview derives chapters from these so it matches the seek landing
    */
   sectionFractions?: number[] | null
+  /** Labels resolved by Foliate's TOC progress model for each spine section. */
+  sectionTocLabels?: string[] | null
   onPrevChapter: () => void
   onNextChapter: () => void
   onPageUp: () => void
@@ -35,6 +37,7 @@ export const ProgressStrip = memo(function ProgressStrip({
   className,
   chapters,
   sectionFractions,
+  sectionTocLabels,
   onPrevChapter,
   onNextChapter,
   onPageUp,
@@ -42,6 +45,7 @@ export const ProgressStrip = memo(function ProgressStrip({
   onSeek,
 }: ProgressStripProps) {
   const [sliderValue, setSliderValue] = useState(percent)
+  const sliderValueRef = useRef(percent)
   const isDragging = useRef(false)
   // Uncontrolled range input: React writing value back every frame fights the
   // browser's drag state and makes fine moves jitter at small steps, so the
@@ -50,6 +54,7 @@ export const ProgressStrip = memo(function ProgressStrip({
   useEffect(() => {
     if (isDragging.current || !sliderRef.current) return
     sliderRef.current.value = String(percent)
+    sliderValueRef.current = percent
     setSliderValue(percent)
   }, [percent])
   // Drag preview: while the thumb moves the chapter/percent texts and the
@@ -61,10 +66,15 @@ export const ProgressStrip = memo(function ProgressStrip({
   const progressText = pageInfo ? `${pageInfo.page} / ${pageInfo.total}` : `${percent}%`
 
   const dragIndex = dragValue !== null ? chapterIndexAtFraction(sectionFractions ?? null, dragValue) : null
-  const dragChapterTitle = dragIndex !== null && chapters ? chapters[dragIndex]?.title : undefined
+  const dragChapterTitle = dragIndex !== null
+    ? sectionTocLabels?.[dragIndex]
+      || (sectionTocLabels == null && chapters && chapters.length === sectionFractions?.length
+        ? chapters[dragIndex]?.title
+        : undefined)
+    : undefined
   // the 0.05% seek precision is for landing, not for the user to read
   const showingPercent = Math.round(dragValue ?? fillPercent)
-  const showingChapterText = dragIndex !== null && chapters
+  const showingChapterText = dragIndex !== null && chapters && sectionTocLabels == null
     ? `${dragIndex + 1} / ${chapters.length}`
     : progressText
 
@@ -204,6 +214,7 @@ export const ProgressStrip = memo(function ProgressStrip({
             defaultValue={percent}
             onChange={(e) => {
               const v = Number(e.target.value)
+              sliderValueRef.current = v
               setSliderValue(v)
               if (isDragging.current) setDragValue(v)
             }}
@@ -217,13 +228,13 @@ export const ProgressStrip = memo(function ProgressStrip({
               // (the window handler ignores INPUT targets) — release it so
               // keyboard page turns work right after seeking
               e.currentTarget.blur()
-              onSeek(sliderValue)
+              onSeek(sliderValueRef.current)
             }}
             onMouseLeave={() => {
               if (isDragging.current) {
                 isDragging.current = false
                 setDragValue(null)
-                onSeek(sliderValue)
+                onSeek(sliderValueRef.current)
               }
             }}
             className="pointer-events-auto bd-progress-slider"

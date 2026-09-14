@@ -20,6 +20,23 @@ export interface TxtChapter {
  * Falls back to UTF-8 when detection fails or decoding throws.
  */
 export function decodeTextBuffer(buffer: Buffer): string {
+  if (buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
+    return buffer.subarray(3).toString('utf8')
+  }
+
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return iconv.decode(buffer.subarray(2), 'utf16le')
+  }
+
+  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    const littleEndian = Buffer.allocUnsafe(buffer.length - 2)
+    for (let i = 2; i + 1 < buffer.length; i += 2) {
+      littleEndian[i - 2] = buffer[i + 1]
+      littleEndian[i - 1] = buffer[i]
+    }
+    return littleEndian.toString('utf16le')
+  }
+
   const encoding = chardet.detect(buffer) ?? 'utf-8'
   try {
     return iconv.decode(buffer, encoding)
@@ -216,8 +233,10 @@ export function fallbackChapters(normalized: string): TxtChapter[] {
     let end = Math.min(start + blockSize, normalized.length)
     if (end < normalized.length) {
       const nl = normalized.lastIndexOf('\n', end)
-      if (nl >= start) end = nl
+      if (nl > start) end = nl
     }
+
+    if (end <= start) end = Math.min(start + blockSize, normalized.length)
 
     chapters.push({
       title: `第${block + 1}章(1)`,
@@ -235,14 +254,15 @@ export function fallbackChapters(normalized: string): TxtChapter[] {
 
 export class TxtParser implements FormatParser {
   match(fileName: string, mime: string): boolean {
-    return fileName.endsWith('.txt') || mime === 'text/plain'
+    const normalizedMime = mime.trim().toLowerCase().split(';', 1)[0]
+    return fileName.toLowerCase().endsWith('.txt') || normalizedMime === 'text/plain'
   }
 
   async parse(data: Buffer | Readable): Promise<ParsedBook> {
     const buf = Buffer.isBuffer(data) ? data : await bufferFromReadable(data)
     const text = decodeTextBuffer(buf)
     const normalized = normalizeText(text)
-    const chapters = detectTxtChapters(normalized)
+    const chapters = scanTxtChapters(normalized)
 
     return {
       meta: {

@@ -688,8 +688,10 @@ export default function Reader() {
   // progress strip's drag preview — same model the seek lands by, so the
   // previewed chapter always matches the landing chapter
   const [sectionFractions, setSectionFractions] = useState<number[] | null>(null)
+  const [sectionTocLabels, setSectionTocLabels] = useState<string[] | null>(null)
   useEffect(() => {
     setSectionFractions(renderer?.getSectionFractions?.() ?? null)
+    setSectionTocLabels(renderer?.getSectionTocLabels?.() ?? null)
   }, [renderer])
 
   // The loading/error/success branches each render their own container div, so
@@ -1220,7 +1222,7 @@ export default function Reader() {
               <div
                 className={cn(
                   'absolute inset-x-0 bottom-0 h-12',
-                  !isTouch && footerVisible ? 'pointer-events-auto' : 'pointer-events-none',
+                  !isTouch ? 'pointer-events-auto' : 'pointer-events-none',
                 )}
                 onPointerEnter={isTouch ? undefined : () => setFooterSummon(true)}
                 onPointerLeave={isTouch ? undefined : () => setFooterSummon(false)}
@@ -1240,6 +1242,7 @@ export default function Reader() {
                   mobileDockVisible={mobileDockVisible}
                   chapters={chaptersQuery.data?.data}
                   sectionFractions={sectionFractions}
+                  sectionTocLabels={sectionTocLabels}
                   onPrevChapter={onPrevChapter}
                   onNextChapter={onNextChapter}
                   onPageUp={onPageUp}

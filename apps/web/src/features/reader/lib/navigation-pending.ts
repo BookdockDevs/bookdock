@@ -42,6 +42,22 @@ export class NavigationPending {
     }
   }
 
+  // A renderer can expose the destination before its outer navigation promise
+  // settles (for example while a background section fill is still running).
+  // Relocation is the visible-content boundary, so it must be able to dismiss
+  // the indicator without waiting for unrelated preloading work.
+  settle() {
+    this.gen++
+    if (this.timer !== null) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+    if (this.shown) {
+      this.shown = false
+      this.onChange(false)
+    }
+  }
+
   // Cancels the anti-flicker timer and invalidates any in-flight navigation
   // (e.g. on destroy — the consumer is unmounted anyway).
   dispose() {

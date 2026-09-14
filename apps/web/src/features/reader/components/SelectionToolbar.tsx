@@ -205,7 +205,8 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   function createNote() {
     if (!selection) return
     setNoteDraft(true)
-    renderer?.deselect()
+    // Keep the native selection until the editor closes; clearing it here emits
+    // selectionchange and unmounts this toolbar before the popup can render.
     setNoteEditorRange(selection.cfiRange)
     setNoteEditing(true)
   }

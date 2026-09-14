@@ -167,7 +167,7 @@ export const compare = (a, b) => {
         || compare(collapse(a, true), collapse(b, true))
 
     for (let i = 0; i < Math.max(a.length, b.length); i++) {
-        const p = a[i], q = b[i]
+        const p = a[i] ?? [], q = b[i] ?? []
         const maxIndex = Math.max(p.length, q.length) - 1
         for (let i = 0; i <= maxIndex; i++) {
             const x = p[i], y = q[i]
@@ -185,13 +185,25 @@ export const compare = (a, b) => {
     return 0
 }
 
-const isTextNode = ({ nodeType }) => nodeType === 3 || nodeType === 4
-const isElementNode = ({ nodeType }) => nodeType === 1
+const isTextNode = node => node?.nodeType === 3 || node?.nodeType === 4
+const isElementNode = node => node?.nodeType === 1
+// cfi-inert: the node AND its subtree are invisible to CFI (e.g. injected a11y
+// skip-links). cfi-skip: only the node itself is invisible — its children are
+// hoisted into its parent, so they keep the indices they'd have without the
+// wrapper (e.g. a layout-only <div> that wraps a table/equation for scrolling).
+const isInertNode = (node) => node.hasAttribute?.('cfi-inert')
+const isSkipNode = (node) => node.hasAttribute?.('cfi-skip')
+
+// CFI-relevant children: text + elements, with cfi-inert nodes removed and
+// cfi-skip wrappers spliced out (their own children hoisted in place, recursively).
+const rawChildNodes = (node) => Array.from(node.childNodes)
+    // "content other than element and character data is ignored"
+    .filter(node => isTextNode(node) || isElementNode(node))
+    .filter(node => !isInertNode(node))
+    .flatMap(node => isSkipNode(node) ? rawChildNodes(node) : [node])
 
 const getChildNodes = (node, filter) => {
-    const nodes = Array.from(node.childNodes)
-        // "content other than element and character data is ignored"
-        .filter(node => isTextNode(node) || isElementNode(node))
+    const nodes = rawChildNodes(node)
     return filter ? nodes.map(node => {
         const accept = filter(node)
         if (accept === NodeFilter.FILTER_REJECT) return null
@@ -258,7 +270,13 @@ const partsToNode = (node, parts, filter) => {
 }
 
 const nodeToParts = (node, offset, filter) => {
-    const { parentNode, id } = node
+    const { id } = node
+    // A cfi-skip wrapper is invisible to CFI, so index this node within the
+    // wrapper's nearest non-skip ancestor — where rawChildNodes has hoisted it —
+    // rather than within the wrapper. Otherwise its index would be computed
+    // relative to the wrapper and not match the same node without the wrapper.
+    let parentNode = node.parentNode
+    while (parentNode && isSkipNode(parentNode)) parentNode = parentNode.parentNode
     const indexed = indexChildNodes(parentNode, filter)
     const index = indexed.findIndex(x =>
         Array.isArray(x) ? x.some(x => x === node) : x === node)
@@ -290,23 +308,29 @@ export const fromRange = (range, filter) => {
 }
 
 export const toRange = (doc, parts, filter) => {
-    const startParts = collapse(parts)
-    const endParts = collapse(parts, true)
+    try {
+        const startParts = collapse(parts)
+        const endParts = collapse(parts, true)
 
-    const root = doc.documentElement
-    const start = partsToNode(root, startParts[0], filter)
-    const end = partsToNode(root, endParts[0], filter)
+        const root = doc.documentElement
+        const start = partsToNode(root, startParts[0], filter)
+        const end = partsToNode(root, endParts[0], filter)
 
-    const range = doc.createRange()
+        if (!start?.node || !end?.node) return null
 
-    if (start.before) range.setStartBefore(start.node)
-    else if (start.after) range.setStartAfter(start.node)
-    else range.setStart(start.node, start.offset)
+        const range = doc.createRange()
 
-    if (end.before) range.setEndBefore(end.node)
-    else if (end.after) range.setEndAfter(end.node)
-    else range.setEnd(end.node, end.offset)
-    return range
+        if (start.before) range.setStartBefore(start.node)
+        else if (start.after) range.setStartAfter(start.node)
+        else range.setStart(start.node, start.offset)
+
+        if (end.before) range.setEndBefore(end.node)
+        else if (end.after) range.setEndAfter(end.node)
+        else range.setEnd(end.node, end.offset)
+        return range
+    } catch {
+        return null
+    }
 }
 
 // faster way of getting CFIs for sorted elements in a single parent

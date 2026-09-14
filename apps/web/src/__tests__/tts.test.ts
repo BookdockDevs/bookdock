@@ -28,4 +28,13 @@ describe('foliate TTS positioning', () => {
     expect(tts.currentDetail()?.text).toBe('第一句。')
     expect(tts.next()).toBe('第二句。')
   })
+
+  it('keeps hidden content and local footnote links out of legacy TTS', () => {
+    const doc = document.implementation.createHTMLDocument()
+    doc.body.innerHTML = '<p>第一句。<span hidden>隐藏内容。</span><a href="#note">脚注内容。</a>第二句。</p>'
+    const tts = new TTS(doc, undefined, () => undefined, () => '')
+
+    expect(tts.start({ highlight: false })).toBe('第一句。')
+    expect(tts.next()).toBe('第二句。')
+  })
 })

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import iconv from 'iconv-lite'
-import { detectTxtChapters, normalizeText, decodeTextBuffer } from '../formats/txt'
+import { detectTxtChapters, normalizeText, decodeTextBuffer, fallbackChapters, TxtParser } from '../formats/txt'
 
 describe('detectTxtChapters', () => {
   it('splits LF text into chapters with correct offsets', () => {
@@ -123,6 +123,39 @@ describe('detectTxtChapters', () => {
     expect(chapters).toHaveLength(2)
     expect(chapters[0].title).toBe('第一章 开篇')
     expect(chapters[1].title).toBe('第二章 续篇')
+  })
+
+  it('honors UTF-8 and UTF-16 BOMs before heuristic detection', () => {
+    const text = '第一章 开篇\n正文内容'
+    const utf8 = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text, 'utf8')])
+    const utf16le = Buffer.concat([Buffer.from([0xff, 0xfe]), iconv.encode(text, 'utf16le')])
+    const utf16beBody = iconv.encode(text, 'utf16le')
+    const utf16beBodySwapped = Buffer.allocUnsafe(utf16beBody.length)
+    for (let i = 0; i + 1 < utf16beBody.length; i += 2) {
+      utf16beBodySwapped[i] = utf16beBody[i + 1]
+      utf16beBodySwapped[i + 1] = utf16beBody[i]
+    }
+    const utf16be = Buffer.concat([Buffer.from([0xfe, 0xff]), utf16beBodySwapped])
+
+    expect(decodeTextBuffer(utf8)).toBe(text)
+    expect(decodeTextBuffer(utf16le)).toBe(text)
+    expect(decodeTextBuffer(utf16be)).toBe(text)
+  })
+
+  it('matches TXT filenames and MIME parameters case-insensitively', () => {
+    const parser = new TxtParser()
+
+    expect(parser.match('BOOK.TXT', 'application/octet-stream')).toBe(true)
+    expect(parser.match('book.bin', ' Text/Plain; charset=utf-8 ')).toBe(true)
+  })
+
+  it('always advances fallback chunks when a boundary newline is at the start', () => {
+    const normalized = `\n${'一'.repeat(10 * 1024)}`
+    const chapters = fallbackChapters(normalized)
+
+    expect(chapters.length).toBe(2)
+    expect(chapters[0].endOffset).toBe(10 * 1024)
+    expect(chapters[1].startOffset).toBe(chapters[0].endOffset)
   })
 
   it('does not merge paragraphs ending with ellipsis', () => {

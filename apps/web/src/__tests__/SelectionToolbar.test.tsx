@@ -8,6 +8,7 @@ import { useUiStore } from '../stores/ui.store'
 import { useReaderState } from '../features/reader/state/reader-state'
 import { SelectionToolbar } from '../features/reader/components/SelectionToolbar'
 import { popupPosition } from '../features/reader/components/annotation-colors'
+import { RendererContext } from '../features/reader/hooks/useReaderApi'
 
 const createMutate = vi.fn()
 const updateMutate = vi.fn()
@@ -97,6 +98,22 @@ describe('SelectionToolbar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'annotation.publish' }))
     await waitFor(() => expect(createMutate).toHaveBeenCalledTimes(1))
     expect(createMutate.mock.calls[0][0].text).toBe('第一段\n\n第二段')
+  })
+
+  it('keeps a fresh selection mounted while opening the note editor', async () => {
+    const deselect = vi.fn()
+    setSelection()
+    render(
+      <RendererContext.Provider value={{ renderer: { deselect } as never }}>
+        <SelectionToolbar bookId="b1" />
+      </RendererContext.Provider>,
+    )
+
+    fireEvent.click(screen.getByTitle('annotation.writeNote'))
+
+    await waitFor(() => expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument())
+    expect(deselect).not.toHaveBeenCalled()
+    expect(useReaderState.getState().selection).not.toBeNull()
   })
 
   it('shows highlight actions for a fresh selection', async () => {

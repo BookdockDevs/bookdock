@@ -159,6 +159,24 @@ describe('NavigationPanel', () => {
     expect(currentButton).toHaveClass('font-medium')
   })
 
+  it('prefers the TOC label when volume nodes make spine and tree indexes differ', () => {
+    useReaderState.setState({
+      tocItems: [
+        { label: '第二卷 纵横具府', href: 'chapter:0', level: 1 },
+        { label: '第九章 一个巴掌拍不响（上）', href: 'chapter:1', level: 2 },
+        { label: '第十章 一个巴掌拍不响（下）', href: 'chapter:2', level: 2 },
+      ],
+      currentChapter: '第九章 一个巴掌拍不响（上）',
+      // This is the spine index; the TOC tree has an extra volume node.
+      currentChapterIndex: 2,
+    })
+
+    render(<NavigationPanel bookId="book-1" open />)
+
+    expect(screen.getByRole('button', { name: '第九章 一个巴掌拍不响（上）' })).toHaveClass('font-medium')
+    expect(screen.getByRole('button', { name: '第十章 一个巴掌拍不响（下）' })).not.toHaveClass('font-medium')
+  })
+
   it('auto-expands nested path and scrolls to current chapter', async () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn()
 

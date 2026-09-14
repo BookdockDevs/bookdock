@@ -649,11 +649,6 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
                   onChange={columnGapBinding.onChange}
                 />
               )}
-              <ToggleRow
-                label={_('reader.pageAnimation')}
-                checked={pageAnimation}
-                onChange={setPageAnimation}
-              />
             </>
           )}
 
@@ -671,6 +666,14 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
               />
             </div>
           )}
+
+          <div className="mb-3">
+            <ToggleRow
+              label={_('reader.pageAnimation')}
+              checked={pageAnimation}
+              onChange={setPageAnimation}
+            />
+          </div>
 
           <div className="mb-4">
             <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.chineseConversion')}</label>

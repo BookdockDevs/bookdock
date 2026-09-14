@@ -8,7 +8,7 @@ import { config } from './config'
 import { runMigrations } from './db/client'
 import { log } from './lib/logger'
 import { bootstrapAuth } from './modules/auth/auth.service'
-import { purgeAllExpiredTrash } from './modules/books/books.service'
+import { migrateTxtArtifacts, purgeAllExpiredTrash } from './modules/books/books.service'
 import { interruptStaleAiGenerationRuns } from './modules/ai/ai.runs.service'
 
 async function start() {
@@ -19,6 +19,12 @@ async function start() {
   try {
     runMigrations()
     log('info', 'database.migration.completed', { durationMs: Date.now() - migrationStartedAt })
+    const txtArtifactMigrationStartedAt = Date.now()
+    const txtArtifactMigration = await migrateTxtArtifacts()
+    log('info', 'books.txt_artifact_migration.completed', {
+      durationMs: Date.now() - txtArtifactMigrationStartedAt,
+      meta: { ...txtArtifactMigration },
+    })
     const interruptedRuns = interruptStaleAiGenerationRuns()
     if (interruptedRuns > 0) log('info', 'ai.generation.stale_runs_interrupted', { meta: { count: interruptedRuns } })
   } catch (err) {

@@ -326,6 +326,33 @@ function getInitialClickAreaMode(): ClickAreaMode {
   return 'standard'
 }
 
+function initMarginalDefaultsMigration() {
+  if (typeof window === 'undefined') return
+  try {
+    if (!localStorage.getItem('bd-marginal-defaults-v2')) {
+      localStorage.setItem('bd-marginal-defaults-v2', 'true')
+      const oldHeaderCenter = localStorage.getItem('bd-header-center')
+      const oldHeaderLeft = localStorage.getItem('bd-header-left')
+      if ((!oldHeaderCenter || oldHeaderCenter === 'bookTitle') && (!oldHeaderLeft || oldHeaderLeft === 'none')) {
+        localStorage.setItem('bd-header-left', 'bookTitle')
+        localStorage.setItem('bd-header-center', 'none')
+      }
+      const oldFooterCenter = localStorage.getItem('bd-footer-center')
+      const oldFooterLeft = localStorage.getItem('bd-footer-left')
+      if ((!oldFooterCenter || oldFooterCenter === 'chapter') && (!oldFooterLeft || oldFooterLeft === 'none')) {
+        localStorage.setItem('bd-footer-left', 'chapter')
+        localStorage.setItem('bd-footer-center', 'none')
+        if (!localStorage.getItem('bd-footer-right') || localStorage.getItem('bd-footer-right') === 'none') {
+          localStorage.setItem('bd-footer-right', 'bookProgress')
+        }
+      }
+    }
+  } catch {
+    // ignore localStorage errors
+  }
+}
+initMarginalDefaultsMigration()
+
 const initialScrollPageWidth = getInitialNumber('bd-page-width', 800, 400, 1800)
 
 function getInitialCoverText(): boolean {
@@ -399,12 +426,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   pageAnimation: getInitialBoolean('bd-page-animation', true),
   autoMarkSelection: getInitialBoolean('bd-auto-mark-selection', false),
   clickAreaMode: getInitialClickAreaMode(),
-  headerLeft: getInitial<MarginalField>('bd-header-left', 'none'),
-  headerCenter: getInitial<MarginalField>('bd-header-center', 'bookTitle'),
+  headerLeft: getInitial<MarginalField>('bd-header-left', 'bookTitle'),
+  headerCenter: getInitial<MarginalField>('bd-header-center', 'none'),
   headerRight: getInitial<MarginalField>('bd-header-right', 'none'),
-  footerLeft: getInitial<MarginalField>('bd-footer-left', 'none'),
-  footerCenter: getInitial<MarginalField>('bd-footer-center', 'chapter'),
-  footerRight: getInitial<MarginalField>('bd-footer-right', 'none'),
+  footerLeft: getInitial<MarginalField>('bd-footer-left', 'chapter'),
+  footerCenter: getInitial<MarginalField>('bd-footer-center', 'none'),
+  footerRight: getInitial<MarginalField>('bd-footer-right', 'bookProgress'),
   marginalFontSize: getInitialNumber('bd-marginal-font-size', 0, 0, 24),
   readingTimerMode: getInitialTimerMode(),
   manualTimerGraceMinutes: getInitialGraceMinutes(),

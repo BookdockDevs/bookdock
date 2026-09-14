@@ -1,153 +1,319 @@
-# foliate-js 本地魔改点清单（升级必须重放）
+# foliate-js 本地差异与重放清单
 
-> 维护约定：**每次修改本目录内任何文件，必须同步更新本清单**（新增/变更条目 + 提交 hash）。升级 foliate 上游时以此为基线重放。
+> 本目录的通用阅读核心以上游增强版 `foliate-js` 为源码基线。本清单只记录 Bookdock 有意保留的差异和宿主适配契约；不能用早期历史快照作为当前核心证据。
 >
-> 识别方式：§1 全部补丁均带 `bookdock:` 注释标记（grep 可定位，每处改动位置都有标记；JS 用 `// bookdock:`，CSS/样式模板内必须写 `/* bookdock: */`，见 §1.10）；§2 基线机制无标记，只能按功能定位。历史可追溯于 `git log -- apps/web/public/foliate-js/`（初始 vendored `a8e48f2`，后续触碰：`2161acf` / `5981470` / `927b9f8` / `901d83f` / `9e36c55`）。
->
-> 行号基于 2026-08-06 working tree（`9e36c55` 之后，未提交），升级后先 grep 标记再核对。
+> 每个差异都必须写明上游版本、文件/符号、Bookdock 需求、为什么不能只放在适配层、影响范围和验证用例。更新上游基线时先按本清单逐条重放，再运行实现地图和格式兼容台账中的完整验证。
 
-## 1. 可追溯补丁（14 处）
+## 0. 可复现基线、许可证和文件范围
 
-### 1.1 `overlayer.js:128-151` — `Overlayer.dashedUnderline`（想法标注）
+- Upstream parent commit：`4512f39859280b8c1f1e6fefa4f104f9e09c55e5`（2026-07-19，`fix(reader): gate concurrent programmatic captured page turns (#5211)`）。
+- Upstream `foliate-js` submodule：`74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`。
+- Upstream `foliate-js` package：MIT，作者 John Factotum，版权 `Copyright (c) 2022 John Factotum`，来源仓库 <https://github.com/johnfactotum/foliate-js>。
+- 早期历史基线参考：`107f4fa74db0e7247c846c49d6211df3edf9887c`。它不是 Bookdock 当前主核心来源。
+- `LICENSE` 保留 foliate-js 的 MIT 来源和历史 fork 说明；`vendor/zip.js`、`vendor/fflate.js` 继续保留各自上游许可证声明，上游清单中列出的 zip.js BSD-3-Clause、fflate MIT、PDF.js Apache 依赖也不能被删除。
 
-- **提交**：`2161acf`（multi-user）
-- **行为**：新增静态绘制器——想法（idea）标注的微信读书式虚线下划线：`stroke-dasharray '4 3'`、线宽 1.5、圆头（`stroke-linecap: round`），横排画底部、竖排画右侧。
-- **上游对照**：上游无此方法（仅 highlight/underline/squiggly/strikethrough/outline）。
+本轮从上述上游 submodule 整体替换或核对了：
 
-### 1.2 `paginator.js:1358-1375` — `#scrollToRect` 滚动模式锚点落位下移 28%
+`epub.js`、`epubcfi.js`、`progress.js`、`search.js`、`text-walker.js`、`overlayer.js`、`footnotes.js`、`tts.js`、`view.js`、`paginator.js`、`fixed-layout.js`、`vendor/zip.js`、`vendor/fflate.js`，并补入上游 module graph 所需的 `fb2.js`、`comic-book.js`、`mobi.js`、`pdf.js`。`reader-entry.js` 是 Bookdock 的浏览器入口，`translator.js` 是 Bookdock 的文本翻译适配模块，两者不是上游同名源码文件。
 
-- **提交**：`2161acf`
-- **行为**：scrolled 模式 `contextOffset = this.size * 0.28`，`offset = rect.left - margin - contextOffset (+continuous 视图偏移)` + `Math.max(0, …)`——搜索/笔记/书签跳转锚点落在视口上方 28% 处，保留前文上下文。
-- **上游对照**：上游直接把锚点贴到视口顶。
+上游包中的 `opds.js`、`dict.js`、`quote-image.js`、`uri-template.js`、`reader.js`、`ui/`、`tests/`、Rollup/包管理文件以及 `vendor/pdfjs/` 分发资产，均不属于 Bookdock 的 EPUB `reader-entry.js` 运行链：它们分别是 OPDS/词典/引文图片/产品界面/测试构建或 PDF 分发范围。它们不参与本项目的 EPUB 核心加载，也没有被伪装成已迁移的运行时文件；如果未来启用对应格式或产品能力，必须另行引入并登记来源。
 
-### 1.3 `view.js:355` — 搜索高亮样式动态跟随主题
+运行时入口只有 `FoliateReader.ts` → `/foliate-js/reader-entry.js` → 上游 `View` → `foliate-paginator` 或 `foliate-fxl` 这一条阅读链。旧 `epubjs` 依赖已移除；没有第二套 renderer 运行时选择。
 
-- **提交**：`2161acf`（初始改为黄色高亮）；后续接入 `Overlayer.highlight { color: 'var(--bd-search-highlight, #fbbf2459)' }`
-- **行为**：搜索命中高亮接入 CSS 变量 `--bd-search-highlight`，由 `FoliateReader.ts` 动态注入 `searchHighlightColor(theme)`，在读者切换日间/护眼/夜间等主题时实时联动换色，无需重载书籍或重启服务。
-- **上游对照**：上游后来抽象为可配置 `#searchDraw/#searchDrawOptions`；bookdock 使用 CSS 变量以实现零 JS 运行开销的主题即时响应。升级时优先迁移到上游配置项。
+## 1. 上游基线的公共表面对照
 
-### 1.4 `paginator.js:367-369` — `expand()` 空文档守卫
+| 文件 | 上游基线导出/公共表面 | Bookdock 处理 |
+| --- | --- | --- |
+| `epub.js` | `EPUB`、`getEpubMetadata`、`parseEpubMetadataFromXML`；sections、TOC、资源、CFI、media overlay | 保持上游解析模型，增加大小写/百分号路径、封面 XHTML/SVG、常见根路径封面和 manifest-first 的安全 ZIP 资源回退；脚本默认拒绝 |
+| `epubcfi.js` | `isCFI`、`joinIndir`、`parse`、`collapse`、`compare`、`fromRange`、`toRange`、`fromElements`、`toElement`、`fake`、Calibre helpers | 保持导出；Bookdock 只在 CFI 适配处剥离类型后缀并对坏定位安全降级 |
+| `progress.js` | `TOCProgress`、`PageProgress`、`SectionProgress` | 保持算法；零总大小和空章节返回有限结果；额外暴露分页视口页首 `startFraction`，供宿主与拖拽 seek 使用 |
+| `search.js` / `text-walker.js` | `search`、`searchMatcher`、`textWalker` | 保持跨节点、regex、nearby-words；接受旧 `regex: true` 调用 |
+| `overlayer.js` | `Overlayer` 和 highlight/underline/squiggly/strikethrough/outline 等绘制器 | 保持完整绘制器；增加 Bookdock idea 的 `dashedUnderline` |
+| `footnotes.js` | `FootnoteHandler` | 保持事件模型；增加保守判定、目标提取、取消和临时 view 清理 |
+| `tts.js` | `getSentences`、`TTS`；SSML、marks、range iterator | SSML 是主实现；旧 Bookdock 句段 facade 使用独立的 legacy 过滤/断句策略，供当前 Reader TTS adapter 平滑调用 |
+| `view.js` | `ResponseError`、`NotFoundError`、`UnsupportedTypeError`、`makeBook`、`View`；load/relocate/search/annotation/media 事件 | 保持上游生命周期和 renderer 公共 API；增加 Bookdock 点击、CFI 后缀、章节页码契约、默认 Media Overlay class、TTS 和脚注接线 |
+| `paginator.js` | `isViewVisibleInContainer`、`getDirection`、`computeBackgroundSegments`、`textureAwareBackground`、`Paginator` | 保持上游主分页器；增加 Bookdock 布局别名、页眉页脚、gutter、滚轮、continuous 历史语义和资源背景隔离 |
+| `fixed-layout.js` | fixed-layout helpers、`FixedLayout` | 保持上游 fixed-layout；只移除 public 直载时无法解析的裸 polyfill import |
+| `reader-entry.js` | Bookdock global bootstrap：`View`、`EPUB`、`Overlayer`、`FootnoteHandler`、zip APIs | 只负责浏览器直载和 global bootstrap，不复制 renderer |
 
-- **提交**：`927b9f8`
-- **行为**：`if (!this.document) return`——ResizeObserver 在 iframe 文档就绪前/销毁后触发 expand 时避免 `this.document is null` 刷屏。
-- **上游对照**：上游 2024-03（18159a4）刻意删过该检查，bookdock 加回；升级时需重放。
+## 2. 必须重放的本地差异
 
-### 1.5 `paginator.js` — `gutter` 布局属性（3 处）
+以下条目均以上游 submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4` 为对应版本。条目中的“为什么不能只放适配层”是保留核心补丁的必要条件；如果后续上游提供了等价公共 API，应删除本地分支并更新本清单。
 
-- **提交**：`927b9f8`
-- **位置**：
-  - `:438` `observedAttributes` 加入 `'gutter'`（标记注释在 `:436-437`）；
-  - `:704` `attributeChangedCallback` 的 `case 'gutter'` 与其他布局属性一起走 `render()`；
-  - `:999-1004` 宽度折算公式重写：`inset = Math.max(0, Math.min(size - 320, Math.max(size - maxInlineSize, gutter * 2)))`。
-- **行为**：**`horizontalPadding` 在 page 模式的作用点**——有效宽度语义 = `min(max-inline-size, size − 2×gutter)`；`min(size−320, …)` 保证小视口 320px 内容下限。`max-inline-size` 仅承担 pageWidth 上限（哨兵 100000 = auto）。
-- **上游对照**：上游无 gutter 概念。
+### 2.1 覆盖层和搜索
 
-### 1.6 `paginator.js:525-532, 618-627` — 页眉/页脚带下限
+1. **`overlayer.js` / `Overlayer.dashedUnderline`**
+   - 需求：idea 标注需要虚线下划线，横排画在矩形底部，竖排画在右侧，默认 `stroke-dasharray="4 3"`、线宽 1.5、圆头。
+   - 不能只放适配层：矩形拆分、SVG 生命周期和覆盖层清理由核心拥有，宿主不应复制绘制器。
+   - 影响/验证：只影响 idea overlay；`foliate-overlayer.test.ts` 验证 SVG path、虚线和方向。
 
-- **提交**：`901d83f`
-- **行为**：grid 行改 `max(var(--_top-margin), var(--_header-band, 0px))`（底部对称）；`:host([show-header]) #top { --_header-band: 28px }`——保证 `verticalPadding = 0` 时页眉页脚文字不被 `#top` 的 `overflow: hidden` 裁掉（scrolled flow 同样生效，见 §2.4）。`verticalPadding` 语义 = 正文与页眉页脚带的间距。
-- **上游对照**：上游无此机制。
+2. **`view.js` / `View.addAnnotation` search overlay**
+   - 需求：搜索命中恢复为填充高亮（跟随 Bookdock 主题的 `--bd-search-highlight`），不能退化为 outline 框选；切换主题不重载书籍。
+   - 不能只放适配层：搜索结果由 View 创建和销毁，颜色必须随核心 overlay 生命周期传递。
+   - 影响/验证：只影响搜索临时标注；`foliate-view.test.ts` 验证 `Overlayer.highlight` 和主题色选项，Reader 搜索测试覆盖 nearby-words 与清理。
 
-### 1.7 `view.js:357-360` — `addAnnotation` 剥 `|${type}` 后缀
+3. **`view.js` / `View.search` nearby-words 多 CFI**
+   - 需求：一个 nearby-words 命中跨多个文本节点时保留多个 `cfis`，再由 View 逐个绘制并去重。
+   - 不能只放适配层：范围拆分发生在核心搜索结果到 overlay 的转换阶段，适配层拿不到稳定的多个 Range。
+   - 影响/验证：不改变普通命中；`foliate-view.test.ts` 验证两个子范围都产生 CFI。
 
-- **提交**：`901d83f`
-- **行为**：`const cfi = value.includes('|') ? value.slice(0, value.lastIndexOf('|')) : value`——标注 value 带 `` `|${type}` `` 后缀以区分同 range 的 highlight 与 idea；`|` 不是合法 CFI 字符，`resolveNavigation` 前必须剥掉。
-- **坑**：无此补丁则 CFI parse 失败被上层 `.catch(() => {})` 吞掉，**标注全部不渲染且无报错**。
+### 2.2 Paginator 和 view 生命周期
 
-### 1.8 `paginator.js:228-245` — `View.load` iframe 事件超时兜底（2026-08-06）
+4. **`paginator.js` / `View.expand` 空文档守卫**
+   - 需求：ResizeObserver 在 iframe 尚未就绪或销毁后触发时直接返回。
+   - 不能只放适配层：expand 是 iframe view 的核心异步回调，宿主无法阻止 renderer 内部 observer 触发。
+   - 影响/验证：阻止切书、首开和卸载竞态报错；`foliate-paginator.test.ts` 和全量 Reader 生命周期测试覆盖。
 
-- **提交**：`6d21188`（首开挂死根治配套）
-- **行为**：原实现 promise 只等 iframe `load` 事件（`{once:true}`），**无超时无错误处理**——事件不来（iframe 被摘离 DOM / blob URL 失效 / 事件丢失）则阅读器永久挂起（表象：首开转圈直到 30s "书籍加载超时"，重进因 parseCache 秒开）。现加 10s 兜底：到点文档已就绪则按已加载继续（事件丢失怪癖），未就绪则 reject 让 mount 报真实错误（10s 内出结果，不再 30s 干等）。
-- **上游对照**：上游无此机制。
+5. **`paginator.js` / `Paginator` 的 `gutter`、`top-margin`、`bottom-margin` 别名和页眉页脚带**
+   - 需求：Bookdock `horizontalPadding`、`verticalPadding` 和三格信息栏继续工作；padding 为 0 时页眉页脚仍至少保留 28px。
+   - 不能只放适配层：这些值参与 shadow grid、列宽和 iframe layout，外部 CSS 无法可靠替代核心计算。
+   - 影响/验证：page/scroll 两种 flow 和 vertical writing mode；paginator contract、Reader settings tests；核心 CSS 使用合法 `/* */` 注释，不使用会使声明静默失效的 `//`。
 
-### 1.9 `view.js:117-124` — renderer 级 click 监听只挂一次（2026-08-06）
+6. **`paginator.js` / `#scrollToRect` scrolled anchor**
+   - 需求：搜索、标注、书签跳转把目标放在视口上方约 28% 处，保留上下文。
+   - 不能只放适配层：目标 rect 到 scroll position 的换算必须和连续视图、边距、方向在同一核心坐标系完成。
+   - 影响/验证：只影响 scrolled 定位；Reader search/annotation navigation tests 与浏览器定位验收。
 
-- **提交**：`7abf03d`（fix(reader): renderer click listener dedup, warm-aware loading spinner, patch marker cleanup）
-- **行为**：页边距/间隙点击（iframe 之外落在 paginator 上的 click）产生的 `click-view` 事件，监听器从 `#handleClick`（每次 view load 各挂一条，共享 renderer 上**无限累积**——读 N 章后点一次边距翻 N 页 + 监听器泄漏）上提到 `open()` 创建 renderer 后**只挂一次**。
-- **验证**：page 模式翻 ~6 章后点击右侧空白边距只触发 1 次 `click-view`；正文内点击/中区 tap-to-toggle/continuous 间隙点击均正常。
-- **上游对照**：上游原实现即 per-view 挂载（有同样问题），升级时确认上游是否已修复，未修复则重放。
+7. **`paginator.js` / scrolled 原生 scrollbar**
+   - 需求：真实 scroll container 是 shadow DOM 内 `#container`，scrolled flow 显示原生滚动条，paginated flow 不显示。
+   - 不能只放适配层：宿主外层无法控制 shadow scroll container 的 scrollbar 和其内容尺寸。
+   - 影响/验证：只影响滚动模式交互；paginator shadow style 检查，浏览器滚动条验收。
 
-### 1.10 `paginator.js` shadow `<style>` 内禁用 `//` 注释（2026-08-09）
+8. **`paginator.js` / 文档 CSS 布局变量**
+   - 需求：向 XHTML 根节点提供 `--bd-page-margin-*`、`--bd-full-width/height`、`--bd-available-width/height`、`--bd-page-break-margin`，供 `duokan-bleed` 和旧分页 CSS 使用。
+   - 不能只放适配层：变量值来自每次 columnize/expand 的真实 iframe 尺寸，必须在文档重排前写入。
+   - 影响/验证：普通流图片、出血和旧 `page-break-after`；Reader style transform tests、复杂 CSS 浏览器验收。
 
-- **提交**：`6768bcb` 在 `grid-template-rows` 声明**值内部**写了两行 `// bookdock:` 注释——CSS 没有行注释，整条 `grid-template-rows` 声明被静默丢弃。
-- **行为后果**：行模板缺失 → 行退化为 auto + 默认 stretch 均分自由空间 → scrolled flow 下**内容不足一屏的短章被垂直居中**（长章节自由空间为负不受影响，page 模式 `#container` 跨全部行也不受影响，故只有短章中招）。
-- **修复**：改为 `/* bookdock: */` 块注释（`#top` 规则里上游遗留的 `// --_gap: 7%;` 一并改为块注释）。**教训：本目录 shadow DOM `<style>` 模板里只能写 `/* */`，写 `//` 浏览器不报错、整条声明静默失效。**升级重放时同样禁止带入 `//`。
-- **验证**：短章（序章）`gridTemplateRows` 从 `298px 701px`（均分）恢复为 `0px 1000px 0px`，内容回顶。
+9. **`paginator.js` / `#demoteUnfragmentableBoxes` 与 body static**
+   - 需求：超高 `inline-block/inline-flex/inline-grid/inline-table` 降级为可分页 display，body 避免 absolute layout 造成 expand 循环。
+   - 不能只放适配层：必须在核心测量并改写 document layout 后再计算页高。
+   - 影响/验证：防止 WebKit 首页裁断；paginator tests 与不可拆分块样本验收。
 
-### 1.11 `paginator.js:228-310` — Blob 章节 srcdoc 兼容、文档就绪与导航边界保护（working tree）
+10. **`paginator.js` / `getDirection` vertical-rl RTL**
+    - 需求：正文首个有效子元素声明竖排时也能推断 writing mode；`vertical-rl` 按 RTL page progression。
+    - 不能只放适配层：方向决定 paginator 的 flex、scroll property、CFI 目标和翻页方向。
+    - 影响/验证：中文/日文竖排；方向单测与浏览器 fixed/reflow 验收。
 
-- **行为**：部分嵌入式浏览器会让 Blob iframe 永远停在旧的 `about:blank`，并且不会触发 `load`；直接检查 `contentDocument` 会把空白文档误判为正文，造成阅读页空白。现在 Blob 章节先 fetch 回 markup，再通过 `iframe.srcdoc` 加载；同时按 `about:srcdoc`/实际 URL 检查文档 readyState，并用 50ms 轮询补足丢失的 `load` 事件，超时明确失败。`#goTo` 拒绝越界章节索引，避免首章/末章翻页访问 `sections[undefined].load`。
-- **验证**：隔离本地实例真实浏览器回归：首开约 1 秒显示正文，目录跳转到“第二章 继续”显示对应正文，未再出现 10 秒 iframe 超时。
+11. **`view.js` / iframe/blob load readiness、srcdoc、导航边界和 click listener**
+    - 需求：Blob 章节先以 `srcdoc` 加载，在 `about:srcdoc`/readyState/丢失 load 事件时有界等待；`#goTo` 拒绝越界；每个 renderer 只挂一个边距 click listener。
+    - 不能只放适配层：iframe 文档 readiness、renderer view 数量和导航边界都属于核心生命周期，React 无法修复已错误解析的空白文档。
+    - 影响/验证：首开、切章、切书和页边距点击；`foliate-reader-load.test.ts`、view tests，浏览器冷启动验收。
 
-### 1.12 `footnotes.js` — 脚注引用判定、片段提取与取消（working tree）
+12. **`view.js` / CFI 类型后缀和 fragment fallback**
+    - 需求：标注值允许用 `cfi|highlight`/`cfi|idea` 区分同 range overlay，解析前去掉后缀；内部链接完整 href 失败时仍尝试当前 section 的 fragment。
+    - 不能只放适配层：View 负责 annotation navigation 和 link event，必须在 CFI/section resolve 前处理。
+    - 影响/验证：标注类型共存、同章 `#id` 链接和坏 CFI 普通阅读降级；cfi overlap、annotation 和 view tests。
 
-- **行为**：显式识别 `epub:type`/`role=doc-noteref`/已验证类名；superscript 只在目标具备注释语义或可提取为非空块级内容时启用，数字索引簇和 backlink 保持普通链接。目标片段在独立临时 `foliate-view` 中渲染，支持同章/跨章、隐藏 `aside`，请求取消和 view dispose 可安全处理异步竞态。
-- **宿主契约**：`FootnoteHandler.handle(book, event)` 返回带 `requestId` 的 Promise，发出 `before-render`/`render` 事件；解析或渲染失败由宿主恢复为普通 `display(href)`。
-- **上游对照**：上游 `FootnoteHandler` 没有 Bookdock 的保守启发式、可取消请求和临时视图清理边界。
+13. **`paginator.js` / per-section background 与 public controls**
+    - 需求：按 iframe section 隔离 body/html background；保留 `no-preload`、`no-background`、`no-continuous-scroll`、`primaryIndex`、`containerPosition`、overflow getters 和 `pan()` 公共面。
+    - 不能只放适配层：背景、视图回收和 scroll position 在核心 shadow DOM 内；宿主只能通过稳定 public API 控制。
+    - 影响/验证：连续阅读章节背景、主题重写、手势 pan 和预加载；paginator contract/fixed-layout tests 与浏览器验收。
 
-### 1.13 `view.js:307-338` — 正文点击交给宿主脚注会话处理（working tree）
+14. **`paginator.js` / 上游 View 的尺寸、字体、图片和 full-page 布局合并**
+    - 需求：保留上游的 `columnCount`、`contentPages`、字体 ready 后重排、Safari zoom/resize 图片上限清理、`data-duokan-page-fullscreen`。
+    - 不能只放适配层：这些值参与核心 View 的 render、iframe 尺寸和 fixed page 定位。
+    - 影响/验证：字号/窗口重排、图片页和 Duokan 封面；fixed-layout/paginator tests 与浏览器验收。
 
-- **行为**：移除旧的 `window.isFootNoteOpen()` / `window.closeFootNote()` 空桩调用；正文点击继续发出既有 `click-view`，由 `FoliateReader` 统一关闭脚注、消费本次点击并避免误翻页。
-- **上游对照**：这是宿主接线所需的行为调整，不再让 React 状态泄漏到全局 window。
+15. **`paginator.js` / continuous mode behavior**
+    - 对应版本：Upstream parent `4512f39859280b8c1f1e6fefa4f104f9e09c55e5`、`packages/foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`；历史行为对照为 Bookdock `v0.2.2` tag `a326427a12579b5914b0be2f5404c0234464d320`。
+    - 符号：`#onWheel`、`#onWheelSnap`、`#onWheelPage`、`#onDocKey`、`#scheduleBackwardBuffer`、`scrollByViewport`、`scrollByPixels`、`snapWheelStep`；`FoliateReader.applyContinuousScroll` 的 `continuous`/`no-continuous-scroll` 属性切换。
+    - 根因/需求：重基线的 paginator 没有迁回 v0.2.2 的 iframe wheel/keyboard 入口、跳章两阶段累计和连续边缘状态；adapter 直接写 `containerPosition` 又绕过了核心边界。另一个迁移遗漏是切换到长卷时只改属性、不启动最终状态下的 `#fillVisibleArea()`，造成“长卷已选中但仍单章”。自动阅读还曾在启动时移除 `snap-turn`，导致跳章模式到章尾既不累计切章也不返回停止信号。关闭模式只允许明确导航切章；跳章第一次到边界、再次同向达到阈值才切章；长卷向下追加、向上非对称回读/回收；滚动模式上下键跳视口、左右键切章。
+    - 为什么不能仅放适配层：iframe 事件、section 边界、`#views` 装载/销毁、scroll compensation、主视图计算和模式属性回调都属于 paginator 的 shadow DOM 私有状态；在 React 适配层复制会形成第二套导航和阈值状态。
+    - 影响范围：只改变 page/scrolled 的滚轮、iframe 键盘、continuous buffer、模式切换初始化和自动滚动边界；不改变 EPUB 内容、CFI、Range、搜索或标注数据。连续模式历史边缘补章只回放实际累积的向上滚轮距离，不额外平滑滚动一整屏；显式章节导航不主动加载更上一章，待用户继续向上到历史边缘后再触发。`scrollByPixels` 返回 `false` 表示当前模式阻止继续自动移动，避免关闭模式在章尾无动作空转。
+    - 验证用例：paginator/Reader/continuous-scroll/auto-reading 定向测试共 56 项通过；`pnpm test` 的 Server 482、Web 1029 项全量测试通过，`pnpm typecheck`、`pnpm lint`、production build 和 `node --check` 通过；浏览器已验证跳章边界和长卷向下 1→2→3 view 追加、向上不对称增长。自动阅读/键盘的完整实机验收仍标 `[B]`。
 
-### 1.14 `paginator.js` shadow `<style>` — scrolled flow 显示原生滚动条（working tree）
+16. **`paginator.js` / `#container` full-width scroll surface**
+   - 需求：正文和 scrolled 模式的真实滚动容器必须覆盖外层左右 gutter；宽窗口下两侧空白仍应接收滚轮，并由同一个容器参与居中/分页布局。
+   - 不能只放适配层：`#container` 位于 shadow DOM 内，外层 Reader 无法把 gutter 的 wheel/scroll 事件转交给内部滚动面，也无法修正列宽计算。
+   - 影响/验证：只影响 paginator 的 shadow grid 和 scroll hit area，不改变书籍正文 CSS；`foliate-paginator.test.ts` 验证两种 flow 使用 `grid-column: 1 / -1`，用户实机确认宽屏 page/scroll、滚轮和居中。
 
-- **行为**：只在 `flow="scrolled"` 时恢复 `#container` 的原生滚动条，并使用继承的 `--bd-read-sub` 主题色；paginated flow 继续隐藏滚动条。递进模式下滚动条反映当前章节，continuous 连卷模式下反映当前保留的连续视图。
-- **原因**：真正的滚动容器是 paginator shadow DOM 内的 `#container`，宿主 Reader 外层 div 的 `overflow-y-auto` 无法控制它；原有基线 CSS 对所有 flow 统一隐藏了滚动条。
-- **上游对照**：上游基线同样隐藏该滚动条；这是 Bookdock 的阅读交互调整。
+17. **`paginator.js` / `#trimDistantViews` 双向连续阅读窗口**
+   - 对应上游：submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4` 的 `Paginator`，Bookdock 在其基础上补充双向窗口回收。
+   - 需求：seamless 连卷向上阅读时，已完全远离视口的前置 section 也要回收；插入/删除前置 view 后必须补偿 scroll position，保持同一段正文停在视口原处。向上不是向下预加载的镜像：只有到达已保留窗口边缘并再次同向操作时才按需恢复更早 section。
+   - 不能只放适配层：section view 的销毁、iframe unload、shadow scroll 坐标和连续 buffer 都由 paginator 私有状态共同维护，宿主只知道当前 public position，无法安全删除前置 view。
+   - 影响/验证：只影响连续滚动的内存/布局窗口，不改变正文顺序、CFI 或非连续模式；`continuousScrollTrimBefore` contract test 覆盖距离阈值和活动 section 保留，`#scheduleBackwardBuffer` 与 `#loadAdjacentSection` 覆盖延迟边缘和插入补偿，浏览器已观察向下追加后向上不对称增加 view。
 
-## 2. vendored 基线专属机制（初始 vendored 自带，上游 main 没有，升级全部需要重放）
+18. **`FoliateReader.ts` / `scrollByPixels` 方向与可见内容 settle**
+   - 对应上游：submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4` 的 paginator public `containerPosition`；Bookdock adapter 行为补丁。
+   - 需求：自动滚动在 `scrollTop` 和 vertical writing 的负向 `scrollLeft` 上都按“向前”移动；由 paginator 统一决定 snap/continuous 边界是否跨 section；内容已触发 relocate 后立即结束导航 pending 指示器。
+   - 根因：旧 adapter 直接修改 `renderer.containerPosition`，因此绕过 paginator 的 off/snap/continuous 边界契约并形成重复导航状态。
+   - 不能只放适配层：滚动方向和跨 section 的触发属于 Bookdock 自动阅读与加载状态的组合契约，但 `containerPosition`/`relocate` 是核心唯一能确认的可见位置边界；把它们复制到 React 会产生第二套导航状态。
+   - 影响/验证：只影响自动滚动、跨章 pending 和快速进度跳转，不改变手动页面翻页；`FoliateReader.scrollByPixels` 现在委托 paginator public `scrollByPixels`，保留旧 direct-write 仅作兼容 fallback。`foliate-reader-load.test.ts`、`navigation-pending.test.ts`、`click-area.test.ts` 与本轮 continuous/auto-reading 定向测试通过，浏览器 spinner/自动阅读完整确认仍标 `[B]`。
 
-以下机制在 `a8e48f2` vendored 时就存在（上游从未有过），与 §1 的"补丁"区分——它们没有 `// bookdock:` 标记，只能按功能定位：
+### 2.3 EPUB 资源和元数据
 
-### 2.1 滚轮翻页/翻章（`paginator.js:1553-1604`）
+16. **`epub.js` / `Resources` 和 `EPUB` metadata/resource loader**
+    - 需求：以上游 metadata/refines、XMP/元数据、XML entity、media overlay、srcset、XHTML cache、display-options XML 为主；同时允许 rootfile/MIME/property 大小写、百分号/相对路径和资源名大小写差异。
+    - 不能只放适配层：manifest、spine、resource URL、encryption 和 cover candidate 是核心 book model，外部再解析会产生两套语义。
+    - 影响/验证：EPUB2/3 metadata、NCX/nav、CSS/image/font/audio/video；`epub-compatibility.test.ts`、server EPUB tests、真实样书离线检查。
 
-- `#onWheel(e)`：scrolled flow → `#onWheelSnap`（章界跨越，"legacy TxtRenderer parity"——bookdock 自己的 TXT 阅读器遗产），paginated → `#onWheelPage`（整页）。
-- 常量（`:486-491`）：`SNAP_DELTA_THRESHOLD = 150` / `SNAP_COOLDOWN = 600` / `PAGE_WHEEL_THRESHOLD = 40` / `PAGE_WHEEL_COOLDOWN = 200`。
-- 侦听器挂 host 与每个 doc（`:674, 679`，`{ passive: true }`）。
+17. **`epub.js` / cover candidate、cover XHTML/SVG 和常见根路径 fallback**
+    - 需求：优先 EPUB3 `cover-image`、EPUB2 legacy meta、guide、命名 raster/SVG；非法候选继续找下一个；cover XHTML 内的 `<img>/<image>` 和 `iTunesArtwork`/`cover.*` 可提取。
+    - 不能只放适配层：封面候选与 manifest href 解析必须共享 EPUB 的 root path、MIME 和 loader。
+    - 影响/验证：只影响封面，不改变章节顺序；server/web EPUB compatibility tests，真实样书封面字节和 MIME 检查。
 
-### 2.2 iframe 内键盘翻页（`paginator.js:1606` `#onDocKey`）
+18. **`view.js` / zip and directory loader case-insensitive lookup**
+    - 需求：manifest href 与 zip entry 大小写不同、百分号路径或资源未列 manifest 时仍可尝试图片/字体加载；大小写冲突不猜测。
+    - 不能只放适配层：上游 `Loader.loadHref` 在核心递归 CSS/XHTML 资源替换时直接查 entries。
+    - 影响/验证：复杂 CSS、外部字体和资源路径；web EPUB compatibility test，真实样书资源图扫描。
 
-- iframe 内 keydown 到不了顶层窗口，这里补 ArrowLeft/Right、PageUp/Down、空格（page 模式）。挂载于 `:683`。
-- **scrolled 分支（2026-08-05）**：原实现 `if (this.scrolled) return`——滚动模式点击正文后焦点在 iframe，顶层窗口的按键处理器永远收不到，方向键切换章节完全失效。现改为 scrolled 流程下：
-  - ArrowRight/Left 直接 `nextSection()/prevSection()`（与顶层处理器语义一致；continuous 模式下 nextSection 对已渲染视图只是滚动，天然快）；
-  - ArrowDown/Up、PageDown/Up 用 `next/prev(round(size*0.92))` 显式滚动一屏（与底栏上下页按键同语义，页尾自然流入相邻章）——**不能依赖浏览器原生箭头滚动**：切章会销毁被聚焦的旧 iframe，焦点掉回（不可滚动的）文档后原生滚动就死了。可编辑目标守卫提前到公共位置。
+19. **`epub.js` / `Loader.loadItem` 与 `Loader.loadHref` 缺失资源回退**
+    - 对应版本：Upstream `foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`。
+    - 需求：CSS/XHTML 中引用了 manifest 声明但实际 ZIP entry 不存在的字体、图片或样式时，不把 `null` 包成伪 Blob，也不让缺失可选资源阻断章节；保留原引用作为浏览器可忽略的降级路径。
+    - 不能只放适配层：缺失发生在核心递归资源替换的 `loadItem`/`loadHref` 之间；外部在文档生成后无法恢复 CSS、XHTML、图片和字体的统一资源生命周期。
+    - 影响/验证：只影响资源缺失/损坏时的 fallback，不改变已存在资源的 Blob URL、缓存和引用计数；`epub-compatibility.test.ts` 缺失字体/图片契约，真实样书资源扫描。
 
-### 2.3 continuous 无缝模式的视图管理
+### 2.4 TTS、脚注和业务桥接
 
-- `#views` + `#placeholders` Map、`#loadAdjacentBuffer`/`#fillInitialBuffer`/`#virtualizeDistantViews`；切换到连卷只按向下方向准备当前章节附近的一章，滚动稳定后按方向、剩余少于 2 个视口再加载一章；普通文本连卷保留已加载历史，不再按距离回收 iframe；向上到达当前历史区顶部时第一次只停住，第二次独立上滚才加载更早章节。向上插入前暂时关闭浏览器滚动锚定，加载完成后按最终高度补偿，并消费本次上滚的一页距离，避免停在当前章顶部后再出现可见跳变；`#virtualizeDistantViews` 保留给图片密集格式等需要时启用；远距目录跳转继续主动清理旧位置，仅保留目标附近内容（`:1682-1683`）；
-- 程序化的键盘/底栏滚动会屏蔽原生 `scroll` 事件；`#scrollTo` 完成后主动检查缓冲，且 `#scrollNext/#scrollPrev` 在本次整屏距离会撞到已渲染末端时等待共享的相邻章加载任务，避免章尾先停在残屏、下一次按键才进下一章；
-- `#getVisibleRange`（`:1463`）连续模式按**视口中心**判定主章节（`:1493` 处使用）；
-- `#afterScroll` 的 anchor 以 fraction 保留（relayout 后按比例恢复，而非 Range）。
-- 相邻章节加载后的 `setStyles()` 会让所有已加载 iframe 再次执行 `fonts.ready → View.expand()`；连续模式主视图的 `onExpand` 必须先确认自身尺寸真的变化，再按 fraction 重定位。无变化回调若直接写回旧 anchor，会在每次新增章节时把滚动位置跳回当前章起点；相邻视图则只在自身位于视口上方且尺寸变化时补偿滚动距离。
-- **上游对照**：上游 main 的连续模式实现不同（无 wheel、无中心判定）。
+20. **`tts.js` + `view.js` / 上游 SSML TTS 与旧 Bookdock facade**
+    - 需求：以上游 `getSentences`、SSML marks、`prepare`、`prevMark/nextMark` 为主；当前 Bookdock TTS adapter 仍需要 `start/end/from/currentDetail/collectDetails/highlightCfi` 的句段契约，因此通过 legacy constructor facade 接入，并让 `View.initTTS` 异步返回实例。
+    - 不能只放适配层：句子 Range、SSML mark 和 document 生命周期由核心创建；适配层复制会导致 TTS 与 CFI/overlay 脱节。
+    - 影响/验证：不改变新 SSML API；旧句段调用不显示意外高亮（`{ highlight: false }`）；`tts.test.ts`、Reader TTS tests，浏览器朗读验收。
 
-### 2.4 页眉页脚信息栏三格化 + 字号可调（`paginator.js`）
+21. **`footnotes.js` / `FootnoteHandler` 判定、提取、取消和 dispose**
+    - 需求：显式 `epub:type=noteref`、`role=doc-noteref`、已知类名优先；superscript 只在目标有注释语义或可提取非空块时启用；支持 hidden aside、`li`、`.note`、`dt`+连续`dd`、跨章目标；请求带 requestId，可取消并清理临时 view。
+    - 不能只放适配层：脚注目标需要核心 `View`、CFI/fragment resolve、before-render/render 事件和 iframe disposal，宿主无法安全替代。
+    - 影响/验证：数字索引簇/backlink/不可提取目标回退普通 display；`footnotes-handler.test.ts` 五类用例，浏览器脚注验收。
 
-- **提交**：F4（阅读信息栏可配置）
-- **行为**：
-  - `#header`/`#footer` 从单格改 **3 列 grid**（`grid-template-columns: 1fr 1fr 1fr`）；首格 `text-align: left`、末格 `text-align: right`、中格居中；格内 `padding: 0 10px`；
-  - `makeMarginals(3, ...)`（`:983-984` scrolled / `:1015-1016` paginated）→ `heads`/`feet` 各 3 个文本元素；**scrolled flow 分支同样建 3 格**（原实现置 null 并清空）——页眉页脚固定在视口顶/底（grid row 1/3，内容在 row 2 滚动），可见性只由 `show-header`/`show-footer` 属性控制；
-  - band 高下限 `--_header-band/--_footer-band: 28px` 规则（`:616-625`）scrolled flow 同样生效；
-  - `setMarginals({header, footer, fontSize})` 接受**文本数组**（`[L, C, R]`，字符串自动包成单元素数组向后兼容）；`fontSize` 写 `--_marginal-font-size`（0=清掉回退 `.75em`）；`#setMarginalTexts()`（`:1029`）统一回填（relayout 重建元素后同样调用）；
-  - `#headerText`/`#footerText` 初始化为 `['']`（`:458-459`）。
-- **上游对照**：上游单格居中；三格化是 bookdock F4 专属。
+22. **`view.js` / 正文 click-view 与脚注会话**
+    - 需求：正文点击只发 `click-view`，由 FoliateReader 统一关闭脚注会话、消费点击并避免误翻页；不再调用旧的全局 `window.isFootNoteOpen` 空桩。
+    - 不能只放适配层：点击坐标需要在 iframe/fixed-layout/scale 后统一映射，且必须与核心 link/selection guard 同一事件阶段。
+    - 影响/验证：脚注关闭、页边距点击、选区/交互元素不误触发；Reader footnote/click tests。
 
-## 3. 未改动文件（与上游基线一致）
+23. **`progress.js` / `SectionProgress.getProgress` viewport-start fraction**
+    - 对应版本：Upstream `foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`。
+    - 根因：分页器的 `pageFraction` 表示当前可视页尾，原 `fraction` 因此是“这一页读到哪里”；但 `View.goToFraction()` 的输入是要放到视口页首的全书坐标。Bookdock 直接把两者都当成同一个进度值，导致滑块显示位置和拖拽落点前后错开，页尾越大错位越明显。
+    - 需求：保留上游 `fraction` 的页尾语义，同时暴露 `startFraction`；Bookdock 进度、恢复和拖拽统一使用视口页首。
+    - 不能只放适配层：页首/页尾的差异只有核心 `SectionProgress` 同时掌握 section 字节权重和分页可视范围，适配层拿不到可靠的同一坐标。
+    - 影响/验证：只影响进度显示、保存和按百分比跳转，不改变 CFI/章节内容；`foliate-progress.test.ts` 验证页首与页尾分离，ProgressStrip 使用同一数值，浏览器需验证拖到 25/50/75% 的实际落点。
 
-`epub.js` / `epubcfi.js` / `progress.js` / `search.js` / `text-walker.js` / `fixed-layout.js` / `translator.js` / `tts.js` / `dict.js` / `vendor/*`——升级时可整体替换。
+24. **`FoliateReader.ts` / `applyStyles` 字体 fallback 与书籍字体覆盖**
+    - 对应版本：Bookdock adapter against upstream `foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`。
+    - 根因：`overrideBookFont` 原本同时承担“应用阅读器字体”和“覆盖作者字体”两个职责；为修 TXT 又增加 `sourceFormat === 'txt'` 分支，结果 TXT 的行为依赖格式参数，且不能解决生成 CSS 已经声明固定字体族的问题。
+    - 需求：没有作者字体声明时，Bookdock 字体通过 `html` 继承规则自然生效；只有打开“覆盖书籍字体”才用 `!important` 覆盖作者字体。TXT 生成样式必须保持 font-neutral，不把转换器默认值伪装成书籍 CSS。
+    - 不能只放在 UI：字体级联发生在 iframe 文档内，合成 TXT 的固定声明也只能在生成源和核心样式注入边界消除；React 侧无法可靠区分“作者 CSS”和“转换器 CSS”。
+    - 影响/验证：影响 TXT 默认字体和所有 EPUB 的作者字体尊重/覆盖边界，不改变字号、行距、段距；`txt-to-epub.test.ts` 验证生成 CSS 不声明字体，`foliate-reader-load.test.ts` 验证无覆盖时为 inherited fallback、有覆盖时保留强制规则，浏览器需分别确认 TXT/EPUB。
 
-`reader-entry.js` 是 bookdock 自写入口（导出 `globalThis.FoliateReader`，供 `FoliateReader.ts` 动态 import），不属于上游文件。
+25. **`view.js` / `View.#handleClick` 标注命中阻断通用 click-view**
+    - 对应版本：Upstream `foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`。
+    - 根因：标注点击和正文点击是同一个 iframe click 的两个监听路径。overlay 识别出想法后，核心原有的通用 `click-view` 监听仍继续发事件，Bookdock 随后同时打开想法列表并执行 chrome toggle，于是上下顶栏浮现。
+    - 需求：在核心 `View` 发出 `click-view` 前先用同一 overlay hit-test；命中非搜索标注时只交给标注事件，搜索高亮仍保持普通阅读区点击行为。
+    - 不能只放适配层：适配层收到 `annotationClicked` 时已经晚于核心 click dispatch，无法撤回已经发出的 `chromeToggle`，也无法可靠区分 iframe 内局部坐标和宿主坐标。
+    - 影响/验证：只影响标注点击事件竞争，不改变标注绘制或搜索高亮；`foliate-view.test.ts` 验证标注/搜索/空命中三种分类，浏览器需确认点击想法只打开想法 UI、不浮出上下顶栏。
 
-## 4. 升级 foliate 操作流程
+26. **`paginator.js` / `#display`、`#goTo` 导航代际与可见性恢复**
+    - 对应版本：Upstream `foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4` 的 `Paginator`。
+    - 根因：切章时核心先把 shadow `#container` 设为 `opacity: 0`，但 `section.load`、前置预加载或 `scrollToAnchor` 任一步异常/长时间未决都没有统一的 `finally`；连续快速跳转也没有“最新导航胜出”的代际检查，旧任务可能继续重定位或把新任务的内容留在隐藏状态。
+    - 需求：连续滚动保持旧内容可见；分页/离散滚动仍可暂时隐藏，但失败必须恢复；新导航开始后，旧任务不能再写 primary、anchor、overlayer 或 opacity，且旧任务创建的 view 要清理。
+    - 不能只放适配层：opacity、primary view、section preload 和 scroll anchor 都是 paginator 私有状态，React 只能看到一个最终 relocate，无法撤销核心已经执行的 DOM 写入。
+    - 影响/验证：影响进度跳转、快速前后章、首次打开和慢资源章节的空白/残留加载状态；不改变 CFI 或章节内容。`foliate-paginator.test.ts`、`foliate-reader-load.test.ts` 和 `navigation-pending.test.ts` 覆盖契约，浏览器需验证 25/50/75% 及快速往返不空白、不永久转圈。
 
-1. 以上游对应版本为基线整体替换未改动文件（§3）；
-2. 对 §1 的 14 处补丁逐条重放（grep `bookdock:` 核对，优先迁移到上游新抽象，如 1.3 的搜索配置项）；
-3. 对 §2 的 4 项基线机制按功能重放（无标记，靠行为测试验证：滚轮翻页、iframe 键盘、continuous 无缝翻章、三格信息栏）；
-4. 跑阅读器相关测试 + 手动验证：搜索跳转锚点位置（28%）、想法虚线下划线、页眉页脚 padding=0 可见性、同 range 一划一想法渲染、页边距点击单次翻页；
-5. 更新本清单的行号与上游版本号。
+27. **`FoliateReader.ts` + `ProgressStrip.tsx` / spine section 到 TOC label 映射**
+    - 对应版本：Bookdock adapter against upstream `foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4` 的 `View.getProgressOf`。
+    - 根因：服务端 `chapters` 是 TOC/正文分章，Foliate `sectionFractions` 是 spine 资源边界；一本书可以一个 XHTML 包含多个 TOC 节点，也可以有封面/卷节点，因此把同一个数组下标用于两者会显示“前一章”或把第九章高亮成第十章。真实样书已出现 776 个服务端章节与 121 个 Foliate sections。
+    - 需求：seek 数学继续使用 Foliate section 字节坐标；拖动预览标签必须来自核心 `getProgressOf(sectionIndex).tocItem`，不能用服务端章节数组按下标猜测。
+    - 不能只放在 React：只有核心知道当前 fraction 实际落在哪个 spine section、该 section 的 fragment/range 和 TOC 进度；适配层若重建一套区间会再次产生坐标漂移。
+    - 影响/验证：影响进度条拖动中的章节提示和 TOC 语义，不改变实际 seek 坐标、服务端章节数据或目录点击；`ProgressStrip.test.tsx` 覆盖 section/TOC 数量不一致，`foliate-reader-load.test.ts` 覆盖核心映射，浏览器需确认拖动标签与落点章节一致。
 
-## 5. 相关文档
+28. **`txt-to-epub.ts` / `STYLE_CSS` 生成源去除固定字体族**
+    - 对应版本：Bookdock generated-EPUB adapter against upstream `foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`。
+    - 根因：TXT 转 EPUB 模板原先写入 `Noto Serif SC, Source Han Serif SC, SimSun, serif`；即使阅读器关闭覆盖，浏览器也会优先命中这些显式字体，用户选择的 Bookdock 默认字体不会通过 `html` fallback 继承下来。
+    - 需求：生成 XHTML 只保留 TXT 的结构、间距和颜色等产品排版，不写字体族；字体由阅读器统一提供默认 fallback，用户打开覆盖时再统一替换。
+    - 不能只放在适配层：适配层若继续按 `txt` 强制覆盖，就会把格式判断写进通用 EPUB 核心，并掩盖未来其他生成格式的同一问题；消除错误声明才能让 CSS cascade 语义正确。
+    - 影响/验证：只影响服务端生成 TXT EPUB 的字体来源，不改变正文、章节、封面和导出结构；`txt-to-epub.test.ts` 验证 `OEBPS/style.css` 不含 `font-family`，浏览器需确认新上传和升级后的存量 TXT 不打开覆盖也能应用当前阅读字体。
 
-- 实现细节与坑：`docs/local/implementation/06-web-reader.md` §13（本清单的文档版，含设计意图）
-- vendored 决策：`docs/local/adr/0009-foliate-js-vendored.md`
+29. **`Reader.tsx` / 桌面 footer summon 热区保持可命中**
+    - 对应版本：Bookdock host adapter against upstream `foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`。
+    - 根因：隐藏态 footer 的热区与 footer 本体共用 `footerVisible` 条件；footer 未显示时热区本身也是 `pointer-events: none`，因此永远收不到 `pointerenter`，`footerSummon` 无法从 `false` 变为 `true`。现场表现为进度条不出现或无法开始拖动。
+    - 需求：桌面热区在隐藏态也必须接收指针进入，以触发 footer 显示；移动端无 hover，继续保持 inert，由中间点击固定 chrome。
+    - 不能只放在 paginator：这是 React 宿主浮层的 hit-test/状态机问题，核心只负责阅读坐标，不知道 footer 的显示状态。
+    - 影响/验证：只影响桌面进度条/底部控制的唤起，不改变阅读内容和布局样式；Reader 代码已修复，浏览器已确认热区可唤起并完成约 24/50/76% 拖动及下一章/上一章抽查，完整基线对照仍为 `[B]`。
+
+30. **`books.service.ts` / `migrateTxtArtifacts` 迁移 0.2.2 存量 TXT 派生 EPUB**
+    - 对应版本：Bookdock server migration for generated TXT EPUBs created by v0.2.2, with the generated-EPUB adapter against upstream `foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`。
+    - 根因：0.2.2 上传 TXT 时只保留服务端生成的 `.epub`，数据库的 `format` 仍为 `txt`；旧 `OEBPS/style.css` 已把转换器默认字体写进 `body`。只改当前 `STYLE_CSS` 只能影响新上传，升级后旧 blob 仍会优先命中显式字体，因此用户必须打开“覆盖书籍字体”。
+    - 需求：升级启动时按 `books.meta.txtArtifactVersion` 识别旧产物，读取已存 EPUB、移除仅由旧 TXT 转换器写入的固定字体声明，并用 `StorageDriver.put` 原子替换；新上传/re-toc 记录当前版本，迁移必须幂等。
+    - 不能仅放在阅读器适配层：阅读器无法可靠区分存量 TXT 派生 CSS 与作者 EPUB CSS；按 `format` 在前端强制覆盖会重新把格式判断塞回通用核心，也会掩盖数据产物未升级的问题。服务端才拥有派生 artifact 的持久化边界和启动生命周期。
+    - 影响/验证：只更新 TXT 派生 artifact 的 CSS 和 `books.meta`/size/updatedAt，不重建章节 XHTML，不改变书籍 ID、CFI、进度、标注或原始 `contentHash`；`books.test.ts` 覆盖字体声明移除、版本标记和二次启动跳过，升级运行日志报告 examined/migrated/skipped/failed，浏览器需确认 0.2.2 存量 TXT 无需打开覆盖即可应用阅读字体。
+
+31. **`view.js` / relocate detail 的 `chapterLocation` 与 Media Overlay 默认 active class**
+    - 对应版本：Bookdock `v0.2.2` 的 `View.#onRelocate` 与 `View.open` 兼容契约。
+    - 需求：relocate detail 保留 renderer 页码 `{ current, total }`；没有 `media:active-class` 时使用 `-epub-media-overlay-active`，显式值优先。
+    - 实现：在当前上游 `page/pages` public getter 上补回 `chapterLocation`，并在 Media Overlay 接线前填充默认 class；不恢复旧 `View` 生命周期或进度实现。
+    - 影响/验证：恢复 Reader 的 `pageInChapter`/`chapterFraction` 输入，避免无 active class 的书在 `classList.add/remove` 失败；`foliate-view.test.ts` 覆盖两项契约。
+
+32. **`paginator.js` / navigation lock exception safety**
+    - 对应版本：Bookdock `v0.2.2` 的 `#turnPage` 加锁/释放契约。
+    - 需求：scroll、fill、相邻章节 `goTo` 或动画等待失败后，后续导航仍可执行。
+    - 实现：`#turnPage` 和 `pan` 的锁释放统一放进 `finally`；不改变当前上游导航代际、continuous 或 snap-turn 语义。
+    - 影响/验证：只影响异常导航后的可恢复性；`foliate-paginator.test.ts` 验证失败后第二次导航不会被永久短路。
+
+33. **`tts.js` / legacy facade compatibility and SSML mark selector**
+    - 对应版本：Bookdock `v0.2.2` legacy TTS sentence behavior plus current upstream SSML core。
+    - 需求：`initTTS(false)` 继续跳过隐藏/ARIA/inert/CFI-inert 内容和局部链接，并保留旧标点/引号断句；新 SSML mark navigation 的属性 selector 必须完整闭合。
+    - 实现：只在 legacy facade 内恢复旧节点过滤、Range 文本过滤和句段切分；SSML 主实现、marks、prepare 和 navigation API 保持上游结构。
+    - 影响/验证：不改变新 SSML 语义；`tts.test.ts` 覆盖从当前位置、lookahead、隐藏内容和局部脚注链接。
+
+34. **`epub.js` / script policy and manifest-first archive fallback**
+    - 对应版本：Bookdock current security/product policy，兼容 v0.2.2 的默认脚本拒绝边界。
+    - 需求：脚本默认不加载；未来设置项不得绕过核心策略。manifest 未列出的本地资源若实际存在于同一 ZIP，可经过规范化、无歧义查找后按扩展名推断 MIME 并加载；不存在的资源保留自然失败。
+    - 实现：`EPUB`/`Loader` 默认 `allowScript = false`，可由未来受控核心策略显式传入；资源 fallback 统一检查精确/大小写安全 entry，覆盖 CSS、SVG、图片、字体、音视频及文档类型，不猜测冲突路径。
+    - 影响/验证：脚本和资源 fallback 共用同一 Loader 生命周期、缓存和 Blob URL；`epub-compatibility.test.ts` 覆盖默认/显式脚本策略、漏列 CSS/SVG 和缺失资源降级。
+
+35. **`paginator.js` / marginal grid dimensions**
+    - 对应版本：当前上游 paginator 的 `#top` CSS grid 与 Bookdock 页眉/页脚信息栏。
+    - 需求：页眉必须在第一页可见，页脚必须与正文物理分离；开启信息栏后，正文不能按全高排版再被信息栏覆盖，也不能生成隐式列。
+    - 实现：`#top` 使用 header/content/footer 三行，`#header`/`#footer` 横跨完整宽度，`#container` 只占中间 row；顶部/底部用户边距由 shell 轨道只保留一次，`View` 以中间 viewport 的真实尺寸排版。基础主题背景由 `#top` 承担，分页章节背景层的 `#background` 只占中间 row，避免书源白色背景覆盖信息栏。三栏 L/C/R 固定，不随分页列数、竖排或 RTL 改变；移除第一页 `visibility` 隐藏逻辑。
+    - 影响/验证：信息栏成为独立布局 chrome，page/scroll/continuous 共用同一几何契约；`foliate-paginator.test.ts` 固化三行、全宽、三栏和背景层约束，浏览器已确认黑色主题下 page 模式的页眉页脚不再出现白条。
+
+36. **`paginator.js` / explicit page column count**
+    - 对应版本：Bookdock page-columns setting 与 v0.2.2 paginator 的 non-zero `max-column-count` 语义。
+    - 需求：设置为 1/2/3 栏时必须实际使用该列数；窄视口或较大的 `max-inline-size` 不能把显式的 3 栏静默降为 2 栏。
+    - 实现：`max-column-count > 0` 直接决定 paginated spread 的 `columnCount`；仅非正值自动模式按可用宽度推导列数。
+    - 影响/验证：显式列数会相应缩小每栏正文宽度，但不改变页面推进范围；契约测试覆盖 1/2/3 与窄视口，浏览器确认设置切换后的实际列宽。
+
+## 3. Bookdock 宿主适配（不属于第二套核心）
+
+这些行为保留在 `apps/web/src/features/reader/renderers/FoliateReader.ts`，不再复制进旧 renderer：
+
+- server Range、HEAD、缓存、失败回退和文本/章节预取；
+- 页面宽度、gutter、边距、行距、段距、字体、主题、书籍 CSS 覆盖和简繁转换；
+- page/scroll/continuous/snap-turn、滚轮、iframe 键盘、click area、页眉页脚三格信息栏；
+- CFI、fraction、章节进度、覆盖区间、跨端恢复和 re-toc 失效策略；
+- 搜索/选择/标注/脚注/翻译/TTS 生命周期、popup guard、取消和错误降级；
+- Reader/React/server mount、unmount、切书、网络错误和通知。
+
+验证这些适配时必须使用上游 public API 或 Bookdock 明确的兼容入口，不读取 renderer 私有字段。`reader-entry.js` 只做浏览器直载 bootstrap；`translator.js` 只做 Bookdock 翻译服务适配。
+
+## 4. 上游基线机制（不是本地补丁，但不能误删）
+
+下列机制来自 Bookdock 在初始 vendored 快照中已有的产品行为，现已在上游 paginator/view 基础上保留或重接：
+
+- paginated/scrolled wheel 与 iframe keyboard；
+- continuous adjacent buffer、anchor、向上插入补偿、视图回收边界和异步 fill；
+- 三格页眉页脚、字体大小、字段组合、时间刷新和 28px band；
+- Bookdock server Range/cache/prefetch 与 renderer 的错误回退。
+
+它们不是“旧核心仍在运行”的证据；它们的当前实现必须始终落在本清单 §2 的核心补丁或 §3 的 FoliateReader 适配层。
+
+## 5. 升级流程
+
+1. 核对上游 parent/submodule 和许可证；
+2. 对 §1 文件逐个检查导出、公共属性、方法和事件；
+3. 对上游核心文件整体替换，再按 §2 重放本地差异；
+4. 检查 `reader-entry.js` 的 browser import graph，不把裸 npm import 带入 public 目录；
+5. 运行 web/server 全量测试、typecheck、lint、production build 和所有 vendored JS `node --check`；
+6. 用真实 EPUB 检查 metadata、TOC、封面字节/MIME、章节、CSS、图片、字体和坏资源降级；
+7. 最后由用户做浏览器基线对照；浏览器验收不能替代前六步。
+
+## 6. 本轮验证证据（2026-09-14）
+
+- Upstream baseline：parent `4512f39859280b8c1f1e6fefa4f104f9e09c55e5`，submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`。
+- Historical baseline: Web core contract：117 test files / 1009 tests passed；server：32 test files / 480 tests passed。
+- Current round regression: Web 117 test files / 1025 tests passed；server：32 test files / 481 tests passed。The desktop footer summon hit area was verified in code after tracing its hidden-state pointer-event path; browser drag verification remains `[B]`.
+- 2026-09-15 repair pass: the four focused Web test files passed 19/19 after restoring chapterLocation, navigation-lock cleanup, Media Overlay default class, legacy TTS compatibility, SSML selector closure, default script denial, and manifest-first archive fallback.
+- 2026-09-15 browser repair pass: with both `show-header` and `show-footer`, the paginator kept an 874px full-width scroll surface and rendered the 28px marginal bands without the former left-half layout collapse.
+- Web production build、server build、typecheck、lint passed；vendored JavaScript syntax check passed。
+- Sample EPUB (`重生之官道.epub`)：archive 16,946,053 bytes；OPF `OEBPS/content.opf`；title `重生之官道`；author `录事参军`；server parser 776 chapters；first spine chapter `OEBPS/Text/cover.xhtml`，first non-cover TOC entry `版权声明`；cover 1,542,212 bytes, JPEG signature and `image/jpeg`.
+- Sample resource scan：manifest 791 items；2/2 CSS loaded；9/9 declared images loaded；CSS references include 5 missing font files, 5 missing decorative images and missing `regular.css`—these are explicit optional/missing-resource fallback cases in the sample, not parser failures.
+- Browser visual/interaction comparison with upstream baseline remains `[B]` and must be performed by the user.

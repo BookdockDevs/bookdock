@@ -900,13 +900,34 @@ export interface BookListItem {
   tags?: string[]
 }
 
+export interface BookContributor {
+  name: string
+  role?: string
+  sortAs?: string
+}
+
+export interface BookSubject {
+  name: string
+  term?: string
+  authority?: string
+}
+
 export interface BookMetadata {
   publisher?: string
   published?: string
+  modified?: string
   isbn?: string
   identifier?: string
   language?: string
+  languages?: string[]
+  subtitle?: string
+  sortAs?: string
+  authorSortAs?: string
+  rights?: string
+  source?: string
   subjects?: string[]
+  subjectDetails?: BookSubject[]
+  contributors?: BookContributor[]
   description?: string
   series?: string
   seriesIndex?: number

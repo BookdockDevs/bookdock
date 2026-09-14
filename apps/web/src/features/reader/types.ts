@@ -5,7 +5,7 @@ import type { TextTransformRule } from './lib/text-transforms'
 export interface ReaderLocation {
   cfi: string
   percent: number
-  /** Book-wide position 0-1 from the engine, for read-interval tracking */
+  /** Book-wide viewport-start position 0-1 from the engine, for seek and read-interval tracking */
   fraction?: number
   chapter?: string
   chapterIndex?: number
@@ -177,11 +177,14 @@ export interface BookReader {
    * matches where the seek actually lands.
    */
   getSectionFractions(): number[] | null
+  /** TOC labels resolved by Foliate for each spine section; section and TOC indexes are not interchangeable. */
+  getSectionTocLabels?(): string[] | null
   scrollToPercent(percent: number): Promise<void>
   scrollByPages(delta: number, distanceOverride?: number, opts?: { internal?: boolean }): Promise<void>
-  scrollByPixels(delta: number): Promise<void>
+  /** Returns false when the active reading mode blocks further auto movement. */
+  scrollByPixels(delta: number): Promise<boolean>
   isAtEnd(): boolean
-  /** Temporarily disables the user's snap-turn setting for smooth auto reading. */
+  /** Coordinates smooth auto reading with the paginator's snap boundary state. */
   setAutoReadingActive(active: boolean): void
   /**
    * Search the book. onProgress fires with partial results and the fraction of

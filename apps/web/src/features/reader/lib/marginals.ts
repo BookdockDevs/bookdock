@@ -25,8 +25,8 @@ export const MARGINAL_FIELDS: readonly MarginalField[] = [
 ]
 
 export const DEFAULT_MARGINAL_CONFIG = {
-  header: ['none', 'bookTitle', 'none'] as [MarginalField, MarginalField, MarginalField],
-  footer: ['none', 'chapter', 'none'] as [MarginalField, MarginalField, MarginalField],
+  header: ['bookTitle', 'none', 'none'] as [MarginalField, MarginalField, MarginalField],
+  footer: ['chapter', 'none', 'bookProgress'] as [MarginalField, MarginalField, MarginalField],
   fontSize: 0,
 }
 

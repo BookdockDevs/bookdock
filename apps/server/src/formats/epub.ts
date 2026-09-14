@@ -20,18 +20,134 @@ interface EpubChapter {
   href: string
 }
 
+function isMarkupMediaType(mediaType: string): boolean {
+  const normalized = mediaType.trim().toLowerCase().split(';', 1)[0]
+  return normalized === 'application/xhtml+xml' || normalized === 'text/html'
+}
+
+function normalizeArchivePath(value: string): string {
+  let path = value.trim().split(/[?#]/, 1)[0] ?? ''
+  path = path.replace(/\\/g, '/')
+  try {
+    path = decodeURIComponent(path)
+  } catch {
+    // Keep the original path when a malformed percent escape is present.
+  }
+
+  const parts: string[] = []
+  for (const part of path.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      parts.pop()
+    } else {
+      parts.push(part)
+    }
+  }
+  return parts.join('/')
+}
+
 function joinPath(base: string, href: string): string {
-  if (!base) return href
-  if (base.endsWith('/')) return `${base}${href}`
-  const parts = base.split('/')
-  parts.pop()
-  const baseParts = parts.join('/')
-  if (!baseParts) return href
-  return `${baseParts}/${href}`
+  const rawHref = href.trim()
+  if (rawHref.startsWith('/')) return normalizeArchivePath(rawHref)
+
+  const rawBase = base.trim()
+  const baseDir = rawBase.endsWith('/')
+    ? rawBase
+    : rawBase.includes('/')
+      ? rawBase.slice(0, rawBase.lastIndexOf('/') + 1)
+      : ''
+  return normalizeArchivePath(`${baseDir}${rawHref}`)
+}
+
+function createArchiveFileLookup(zip: JSZip): (href: string) => JSZip.JSZipObject | null {
+  const exact = new Map<string, JSZip.JSZipObject | null>()
+  const insensitive = new Map<string, JSZip.JSZipObject | null>()
+
+  for (const file of Object.values(zip.files)) {
+    if (file.dir) continue
+    const path = normalizeArchivePath(file.name)
+    if (!exact.has(path)) exact.set(path, file)
+    else if (exact.get(path) !== file) exact.set(path, null)
+
+    const key = path.toLowerCase()
+    if (!insensitive.has(key)) {
+      insensitive.set(key, file)
+    } else if (insensitive.get(key) !== file) {
+      insensitive.set(key, null)
+    }
+  }
+
+  return (href) => {
+    const path = normalizeArchivePath(href)
+    return exact.get(path) ?? insensitive.get(path.toLowerCase()) ?? null
+  }
+}
+
+function hasManifestProperty(item: ManifestItem, property: string): boolean {
+  return item.properties?.split(/\s+/).some((value) => value.toLowerCase() === property) ?? false
+}
+
+async function readArchiveText(file: JSZip.JSZipObject): Promise<string> {
+  const bytes = Buffer.from(await file.async('uint8array'))
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return bytes.subarray(2).toString('utf16le')
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+    const littleEndian = Buffer.alloc(bytes.length - 2)
+    for (let i = 2; i + 1 < bytes.length; i += 2) {
+      littleEndian[i - 2] = bytes[i + 1] ?? 0
+      littleEndian[i - 1] = bytes[i] ?? 0
+    }
+    return littleEndian.toString('utf16le')
+  }
+  return bytes.toString('utf8').replace(/^\uFEFF/, '')
+}
+
+function isUsableCoverBuffer(buffer: Buffer, mediaType: string): boolean {
+  if (buffer.length === 0) return false
+
+  const normalizedType = mediaType.toLowerCase()
+  if (normalizedType === 'image/png') {
+    return buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  }
+  if (normalizedType === 'image/jpeg' || normalizedType === 'image/jpg') {
+    return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff
+  }
+  if (normalizedType === 'image/gif') {
+    return buffer.subarray(0, 6).toString('ascii') === 'GIF87a' || buffer.subarray(0, 6).toString('ascii') === 'GIF89a'
+  }
+  if (normalizedType === 'image/webp') {
+    return buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  }
+  if (normalizedType === 'image/svg+xml') {
+    const header = buffer.subarray(0, 4096).toString('utf8').replace(/^\uFEFF/, '')
+    return /<svg(?:\s|>)/i.test(header)
+  }
+
+  // Keep uncommon image formats available when the package declares them
+  // correctly; this check only rejects known formats with invalid signatures.
+  return normalizedType.startsWith('image/')
+}
+
+function detectImageMediaType(buffer: Buffer): string | null {
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png'
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg'
+  const signature = buffer.subarray(0, 6).toString('ascii')
+  if (signature === 'GIF87a' || signature === 'GIF89a') return 'image/gif'
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
+  const header = buffer.subarray(0, 4096).toString('utf8').replace(/^\uFEFF/, '')
+  if (/<svg(?:\s|>)/i.test(header)) return 'image/svg+xml'
+  return null
+}
+
+function coverMediaType(buffer: Buffer, declaredType: string): string {
+  return detectImageMediaType(buffer) ?? declaredType.toLowerCase().split(';', 1)[0]
 }
 
 function getAttribute(elem: XmlElement, name: string): string | null {
   return elem.getAttribute(name)
+}
+
+function getNamespacedAttribute(elem: XmlElement, namespace: string, localName: string, legacyName: string): string | null {
+  return elem.getAttributeNS?.(namespace, localName) || getAttribute(elem, legacyName) || getAttribute(elem, localName)
 }
 
 function getTextContent(elem: XmlElement | null): string {
@@ -42,8 +158,19 @@ function nodeListToArray(list: ArrayLike<XmlElement>): XmlElement[] {
   return Array.from(list)
 }
 
+function elementsByLocalName(root: { getElementsByTagName: (name: string) => ArrayLike<XmlElement> }, localName: string): XmlElement[] {
+  return nodeListToArray(root.getElementsByTagName('*')).filter((element) => {
+    const name = element.localName ?? element.tagName.split(':').pop()
+    return name?.toLowerCase() === localName.toLowerCase()
+  })
+}
+
 function firstElement(list: ArrayLike<XmlElement>): XmlElement | null {
   return list.length > 0 ? list[0] : null
+}
+
+function metadataValue(elem: XmlElement): string {
+  return getAttribute(elem, 'content') || getTextContent(elem)
 }
 
 const DESCRIPTION_BLOCK_TAGS = new Set(['p', 'div', 'li', 'tr', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
@@ -80,56 +207,164 @@ function normalizeDescription(raw: string): string {
 }
 
 export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
-  const zip = await JSZip.loadAsync(buffer)
+  let zip: JSZip
+  try {
+    zip = await JSZip.loadAsync(buffer)
+  } catch (error) {
+    throw new Error('Invalid EPUB: corrupt ZIP archive', { cause: error })
+  }
+  const findArchiveFile = createArchiveFileLookup(zip)
 
-  const containerFile = zip.file('META-INF/container.xml')
+  const containerFile = findArchiveFile('META-INF/container.xml')
   if (!containerFile) {
     throw new Error('Invalid EPUB: META-INF/container.xml not found')
   }
 
-  const containerXml = await containerFile.async('text')
+  const containerXml = await readArchiveText(containerFile)
   const containerDoc = new DOMParser().parseFromString(containerXml, 'application/xml')
-  const rootfiles = containerDoc.getElementsByTagName('rootfile')
+  const rootfiles = elementsByLocalName(containerDoc, 'rootfile')
   if (rootfiles.length === 0) {
     throw new Error('Invalid EPUB: rootfile not found in container.xml')
   }
-  const opfPath = getAttribute(rootfiles[0], 'full-path')
+  const rootfile = rootfiles.find((file) => getAttribute(file, 'media-type')?.trim().toLowerCase().split(';', 1)[0] === 'application/oebps-package+xml')
+    ?? rootfiles[0]
+  const opfPathValue = getAttribute(rootfile, 'full-path')
+  const opfPath = opfPathValue ? normalizeArchivePath(opfPathValue) : ''
   if (!opfPath) {
     throw new Error('Invalid EPUB: rootfile missing full-path')
   }
 
-  const opfFile = zip.file(opfPath)
+  const opfFile = findArchiveFile(opfPath)
   if (!opfFile) {
     throw new Error(`Invalid EPUB: OPF file ${opfPath} not found`)
   }
 
-  const opfXml = await opfFile.async('text')
+  const opfXml = await readArchiveText(opfFile)
   const opfDoc = new DOMParser().parseFromString(opfXml, 'application/xml')
   const opfDir = opfPath.includes('/') ? `${opfPath.slice(0, opfPath.lastIndexOf('/'))}/` : ''
 
-  const title = getTextContent(firstElement(opfDoc.getElementsByTagName('dc:title')))
-  const author = getTextContent(firstElement(opfDoc.getElementsByTagName('dc:creator'))) || undefined
+  const metadataMetas = elementsByLocalName(opfDoc, 'meta')
+  const refinedMetas = new Map<string, XmlElement[]>()
+  for (const meta of metadataMetas) {
+    const refines = getAttribute(meta, 'refines')
+    if (!refines?.startsWith('#')) continue
+    const list = refinedMetas.get(refines.slice(1)) ?? []
+    list.push(meta)
+    refinedMetas.set(refines.slice(1), list)
+  }
+  const refinedValues = (elem: XmlElement, property: string) => {
+    const id = getAttribute(elem, 'id')
+    if (!id) return []
+    return (refinedMetas.get(id) ?? [])
+      .filter((meta) => {
+        const value = getAttribute(meta, 'property')?.toLowerCase() ?? ''
+        return value === property || value.endsWith(`:${property}`)
+      })
+      .map(metadataValue)
+      .filter(Boolean)
+  }
+  const titleElements = elementsByLocalName(opfDoc, 'title')
+  const mainTitle = titleElements.find((elem) => refinedValues(elem, 'title-type').some((value) => value.toLowerCase() === 'main'))
+    ?? firstElement(titleElements)
+  const title = getTextContent(mainTitle)
+  const subtitle = titleElements.find((elem) => refinedValues(elem, 'title-type').some((value) => value.toLowerCase() === 'subtitle'))
+  const titleSortAs = mainTitle
+    ? getNamespacedAttribute(mainTitle, 'http://www.idpf.org/2007/opf', 'file-as', 'opf:file-as') ?? undefined
+    : undefined
+  const creatorElements = elementsByLocalName(opfDoc, 'creator')
+  const contributorElements = elementsByLocalName(opfDoc, 'contributor')
+  const getRole = (elem: XmlElement): string | undefined => {
+    const directRole = getNamespacedAttribute(elem, 'http://www.idpf.org/2007/opf', 'role', 'opf:role')
+    return directRole || refinedValues(elem, 'role')[0] || undefined
+  }
+  const roleCreator = creatorElements.find((elem) => {
+    const directRole = getRole(elem)?.toLowerCase()
+    return directRole === 'aut' || directRole === 'author' || refinedValues(elem, 'role').some((value) => /^(aut|author)$/i.test(value))
+  })
+  const author = getTextContent(roleCreator ?? firstElement(creatorElements)) || undefined
+  const authorSortAs = roleCreator
+    ? getNamespacedAttribute(roleCreator, 'http://www.idpf.org/2007/opf', 'file-as', 'opf:file-as') ?? undefined
+    : undefined
 
   const bookmeta: BookMetadata = {}
-  const publisher = getTextContent(firstElement(opfDoc.getElementsByTagName('dc:publisher')))
+  const publisher = getTextContent(firstElement(elementsByLocalName(opfDoc, 'publisher')))
   if (publisher) bookmeta.publisher = publisher
-  const published = getTextContent(firstElement(opfDoc.getElementsByTagName('dc:date')))
+  const published = getTextContent(firstElement(elementsByLocalName(opfDoc, 'date')))
   if (published) bookmeta.published = published
-  const language = getTextContent(firstElement(opfDoc.getElementsByTagName('dc:language')))
+  const languageElements = elementsByLocalName(opfDoc, 'language')
+  const languages = languageElements.map(getTextContent).filter(Boolean)
+  const language = languages[0]
   if (language) bookmeta.language = language
-  const descEl = firstElement(opfDoc.getElementsByTagName('dc:description'))
+  if (languages.length > 1) bookmeta.languages = [...new Set(languages)]
+  if (subtitle) bookmeta.subtitle = getTextContent(subtitle)
+  if (titleSortAs) bookmeta.sortAs = titleSortAs
+  if (authorSortAs) bookmeta.authorSortAs = authorSortAs
+  const modified = metadataMetas.find((meta) => {
+    const property = getAttribute(meta, 'property')?.toLowerCase() ?? ''
+    return property === 'dcterms:modified' || property.endsWith(':modified')
+  })
+  if (modified) bookmeta.modified = metadataValue(modified) || undefined
+  const rights = getTextContent(firstElement(elementsByLocalName(opfDoc, 'rights')))
+  if (rights) bookmeta.rights = rights
+  const source = getTextContent(firstElement(elementsByLocalName(opfDoc, 'source')))
+  if (source) bookmeta.source = source
+  const descEl = firstElement(elementsByLocalName(opfDoc, 'description'))
   if (descEl) {
     const description = normalizeDescription(collectDescriptionText(descEl))
     if (description) bookmeta.description = description
   }
-  const subjects = nodeListToArray(opfDoc.getElementsByTagName('dc:subject'))
-    .map((el) => getTextContent(el))
-    .filter(Boolean)
+  const subjectElements = elementsByLocalName(opfDoc, 'subject')
+  const subjectDetails = subjectElements
+    .map((el) => ({
+      name: getTextContent(el),
+      term: getNamespacedAttribute(el, 'http://www.idpf.org/2007/opf', 'term', 'opf:term') ?? undefined,
+      authority: getNamespacedAttribute(el, 'http://www.idpf.org/2007/opf', 'authority', 'opf:authority') ?? undefined,
+    }))
+    .filter((subject) => subject.name)
+  const subjects = subjectDetails.map((subject) => subject.name)
   if (subjects.length > 0) bookmeta.subjects = subjects
-  for (const idEl of nodeListToArray(opfDoc.getElementsByTagName('dc:identifier'))) {
+  if (subjectDetails.length > 0) bookmeta.subjectDetails = subjectDetails
+  const contributors = [...creatorElements, ...contributorElements]
+    .map((elem) => ({
+      name: getTextContent(elem),
+      role: getRole(elem),
+      sortAs: getNamespacedAttribute(elem, 'http://www.idpf.org/2007/opf', 'file-as', 'opf:file-as') ?? undefined,
+    }))
+    .filter((contributor) => contributor.name)
+  const hasStructuredContributors = contributors.length > 0 && (
+    contributorElements.length > 0
+    || contributors.length > 1
+    || contributors.some((contributor) => contributor.role || contributor.sortAs)
+  )
+  if (hasStructuredContributors) bookmeta.contributors = contributors
+  for (const meta of metadataMetas) {
+    const property = getAttribute(meta, 'property')?.toLowerCase() ?? ''
+    if (property !== 'belongs-to-collection' && !property.endsWith(':belongs-to-collection')) continue
+    const value = metadataValue(meta)
+    if (!value) continue
+    const id = getAttribute(meta, 'id')
+    const collectionType = id
+      ? refinedMetas.get(id)?.find((item) => {
+        const property = getAttribute(item, 'property')?.toLowerCase() ?? ''
+        return property === 'collection-type' || property.endsWith(':collection-type')
+      })
+      : undefined
+    if (collectionType && metadataValue(collectionType).toLowerCase() !== 'series') continue
+    bookmeta.series = value
+    const position = id
+      ? refinedMetas.get(id)?.find((item) => {
+        const property = getAttribute(item, 'property')?.toLowerCase() ?? ''
+        return property === 'group-position' || property.endsWith(':group-position')
+      })
+      : undefined
+    const index = Number.parseFloat(position ? metadataValue(position) : '')
+    if (Number.isFinite(index)) bookmeta.seriesIndex = index
+    break
+  }
+  for (const idEl of elementsByLocalName(opfDoc, 'identifier')) {
     const value = getTextContent(idEl)
     if (!value) continue
-    const scheme = getAttribute(idEl, 'opf:scheme')?.toUpperCase()
+    const scheme = getNamespacedAttribute(idEl, 'http://www.idpf.org/2007/opf', 'scheme', 'opf:scheme')?.toUpperCase()
     const digits = value.replace(/[- ]/g, '')
     const looksIsbn = /^97[89]\d{10}$/.test(digits) || /^\d{9}[\dXx]$/.test(digits)
     if (scheme === 'ISBN' || looksIsbn) {
@@ -138,21 +373,21 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
       bookmeta.identifier = value
     }
   }
-  for (const meta of nodeListToArray(opfDoc.getElementsByTagName('meta'))) {
-    const name = getAttribute(meta, 'name')
-    if (name === 'calibre:series') {
+  for (const meta of metadataMetas) {
+    const name = getAttribute(meta, 'name')?.toLowerCase()
+    if (name === 'calibre:series' && !bookmeta.series) {
       const series = getAttribute(meta, 'content')
       if (series) bookmeta.series = series
-    } else if (name === 'calibre:series_index') {
+    } else if (name === 'calibre:series_index' && bookmeta.seriesIndex === undefined) {
       const index = parseFloat(getAttribute(meta, 'content') ?? '')
       if (!Number.isNaN(index)) bookmeta.seriesIndex = index
     }
   }
 
   const manifest: Record<string, ManifestItem> = {}
-  const manifestRoot = firstElement(opfDoc.getElementsByTagName('manifest'))
+  const manifestRoot = firstElement(elementsByLocalName(opfDoc, 'manifest'))
   if (manifestRoot) {
-    for (const item of nodeListToArray(manifestRoot.getElementsByTagName('item'))) {
+    for (const item of elementsByLocalName(manifestRoot, 'item')) {
       const id = getAttribute(item, 'id')
       const href = getAttribute(item, 'href')
       const mediaType = getAttribute(item, 'media-type')
@@ -160,73 +395,131 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
         manifest[id] = {
           id,
           href: joinPath(opfDir, href),
-          mediaType,
+          mediaType: mediaType.trim().toLowerCase().split(';', 1)[0],
           properties: getAttribute(item, 'properties') ?? undefined,
         }
       }
     }
   }
 
+  const manifestItems = Object.values(manifest)
+  const imageItems = manifestItems.filter((item) => item.mediaType.toLowerCase().startsWith('image/'))
+  const coverCandidates: ManifestItem[] = []
+  const addCoverCandidate = (item: ManifestItem | undefined) => {
+    if (item && !coverCandidates.includes(item)) coverCandidates.push(item)
+  }
+
+  // EPUB 3 is the authoritative declaration when both cover conventions exist.
+  addCoverCandidate(manifestItems.find(
+    (item) => item.mediaType.toLowerCase().startsWith('image/') && hasManifestProperty(item, 'cover-image'),
+  ))
+
+  // EPUB 2: <meta name="cover" content="cover-id"/>. Some books point this
+  // at a cover XHTML page, which is not itself a usable cover image.
+  const legacyCoverMeta = metadataMetas.find(
+    (meta) => getAttribute(meta, 'name')?.toLowerCase() === 'cover',
+  )
+  const legacyCoverId = legacyCoverMeta ? getAttribute(legacyCoverMeta, 'content') : null
+  const legacyCoverItem = legacyCoverId ? manifest[legacyCoverId] : undefined
+  if (legacyCoverItem?.mediaType.toLowerCase().startsWith('image/')) addCoverCandidate(legacyCoverItem)
+
+  const heuristicImageItems = imageItems.filter((item) => !hasManifestProperty(item, 'nav'))
+  const rasterItems = heuristicImageItems.filter((item) => item.mediaType.toLowerCase() !== 'image/svg+xml')
+  const svgItems = heuristicImageItems.filter((item) => item.mediaType.toLowerCase() === 'image/svg+xml')
+  const isCoverNamed = (item: ManifestItem) => {
+    const name = `${item.id}/${item.href}`.toLowerCase()
+    return name.includes('cover')
+  }
+
+  // Cover resolution heuristic: look for named raster covers first, then any
+  // raster image, and only use SVG when the package has no raster alternative.
+  for (const item of rasterItems.filter(isCoverNamed)) addCoverCandidate(item)
+  for (const item of rasterItems) addCoverCandidate(item)
+  for (const item of svgItems.filter(isCoverNamed)) addCoverCandidate(item)
+  for (const item of svgItems) addCoverCandidate(item)
+
   let cover: Buffer | undefined
-  // EPUB 2: <meta name="cover" content="cover-id"/>
-  for (const meta of nodeListToArray(opfDoc.getElementsByTagName('meta'))) {
-    if (getAttribute(meta, 'name') === 'cover') {
-      const coverId = getAttribute(meta, 'content')
-      if (coverId && manifest[coverId]) {
-        const coverFile = zip.file(manifest[coverId].href)
-        if (coverFile) {
-          cover = Buffer.from(await coverFile.async('arraybuffer'))
-        }
-      }
-      break
-    }
-  }
-
-  // EPUB 3: <item properties="cover-image"/>
-  if (!cover) {
-    const coverItem = Object.values(manifest).find(
-      (item) => item.properties?.includes('cover-image'),
-    )
-    if (coverItem) {
-      const coverFile = zip.file(coverItem.href)
-      if (coverFile) {
-        cover = Buffer.from(await coverFile.async('arraybuffer'))
-      }
-    }
-  }
-
-  // Fallback: first image in manifest
-  if (!cover) {
-    const imageItem = Object.values(manifest).find(
-      (item) => item.mediaType.startsWith('image/'),
-    )
-    if (imageItem) {
-      const coverFile = zip.file(imageItem.href)
-      if (coverFile) {
-        cover = Buffer.from(await coverFile.async('arraybuffer'))
-      }
-    }
+  for (const candidate of coverCandidates) {
+    const coverFile = findArchiveFile(candidate.href)
+    if (!coverFile) continue
+    const candidateBuffer = Buffer.from(await coverFile.async('arraybuffer'))
+    if (!isUsableCoverBuffer(candidateBuffer, coverMediaType(candidateBuffer, candidate.mediaType))) continue
+    cover = candidateBuffer
+    break
   }
 
   const spine: string[] = []
-  const spineRoot = firstElement(opfDoc.getElementsByTagName('spine'))
+  const spineRoot = firstElement(elementsByLocalName(opfDoc, 'spine'))
+  const spineTocId = spineRoot ? getAttribute(spineRoot, 'toc') : null
   if (spineRoot) {
-    for (const itemref of nodeListToArray(spineRoot.getElementsByTagName('itemref'))) {
+    for (const itemref of elementsByLocalName(spineRoot, 'itemref')) {
       const idref = getAttribute(itemref, 'idref')
       if (idref) spine.push(idref)
     }
   }
 
+  if (!cover) {
+    const coverPageItems = manifestItems.filter((item) =>
+      isMarkupMediaType(item.mediaType) && (isCoverNamed(item) || item === legacyCoverItem || spine.includes(item.id)),
+    )
+    for (const coverPage of coverPageItems) {
+      const coverPageFile = findArchiveFile(coverPage.href)
+      if (!coverPageFile) continue
+      const coverPageXml = await readArchiveText(coverPageFile)
+      const coverPageDoc = new DOMParser().parseFromString(coverPageXml, 'application/xhtml+xml')
+      const image = firstElement(elementsByLocalName(coverPageDoc, 'img'))
+        ?? firstElement(elementsByLocalName(coverPageDoc, 'image'))
+      if (!image) continue
+      const imageHref = getAttribute(image, 'src')
+        || getAttribute(image, 'href')
+        || getAttribute(image, 'xlink:href')
+        || image.getAttributeNS?.('http://www.w3.org/1999/xlink', 'href')
+      if (!imageHref) continue
+      const resolvedImageHref = joinPath(coverPage.href, imageHref)
+      const imageItem = manifestItems.find((item) => item.href.toLowerCase() === resolvedImageHref.toLowerCase())
+      const mediaType = imageItem?.mediaType.toLowerCase()
+        ?? (resolvedImageHref.toLowerCase().endsWith('.png') ? 'image/png'
+          : resolvedImageHref.toLowerCase().endsWith('.gif') ? 'image/gif'
+            : resolvedImageHref.toLowerCase().endsWith('.webp') ? 'image/webp'
+              : resolvedImageHref.toLowerCase().endsWith('.svg') ? 'image/svg+xml'
+                : 'image/jpeg')
+      const imageFile = findArchiveFile(resolvedImageHref)
+      if (!imageFile) continue
+      const imageBuffer = Buffer.from(await imageFile.async('arraybuffer'))
+      if (!isUsableCoverBuffer(imageBuffer, coverMediaType(imageBuffer, mediaType))) continue
+      cover = imageBuffer
+      break
+    }
+  }
+
+  if (!cover) {
+    for (const fallbackPath of ['iTunesArtwork', 'cover.jpg', 'cover.jpeg', 'cover.png', 'cover.gif', 'cover.webp', 'cover.svg']) {
+      const fallbackFile = findArchiveFile(fallbackPath)
+      if (!fallbackFile) continue
+      const lowerPath = fallbackPath.toLowerCase()
+      const mediaType = lowerPath.endsWith('.png') ? 'image/png'
+        : lowerPath.endsWith('.gif') ? 'image/gif'
+          : lowerPath.endsWith('.webp') ? 'image/webp'
+            : lowerPath.endsWith('.svg') ? 'image/svg+xml'
+              : 'image/jpeg'
+      const fallbackBuffer = Buffer.from(await fallbackFile.async('arraybuffer'))
+      if (!isUsableCoverBuffer(fallbackBuffer, coverMediaType(fallbackBuffer, mediaType))) continue
+      cover = fallbackBuffer
+      break
+    }
+  }
+
   const chapters: EpubChapter[] = []
-  const ncxItem = Object.values(manifest).find((item) => item.mediaType === 'application/x-dtbncx+xml')
+  const ncxItem = (spineTocId ? manifest[spineTocId] : undefined)
+    ?? Object.values(manifest).find((item) => item.mediaType.trim().toLowerCase().split(';', 1)[0] === 'application/x-dtbncx+xml')
   if (ncxItem) {
-    const ncxFile = zip.file(ncxItem.href)
+    const ncxFile = findArchiveFile(ncxItem.href)
     if (ncxFile) {
-      const ncxXml = await ncxFile.async('text')
+      const ncxXml = await readArchiveText(ncxFile)
       const ncxDoc = new DOMParser().parseFromString(ncxXml, 'application/xml')
-      for (const navPoint of nodeListToArray(ncxDoc.getElementsByTagName('navPoint'))) {
-        const textEl = firstElement(navPoint.getElementsByTagName('text'))
-        const contentEl = firstElement(navPoint.getElementsByTagName('content'))
+      for (const navPoint of elementsByLocalName(ncxDoc, 'navPoint')) {
+        const textEl = firstElement(elementsByLocalName(navPoint, 'text'))
+        const contentEl = firstElement(elementsByLocalName(navPoint, 'content'))
         const label = getTextContent(textEl)
         const src = contentEl ? getAttribute(contentEl, 'src') : null
         if (src) {
@@ -235,17 +528,31 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
         }
       }
     }
-  } else {
-    const navItem = Object.values(manifest).find((item) => item.properties === 'nav')
+  }
+
+  // A stale spine toc or a missing NCX must not hide a valid EPUB3 nav.
+  // Keep the nav fallback available when the preferred source cannot
+  // produce a usable TOC.
+  if (chapters.length === 0) {
+    const navItem = Object.values(manifest).find(
+      (item) => isMarkupMediaType(item.mediaType) && hasManifestProperty(item, 'nav'),
+    )
     if (navItem) {
-      const navFile = zip.file(navItem.href)
+      const navFile = findArchiveFile(navItem.href)
       if (navFile) {
-        const navXml = await navFile.async('text')
+        const navXml = await readArchiveText(navFile)
         const navDoc = new DOMParser().parseFromString(navXml, 'application/xml')
-        for (const link of nodeListToArray(navDoc.getElementsByTagName('a'))) {
+        const navElements = elementsByLocalName(navDoc, 'nav')
+        const tocNav = navElements.find((nav) => {
+          const type = getAttribute(nav, 'epub:type') ?? getAttribute(nav, 'type') ?? ''
+          return type.split(/\s+/).some((value) => value.toLowerCase() === 'toc')
+        })
+        const links = elementsByLocalName(tocNav ?? navDoc, 'a')
+        for (const link of nodeListToArray(links)) {
           const href = getAttribute(link, 'href')
           if (href) {
             const base = href.split('#')[0]
+            if (!base) continue
             chapters.push({ title: getTextContent(link) || base, href: joinPath(navItem.href, base) })
           }
         }
@@ -256,7 +563,7 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
   if (chapters.length === 0) {
     for (const idref of spine) {
       const item = manifest[idref]
-      if (item && item.mediaType === 'application/xhtml+xml') {
+      if (item && isMarkupMediaType(item.mediaType)) {
         chapters.push({ title: item.href, href: item.href })
       }
     }
@@ -269,10 +576,10 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
     let text = chapterTexts.get(c.href)
     if (text === undefined) {
       text = ''
-      const file = zip.file(c.href)
+      const file = findArchiveFile(c.href)
       if (file) {
         try {
-          const doc = new DOMParser().parseFromString(await file.async('text'), 'application/xml')
+          const doc = new DOMParser().parseFromString(await readArchiveText(file), 'application/xml')
           text = doc.documentElement?.textContent ?? ''
         } catch {
           // An unreadable chapter file counts as 0 words, not a failed upload.
@@ -335,16 +642,17 @@ export async function extractEpubChapterText(buffer: Buffer, chapterIndex: numbe
   const chapter = parsed.chapters[chapterIndex]
   if (!chapter) return ''
   const zip = await JSZip.loadAsync(buffer)
-  const file = zip.file(chapter.content)
+  const file = createArchiveFileLookup(zip)(chapter.content)
   if (!file) return ''
-  const doc = new DOMParser().parseFromString(await file.async('text'), 'application/xml')
+  const doc = new DOMParser().parseFromString(await readArchiveText(file), 'application/xml')
   const body = firstElement(doc.getElementsByTagName('body')) ?? doc.documentElement
   return body ? normalizeReadingText(collectReadingText(body)) : ''
 }
 
 export class EpubParser implements FormatParser {
   match(fileName: string, mime: string): boolean {
-    return fileName.endsWith('.epub') || mime === 'application/epub+zip'
+    const normalizedMime = mime.trim().toLowerCase().split(';', 1)[0]
+    return fileName.toLowerCase().endsWith('.epub') || normalizedMime === 'application/epub+zip'
   }
 
   async parse(data: Buffer | Readable): Promise<ParsedBook> {

@@ -52,6 +52,25 @@ describe('NavigationPending', () => {
     expect(changes).toEqual([true, false])
   })
 
+  it('can settle from the visible relocation boundary before the promise ends', () => {
+    const changes: boolean[] = []
+    const n = new NavigationPending((pending) => changes.push(pending))
+    const gen = n.begin()
+    vi.advanceTimersByTime(200)
+    n.settle()
+    n.end(gen)
+    expect(changes).toEqual([true, false])
+  })
+
+  it('cancels a not-yet-visible indicator when relocation arrives early', () => {
+    const changes: boolean[] = []
+    const n = new NavigationPending((pending) => changes.push(pending))
+    n.begin()
+    n.settle()
+    vi.advanceTimersByTime(500)
+    expect(changes).toEqual([])
+  })
+
   it('dispose cancels the pending timer and invalidates in-flight navigations', () => {
     const changes: boolean[] = []
     const n = new NavigationPending((pending) => changes.push(pending))

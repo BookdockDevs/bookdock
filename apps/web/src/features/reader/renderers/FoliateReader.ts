@@ -190,6 +190,13 @@ export function shouldArmPending(
   return !book?.loadSectionText?.has?.(target.id)
 }
 
+// Paginator scrollLeft is negative for the forward direction of vertical
+// writing. Keeping this at the adapter boundary makes auto-reading use the
+// same logical forward direction for horizontal and vertical books.
+export function scrollForwardSign(scrollProp: string): 1 | -1 {
+  return scrollProp === 'scrollLeft' ? -1 : 1
+}
+
 export type TtsViewportAction = 'stay' | 'advance' | 'return'
 
 const TTS_START_VIEWPORT_INSET = 8
@@ -229,6 +236,304 @@ const parseCache = new Map<string, Promise<any>>()
 export const FULL_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024
 
 export type ZipLoadStrategy = 'full' | 'range'
+
+function normalizeZipEntryPath(value: string): string {
+  let path = value.trim().split(/[?#]/, 1)[0] ?? ''
+  path = path.replace(/\\/g, '/')
+  try {
+    path = decodeURIComponent(path)
+  } catch {
+    // Keep the original path when a malformed percent escape is present.
+  }
+
+  const parts: string[] = []
+  for (const part of path.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') parts.pop()
+    else parts.push(part)
+  }
+  return parts.join('/')
+}
+
+export function createZipEntryMap(entries: any[]) {
+  const exact = new Map<string, any>()
+  const insensitive = new Map<string, any | null>()
+
+  for (const entry of entries) {
+    if (!entry?.filename) continue
+    const path = normalizeZipEntryPath(entry.filename)
+    if (!exact.has(entry.filename)) exact.set(entry.filename, entry)
+    if (!exact.has(path)) exact.set(path, entry)
+
+    const key = path.toLowerCase()
+    if (!insensitive.has(key)) insensitive.set(key, entry)
+    else if (insensitive.get(key) !== entry) insensitive.set(key, null)
+  }
+
+  return {
+    get(name: string) {
+      const normalized = normalizeZipEntryPath(name)
+      return exact.get(name) ?? exact.get(normalized) ?? insensitive.get(normalized.toLowerCase()) ?? undefined
+    },
+  }
+}
+
+function findCssOpeningBrace(source: string, start: number, end: number): number {
+  let quote = ''
+  for (let index = start; index < end; index++) {
+    const character = source[index]
+    if (quote) {
+      if (character === '\\') index++
+      else if (character === quote) quote = ''
+      continue
+    }
+    if (character === '/' && source[index + 1] === '*') {
+      const commentEnd = source.indexOf('*/', index + 2)
+      if (commentEnd < 0 || commentEnd >= end) return -1
+      index = commentEnd + 1
+      continue
+    }
+    if (character === '"' || character === "'") quote = character
+    else if (character === '{') return index
+  }
+  return -1
+}
+
+function findCssClosingBrace(source: string, opening: number, end: number): number {
+  let depth = 1
+  let quote = ''
+  for (let index = opening + 1; index < end; index++) {
+    const character = source[index]
+    if (quote) {
+      if (character === '\\') index++
+      else if (character === quote) quote = ''
+      continue
+    }
+    if (character === '/' && source[index + 1] === '*') {
+      const commentEnd = source.indexOf('*/', index + 2)
+      if (commentEnd < 0 || commentEnd >= end) return -1
+      index = commentEnd + 1
+      continue
+    }
+    if (character === '"' || character === "'") quote = character
+    else if (character === '{') depth++
+    else if (character === '}' && --depth === 0) return index
+  }
+  return -1
+}
+
+function transformCssRules(css: string, transformBlock: (selector: string, block: string) => string): string {
+  const visit = (source: string, start: number, end: number): string => {
+    let result = ''
+    let cursor = start
+    while (cursor < end) {
+      const opening = findCssOpeningBrace(source, cursor, end)
+      if (opening < 0) {
+        result += source.slice(cursor, end)
+        break
+      }
+      const closing = findCssClosingBrace(source, opening, end)
+      if (closing < 0) {
+        result += source.slice(cursor, end)
+        break
+      }
+      const selector = source.slice(cursor, opening)
+      const block = source.slice(opening + 1, closing)
+      const nestedBlock = selector.trimStart().startsWith('@') && block.includes('{')
+        ? visit(block, 0, block.length)
+        : block
+      result += `${selector}{${transformBlock(selector, nestedBlock)}}`
+      cursor = closing + 1
+    }
+    return result
+  }
+
+  return visit(css, 0, css.length)
+}
+
+function appendCssDeclarations(block: string, declarations: string[]): string {
+  if (declarations.length === 0) return block
+  const trailingWhitespace = block.match(/\s*$/)?.[0] ?? ''
+  const content = block.slice(0, block.length - trailingWhitespace.length)
+  const separator = content.length > 0 && !content.endsWith(';') ? '; ' : ' '
+  return `${content}${separator}${declarations.join(' ')}${trailingWhitespace}`
+}
+
+export function transformEpubStylesheet(
+  css: string,
+  viewportWidth: number,
+  viewportHeight = 0,
+  fontScale = 1,
+): string {
+  const transformBlock = (_selector: string, originalBlock: string) => {
+    let block = originalBlock
+    const declarations: string[] = []
+    const hasTextAlignCenter = /text-align\s*:\s*center\s*[;$]/i.test(block)
+    const hasTextIndentZero = /text-indent\s*:\s*0(?:\.0+)?(?:px|em|rem|%)?\s*[;$]/i.test(block)
+    if (hasTextAlignCenter && hasTextIndentZero) {
+      block = block
+        .replace(/(text-align\s*:\s*center)(\s*;|\s*$)/gi, '$1 !important$2')
+        .replace(/(text-indent\s*:\s*0(?:\.0+)?(?:px|em|rem|%)?)(\s*;|\s*$)/gi, '$1 !important$2')
+    }
+
+    if (/white-space\s*:\s*nowrap\s*[;$]/i.test(block) && !/overflow\s*:/i.test(block)) {
+      declarations.push('overflow: clip !important;')
+    }
+    if (/page-break-after\s*:\s*always\s*[;$]/i.test(block) && !/margin-bottom\s*:/i.test(block)) {
+      declarations.push('margin-bottom: var(--bd-page-break-margin, 100vh);')
+    }
+
+    const bleedDirections: string[] = []
+    for (const direction of ['top', 'bottom', 'left', 'right']) {
+      const hasBleed = new RegExp(`duokan-bleed\\s*:\\s*[^;]*${direction}[^;]*;`, 'i').test(block)
+      if (hasBleed && !new RegExp(`margin-${direction}\\s*:`, 'i').test(block)) {
+        bleedDirections.push(direction)
+        declarations.push(`margin-${direction}: calc(-1 * var(--bd-page-margin-${direction}, 0px)) !important;`)
+      }
+    }
+    if (bleedDirections.length > 0) {
+      if (!/position\s*:/i.test(block)) declarations.push('position: relative !important;')
+      if (!/overflow\s*:/i.test(block)) declarations.push('overflow: hidden !important;')
+      if (!/display\s*:/i.test(block)) declarations.push('display: flow-root !important;')
+      if (bleedDirections.includes('left') && bleedDirections.includes('right')) {
+        declarations.push('width: var(--bd-full-width, 100%) !important; min-width: var(--bd-full-width, 100%) !important; max-width: var(--bd-full-width, 100%) !important;')
+      }
+      if (bleedDirections.includes('top') && bleedDirections.includes('bottom')) {
+        declarations.push('height: var(--bd-full-height, 100%) !important; min-height: var(--bd-full-height, 100%) !important; max-height: var(--bd-full-height, 100%) !important;')
+      }
+    }
+
+    const widthMatch = /(?:^|[;{])\s*width\s*:\s*(\d+(?:\.\d+)?)px(?:\s*!important)?\s*(?:;|$)/i.exec(block)
+    const width = Number(widthMatch?.[1])
+    if (viewportWidth > 0 && width > viewportWidth && !/max-width\s*:/i.test(block)) {
+      declarations.push('width: 100%; max-width: var(--bd-available-width, 100%); box-sizing: border-box;')
+    }
+
+    return appendCssDeclarations(block, declarations)
+  }
+
+  let transformed = css.includes('{') ? transformCssRules(css, transformBlock) : transformBlock('', css)
+  const toRem = (value: string, base: number) => Number((Number(value) / base / fontScale).toFixed(4))
+  transformed = transformed
+    .replace(/font-size\s*:\s*xx-small/gi, 'font-size: 0.6rem')
+    .replace(/font-size\s*:\s*x-small/gi, 'font-size: 0.75rem')
+    .replace(/font-size\s*:\s*small/gi, 'font-size: 0.875rem')
+    .replace(/font-size\s*:\s*medium/gi, 'font-size: 1rem')
+    .replace(/font-size\s*:\s*large/gi, 'font-size: 1.2rem')
+    .replace(/font-size\s*:\s*x-large/gi, 'font-size: 1.5rem')
+    .replace(/font-size\s*:\s*xx-large/gi, 'font-size: 2rem')
+    .replace(/font-size\s*:\s*xxx-large/gi, 'font-size: 3rem')
+    .replace(/font-size\s*:\s*(\d+(?:\.\d+)?)px/gi, (_match, value: string) => `font-size: ${toRem(value, 16)}rem`)
+    .replace(/font-size\s*:\s*(\d+(?:\.\d+)?)pt/gi, (_match, value: string) => `font-size: ${toRem(value, 12)}rem`)
+    .replace(/(font-family\s*:[^;]*?)\bsans-serif\b/gi, '$1__BD_SANS_SERIF__')
+    .replace(/(font-family\s*:[^;]*?)\bserif\b(?!-)/gi, '$1var(--bd-serif, serif)')
+    .replace(/(font-family\s*:[^;]*?)\bmonospace\b/gi, '$1var(--bd-monospace, monospace)')
+    .replace(/__BD_SANS_SERIF__/g, 'var(--bd-sans-serif, sans-serif)')
+    .replace(/(^|[\s;{])font-weight\s*:\s*normal/gi, '$1font-weight: var(--bd-font-weight, normal)')
+    .replace(/(^|[\s;{])color\s*:\s*black/gi, '$1color: var(--bd-theme-text, black)')
+    .replace(/(^|[\s;{])color\s*:\s*#000000/gi, '$1color: var(--bd-theme-text, black)')
+    .replace(/(^|[\s;{])color\s*:\s*#000/gi, '$1color: var(--bd-theme-text, black)')
+    .replace(/(^|[\s;{])color\s*:\s*rgb\(0,\s*0,\s*0\)/gi, '$1color: var(--bd-theme-text, black)')
+    .replace(/(background(?:-color)?\s*:\s*)([^;!}]+?)(\s*!important)?(?=\s*(?:;|}|$))/gi, (match, prefix: string, value: string, important = '') => {
+      const color = value.trim().split(/\s+/)[0] ?? ''
+      return isLightCssColor(color)
+        ? `${prefix}var(--bd-theme-bg, ${color})${important}`
+        : match
+    })
+    .replace(/backdrop-filter\s*:\s*brightness\(100%\)\s*[;]?/gi, '')
+    .replace(/(^|[\s;{])-webkit-user-select\s*:\s*none/gi, '$1-webkit-user-select: unset')
+    .replace(/(^|[\s;{])-moz-user-select\s*:\s*none/gi, '$1-moz-user-select: unset')
+    .replace(/(^|[\s;{])-ms-user-select\s*:\s*none/gi, '$1-ms-user-select: unset')
+    .replace(/(^|[\s;{])-o-user-select\s*:\s*none/gi, '$1-o-user-select: unset')
+    .replace(/(^|[\s;{])user-select\s*:\s*none/gi, '$1user-select: unset')
+    .replace(/(font-size\s*:\s*)(\d*\.?\d+)(px|rem|em|%|)(?=\s*(?:!important\s*)?(?:;|}|$))/gi, '$1max($2$3, var(--bd-min-font-size, 8px))')
+  if (viewportWidth > 0) {
+    transformed = transformed.replace(/(\d*\.?\d+)vw/gi, (_match, value: string) => `${Number((Number(value) * viewportWidth / 100).toFixed(4))}px`)
+  }
+  if (viewportHeight > 0) {
+    transformed = transformed.replace(/(\d*\.?\d+)vh/gi, (_match, value: string) => `${Number((Number(value) * viewportHeight / 100).toFixed(4))}px`)
+  }
+  transformed = transformed.replace(/-epub-/gi, '')
+  return transformed
+}
+
+function isLightCssColor(value: string): boolean {
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'white') return true
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(normalized)
+  if (hex) {
+    const value = hex[1]!
+    const expanded = value.length === 3
+      ? value.split('').map((part) => `${part}${part}`).join('')
+      : value
+    const red = Number.parseInt(expanded.slice(0, 2), 16)
+    const green = Number.parseInt(expanded.slice(2, 4), 16)
+    const blue = Number.parseInt(expanded.slice(4, 6), 16)
+    return (0.299 * red + 0.587 * green + 0.114 * blue) / 255 > 0.85
+  }
+  const rgb = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i.exec(normalized)
+  if (!rgb) return false
+  const red = Number(rgb[1])
+  const green = Number(rgb[2])
+  const blue = Number(rgb[3])
+  return (0.299 * red + 0.587 * green + 0.114 * blue) / 255 > 0.85
+}
+
+export function transformEpubMarkup(markup: string, viewportWidth: number, viewportHeight = 0, fontScale = 1): string {
+  const transformed = markup.replace(
+    /(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi,
+    (_match, opening: string, css: string, closing: string) => `${opening}${transformEpubStylesheet(css, viewportWidth, viewportHeight, fontScale)}${closing}`,
+  )
+  return transformed.replace(
+    /(\sstyle\s*=\s*)(["'])([\s\S]*?)\2/gi,
+    (_match, prefix: string, quote: string, style: string) => `${prefix}${quote}${transformEpubStylesheet(style, viewportWidth, viewportHeight, fontScale)}${quote}`,
+  )
+}
+
+export function normalizeEpubDocumentImages(doc: Document): void {
+  const view = doc.defaultView ?? (typeof window === 'undefined' ? null : window)
+  if (!view) return
+
+  const vertical = !!doc.body && /^vertical-(?:rl|lr)$/i.test(view.getComputedStyle(doc.body).writingMode)
+  if (vertical) {
+    doc.documentElement.classList.add('vertical-writing')
+    doc.body?.classList.add('vertical-writing')
+  }
+  const plans = Array.from(doc.querySelectorAll('img')).map((image) => {
+    const width = image.getAttribute('width') ?? ''
+    const height = image.getAttribute('height') ?? ''
+    const widthValue = /^(\d+(?:\.\d+)?)(%|vw)$/i.exec(width)
+    const heightValue = /^(\d+(?:\.\d+)?)(%|vh)$/i.exec(height)
+    const parent = image.parentElement
+    const hasTextSibling = !!parent
+      && Array.from(parent.childNodes).some((node) => node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim())
+      && Array.from(parent.children).every((child) => child.tagName !== 'BR')
+    const computedStyle = view.getComputedStyle(image)
+    const keepBaseline = hasTextSibling
+      && (computedStyle.verticalAlign === '' || computedStyle.verticalAlign === 'baseline')
+    return { image, widthValue, heightValue, hasTextSibling, keepBaseline, vertical }
+  })
+
+  for (const { image, widthValue, heightValue, hasTextSibling, keepBaseline, vertical } of plans) {
+    if (widthValue && view.innerWidth > 0) {
+      image.style.width = String(Number(widthValue[1]) * view.innerWidth / 100) + 'px'
+      image.removeAttribute('width')
+    }
+    if (heightValue && view.innerHeight > 0) {
+      image.style.height = String(Number(heightValue[1]) * view.innerHeight / 100) + 'px'
+      image.removeAttribute('height')
+    }
+    if (hasTextSibling) {
+      image.classList.add('has-text-siblings')
+      if (vertical) image.classList.add('has-text-siblings-vertical')
+      if (keepBaseline) image.classList.add('has-text-siblings-baseline')
+    }
+  }
+
+  for (const rule of Array.from(doc.querySelectorAll('hr'))) {
+    if (view.getComputedStyle(rule).backgroundImage !== 'none') rule.classList.add('background-img')
+  }
+}
 
 // Search results per (book, query, mode): re-searching the same term in a
 // session skips the per-chapter matching pass. Keyed by content URL so it
@@ -274,7 +579,8 @@ async function openZipEntryMap(url: string, foliate: any) {
     const reader = new ZipReader(new HttpReader(url, { useRangeHeader: true }))
     const entries: any[] = await reader.getEntries()
     return {
-      map: new Map<string, any>(entries.map((entry) => [entry.filename, entry])),
+      map: createZipEntryMap(entries),
+      entries,
       TextWriter: ZipTextWriter,
       BlobWriter: ZipBlobWriter,
     }
@@ -296,7 +602,8 @@ async function openZipFromWholeFile(url: string, foliate: any) {
   const reader = new VendoredZipReader(new BlobReader(file))
   const entries: any[] = await reader.getEntries()
   return {
-    map: new Map<string, any>(entries.map((entry) => [entry.filename, entry])),
+    map: createZipEntryMap(entries),
+    entries,
     TextWriter,
     BlobWriter,
   }
@@ -381,7 +688,7 @@ function getParsedBook(url: string, foliate: any): Promise<any> {
   }
   const { EPUB } = foliate
   const promise = (async () => {
-    const { map, TextWriter, BlobWriter } = await openZipEntryMap(url, foliate)
+    const { map, entries, TextWriter, BlobWriter } = await openZipEntryMap(url, foliate)
 
     const load = (fn: (entry: any, type?: string) => any) => (name: string) => {
       const entry = map.get(name)
@@ -392,7 +699,7 @@ function getParsedBook(url: string, foliate: any): Promise<any> {
     const loadBlob = load((entry: any, type?: string) => entry.getData(new BlobWriter(type)))
     const getSize = (name: string) => map.get(name)?.uncompressedSize ?? 0
 
-    const book = await new EPUB({ loadText, loadBlob, getSize }).init()
+    const book = await new EPUB({ entries, loadText, loadBlob, getSize }).init()
     attachTextPrefetch(book, loadText)
     return book
   })()
@@ -409,12 +716,12 @@ function getParsedBook(url: string, foliate: any): Promise<any> {
   return promise
 }
 
-// Chinese conversion runs at the string level, before foliate parses a
-// section: the Loader dispatches a `data` event on book.transformTarget
-// before caching each resource URL (epub.js createURL), so replacing
-// detail.data with converted markup makes the converted string the cached
-// content. The parse cache reuses the same book object across view mounts —
-// track which books already carry the listener to avoid stacking duplicates.
+// Book data transforms run before foliate parses a section: the Loader
+// dispatches a `data` event on book.transformTarget before caching each
+// resource URL (epub.js createURL), so replacing detail.data changes the
+// cached content. The parse cache reuses the same book object across view
+// mounts — track which books already carry the listener to avoid stacking
+// duplicates.
 const transformedBooks = new WeakSet<object>()
 
 interface FoliateTocItem {
@@ -466,7 +773,7 @@ let activeTransforms: TextTransformRule[] = []
 export function setActiveTransforms(rules: TextTransformRule[]) {
   activeTransforms = rules
 }
-// Invalid point-patch reporter (P2): attachChineseTransform runs outside any
+// Invalid point-patch reporter (P2): attachBookDataTransform runs outside any
 // instance (module-level book listener), so the current instance registers a
 // callback here on mount and clears it on destroy — same pattern as the rule
 // set above. Without a live reader the report is dropped, which is correct.
@@ -483,28 +790,45 @@ export function setAutoMarkSelectionMode(enabled: boolean) {
 }
 const CONVERTIBLE_MEDIA_TYPES = new Set(['application/xhtml+xml', 'text/html'])
 
-function attachChineseTransform(book: any) {
+function attachBookDataTransform(book: any) {
   const target = book?.transformTarget as EventTarget | undefined
   if (!target || transformedBooks.has(book)) return
   transformedBooks.add(book)
+  const isFixedLayout = book?.rendition?.layout === 'pre-paginated'
   target.addEventListener('data', (event: Event) => {
-    if (conversionMode === 'off' && activeTransforms.length === 0) return
     const detail = (event as CustomEvent).detail
-    // Section markup only — images, fonts and CSS pass through untouched.
-    if (!CONVERTIBLE_MEDIA_TYPES.has(detail?.type)) return
+    const mediaType = typeof detail?.type === 'string' ? detail.type.toLowerCase() : ''
+    const isMarkup = CONVERTIBLE_MEDIA_TYPES.has(mediaType)
+    const isStylesheet = mediaType === 'text/css'
+    const applyBookStyleTransform = !isFixedLayout && (isMarkup || isStylesheet)
+    const applyMarkupTransform = isMarkup && (conversionMode !== 'off' || activeTransforms.length > 0)
+    if (!applyBookStyleTransform && !applyMarkupTransform) return
     const mode = conversionMode
     const rules = activeTransforms
-    const docType = detail.type as DOMParserSupportedType
+    const docType = mediaType as DOMParserSupportedType
+    const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth
+    const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight
+    const fontScale = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent)
+      ? 1.25
+      : 1
     // detail.data may be a promise; the Loader awaits it either way.
-    // Text transforms run first (rules are written against the original text),
-    // then Chinese conversion on the whole string — conversion rewrites
-    // script/style/attribute text as part of the visible-text transformation.
     detail.data = Promise.resolve(detail.data).then(async (data: unknown) => {
       if (typeof data !== 'string') return data
-      const transformed = rules.length
-        ? applyTransforms(data, rules, docType, detail.name, (ids) => transformInvalidListener?.(ids))
-        : data
-      return mode === 'off' ? transformed : convertChinese(transformed, mode)
+      let transformed = data
+      if (applyBookStyleTransform) {
+        transformed = isStylesheet
+          ? transformEpubStylesheet(transformed, viewportWidth, viewportHeight, fontScale)
+          : transformEpubMarkup(transformed, viewportWidth, viewportHeight, fontScale)
+      }
+      if (isMarkup) {
+        // Text transforms run after book CSS normalization, and only markup
+        // receives text conversion; images, fonts and CSS remain untouched.
+        transformed = rules.length
+          ? applyTransforms(transformed, rules, docType, detail.name, (ids) => transformInvalidListener?.(ids))
+          : transformed
+        if (mode !== 'off') transformed = await convertChinese(transformed, mode)
+      }
+      return transformed
     })
   })
 }
@@ -799,13 +1123,41 @@ export class FoliateReader implements BookReader {
         --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
         --bd-search-highlight: ${searchHighlightColor(this.theme)} !important;
       }
-      body {
-        box-sizing: border-box !important;
-        margin: 0 !important;
-        padding: 8px !important;
-        overflow-wrap: anywhere !important;
+     body {
+       box-sizing: border-box !important;
+       margin: 0 !important;
+       padding: 8px !important;
+       overflow-wrap: anywhere !important;
+     }
+      a:any-link {
+        text-decoration: none;
+        padding: unset;
+        margin: unset;
       }
-      p {
+      ol {
+        margin: 0;
+        padding: 0;
+      }
+      p, li, blockquote, dd {
+        margin: unset !important;
+        text-indent: unset !important;
+      }
+      div {
+        margin: unset !important;
+        padding: unset !important;
+      }
+      dt {
+        font-weight: bold;
+        line-height: 1.6;
+      }
+      .epubtype-footnote,
+      aside[*|type~="endnote"],
+      aside[*|type~="footnote"],
+      aside[*|type~="note"],
+      aside[*|type~="rearnote"] {
+        display: block !important;
+      }
+     p {
         text-indent: ${this.paragraph.indent}em !important;
         margin-bottom: ${this.paragraph.paragraphSpacing}em !important;
         text-align: ${this.paragraph.textAlignJustify ? 'justify' : 'start'} !important;
@@ -872,6 +1224,18 @@ export class FoliateReader implements BookReader {
     return sectionFractionBoundaries(
       this.book.sections.map((s: any) => (s.linear !== 'no' && s.size > 0 ? s.size : 0)),
     )
+  }
+
+  getSectionTocLabels(): string[] | null {
+    if (!this.book?.sections || !this.view?.getProgressOf) return null
+    return this.book.sections.map((_: unknown, index: number) => {
+      try {
+        const label = this.view.getProgressOf(index)?.tocItem?.label
+        return typeof label === 'string' ? label : ''
+      } catch {
+        return ''
+      }
+    })
   }
 
   private updateMarginals() {
@@ -948,7 +1312,7 @@ export class FoliateReader implements BookReader {
       // Point patches report their invalid ids here (P2); the module-level
       // listener is shared with the load-time data pipeline.
       setTransformInvalidListener((ids) => this.emit('transformInvalid', { ids }))
-      attachChineseTransform(epub)
+      attachBookDataTransform(epub)
       await applyTocConversion(epub, this.conversion)
 
       const view = document.createElement('foliate-view') as any
@@ -1060,12 +1424,23 @@ export class FoliateReader implements BookReader {
   }
 
   private handleRelocate(detail: any) {
-    const { cfi, fraction, tocItem, section, chapterLocation, range } = detail
+    const { cfi, fraction, startFraction, tocItem, section, chapterLocation, range } = detail
+    // The content has become visible at this point. Do not keep a spinner up
+    // while a paginator background-fill or font/layout promise finishes.
+    this.navigationPending.settle()
     this.lastRange = range ?? null
     // fraction is NaN on transient relocate paths (section reload with zero viewSize)
-    const frac = Number.isFinite(fraction) ? fraction : this.lastFraction
+    // Paginated foliate progress includes the visible page tail in `fraction`.
+    // Product progress is a viewport-start coordinate, matching goToFraction;
+    // using the tail here made the slider display a different point than the
+    // point it navigated to.
+    const frac = Number.isFinite(startFraction)
+      ? startFraction
+      : Number.isFinite(fraction) ? fraction : this.lastFraction
     if (frac != null) this.lastFraction = frac
-    // chapter progress: foliate sections map 1:1 to the book's chapter list
+    // Foliate's section index is a spine-resource coordinate. It is not the
+    // server chapter/TOC index: one XHTML resource may contain multiple TOC
+    // entries, and a TOC entry may share a resource with its neighbors.
     const chapterIndex = Number.isFinite(section?.current) ? section.current : undefined
     if (chapterIndex !== undefined) {
       this.currentSectionIndex = chapterIndex
@@ -1380,6 +1755,13 @@ export class FoliateReader implements BookReader {
     if (!this.view?.renderer) return
     this.view.renderer.style.setProperty('--bd-tts-highlight', ttsHighlightColor(theme))
     this.view.renderer.style.setProperty('--bd-search-highlight', searchHighlightColor(theme))
+    this.view.renderer.style.setProperty('background-color', theme.bg)
+    if (this.view.isFixedLayout) {
+      const contents = this.view.renderer.getContents?.() as Array<{ doc?: Document }> | undefined
+      for (const { doc } of contents ?? []) {
+        if (doc) this.applyFixedLayoutDocumentStyles(doc)
+      }
+    }
     this.view.renderer.setAttribute('background-color', theme.bg)
     this.applyStyles()
   }
@@ -1418,7 +1800,7 @@ export class FoliateReader implements BookReader {
     const isPage = this.readingMode === 'page'
     const cap = this.pageWidth > 0 ? Math.max(320, this.pageWidth) : 100000
     this.view.renderer.setAttribute('max-inline-size', String(cap))
-    this.view.renderer.setAttribute('gutter', `${isPage ? this.paragraph.horizontalPadding : 0}px`)
+    this.view.renderer.setAttribute('gutter', `${this.paragraph.horizontalPadding}px`)
     const vPad = isPage ? this.paragraph.verticalPadding : 0
     this.view.renderer.setAttribute('top-margin', `${vPad}px`)
     this.view.renderer.setAttribute('bottom-margin', `${vPad}px`)
@@ -1495,12 +1877,15 @@ export class FoliateReader implements BookReader {
     if (mode === 'snap') {
       renderer.setAttribute('snap-turn', '')
       renderer.removeAttribute('continuous')
+      renderer.setAttribute('no-continuous-scroll', '')
     } else if (mode === 'seamless') {
       renderer.removeAttribute('snap-turn')
       renderer.setAttribute('continuous', '')
+      renderer.removeAttribute('no-continuous-scroll')
     } else {
       renderer.removeAttribute('snap-turn')
       renderer.removeAttribute('continuous')
+      renderer.setAttribute('no-continuous-scroll', '')
     }
   }
 
@@ -1529,6 +1914,13 @@ export class FoliateReader implements BookReader {
       ? distanceOverride ?? pageDistance
       : undefined
     const steps = Math.abs(delta)
+    const renderer = this.view?.renderer
+    if (this.readingMode === 'scroll' && !opts?.internal
+      && typeof renderer?.scrollByViewport === 'function') {
+      for (let i = 0; i < steps; i++)
+        await renderer.scrollByViewport(delta > 0 ? 1 : -1, distance)
+      return
+    }
     for (let i = 0; i < steps; i++) {
       if (delta > 0) await this.view?.next(distance)
       else await this.view?.prev(distance)
@@ -1537,15 +1929,38 @@ export class FoliateReader implements BookReader {
 
   async scrollByPixels(delta: number) {
     const renderer = this.view?.renderer
-    if (!renderer || this.readingMode !== 'scroll' || !Number.isFinite(delta) || delta === 0) return
-    const horizontal = renderer.scrollProp === 'scrollLeft'
-    renderer.scrollBy(horizontal ? delta : 0, horizontal ? 0 : delta)
-    if (renderer.hasAttribute('continuous')) return
-    if (delta > 0 && renderer.start + renderer.size >= renderer.viewSize - 2) {
-      await renderer.next(0)
-    } else if (delta < 0 && renderer.start <= 2) {
-      await renderer.prev(0)
+    if (!renderer || this.readingMode !== 'scroll' || !Number.isFinite(delta) || delta === 0) return false
+    if (typeof renderer.scrollByPixels === 'function') {
+      const result = await renderer.scrollByPixels(delta)
+      return result !== false
     }
+    const before = renderer.containerPosition
+    renderer.containerPosition = before + scrollForwardSign(renderer.scrollProp) * delta
+    const moved = renderer.containerPosition !== before
+    if (moved) return true
+    if (renderer.hasAttribute('continuous')) {
+      // A continuous buffer can be temporarily exhausted while the next
+      // section is still inflating. Explicitly advance in that stalled case;
+      // otherwise auto-reading reaches a chapter boundary and silently stops.
+      if (delta > 0 && !renderer.atEnd) {
+        await renderer.next(0)
+        return true
+      }
+      if (delta < 0 && !renderer.atStart) {
+        await renderer.prev(0)
+        return true
+      }
+      return false
+    }
+    if (renderer.hasAttribute('snap-turn')
+      && delta > 0 && renderer.start + renderer.size >= renderer.viewSize - 2) {
+      await renderer.next(0)
+      return true
+    } else if (renderer.hasAttribute('snap-turn') && delta < 0 && renderer.start <= 2) {
+      await renderer.prev(0)
+      return true
+    }
+    return false
   }
 
   isAtEnd(): boolean {
@@ -1561,7 +1976,8 @@ export class FoliateReader implements BookReader {
     if (active) {
       if (this.continuousScroll !== 'snap' || this.readingMode !== 'scroll' || !renderer) return
       this.autoReadingSnapTurn = renderer.hasAttribute('snap-turn')
-      renderer.removeAttribute('snap-turn')
+      // Keep snap-turn enabled. Paginator owns the same-direction boundary
+      // accumulation for both wheel input and smooth auto-reading frames.
       return
     }
     if (this.autoReadingSnapTurn !== null && renderer) {
@@ -1571,11 +1987,10 @@ export class FoliateReader implements BookReader {
     this.autoReadingSnapTurn = null
   }
 
-  private ensureTts(): any | null {
+  private async ensureTts(): Promise<any | null> {
     if (!this.view?.renderer?.getContents) return null
     try {
-      this.view.initTTS(false)
-      return this.view.tts ?? null
+      return await this.view.initTTS(false) ?? this.view.tts ?? null
     } catch {
       return null
     }
@@ -1622,7 +2037,7 @@ export class FoliateReader implements BookReader {
   }
 
   async getTtsSegment(startCfi?: string): Promise<TtsSegment | null> {
-    let tts = this.ensureTts()
+    let tts = await this.ensureTts()
     if (!tts) return null
     let detail: any = null
     if (startCfi?.startsWith('epubcfi(')) {
@@ -1633,7 +2048,7 @@ export class FoliateReader implements BookReader {
       } else {
         this.ttsNavigation = true
         try { await this.view?.goTo(startCfi) } finally { this.ttsNavigation = false }
-        tts = this.ensureTts()
+        tts = await this.ensureTts()
         detail = tts?.currentDetail?.()
       }
     } else if (this.lastRange) {
@@ -1665,14 +2080,14 @@ export class FoliateReader implements BookReader {
   }
 
   async getTtsChapterStartSegment(): Promise<TtsSegment | null> {
-    const tts = this.ensureTts()
+    const tts = await this.ensureTts()
     if (!tts) return null
     tts.start?.({ highlight: false })
     return this.ttsDetailToSegment(tts.currentDetail?.())
   }
 
   async peekTtsSegments(count = 4): Promise<TtsSegment[]> {
-    const tts = this.ensureTts()
+    const tts = await this.ensureTts()
     if (!tts?.collectDetails) return []
     const details = tts.collectDetails(count, { offset: 1 })
     return details.map((detail: any) => this.ttsDetailToSegment(detail)).filter((segment: TtsSegment | null): segment is TtsSegment => Boolean(segment))
@@ -1694,23 +2109,23 @@ export class FoliateReader implements BookReader {
   }
 
   async nextTtsSegment(): Promise<TtsSegment | null> {
-    const tts = this.ensureTts()
+    const tts = await this.ensureTts()
     if (!tts) return null
     const nextText = tts.next?.()
     let detail = nextText ? tts.currentDetail?.() : null
     if (!nextText && await this.moveTtsChapter('next')) {
-      detail = this.ensureTts()?.currentDetail?.()
+      detail = (await this.ensureTts())?.currentDetail?.()
     }
     return this.ttsDetailToSegment(detail)
   }
 
   async previousTtsSegment(): Promise<TtsSegment | null> {
-    const tts = this.ensureTts()
+    const tts = await this.ensureTts()
     if (!tts) return null
     const previousText = tts.prev?.()
     let detail = previousText ? tts.currentDetail?.() : null
     if (!previousText && await this.moveTtsChapter('previous')) {
-      const previous = this.ensureTts()
+      const previous = await this.ensureTts()
       previous?.end?.({ highlight: false })
       detail = previous?.currentDetail?.()
     }
@@ -1748,7 +2163,7 @@ export class FoliateReader implements BookReader {
           ? Math.min(pageDistance, safeDistance)
           : undefined
         this.ttsNavigation = true
-        try { await this.scrollByPages(1, distance) } finally { this.ttsNavigation = false }
+        try { await this.scrollByPages(1, distance, { internal: true }) } finally { this.ttsNavigation = false }
         return
       }
     }
@@ -1757,7 +2172,7 @@ export class FoliateReader implements BookReader {
   }
 
   async highlightTtsSegment(segment: TtsSegment): Promise<void> {
-    this.ensureTts()?.highlightCfi?.(segment.cfi)
+    ;(await this.ensureTts())?.highlightCfi?.(segment.cfi)
   }
 
   clearTtsHighlight() {
@@ -2338,6 +2753,8 @@ export class FoliateReader implements BookReader {
       }
       for (const { doc, index } of contents) {
         if (!doc || this.activeDocs.has(doc)) continue
+        this.applyFixedLayoutDocumentStyles(doc)
+        normalizeEpubDocumentImages(doc)
         doc.addEventListener('click', this.handleDocInteraction)
         const handler = () => this.handleSelection(doc, index)
         const selectionChangeHandler = () => this.handleSelectionChange(doc)
@@ -2400,6 +2817,13 @@ export class FoliateReader implements BookReader {
     } catch {
       // ignore sync errors — the renderer may not be fully initialized yet
     }
+  }
+
+  private applyFixedLayoutDocumentStyles(doc: Document) {
+    if (!this.view?.isFixedLayout) return
+    doc.documentElement.style.setProperty('background-color', this.theme.bg, 'important')
+    doc.body?.style.setProperty('background-color', this.theme.bg, 'important')
+    doc.body?.style.setProperty('position', 'relative')
   }
 
   destroy() {
@@ -2472,31 +2896,367 @@ export class FoliateReader implements BookReader {
     const fontStack = this.font.fontStack ?? FONT_OPTIONS[0].value
     const vPad = this.readingMode === 'page' ? 0 : this.scrollBlockPadding()
     this.lastScrollVPad = vPad
+    const fontCss = this.font.fontCss ?? ''
+    const isDarkTheme = !isLightCssColor(this.theme.bg)
+    const forceBookdockFont = this.font.overrideBookFont
+    const fontDeclarations = `
+        font-size: ${this.font.size}px !important;
+        font-weight: ${this.font.fontWeight};
+        -webkit-text-size-adjust: none;
+        text-size-adjust: none;
+        ${forceBookdockFont ? `font-family: ${fontStack} !important;` : ''}`
+    const fontDescendantStyles = forceBookdockFont
+      ? `
+      body *:not(pre, code, kbd, .code):not(pre *, code *, kbd *, .code *) {
+        font-family: ${fontStack} !important;
+      }`
+      : ''
+    const fontLegacySizeStyles = `
+      font[size="1"] { font-size: 8px; }
+      font[size="2"] { font-size: 12px; }
+      font[size="3"] { font-size: ${this.font.size}px; }
+      font[size="4"] { font-size: ${Number((this.font.size * 1.2).toFixed(2))}px; }
+      font[size="5"] { font-size: ${Number((this.font.size * 1.5).toFixed(2))}px; }
+      font[size="6"] { font-size: ${Number((this.font.size * 2).toFixed(2))}px; }
+      font[size="7"] { font-size: ${Number((this.font.size * 3).toFixed(2))}px; }
+      [style*="font-size: 16px"], [style*="font-size:16px"] { font-size: 1rem !important; }`
+    const layoutDeclarations = `
+        line-height: ${this.font.lineHeight} !important;
+        letter-spacing: ${this.paragraph.letterSpacing}px !important;`
+    // Reader paragraph controls are application settings, not the switch that
+    // decides whether EPUB-specific compatibility rules replace book CSS.
+    // TXT is wrapped in generated XHTML with its own stylesheet, so these
+    // controls must remain effective when book-style override is disabled.
+    const paragraphStyles = `
+      p {
+        line-height: ${this.font.lineHeight} !important;
+        letter-spacing: ${this.paragraph.letterSpacing}px !important;
+        text-indent: ${this.paragraph.indent}em !important;
+        margin-bottom: ${this.paragraph.paragraphSpacing}em !important;
+        text-align: ${this.paragraph.textAlignJustify ? 'justify' : 'start'} !important;
+      }`
+      + (this.paragraph.overrideBookLayout ? `
+      html {
+        hanging-punctuation: allow-end last;
+        orphans: 2;
+        widows: 2;
+      }
+      p {
+        -webkit-hyphens: manual !important;
+        hyphens: manual !important;
+        -webkit-hyphenate-limit-before: 3;
+        -webkit-hyphenate-limit-after: 2;
+        -webkit-hyphenate-limit-lines: 2;
+      }`
+      + `
+      blockquote, dd, li, div:not(:has(*:not(b, a, em, i, strong, u, span))) {
+        line-height: ${this.font.lineHeight} !important;
+        letter-spacing: ${this.paragraph.letterSpacing}px !important;
+        text-indent: ${this.paragraph.indent}em !important;
+        margin-bottom: ${this.paragraph.paragraphSpacing}em !important;
+        text-align: ${this.paragraph.textAlignJustify ? 'justify' : 'start'} !important;
+        hanging-punctuation: allow-end last;
+        widows: 2;
+        orphans: 2;
+        hyphens: manual;
+        -webkit-hyphenate-limit-before: 3;
+        -webkit-hyphenate-limit-after: 2;
+        -webkit-hyphenate-limit-lines: 2;
+      }
+      [align="left"] { text-align: left !important; }
+      [align="right"] { text-align: right !important; }
+      [align="center"] { text-align: center !important; }
+      [align="justify"] { text-align: justify !important; }
+      .aligned-left { ${this.paragraph.textAlignJustify ? 'text-align: justify !important;' : ''} }
+      .aligned-center { text-align: center !important; }
+      .aligned-right { text-align: right !important; }
+      .aligned-justify { text-align: justify !important; }
+      p > font:only-child {
+        display: flow-root;
+      }
+      .nonindent, .noindent {
+        text-indent: unset !important;
+      }
+      :is(hgroup, header) p {
+        text-align: unset;
+        hyphens: unset;
+      }
+      :lang(zh), :lang(ja), :lang(ko) {
+        widows: 1;
+        orphans: 1;
+      }
+      div.left *, p.left * { text-align: left; }
+      div.right *, p.right * { text-align: right; }
+      div.center *, p.center * { text-align: center; }
+      div.justify *, p.justify * { text-align: justify; }
+      li p, ol p, ul p, td p,
+      p:has(> img:only-child),
+      p:has(> span:only-child > img:only-child),
+      p:has(> img:not(.has-text-siblings)),
+      p:has(> a:first-child + img:last-child),
+      blockquote[align="center"], div[align="center"], p[align="center"], dd[align="center"],
+      .aligned-center {
+        text-indent: 0 !important;
+      }` : '')
+    const contentOverflowStyles = this.view?.isFixedLayout
+      ? ''
+      : `
+      html, body {
+        box-sizing: border-box;
+        max-height: none;
+        -webkit-touch-callout: none;
+        -webkit-user-select: text;
+      }
+      body {
+        margin: 0 !important;
+        overflow: unset;
+        line-height: unset !important;
+      }
+      img {
+        -webkit-touch-callout: none;
+        -webkit-user-drag: none;
+      }
+      img, svg, video, audio, canvas, object, embed, iframe {
+        max-width: 100% !important;
+        object-fit: contain;
+        break-inside: avoid;
+        page-break-inside: avoid;
+        box-sizing: border-box;
+      }
+      img:not([width]), svg:not([width]) {
+        width: auto;
+      }
+      img:not([height]), svg:not([height]) {
+        height: auto;
+      }
+      .ie6 img {
+        width: unset;
+        height: unset;
+      }
+      a {
+        position: relative !important;
+      }
+      a::before {
+        content: '';
+        position: absolute;
+        inset: -10px;
+      }
+      a:any-link {
+        color: var(--bd-theme-primary) !important;
+        text-decoration: none;
+      }
+      .vertical-writing img.pi {
+        transform: rotate(90deg);
+        transform-origin: center;
+        height: 2em;
+        width: ${this.font.lineHeight}em;
+        vertical-align: unset;
+      }
+      img.has-text-siblings {
+        height: 1em;
+      }
+      img.has-text-siblings-vertical {
+        width: 1em;
+        height: auto;
+      }
+      img.has-text-siblings-baseline {
+        vertical-align: baseline;
+      }
+      :is(div) > img.has-text-siblings[style*="object-fit"] {
+        display: block;
+        height: auto;
+        vertical-align: unset;
+      }
+      .duokan-image-gallery-cell {
+        height: calc(var(--bd-available-height, 100%) * 1px);
+      }
+      .duokan-image-gallery-cell img {
+        height: 90%;
+      }
+      .duokan-footnote img:not([class]) {
+        width: 0.8em;
+        height: 0.8em;
+      }
+      sup img {
+        height: 1em;
+      }
+      div:has(img.singlepage) {
+        position: relative;
+        width: auto;
+        height: auto;
+      }
+      p[width][height] > img:only-child {
+        width: unset !important;
+        height: unset !important;
+      }
+      figure > div:has(img) {
+        height: auto !important;
+      }
+      figure.code {
+        overflow: unset !important;
+      }
+      div:has(> img, > svg) {
+        max-width: 100% !important;
+      }
+      p img.has-text-siblings, span img.has-text-siblings, sup img.has-text-siblings {
+        mix-blend-mode: ${isDarkTheme ? 'screen' : 'multiply'};
+      }
+      p[width][height] > img:only-child {
+        mix-blend-mode: ${isDarkTheme ? 'screen' : 'multiply'};
+      }
+      p {
+        display: block;
+      }
+      .br {
+        display: flow-root;
+      }
+      .h5_mainbody {
+        overflow: unset !important;
+      }
+      pre, code, math {
+        white-space: pre-wrap !important;
+        overflow-wrap: anywhere;
+        scrollbar-width: none;
+      }
+      math {
+        overflow: auto;
+      }
+      .epubtype-footnote,
+      .duokan-footnote-content,
+      .duokan-footnote-item,
+      aside[*|type~="endnote"],
+      aside[*|type~="footnote"],
+      aside[*|type~="note"],
+      aside[*|type~="rearnote"] {
+        display: none;
+      }
+      table, math {
+        max-width: 100% !important;
+      }
+      [style*="page-break-after: always"], [style*="page-break-after:always"] {
+        margin-bottom: var(--bd-page-break-margin, 100vh) !important;
+      }
+      table {
+        overflow-x: auto !important;
+        max-height: calc(var(--bd-available-height, 100%) * 1px);
+      }
+      body.paginated-mode td:has(img), body.paginated-mode td :has(img) {
+        max-height: calc(var(--bd-available-height, 100%) * 0.8 * 1px);
+      }
+      table:has(> colgroup) {
+        table-layout: fixed;
+      }
+      td, th {
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+      *:has(> hr.background-img):not(body) {
+        background-color: var(--bd-theme-bg) !important;
+      }
+      hr.background-img {
+        mix-blend-mode: multiply;
+      }
+      math {
+        max-height: calc(var(--bd-available-height, 100%) * 1px);
+      }`
+    const templateCompatibilityStyles = `
+      #pg-header * {
+        color: inherit !important;
+      }
+      .x-ebookmaker, .x-ebookmaker-cover, .x-ebookmaker-coverpage {
+        background-color: unset !important;
+      }
+      .chapterHeader, .chapterHeader * {
+        border-color: unset;
+        background-color: var(--bd-theme-bg) !important;
+      }
+      .calibre {
+        color: unset;
+        background-color: unset;
+      }`
+    const themeCompatibilityStyles = isDarkTheme
+      ? `
+      html { color-scheme: dark; }
+      body { background-color: transparent !important; }
+      blockquote {
+        background: color-mix(in srgb, var(--bd-theme-bg) 80%, #000);
+        background-color: color-mix(in srgb, var(--bd-theme-bg) 80%, #000);
+      }
+      code {
+        color: color-mix(in srgb, var(--bd-theme-text) 80%, transparent);
+        background-color: color-mix(in srgb, var(--bd-theme-bg) 90%, #000);
+      }`
+      + `
+      body.pbg {
+        background-color: var(--bd-theme-bg) !important;
+      }`
+      : ''
+    const fontVariables = `
+      html {
+        --bd-serif: ${fontStack};
+        --bd-sans-serif: ${fontStack};
+        --bd-monospace: ui-monospace, SFMono-Regular, Consolas, monospace;
+        --bd-font-size: ${this.font.size}px;
+        --bd-min-font-size: 8px;
+        --bd-font-weight: ${this.font.fontWeight};
+        --bd-theme-bg: ${this.theme.bg};
+        --bd-theme-text: ${this.theme.text};
+        --bd-theme-primary: ${this.theme.primary ?? this.theme.text};
+        color-scheme: ${isDarkTheme ? 'dark' : 'light'};
+      }`
+    const inlineThemeStyles = `
+      *[style*="color: black"], *[style*="color:black"],
+      *[style*="color: #000"], *[style*="color:#000"],
+      *[style*="color: rgb(0"], *[style*="color:rgb(0"] {
+        color: var(--bd-theme-text) !important;
+      }
+      *[style*="background: white"], *[style*="background:white"],
+      *[style*="background-color: white"], *[style*="background-color:white"],
+      *[style*="background: #fff"], *[style*="background:#fff"],
+      *[style*="background: #ffffff"], *[style*="background:#ffffff"],
+      *[style*="background-color: #fff"], *[style*="background-color:#fff"] {
+        background-color: var(--bd-theme-bg) !important;
+      }
+      *[style*="background: rgb(255"], *[style*="background:rgb(255"],
+      *[style*="background-color: rgb(255"], *[style*="background-color:rgb(255"] {
+        background-color: var(--bd-theme-bg) !important;
+      }
+      font[color="#000000"], font[color="#000"], font[color="black"],
+      font[color="rgb(0,0,0)"], font[color="rgb(0, 0, 0)"] {
+        color: var(--bd-theme-text) !important;
+      }`
     // fontCss (@import/@font-face) must precede all rules or the at-rules
     // are ignored; the paginator re-lays out on document.fonts.ready
     const css = `
-      ${this.font.fontCss ?? ''}
+      ${fontCss}
+      ${fontVariables}
+      html {
+        font-family: ${fontStack};
+      }
       html, body {
-        font-family: ${fontStack} !important;
-        font-size: ${this.font.size}px !important;
-        line-height: ${this.font.lineHeight} !important;
-        font-weight: ${this.font.fontWeight} !important;
-        letter-spacing: ${this.paragraph.letterSpacing}px !important;
+        ${fontDeclarations}
+        ${layoutDeclarations}
         color: ${this.theme.text} !important;
         background: ${this.theme.bg} !important;
         background-color: ${this.theme.bg} !important;
         --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
         --bd-search-highlight: ${searchHighlightColor(this.theme)} !important;
       }
+      pre, code, kbd {
+        font-family: var(--bd-monospace, ui-monospace, SFMono-Regular, Consolas, monospace);
+        font-variant-ligatures: none;
+      }
       ::selection {
         background: ${this.theme.text}19 !important;
         color: inherit !important;
       }
-      p {
-        text-indent: ${this.paragraph.indent}em !important;
-        margin-bottom: ${this.paragraph.paragraphSpacing}em !important;
-        text-align: ${this.paragraph.textAlignJustify ? 'justify' : 'start'} !important;
-      }
+      ${fontDescendantStyles}
+      ${fontLegacySizeStyles}
+      ${inlineThemeStyles}
+      ${paragraphStyles}
+      ${contentOverflowStyles}
+      ${themeCompatibilityStyles}
+      ${templateCompatibilityStyles}
       body {
         padding-top: ${vPad}px !important;
         padding-bottom: ${vPad}px !important;
