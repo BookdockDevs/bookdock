@@ -29,19 +29,21 @@ export default function InstanceSettingsSection() {
 
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <h2 className="mb-4 text-sm font-medium">{_('admin.instanceSettings')}</h2>
-      <ToggleRow
-        label={_('admin.allowRegistration')}
-        hint={_('admin.allowRegistrationHint')}
-        checked={instance.allowRegistration}
-        onChange={(v) => toggle('allowRegistration', v)}
-      />
-      <ToggleRow
-        label={_('admin.allowGuestAccess')}
-        hint={_('admin.allowGuestAccessHint')}
-        checked={instance.allowGuestAccess}
-        onChange={(v) => toggle('allowGuestAccess', v)}
-      />
+      <h2 className="mb-2 text-sm font-medium">{_('admin.instanceSettings')}</h2>
+      <div className="divide-y divide-stone-100 dark:divide-stone-800/80">
+        <ToggleRow
+          label={_('admin.allowRegistration')}
+          hint={_('admin.allowRegistrationHint')}
+          checked={instance.allowRegistration}
+          onChange={(v) => toggle('allowRegistration', v)}
+        />
+        <ToggleRow
+          label={_('admin.allowGuestAccess')}
+          hint={_('admin.allowGuestAccessHint')}
+          checked={instance.allowGuestAccess}
+          onChange={(v) => toggle('allowGuestAccess', v)}
+        />
+      </div>
     </section>
   )
 }
@@ -53,10 +55,10 @@ function ToggleRow({ label, hint, checked, onChange }: {
   onChange: (value: boolean) => void
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2">
+    <div className="flex items-center justify-between gap-4 py-3">
       <div className="min-w-0">
-        <p className="text-sm text-stone-700 dark:text-stone-200">{label}</p>
-        <p className="mt-0.5 text-xs text-stone-500">{hint}</p>
+        <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{label}</p>
+        <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>
       </div>
       <button
         type="button"

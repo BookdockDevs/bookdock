@@ -6,6 +6,7 @@ import type { AiEmbeddingStatus, AiIndexChapter, AiIndexReq, AiIndexRes, AiProvi
 import { getDb } from '../../db/client'
 import { aiBookIndexes, aiChunkEmbeddings, aiChunks } from '../../db/schema'
 import { extractEpubChapterText } from '../../formats/epub'
+import { getTxtChapterContent } from '../../formats/txt'
 import { createId } from '../../lib/id'
 import { AppError } from '../../middleware/error'
 import { getActiveBook, getBookChapters, getBookContent, getBookEpubBuffer } from '../books/books.service'
@@ -183,7 +184,7 @@ async function buildChunkDrafts(userId: string, bookId: string, signal: AbortSig
   for (const [chapterIndex, chapter] of chapters.entries()) {
     throwIfAborted(signal)
     const content = book.format === 'txt'
-      ? txtContent?.slice(chapter.contentStartOffset ?? chapter.startOffset, chapter.endOffset).trim() ?? ''
+      ? getTxtChapterContent(txtContent ?? '', chapter).trim()
       : await extractEpubChapterText(epubBuffer!, chapterIndex)
     for (const chunk of chunkChapter(content)) {
       drafts.push({

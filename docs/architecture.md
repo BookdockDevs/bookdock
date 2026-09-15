@@ -57,7 +57,9 @@ Conventions:
 - `TextTransform(id, userId, bookId?, matchType, pattern?, replacement?, enabled, ...)` — user-global pattern rules and book-local point patches share one table; per-book pattern overrides live in `text_transform_overrides`.
 - `TextTransformOverride(id, userId, bookId, transformId, enabled, createdAt, updatedAt)` — per-book enablement for pattern transforms.
 - `Font(id, userId, scope, family, fileName, format, contentHash, size, createdAt)` — uploaded fonts; `scope: user|instance` (instance = owner-shared, visible to all users); physical file content-hash deduped, ref-counted on delete (see ADR-13). The web font catalog also exposes stable system and CDN-builtin entries; user-level display-name/enabled overrides and display ordering live in `Settings.ui.fontPreferences` and `Settings.ui.fontOrder` so users can hide or reorder any font without deleting shared assets.
-- `TocRule(id, userId, seedKey?, name, enabled, sortOrder, patterns, createdAt, updatedAt)` — user-owned TXT chapter presets; `seedKey` identifies product-provided presets for safe backfill and restore, while `patterns` stores one continuous level per array position.
+- `TocRule(id, userId, seedKey?, name, enabled, sortOrder, patterns, createdAt, updatedAt)` — user-owned TXT chapter presets; `seedKey` identifies product-provided presets for safe backfill and restore, while `patterns` stores one configured level per array position. TXT scanning compacts unobserved levels to contiguous output depth for the current book, so a missing parent pattern cannot force all matched child headings to remain nested.
+- `books.meta.tocExcludedChapterIds` — per-book TOC boundary overrides. These stable `ch-<offset>` ids suppress selected detected boundaries without changing the global preset; rebuilding merges the suppressed boundary's text into the preceding chapter, with the synthetic leading `序章` handled as a merge into the first real chapter. `tocExcludedLeadingText` preserves that leading text's source order across EPUB recovery.
+- TXT append is a two-step preview/commit flow. The preview parses the candidate text with the book's effective TOC rule, predicts a continuation point from the last 1–3 existing chapter nodes (including volume/chapter hierarchy), and returns every candidate boundary so the user can override the prediction. Commit accepts the selected normalized-text offset, discards only the candidate prefix before that boundary, then rebuilds the derived EPUB; the existing prefix remains byte-for-byte structurally stable so its CFI, bookmarks, and annotations stay valid. On success, the web mutation updates and invalidates both the library detail cache and the reader's `['book', bookId]` cache so a subsequent reader entry uses the new `updatedAt`-versioned file URL immediately.
 - `ReadingRecord(id, userId, bookId, date, durationSeconds)` — per-day per-book accumulated reading seconds; `date` is the client-local calendar day `YYYY-MM-DD` (sessions bucket to the start-day)
 
 Reading position fields live in the `books` row; progress history and interval data live in storage files under `DATA_DIR`.
@@ -85,10 +87,10 @@ apps/server/src/
   formats/
     registry.ts            # FormatRegistry: dispatcher by extension/MIME
     epub.ts                # EpubParser (OPF/NCX/nav parsing + spine order)
-    txt.ts                 # TxtParser (encoding detect + chapter heuristics)
+    txt.ts                 # TxtParser (encoding detect + chapter heuristics + effective level normalization)
   modules/
     auth.routes.ts          # JWT (jose), instance settings, /setup, /login, /logout, /register, /password, /username
-    books.routes.ts         # books CRUD + upload + cover
+    books.routes.ts         # books CRUD + upload + cover + TOC preview/rebuild + TXT append
     shelves.routes.ts       # shelves CRUD + batch move books in/out of a shelf
     tags.routes.ts          # tags CRUD + m2m book membership
     progress.routes.ts      # reading position
@@ -275,7 +277,7 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | `/api/v1/auth` | auth | `GET /instance` `PATCH /instance`(owner) `POST /login` `POST /logout` `POST /setup` `GET /setup-required` `POST /register` `POST /password` `POST /username` `GET /me` |
 | `/api/v1/users` | users | `GET /`(owner) `PATCH /:id`(owner) |
 | `/api/v1/avatars` | avatars | `POST /`(multipart, jpeg/png/webp/gif ≤ 2MB) `DELETE /` `GET /<hh>/<sha256>.<ext>` (immutable content-hash blob) |
-| `/api/v1/books` | books | `GET /` (supports title/author search plus exact metadata filters `author` and `series`) `POST /` `GET /:id` `DELETE /:id` `GET /:id/file` `GET /:id/cover` `PUT /:id/shelves` (set single shelf, `{shelfId: string|null}`) `GET /:id/shelves` `PUT /:id/tags` `GET /:id/tags` `GET /:id/chapters` |
+| `/api/v1/books` | books | `GET /` (supports title/author search plus exact metadata filters `author` and `series`) `POST /` `GET /:id` `DELETE /:id` `GET /:id/file` `GET /:id/cover` `PUT /:id/shelves` (set single shelf, `{shelfId: string|null}`) `GET /:id/shelves` `PUT /:id/tags` `GET /:id/tags` `GET /:id/chapters` `POST /:id/toc-preview` `POST /:id/re-toc` `POST /:id/append-preview` `POST /:id/append` |
 | `/api/v1/shelves` | shelves | `GET /` `POST /` `PUT /:id` `DELETE /:id` `POST /:id/books` (batch move in) `DELETE /:id/books` (batch move out) |
 | `/api/v1/tags` | tags | `GET /` `POST /` `PUT /:id` `PUT /order` `DELETE /:id` |
 | `/api/v1/fonts` | fonts | `GET /` `POST /` `PATCH /:id/scope`(owner) `DELETE /:id` `GET /:id/file` |

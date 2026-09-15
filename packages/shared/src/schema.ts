@@ -510,7 +510,7 @@ export const tocRulePatternSchema = z.object({
   enabled: z.boolean().default(true),
 })
 
-const tocRulePatternsSchema = z.array(tocRulePatternSchema).min(1).superRefine((patterns, context) => {
+export const tocRulePatternsSchema = z.array(tocRulePatternSchema).min(1).superRefine((patterns, context) => {
   patterns.forEach((pattern, index) => {
     if (pattern.level !== index + 1) {
       context.addIssue({
@@ -544,6 +544,31 @@ export const tocRuleUpdateSchema = z.object({
 
 export const tocRuleReorderSchema = z.object({
   tocRuleIds: z.array(z.string().min(1)),
+})
+
+export const tocPreviewSchema = z.object({
+  tocRuleId: z.string().nullable().optional(),
+  customPatterns: tocRulePatternsSchema.optional(),
+  excludedChapterIds: z.array(z.string().min(1)).max(5000).optional(),
+  limit: z.number().int().min(1).max(5000).optional(),
+  offset: z.number().int().min(0).optional(),
+}).refine((v) => v.customPatterns === undefined || v.customPatterns.every((p) => isValidRegex(p.regex)), {
+  message: 'pattern is not a valid regular expression',
+  path: ['customPatterns'],
+})
+
+export const reTocSchema = z.object({
+  tocRuleId: z.string().nullable().optional(),
+  customPatterns: tocRulePatternsSchema.optional(),
+  excludedChapterIds: z.array(z.string().min(1)).max(5000).optional(),
+}).refine((v) => v.customPatterns === undefined || v.customPatterns.every((p) => isValidRegex(p.regex)), {
+  message: 'pattern is not a valid regular expression',
+  path: ['customPatterns'],
+})
+
+export const appendContentSchema = z.object({
+  text: z.string().min(1).refine((value) => value.trim().length > 0, 'text is required'),
+  startOffset: z.coerce.number().int().min(0).optional(),
 })
 
 export const setupSchema = z.object({

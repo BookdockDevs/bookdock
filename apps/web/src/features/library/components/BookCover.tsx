@@ -40,19 +40,28 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
 
   if (hasCover) {
     return (
-      <img
-        src={source ?? undefined}
-        alt={book.title}
+      <div
         className={cn(
-          'block overflow-hidden rounded-xl border border-stone-200/70 dark:border-stone-800/60',
-          coverFit === 'full'
-            ? 'bg-stone-100 object-contain p-1 dark:bg-stone-800'
-            : 'object-cover',
-          isSm ? 'h-16 w-12' : 'aspect-[2/3] w-full',
+          'relative overflow-hidden rounded-xl border border-stone-200/80 shadow-xs dark:border-stone-800/70',
+          isSm ? 'h-16 w-12 shrink-0' : 'aspect-[2/3] w-full',
         )}
-        onError={() => setError(true)}
-        loading="lazy"
-      />
+      >
+        <img
+          src={source ?? undefined}
+          alt={book.title}
+          className={cn(
+            'block h-full w-full',
+            coverFit === 'full'
+              ? 'bg-stone-100 object-contain p-1 dark:bg-stone-800'
+              : 'object-cover',
+          )}
+          onError={() => setError(true)}
+          loading="lazy"
+        />
+        {/* Subtle spine shadow overlay on real covers */}
+        <span className={cn('pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-black/25 via-black/5 to-transparent', isSm ? 'w-1.5' : 'w-3')} />
+        <span className={cn('pointer-events-none absolute inset-y-0 w-px bg-white/20', isSm ? 'left-1.5' : 'left-2.5')} />
+      </div>
     )
   }
 
@@ -63,11 +72,12 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
     return (
       <div
         className={cn(
-          'relative flex h-16 w-12 items-center justify-center overflow-hidden rounded-xl border border-stone-200/70 dark:border-stone-800/60',
+          'relative flex h-16 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-stone-200/80 shadow-xs dark:border-stone-800/70',
           palette.className,
         )}
       >
-        <span className="absolute inset-y-0 left-0 w-0.5 bg-black/8 dark:bg-black/25" />
+        <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 bg-gradient-to-r from-black/15 to-transparent dark:from-black/30" />
+        <span className="pointer-events-none absolute inset-y-0 left-1.5 w-px bg-white/25 dark:bg-white/10" />
         <span className="select-none font-serif text-lg font-medium">{initial}</span>
       </div>
     )
@@ -76,18 +86,23 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
   return (
     <div
       className={cn(
-        'relative flex aspect-[2/3] w-full select-none flex-col overflow-hidden rounded-xl border border-stone-200/70 shadow-xs dark:border-stone-800/60',
+        'relative flex aspect-[2/3] w-full select-none flex-col overflow-hidden rounded-xl border border-stone-200/80 shadow-xs dark:border-stone-800/70',
         palette.className,
       )}
     >
-      <span className="absolute inset-y-0 left-0 w-1 bg-black/8 dark:bg-black/25" />
-      <span className="absolute inset-y-0 left-2 w-px bg-black/4 dark:bg-black/15" />
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-3.5 pl-4">
+      {/* Spine lighting & crease */}
+      <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-black/10 dark:bg-black/25" />
+      <span className="pointer-events-none absolute inset-y-0 left-2 w-px bg-black/5 dark:bg-black/15" />
+      <span className="pointer-events-none absolute inset-y-0 left-0 w-3.5 bg-gradient-to-r from-black/15 via-black/5 to-transparent dark:from-black/30" />
+      {/* Right edge curvature */}
+      <span className="pointer-events-none absolute inset-y-0 right-0 w-1.5 bg-gradient-to-l from-black/5 to-transparent dark:from-black/15" />
+
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 pl-5">
         <span className="line-clamp-4 text-center font-serif text-[13px] font-medium leading-snug tracking-wide">
           {title}
         </span>
       </div>
-      <span className="pb-2 text-center text-[9px] font-medium uppercase tracking-widest opacity-40">
+      <span className="pb-2 text-center font-mono text-[9px] font-medium uppercase tracking-widest opacity-40">
         {book.format}
       </span>
     </div>

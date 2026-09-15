@@ -142,9 +142,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
         />
       )}
       <aside className={cn(
-        'w-60 shrink-0 flex-col border-r border-stone-200/60 px-3 py-6 dark:border-stone-800/50',
+        'w-60 shrink-0 flex-col border-r border-stone-200/60 px-3 py-6 md:sticky md:top-0 md:h-screen md:self-start dark:border-stone-800/50',
         mobileOpen
-          ? 'fixed inset-y-0 left-0 z-50 flex h-full w-[min(19rem,75vw)] overflow-hidden bg-stone-50 shadow-xl dark:bg-stone-950 md:static md:h-auto md:w-60 md:shadow-none'
+          ? 'fixed inset-y-0 left-0 z-50 flex h-full w-[min(19rem,75vw)] overflow-hidden bg-stone-50 shadow-xl dark:bg-stone-950 md:shadow-none'
           : 'hidden md:flex',
       )}>
       <div className="mb-8 flex items-center gap-2.5 px-2">

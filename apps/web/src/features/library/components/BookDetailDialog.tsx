@@ -4,8 +4,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { BookListItem } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
+import { useBookChapters } from '@/api/hooks/useBookChapters'
 import { Button } from '@/components/ui/Button'
-import Modal from '@/components/ui/Modal'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -14,6 +14,7 @@ import { computeFromAnchor, PADDING, type SmartPosition } from '@/lib/position'
 
 import { useBook, useBookMembership, useResetMetadata, useShelves, useTags } from '../hooks'
 
+import AppendContentModal from './AppendContentModal'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
 import BookCoverEditor from './book-detail/BookCoverEditor'
 import BookDetailView from './book-detail/BookDetailView'
@@ -57,6 +58,8 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   const moreAnchorRef = useRef<HTMLDivElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const [tocRuleOpen, setTocRuleOpen] = useState(false)
+  const [appendContentOpen, setAppendContentOpen] = useState(false)
+  const { data: chaptersData } = useBookChapters(book?.id ?? '', tocRuleOpen && displayBook.format === 'txt')
 
   useEffect(() => {
     if (!pendingCoverFile) {
@@ -98,6 +101,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
 
   const closeDialog = useCallback(() => {
     discardEdit()
+    setAppendContentOpen(false)
     onClose()
   }, [discardEdit, onClose])
 
@@ -118,6 +122,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
     setTocRuleOpen(false)
+    setAppendContentOpen(false)
   }, [book?.id])
 
   function enterEdit() {
@@ -191,7 +196,8 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   const identifier = bookmeta?.isbn || bookmeta?.identifier || ''
 
   return (
-    <div
+    <>
+      <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4"
       onClick={closeDialog}
     >
@@ -238,6 +244,19 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                         <line x1="3" y1="18" x2="3.01" y2="18" />
                       </svg>
                       <span className="flex-1">{_('library.changeTocRule')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreMenu(null)
+                        setAppendContentOpen(true)
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                      <span className="flex-1">{_('library.appendContent')}</span>
                     </button>
                   </SmartMenu>
                 )}
@@ -301,13 +320,15 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
           )}
 
           {displayBook.format === 'txt' && tocRuleOpen && (
-            <Modal title={_('library.tocRuleSection')} onClose={() => setTocRuleOpen(false)}>
-              <TocRulePicker
-                bookId={book.id}
-                currentRuleId={detail?.meta?.tocRuleId}
-                autoScored={detail?.meta?.tocRuleAuto}
-              />
-            </Modal>
+            <TocRulePicker
+              bookId={book.id}
+              currentRuleId={detail?.meta?.tocRuleId}
+              autoScored={detail?.meta?.tocRuleAuto}
+              customPatterns={detail?.meta?.customTocPatterns}
+              excludedChapterIds={detail?.meta?.tocExcludedChapterIds}
+              currentChapters={chaptersData?.data}
+              onClose={() => setTocRuleOpen(false)}
+            />
           )}
         </div>
 
@@ -336,9 +357,13 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
               <button
                 type="button"
                 onClick={() => setConfirmReset(true)}
-                className="text-xs text-stone-400 transition-colors hover:text-stone-700 dark:hover:text-stone-200"
+                className="inline-flex items-center gap-1.5 text-xs text-stone-400 transition-colors hover:text-stone-700 dark:hover:text-stone-200"
               >
-                {_('library.resetMetadata')}
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-70">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+                <span>{_('library.resetMetadata')}</span>
               </button>
             )}
             <div className="flex shrink-0 items-center gap-2">
@@ -353,5 +378,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
         )}
       </div>
     </div>
+      {appendContentOpen && <AppendContentModal bookId={book.id} onClose={() => setAppendContentOpen(false)} />}
+    </>
   )
 }

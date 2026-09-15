@@ -178,8 +178,49 @@ describe('toc-rules service', () => {
     expect(first.every((r) => r.enabled)).toBe(true)
     expect(first.every((r) => r.builtIn)).toBe(true)
     expect(first.map((r) => r.name)).toEqual(SEED_TOC_RULES.map((s) => s.name))
-    expect(first[0]?.name).toBe('中文网文（卷·章·节）')
+    expect(first[0]?.name).toBe('中文网文（卷·章）')
     expect(await listTocRules(ownerId)).toHaveLength(SEED_TOC_RULES.length)
+  })
+
+  it('merges flat Chinese title forms into the hierarchy preset', async () => {
+    const hierarchy = (await listTocRules(ownerId)).find((rule) => rule.name === '中文网文（卷·章）')!
+    expect(hierarchy.patterns).toHaveLength(2)
+    expect(hierarchy.patterns[1]?.regex).toContain('序章')
+    expect(hierarchy.patterns[1]?.regex).toContain('回')
+    expect((await listTocRules(ownerId)).some((rule) => rule.name === '中文网文（章/回 平铺）')).toBe(false)
+  })
+
+  it('retires an untouched legacy flat preset and upgrades the hierarchy preset', async () => {
+    const legacyFlatRegex = '^[ \\t　]{0,4}(?:序章|楔子|正文(?!完|结)|终章|后记|尾声|番外|第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}(?:章|回(?![合来事去])|话|集(?![合和]))).{0,30}$'
+    const legacyChapterRegex = '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}章.{0,30}$'
+    const legacySectionRegex = '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}节(?!课).{0,30}$'
+    const currentRules = new Map(SEED_TOC_RULES.map((rule) => [rule.seedKey, rule]))
+    const now = Date.now()
+    const rows = [
+      { seedKey: 'toc.zh-hierarchy', name: '中文网文（卷·章·节）', patterns: [{ level: 1, regex: currentRules.get('toc.zh-hierarchy')!.patterns[0]!.regex, replacement: null, enabled: true }, { level: 2, regex: legacyChapterRegex, replacement: null, enabled: true }, { level: 3, regex: legacySectionRegex, replacement: null, enabled: true }] },
+      { seedKey: 'toc.zh-flat', name: '中文网文（章/回 平铺）', patterns: [{ level: 1, regex: legacyFlatRegex, replacement: null, enabled: true }] },
+      { seedKey: 'toc.numeric', name: currentRules.get('toc.numeric')!.name, patterns: currentRules.get('toc.numeric')!.patterns },
+      { seedKey: 'toc.en', name: currentRules.get('toc.en')!.name, patterns: currentRules.get('toc.en')!.patterns },
+    ]
+    rows.forEach((row, index) => db.insert(schema.tocRules).values({
+      id: createId('tocr'),
+      userId: ownerId,
+      seedKey: row.seedKey,
+      name: row.name,
+      enabled: 1,
+      sortOrder: index,
+      patterns: row.patterns,
+      createdAt: now,
+      updatedAt: now,
+    }).run())
+
+    const migrated = await listTocRules(ownerId)
+    expect(migrated.map((rule) => rule.name)).toEqual([
+      '中文网文（卷·章）',
+      '数字/大写数字 分隔符 标题',
+      'English Chapter/Section/Part',
+    ])
+    expect(migrated[0]?.patterns[1]?.regex).toContain('序章')
   })
 
   it('delete-all sticks until restore is requested', async () => {
@@ -204,7 +245,6 @@ describe('toc-rules service', () => {
     expect(items.map((rule) => rule.name)).toEqual([
       initial[0]!.name,
       initial[2]!.name,
-      initial[3]!.name,
       'mine',
       initial[1]!.name,
     ])

@@ -26,9 +26,12 @@ export const continuousScrollNeedsBuffer = (remaining, distance) =>
 // backward distance that was actually requested after the new section is
 // prepended. This keeps the follow-up movement equivalent to native scrolling
 // instead of turning it into an animated viewport jump.
-export const continuousScrollBackwardTarget = (scrollStart, wheelDelta) => {
+export const continuousScrollBackwardTarget = (scrollStart, wheelDelta, fallbackDistance = 0) => {
     if (!Number.isFinite(scrollStart) || !Number.isFinite(wheelDelta)) return scrollStart
-    return Math.max(0, scrollStart + Math.min(0, wheelDelta))
+    if (wheelDelta < 0) return Math.max(0, scrollStart + wheelDelta)
+    if (wheelDelta === 0 && Number.isFinite(fallbackDistance) && fallbackDistance > 0)
+        return Math.max(0, scrollStart - fallbackDistance)
+    return scrollStart
 }
 
 // Return loaded sections that are entirely farther than maxDistance behind
@@ -1734,7 +1737,7 @@ export class Paginator extends HTMLElement {
                     `break-${x}: ${y ?? ''}column`))
         })
     }
-    #createView(index) {
+    #createView(index, expandHandler) {
         // Destroy existing view for this index if any
         const existing = this.#views.get(index)
         if (existing) {
@@ -1742,9 +1745,14 @@ export class Paginator extends HTMLElement {
             this.#container.removeChild(existing.element)
             this.#views.delete(index)
         }
-        const view = new View({
+        let view
+        view = new View({
             container: this,
             onExpand: () => {
+                if (expandHandler) {
+                    expandHandler(view)
+                    return
+                }
                 // Only the primary view's resize should adjust scroll;
                 // non-primary views (preloaded/adjacent) must not scroll
                 if (this.#filling || this.#stabilizing || this.scrolled) return
@@ -3229,11 +3237,18 @@ export class Paginator extends HTMLElement {
                 await this.#loadAdjacentSection(prevIndex)
                 const wheelIntent = this.#backwardWheelIntent
                 this.#backwardWheelIntent = 0
-                if (this.#continuous && this.#views.has(prevIndex) && wheelIntent < 0) {
+                if (this.#continuous && this.#views.has(prevIndex)
+                    && this.#lastScrollDirection === -1) {
+                    // Wheel input has an exact continuation distance. Touch
+                    // scrolling has no wheel delta, so retain the old
+                    // one-viewport continuation as a single fallback.
                     const target = continuousScrollBackwardTarget(
-                        this.#renderedStart, wheelIntent)
+                        this.#renderedStart,
+                        wheelIntent,
+                        wheelIntent === 0 ? Math.round(this.size * 0.92) : 0,
+                    )
                     if (target < this.#renderedStart)
-                        await this.#scrollTo(target, null)
+                        await this.#scrollTo(target, null, { animate: true })
                 }
                 this.#lastScrollPosition = this.#renderedStart
             } finally {
@@ -3434,10 +3449,43 @@ export class Paginator extends HTMLElement {
         const firstIndex = this.#sortedViews[0]?.[0]
         const isPrepend = this.scrolled && firstIndex != null && index < firstIndex
         const startBefore = isPrepend ? this.#renderedStart : 0
+        const currentSize = this.#primaryView?.element.getBoundingClientRect()[this.sideProp]
+        const reservedSize = Math.max(
+            Number.isFinite(currentSize) ? currentSize : 0, this.size)
+        const previousOverflowAnchor = isPrepend ? this.#container.style.overflowAnchor : ''
+        let previousSize = reservedSize
+        let inserted = false
+        let loaded = false
         try {
+            if (isPrepend) this.#container.style.overflowAnchor = 'none'
             const src = await section.load()
             const data = await section.loadContent?.()
-            const view = this.#createView(index)
+            const expandHandler = isPrepend
+                ? expandedView => {
+                    if (!loaded || this.#views.get(index) !== expandedView
+                        || expandedView.element.parentNode !== this.#container) return
+                    const nextSize = expandedView.element.getBoundingClientRect()[this.sideProp]
+                    if (!Number.isFinite(nextSize) || nextSize <= 0) return
+                    const sizeDelta = nextSize - previousSize
+                    previousSize = nextSize
+                    if (Math.abs(sizeDelta) <= 0.5
+                        || this.#getViewOffset(index) >= this.#renderedStart) return
+                    this.containerPosition += (this.#vertical ? -1 : 1) * sizeDelta
+                    this.#lastScrollPosition = this.#renderedStart
+                }
+                : undefined
+            const view = this.#createView(index, expandHandler)
+            inserted = true
+            view.element.style[this.sideProp] = `${reservedSize}px`
+            view.element.style.contain = 'layout paint size'
+            view.element.style.contentVisibility = 'visible'
+            // Keep the old first visible section in place while the new iframe
+            // is loading. Without this shift, the viewport briefly lands on
+            // the blank reserved section at scroll position zero.
+            if (isPrepend) {
+                this.containerPosition += (this.#vertical ? -1 : 1) * reservedSize
+                this.#lastScrollPosition = this.#renderedStart
+            }
             const afterLoad = doc => {
                 if (doc.head) {
                     const $styleBefore = doc.createElement('style')
@@ -3465,20 +3513,25 @@ export class Paginator extends HTMLElement {
                 // Mixed-direction views corrupt scroll/page calculations.
                 if (dir.vertical !== this.#vertical) {
                     this.#destroyView(index)
+                    inserted = false
+                    if (isPrepend) this.containerPosition = (this.#vertical ? -1 : 1) * startBefore
                     return
                 }
             }
-            // Keep the previously visible content anchored: the new view added
-            // `addedSize` px above it, so the scroll position must grow by the
-            // same amount. This corrects the browser's scroll-anchoring
-            // suppression at scrollTop 0 and is a no-op when anchoring already
-            // handled the shift (correction ≈ 0).
+            const measuredSize = view.element.getBoundingClientRect()[this.sideProp]
+            const loadedSize = Number.isFinite(measuredSize) && measuredSize > 0
+                ? measuredSize : reservedSize
+            if (loadedSize !== measuredSize)
+                view.element.style[this.sideProp] = `${loadedSize}px`
+            if (measuredSize > 0) view.element.style.contentVisibility = 'auto'
             if (isPrepend) {
-                const addedSize = view.element.getBoundingClientRect()[this.sideProp]
-                const correction = startBefore + addedSize - this.#renderedStart
+                const correction = startBefore + loadedSize - this.#renderedStart
                 if (Math.abs(correction) > 0.5)
                     this.containerPosition += (this.#vertical ? -1 : 1) * correction
+                this.#lastScrollPosition = this.#renderedStart
             }
+            previousSize = loadedSize
+            loaded = true
             this.dispatchEvent(new CustomEvent('create-overlayer', {
                 detail: {
                     doc: view.document, index,
@@ -3488,6 +3541,11 @@ export class Paginator extends HTMLElement {
         } catch (e) {
             console.warn(e)
             console.warn(new Error(`Failed to load adjacent section ${index}`))
+            if (inserted && isPrepend)
+                this.containerPosition = (this.#vertical ? -1 : 1) * startBefore
+            this.#destroyView(index)
+        } finally {
+            if (isPrepend) this.#container.style.overflowAnchor = previousOverflowAnchor
         }
     }
     // Fill adjacent sections until at least `minPages` pages exist

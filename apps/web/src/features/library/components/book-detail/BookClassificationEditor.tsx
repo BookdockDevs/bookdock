@@ -4,7 +4,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 
 import { useCreateShelf, useCreateTag, useShelves, useTags } from '../../hooks'
 import { toggleSetItem } from './types'
-import { Chip, GroupLabel } from './ui'
+import { Chip } from './ui'
 
 interface BookClassificationEditorProps {
   shelfId: string | null
@@ -74,10 +74,9 @@ export default function BookClassificationEditor({
   }
 
   return (
-    <section className="mt-6">
-      <GroupLabel>{_('library.membershipSection')}</GroupLabel>
-      <p className="mb-2 text-xs font-medium text-stone-500 dark:text-stone-400">{_('library.shelves')}</p>
-      <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
+    <section className="mt-5 border-t border-stone-100 pt-4 dark:border-stone-800">
+      <p className="mb-2 text-xs font-semibold text-stone-500 dark:text-stone-400">{_('library.shelves')}</p>
+      <div className="flex max-h-28 flex-wrap items-center gap-1.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
         <Chip
           label={_('library.uncategorized')}
           selected={shelfId === null}
@@ -92,7 +91,7 @@ export default function BookClassificationEditor({
           />
         ))}
         {newShelfOpen ? (
-          <span ref={newShelfEditorRef} className="flex items-center gap-1">
+          <span ref={newShelfEditorRef} className="inline-flex items-center gap-1">
             <input
               type="text"
               value={newShelf}
@@ -109,16 +108,16 @@ export default function BookClassificationEditor({
                 }
               }}
               placeholder={_('library.newShelfPlaceholder')}
-              className="h-8 w-28 rounded-full border border-stone-200 bg-white px-3 text-xs text-stone-700 outline-none placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500"
+              className="h-[26px] w-24 rounded-full border border-stone-200 bg-white px-2.5 text-xs text-stone-700 outline-none transition-colors placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500"
             />
             <button
               type="button"
               onClick={() => void handleCreateShelf()}
               disabled={!newShelf.trim() || createShelf.isPending}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-800 disabled:opacity-40 dark:border-stone-700 dark:hover:text-stone-200"
+              className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200 hover:text-stone-900 disabled:opacity-40 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
               aria-label={_('library.newShelf')}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="m5 13 4 4 10-10" />
               </svg>
             </button>
@@ -126,26 +125,28 @@ export default function BookClassificationEditor({
         ) : (
           <button
             type="button"
+            aria-label={`+ ${_('library.newShelf')}`}
             onClick={() => setNewShelfOpen(true)}
-            className="rounded-full border border-dashed border-stone-300 px-3 py-1.5 text-xs text-stone-400 transition-colors hover:border-stone-400 hover:text-stone-600 dark:border-stone-600 dark:hover:border-stone-500 dark:hover:text-stone-300"
+            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
           >
-            + {_('library.newShelf')}
+            + {_('library.new')}
           </button>
         )}
       </div>
 
-      <p className="mb-2 mt-4 text-xs font-medium text-stone-500 dark:text-stone-400">{_('library.tags')}</p>
+      <p className="mb-2 mt-4 text-xs font-semibold text-stone-500 dark:text-stone-400">{_('library.tags')}</p>
       <div className="flex max-h-28 flex-wrap items-center gap-1.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
         {(tagsData?.data ?? []).map((tag) => (
           <Chip
             key={tag.id}
             label={tag.name}
             selected={tagIds.has(tag.id)}
+            showCheck
             onClick={() => onTagChange((current) => toggleSetItem(current, tag.id))}
           />
         ))}
         {newTagOpen ? (
-          <span ref={newTagEditorRef} className="flex items-center gap-1">
+          <span ref={newTagEditorRef} className="inline-flex items-center gap-1">
             <input
               type="text"
               value={newTag}
@@ -162,16 +163,16 @@ export default function BookClassificationEditor({
                 }
               }}
               placeholder={_('library.newTagPlaceholder')}
-              className="h-8 w-28 rounded-full border border-stone-200 bg-white px-3 text-xs text-stone-700 outline-none placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500"
+              className="h-[26px] w-24 rounded-full border border-stone-200 bg-white px-2.5 text-xs text-stone-700 outline-none transition-colors placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500"
             />
             <button
               type="button"
               onClick={() => void handleCreateTag()}
               disabled={!newTag.trim() || createTag.isPending}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-800 disabled:opacity-40 dark:border-stone-700 dark:hover:text-stone-200"
+              className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200 hover:text-stone-900 disabled:opacity-40 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
               aria-label={_('library.newTag')}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="m5 13 4 4 10-10" />
               </svg>
             </button>
@@ -179,10 +180,11 @@ export default function BookClassificationEditor({
         ) : (
           <button
             type="button"
+            aria-label={`+ ${_('library.newTag')}`}
             onClick={() => setNewTagOpen(true)}
-            className="rounded-full border border-dashed border-stone-300 px-3 py-1.5 text-xs text-stone-400 transition-colors hover:border-stone-400 hover:text-stone-600 dark:border-stone-600 dark:hover:border-stone-500 dark:hover:text-stone-300"
+            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
           >
-            + {_('library.newTag')}
+            + {_('library.new')}
           </button>
         )}
       </div>

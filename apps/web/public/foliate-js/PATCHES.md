@@ -119,7 +119,7 @@
     - 符号：`#onWheel`、`#onWheelSnap`、`#onWheelPage`、`#onDocKey`、`#scheduleBackwardBuffer`、`scrollByViewport`、`scrollByPixels`、`snapWheelStep`；`FoliateReader.applyContinuousScroll` 的 `continuous`/`no-continuous-scroll` 属性切换。
     - 根因/需求：重基线的 paginator 没有迁回 v0.2.2 的 iframe wheel/keyboard 入口、跳章两阶段累计和连续边缘状态；adapter 直接写 `containerPosition` 又绕过了核心边界。另一个迁移遗漏是切换到长卷时只改属性、不启动最终状态下的 `#fillVisibleArea()`，造成“长卷已选中但仍单章”。自动阅读还曾在启动时移除 `snap-turn`，导致跳章模式到章尾既不累计切章也不返回停止信号。关闭模式只允许明确导航切章；跳章第一次到边界、再次同向达到阈值才切章；长卷向下追加、向上非对称回读/回收；滚动模式上下键跳视口、左右键切章。
     - 为什么不能仅放适配层：iframe 事件、section 边界、`#views` 装载/销毁、scroll compensation、主视图计算和模式属性回调都属于 paginator 的 shadow DOM 私有状态；在 React 适配层复制会形成第二套导航和阈值状态。
-    - 影响范围：只改变 page/scrolled 的滚轮、iframe 键盘、continuous buffer、模式切换初始化和自动滚动边界；不改变 EPUB 内容、CFI、Range、搜索或标注数据。连续模式历史边缘补章只回放实际累积的向上滚轮距离，不额外平滑滚动一整屏；显式章节导航不主动加载更上一章，待用户继续向上到历史边缘后再触发。`scrollByPixels` 返回 `false` 表示当前模式阻止继续自动移动，避免关闭模式在章尾无动作空转。
+    - 影响范围：只改变 page/scrolled 的滚轮、iframe 键盘、continuous buffer、模式切换初始化和自动滚动边界；不改变 EPUB 内容、CFI、Range、搜索或标注数据。连续模式历史边缘补章仍只在到达保留窗口边缘并再次同向操作后触发；有 wheel 距离时只回放实际累积距离，没有可测 wheel 距离的触屏场景最多续接一个视口，避免加载完成后停在当前章顶部。显式章节导航不主动加载更上一章，待用户继续向上到历史边缘后再触发。`scrollByPixels` 返回 `false` 表示当前模式阻止继续自动移动，避免关闭模式在章尾无动作空转。
     - 验证用例：paginator/Reader/continuous-scroll/auto-reading 定向测试共 56 项通过；`pnpm test` 的 Server 482、Web 1029 项全量测试通过，`pnpm typecheck`、`pnpm lint`、production build 和 `node --check` 通过；浏览器已验证跳章边界和长卷向下 1→2→3 view 追加、向上不对称增长。自动阅读/键盘的完整实机验收仍标 `[B]`。
 
 16. **`paginator.js` / `#container` full-width scroll surface**
@@ -129,7 +129,7 @@
 
 17. **`paginator.js` / `#trimDistantViews` 双向连续阅读窗口**
    - 对应上游：submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4` 的 `Paginator`，Bookdock 在其基础上补充双向窗口回收。
-   - 需求：seamless 连卷向上阅读时，已完全远离视口的前置 section 也要回收；插入/删除前置 view 后必须补偿 scroll position，保持同一段正文停在视口原处。向上不是向下预加载的镜像：只有到达已保留窗口边缘并再次同向操作时才按需恢复更早 section。
+   - 需求：seamless 连卷向上阅读时，已完全远离视口的前置 section 也要回收；插入/删除前置 view 后必须补偿 scroll position，保持同一段正文停在视口原处。前置 view 插入前先保留稳定尺寸并让视口越过该保留槽，避免加载中的空 iframe 闪入视口；首次布局和后续字体/图片撑高都要纳入补偿。向上不是向下预加载的镜像：只有到达已保留窗口边缘并再次同向操作时才按需恢复更早 section。
    - 不能只放适配层：section view 的销毁、iframe unload、shadow scroll 坐标和连续 buffer 都由 paginator 私有状态共同维护，宿主只知道当前 public position，无法安全删除前置 view。
    - 影响/验证：只影响连续滚动的内存/布局窗口，不改变正文顺序、CFI 或非连续模式；`continuousScrollTrimBefore` contract test 覆盖距离阈值和活动 section 保留，`#scheduleBackwardBuffer` 与 `#loadAdjacentSection` 覆盖延迟边缘和插入补偿，浏览器已观察向下追加后向上不对称增加 view。
 

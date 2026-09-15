@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
@@ -14,6 +14,18 @@ interface BookMetaFormProps {
 
 export default function BookMetaForm({ draft, onChange, identifier, coverSlot }: BookMetaFormProps) {
   const _ = useTranslation()
+
+  const hasExtendedMeta = Boolean(
+    draft.publisher?.trim() ||
+    draft.published?.trim() ||
+    draft.language?.trim() ||
+    draft.isbn?.trim() ||
+    draft.subjects?.trim() ||
+    draft.series?.trim() ||
+    draft.seriesIndex?.trim() ||
+    identifier,
+  )
+  const [expanded, setExpanded] = useState(hasExtendedMeta)
 
   const update = (field: keyof MetaDraft, value: string) => {
     onChange({ ...draft, [field]: value })
@@ -60,87 +72,116 @@ export default function BookMetaForm({ draft, onChange, identifier, coverSlot }:
         </div>
       </section>
 
-      <section className="mt-6">
-        <GroupLabel>{_('library.editGroupPublishing')}</GroupLabel>
-        <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
-          <Field label={_('library.publisher')}>
-            <input
-              type="text"
-              value={draft.publisher}
-              onChange={(e) => update('publisher', e.target.value)}
-              className={inputClass}
-            />
-          </Field>
-          <Field label={_('library.published')}>
-            <input
-              type="text"
-              value={draft.published}
-              onChange={(e) => update('published', e.target.value)}
-              className={inputClass}
-            />
-          </Field>
-          <Field label={_('library.language')}>
-            <input
-              type="text"
-              value={draft.language}
-              onChange={(e) => update('language', e.target.value)}
-              className={inputClass}
-            />
-          </Field>
-          <Field label="ISBN">
-            <input
-              type="text"
-              value={draft.isbn}
-              onChange={(e) => update('isbn', e.target.value)}
-              className={inputClass}
-            />
-          </Field>
-          <Field label={_('library.subjects')}>
-            <input
-              type="text"
-              value={draft.subjects}
-              onChange={(e) => update('subjects', e.target.value)}
-              className={inputClass}
-            />
-          </Field>
-        </div>
-        {identifier && (
-          <div className="mt-3">
-            <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">{_('library.identifier')}</span>
-            <button
-              type="button"
-              title={identifier}
-              onClick={() => void copyText(identifier)}
-              className="font-mono text-sm text-stone-600 transition-colors hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100"
-            >
-              {middleTruncate(identifier)}
-            </button>
-          </div>
-        )}
-      </section>
+      <div className="mt-5 border-t border-stone-100 pt-3 dark:border-stone-800">
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="inline-flex items-center gap-1.5 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+          <span>{expanded ? _('library.lessMetadata') : _('library.moreMetadata')}</span>
+        </button>
+      </div>
 
-      <section className="mt-6">
-        <GroupLabel>{_('library.seriesSection')}</GroupLabel>
-        <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
-          <Field label={_('library.seriesSection')}>
-            <input
-              type="text"
-              value={draft.series}
-              onChange={(e) => update('series', e.target.value)}
-              className={inputClass}
-            />
-          </Field>
-          <Field label={_('library.seriesIndex')}>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={draft.seriesIndex}
-              onChange={(e) => update('seriesIndex', e.target.value)}
-              className={inputClass}
-            />
-          </Field>
+      {expanded && (
+        <div className="mt-3 space-y-5 rounded-xl border border-stone-100 bg-stone-50/50 p-3.5 dark:border-stone-800 dark:bg-stone-800/30">
+          <section>
+            <GroupLabel>{_('library.editGroupPublishing')}</GroupLabel>
+            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+              <Field label={_('library.publisher')}>
+                <input
+                  type="text"
+                  value={draft.publisher}
+                  onChange={(e) => update('publisher', e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label={_('library.published')}>
+                <input
+                  type="text"
+                  value={draft.published}
+                  onChange={(e) => update('published', e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label={_('library.language')}>
+                <input
+                  type="text"
+                  value={draft.language}
+                  onChange={(e) => update('language', e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="ISBN">
+                <input
+                  type="text"
+                  value={draft.isbn}
+                  onChange={(e) => update('isbn', e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+              <div className="sm:col-span-2">
+                <Field label={_('library.subjects')}>
+                  <input
+                    type="text"
+                    value={draft.subjects}
+                    onChange={(e) => update('subjects', e.target.value)}
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+            </div>
+            {identifier && (
+              <div className="mt-3">
+                <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">{_('library.identifier')}</span>
+                <button
+                  type="button"
+                  title={identifier}
+                  onClick={() => void copyText(identifier)}
+                  className="font-mono text-sm text-stone-600 transition-colors hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100"
+                >
+                  {middleTruncate(identifier)}
+                </button>
+              </div>
+            )}
+          </section>
+
+          <section>
+            <GroupLabel>{_('library.seriesSection')}</GroupLabel>
+            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+              <Field label={_('library.seriesSection')}>
+                <input
+                  type="text"
+                  value={draft.series}
+                  onChange={(e) => update('series', e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label={_('library.seriesIndex')}>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={draft.seriesIndex}
+                  onChange={(e) => update('seriesIndex', e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+          </section>
         </div>
-      </section>
+      )}
     </div>
   )
 }

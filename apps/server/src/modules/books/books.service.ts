@@ -1,4 +1,4 @@
-﻿import type { Readable } from 'node:stream'
+import type { Readable } from 'node:stream'
 
 import { eq, ne, lt, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
 import JSZip from 'jszip'
@@ -7,15 +7,24 @@ import { books, annotations, bookTags, shelves, tags, settings, users as usersTa
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
 import { extractEpubChapterText } from '../../formats/epub'
-import { scanTxtChapters, normalizeText, decodeTextBuffer } from '../../formats/txt'
+import {
+  applyTxtChapterExclusions,
+  canExcludeTxtChapter,
+  decodeTextBuffer,
+  getTxtChapterContent,
+  normalizeText,
+  scanTxtChapters,
+  txtChapterId,
+} from '../../formats/txt'
 import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { sha256 } from '../../lib/hash'
 import { countWords } from '../../lib/word-count'
+import { readProgressFile } from '../../lib/progress-file'
 import { log } from '../../lib/logger'
-import type { BookFormat, BookMetadata, Chapter, TocRulePattern, TrashSettings, ViewSettings } from '@bookdock/shared'
+import type { AppendContentCandidate, AppendContentPreviewRes, BookFormat, BookMetadata, Chapter, TocPreviewChapter, TocPreviewRes, TocRulePattern, TrashSettings, ViewSettings } from '@bookdock/shared'
 
 /**
  * The effective TOC preset for a book: the pinned rule id in books.meta
@@ -24,11 +33,57 @@ import type { BookFormat, BookMetadata, Chapter, TocRulePattern, TrashSettings, 
  * preset applies (the built-in patterns take over) and `tocRuleId` is
  * null then too.
  */
+interface CachedNormalizedText {
+  normalized: string
+  cachedAt: number
+}
+const normalizedTextCache = new Map<string, CachedNormalizedText>()
+const NORMALIZED_CACHE_TTL_MS = 5 * 60 * 1000
+
+function getCachedNormalized(key: string): string | null {
+  const item = normalizedTextCache.get(key)
+  if (!item) return null
+  if (Date.now() - item.cachedAt > NORMALIZED_CACHE_TTL_MS) {
+    normalizedTextCache.delete(key)
+    return null
+  }
+  return item.normalized
+}
+
+function setCachedNormalized(key: string, normalized: string) {
+  if (normalizedTextCache.size > 50) {
+    const oldestKey = normalizedTextCache.keys().next().value
+    if (oldestKey) normalizedTextCache.delete(oldestKey)
+  }
+  normalizedTextCache.set(key, { normalized, cachedAt: Date.now() })
+}
+
+function invalidateCachedNormalized(bookId: string) {
+  for (const key of normalizedTextCache.keys()) {
+    if (key.startsWith(bookId + ':')) normalizedTextCache.delete(key)
+  }
+}
+
+/**
+ * The effective TOC preset for a book: the pinned rule id in books.meta
+ * (user-chosen or auto-scored) when it still exists, otherwise nothing.
+ * Returns `{ patterns, tocRuleId, tocRuleAuto, ruleName }`; `patterns` is null when no
+ * preset applies (the built-in patterns take over) and `tocRuleId` is
+ * null then too.
+ */
 export async function resolveEffectiveTocRule(
   userId: string,
   book: { meta: Record<string, unknown> },
-): Promise<{ patterns: TocRulePattern[] | null; tocRuleId: string | null; tocRuleAuto: boolean }> {
+): Promise<{ patterns: TocRulePattern[] | null; tocRuleId: string | null; tocRuleAuto: boolean; ruleName?: string }> {
   const meta = book.meta
+  if (Array.isArray(meta.customTocPatterns) && meta.customTocPatterns.length > 0) {
+    return {
+      patterns: (meta.customTocPatterns as TocRulePattern[]).filter((p) => p.enabled !== false),
+      tocRuleId: 'custom',
+      tocRuleAuto: false,
+      ruleName: '本书专属规则',
+    }
+  }
   const pinnedId = typeof meta.tocRuleId === 'string' ? meta.tocRuleId : null
   if (!pinnedId) return { patterns: null, tocRuleId: null, tocRuleAuto: false }
   const db = getDb()
@@ -38,6 +93,7 @@ export async function resolveEffectiveTocRule(
     patterns: rule.patterns.filter((p) => p.enabled !== false),
     tocRuleId: pinnedId,
     tocRuleAuto: meta.tocRuleAuto === true,
+    ruleName: rule.name,
   }
 }
 
@@ -331,6 +387,313 @@ export async function getBookChapters(userId: string, bookId: string) {
   return (book.meta?.chapters ?? []) as Chapter[]
 }
 
+interface PreparedTxtAppend {
+  mergedNormalized: string
+  chapters: ReturnType<typeof scanTxtChapters>
+  originalWordCount: number
+  newWordCount: number
+  mergedRawChapters: ReturnType<typeof scanTxtChapters>
+  excludedChapterIds: string[]
+  metaChapters: Array<{
+    id: string
+    title: string
+    level: number
+    startOffset: number
+    endOffset: number
+    contentStartOffset: number
+    contentRanges?: Array<{ startOffset: number; endOffset: number }>
+    wordCount: number
+  }>
+  candidateChapters: AppendContentCandidate[]
+  predictedStartIndex: number
+  preview: AppendContentPreviewRes
+}
+
+function chapterSequenceKey(chapter: Pick<AppendContentCandidate, 'title' | 'level'>): string {
+  return `${chapter.level}:${chapter.title.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase()}`
+}
+
+function parseChineseChapterNumber(value: string): number | null {
+  const digits: Record<string, number> = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+  const units: Record<string, number> = { 十: 10, 百: 100, 千: 1_000, 万: 10_000, 亿: 100_000_000 }
+  if (!value || [...value].some((char) => digits[char] === undefined && units[char] === undefined)) return null
+
+  let total = 0
+  let section = 0
+  for (const char of value) {
+    const digit = digits[char]
+    if (digit !== undefined) {
+      section = digit
+      continue
+    }
+    const unit = units[char]!
+    if (unit >= 10_000) {
+      total += section
+      total *= unit
+      section = 0
+    } else {
+      total += (section || 1) * unit
+      section = 0
+    }
+  }
+  return total + section
+}
+
+function chapterNumber(title: string): number | null {
+  const arabic = title.match(/第\s*(\d+)\s*(?:章|回|节)/i)?.[1]
+    ?? title.match(/\bchapter\s+(\d+)\b/i)?.[1]
+  if (arabic) return Number(arabic)
+  const chinese = title.match(/第\s*([零〇一二两三四五六七八九十百千万亿]+)\s*(?:章|回|节)/)?.[1]
+  return chinese ? parseChineseChapterNumber(chinese) : null
+}
+
+function sumCandidateWords(candidates: AppendContentCandidate[], endExclusive: number): number {
+  return candidates.slice(0, endExclusive).reduce((sum, chapter) => sum + chapter.wordCount, 0)
+}
+
+export function predictAppendStartIndex(
+  originalChapters: AppendContentCandidate[],
+  candidates: AppendContentCandidate[],
+  originalWordCount: number,
+): number {
+  if (candidates.length === 0 || originalChapters.length === 0) return 0
+
+  const sequenceLength = Math.min(3, originalChapters.length)
+  for (let length = sequenceLength; length >= 1; length -= 1) {
+    const suffix = originalChapters.slice(-length).map(chapterSequenceKey)
+    const matches: number[] = []
+    for (let index = 0; index <= candidates.length - length; index += 1) {
+      const sequence = candidates.slice(index, index + length).map(chapterSequenceKey)
+      if (sequence.every((key, sequenceIndex) => key === suffix[sequenceIndex])) {
+        matches.push(index + length)
+      }
+    }
+    if (matches.length > 0) {
+      return matches.sort((left, right) =>
+        Math.abs(sumCandidateWords(candidates, left) - originalWordCount) -
+        Math.abs(sumCandidateWords(candidates, right) - originalWordCount),
+      )[0]!
+    }
+  }
+
+  const lastNumber = chapterNumber(originalChapters[originalChapters.length - 1]!.title)
+  if (lastNumber !== null) {
+    const nextNumber = lastNumber + 1
+    const nextIndex = candidates.findIndex((chapter) => chapterNumber(chapter.title) === nextNumber)
+    if (nextIndex >= 0) return nextIndex
+  }
+
+  if (candidates.length > originalChapters.length) {
+    const prefixWords = sumCandidateWords(candidates, originalChapters.length)
+    const tolerance = Math.max(100, originalWordCount * 0.15)
+    if (Math.abs(prefixWords - originalWordCount) <= tolerance) return originalChapters.length
+  }
+
+  return 0
+}
+
+function resolveAppendStartOffset(
+  appendedNormalized: string,
+  candidates: AppendContentCandidate[],
+  predictedStartIndex: number,
+  requestedStartOffset?: number,
+): number {
+  const startOffset = requestedStartOffset ?? candidates[predictedStartIndex]?.startOffset ?? appendedNormalized.length
+  if (!Number.isInteger(startOffset) || startOffset < 0 || startOffset > appendedNormalized.length) {
+    throw new AppError('VALIDATION_ERROR', 'Invalid append start offset')
+  }
+  if (startOffset !== 0 && startOffset !== appendedNormalized.length && !candidates.some((chapter) => chapter.startOffset === startOffset)) {
+    throw new AppError('VALIDATION_ERROR', 'Append start must be a chapter boundary')
+  }
+  return startOffset
+}
+
+async function prepareTxtAppend(userId: string, bookId: string, appendedText: string, requestedStartOffset?: number): Promise<PreparedTxtAppend> {
+  if (!appendedText.trim()) throw new AppError('VALIDATION_ERROR', 'Append content is required')
+
+  const book = await getActiveBook(userId, bookId)
+  if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'Appending content only supports txt books')
+
+  const normalized = await getOrRecoverTxtNormalized(book)
+  const appendedNormalized = normalizeText(appendedText)
+  if (!appendedNormalized) throw new AppError('VALIDATION_ERROR', 'Append content is required')
+
+  const effective = await resolveEffectiveTocRule(userId, book)
+  let patterns = effective.patterns
+  if (patterns === null) {
+    const scored = scoreTocRules(userId, normalized.slice(0, TOC_SAMPLE_SIZE))
+    patterns = scored ? scored.patterns.filter((pattern) => pattern.enabled !== false) : null
+  }
+
+  const storedExcludedChapterIds = Array.isArray(book.meta.tocExcludedChapterIds)
+    ? book.meta.tocExcludedChapterIds.filter((id): id is string => typeof id === 'string')
+    : []
+  const originalRawChapters = scanTxtChapters(normalized, patterns ?? undefined)
+  const { chapters: originalChapters } = applyTxtChapterExclusions(originalRawChapters, storedExcludedChapterIds)
+  const originalCandidateChapters = originalChapters.map((chapter) => ({
+    title: chapter.title,
+    level: chapter.level,
+    wordCount: countWords(getTxtChapterContent(normalized, chapter)),
+    startOffset: chapter.startOffset,
+  }))
+  const candidateRawChapters = scanTxtChapters(appendedNormalized, patterns ?? undefined)
+  const candidateChapters = candidateRawChapters.map((chapter) => ({
+    title: chapter.title,
+    level: chapter.level,
+    wordCount: countWords(getTxtChapterContent(appendedNormalized, chapter)),
+    startOffset: chapter.startOffset,
+  }))
+  const originalWordCount = originalCandidateChapters.reduce((sum, chapter) => sum + chapter.wordCount, 0)
+  const predictedStartIndex = predictAppendStartIndex(originalCandidateChapters, candidateChapters, originalWordCount)
+  const selectedStartOffset = resolveAppendStartOffset(appendedNormalized, candidateChapters, predictedStartIndex, requestedStartOffset)
+  const validAppendedNormalized = appendedNormalized.slice(selectedStartOffset).trimStart()
+  const mergedNormalized = validAppendedNormalized
+    ? `${normalized.trimEnd()}\n\n${validAppendedNormalized}`
+    : normalized
+  const mergedRawChapters = scanTxtChapters(mergedNormalized, patterns ?? undefined)
+  const { chapters, excludedChapterIds } = applyTxtChapterExclusions(mergedRawChapters, storedExcludedChapterIds)
+
+  const originalMetaChapters = originalChapters.map((chapter) => ({
+    ...chapter,
+    id: txtChapterId(chapter),
+    wordCount: countWords(getTxtChapterContent(normalized, chapter)),
+  }))
+  const metaChapters = chapters.map((chapter) => ({
+    id: txtChapterId(chapter),
+    title: chapter.title,
+    level: chapter.level,
+    startOffset: chapter.startOffset,
+    endOffset: chapter.endOffset,
+    contentStartOffset: chapter.contentStartOffset,
+    contentRanges: chapter.contentRanges,
+    wordCount: countWords(getTxtChapterContent(mergedNormalized, chapter)),
+  }))
+  const newWordCount = metaChapters.reduce((sum, chapter) => sum + chapter.wordCount, 0)
+  const addedChapterCount = Math.max(0, metaChapters.length - originalMetaChapters.length)
+  const addedChapters = metaChapters.slice(originalMetaChapters.length).map((chapter) => ({
+    title: chapter.title,
+    level: chapter.level,
+    wordCount: chapter.wordCount,
+  }))
+  const appendedToLastChapter = addedChapterCount === 0
+
+  // A stored exclusion is a persistent boundary decision, so keep its actual
+  // value in the rebuilt metadata even when a stale id no longer matches.
+  const preview: AppendContentPreviewRes = {
+    originalChapterCount: originalMetaChapters.length,
+    originalWordCount,
+    newChapterCount: metaChapters.length,
+    newWordCount,
+    addedChapterCount,
+    addedWordCount: Math.max(0, newWordCount - originalWordCount),
+    candidateTextLength: appendedNormalized.length,
+    candidateChapters,
+    predictedStartIndex,
+    addedChapters,
+    appendedToLastChapter,
+    ...(appendedToLastChapter && metaChapters.length > 0 ? { lastChapterTitle: metaChapters[metaChapters.length - 1]!.title } : {}),
+  }
+
+  return {
+    mergedNormalized,
+    chapters,
+    originalWordCount,
+    newWordCount,
+    mergedRawChapters,
+    excludedChapterIds,
+    metaChapters,
+    candidateChapters,
+    predictedStartIndex,
+    preview,
+  }
+}
+
+export async function previewAppendTxtBookContent(userId: string, bookId: string, appendedText: string, startOffset?: number): Promise<AppendContentPreviewRes> {
+  const prepared = await prepareTxtAppend(userId, bookId, appendedText, startOffset)
+  return prepared.preview
+}
+
+export async function appendTxtBookContent(userId: string, bookId: string, appendedText: string, startOffset?: number) {
+  const prepared = await prepareTxtAppend(userId, bookId, appendedText, startOffset)
+  const db = getDb()
+  const storage = getStorage()
+  const book = await getActiveBook(userId, bookId)
+  const meta: Record<string, unknown> = {
+    ...book.meta,
+    chapters: prepared.metaChapters,
+    wordCount: prepared.newWordCount,
+    txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION,
+  }
+  const leadingExcludedId = prepared.mergedRawChapters[0] ? txtChapterId(prepared.mergedRawChapters[0]) : null
+  if (prepared.excludedChapterIds.length > 0) meta.tocExcludedChapterIds = prepared.excludedChapterIds
+  else delete meta.tocExcludedChapterIds
+  if (prepared.mergedRawChapters[0]?.synthetic && leadingExcludedId && prepared.excludedChapterIds.includes(leadingExcludedId)) {
+    const leadingText = getTxtChapterContent(prepared.mergedNormalized, prepared.mergedRawChapters[0]).trim()
+    if (leadingText) meta.tocExcludedLeadingText = leadingText
+  } else {
+    delete meta.tocExcludedLeadingText
+  }
+
+  const epubChapters = prepared.chapters.map((chapter) => ({
+    id: txtChapterId(chapter),
+    title: chapter.title,
+    level: chapter.level,
+  }))
+  const contentFor = (index: number) => getTxtChapterContent(prepared.mergedNormalized, prepared.chapters[index]!)
+  const epubBuffer = await convertTxtToEpub(
+    { title: book.title, author: book.author || undefined, id: book.id },
+    epubChapters,
+    contentFor,
+  )
+  const contentHash = sha256(epubBuffer)
+  const filePath = blobKey(contentHash, '.epub')
+  await storage.put(filePath, epubBuffer)
+
+  const progress = await readProgressFile(bookId)
+  const scale = prepared.newWordCount > 0 ? prepared.originalWordCount / prepared.newWordCount : 1
+  const scaleFraction = (value: number) => Math.max(0, Math.min(1, value * scale))
+  const oldPercent = progress?.percent ?? book.progress
+  const newPercent = Math.min(100, Math.round(oldPercent * scale))
+  if (progress) {
+    const nextProgress = {
+      ...progress,
+      percent: newPercent,
+      fraction: typeof progress.fraction === 'number' ? scaleFraction(progress.fraction) : progress.fraction,
+      intervals: (progress.intervals ?? []).map(([start, end]) => [scaleFraction(start), scaleFraction(end)] as [number, number]),
+      rateSamples: Array.isArray(progress.rateSamples)
+        ? progress.rateSamples.map((sample) => (
+            sample && typeof sample === 'object' && typeof (sample as { fraction?: unknown }).fraction === 'number'
+              ? { ...sample, fraction: scaleFraction((sample as { fraction: number }).fraction) }
+              : sample
+          ))
+        : progress.rateSamples,
+      updatedAt: Date.now(),
+    }
+    await storage.put(`progress/${bookId}.json`, Buffer.from(JSON.stringify(nextProgress), 'utf-8'))
+  }
+
+  const oldFilePath = book.filePath
+  const updatedAt = Date.now()
+  db.update(books).set({
+    filePath,
+    contentHash,
+    size: epubBuffer.length,
+    meta,
+    progress: newPercent,
+    updatedAt,
+  }).where(and(eq(books.id, bookId), eq(books.userId, userId))).run()
+  invalidateCachedNormalized(bookId)
+
+  if (oldFilePath !== filePath) {
+    const refs = db.select({ count: sql<number>`count(*)` }).from(books).where(eq(books.filePath, oldFilePath)).get()
+    if ((refs?.count ?? 0) === 0 && await storage.exists(oldFilePath)) {
+      await storage.delete(oldFilePath)
+    }
+  }
+
+  return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+}
+
 const LEGACY_TXT_FONT_DECLARATION = /font-family\s*:\s*"Noto Serif SC"\s*,\s*"Source Han Serif SC"\s*,\s*"SimSun"\s*,\s*serif\s*;/i
 
 export interface TxtArtifactMigrationResult {
@@ -395,23 +758,27 @@ async function rebuildTocBook(
   patterns: TocRulePattern[] | null,
   tocRuleId: string | null,
   tocRuleAuto: boolean,
+  customPatterns?: TocRulePattern[] | null,
+  requestedExcludedChapterIds: string[] = [],
 ): Promise<string> {
   const storage = getStorage()
   const book = await getBook(userId, bookId)
   if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'Re-TOC only supports txt books')
 
-  const normalized = await recoverTxtNormalized(book)
-  const chapters = scanTxtChapters(normalized, patterns ?? undefined)
+  const normalized = await getOrRecoverTxtNormalized(book)
+  const rawChapters = scanTxtChapters(normalized, patterns ?? undefined)
+  const { chapters, excludedChapterIds } = applyTxtChapterExclusions(rawChapters, requestedExcludedChapterIds)
 
   const db = getDb()
   const metaChapters = chapters.map((c) => ({
-    id: `ch-${c.startOffset}`,
+    id: txtChapterId(c),
     title: c.title,
     level: c.level,
     startOffset: c.startOffset,
     endOffset: c.endOffset,
     contentStartOffset: c.contentStartOffset,
-    wordCount: countWords(normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)),
+    contentRanges: c.contentRanges,
+    wordCount: countWords(getTxtChapterContent(normalized, c)),
   }))
   const wordCount = metaChapters.reduce((sum, c) => sum + c.wordCount, 0)
   const meta: Record<string, unknown> = {
@@ -419,6 +786,15 @@ async function rebuildTocBook(
     chapters: metaChapters,
     wordCount,
     txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION,
+  }
+  if (excludedChapterIds.length > 0) meta.tocExcludedChapterIds = excludedChapterIds
+  else delete meta.tocExcludedChapterIds
+  const leadingExcludedId = rawChapters[0] ? txtChapterId(rawChapters[0]) : null
+  if (rawChapters[0]?.synthetic && leadingExcludedId && excludedChapterIds.includes(leadingExcludedId)) {
+    const leadingText = getTxtChapterContent(normalized, rawChapters[0]).trim()
+    if (leadingText) meta.tocExcludedLeadingText = leadingText
+  } else {
+    delete meta.tocExcludedLeadingText
   }
   const oldChapters = (book.meta as { chapters?: { id?: string }[] } | undefined)?.chapters
   // CFIs address the EPUB by chapter-file index, so only the chapter
@@ -428,22 +804,28 @@ async function rebuildTocBook(
     !oldChapters ||
     oldChapters.length !== metaChapters.length ||
     oldChapters.some((c, i) => c.id !== metaChapters[i]?.id)
-  if (tocRuleId) {
+  if (customPatterns && customPatterns.length > 0) {
+    meta.customTocPatterns = customPatterns
+    meta.tocRuleId = 'custom'
+    meta.tocRuleAuto = false
+  } else if (tocRuleId) {
     meta.tocRuleId = tocRuleId
     meta.tocRuleAuto = tocRuleAuto
+    delete meta.customTocPatterns
   } else {
     delete meta.tocRuleId
     delete meta.tocRuleAuto
+    delete meta.customTocPatterns
   }
 
   const epubChapters = chapters.map((c) => ({
-    id: `ch-${c.startOffset}`,
+    id: txtChapterId(c),
     title: c.title,
     level: c.level,
   }))
   const contentFor = (index: number) => {
     const c = chapters[index]
-    return normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)
+    return getTxtChapterContent(normalized, c)
   }
   const epubBuffer = await convertTxtToEpub(
     { title: book.title, author: book.author || undefined, id: book.id },
@@ -477,6 +859,28 @@ async function rebuildTocBook(
 /**
  * Recover the normalized text of a TXT book from its server-generated EPUB.
  */
+export async function getOrRecoverTxtNormalized(book: { filePath: string; id: string; updatedAt: number; meta?: unknown }): Promise<string> {
+  const cacheKey = book.id + ':' + book.updatedAt
+  const cached = getCachedNormalized(cacheKey)
+  if (cached) return cached
+  let normalized = await recoverTxtNormalized(book)
+  const meta = (book as { meta?: { chapters?: Array<{ title?: string }>; tocExcludedLeadingText?: string } }).meta
+  const leadingText = meta?.tocExcludedLeadingText?.trim()
+  const firstTitle = meta?.chapters?.[0]?.title?.trim()
+  if (leadingText && firstTitle) {
+    const titlePrefix = firstTitle + '\n\n'
+    if (normalized.startsWith(titlePrefix)) {
+      const afterTitle = normalized.slice(titlePrefix.length)
+      if (afterTitle.startsWith(leadingText)) {
+        const body = afterTitle.slice(leadingText.length).replace(/^\n+/, '')
+        normalized = leadingText + '\n\n' + firstTitle + (body ? '\n\n' + body : '')
+      }
+    }
+  }
+  setCachedNormalized(cacheKey, normalized)
+  return normalized
+}
+
 export async function recoverTxtNormalized(book: { filePath: string }): Promise<string> {
   const storage = getStorage()
   const buffer = await bufferFromStream(await storage.get(book.filePath))
@@ -536,41 +940,161 @@ export async function reTocBook(
   userId: string,
   bookId: string,
   tocRuleId?: string | null,
+  customPatterns?: TocRulePattern[],
+  excludedChapterIds?: string[],
 ): Promise<string> {
   const db = getDb()
   const book = await getBook(userId, bookId)
   if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'Re-TOC only supports txt books')
+  const storedExcludedChapterIds = (book.meta as { tocExcludedChapterIds?: string[] }).tocExcludedChapterIds ?? []
+  const effectiveExcludedChapterIds = excludedChapterIds ?? storedExcludedChapterIds
+
+  if (customPatterns && customPatterns.length > 0) {
+    const active = customPatterns.filter((p) => p.enabled !== false)
+    return rebuildTocBook(userId, bookId, active, 'custom', false, customPatterns, effectiveExcludedChapterIds)
+  }
 
   if (tocRuleId !== undefined) {
     // Explicit pin or clear: tocRuleId is validated against the user's rules
     if (tocRuleId !== null) {
       const rule = db.select().from(tocRules).where(and(eq(tocRules.id, tocRuleId), eq(tocRules.userId, userId))).get()
       if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
-      return rebuildTocBook(userId, bookId, rule.patterns.filter((p) => p.enabled !== false), rule.id, false)
+      return rebuildTocBook(userId, bookId, rule.patterns.filter((p) => p.enabled !== false), rule.id, false, null, effectiveExcludedChapterIds)
     }
-    // Clear the pin: auto-score decides from scratch (rebuildTocBook with
-    // tocRuleId null removes the recorded pin).
-    const normalized = await recoverTxtNormalized(book)
+    // Clear the pin: auto-score decides from scratch
+    const normalized = await getOrRecoverTxtNormalized(book)
     const scored = scoreTocRules(userId, normalized.slice(0, TOC_SAMPLE_SIZE))
     if (scored) {
-      return rebuildTocBook(userId, bookId, scored.patterns.filter((p) => p.enabled !== false), scored.id, true)
+      return rebuildTocBook(userId, bookId, scored.patterns.filter((p) => p.enabled !== false), scored.id, true, null, effectiveExcludedChapterIds)
     }
-    return rebuildTocBook(userId, bookId, null, null, false)
+    return rebuildTocBook(userId, bookId, null, null, false, null, effectiveExcludedChapterIds)
   }
 
-  // No explicit instruction: keep the current pin (auto-scored or user-chosen)
+  // No explicit instruction: keep the current pin (auto-scored or user-chosen or custom)
   const effective = await resolveEffectiveTocRule(userId, book)
+  if (effective.tocRuleId === 'custom' && Array.isArray((book.meta as Record<string, unknown>).customTocPatterns)) {
+    return rebuildTocBook(
+      userId,
+      bookId,
+      effective.patterns,
+      'custom',
+      false,
+      (book.meta as Record<string, unknown>).customTocPatterns as TocRulePattern[],
+      effectiveExcludedChapterIds,
+    )
+  }
   if (effective.tocRuleId) {
-    return rebuildTocBook(userId, bookId, effective.patterns, effective.tocRuleId, effective.tocRuleAuto)
+    return rebuildTocBook(userId, bookId, effective.patterns, effective.tocRuleId, effective.tocRuleAuto, null, effectiveExcludedChapterIds)
   }
 
   // No pin (or it dangles): auto-score now
-  const normalized = await recoverTxtNormalized(book)
+  const normalized = await getOrRecoverTxtNormalized(book)
   const scored = scoreTocRules(userId, normalized.slice(0, TOC_SAMPLE_SIZE))
   if (scored) {
-    return rebuildTocBook(userId, bookId, scored.patterns.filter((p) => p.enabled !== false), scored.id, true)
+    return rebuildTocBook(userId, bookId, scored.patterns.filter((p) => p.enabled !== false), scored.id, true, null, effectiveExcludedChapterIds)
   }
-  return rebuildTocBook(userId, bookId, null, null, false)
+  return rebuildTocBook(userId, bookId, null, null, false, null, effectiveExcludedChapterIds)
+}
+
+export interface PreviewBookTocOptions {
+  tocRuleId?: string | null
+  customPatterns?: TocRulePattern[]
+  limit?: number
+  offset?: number
+  excludedChapterIds?: string[]
+}
+
+export async function previewBookToc(
+  userId: string,
+  bookId: string,
+  options: PreviewBookTocOptions = {},
+): Promise<TocPreviewRes> {
+  const db = getDb()
+  const book = await getBook(userId, bookId)
+  if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'TOC preview only supports txt books')
+
+  const normalized = await getOrRecoverTxtNormalized(book)
+  const storedExcludedChapterIds = (book.meta as { tocExcludedChapterIds?: string[] }).tocExcludedChapterIds ?? []
+  const requestedExcludedChapterIds = options.excludedChapterIds ?? storedExcludedChapterIds
+  let patterns: TocRulePattern[] | null = null
+  let ruleId: string | null = null
+  let ruleName: string | undefined
+  let autoScored = false
+
+  if (options.customPatterns && options.customPatterns.length > 0) {
+    patterns = options.customPatterns.filter((p) => p.enabled !== false)
+    ruleId = 'custom'
+    ruleName = '本书专属规则'
+  } else if (options.tocRuleId !== undefined) {
+    if (options.tocRuleId !== null) {
+      if (options.tocRuleId === 'custom') {
+        const custom = (book.meta as { customTocPatterns?: TocRulePattern[] } | undefined)?.customTocPatterns
+        if (custom && custom.length > 0) {
+          patterns = custom.filter((p) => p.enabled !== false)
+          ruleId = 'custom'
+          ruleName = '本书专属规则'
+        }
+      } else {
+        const rule = db.select().from(tocRules).where(and(eq(tocRules.id, options.tocRuleId), eq(tocRules.userId, userId))).get()
+        if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
+        patterns = rule.patterns.filter((p) => p.enabled !== false)
+        ruleId = rule.id
+        ruleName = rule.name
+      }
+    } else {
+      // Auto-scoring preview
+      const scored = scoreTocRules(userId, normalized.slice(0, TOC_SAMPLE_SIZE))
+      if (scored) {
+        patterns = scored.patterns.filter((p) => p.enabled !== false)
+        ruleId = scored.id
+        ruleName = scored.name
+        autoScored = true
+      }
+    }
+  } else {
+    // Default / effective
+    const effective = await resolveEffectiveTocRule(userId, book)
+    patterns = effective.patterns
+    ruleId = effective.tocRuleId
+    ruleName = effective.ruleName
+    autoScored = effective.tocRuleAuto
+  }
+
+  const outMeta: { fallback?: boolean } = {}
+  const rawChapters = scanTxtChapters(normalized, patterns ?? undefined, outMeta)
+  const { chapters: effectiveChapters, excludedChapterIds } = applyTxtChapterExclusions(rawChapters, requestedExcludedChapterIds)
+
+  const currentChapters = (book.meta as { chapters?: Chapter[] } | undefined)?.chapters ?? []
+  const currentTotalChapters = currentChapters.length
+
+  const levelCounts: Record<number, number> = {}
+  for (const c of effectiveChapters) {
+    levelCounts[c.level] = (levelCounts[c.level] ?? 0) + 1
+  }
+
+  const previewLimit = options.limit ?? 1000
+  const previewOffset = options.offset ?? 0
+  const chapters: TocPreviewChapter[] = rawChapters.slice(previewOffset, previewOffset + previewLimit).map((c, index) => ({
+    id: txtChapterId(c),
+    title: c.title,
+    level: c.level,
+    wordCount: countWords(getTxtChapterContent(normalized, c)),
+    excluded: excludedChapterIds.includes(txtChapterId(c)),
+    canExclude: canExcludeTxtChapter(c, previewOffset + index),
+  }))
+
+  return {
+    ruleId,
+    ruleName,
+    autoScored,
+    fallback: outMeta.fallback === true,
+    totalChapters: effectiveChapters.length,
+    matchedTotalChapters: rawChapters.length,
+    currentTotalChapters,
+    levelCounts,
+    excludedChapterIds,
+    chapters,
+  }
 }
 
 export async function getBookContent(userId: string, bookId: string): Promise<string> {
@@ -578,7 +1102,7 @@ export async function getBookContent(userId: string, bookId: string): Promise<st
   if (book.format !== 'txt') {
     throw new AppError('UNSUPPORTED_FORMAT', 'Content endpoint only supports txt')
   }
-  return recoverTxtNormalized(book)
+  return getOrRecoverTxtNormalized(book)
 }
 
 export async function getBookChapterContent(userId: string, bookId: string, chapterIndex: number) {
@@ -588,7 +1112,7 @@ export async function getBookChapterContent(userId: string, bookId: string, chap
   if (!chapter) throw new AppError('VALIDATION_ERROR', 'Chapter index is out of range')
 
   const content = book.format === 'txt'
-    ? (await getBookContent(userId, bookId)).slice(chapter.contentStartOffset ?? chapter.startOffset, chapter.endOffset).trim()
+    ? getTxtChapterContent(await getBookContent(userId, bookId), chapter).trim()
     : await extractEpubChapterText(await getBookEpubBuffer(userId, bookId), chapterIndex)
 
   return {

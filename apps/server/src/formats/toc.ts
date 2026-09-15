@@ -101,15 +101,21 @@ function scorePresetDetails(patterns: TocPatternLike[], sample: string): ScoredP
     numE += score.numE
     if (score.csNum > 0) matchedLevels.add(pattern.level)
   }
-  return { csNum, numE, matchedLevels: matchedLevels.size }
+  return {
+    csNum,
+    numE,
+    matchedLevels: matchedLevels.size,
+  }
 }
 
 /**
  * Pick the best enabled preset for a sample.
  * Candidates need csNum >= numE*3 and normally must beat the current best by
  * more than 2. A preset that reliably matches more than one level may replace
- * a near-tied flatter preset (within 2 candidates), because a volume heading
- * can be sparse in the sample while still proving that the hierarchy exists.
+ * a near-tied preset (within 2 candidates), because a volume heading can be
+ * sparse in the sample while still proving that the hierarchy exists. For a
+ * single matched level, configured rule order remains the tie-breaker; the
+ * scanner later compacts any unobserved levels.
  * Rules are expected to be pre-sorted by sortOrder ascending (lower wins
  * ties). Returns the rule id, or null when nothing clears the bar.
  */

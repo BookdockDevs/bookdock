@@ -8,8 +8,13 @@ import { createId } from '../../lib/id'
 
 /** Settings key that records that a user has been seeded (delete-all sticks). */
 const SEEDED_KEY = 'tocRuleSeeded'
-const SEED_ORDER_MIGRATED_KEY = 'tocRuleSeedOrderV4'
-const LEGACY_SEED_ORDER = ['toc.zh-flat', 'toc.zh-hierarchy', 'toc.numeric', 'toc.en']
+const SEED_ORDER_MIGRATED_KEY = 'tocRuleSeedOrderV8'
+const RETIRED_FLAT_SEED_KEY = 'toc.zh-flat'
+const MIGRATABLE_DEFAULT_ORDERS = [
+  ['toc.zh-hierarchy', 'toc.zh-flat', 'toc.numeric', 'toc.en'],
+  ['toc.zh-flat', 'toc.zh-hierarchy', 'toc.numeric', 'toc.en'],
+  ['toc.zh-hierarchy', 'toc.numeric', 'toc.en'],
+]
 
 export interface SeedTocRule {
   seedKey: string
@@ -19,47 +24,44 @@ export interface SeedTocRule {
 
 /**
  * Built-in presets installed once per user on first access. The single-regex
- * patterns are merged into our multi-level presets. The volume/chapter/section
- * preset is first because it is the most specific built-in rule.
+ * patterns are merged into our multi-level presets. The hierarchy preset is
+ * first so volume/chapter recognition has priority; the scanner
+ * compacts levels that are not observed in the current book.
  */
-const DEFAULT_SEED_ORDER = ['toc.zh-hierarchy', 'toc.zh-flat', 'toc.numeric', 'toc.en']
+const DEFAULT_SEED_ORDER = ['toc.zh-hierarchy', 'toc.numeric', 'toc.en']
+
+const ZH_FLAT_NAME = '中文网文（章/回 平铺）'
+const LEGACY_ZH_HIERARCHY_NAME = '中文网文（卷·章·节）'
+const ZH_HIERARCHY_NAME = '中文网文（卷·章）'
+const ZH_VOLUME_REGEX = '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}卷.{0,30}$'
+const ZH_LEGACY_CHAPTER_REGEX = '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}章.{0,30}$'
+const ZH_CHAPTER_REGEX = '^[ \\t　]{0,4}(?:序章|楔子|正文(?!完|结)|终章|后记|尾声|番外|第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}(?:章|回(?![合来事去])|话|集(?![合和]))).{0,30}$'
+const ZH_SECTION_REGEX = '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}节(?!课).{0,30}$'
+const ZH_FLAT_REGEX = '^[ \\t　]{0,4}(?:序章|楔子|正文(?!完|结)|终章|后记|尾声|番外|第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}(?:章|回(?![合来事去])|话|集(?![合和]))).{0,30}$'
+
+const ZH_HIERARCHY_WITH_SECTION_PATTERNS: TocRulePattern[] = [
+  { level: 1, regex: ZH_VOLUME_REGEX, replacement: null, enabled: true },
+  { level: 2, regex: ZH_CHAPTER_REGEX, replacement: null, enabled: true },
+  { level: 3, regex: ZH_SECTION_REGEX, replacement: null, enabled: true },
+]
+
+const ZH_HIERARCHY_PATTERNS: TocRulePattern[] = ZH_HIERARCHY_WITH_SECTION_PATTERNS.slice(0, 2)
+
+const LEGACY_ZH_HIERARCHY_PATTERNS: TocRulePattern[] = [
+  { level: 1, regex: ZH_VOLUME_REGEX, replacement: null, enabled: true },
+  { level: 2, regex: ZH_LEGACY_CHAPTER_REGEX, replacement: null, enabled: true },
+  { level: 3, regex: ZH_SECTION_REGEX, replacement: null, enabled: true },
+]
+
+const LEGACY_ZH_FLAT_PATTERNS: TocRulePattern[] = [
+  { level: 1, regex: ZH_FLAT_REGEX, replacement: null, enabled: true },
+]
 
 export const SEED_TOC_RULES: SeedTocRule[] = [
   {
-    seedKey: 'toc.zh-flat',
-    name: '中文网文（章/回 平铺）',
-    patterns: [
-      {
-        level: 1,
-        regex: '^[ \\t　]{0,4}(?:序章|楔子|正文(?!完|结)|终章|后记|尾声|番外|第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}(?:章|回(?![合来事去])|话|集(?![合和]))).{0,30}$',
-        replacement: null,
-        enabled: true,
-      },
-    ],
-  },
-  {
     seedKey: 'toc.zh-hierarchy',
-    name: '中文网文（卷·章·节）',
-    patterns: [
-      {
-        level: 1,
-        regex: '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}卷.{0,30}$',
-        replacement: null,
-        enabled: true,
-      },
-      {
-        level: 2,
-        regex: '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}章.{0,30}$',
-        replacement: null,
-        enabled: true,
-      },
-      {
-        level: 3,
-        regex: '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}节(?!课).{0,30}$',
-        replacement: null,
-        enabled: true,
-      },
-    ],
+    name: ZH_HIERARCHY_NAME,
+    patterns: ZH_HIERARCHY_PATTERNS,
   },
   {
     seedKey: 'toc.en',
@@ -114,18 +116,54 @@ function markSeedOrderMigrated(userId: string) {
   db.insert(settings).values({ id: createId('setting'), userId, key: SEED_ORDER_MIGRATED_KEY, value: 1 }).run()
 }
 
+function hasSamePatterns(actual: unknown, expected: TocRulePattern[]): boolean {
+  return JSON.stringify(actual) === JSON.stringify(expected)
+}
+
+function migrateBuiltInDefinitions(userId: string) {
+  const db = getDb()
+  const rows = db.select().from(tocRules).where(eq(tocRules.userId, userId)).all()
+  const hierarchy = rows.find((row) => row.seedKey === 'toc.zh-hierarchy')
+  if (
+    hierarchy
+    && (hierarchy.name === ZH_HIERARCHY_NAME || hierarchy.name === LEGACY_ZH_HIERARCHY_NAME)
+    && (hasSamePatterns(hierarchy.patterns, LEGACY_ZH_HIERARCHY_PATTERNS) || hasSamePatterns(hierarchy.patterns, ZH_HIERARCHY_WITH_SECTION_PATTERNS))
+  ) {
+    db.update(tocRules)
+      .set({ name: ZH_HIERARCHY_NAME, patterns: ZH_HIERARCHY_PATTERNS, updatedAt: Date.now() })
+      .where(eq(tocRules.id, hierarchy.id))
+      .run()
+  }
+
+  for (const row of rows) {
+    if (
+      row.seedKey === RETIRED_FLAT_SEED_KEY
+      && row.name === ZH_FLAT_NAME
+      && row.enabled === 1
+      && hasSamePatterns(row.patterns, LEGACY_ZH_FLAT_PATTERNS)
+    ) {
+      db.delete(tocRules).where(eq(tocRules.id, row.id)).run()
+    }
+  }
+}
+
 function migrateLegacyDefaultOrder(userId: string) {
   if (hasSeedOrderMigrated(userId)) return
   const db = getDb()
   const rows = db.select().from(tocRules).where(eq(tocRules.userId, userId)).all()
     .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt)
   const currentSeedOrder = rows.map((row) => row.seedKey)
-  const isLegacyDefault = currentSeedOrder.length === LEGACY_SEED_ORDER.length
-    && currentSeedOrder.every((seedKey, index) => seedKey === LEGACY_SEED_ORDER[index])
+  const isPreviousDefault = MIGRATABLE_DEFAULT_ORDERS.some((defaultOrder) =>
+    currentSeedOrder.length === defaultOrder.length
+      && currentSeedOrder.every((seedKey, index) => seedKey === defaultOrder[index]),
+  )
 
-  if (isLegacyDefault) {
+  migrateBuiltInDefinitions(userId)
+
+  if (isPreviousDefault) {
+    const activeRows = db.select().from(tocRules).where(eq(tocRules.userId, userId)).all()
     for (const [sortOrder, seedKey] of DEFAULT_SEED_ORDER.entries()) {
-      const row = rows.find((item) => item.seedKey === seedKey)
+      const row = activeRows.find((item) => item.seedKey === seedKey)
       if (row) db.update(tocRules).set({ sortOrder }).where(eq(tocRules.id, row.id)).run()
     }
   }

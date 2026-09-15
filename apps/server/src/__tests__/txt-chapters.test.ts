@@ -1,8 +1,42 @@
 import { describe, it, expect } from 'vitest'
 import iconv from 'iconv-lite'
-import { detectTxtChapters, normalizeText, decodeTextBuffer, fallbackChapters, TxtParser } from '../formats/txt'
+import {
+  applyTxtChapterExclusions,
+  decodeTextBuffer,
+  detectTxtChapters,
+  fallbackChapters,
+  getTxtChapterContent,
+  normalizeText,
+  scanTxtChapters,
+  TxtParser,
+} from '../formats/txt'
 
 describe('detectTxtChapters', () => {
+  it('compresses unmatched parent levels for a flat book', () => {
+    const normalized = normalizeText('前言\n\n第一章 开篇\n\n正文\n\n第二章 续篇\n\n正文')
+    const chapters = scanTxtChapters(normalized, [
+      { level: 1, regex: '^第[一二三四五六七八九十]+卷 .+$' },
+      { level: 2, regex: '^第[一二三四五六七八九十]+章 .+$' },
+    ])
+
+    expect(chapters.map((chapter) => ({ title: chapter.title, level: chapter.level }))).toEqual([
+      { title: '序章', level: 1 },
+      { title: '第一章 开篇', level: 1 },
+      { title: '第二章 续篇', level: 1 },
+    ])
+  })
+
+  it('preserves observed hierarchy levels', () => {
+    const normalized = normalizeText('第一卷 崛起\n\n第一章 开篇\n\n第一节 相遇\n\n正文\n\n第二章 续篇\n\n正文')
+    const chapters = scanTxtChapters(normalized, [
+      { level: 1, regex: '^第[一二三四五六七八九十]+卷 .+$' },
+      { level: 2, regex: '^第[一二三四五六七八九十]+章 .+$' },
+      { level: 3, regex: '^第[一二三四五六七八九十]+节 .+$' },
+    ])
+
+    expect(chapters.map((chapter) => chapter.level)).toEqual([1, 2, 3, 2])
+  })
+
   it('splits LF text into chapters with correct offsets', () => {
     const content = '前言\n第一章 开篇\n正文内容\n第二章 续篇\n更多内容'
     const normalized = normalizeText(content)
@@ -167,5 +201,37 @@ describe('detectTxtChapters', () => {
     const bodyStart = chapters[0].contentStartOffset
     const body = normalized.slice(bodyStart, chapters[0].endOffset)
     expect(body).toBe('那我之前给白君做的便当……\n\n人不能和免费过不去。\n\n白菌看来更适合在湿润气候生长。')
+  })
+
+  it('merges a cancelled middle boundary into the previous chapter', () => {
+    const normalized = normalizeText('第一章 开篇\n正文一\n第二章 误判\n正文二\n第三章 续篇\n正文三')
+    const chapters = scanTxtChapters(normalized)
+    const targetId = 'ch-' + chapters[1]!.startOffset
+
+    const applied = applyTxtChapterExclusions(chapters, [targetId])
+
+    expect(applied.excludedChapterIds).toEqual([targetId])
+    expect(applied.chapters.map((chapter) => chapter.title)).toEqual(['第一章 开篇', '第三章 续篇'])
+    expect(getTxtChapterContent(normalized, applied.chapters[0]!)).toContain('第二章 误判')
+  })
+
+  it('merges a cancelled synthetic preface into the first real chapter', () => {
+    const normalized = normalizeText('作品前言\n第一章 开篇\n正文一\n第二章 续篇\n正文二')
+    const chapters = scanTxtChapters(normalized)
+
+    const applied = applyTxtChapterExclusions(chapters, ['ch-' + chapters[0]!.startOffset])
+
+    expect(applied.chapters.map((chapter) => chapter.title)).toEqual(['第一章 开篇', '第二章 续篇'])
+    expect(getTxtChapterContent(normalized, applied.chapters[0]!)).toContain('作品前言')
+  })
+
+  it('does not cancel the first real chapter when there is no preface', () => {
+    const normalized = normalizeText('第一章 开篇\n正文一\n第二章 续篇\n正文二')
+    const chapters = scanTxtChapters(normalized)
+
+    const applied = applyTxtChapterExclusions(chapters, ['ch-' + chapters[0]!.startOffset])
+
+    expect(applied.excludedChapterIds).toEqual([])
+    expect(applied.chapters).toHaveLength(2)
   })
 })

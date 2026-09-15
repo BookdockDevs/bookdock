@@ -115,9 +115,9 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return request<T>(path, { method: 'DELETE' })
 }
 
-export async function apiUpload<T>(path: string, file: File, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
-  const formData = new FormData()
-  formData.append('file', file)
+export async function apiUpload<T>(path: string, file: File | FormData, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
+  const formData = file instanceof FormData ? file : new FormData()
+  if (file instanceof File) formData.append('file', file)
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     body: formData,

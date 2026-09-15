@@ -399,8 +399,8 @@ export default function Library() {
     const observer = new ResizeObserver(([entry]) => {
       const width = entry.contentRect.width
       const gap = 20
-      const itemWidth = 160
-      setDynColumns(Math.max(2, Math.floor((width + gap) / (itemWidth + gap))))
+      const itemWidth = 176
+      setDynColumns(Math.min(6, Math.max(2, Math.floor((width + gap) / (itemWidth + gap)))))
     })
     observer.observe(el)
     return () => observer.disconnect()

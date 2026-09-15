@@ -1,5 +1,5 @@
-import { Hono } from 'hono'
-import { paginationSchema, bookMembershipSchema, bookFormatSchema, bookUpdateSchema } from '@bookdock/shared'
+import { Hono, type Context } from 'hono'
+import { appendContentSchema, paginationSchema, bookMembershipSchema, bookFormatSchema, bookUpdateSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
@@ -23,18 +23,52 @@ import {
   stripMetaChapters,
   bufferFromStream,
   reTocBook,
+  previewBookToc,
+  previewAppendTxtBookContent,
+  appendTxtBookContent,
 } from './books.service'
 import { getTrashSettings } from '../settings/settings.service'
 import { getStorage } from '../../storage'
 import { config } from '../../config'
 import { AppError } from '../../middleware/error'
+import { decodeTextBuffer } from '../../formats/txt'
 import { exportEpubBook, exportTxtBook } from './txt-export'
 
 const booksRoutes = new Hono()
+const appendOptionsSchema = appendContentSchema.pick({ startOffset: true })
 
 // Download filenames keep word chars plus CJK punctuation/ideographs, '_' else.
 function safeFileBase(title: string): string {
   return title.replace(/[^\w\u3000-\u303f\uff00-\uffef\u4e00-\u9fa5-]/g, '_')
+}
+
+async function parseAppendRequest(c: Context): Promise<{ text: string; startOffset?: number }> {
+  const contentType = c.req.header('content-type') ?? ''
+  if (contentType.toLowerCase().includes('multipart/form-data')) {
+    const body = await c.req.parseBody()
+    const rawFile = body['file']
+    if (rawFile !== undefined) {
+      if (!(rawFile instanceof File)) throw new AppError('VALIDATION_ERROR', 'File is invalid')
+      if (body['text'] !== undefined) throw new AppError('VALIDATION_ERROR', 'Provide either a file or text')
+      if (!rawFile.name.toLowerCase().endsWith('.txt')) throw new AppError('UNSUPPORTED_FORMAT', 'Append file must be a TXT file')
+      if (rawFile.size > config.uploadMaxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
+      const buffer = Buffer.from(await rawFile.arrayBuffer())
+      if (buffer.length > config.uploadMaxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
+      const options = appendOptionsSchema.safeParse({ startOffset: body['startOffset'] })
+      if (!options.success) throw new AppError('VALIDATION_ERROR', 'Invalid append start offset', options.error.flatten())
+      return { text: decodeTextBuffer(buffer), startOffset: options.data.startOffset }
+    }
+
+    const parsed = appendContentSchema.safeParse({ text: body['text'], startOffset: body['startOffset'] })
+    if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid append content', parsed.error.flatten())
+    if (Buffer.byteLength(parsed.data.text, 'utf8') > config.uploadMaxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'Text too large')
+    return parsed.data
+  }
+
+  const parsed = appendContentSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid append content', parsed.error.flatten())
+  if (Buffer.byteLength(parsed.data.text, 'utf8') > config.uploadMaxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'Text too large')
+  return parsed.data
 }
 
 booksRoutes.get('/', async (c) => {
@@ -245,16 +279,41 @@ booksRoutes.patch('/:id', async (c) => {
   return c.json({ data: book })
 })
 
+booksRoutes.post('/:id/toc-preview', async (c) => {
+  const user = c.get('user')
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({}))
+  const parsed = tocPreviewSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  const preview = await previewBookToc(user.id, id, parsed.data)
+  return c.json({ data: preview })
+})
+
+booksRoutes.post('/:id/append-preview', async (c) => {
+  const user = c.get('user')
+  const { text, startOffset } = await parseAppendRequest(c)
+  const preview = await previewAppendTxtBookContent(user.id, c.req.param('id'), text, startOffset)
+  return c.json({ data: preview })
+})
+
+booksRoutes.post('/:id/append', async (c) => {
+  const user = c.get('user')
+  const { text, startOffset } = await parseAppendRequest(c)
+  const book = await appendTxtBookContent(user.id, c.req.param('id'), text, startOffset)
+  return c.json({ data: book })
+})
+
 booksRoutes.post('/:id/re-toc', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
   const body = await c.req.json().catch(() => ({}))
-  // Body is optional; when present it carries the pin decision for the book:
-  // a rule id pins it, null clears the pin and re-runs auto-scoring.
-  const tocRuleId = typeof body?.tocRuleId === 'string' || body?.tocRuleId === null
-    ? (body.tocRuleId as string | null)
-    : undefined
-  await reTocBook(user.id, id, tocRuleId)
+  const parsed = reTocSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  await reTocBook(user.id, id, parsed.data.tocRuleId, parsed.data.customPatterns, parsed.data.excludedChapterIds)
   const book = await getActiveBook(user.id, id)
   return c.json({ data: stripMetaChapters(book) })
 })

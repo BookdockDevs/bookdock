@@ -60,7 +60,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
       onContextMenu={handleContextMenu}
       className={`group relative flex min-w-0 select-none flex-col gap-1.5 ${selectable ? 'cursor-pointer' : ''}`}
     >
-      <div className="relative rounded-xl transition-all duration-200 group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-stone-900/10 dark:group-hover:shadow-black/40">
+      <div className="relative rounded-xl transition-all duration-300 ease-out group-hover:-translate-y-1.5 group-hover:shadow-xl group-hover:shadow-stone-900/15 dark:group-hover:shadow-black/50">
         <BookCover book={book} />
         <div className="pointer-events-none absolute inset-0 rounded-xl ring-1 ring-inset ring-stone-900/10 dark:ring-white/10" />
         {!selectionActive && book.pinnedAt && (

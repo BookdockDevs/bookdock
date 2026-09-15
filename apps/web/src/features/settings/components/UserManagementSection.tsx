@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import type { AdminUserRes, UpdateUserReq } from '@bookdock/shared'
 
+import { cn } from '@/lib/utils'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useAdminUsers, useUpdateUser } from '@/features/auth/hooks'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
@@ -45,16 +46,16 @@ export default function UserManagementSection() {
       ) : isError ? (
         <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
       ) : (
-        <div className="-mx-1 overflow-x-auto px-1">
-          <table className="min-w-[42rem] w-full text-left text-sm">
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <table className="w-full min-w-[28rem] text-left text-sm sm:min-w-full">
           <thead>
             <tr className="border-b border-stone-100 text-xs text-stone-400 dark:border-stone-800">
-              <th className="pb-2 font-medium">{_('auth.username')}</th>
-              <th className="pb-2 font-medium">{_('admin.role')}</th>
-              <th className="pb-2 font-medium">{_('admin.bookCount')}</th>
-              <th className="pb-2 font-medium">{_('admin.status')}</th>
-              <th className="pb-2 font-medium">{_('admin.createdAt')}</th>
-              <th className="pb-2" />
+              <th className="pb-2.5 font-medium">{_('auth.username')}</th>
+              <th className="pb-2.5 font-medium">{_('admin.role')}</th>
+              <th className="pb-2.5 font-medium">{_('admin.bookCount')}</th>
+              <th className="pb-2.5 font-medium">{_('admin.status')}</th>
+              <th className="pb-2.5 whitespace-nowrap font-medium">{_('admin.createdAt')}</th>
+              <th className="pb-2.5 w-8" />
             </tr>
           </thead>
           <tbody>
@@ -110,19 +111,26 @@ function UserRow({ user, isSelf, onAction, onResetPassword }: {
   const roleLabel = user.role === 'owner' ? _('auth.roleOwner') : user.role === 'guest' ? _('auth.guest') : _('auth.roleMember')
 
   return (
-    <tr className="border-b border-stone-50 last:border-0 dark:border-stone-800/50">
+    <tr className="border-b border-stone-100/70 transition-colors last:border-0 hover:bg-stone-50/50 dark:border-stone-800/50 dark:hover:bg-stone-800/30">
       <td className="py-2.5 pr-2">
-        <span className="text-stone-800 dark:text-stone-100">{user.username}</span>
-        {isSelf && <span className="ml-1.5 text-xs text-stone-400">{_('admin.self')}</span>}
+        <span className="font-medium text-stone-800 dark:text-stone-100">{user.username}</span>
+        {isSelf && <span className="ml-1.5 rounded bg-stone-100 px-1 py-0.5 text-[11px] text-stone-400 dark:bg-stone-800">{_('admin.self')}</span>}
       </td>
-      <td className="py-2.5 pr-2 text-stone-500">{roleLabel}</td>
-      <td className="py-2.5 pr-2 tabular-nums text-stone-500">{user.bookCount}</td>
+      <td className="py-2.5 pr-2 text-stone-500 dark:text-stone-400">{roleLabel}</td>
+      <td className="py-2.5 pr-2 tabular-nums text-stone-500 dark:text-stone-400">{user.bookCount}</td>
       <td className="py-2.5 pr-2">
-        <span className={user.disabled ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}>
+        <span
+          className={cn(
+            'inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium',
+            user.disabled
+              ? 'bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300'
+              : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
+          )}
+        >
           {user.disabled ? _('admin.statusDisabled') : _('admin.statusActive')}
         </span>
       </td>
-      <td className="py-2.5 pr-2 text-xs text-stone-400">{new Date(user.createdAt).toLocaleDateString()}</td>
+      <td className="py-2.5 pr-2 whitespace-nowrap text-xs text-stone-400">{new Date(user.createdAt).toLocaleDateString()}</td>
       <td className="py-2.5 text-right">
         <button
           ref={menu.btnRef}

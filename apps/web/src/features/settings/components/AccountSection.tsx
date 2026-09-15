@@ -125,33 +125,117 @@ export default function AccountSection() {
   }
 
   const url = avatarUrl(user?.avatarKey)
-  const rowLabel = 'mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400'
 
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <h2 className="mb-4 text-sm font-medium">{_('settings.account')}</h2>
+      <h2 className="mb-2 text-sm font-medium">{_('settings.account')}</h2>
 
-      <div className="mb-5">
-        <span className={rowLabel}>{_('settings.avatar')}</span>
-        <div className="flex flex-wrap items-center gap-4">
-          {preview ? (
-            <img src={preview.url} alt={_('settings.avatar')} className="h-16 w-16 rounded-full object-cover" />
-          ) : url ? (
-            <img src={url} alt={_('settings.avatar')} className="h-16 w-16 rounded-full object-cover" />
-          ) : (
-            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-stone-300/80 text-xl font-semibold uppercase text-stone-700 dark:bg-stone-700 dark:text-stone-200">
-              {(user?.username ?? '').slice(0, 1)}
-            </span>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
-            className="hidden"
-            onChange={(e) => void onFileSelected(e.target.files)}
-          />
-          {preview ? (
-            <div className="flex flex-wrap gap-2">
+      <div className="divide-y divide-stone-100 dark:divide-stone-800/80">
+        {/* Profile Row */}
+        <div className="flex flex-col gap-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            {/* Avatar with hover reveal controls */}
+            <div className="group relative shrink-0">
+              {preview ? (
+                <img src={preview.url} alt={_('settings.avatar')} className="h-16 w-16 rounded-full object-cover ring-2 ring-stone-100 shadow-xs dark:ring-stone-700" />
+              ) : url ? (
+                <img src={url} alt={_('settings.avatar')} className="h-16 w-16 rounded-full object-cover ring-2 ring-stone-100 shadow-xs dark:ring-stone-700" />
+              ) : (
+                <span className="flex h-16 w-16 items-center justify-center rounded-full bg-stone-200 text-xl font-semibold uppercase text-stone-700 ring-2 ring-stone-100 shadow-xs dark:bg-stone-700 dark:text-stone-200 dark:ring-stone-600">
+                  {(user?.username ?? '').slice(0, 1)}
+                </span>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+                onChange={(e) => void onFileSelected(e.target.files)}
+              />
+
+              {/* Hover overlay button to change avatar */}
+              <button
+                type="button"
+                aria-label={_('settings.avatarChange')}
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute inset-0 flex flex-col items-center justify-center rounded-full bg-stone-950/60 text-white opacity-0 backdrop-blur-[1px] transition-opacity group-hover:opacity-100"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                  <circle cx="12" cy="13" r="4" />
+                </svg>
+                <span className="mt-0.5 text-[10px] font-medium leading-tight">{_('settings.avatarChange')}</span>
+              </button>
+
+              {/* Hover remove button if avatar is set */}
+              {url && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRemoveAvatar()
+                  }}
+                  title={_('settings.avatarRemove')}
+                  aria-label={_('settings.avatarRemove')}
+                  className="absolute -right-1 -top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-stone-900 text-stone-300 shadow-sm opacity-0 ring-2 ring-white transition-all hover:bg-red-600 hover:text-white group-hover:opacity-100 dark:bg-stone-700 dark:ring-stone-900"
+                >
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                  <span className="sr-only">{_('settings.avatarRemove')}</span>
+                </button>
+              )}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              {editingName ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    value={nameDraft}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    maxLength={AUTH_REGISTER_USERNAME_MAX_LENGTH}
+                    className="h-8 w-full max-w-xs rounded-xl border border-stone-200 bg-white px-3 text-sm outline-none focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900"
+                    autoFocus
+                  />
+                  <Button size="sm" disabled={updateUsername.isPending || !nameDraft.trim()} onClick={() => void onSaveUsername()}>
+                    {_('library.save')}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditingName(false)}>
+                    {_('library.cancel')}
+                  </Button>
+                  {nameError && <p className="w-full text-xs text-red-600">{nameError}</p>}
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="truncate text-base font-semibold text-stone-900 dark:text-stone-100">
+                    {user?.username}
+                  </span>
+                  <span className="shrink-0 rounded-md bg-stone-100 px-1.5 py-0.5 text-[11px] font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                    {user?.role === 'owner' ? _('auth.roleOwner') : user?.role === 'guest' ? _('auth.guest') : _('auth.roleMember')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNameDraft(user?.username ?? '')
+                      setNameError(null)
+                      setEditingName(true)
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                    </svg>
+                    <span>{_('settings.usernameEdit')}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Confirmation buttons only when previewing a new avatar */}
+          {preview && (
+            <div className="flex shrink-0 items-center gap-2">
               <Button size="sm" disabled={uploadAvatar.isPending} onClick={() => void onUploadPreview()}>
                 {_('settings.avatarUpload')}
               </Button>
@@ -159,64 +243,16 @@ export default function AccountSection() {
                 {_('library.cancel')}
               </Button>
             </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>
-                {_('settings.avatarChange')}
-              </Button>
-              {url && (
-                <Button size="sm" variant="ghost" disabled={deleteAvatar.isPending} onClick={onRemoveAvatar}>
-                  {_('settings.avatarRemove')}
-                </Button>
-              )}
-            </div>
           )}
         </div>
-      </div>
 
-      <div className="mb-5">
-        <span className={rowLabel}>{_('auth.username')}</span>
-        {editingName ? (
-          <div>
-            <div className="flex flex-wrap gap-2">
-              <input
-                value={nameDraft}
-                onChange={(e) => setNameDraft(e.target.value)}
-                maxLength={AUTH_REGISTER_USERNAME_MAX_LENGTH}
-                className="w-full max-w-xs rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
-              />
-              <Button size="sm" disabled={updateUsername.isPending || !nameDraft.trim()} onClick={() => void onSaveUsername()}>
-                {_('library.save')}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setEditingName(false)}>
-                {_('library.cancel')}
-              </Button>
-            </div>
-            {nameError && <p className="mt-2 text-sm text-red-600">{nameError}</p>}
-          </div>
-        ) : (
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-stone-900 dark:text-stone-100">{user?.username}</span>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setNameDraft(user?.username ?? '')
-                setNameError(null)
-                setEditingName(true)
-              }}
-            >
-              {_('settings.usernameEdit')}
-            </Button>
-          </div>
-        )}
-      </div>
-
-      <div>
-        <span className={rowLabel}>{_('auth.password')}</span>
-        <Button size="sm" variant="secondary" onClick={() => setChangePasswordOpen(true)}>
-          {_('auth.changePassword')}
-        </Button>
+        {/* Security & Password Row */}
+        <div className="flex items-center justify-between gap-4 py-3.5">
+          <span className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('auth.password')}</span>
+          <Button size="sm" variant="secondary" onClick={() => setChangePasswordOpen(true)}>
+            {_('auth.changePassword')}
+          </Button>
+        </div>
       </div>
 
       {removeAvatarOpen && (

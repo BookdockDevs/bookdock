@@ -34,6 +34,12 @@ import {
   uploadBook,
   migrateTxtArtifacts,
   reTocBook,
+  previewBookToc,
+  previewAppendTxtBookContent,
+  appendTxtBookContent,
+  predictAppendStartIndex,
+  getBookContent,
+  getBookChapterContent,
   getBookCover,
   removeBookCover,
 } from './books.service'
@@ -982,6 +988,187 @@ describe('listBooks shelfName and tags', () => {
   })
 })
 
+describe('appendTxtBookContent', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeAll(() => {
+    registerParser(new TxtParser())
+  })
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  async function seedTxtBook(text: string) {
+    return uploadBook(ownerId, new File([text], 'book.txt', { type: 'text/plain' }))
+  }
+
+  it('previews the appended chapter without changing the book', async () => {
+    const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
+    const before = await getBook(ownerId, book.id)
+
+    const preview = await previewAppendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
+
+    expect(preview).toMatchObject({
+      originalChapterCount: 2,
+      newChapterCount: 3,
+      addedChapterCount: 1,
+      predictedStartIndex: 0,
+      candidateChapters: [{ title: '第三章 归来', level: 1, startOffset: 0 }],
+      appendedToLastChapter: false,
+      addedChapters: [{ title: '第三章 归来', level: 1 }],
+    })
+    const after = await getBook(ownerId, book.id)
+    expect(after.updatedAt).toBe(before.updatedAt)
+    expect(after.meta.chapters).toEqual(before.meta.chapters)
+  })
+
+  it('merges content without a recognized chapter title into the last chapter', async () => {
+    const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
+
+    const preview = await previewAppendTxtBookContent(ownerId, book.id, '这是第二章的续写')
+
+    expect(preview).toMatchObject({
+      originalChapterCount: 2,
+      newChapterCount: 2,
+      addedChapterCount: 0,
+      appendedToLastChapter: true,
+      lastChapterTitle: '第二章 旅途',
+    })
+    await appendTxtBookContent(ownerId, book.id, '这是第二章的续写')
+    await expect(getBookChapterContent(ownerId, book.id, 1)).resolves.toMatchObject({
+      content: expect.stringContaining('这是第二章的续写'),
+    })
+  })
+
+  it('keeps the CFI and scales fraction-based progress after appending', async () => {
+    const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
+    const preview = await previewAppendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
+    const store = storage.getStorage()
+    const progressKey = `progress/${book.id}.json`
+    await store.put(progressKey, Buffer.from(JSON.stringify({
+      cfi: 'chapter-0002.xhtml#epubcfi(/6/4/4)',
+      chapter: '第二章 旅途',
+      chapterIndex: 1,
+      percent: 42,
+      fraction: 0.42,
+      intervals: [[0.1, 0.42]],
+      rateSamples: [{ at: 1, fraction: 0.4 }],
+      updatedAt: 123,
+    }), 'utf-8'))
+    db.update(schema.books).set({ readStatus: 'finished' }).where(eq(schema.books.id, book.id)).run()
+
+    const updated = await appendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
+    const stream = await store.get(progressKey)
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    const progress = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {
+      cfi: string
+      chapter: string
+      chapterIndex: number
+      percent: number
+      fraction: number
+      intervals: number[][]
+      rateSamples: Array<{ at: number; fraction: number }>
+    }
+    const scale = preview.originalWordCount / preview.newWordCount
+
+    expect(progress.cfi).toBe('chapter-0002.xhtml#epubcfi(/6/4/4)')
+    expect(progress.chapter).toBe('第二章 旅途')
+    expect(progress.chapterIndex).toBe(1)
+    expect(progress.percent).toBe(Math.round(42 * scale))
+    expect(progress.fraction).toBeCloseTo(0.42 * scale)
+    expect(progress.intervals[0]![0]).toBeCloseTo(0.1 * scale)
+    expect(progress.intervals[0]![1]).toBeCloseTo(0.42 * scale)
+    expect(progress.rateSamples[0]!.fraction).toBeCloseTo(0.4 * scale)
+    expect(updated.readStatus).toBe('finished')
+    expect(updated.progress).toBe(progress.percent)
+    expect((await getBook(ownerId, book.id)).meta.chapters as unknown[]).toHaveLength(3)
+  })
+
+  it('predicts the continuation after a matching trailing chapter sequence', async () => {
+    const original = '第一卷 风起\n\n第九十九章 前夜\n\n旧内容\n\n第一百章 决战\n\n结尾'
+    const fullText = `${original}\n\n第二卷 飞龙在天\n\n第一章 新篇\n\n新内容`
+    const { book } = await seedTxtBook(original)
+
+    const preview = await previewAppendTxtBookContent(ownerId, book.id, fullText)
+
+    expect(preview.predictedStartIndex).toBe(3)
+    expect(preview.candidateChapters.map((chapter) => chapter.title)).toEqual([
+      '第一卷 风起',
+      '第九十九章 前夜',
+      '第一百章 决战',
+      '第二卷 飞龙在天',
+      '第一章 新篇',
+    ])
+    expect(preview.addedChapters.map((chapter) => chapter.title)).toEqual(['第二卷 飞龙在天', '第一章 新篇'])
+  })
+
+  it('supports choosing a later candidate chapter as the append start', async () => {
+    const original = '第一卷 风起\n\n第九十九章 前夜\n\n旧内容\n\n第一百章 决战\n\n结尾'
+    const fullText = `${original}\n\n第二卷 飞龙在天\n\n第一章 新篇\n\n新内容`
+    const { book } = await seedTxtBook(original)
+    const preview = await previewAppendTxtBookContent(ownerId, book.id, fullText)
+    const chosenStartOffset = preview.candidateChapters[4]!.startOffset
+
+    await appendTxtBookContent(ownerId, book.id, fullText, chosenStartOffset)
+
+    const content = await getBookContent(ownerId, book.id)
+    expect(content).toContain('第一章 新篇')
+    expect(content).not.toContain('第二卷 飞龙在天')
+    expect((await getBook(ownerId, book.id)).meta.chapters as unknown[]).toHaveLength(4)
+  })
+
+  it('falls back to a pure increment when no existing chapter sequence is present', () => {
+    expect(predictAppendStartIndex(
+      [
+        { title: '第十章 结尾', level: 1, wordCount: 10, startOffset: 0 },
+      ],
+      [
+        { title: '第十一章 新篇', level: 1, wordCount: 10, startOffset: 0 },
+      ],
+      10,
+    )).toBe(0)
+  })
+
+  it('accepts JSON and multipart requests for preview and save', async () => {
+    const { book } = await seedTxtBook('第一章 启程\n\n正文一')
+    const createApp = () => {
+      const app = new Hono()
+      app.onError(errorHandler)
+      app.use('*', async (c, next) => {
+        c.set('user', { id: ownerId, username: 'owner', role: 'owner', avatarKey: null })
+        return next()
+      })
+      app.route('/api/v1/books', booksRoutes)
+      return app
+    }
+
+    const jsonResponse = await createApp().request(`/api/v1/books/${book.id}/append-preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '第二章 续篇\n\n正文二' }),
+    })
+    expect(jsonResponse.status).toBe(200)
+    expect((await jsonResponse.json()).data.addedChapterCount).toBe(1)
+
+    const form = new FormData()
+    form.append('file', new File(['第三章 终章\n\n正文三'], 'update.TXT', { type: 'text/plain' }))
+    const saveResponse = await createApp().request(`/api/v1/books/${book.id}/append`, { method: 'POST', body: form })
+    expect(saveResponse.status).toBe(200)
+    expect((await saveResponse.json()).data.meta).not.toHaveProperty('chapters')
+  })
+
+  it('rejects appending to an EPUB book', async () => {
+    const book = seedBook(db, ownerId, { format: 'epub' })
+    await expect(appendTxtBookContent(ownerId, book.id, '续写')).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
+  })
+})
+
 describe('reTocBook', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
@@ -1113,4 +1300,152 @@ describe('reTocBook', () => {
     const epub = seedBook(db, ownerId, { format: 'epub' })
     await expect(reTocBook(ownerId, epub.id)).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
   })
+  it('applies customPatterns and records them on the book', async () => {
+    const { book } = await seedTxtBook('【第一部】\n\n正文一\n\n§ 1 开启\n\n正文二')
+    await reTocBook(ownerId, book.id, null, [
+      { level: 1, regex: '^【.+】$' },
+      { level: 2, regex: '^§\\s*\\d+.*$' },
+    ])
+    const after = await getActiveBook(ownerId, book.id)
+    expect(after.meta.tocRuleId).toBe('custom')
+    expect(after.meta.tocRuleAuto).toBe(false)
+    expect(after.meta.customTocPatterns).toEqual([
+      { level: 1, regex: '^【.+】$' },
+      { level: 2, regex: '^§\\s*\\d+.*$' },
+    ])
+    const chapters = after.meta.chapters as Array<{ title: string; level: number }>
+    expect(chapters.some((c) => c.title === '【第一部】' && c.level === 1)).toBe(true)
+    expect(chapters.some((c) => c.title === '§ 1 开启' && c.level === 2)).toBe(true)
+
+    // Re-toc without parameters preserves custom patterns
+    await reTocBook(ownerId, book.id)
+    const preserved = await getActiveBook(ownerId, book.id)
+    expect(preserved.meta.tocRuleId).toBe('custom')
+    expect(preserved.meta.customTocPatterns).toHaveLength(2)
+
+    // Switching to a global rule removes custom patterns
+    const globalRule = createTocRule(ownerId, {
+      name: 'global',
+      patterns: [{ level: 1, regex: '^【.+】$' }],
+    })
+    await reTocBook(ownerId, book.id, globalRule.id)
+    const switched = await getActiveBook(ownerId, book.id)
+    expect(switched.meta.tocRuleId).toBe(globalRule.id)
+    expect(switched.meta.customTocPatterns).toBeUndefined()
+  })
+
+  describe('previewBookToc', () => {
+    it('previews chapters with a global rule without modifying the book', async () => {
+      const rule = createTocRule(ownerId, {
+        name: 'custom-rule',
+        patterns: [{ level: 1, regex: '^第.+章 .+$' }],
+      })
+      const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
+      const before = await getActiveBook(ownerId, book.id)
+
+      const preview = await previewBookToc(ownerId, book.id, { tocRuleId: rule.id })
+      expect(preview.ruleId).toBe(rule.id)
+      expect(preview.ruleName).toBe('custom-rule')
+      expect(preview.autoScored).toBe(false)
+      expect(preview.fallback).toBe(false)
+      expect(preview.totalChapters).toBe(2)
+      expect(preview.currentTotalChapters).toBe((before.meta.chapters as unknown[]).length)
+      expect(preview.levelCounts).toEqual({ 1: 2 })
+      expect(preview.chapters).toHaveLength(2)
+      expect(preview.chapters[0]?.title).toBe('第一章 启程')
+
+      // Verifies the book row was not modified
+      const after = await getActiveBook(ownerId, book.id)
+      expect(after.meta.tocRuleId).toBe(before.meta.tocRuleId)
+      expect(after.updatedAt).toBe(before.updatedAt)
+    })
+
+    it('previews customPatterns and detects fallback when unmatched', async () => {
+      const { book } = await seedTxtBook('毫无匹配的文本\n\n第二行正文')
+      const preview = await previewBookToc(ownerId, book.id, {
+        customPatterns: [{ level: 1, regex: '^绝不可能匹配的正则.*$' }],
+      })
+      expect(preview.ruleId).toBe('custom')
+      expect(preview.fallback).toBe(true)
+      expect(preview.totalChapters).toBeGreaterThan(0)
+    })
+
+    it('supports limit and offset pagination for preview chapters', async () => {
+      const text = Array.from({ length: 15 }, (_, i) => `第${i + 1}章 标题${i + 1}\n\n内容`).join('\n\n')
+      const { book } = await seedTxtBook(text)
+      const p1 = await previewBookToc(ownerId, book.id, {
+        customPatterns: [{ level: 1, regex: '^第.+章 .+$' }],
+        limit: 5,
+        offset: 0,
+      })
+      expect(p1.totalChapters).toBe(15)
+      expect(p1.chapters).toHaveLength(5)
+      expect(p1.chapters[0]?.title).toBe('第1章 标题1')
+      expect(p1.chapters[4]?.title).toBe('第5章 标题5')
+
+      const p2 = await previewBookToc(ownerId, book.id, {
+        customPatterns: [{ level: 1, regex: '^第.+章 .+$' }],
+        limit: 5,
+        offset: 5,
+      })
+      expect(p2.totalChapters).toBe(15)
+      expect(p2.chapters).toHaveLength(5)
+      expect(p2.chapters[0]?.title).toBe('第6章 标题6')
+      expect(p2.chapters[4]?.title).toBe('第10章 标题10')
+    })
+
+    it('marks cancellable boundaries and applies them to chapter content', async () => {
+      const { book } = await seedTxtBook('前言\n\n第一章 开篇\n\n正文一\n\n第二章 误判\n\n正文二\n\n第三章 续篇\n\n正文三')
+      const patterns = [{ level: 1, regex: '^第.+章 .+$' }]
+      const raw = await previewBookToc(ownerId, book.id, { customPatterns: patterns })
+      const excludedId = raw.chapters[2]!.id
+
+      expect(raw.matchedTotalChapters).toBe(4)
+      expect(raw.chapters[0]).toMatchObject({ title: '序章', canExclude: true, excluded: false })
+      expect(raw.chapters[1]).toMatchObject({ title: '第一章 开篇', canExclude: true })
+      expect(raw.chapters[2]?.id).toBe(excludedId)
+
+      const preview = await previewBookToc(ownerId, book.id, {
+        customPatterns: patterns,
+        excludedChapterIds: [excludedId],
+      })
+      expect(preview.totalChapters).toBe(3)
+      expect(preview.matchedTotalChapters).toBe(4)
+      expect(preview.excludedChapterIds).toEqual([excludedId])
+      expect(preview.chapters[2]).toMatchObject({ id: excludedId, excluded: true })
+
+      await reTocBook(ownerId, book.id, undefined, patterns, [excludedId])
+      const updated = await getActiveBook(ownerId, book.id)
+      expect(updated.meta.tocExcludedChapterIds).toEqual([excludedId])
+      expect(updated.meta.chapters as unknown[]).toHaveLength(3)
+      await expect(getBookChapterContent(ownerId, book.id, 1)).resolves.toMatchObject({
+        title: '第一章 开篇',
+        content: expect.stringContaining('第二章 误判'),
+      })
+    })
+
+    it('can cancel a synthetic leading preface and keep it in the first chapter', async () => {
+      const { book } = await seedTxtBook('前言\n\n第一章 开篇\n\n正文一\n\n第二章 续篇\n\n正文二')
+      const patterns = [{ level: 1, regex: '^第.+章 .+$' }]
+      const raw = await previewBookToc(ownerId, book.id, { customPatterns: patterns })
+      const excludedId = raw.chapters[0]!.id
+
+      expect(raw.chapters[0]).toMatchObject({ id: excludedId, title: '序章', canExclude: true })
+      await reTocBook(ownerId, book.id, undefined, patterns, [excludedId])
+
+      const updated = await getActiveBook(ownerId, book.id)
+      expect(updated.meta.tocExcludedChapterIds).toEqual([excludedId])
+      expect(updated.meta.chapters as unknown[]).toHaveLength(2)
+      await expect(getBookChapterContent(ownerId, book.id, 0)).resolves.toMatchObject({
+        title: '第一章 开篇',
+        content: expect.stringContaining('前言'),
+      })
+
+      await reTocBook(ownerId, book.id, undefined, patterns, [])
+      const restored = await getActiveBook(ownerId, book.id)
+      expect(restored.meta.tocExcludedChapterIds).toBeUndefined()
+      expect(restored.meta.chapters as unknown[]).toHaveLength(3)
+    })
+  })
+
 })

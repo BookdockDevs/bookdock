@@ -13,6 +13,80 @@ export interface TxtChapter {
   startOffset: number
   endOffset: number
   contentStartOffset: number
+  synthetic?: boolean
+  contentRanges?: Array<{ startOffset: number; endOffset: number }>
+}
+
+export function txtChapterId(chapter: Pick<TxtChapter, 'startOffset'>): string {
+  return `ch-${chapter.startOffset}`
+}
+
+export function canExcludeTxtChapter(chapter: Pick<TxtChapter, 'synthetic'>, index: number): boolean {
+  return chapter.synthetic === true || index > 0
+}
+
+export function getTxtChapterContent(
+  normalized: string,
+  chapter: Pick<TxtChapter, 'startOffset' | 'endOffset' | 'contentRanges'> & { contentStartOffset?: number },
+): string {
+  if (chapter.contentRanges) {
+    return chapter.contentRanges
+      .map((range) => normalized.slice(range.startOffset, range.endOffset))
+      .filter(Boolean)
+      .join('\n\n')
+  }
+  return normalized.slice(chapter.contentStartOffset ?? chapter.startOffset, chapter.endOffset)
+}
+
+export function applyTxtChapterExclusions(
+  chapters: TxtChapter[],
+  requestedIds: string[] = [],
+): { chapters: TxtChapter[]; excludedChapterIds: string[] } {
+  const requested = new Set(requestedIds)
+  const excluded = new Set(
+    chapters
+      .map((chapter, index) => ({ chapter, index }))
+      .filter(({ chapter, index }) => requested.has(txtChapterId(chapter)) && canExcludeTxtChapter(chapter, index))
+      .map(({ chapter }) => txtChapterId(chapter)),
+  )
+  const actualChapters = chapters.filter((chapter) => chapter.synthetic !== true)
+  if (actualChapters.length > 0 && actualChapters.every((chapter) => excluded.has(txtChapterId(chapter)))) {
+    excluded.delete(txtChapterId(actualChapters[actualChapters.length - 1]!))
+  }
+
+  const result: TxtChapter[] = []
+  let leadingExcluded = false
+  for (const chapter of chapters) {
+    if (excluded.has(txtChapterId(chapter))) {
+      if (result.length === 0) leadingExcluded = true
+      else extendTxtChapterEnd(result[result.length - 1]!, chapter.endOffset)
+      continue
+    }
+
+    if (result.length > 0) extendTxtChapterEnd(result[result.length - 1]!, chapter.startOffset)
+    if (leadingExcluded) {
+      result.push({
+        ...chapter,
+        startOffset: 0,
+        contentRanges: [
+          { startOffset: 0, endOffset: chapter.startOffset },
+          { startOffset: chapter.contentStartOffset, endOffset: chapter.endOffset },
+        ].filter((range) => range.endOffset > range.startOffset),
+      })
+      leadingExcluded = false
+    } else {
+      result.push({ ...chapter })
+    }
+  }
+
+  return { chapters: result, excludedChapterIds: [...excluded] }
+}
+
+function extendTxtChapterEnd(chapter: TxtChapter, endOffset: number) {
+  chapter.endOffset = endOffset
+  if (chapter.contentRanges && chapter.contentRanges.length > 0) {
+    chapter.contentRanges[chapter.contentRanges.length - 1]!.endOffset = endOffset
+  }
 }
 
 /**
@@ -143,7 +217,11 @@ export function detectTxtChapters(text: string): TxtChapter[] {
  * falls back to ~10KB chunks aligned on newlines (never a single "全文"
  * chapter).
  */
-export function scanTxtChapters(normalized: string, patterns?: TocPatternLike[]): TxtChapter[] {
+export function scanTxtChapters(
+  normalized: string,
+  patterns?: TocPatternLike[],
+  outMeta?: { fallback?: boolean },
+): TxtChapter[] {
   const active = patterns && patterns.length > 0 ? patterns.filter((p) => p.enabled !== false) : defaultTocPatterns
 
   const claimed = new Set<number>()
@@ -182,8 +260,18 @@ export function scanTxtChapters(normalized: string, patterns?: TocPatternLike[])
   titles.sort((a, b) => a.offset - b.offset)
 
   if (titles.length === 0) {
+    if (outMeta) outMeta.fallback = true
     return fallbackChapters(normalized)
   }
+  if (outMeta) outMeta.fallback = false
+
+  // A preset may describe optional parent levels such as volume. Only levels
+  // observed in this book define its output depth; an unmatched parent must
+  // not make every matched child heading appear nested.
+  const observedLevels = [...new Set(titles.map((title) => title.level))].sort((a, b) => a - b)
+  const outputLevelByConfiguredLevel = new Map(
+    observedLevels.map((level, index) => [level, index + 1]),
+  )
 
   const chapters: TxtChapter[] = []
 
@@ -194,6 +282,7 @@ export function scanTxtChapters(normalized: string, patterns?: TocPatternLike[])
       startOffset: 0,
       endOffset: titles[0].offset,
       contentStartOffset: 0,
+      synthetic: true,
     })
   }
 
@@ -212,7 +301,7 @@ export function scanTxtChapters(normalized: string, patterns?: TocPatternLike[])
 
     chapters.push({
       title: title.title,
-      level: title.level,
+      level: outputLevelByConfiguredLevel.get(title.level) ?? 1,
       startOffset: start,
       endOffset: end,
       contentStartOffset: contentStart,

@@ -948,6 +948,12 @@ export interface BookMeta {
    * chosen by auto-scoring, not by the user. */
   tocRuleId?: string
   tocRuleAuto?: boolean
+  /** Book-specific TOC patterns when not using a global preset */
+  customTocPatterns?: TocRulePattern[]
+  /** Detected chapter boundaries suppressed for this book only */
+  tocExcludedChapterIds?: string[]
+  /** Internal source-order preservation for a suppressed synthetic preface */
+  tocExcludedLeadingText?: string
 }
 
 export interface BookDetailRes extends BookListItem {
@@ -962,6 +968,7 @@ export interface Chapter {
   startOffset: number
   endOffset: number
   contentStartOffset?: number
+  contentRanges?: Array<{ startOffset: number; endOffset: number }>
   wordCount?: number
 }
 
@@ -1236,6 +1243,74 @@ export interface TocRuleRes {
 
 export interface TocRuleListRes {
   data: TocRuleRes[]
+}
+
+export interface TocPreviewReq {
+  tocRuleId?: string | null
+  customPatterns?: TocRulePattern[]
+  excludedChapterIds?: string[]
+  limit?: number
+  offset?: number
+}
+
+export interface TocPreviewChapter {
+  id: string
+  title: string
+  level: number
+  wordCount: number
+  excluded: boolean
+  canExclude: boolean
+}
+
+export interface TocPreviewRes {
+  ruleId: string | null
+  ruleName?: string
+  autoScored: boolean
+  fallback: boolean
+  totalChapters: number
+  matchedTotalChapters: number
+  currentTotalChapters: number
+  levelCounts: Record<number, number>
+  excludedChapterIds: string[]
+  chapters: TocPreviewChapter[]
+}
+
+export interface ReTocReq {
+  tocRuleId?: string | null
+  customPatterns?: TocRulePattern[]
+  excludedChapterIds?: string[]
+}
+
+/** JSON form of TXT append requests; file uploads use the same field name in multipart form data. */
+export interface AppendContentReq {
+  text?: string
+  startOffset?: number
+}
+
+export interface AppendContentCandidate {
+  title: string
+  level: number
+  wordCount: number
+  startOffset: number
+}
+
+export interface AppendContentPreviewRes {
+  originalChapterCount: number
+  originalWordCount: number
+  newChapterCount: number
+  newWordCount: number
+  addedChapterCount: number
+  addedWordCount: number
+  candidateTextLength: number
+  candidateChapters: AppendContentCandidate[]
+  predictedStartIndex: number
+  addedChapters: Array<{
+    title: string
+    level: number
+    wordCount: number
+  }>
+  appendedToLastChapter: boolean
+  lastChapterTitle?: string
 }
 
 export type AnnotationCreateReq = {

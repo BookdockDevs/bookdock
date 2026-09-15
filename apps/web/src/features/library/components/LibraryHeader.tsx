@@ -90,7 +90,7 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
 
         <div className="flex w-full min-w-0 flex-1 flex-wrap items-center justify-end gap-2 md:w-auto">
           {!trash && (
-            <div className="relative min-w-0 flex-1 sm:min-w-40 sm:max-w-64">
+            <div className="relative min-w-0 flex-1 sm:min-w-48 sm:max-w-72 md:max-w-80">
               <svg
                 className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400"
                 viewBox="0 0 24 24"

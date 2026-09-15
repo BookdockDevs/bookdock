@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryObserverResult } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { BookDetailRes, BookFormat, BookListItem, BookMetadata, PaginatedResponse, ReadStatus, ShelfListItem, TagListItem } from '@bookdock/shared'
+import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookMetadata, PaginatedResponse, ReadStatus, ShelfListItem, TagListItem } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -446,6 +446,48 @@ export function useBook(bookId: string | null) {
     queryKey: ['books', 'detail', bookId],
     queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
     enabled: Boolean(bookId),
+  })
+}
+
+export interface AppendContentInput {
+  bookId: string
+  file?: File
+  text?: string
+  startOffset?: number
+}
+
+function appendContentRequest<T>(path: string, { bookId, file, text, startOffset }: AppendContentInput): Promise<T> {
+  if (file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (startOffset !== undefined) formData.append('startOffset', String(startOffset))
+    return apiUpload<T>(`/books/${bookId}/${path}`, formData)
+  }
+  return apiPost<T>(`/books/${bookId}/${path}`, {
+    text: text ?? '',
+    ...(startOffset !== undefined ? { startOffset } : {}),
+  })
+}
+
+export function useAppendBookContentPreview() {
+  return useMutation({
+    mutationFn: (input: AppendContentInput) => appendContentRequest<{ data: AppendContentPreviewRes }>('append-preview', input),
+  })
+}
+
+export function useAppendBookContent() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: AppendContentInput) => appendContentRequest<{ data: BookDetailRes }>('append', input),
+    onSuccess: (result, input) => {
+      queryClient.setQueryData(['book', input.bookId], result)
+      queryClient.invalidateQueries({ queryKey: ['books'] })
+      queryClient.invalidateQueries({ queryKey: ['books', 'detail', input.bookId] })
+      queryClient.invalidateQueries({ queryKey: ['book', input.bookId] })
+      queryClient.invalidateQueries({ queryKey: ['chapters', input.bookId] })
+      queryClient.invalidateQueries({ queryKey: ['progress', input.bookId] })
+    },
   })
 }
 

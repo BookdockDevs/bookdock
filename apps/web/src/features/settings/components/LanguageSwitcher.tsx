@@ -19,7 +19,8 @@ export default function LanguageSwitcher() {
   return (
     <div className="flex items-center justify-between gap-4 py-2">
       <div className="min-w-0">
-        <p className="text-sm text-stone-700 dark:text-stone-200">{_('settings.language')}</p>
+        <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.language')}</p>
+        <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.languageHint')}</p>
       </div>
       <div className="inline-flex items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.language')}>
         {LANG_OPTIONS.map((opt) => (

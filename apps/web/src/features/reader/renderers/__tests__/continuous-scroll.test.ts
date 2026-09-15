@@ -31,4 +31,9 @@ describe('continuousScrollBackwardTarget', () => {
     expect(continuousScrollBackwardTarget(920, 120)).toBe(920)
     expect(continuousScrollBackwardTarget(920, Number.NaN)).toBe(920)
   })
+
+  it('falls back to one overlapped viewport when touch has no wheel distance', () => {
+    expect(continuousScrollBackwardTarget(920, 0, 846)).toBe(74)
+    expect(continuousScrollBackwardTarget(80, 0, 846)).toBe(0)
+  })
 })

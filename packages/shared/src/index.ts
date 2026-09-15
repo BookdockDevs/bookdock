@@ -164,6 +164,13 @@ export type {
   TocRuleReorderReq,
   TocRuleRes,
   TocRuleListRes,
+  TocPreviewReq,
+  TocPreviewChapter,
+  TocPreviewRes,
+  ReTocReq,
+  AppendContentReq,
+  AppendContentCandidate,
+  AppendContentPreviewRes,
 } from './contract'
 
 export {
@@ -205,9 +212,13 @@ export {
   transformUpdateSchema,
   transformOverrideSchema,
   tocRulePatternSchema,
+  tocRulePatternsSchema,
   tocRuleCreateSchema,
   tocRuleUpdateSchema,
   tocRuleReorderSchema,
+  tocPreviewSchema,
+  reTocSchema,
+  appendContentSchema,
   setupSchema,
   setupRequiredSchema,
   registerSchema,

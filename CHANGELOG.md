@@ -2,7 +2,34 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.2.2] - Unreleased
+## [0.2.3] - Unreleased
+
+### Highlights
+
+- Refined the vendored reader baseline and book ingestion pipeline for EPUB compatibility, metadata extraction, TXT normalization, and generated TXT artifacts.
+- Expanded TXT workflows with chapter-aware content append, automatic continuation prediction, per-book TOC customization, and live previews.
+- Continued the library, book-details, settings, and responsive UI polish pass with stronger reader scrolling stability and clearer metadata workflows.
+
+### Added
+
+- TXT append from a file or pasted text, with overlap-aware chapter preview, selectable append start, progress scaling, and reader-cache invalidation after save.
+- Per-book TOC previews and custom rules, including template copying, manual regex testing, hierarchy-aware chapter boundaries, and cancellable detected boundaries.
+- Regression coverage for TXT parsing and append flows, TOC scoring and migration, book metadata workflows, reader continuous scrolling, and the updated UI.
+
+### Changed
+
+- Improved TXT chapter scanning by compacting unobserved hierarchy levels, preserving excluded leading text, and sharing merged chapter ranges with AI retrieval.
+- Refined built-in TOC presets and migrated legacy seed orders and definitions while preserving user-owned rule data.
+- Updated the reader's continuous-scroll loading and layout compensation for touch continuation, backward buffer recovery, and late font/image expansion.
+- Polished book covers, metadata disclosure, classification controls, account management, reading-data settings, trash settings, and English/Chinese localization.
+
+### Fixed
+
+- Prevented unmatched parent TOC levels from artificially nesting otherwise flat TXT chapters.
+- Preserved reading position and existing annotations when TXT content is appended, while rebuilding only the derived EPUB artifact and scaling progress to the new length.
+- Reduced continuous-scroll jumps when preceding chapters are inserted or expand after their initial layout.
+
+## [0.2.2] - 2026-09-14
 
 ### Highlights
 
@@ -96,7 +123,34 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.2.2] - 待发布
+### [0.2.3] - 待发布
+
+#### 主要更新
+
+- 完善内置阅读器基线和书籍导入链路，改进 EPUB 兼容性、元数据提取、TXT 规范化以及 TXT 派生文件处理。
+- 扩展 TXT 工作流，支持按章节追加内容、自动预测续接起点、按书自定义目录规则和即时预览。
+- 延续书库、书籍详情、设置和响应式界面优化，并提升阅读器滚动稳定性与元数据编辑体验。
+
+#### 新增
+
+- 支持上传文件或粘贴文本追加 TXT 内容，提供基于重复内容的章节预览、追加起点选择、进度比例调整以及保存后的阅读器缓存失效。
+- 支持按书预览目录和配置专属规则，包括从模板复制、手动测试正则、层级感知的章节边界以及取消误判的分章边界。
+- 增加 TXT 解析与追加、目录评分和迁移、书籍元数据、阅读器连续滚动及界面更新的回归测试。
+
+#### 变更
+
+- 改进 TXT 分章：压平未命中的中间层级，保留被排除的前置正文，并让 AI 检索复用合并后的章节范围。
+- 优化内置目录规则，并迁移旧版种子顺序和定义，同时保留用户自定义规则数据。
+- 更新阅读器连续滚动加载和布局补偿，覆盖触控续接、向后缓冲恢复以及字体/图片延迟撑高。
+- 优化书籍封面、元数据渐进展开、归类控件、账户管理、阅读数据设置、回收站设置以及中英文文案。
+
+#### 修复
+
+- 修复目录父级规则未命中时，普通 TXT 章节被错误嵌套的问题。
+- 追加 TXT 内容时保留既有阅读位置和标注，仅重建派生 EPUB，并按新篇幅比例调整阅读进度。
+- 减少连续滚动向前插入章节或章节首次布局后继续增高时的位置跳动。
+
+### [0.2.2] - 2026-09-14
 
 #### 主要更新
 

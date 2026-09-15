@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 
-import type { BookDetailRes, TocRuleCreateReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
+import type { BookDetailRes, ReTocReq, TocPreviewReq, TocPreviewRes, TocRuleCreateReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../client'
 
@@ -87,8 +87,8 @@ export function useSeedTocRules() {
 export function useReToc(bookId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ tocRuleId }: { tocRuleId: string | null }) =>
-      apiPost<{ data: BookDetailRes }>(`/books/${bookId}/re-toc`, { tocRuleId }),
+    mutationFn: (body: ReTocReq) =>
+      apiPost<{ data: BookDetailRes }>(`/books/${bookId}/re-toc`, body),
     onSuccess: (response) => {
       void queryClient.invalidateQueries({ queryKey: ['books'] })
       queryClient.setQueryData(['books', 'detail', bookId], response)
@@ -99,5 +99,18 @@ export function useReToc(bookId: string | undefined) {
       queryClient.removeQueries({ queryKey: ['chapters', bookId], type: 'inactive' })
       queryClient.removeQueries({ queryKey: ['progress', bookId], type: 'inactive' })
     },
+  })
+}
+
+export function useTocPreview(
+  bookId: string | undefined,
+  req: TocPreviewReq,
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: ['books', bookId, 'toc-preview', req],
+    queryFn: () => apiPost<{ data: TocPreviewRes }>(`/books/${bookId}/toc-preview`, req),
+    enabled: options?.enabled !== false && Boolean(bookId),
+    staleTime: 60 * 1000,
   })
 }

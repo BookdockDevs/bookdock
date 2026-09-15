@@ -118,7 +118,7 @@ export default function BookDetailView({
   return (
     <div>
       <div className="flex flex-col gap-4 sm:flex-row sm:gap-5">
-        <div className="w-32 shrink-0 self-center sm:self-auto">
+        <div className="w-32 shrink-0 self-center rounded-lg shadow-md shadow-stone-900/10 sm:self-start">
           <BookCover book={displayBook} />
         </div>
         <div className="min-w-0 flex-1">
@@ -134,27 +134,27 @@ export default function BookDetailView({
               {displayBook.author}
             </button>
           ) : (
-            <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">
+            <p className="mt-1 text-sm text-stone-400 dark:text-stone-500">
               {_('library.unknown')}
             </p>
           )}
 
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <ReadStatusChip book={displayBook} />
-            <span className="rounded-md bg-stone-900 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white dark:bg-stone-100 dark:text-stone-900">
+            <span className="inline-flex items-center rounded-md bg-stone-100 px-2 py-0.5 font-mono text-[11px] font-medium uppercase tracking-wide text-stone-600 dark:bg-stone-800 dark:text-stone-300">
               {displayBook.format}
             </span>
             {shelfName && currentShelfId ? (
-              <FilterChip label={shelfName} onClick={() => goToFilter({ shelf: currentShelfId })} />
+              <FilterChip prefix="📁" label={shelfName} onClick={() => goToFilter({ shelf: currentShelfId })} />
             ) : null}
             {memberTags.map((tag) => (
-              <FilterChip key={tag.id} label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />
+              <FilterChip key={tag.id} prefix="#" label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />
             ))}
           </div>
 
           {hasProgress && (
             <div className="mt-3 flex items-center gap-2">
-              <div className="h-1 flex-1 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700">
                 <div
                   className="h-full rounded-full bg-stone-700 dark:bg-stone-400"
                   style={{ width: `${displayBook.progress}%` }}
@@ -179,13 +179,14 @@ export default function BookDetailView({
               </svg>
               {hasProgress ? _('library.continueReading') : _('library.startReading')}
             </Button>
-            <div className="flex items-center gap-1">
-              <ActionIcon label={_('library.edit')} onClick={onEdit}>
+            <div className="flex flex-1 items-center gap-1.5">
+              <ActionIcon secondary label={_('library.edit')} onClick={onEdit}>
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
               </ActionIcon>
               <div ref={downloadAnchorRef} className="relative">
                 <ActionIcon
+                  secondary
                   label={_('library.download')}
                   onClick={
                     displayBook.format === 'txt'
@@ -255,16 +256,18 @@ export default function BookDetailView({
                   </SmartMenu>
                 )}
               </div>
-              <ActionIcon label={_('library.delete')} danger onClick={() => onDelete(book)}>
-                <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
-              </ActionIcon>
+              <div className="ml-auto">
+                <ActionIcon label={_('library.delete')} danger onClick={() => onDelete(book)}>
+                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+                </ActionIcon>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {bookmeta?.description && (
-        <section className="mt-6">
+        <section className="mt-5">
           <GroupLabel>{_('library.descriptionSection')}</GroupLabel>
           <p className="max-h-40 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1 whitespace-pre-wrap text-sm leading-relaxed text-stone-600 dark:text-stone-300">
             {bookmeta.description}
@@ -272,40 +275,42 @@ export default function BookDetailView({
         </section>
       )}
 
-      <section className="mt-6">
+      <section className="mt-5">
         <GroupLabel>{_('library.metaSection')}</GroupLabel>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
-          {metaRows.map((row) => (
-            <div key={row.label} className="min-w-0">
-              <dt className="text-xs text-stone-400 dark:text-stone-500">{row.label}</dt>
-              {row.copyable ? (
-                <dd className="mt-0.5">
-                  <button
-                    type="button"
-                    title={row.value}
-                    onClick={() => void copyText(row.value)}
-                    className="break-all font-mono text-sm text-stone-700 transition-colors hover:text-stone-900 dark:text-stone-200 dark:hover:text-stone-100"
-                  >
-                    {middleTruncate(row.value)}
-                  </button>
-                </dd>
-              ) : row.onClick ? (
-                <dd className="mt-0.5">
-                  <button
-                    type="button"
-                    title={row.value}
-                    onClick={row.onClick}
-                    className="break-words text-left text-sm text-stone-700 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-200 dark:decoration-stone-600 dark:hover:text-stone-100"
-                  >
-                    {row.value}
-                  </button>
-                </dd>
-              ) : (
-                <dd className="mt-0.5 break-words text-sm text-stone-700 dark:text-stone-200">{row.value}</dd>
-              )}
-            </div>
-          ))}
-        </dl>
+        <div className="rounded-xl border border-stone-200/70 bg-stone-50/70 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
+            {metaRows.map((row) => (
+              <div key={row.label} className="min-w-0">
+                <dt className="text-xs text-stone-400 dark:text-stone-500">{row.label}</dt>
+                {row.copyable ? (
+                  <dd className="mt-0.5">
+                    <button
+                      type="button"
+                      title={row.value}
+                      onClick={() => void copyText(row.value)}
+                      className="break-all font-mono text-sm text-stone-700 transition-colors hover:text-stone-900 dark:text-stone-200 dark:hover:text-stone-100"
+                    >
+                      {middleTruncate(row.value)}
+                    </button>
+                  </dd>
+                ) : row.onClick ? (
+                  <dd className="mt-0.5">
+                    <button
+                      type="button"
+                      title={row.value}
+                      onClick={row.onClick}
+                      className="break-words text-left text-sm text-stone-700 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-200 dark:decoration-stone-600 dark:hover:text-stone-100"
+                    >
+                      {row.value}
+                    </button>
+                  </dd>
+                ) : (
+                  <dd className="mt-0.5 break-words text-sm text-stone-700 dark:text-stone-200">{row.value}</dd>
+                )}
+              </div>
+            ))}
+          </dl>
+        </div>
       </section>
     </div>
   )

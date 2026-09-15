@@ -57,4 +57,12 @@ describe('BookCover', () => {
     render(<BookCover book={baseBook} size="sm" />)
     expect(screen.getByText('T')).toBeInTheDocument()
   })
+
+  it('renders compact size="sm" when cover image is present', () => {
+    const { container } = render(<BookCover book={{ ...baseBook, coverKey: 'covers/book-1.jpg' }} size="sm" />)
+    const wrapper = container.firstChild as HTMLElement
+    expect(wrapper.className).toContain('h-16')
+    expect(wrapper.className).toContain('w-12')
+    expect(wrapper.className).toContain('shrink-0')
+  })
 })
