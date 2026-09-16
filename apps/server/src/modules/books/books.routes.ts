@@ -218,8 +218,8 @@ booksRoutes.get('/:id/epub', async (c) => {
 })
 
 // P4: edited TXT export — the book's normalized text with the requesting
-// user's effective transforms applied. TXT books only. `?plain=1` skips the
-// transforms; without effective rules the filename falls back to 原文 too
+// user's effective replacements applied. TXT books only. `?plain=1` skips the
+// replacements; without effective rules the filename falls back to 原文 too
 // (the content is identical, the 校订版 label would be dishonest).
 booksRoutes.get('/:id/export.txt', async (c) => {
   const user = c.get('user')
@@ -235,9 +235,9 @@ booksRoutes.get('/:id/export.txt', async (c) => {
 })
 
 // P4: EPUB export — regenerated on demand (never a stored blob) from the
-// book's chapters with the user's effective transforms applied. TXT books
+// book's chapters with the user's effective replacements applied. TXT books
 // only; the 校订版 filename uses a hyphen (not the txt variant's dot) so the
-// two stems stay distinct. `?plain=1` skips the transforms; without effective
+// two stems stay distinct. `?plain=1` skips the replacements; without effective
 // rules the filename is the 原文 form (same rule as export.txt above).
 booksRoutes.get('/:id/export.epub', async (c) => {
   const user = c.get('user')

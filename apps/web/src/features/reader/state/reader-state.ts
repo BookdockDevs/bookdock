@@ -10,6 +10,7 @@ export interface AiPendingQuickCommand {
 interface ReaderState {
   activeNavTab: NavTab
   tocItems: { label: string; href: string; level?: number }[]
+  tocBookId: string | null
   currentChapter: string | null
   currentChapterIndex: number | null
   selection: SelectionInfo | null
@@ -26,15 +27,15 @@ interface ReaderState {
    *  `note`/`createdAt` are set when sharing an idea (想法) instead of a plain excerpt */
   shareTarget: { text: string; chapter: string | null; note?: string; createdAt?: number } | null
   /** Point patches that failed to apply on a loaded section — deduped, so a rule-set reload never re-toasts */
-  invalidTransformIds: string[]
+  invalidReplacementIds: string[]
   /** Annotation keys (`${cfiRange}|${type}`) whose CFI no longer resolves — orphaned, shown as badges in NotesPanel */
   orphanedAnnotationKeys: string[]
-  /** 正文变换 create-from-selection target: opening it collapses the selection
+  /** 文本替换 create-from-selection target: opening it collapses the selection
    *  toolbar, so the dialog state must live outside SelectionToolbar (which
    *  unmounts when the selection clears). Rendered by Reader. */
   replaceTarget: SelectionInfo | null
   setActiveNavTab: (tab: NavTab) => void
-  setTocItems: (items: { label: string; href: string }[]) => void
+  setTocItems: (items: { label: string; href: string }[], bookId?: string) => void
   setCurrentChapter: (chapter: string | null) => void
   setCurrentChapterIndex: (index: number | null) => void
   setSelection: (sel: SelectionInfo | null) => void
@@ -44,14 +45,16 @@ interface ReaderState {
   setPendingSearchQuery: (query: string | null) => void
   setNoteEditorRange: (range: string | null) => void
   setShareTarget: (target: { text: string; chapter: string | null; note?: string; createdAt?: number } | null) => void
-  addInvalidTransformIds: (ids: string[]) => void
+  addInvalidReplacementIds: (ids: string[]) => void
   addOrphanedAnnotationKeys: (keys: string[]) => void
   setReplaceTarget: (target: SelectionInfo | null) => void
+  resetForBook: () => void
 }
 
 export const useReaderState = create<ReaderState>((set) => ({
   activeNavTab: 'toc',
   tocItems: [],
+  tocBookId: null,
   currentChapter: null,
   currentChapterIndex: null,
   selection: null,
@@ -61,11 +64,11 @@ export const useReaderState = create<ReaderState>((set) => ({
   pendingSearchQuery: null,
   noteEditorRange: null,
   shareTarget: null,
-  invalidTransformIds: [],
+  invalidReplacementIds: [],
   orphanedAnnotationKeys: [],
   replaceTarget: null,
   setActiveNavTab: (activeNavTab) => set({ activeNavTab }),
-  setTocItems: (tocItems) => set({ tocItems }),
+  setTocItems: (tocItems, tocBookId: string | null = null) => set({ tocItems, tocBookId }),
   setCurrentChapter: (currentChapter) => set({ currentChapter }),
   setCurrentChapterIndex: (currentChapterIndex) => set({ currentChapterIndex }),
   setSelection: (selection) => set({ selection }),
@@ -75,9 +78,26 @@ export const useReaderState = create<ReaderState>((set) => ({
   setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
   setNoteEditorRange: (noteEditorRange) => set({ noteEditorRange }),
   setShareTarget: (shareTarget) => set({ shareTarget }),
-  addInvalidTransformIds: (ids) =>
-    set((s) => ({ invalidTransformIds: Array.from(new Set([...s.invalidTransformIds, ...ids])) })),
+  addInvalidReplacementIds: (ids) =>
+    set((s) => ({ invalidReplacementIds: Array.from(new Set([...s.invalidReplacementIds, ...ids])) })),
   addOrphanedAnnotationKeys: (keys) =>
     set((s) => ({ orphanedAnnotationKeys: Array.from(new Set([...s.orphanedAnnotationKeys, ...keys])) })),
   setReplaceTarget: (replaceTarget) => set({ replaceTarget }),
+  resetForBook: () => set({
+    activeNavTab: 'toc',
+    tocItems: [],
+    tocBookId: null,
+    currentChapter: null,
+    currentChapterIndex: null,
+    selection: null,
+    aiContext: null,
+    aiPendingCommand: null,
+    sidebarOpen: false,
+    pendingSearchQuery: null,
+    noteEditorRange: null,
+    shareTarget: null,
+    invalidReplacementIds: [],
+    orphanedAnnotationKeys: [],
+    replaceTarget: null,
+  }),
 }))

@@ -42,7 +42,17 @@ export default function UserManagementSection() {
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <h2 className="mb-4 text-sm font-medium">{_('admin.userManagement')}</h2>
       {isLoading ? (
-        <p className="text-xs text-stone-400">{_('reader.loading')}</p>
+        <div className="space-y-3 py-1">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
+              <div className="space-y-1.5">
+                <div className="h-4 w-28 rounded bg-stone-200/80 dark:bg-stone-800" />
+                <div className="h-3 w-40 rounded bg-stone-100 dark:bg-stone-800/60" />
+              </div>
+              <div className="h-6 w-16 rounded-md bg-stone-200/80 dark:bg-stone-800" />
+            </div>
+          ))}
+        </div>
       ) : isError ? (
         <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
       ) : (

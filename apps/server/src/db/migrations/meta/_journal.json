@@ -15,6 +15,20 @@
       "when": 1789072696812,
       "tag": "0001_release_0_2_1",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789583996727,
+      "tag": "0002_text_replacements",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789590000000,
+      "tag": "0003_text_replacement_scope",
+      "breakpoints": true
     }
   ]
 }

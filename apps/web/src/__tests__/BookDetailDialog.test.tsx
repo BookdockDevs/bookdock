@@ -6,7 +6,7 @@ import type { ReactNode } from 'react'
 import type { BookListItem } from '@bookdock/shared'
 
 import i18n from '../i18n/i18n'
-import { useBookTransforms } from '@/api/hooks/useTransforms'
+import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { downloadBook, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../features/library/download'
 import BookDetailDialog from '../features/library/components/BookDetailDialog'
 
@@ -27,8 +27,8 @@ vi.mock('@/api/client', () => ({
   apiUpload: (...args: unknown[]) => apiUpload(...args),
 }))
 
-vi.mock('@/api/hooks/useTransforms', () => ({
-  useBookTransforms: vi.fn(() => ({ data: { data: [] } })),
+vi.mock('@/api/hooks/useReplacements', () => ({
+  useBookReplacements: vi.fn(() => ({ data: { data: [] } })),
 }))
 
 vi.mock('../features/library/download', () => ({
@@ -98,7 +98,7 @@ beforeEach(async () => {
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:cover-preview') })
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
   createShelfMutate.mockResolvedValue({ data: { id: 'shelf-new', name: '科幻' } })
-  vi.mocked(useBookTransforms).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useBookTransforms>)
+  vi.mocked(useBookReplacements).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useBookReplacements>)
   createTagMutate.mockResolvedValue({ data: { id: 'tag-new' } })
   membershipShelf = null
   membershipTags = []
@@ -309,12 +309,12 @@ describe('BookDetailDialog identity chips', () => {
     expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { series: 'Trilogy' } })
   })
 
-  it('renders the format chip and navigates to the shelf filter on shelf chip click', () => {
+  it('renders format in specs and navigates to the shelf filter on shelf chip click', () => {
     membershipShelf = 'shelf-1'
     const onClose = vi.fn()
     render(<BookDetailDialog book={book} onClose={onClose} onDelete={vi.fn()} />, { wrapper })
 
-    expect(screen.getAllByText('epub').length).toBeGreaterThan(0)
+    expect(screen.getByText('EPUB')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Favorites' }))
 
     expect(onClose).toHaveBeenCalled()
@@ -384,11 +384,45 @@ describe('BookDetailDialog metadata rows', () => {
     expect(screen.queryByText('主题')).toBeNull()
     expect(screen.queryByText('标识符')).toBeNull()
     expect(screen.queryByText('系列')).toBeNull()
+    expect(screen.queryByText('更新日期')).toBeNull()
 
-    expect(screen.getByText('更新日期')).toBeInTheDocument()
     expect(screen.getByText('添加时间')).toBeInTheDocument()
     expect(screen.getByText('格式')).toBeInTheDocument()
     expect(screen.getByText('大小')).toBeInTheDocument()
+  })
+
+  it('renders lastRead in reading progress area when lastReadAt is present', () => {
+    render(
+      <BookDetailDialog
+        book={{ ...book, lastReadAt: Date.now() - 3600_000 }}
+        onClose={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+      { wrapper },
+    )
+
+    expect(screen.getByText(/小时前/)).toBeInTheDocument()
+  })
+
+  it('shows 0% and an empty progress bar when reading has started without progress', () => {
+    render(
+      <BookDetailDialog
+        book={{ ...book, lastReadAt: Date.now() - 3600_000 }}
+        onClose={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+      { wrapper },
+    )
+
+    expect(screen.getByText('0%')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: '阅读进度' })).toHaveAttribute('aria-valuenow', '0')
+  })
+
+  it('renders localized simplified Chinese for zh-CN language', () => {
+    withMeta({ language: 'zh-CN' })
+    renderDialog()
+
+    expect(screen.getByText('简体中文')).toBeInTheDocument()
   })
 
   it('renders rows with values and merges series name with its index', () => {
@@ -399,6 +433,22 @@ describe('BookDetailDialog metadata rows', () => {
     expect(screen.getByText('Pub House')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Trilogy #2' })).toBeInTheDocument()
     expect(screen.getByText('desc')).toBeInTheDocument()
+  })
+})
+
+describe('BookDetailDialog header semantics', () => {
+  it('renders 书籍详情 title and 关闭 button in view mode', () => {
+    renderDialog()
+
+    expect(screen.getByRole('heading', { name: '书籍详情' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关闭' })).toBeInTheDocument()
+  })
+
+  it('renders 编辑书籍 title in edit mode', () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    expect(screen.getByRole('heading', { name: '编辑书籍' })).toBeInTheDocument()
   })
 })
 
@@ -503,9 +553,9 @@ describe('BookDetailDialog download menu (2×2)', () => {
   })
 
   function mockEffectiveRules() {
-    vi.mocked(useBookTransforms).mockReturnValue({
+    vi.mocked(useBookReplacements).mockReturnValue({
       data: { data: [transformRule({ enabled: true, effectiveEnabled: true })] },
-    } as ReturnType<typeof useBookTransforms>)
+    } as ReturnType<typeof useBookReplacements>)
   }
 
   // 原文/校订版 rows only render inside the SmartMenu; their format submenus

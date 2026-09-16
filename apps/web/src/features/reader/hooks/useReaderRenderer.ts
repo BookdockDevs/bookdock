@@ -30,7 +30,7 @@ interface UseReaderRendererOptions {
   onNavigatePending?: (e: { pending: boolean }) => void
   onChromeToggle?: () => void
   onUserJump?: () => void
-  onTransformInvalid?: (e: Parameters<RendererEvents['transformInvalid']>[0]) => void
+  onReplacementInvalid?: (e: Parameters<RendererEvents['replacementInvalid']>[0]) => void
   onAnnotationOrphaned?: (e: Parameters<RendererEvents['annotationOrphaned']>[0]) => void
   onFootnoteOpen?: (e: Parameters<RendererEvents['footnoteOpen']>[0]) => void
   onFootnoteClose?: () => void
@@ -54,7 +54,7 @@ export function useReaderRenderer({
   onNavigatePending,
   onChromeToggle,
   onUserJump,
-  onTransformInvalid,
+  onReplacementInvalid,
   onAnnotationOrphaned,
   onFootnoteOpen,
   onFootnoteClose,
@@ -127,7 +127,7 @@ export function useReaderRenderer({
   const onNavigatePendingRef = useRef(onNavigatePending)
   const onChromeToggleRef = useRef(onChromeToggle)
   const onUserJumpRef = useRef(onUserJump)
-  const onTransformInvalidRef = useRef(onTransformInvalid)
+  const onReplacementInvalidRef = useRef(onReplacementInvalid)
   const onAnnotationOrphanedRef = useRef(onAnnotationOrphaned)
   const onFootnoteOpenRef = useRef(onFootnoteOpen)
   const onFootnoteCloseRef = useRef(onFootnoteClose)
@@ -162,7 +162,7 @@ export function useReaderRenderer({
   onNavigatePendingRef.current = onNavigatePending
   onChromeToggleRef.current = onChromeToggle
   onUserJumpRef.current = onUserJump
-  onTransformInvalidRef.current = onTransformInvalid
+  onReplacementInvalidRef.current = onReplacementInvalid
   onAnnotationOrphanedRef.current = onAnnotationOrphaned
   onFootnoteOpenRef.current = onFootnoteOpen
   onFootnoteCloseRef.current = onFootnoteClose
@@ -200,11 +200,12 @@ export function useReaderRenderer({
     const theme = themeRef.current
 
     let cancelled = false
+    const isCurrentRenderer = () => !cancelled && rendererRef.current === newRenderer
     const initialTarget = initialCfi
     newRenderer.mount(containerRef.current, initialTarget, initialFraction).then(async () => {
       // StrictMode double-invokes this effect: the loser must not become the
       // current renderer — its view already bailed out of mount
-      if (cancelled) return
+      if (!isCurrentRenderer()) return
       // mount already navigated (initialTarget may be '' for "book start")
       lastDisplayedCfiRef.current = initialTarget
       setRenderer(newRenderer)
@@ -224,23 +225,23 @@ export function useReaderRenderer({
       newRenderer.applyMarginals(marginalConfigRef.current)
     }).catch((err) => {
       console.error('[FoliateReader] mount failed:', err)
-      onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)))
+      if (isCurrentRenderer()) onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)))
     })
 
-    const unsubRelocated = newRenderer.on('relocated', (e) => onRelocatedRef.current?.(e))
-    const unsubSelected = newRenderer.on('selected', (e) => onSelectedRef.current?.(e))
-    const unsubAnnotationClicked = newRenderer.on('annotationClicked', (e) => onAnnotationClickedRef.current?.(e))
-    const unsubInstantAnnotation = newRenderer.on('instantAnnotation', (e) => onInstantAnnotationRef.current?.(e))
-    const unsubRendered = newRenderer.on('rendered', () => onRenderedRef.current?.())
-    const unsubToc = newRenderer.on('tocReady', (items) => onTocReadyRef.current?.(items))
-    const unsubJumpConfirmed = newRenderer.on('jumpConfirmed', (e) => onJumpConfirmedRef.current?.(e))
-    const unsubNavigatePending = newRenderer.on('navigatePending', (e) => onNavigatePendingRef.current?.(e))
-    const unsubChromeToggle = newRenderer.on('chromeToggle', () => onChromeToggleRef.current?.())
-    const unsubUserJump = newRenderer.on('userJump', () => onUserJumpRef.current?.())
-    const unsubTransformInvalid = newRenderer.on('transformInvalid', (e) => onTransformInvalidRef.current?.(e))
-    const unsubAnnotationOrphaned = newRenderer.on('annotationOrphaned', (e) => onAnnotationOrphanedRef.current?.(e))
-    const unsubFootnoteOpen = newRenderer.on('footnoteOpen', (e) => onFootnoteOpenRef.current?.(e))
-    const unsubFootnoteClose = newRenderer.on('footnoteClose', () => onFootnoteCloseRef.current?.())
+    const unsubRelocated = newRenderer.on('relocated', (e) => { if (isCurrentRenderer()) onRelocatedRef.current?.(e) })
+    const unsubSelected = newRenderer.on('selected', (e) => { if (isCurrentRenderer()) onSelectedRef.current?.(e) })
+    const unsubAnnotationClicked = newRenderer.on('annotationClicked', (e) => { if (isCurrentRenderer()) onAnnotationClickedRef.current?.(e) })
+    const unsubInstantAnnotation = newRenderer.on('instantAnnotation', (e) => { if (isCurrentRenderer()) onInstantAnnotationRef.current?.(e) })
+    const unsubRendered = newRenderer.on('rendered', () => { if (isCurrentRenderer()) onRenderedRef.current?.() })
+    const unsubToc = newRenderer.on('tocReady', (items) => { if (isCurrentRenderer()) onTocReadyRef.current?.(items) })
+    const unsubJumpConfirmed = newRenderer.on('jumpConfirmed', (e) => { if (isCurrentRenderer()) onJumpConfirmedRef.current?.(e) })
+    const unsubNavigatePending = newRenderer.on('navigatePending', (e) => { if (isCurrentRenderer()) onNavigatePendingRef.current?.(e) })
+    const unsubChromeToggle = newRenderer.on('chromeToggle', () => { if (isCurrentRenderer()) onChromeToggleRef.current?.() })
+    const unsubUserJump = newRenderer.on('userJump', () => { if (isCurrentRenderer()) onUserJumpRef.current?.() })
+    const unsubReplacementInvalid = newRenderer.on('replacementInvalid', (e) => { if (isCurrentRenderer()) onReplacementInvalidRef.current?.(e) })
+    const unsubAnnotationOrphaned = newRenderer.on('annotationOrphaned', (e) => { if (isCurrentRenderer()) onAnnotationOrphanedRef.current?.(e) })
+    const unsubFootnoteOpen = newRenderer.on('footnoteOpen', (e) => { if (isCurrentRenderer()) onFootnoteOpenRef.current?.(e) })
+    const unsubFootnoteClose = newRenderer.on('footnoteClose', () => { if (isCurrentRenderer()) onFootnoteCloseRef.current?.() })
 
     return () => {
       cancelled = true
@@ -254,12 +255,12 @@ export function useReaderRenderer({
       unsubNavigatePending()
       unsubChromeToggle()
       unsubUserJump()
-      unsubTransformInvalid()
+      unsubReplacementInvalid()
       unsubAnnotationOrphaned()
       unsubFootnoteOpen()
       unsubFootnoteClose()
       newRenderer.destroy()
-      rendererRef.current = null
+      if (rendererRef.current === newRenderer) rendererRef.current = null
       setRenderer((current) => (current === newRenderer ? null : current))
     }
   }, [url, createRenderer, initialCfi, initialFraction])

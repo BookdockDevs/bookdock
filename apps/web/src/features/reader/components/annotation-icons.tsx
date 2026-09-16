@@ -230,7 +230,7 @@ export function TrashIcon({
   )
 }
 
-/** Replace glyph for the selection toolbar's 正文变换 action — opposing
+/** Replace glyph for the selection toolbar's 文本替换 action — opposing
  *  horizontal exchange arrows representing text replacement */
 export function ReplaceIcon() {
   return (

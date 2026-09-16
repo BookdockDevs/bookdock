@@ -124,9 +124,17 @@ describe('ReaderSidebar on pointer devices', () => {
 
   it('shows the lock button and the resize handle, and no backdrop', () => {
     act(() => useReaderState.setState({ sidebarOpen: true }))
-    const { container } = renderSidebar(false)
+    renderSidebar(false)
     expect(screen.getByTitle('锁定工具栏')).toBeInTheDocument()
-    expect(container.querySelector('.cursor-col-resize')).not.toBeNull()
+    expect(screen.getByTestId('reader-sidebar-resize-handle')).toHaveClass('reader-resize-cursor')
     expect(screen.queryByTestId('sidebar-backdrop')).toBeNull()
+  })
+
+  it('keeps the resize handle outside the navigation panel scrollbar', () => {
+    act(() => useReaderState.setState({ sidebarOpen: true }))
+    const { container } = renderSidebar(false)
+    const handle = screen.getByTestId('reader-sidebar-resize-handle')
+    expect(handle.parentElement).toBe(outerEl(container))
+    expect(handle.closest('[data-testid="navigation-panel"]')).toBeNull()
   })
 })

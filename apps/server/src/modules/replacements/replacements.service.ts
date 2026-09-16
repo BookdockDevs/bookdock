@@ -1,18 +1,18 @@
 import { and, eq, isNull, or } from 'drizzle-orm'
 
-import type { TextTransformRes, TransformCreateReq, TransformOverrideReq, TransformUpdateReq } from '@bookdock/shared'
+import { compileReplacementRegex, type TextReplacementRes, type ReplacementCreateReq, type ReplacementOverrideReq, type ReplacementUpdateReq } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { books, textTransformOverrides, textTransforms } from '../../db/schema'
+import { books, textReplacementOverrides, textReplacements } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { AppError } from '../../middleware/error'
 
-type TransformRow = typeof textTransforms.$inferSelect
-type OverrideRow = typeof textTransformOverrides.$inferSelect
+type ReplacementRow = typeof textReplacements.$inferSelect
+type ReplacementOverrideRow = typeof textReplacementOverrides.$inferSelect
 
 // override undefined = no book context (plain list); null = book context without an override row
-function toRes(row: TransformRow, override?: OverrideRow | null): TextTransformRes {
-  const res: TextTransformRes = {
+function toRes(row: ReplacementRow, override?: ReplacementOverrideRow | null): TextReplacementRes {
+  const res: TextReplacementRes = {
     id: row.id,
     bookId: row.bookId,
     scope: row.bookId ? 'book' : 'global',
@@ -20,7 +20,7 @@ function toRes(row: TransformRow, override?: OverrideRow | null): TextTransformR
     pattern: row.pattern,
     replacement: row.replacement,
     isRegex: row.isRegex === 1,
-    caseSensitive: row.caseSensitive === 1,
+    applyTo: row.applyTo as TextReplacementRes['applyTo'],
     enabled: row.enabled === 1,
     name: row.name,
     group: row.group,
@@ -39,52 +39,55 @@ function toRes(row: TransformRow, override?: OverrideRow | null): TextTransformR
 
 function assertValidRegex(pattern: string) {
   try {
-    new RegExp(pattern)
+    compileReplacementRegex(pattern)
   } catch {
     throw new AppError('VALIDATION_ERROR', 'pattern is not a valid regular expression')
   }
 }
 
-function getOwnedTransform(userId: string, transformId: string): TransformRow {
+function getOwnedReplacement(userId: string, replacementId: string): ReplacementRow {
   const db = getDb()
-  const existing = db.select().from(textTransforms).where(eq(textTransforms.id, transformId)).get()
-  if (!existing || existing.userId !== userId) throw new AppError('TRANSFORM_NOT_FOUND')
+  const existing = db.select().from(textReplacements).where(eq(textReplacements.id, replacementId)).get()
+  if (!existing || existing.userId !== userId) throw new AppError('REPLACEMENT_NOT_FOUND')
   return existing
 }
 
-export async function listTransforms(userId: string, bookId?: string) {
+export async function listReplacements(userId: string, bookId?: string) {
   const db = getDb()
   if (!bookId) {
-    const rows = await db.select().from(textTransforms).where(eq(textTransforms.userId, userId)).all()
+    const rows = await db.select().from(textReplacements).where(eq(textReplacements.userId, userId)).all()
     return rows.map((row) => toRes(row))
   }
   // Book view: user-global pattern rules (per-book state comes from overrides)
   // plus everything scoped to this book (book-scoped patterns, point patches)
-  const rows = await db.select().from(textTransforms).where(
+  const rows = await db.select().from(textReplacements).where(
     and(
-      eq(textTransforms.userId, userId),
+      eq(textReplacements.userId, userId),
       or(
-        and(eq(textTransforms.matchType, 'pattern'), isNull(textTransforms.bookId)),
-        eq(textTransforms.bookId, bookId),
+        and(eq(textReplacements.matchType, 'pattern'), isNull(textReplacements.bookId)),
+        eq(textReplacements.bookId, bookId),
       ),
     ),
   ).all()
-  const overrides = await db.select().from(textTransformOverrides).where(
-    and(eq(textTransformOverrides.userId, userId), eq(textTransformOverrides.bookId, bookId)),
+  const overrides = await db.select().from(textReplacementOverrides).where(
+    and(eq(textReplacementOverrides.userId, userId), eq(textReplacementOverrides.bookId, bookId)),
   ).all()
-  const overrideByTransform = new Map(overrides.map((o) => [o.transformId, o]))
+  const overrideByReplacement = new Map(overrides.map((o) => [o.replacementId, o]))
   return rows.map((row) =>
     toRes(row, row.matchType === 'pattern' && row.bookId === null
-      ? overrideByTransform.get(row.id) ?? null
+      ? overrideByReplacement.get(row.id) ?? null
       : null),
   )
 }
 
-export async function createTransform(userId: string, data: TransformCreateReq) {
+export async function createReplacement(userId: string, data: ReplacementCreateReq) {
   const db = getDb()
   const matchType = data.matchType ?? 'pattern'
   if (matchType === 'point' && !data.bookId) {
-    throw new AppError('VALIDATION_ERROR', 'bookId is required for point transforms')
+    throw new AppError('VALIDATION_ERROR', 'bookId is required for point replacements')
+  }
+  if (matchType === 'point' && data.applyTo && data.applyTo !== 'content') {
+    throw new AppError('VALIDATION_ERROR', 'point replacements only apply to content')
   }
   // Null bookId = user-global pattern rule; set = book-scoped pattern or point patch
   const bookId = data.bookId ?? null
@@ -93,15 +96,15 @@ export async function createTransform(userId: string, data: TransformCreateReq) 
     if (!book) throw new AppError('BOOK_NOT_FOUND')
   }
   const now = Date.now()
-  const row: TransformRow = {
-    id: createId('transform'),
+  const row: ReplacementRow = {
+    id: createId('replacement'),
     userId,
     bookId,
     matchType,
     pattern: data.pattern ?? null,
     replacement: data.replacement ?? null,
     isRegex: data.isRegex ? 1 : 0,
-    caseSensitive: data.caseSensitive ? 1 : 0,
+    applyTo: matchType === 'point' ? 'content' : (data.applyTo ?? 'content'),
     enabled: data.enabled === false ? 0 : 1,
     name: data.name ?? null,
     group: data.group ?? null,
@@ -111,22 +114,26 @@ export async function createTransform(userId: string, data: TransformCreateReq) 
     createdAt: now,
     updatedAt: now,
   }
-  db.insert(textTransforms).values(row).run()
+  db.insert(textReplacements).values(row).run()
   return toRes(row)
 }
 
-export async function updateTransform(userId: string, transformId: string, data: TransformUpdateReq) {
+export async function updateReplacement(userId: string, replacementId: string, data: ReplacementUpdateReq) {
   const db = getDb()
-  const existing = getOwnedTransform(userId, transformId)
+  const existing = getOwnedReplacement(userId, replacementId)
   if (data.matchType === 'point') {
     // Point patches need anchor information only a text selection provides;
     // converting a rule into one would have no idea which spot to fix
-    throw new AppError('VALIDATION_ERROR', 'point transforms must be created from a text selection')
+    throw new AppError('VALIDATION_ERROR', 'point replacements must be created from a text selection')
   }
   const mergedIsRegex = data.isRegex ?? existing.isRegex === 1
   const mergedPattern = data.pattern ?? existing.pattern
+  const mergedMatchType = data.matchType ?? existing.matchType
+  if (mergedMatchType === 'point' && data.applyTo && data.applyTo !== 'content') {
+    throw new AppError('VALIDATION_ERROR', 'point replacements only apply to content')
+  }
   if (mergedIsRegex && mergedPattern) assertValidRegex(mergedPattern)
-  const patch: Partial<TransformRow> = { updatedAt: Date.now() }
+  const patch: Partial<ReplacementRow> = { updatedAt: Date.now() }
   if (data.matchType === 'pattern' && existing.matchType === 'point') {
     // point → pattern: the snapshot becomes the pattern, anchors are meaningless
     patch.matchType = 'pattern'
@@ -146,22 +153,22 @@ export async function updateTransform(userId: string, transformId: string, data:
   if (data.pattern !== undefined) patch.pattern = data.pattern
   if (data.replacement !== undefined) patch.replacement = data.replacement
   if (data.isRegex !== undefined) patch.isRegex = data.isRegex ? 1 : 0
-  if (data.caseSensitive !== undefined) patch.caseSensitive = data.caseSensitive ? 1 : 0
+  if (data.applyTo !== undefined) patch.applyTo = data.applyTo
   if (data.enabled !== undefined) patch.enabled = data.enabled ? 1 : 0
   if (data.originalText !== undefined) patch.originalText = data.originalText
-  db.update(textTransforms).set(patch).where(eq(textTransforms.id, transformId)).run()
-  return toRes(db.select().from(textTransforms).where(eq(textTransforms.id, transformId)).get()!)
+  db.update(textReplacements).set(patch).where(eq(textReplacements.id, replacementId)).run()
+  return toRes(db.select().from(textReplacements).where(eq(textReplacements.id, replacementId)).get()!)
 }
 
-export async function deleteTransform(userId: string, transformId: string) {
+export async function deleteReplacement(userId: string, replacementId: string) {
   const db = getDb()
-  getOwnedTransform(userId, transformId)
-  db.delete(textTransforms).where(eq(textTransforms.id, transformId)).run()
+  getOwnedReplacement(userId, replacementId)
+  db.delete(textReplacements).where(eq(textReplacements.id, replacementId)).run()
 }
 
-export async function setTransformOverride(userId: string, transformId: string, data: TransformOverrideReq) {
+export async function setReplacementOverride(userId: string, replacementId: string, data: ReplacementOverrideReq) {
   const db = getDb()
-  const existing = getOwnedTransform(userId, transformId)
+  const existing = getOwnedReplacement(userId, replacementId)
   // Overrides only layer on user-global pattern rules: point patches are
   // single-book, book-scoped patterns already are — both toggle their own
   // enabled switch instead.
@@ -172,27 +179,27 @@ export async function setTransformOverride(userId: string, transformId: string, 
   if (!book) throw new AppError('BOOK_NOT_FOUND')
 
   if (data.enabled === null) {
-    db.delete(textTransformOverrides).where(
-      and(eq(textTransformOverrides.bookId, data.bookId), eq(textTransformOverrides.transformId, transformId)),
+    db.delete(textReplacementOverrides).where(
+      and(eq(textReplacementOverrides.bookId, data.bookId), eq(textReplacementOverrides.replacementId, replacementId)),
     ).run()
     return toRes(existing, null)
   }
 
   const now = Date.now()
-  db.insert(textTransformOverrides).values({
-    id: createId('tfo'),
+  db.insert(textReplacementOverrides).values({
+    id: createId('rpo'),
     userId,
     bookId: data.bookId,
-    transformId,
+    replacementId,
     enabled: data.enabled ? 1 : 0,
     createdAt: now,
     updatedAt: now,
   }).onConflictDoUpdate({
-    target: [textTransformOverrides.bookId, textTransformOverrides.transformId],
+    target: [textReplacementOverrides.bookId, textReplacementOverrides.replacementId],
     set: { enabled: data.enabled ? 1 : 0, updatedAt: now },
   }).run()
-  const override = db.select().from(textTransformOverrides).where(
-    and(eq(textTransformOverrides.bookId, data.bookId), eq(textTransformOverrides.transformId, transformId)),
+  const override = db.select().from(textReplacementOverrides).where(
+    and(eq(textReplacementOverrides.bookId, data.bookId), eq(textReplacementOverrides.replacementId, replacementId)),
   ).get()!
   return toRes(existing, override)
 }

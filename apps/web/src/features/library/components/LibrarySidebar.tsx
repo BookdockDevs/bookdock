@@ -22,6 +22,7 @@ import { useContextMenu } from './use-context-menu'
 
 interface LibrarySidebarProps {
   navSearch: (patch: Partial<LibrarySearch>) => void
+  onPrefetchNavigation?: (patch: Partial<LibrarySearch>) => void
   shelfId: string | null
   tagId: string | null
   author: string | null
@@ -42,11 +43,11 @@ interface LibrarySidebarProps {
   settleTagId?: string | null
 }
 
-const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId, author, series, trash, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavigation, shelfId, tagId, author, series, trash, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const { data: shelvesData, isLoading: shelvesLoading } = useShelves()
-  const { data: tagsData } = useTags()
+  const { data: tagsData, isLoading: tagsLoading } = useTags()
 
   const shelves = useMemo(
     () => applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride),
@@ -165,7 +166,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
         <nav
           ref={setNavRef}
           onScroll={updateScrollShadows}
-          className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1"
+          className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] -mx-1 px-1 py-0.5 -my-0.5"
         >
         <NavItem
           label={_('library.allBooks')}
@@ -177,6 +178,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
             </svg>
           }
           onClick={() => selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })}
+          onPointerEnter={() => onPrefetchNavigation?.({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })}
         />
         <div className="mb-1 mt-6 flex items-center justify-between px-3">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
@@ -197,9 +199,19 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
           count={uncategorizedCount}
           active={!trash && shelfId === 'none'}
           onClick={() => selectNavigation({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
+          onPointerEnter={() => onPrefetchNavigation?.({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
         />
         {shelvesLoading ? (
-          <div className="px-3 py-2 text-xs text-stone-400">{_('reader.loading')}</div>
+          <div className="space-y-1 py-1" aria-busy="true">
+            <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
+              <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
+              <div className="h-3 w-20 rounded bg-stone-200/60 dark:bg-stone-800/60" />
+            </div>
+            <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
+              <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
+              <div className="h-3 w-14 rounded bg-stone-200/60 dark:bg-stone-800/60" />
+            </div>
+          </div>
         ) : shelves.length > 0 ? (
           <SortableContext items={shelves.map((s) => s.id)} strategy={verticalListSortingStrategy}>
             {shelves.map((shelf) => (
@@ -209,6 +221,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
                   active={!trash && shelfId === shelf.id}
                   settling={settleShelfId === shelf.id}
                   onClick={() => selectNavigation({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
+                  onPointerEnter={() => onPrefetchNavigation?.({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
                   onRename={() => setShelfDialog({ shelfId: shelf.id, initialName: shelf.name })}
                   onDelete={() => setDeleteShelfTarget(shelf)}
                 />
@@ -231,7 +244,14 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
             </svg>
           </button>
         </div>
-        {tags.length === 0 ? (
+        {tagsLoading ? (
+          <div className="space-y-1 py-1" aria-busy="true">
+            <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
+              <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
+              <div className="h-3 w-16 rounded bg-stone-200/60 dark:bg-stone-800/60" />
+            </div>
+          </div>
+        ) : tags.length === 0 ? (
           <div className="px-3 py-1 text-xs text-stone-400">{_('library.noTags')}</div>
         ) : (
           <SortableContext items={tags.map((tag) => tag.id)} strategy={verticalListSortingStrategy}>
@@ -242,6 +262,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
                 settling={settleTagId === tag.id}
                 active={!trash && tagId === tag.id}
                 onClick={() => selectNavigation({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
+                onPointerEnter={() => onPrefetchNavigation?.({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
                 onRename={() => setTagDialog({ tagId: tag.id, initialName: tag.name })}
                 onDelete={() => setDeleteTagTarget(tag)}
               />
@@ -260,6 +281,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
               </svg>
             }
             onClick={() => selectNavigation({ trash: true, shelf: undefined, tag: undefined, status: undefined })}
+            onPointerEnter={() => onPrefetchNavigation?.({ trash: true, shelf: undefined, tag: undefined, status: undefined })}
           />
         </div>
       </nav>
@@ -289,6 +311,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
             onMobileClose?.()
             void navigate({ to: '/stats' })
           }}
+          onPointerEnter={() => {
+            void import('@/features/stats/Stats')
+          }}
         />
         <NavItem
           label={_('settings.title')}
@@ -301,6 +326,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, shelfId, tagId,
           onClick={() => {
             onMobileClose?.()
             void navigate({ to: '/settings' })
+          }}
+          onPointerEnter={() => {
+            void import('@/features/settings/Settings')
           }}
         />
         <div className="mt-1">
@@ -366,6 +394,7 @@ function NavItem({
   active = false,
   icon,
   onClick,
+  onPointerEnter,
 }: {
   label: string
   count?: number
@@ -374,11 +403,13 @@ function NavItem({
   active?: boolean
   icon?: React.ReactNode
   onClick: () => void
+  onPointerEnter?: () => void
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      onPointerEnter={onPointerEnter}
       className={cn(
         'flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] transition-all',
         hasMenu && 'pr-10 md:pr-3',
@@ -422,10 +453,12 @@ function UncategorizedDropTarget({
   count,
   active,
   onClick,
+  onPointerEnter,
 }: {
   count?: number
   active: boolean
   onClick: () => void
+  onPointerEnter?: () => void
 }) {
   const _ = useTranslation()
   const { setNodeRef, isOver } = useDroppable({ id: SHELF_NONE_DROPPABLE })
@@ -449,6 +482,7 @@ function UncategorizedDropTarget({
           </svg>
         }
         onClick={onClick}
+        onPointerEnter={onPointerEnter}
       />
     </div>
   )
@@ -459,6 +493,7 @@ function ShelfItem({
   active,
   settling,
   onClick,
+  onPointerEnter,
   onRename,
   onDelete,
 }: {
@@ -466,6 +501,7 @@ function ShelfItem({
   active: boolean
   settling: boolean
   onClick: () => void
+  onPointerEnter?: () => void
   onRename: () => void
   onDelete: () => void
 }) {
@@ -511,6 +547,7 @@ function ShelfItem({
           </svg>
         }
         onClick={onClick}
+        onPointerEnter={onPointerEnter}
       />
       <div className="absolute right-2 top-1/2 -translate-y-1/2">
         <button
@@ -579,6 +616,7 @@ function TagItem({
   settling,
   active,
   onClick,
+  onPointerEnter,
   onRename,
   onDelete,
 }: {
@@ -586,6 +624,7 @@ function TagItem({
   settling: boolean
   active: boolean
   onClick: () => void
+  onPointerEnter?: () => void
   onRename: () => void
   onDelete: () => void
 }) {
@@ -626,6 +665,7 @@ function TagItem({
           </svg>
         }
         onClick={onClick}
+        onPointerEnter={onPointerEnter}
       />
       <div className="absolute right-2 top-1/2 -translate-y-1/2">
         <button

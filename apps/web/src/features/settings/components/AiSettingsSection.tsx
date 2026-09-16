@@ -331,13 +331,45 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         </div>}
       </div>
 
-      {isGuest ? <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiGuestHint')}</p> : isError ? <QueryErrorState isRetrying={isFetching} onRetry={refetch} /> : isLoading || !config ? <p className="text-xs text-stone-400">{_('reader.loading')}</p> : profiles.length === 0 ? <SettingsEmptyState>{_('settings.aiEmpty')}</SettingsEmptyState> : <div className="divide-y divide-stone-100 dark:divide-stone-800">
-        {profiles.map((profile) => <div key={profile.id} className="flex items-center gap-3 py-3">
-          <AiBrandIcon provider={providers.find((item) => item.id === profile.provider) ?? profile.provider} className="h-8 w-8" />
-          <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-sm text-stone-800 dark:text-stone-100">{profile.name || providers.find((item) => item.id === profile.provider)?.name || profile.provider}</p>{config.activeProfileId === profile.id && <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiActive')}</span>}</div><p className="mt-0.5 truncate text-xs text-stone-400">{providers.find((item) => item.id === profile.provider)?.name ?? profile.provider}{profile.model ? ` · ${profile.model}` : ''}</p></div>
-          <div className="flex shrink-0 items-center gap-1"><button type="button" onClick={() => openEdit(profile)} aria-label={_('settings.aiEdit')} title={_('settings.aiEdit')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"><EditIcon /></button>{config.activeProfileId !== profile.id && <button type="button" onClick={() => activate.mutate(profile.id, { onError: (error) => showError(error) })} className="rounded-lg px-2 py-1 text-[11px] text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200">{_('settings.aiUse')}</button>}<button type="button" onClick={() => setPendingDelete(profile)} aria-label={_('settings.aiDelete')} title={_('settings.aiDelete')} className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"><TrashIcon /></button></div>
-        </div>)}
-      </div>}
+      {isGuest ? (
+        <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiGuestHint')}</p>
+      ) : isError ? (
+        <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
+      ) : isLoading || !config ? (
+        <div className="space-y-3 py-1">
+          {[1, 2].map((i) => (
+            <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
+              <div className="space-y-1.5">
+                <div className="h-4 w-32 rounded bg-stone-200/80 dark:bg-stone-800" />
+                <div className="h-3 w-48 rounded bg-stone-100 dark:bg-stone-800/60" />
+              </div>
+              <div className="h-5 w-9 rounded-full bg-stone-200/80 dark:bg-stone-800" />
+            </div>
+          ))}
+        </div>
+      ) : profiles.length === 0 ? (
+        <SettingsEmptyState>{_('settings.aiEmpty')}</SettingsEmptyState>
+      ) : (
+        <div className="divide-y divide-stone-100 dark:divide-stone-800">
+          {profiles.map((profile) => (
+            <div key={profile.id} className="flex items-center gap-3 py-3">
+              <AiBrandIcon provider={providers.find((item) => item.id === profile.provider) ?? profile.provider} className="h-8 w-8" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm text-stone-800 dark:text-stone-100">{profile.name || providers.find((item) => item.id === profile.provider)?.name || profile.provider}</p>
+                  {config.activeProfileId === profile.id && <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiActive')}</span>}
+                </div>
+                <p className="mt-0.5 truncate text-xs text-stone-400">{providers.find((item) => item.id === profile.provider)?.name ?? profile.provider}{profile.model ? ` · ${profile.model}` : ''}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <button type="button" onClick={() => openEdit(profile)} aria-label={_('settings.aiEdit')} title={_('settings.aiEdit')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"><EditIcon /></button>
+                {config.activeProfileId !== profile.id && <button type="button" onClick={() => activate.mutate(profile.id, { onError: (error) => showError(error) })} className="rounded-lg px-2 py-1 text-[11px] text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200">{_('settings.aiUse')}</button>}
+                <button type="button" onClick={() => setPendingDelete(profile)} aria-label={_('settings.aiDelete')} title={_('settings.aiDelete')} className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"><TrashIcon /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {!isGuest && config && profiles.length > 0 && <div className="mt-5 border-t border-stone-100 pt-5 dark:border-stone-800">
         <div className="flex flex-col gap-2 text-xs text-stone-600 dark:text-stone-300">

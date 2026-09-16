@@ -1,5 +1,7 @@
 import { z } from 'zod'
+
 import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, PAGINATION } from './constants'
+import { compileReplacementRegex } from './text-replacement-engine'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
 
@@ -434,7 +436,7 @@ export const annotationUpdateSchema = z.object({
   text: z.string().optional(),
 })
 
-const transformFields = {
+const replacementFields = {
   // Null = user-global pattern rule; set = book-scoped (pattern "all matches in
   // this book"). Point patches require it.
   bookId: z.string().min(1).nullish(),
@@ -443,7 +445,7 @@ const transformFields = {
   // Null/empty = delete (hide) the matched content
   replacement: z.string().nullish(),
   isRegex: z.boolean().optional().default(false),
-  caseSensitive: z.boolean().optional().default(false),
+  applyTo: z.enum(['content', 'title', 'both']).optional().default('content'),
   enabled: z.boolean().optional().default(true),
   name: z.string().max(200).optional(),
   group: z.string().max(200).optional(),
@@ -455,38 +457,42 @@ const transformFields = {
 
 function isValidRegex(pattern: string): boolean {
   try {
-    new RegExp(pattern)
+    compileReplacementRegex(pattern)
     return true
   } catch {
     return false
   }
 }
 
-export const transformCreateSchema = z.object(transformFields)
+export const replacementCreateSchema = z.object(replacementFields)
   .refine((v) => v.matchType !== 'pattern' || (v.pattern !== undefined && v.pattern.length > 0), {
-    message: 'pattern is required for pattern transforms',
+    message: 'pattern is required for pattern replacements',
     path: ['pattern'],
   })
   .refine((v) => v.matchType !== 'point' || (v.spineHref !== undefined && v.textOffset !== undefined && v.originalText !== undefined), {
-    message: 'spineHref, textOffset and originalText are required for point transforms',
+    message: 'spineHref, textOffset and originalText are required for point replacements',
     path: ['spineHref'],
   })
   .refine((v) => v.matchType !== 'point' || (v.bookId !== undefined && v.bookId !== null), {
-    message: 'bookId is required for point transforms',
+    message: 'bookId is required for point replacements',
     path: ['bookId'],
+  })
+  .refine((v) => v.matchType !== 'point' || v.applyTo === 'content', {
+    message: 'point replacements only apply to content',
+    path: ['applyTo'],
   })
   .refine((v) => !v.isRegex || v.pattern === undefined || isValidRegex(v.pattern), {
     message: 'pattern is not a valid regular expression',
     path: ['pattern'],
   })
 
-export const transformUpdateSchema = z.object({
+export const replacementUpdateSchema = z.object({
   name: z.string().max(200).nullable().optional(),
   group: z.string().max(200).nullable().optional(),
   pattern: z.string().min(1).optional(),
   replacement: z.string().nullable().optional(),
   isRegex: z.boolean().optional(),
-  caseSensitive: z.boolean().optional(),
+  applyTo: z.enum(['content', 'title', 'both']).optional(),
   enabled: z.boolean().optional(),
   // Type conversion: only pattern is reachable via update — point patches need
   // anchors from a text selection and are never created through this path
@@ -497,7 +503,7 @@ export const transformUpdateSchema = z.object({
   originalText: z.string().min(1).optional(),
 })
 
-export const transformOverrideSchema = z.object({
+export const replacementOverrideSchema = z.object({
   bookId: z.string().min(1),
   // boolean = upsert the per-book override; null = delete it (restore inheritance)
   enabled: z.boolean().nullable(),

@@ -43,7 +43,7 @@ import RecentlyRead from './components/RecentlyRead'
 import SelectionBar from './components/SelectionBar'
 import UploadSheet from './components/UploadSheet'
 import { applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
-import { useInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags } from './hooks'
+import { useInfiniteBooks, prefetchInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags } from './hooks'
 
 const PAGE_SIZE = 20
 
@@ -51,6 +51,7 @@ export default function Library() {
   const _ = useTranslation()
   const search = useSearch({ from: indexRoute.id })
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const viewPref = useUiStore((s) => s.view)
   const sortByPref = useUiStore((s) => s.sortBy)
@@ -68,6 +69,29 @@ export default function Library() {
   const format = search.format ?? null
   const readStatus = search.status ?? null
   const trash = search.trash ?? false
+
+  const prefetchLibrary = useCallback(
+    (patch: Partial<LibrarySearch>) => {
+      const nextShelfId = 'shelf' in patch ? (patch.shelf ?? null) : shelfId
+      const nextTagId = 'tag' in patch ? (patch.tag ?? null) : tagId
+      const nextTrash = 'trash' in patch ? (patch.trash ?? false) : false
+      const nextStatus = 'status' in patch ? (patch.status ?? null) : readStatus
+      void prefetchInfiniteBooks(queryClient, {
+        pageSize: PAGE_SIZE,
+        search: query,
+        sortBy,
+        sortOrder,
+        shelfId: nextShelfId,
+        tagId: nextTagId,
+        author: null,
+        series: null,
+        format,
+        readStatus: nextStatus,
+        trash: nextTrash,
+      })
+    },
+    [queryClient, query, sortBy, sortOrder, shelfId, tagId, format, readStatus],
+  )
 
   const [uploadOpen, setUploadOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -133,13 +157,22 @@ export default function Library() {
     clearSelection()
   }
 
-  const queryClient = useQueryClient()
-
   // Reading progress no longer bumps books.updatedAt and global staleTime is
   // Infinity, so the books cache is stale after a reading session. Refetch on mount.
   useEffect(() => {
     void queryClient.invalidateQueries({ queryKey: ['books'] })
   }, [queryClient])
+
+  // Warm up settings route during browser idle time so clicking settings opens with 0ms lag
+  useEffect(() => {
+    const handle = typeof requestIdleCallback !== 'undefined'
+      ? requestIdleCallback(() => { void import('@/features/settings/Settings') })
+      : setTimeout(() => { void import('@/features/settings/Settings') }, 1500)
+    return () => {
+      if (typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(handle as number)
+      else clearTimeout(handle)
+    }
+  }, [])
 
   // Book drag-to-shelf: the in-flight drag payload drives the overlay and the
   // sidebar drop hints; dragJustEndedRef swallows the click that fires after a
@@ -417,6 +450,7 @@ export default function Library() {
       <div className="flex min-h-screen bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
         <LibrarySidebar
           navSearch={navSearch}
+          onPrefetchNavigation={prefetchLibrary}
           shelfId={shelfId}
           tagId={tagId}
           author={author}
@@ -463,9 +497,12 @@ export default function Library() {
         {recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <ReadingStatsCard />}
         {recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <RecentlyRead style={recentlyReadStyle} />}
 
-        <div ref={containerRef} className={`min-h-0 flex-1 ${selection.size > 0 ? 'pb-16' : ''}`}>
+        <div
+          ref={containerRef}
+          className={`min-h-0 flex-1 transition-opacity duration-150 ${isFetching && !isLoading ? 'opacity-65' : ''} ${selection.size > 0 ? 'pb-16' : ''}`}
+        >
           {isLoading ? (
-            <InitialLoading />
+            <InitialLoading view={view} columns={columns} />
           ) : isError && !data ? (
             <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
           ) : isEmpty ? (
@@ -710,11 +747,38 @@ function DraggableBookCard({
   )
 }
 
-function InitialLoading() {
-  const _ = useTranslation()
+function InitialLoading({ view, columns }: { view: 'grid' | 'list'; columns: number }) {
+  if (view === 'list') {
+    return (
+      <div className="flex flex-col divide-y divide-stone-100 py-2 dark:divide-stone-800">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="flex animate-pulse items-center gap-3 py-3 px-2">
+            <div className="h-14 w-10 shrink-0 rounded bg-stone-200/70 dark:bg-stone-800/70" />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 w-1/3 rounded bg-stone-200/70 dark:bg-stone-800/70" />
+              <div className="h-3 w-1/4 rounded bg-stone-100 dark:bg-stone-800/40" />
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const count = Math.max(columns * 2, 8)
   return (
-    <div className="flex min-h-[40vh] items-center justify-center">
-      <p className="text-sm text-stone-400">{_('reader.loading')}</p>
+    <div
+      className="grid gap-4 py-2"
+      style={{
+        gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+      }}
+    >
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="flex animate-pulse flex-col gap-2 rounded-xl p-1">
+          <div className="aspect-[1/1.4] w-full rounded-lg bg-stone-200/70 dark:bg-stone-800/70" />
+          <div className="h-3.5 w-3/4 rounded bg-stone-200/70 dark:bg-stone-800/70" />
+          <div className="h-3 w-1/2 rounded bg-stone-100 dark:bg-stone-800/40" />
+        </div>
+      ))}
     </div>
   )
 }

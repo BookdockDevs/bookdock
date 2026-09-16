@@ -1,10 +1,10 @@
 import JSZip from 'jszip'
 import { and, eq, isNull, or } from 'drizzle-orm'
 
-import { applyPointMatch, applyRuleToText, findPointMatch } from '@bookdock/shared'
+import { applyPointMatch, applyRuleToRuns, findPointMatch } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { textTransformOverrides, textTransforms } from '../../db/schema'
+import { textReplacementOverrides, textReplacements } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { AppError } from '../../middleware/error'
 import { convertTxtToEpub, type TxtToEpubCover } from '../../lib/txt-to-epub'
@@ -17,7 +17,7 @@ export interface ExportRule {
   pattern: string | null
   replacement: string | null
   isRegex: boolean
-  caseSensitive: boolean
+  applyTo: 'content' | 'title' | 'both'
   /** Per-book effective value (override ?? global default for pattern rules) */
   effectiveEnabled: boolean
   spineHref: string | null
@@ -25,7 +25,7 @@ export interface ExportRule {
   originalText: string | null
 }
 
-// The same filter and override resolution as the transforms module's
+// The same filter and override resolution as the replacements module's
 // book-scoped list — global pattern rules + this book's scoped rows, with
 // effectiveEnabled = override ?? global default for global patterns.
 async function loadEffectiveRules(
@@ -33,22 +33,22 @@ async function loadEffectiveRules(
   userId: string,
   bookId: string,
 ): Promise<ExportRule[]> {
-  const rows = await db.select().from(textTransforms).where(
+  const rows = await db.select().from(textReplacements).where(
     and(
-      eq(textTransforms.userId, userId),
+      eq(textReplacements.userId, userId),
       or(
-        and(eq(textTransforms.matchType, 'pattern'), isNull(textTransforms.bookId)),
-        eq(textTransforms.bookId, bookId),
+        and(eq(textReplacements.matchType, 'pattern'), isNull(textReplacements.bookId)),
+        eq(textReplacements.bookId, bookId),
       ),
     ),
   ).all()
-  const overrides = await db.select().from(textTransformOverrides).where(
-    and(eq(textTransformOverrides.userId, userId), eq(textTransformOverrides.bookId, bookId)),
+  const overrides = await db.select().from(textReplacementOverrides).where(
+    and(eq(textReplacementOverrides.userId, userId), eq(textReplacementOverrides.bookId, bookId)),
   ).all()
-  const overrideByTransform = new Map(overrides.map((o) => [o.transformId, o]))
+  const overrideByReplacement = new Map(overrides.map((o) => [o.replacementId, o]))
   return rows.map((row) => {
     const override = row.matchType === 'pattern' && row.bookId === null
-      ? overrideByTransform.get(row.id)
+      ? overrideByReplacement.get(row.id)
       : undefined
     return {
       id: row.id,
@@ -56,7 +56,7 @@ async function loadEffectiveRules(
       pattern: row.pattern,
       replacement: row.replacement,
       isRegex: row.isRegex === 1,
-      caseSensitive: row.caseSensitive === 1,
+      applyTo: row.applyTo as ExportRule['applyTo'],
       effectiveEnabled: override ? override.enabled === 1 : row.enabled === 1,
       spineHref: row.spineHref,
       textOffset: row.textOffset,
@@ -91,24 +91,22 @@ export function extractChapterRuns(xhtml: string): { title: string; paragraphs: 
   return { title: titles.join(''), paragraphs }
 }
 
-// Apply the effective rules to one chapter's runs: pattern rules first
-// (per run, rule order — same semantics as the renderer), then point patches
-// (spineHref-matched, snapshot searched over the run concatenation with the
-// closest-to-offset disambiguation; a miss means the patch is invalid and is
-// silently skipped — the renderer already flags it in the UI).
-export function applyChapterTransforms(runs: { text: string }[], rules: ExportRule[], spineHref: string): void {
+// Apply the effective rules to one chapter's runs: title and content use their
+// own logical streams, then point patches search the complete section stream.
+export function applyChapterReplacements(runs: { text: string }[], rules: ExportRule[], spineHref: string): void {
   const patternRules = rules.filter((r) => r.matchType === 'pattern' && r.effectiveEnabled && r.pattern)
-  for (const run of runs) {
-    let text = run.text
-    for (const rule of patternRules) text = applyRuleToText(text, rule)
-    run.text = text
+  const titleRuns = runs.slice(0, 1)
+  const contentRuns = runs.slice(1)
+  for (const rule of patternRules) {
+    if (rule.applyTo !== 'content') applyRuleToRuns(titleRuns, rule)
+    if (rule.applyTo !== 'title') applyRuleToRuns(contentRuns, rule)
   }
   for (const patch of rules) {
     if (patch.matchType !== 'point' || !patch.effectiveEnabled) continue
     if (patch.spineHref !== spineHref) continue
     const snapshot = patch.originalText ?? ''
     if (!snapshot || patch.textOffset == null) continue
-    const found = findPointMatch(runs, snapshot, patch.textOffset, patch.caseSensitive)
+    const found = findPointMatch(runs, snapshot, patch.textOffset)
     if (!found) continue
     applyPointMatch(runs, found, patch.replacement ?? '')
   }
@@ -128,8 +126,8 @@ export function assembleTxt(chapters: { title: string; paragraphs: string[] }[])
 
 // The shared middle of export.txt / export.epub: read the stored EPUB's
 // chapters (server-generated, spine order), apply the given rules per chapter
-// and return the transformed runs. `rules` is [] for the plain (原文) variant.
-export async function extractTransformedChapters(
+// and return the replaced runs. `rules` is [] for the plain (原文) variant.
+export async function extractReplacedChapters(
   buffer: Buffer,
   rules: ExportRule[],
 ): Promise<{ title: string; paragraphs: string[] }[]> {
@@ -159,7 +157,7 @@ export async function extractTransformedChapters(
     // — the id foliate exposes as book.sections[i].id and the reader compares
     // against). Match that, not the bare OPF href, or every point patch
     // silently misses here while working in the reader.
-    applyChapterTransforms(runs, rules, `OEBPS/${href}`)
+    applyChapterReplacements(runs, rules, `OEBPS/${href}`)
     chapters.push({ title: runs[0]!.text, paragraphs: runs.slice(1).map((r) => r.text) })
   }
   return chapters
@@ -175,7 +173,7 @@ async function getExportableTxtBook(userId: string, bookId: string) {
 }
 
 // Load the rules and read the stored EPUB for an export. `plain` skips the
-// rule query entirely — the 原文 variant never applies transforms.
+// rule query entirely — the 原文 variant never applies replacements.
 async function loadExportInput(userId: string, bookId: string, plain: boolean) {
   const book = await getExportableTxtBook(userId, bookId)
   const rules: ExportRule[] = plain ? [] : await loadEffectiveRules(getDb(), userId, bookId)
@@ -192,7 +190,7 @@ async function loadExportInput(userId: string, bookId: string, plain: boolean) {
 // the requesting user's effective rules (or not, when plain) and returns the
 // assembled text plus the book title (for the download filename). `plain`
 // powers the "原文" path for TXT books: the original bytes were never
-// stored, so the closest to the original is the untransformed normalized text.
+// stored, so the closest to the original is the unreplaced normalized text.
 // `edited` reports whether any effective rule was applied — routes use it to
 // keep the filename honest (原文 name when nothing was changed).
 export async function exportTxtBook(
@@ -201,7 +199,7 @@ export async function exportTxtBook(
   plain = false,
 ): Promise<{ text: string; title: string; edited: boolean }> {
   const { book, rules, buffer } = await loadExportInput(userId, bookId, plain)
-  const chapters = await extractTransformedChapters(buffer, rules)
+  const chapters = await extractReplacedChapters(buffer, rules)
   return { text: assembleTxt(chapters), title: book.title, edited: rules.some((r) => r.effectiveEnabled) }
 }
 
@@ -217,7 +215,7 @@ export async function exportEpubBook(
   plain = false,
 ): Promise<{ buffer: Buffer; title: string; edited: boolean }> {
   const { book, rules, buffer } = await loadExportInput(userId, bookId, plain)
-  const chapters = await extractTransformedChapters(buffer, rules)
+  const chapters = await extractReplacedChapters(buffer, rules)
 
   // A missing or unreadable cover never fails the export (silent degradation).
   let cover: TxtToEpubCover | undefined

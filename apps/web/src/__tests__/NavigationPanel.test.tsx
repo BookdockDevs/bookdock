@@ -55,6 +55,7 @@ describe('NavigationPanel', () => {
     useReaderState.setState({
       activeNavTab: 'toc',
       tocItems: [],
+      tocBookId: null,
       currentChapter: null,
       selection: null,
     })
@@ -73,6 +74,17 @@ describe('NavigationPanel', () => {
 
     const currentButton = screen.getByRole('button', { name: '第二章 续篇' })
     expect(currentButton).toHaveClass('font-medium')
+  })
+
+  it('does not render a TOC owned by another book', () => {
+    useReaderState.setState({
+      tocBookId: 'book-1',
+      tocItems: [{ label: '上一本书的章节', href: 'chapter:0' }],
+    })
+
+    render(<NavigationPanel bookId="book-2" open />)
+
+    expect(screen.queryByRole('button', { name: '上一本书的章节' })).not.toBeInTheDocument()
   })
 
   it('renders volume header with distinct styling and chapter count on volume items', () => {

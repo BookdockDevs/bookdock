@@ -17,7 +17,7 @@ interface ModalProps {
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-/** The project's centered modal chrome — every dialog (transforms manager,
+/** The project's centered modal chrome — every dialog (replacements manager,
  *  per-book rules, selection replace) shares this shell so they read as one
  *  window system. The close button is always the X: hosts may give it
  *  "back" semantics (e.g. cancel an inline edit view) via onClose. */

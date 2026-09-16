@@ -28,6 +28,7 @@ vi.mock('@/features/auth/AccountMenu', () => ({
   default: () => null,
 }))
 
+
 interface ShelfItemData { id: string; name: string; bookCount: number }
 interface TagItemData { id: string; name: string; bookCount: number }
 
@@ -41,6 +42,7 @@ function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1 }: { shelve
   })
   ;(libraryHooks.useTags as ReturnType<typeof vi.fn>).mockReturnValue({
     data: { data: tags },
+    isLoading: false,
   })
   ;(libraryHooks.useCreateShelf as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useRenameShelf as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })

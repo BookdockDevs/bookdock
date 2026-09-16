@@ -33,7 +33,15 @@ export default function TrashSettingsRow() {
     return <QueryErrorState className="py-4" isRetrying={settingsQuery.isFetching} onRetry={settingsQuery.refetch} />
   }
   if (settingsQuery.isLoading) {
-    return <div className="py-2 text-sm text-stone-500">{_('reader.loading')}</div>
+    return (
+      <div className="flex animate-pulse flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between" aria-busy="true">
+        <div className="space-y-1.5">
+          <div className="h-4 w-28 rounded bg-stone-200/80 dark:bg-stone-800" />
+          <div className="h-3 w-48 rounded bg-stone-100 dark:bg-stone-800/60" />
+        </div>
+        <div className="h-7 w-40 rounded-lg bg-stone-100 dark:bg-stone-800/60" />
+      </div>
+    )
   }
 
   const current = settingsQuery.data?.data.trash?.autoCleanDays ?? 30

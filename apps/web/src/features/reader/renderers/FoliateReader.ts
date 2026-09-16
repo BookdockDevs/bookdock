@@ -27,9 +27,11 @@ import type {
 } from '../types'
 import { FONT_OPTIONS } from '../types'
 import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
-import { applyTransforms, countPatternMatches, textContentOffset, type TextTransformRule } from '../lib/text-transforms'
+import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, type TextReplacementRule } from '../lib/text-replacements'
 import { NavigationPending } from '../lib/navigation-pending'
 import { sectionFractionBoundaries } from '../lib/progress-model'
+import { applyTitleReplacements } from '@bookdock/shared'
+
 import {
   findMatches,
   getChapterText,
@@ -62,9 +64,9 @@ function ttsTextHash(text: string): string {
   return (hash >>> 0).toString(36)
 }
 
-function readerTextVersion(conversion: ChineseConversion, transforms: TextTransformRule[]): string {
+function readerTextVersion(conversion: ChineseConversion, replacements: TextReplacementRule[]): string {
   let hash = 2166136261
-  const value = JSON.stringify({ conversion, transforms })
+  const value = JSON.stringify({ conversion, replacements })
   for (let index = 0; index < value.length; index++) {
     hash ^= value.charCodeAt(index)
     hash = Math.imul(hash, 16777619)
@@ -178,8 +180,9 @@ export function turnsCrossChapter(dir: 1 | -1, page: number | undefined, pages: 
 // Whether an adjacent-chapter turn deserves the loading indicator: adjacent
 // sections are served from the text-prefetch memo (warm) in the normal case,
 // so arming the 200ms anti-flicker window would flash the spinner on every
-// chapter crossing. Only cold targets (memo miss — prefetch debounce skipped
-// the turn, LRU eviction) arm it; missing/non-linear targets never load.
+// chapter crossing. Only cold targets (memo miss or unresolved prefetch —
+// prefetch debounce skipped the turn, a slow load, or LRU eviction) arm it;
+// missing/non-linear targets never load.
 export function shouldArmPending(
   dir: 1 | -1,
   book: any,
@@ -626,17 +629,24 @@ export type MemoizedLoadText = ((name: string) => Promise<string | null>) & {
 export function memoizeLoadText(
   loadText: (name: string) => Promise<string | null> | string | null,
 ): MemoizedLoadText {
-  const memo = new Map<string, Promise<string | null>>()
+  const memo = new Map<string, { promise: Promise<string | null>; resolved: boolean }>()
   const memoized = (name: string) => {
     const cached = memo.get(name)
     if (cached) {
       // refresh recency
       memo.delete(name)
       memo.set(name, cached)
-      return cached
+      return cached.promise
     }
-    const promise = Promise.resolve(loadText(name))
-    memo.set(name, promise)
+    const entry = { promise: null as unknown as Promise<string | null>, resolved: false }
+    const promise = Promise.resolve()
+      .then(() => loadText(name))
+      .then((value) => {
+        entry.resolved = value !== null
+        return value
+      })
+    entry.promise = promise
+    memo.set(name, entry)
     while (memo.size > TEXT_MEMO_MAX) {
       const oldest = memo.keys().next().value
       if (oldest === undefined) break
@@ -644,15 +654,78 @@ export function memoizeLoadText(
     }
     // never memo a failure — the next request must retry
     promise.catch(() => {
-      if (memo.get(name) === promise) memo.delete(name)
+      if (memo.get(name) === entry) memo.delete(name)
     })
     return promise
   }
-  // Warmth query for the loading indicator: a memo entry means the text was
-  // requested (prefetch counts) and hasn't failed — adjacent chapters are
-  // normally warm, so their turn doesn't need the spinner.
-  memoized.has = (name: string) => memo.has(name)
+  // Only resolved, non-missing text is warm. A prefetch inserts its promise
+  // immediately, so treating every map entry as warm hides the spinner while
+  // the paginator has already blanked the old section.
+  memoized.has = (name: string) => memo.get(name)?.resolved === true
   return memoized
+}
+
+const RESOURCE_BLOB_CACHE_MAX_ENTRIES = 256
+const RESOURCE_BLOB_CACHE_MAX_BYTES = 64 * 1024 * 1024
+
+interface ResourceBlobCacheEntry {
+  promise: Promise<Blob | null>
+  size: number
+}
+
+const resourceBlobCache = new Map<string, ResourceBlobCacheEntry>()
+let resourceBlobCacheBytes = 0
+
+function evictResourceBlobCache() {
+  while (resourceBlobCache.size > RESOURCE_BLOB_CACHE_MAX_ENTRIES
+    || resourceBlobCacheBytes > RESOURCE_BLOB_CACHE_MAX_BYTES) {
+    const oldest = resourceBlobCache.entries().next().value as [string, ResourceBlobCacheEntry] | undefined
+    if (!oldest) break
+    const [key, entry] = oldest
+    resourceBlobCache.delete(key)
+    resourceBlobCacheBytes -= entry.size
+  }
+}
+
+export type MemoizedLoadBlob = (name: string, type?: string) => Promise<Blob | null>
+
+export function memoizeLoadBlob(
+  cacheKey: string,
+  loadBlob: (name: string, type?: string) => Promise<Blob | null> | Blob | null,
+): MemoizedLoadBlob {
+  return (name, type) => {
+    const key = `${cacheKey}\u0000${name}`
+    const cached = resourceBlobCache.get(key)
+    if (cached) {
+      resourceBlobCache.delete(key)
+      resourceBlobCache.set(key, cached)
+      return cached.promise
+    }
+
+    const entry = { promise: null as unknown as Promise<Blob | null>, size: 0 }
+    const promise = Promise.resolve()
+      .then(() => loadBlob(name, type))
+      .then((blob) => {
+        if (!blob) {
+          if (resourceBlobCache.get(key) === entry) resourceBlobCache.delete(key)
+          return null
+        }
+        if (resourceBlobCache.get(key) === entry) {
+          entry.size = blob.size
+          resourceBlobCacheBytes += entry.size
+          evictResourceBlobCache()
+        }
+        return blob
+      })
+      .catch((error) => {
+        if (resourceBlobCache.get(key) === entry) resourceBlobCache.delete(key)
+        throw error
+      })
+    entry.promise = promise
+    resourceBlobCache.set(key, entry)
+    evictResourceBlobCache()
+    return promise
+  }
 }
 
 // Attached once per book (the parse cache hands the same book object to
@@ -696,7 +769,7 @@ function getParsedBook(url: string, foliate: any): Promise<any> {
     }
 
     const loadText = memoizeLoadText(load((entry: any) => entry.getData(new TextWriter())))
-    const loadBlob = load((entry: any, type?: string) => entry.getData(new BlobWriter(type)))
+    const loadBlob = memoizeLoadBlob(url, load((entry: any, type?: string) => entry.getData(new BlobWriter(type))))
     const getSize = (name: string) => map.get(name)?.uncompressedSize ?? 0
 
     const book = await new EPUB({ entries, loadText, loadBlob, getSize }).init()
@@ -716,7 +789,7 @@ function getParsedBook(url: string, foliate: any): Promise<any> {
   return promise
 }
 
-// Book data transforms run before foliate parses a section: the Loader
+// Book data replacements run before foliate parses a section: the Loader
 // dispatches a `data` event on book.transformTarget before caching each
 // resource URL (epub.js createURL), so replacing detail.data changes the
 // cached content. The parse cache reuses the same book object across view
@@ -748,38 +821,43 @@ function originalToc(book: object & { toc?: unknown }): FoliateTocItem[] {
   return source
 }
 
-export async function convertTocLabels(items: FoliateTocItem[], mode: ChineseConversion): Promise<FoliateTocItem[]> {
-  if (mode === 'off') return cloneToc(items)
+export async function convertTocLabels(
+  items: FoliateTocItem[],
+  mode: ChineseConversion,
+  replacementRules: TextReplacementRule[] = [],
+): Promise<FoliateTocItem[]> {
   return Promise.all(items.map(async (item) => ({
     ...item,
-    ...(typeof item.label === 'string' ? { label: await convertChinese(item.label, mode) } : {}),
-    ...(Array.isArray(item.subitems) ? { subitems: await convertTocLabels(item.subitems, mode) } : {}),
+    ...(typeof item.label === 'string'
+      ? { label: await convertChinese(applyTitleReplacements(item.label, replacementRules), mode) }
+      : {}),
+    ...(Array.isArray(item.subitems) ? { subitems: await convertTocLabels(item.subitems, mode, replacementRules) } : {}),
   })))
 }
 
 async function applyTocConversion(book: object & { toc?: unknown }, mode: ChineseConversion) {
   if (!Array.isArray(book.toc)) return
-  book.toc = await convertTocLabels(originalToc(book), mode)
+  book.toc = await convertTocLabels(originalToc(book), mode, activeReplacements)
 }
 
 // The transform listener outlives any single FoliateReader (the parse cache
 // keeps the book alive after destroy), so the current mode is module-level;
 // chineseConversion is a global UI setting.
 let conversionMode: ChineseConversion = 'off'
-// Active text-transform rules (正文变换 P1), module-level for the same reason
+// Active text-replacement rules (文本替换 P1), module-level for the same reason
 // as conversionMode. Rules are per-book/per-user data, not a global setting,
 // so Reader clears them on unmount/book switch to avoid leaking across books.
-let activeTransforms: TextTransformRule[] = []
-export function setActiveTransforms(rules: TextTransformRule[]) {
-  activeTransforms = rules
+let activeReplacements: TextReplacementRule[] = []
+export function setActiveReplacements(rules: TextReplacementRule[]) {
+  activeReplacements = rules
 }
 // Invalid point-patch reporter (P2): attachBookDataTransform runs outside any
 // instance (module-level book listener), so the current instance registers a
 // callback here on mount and clears it on destroy — same pattern as the rule
 // set above. Without a live reader the report is dropped, which is correct.
-let transformInvalidListener: ((ids: string[]) => void) | null = null
-export function setTransformInvalidListener(fn: ((ids: string[]) => void) | null) {
-  transformInvalidListener = fn
+let replacementInvalidListener: ((ids: string[]) => void) | null = null
+export function setReplacementInvalidListener(fn: ((ids: string[]) => void) | null) {
+  replacementInvalidListener = fn
 }
 // "选中即划": auto-create a highlight the moment a selection settles, keeping
 // the toolbar open for restyling. Module-level like conversionMode because the
@@ -801,10 +879,10 @@ function attachBookDataTransform(book: any) {
     const isMarkup = CONVERTIBLE_MEDIA_TYPES.has(mediaType)
     const isStylesheet = mediaType === 'text/css'
     const applyBookStyleTransform = !isFixedLayout && (isMarkup || isStylesheet)
-    const applyMarkupTransform = isMarkup && (conversionMode !== 'off' || activeTransforms.length > 0)
+    const applyMarkupTransform = isMarkup && (conversionMode !== 'off' || activeReplacements.length > 0)
     if (!applyBookStyleTransform && !applyMarkupTransform) return
     const mode = conversionMode
-    const rules = activeTransforms
+    const rules = activeReplacements
     const docType = mediaType as DOMParserSupportedType
     const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth
     const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight
@@ -821,10 +899,10 @@ function attachBookDataTransform(book: any) {
           : transformEpubMarkup(transformed, viewportWidth, viewportHeight, fontScale)
       }
       if (isMarkup) {
-        // Text transforms run after book CSS normalization, and only markup
+        // Text replacements run after book CSS normalization, and only markup
         // receives text conversion; images, fonts and CSS remain untouched.
         transformed = rules.length
-          ? applyTransforms(transformed, rules, docType, detail.name, (ids) => transformInvalidListener?.(ids))
+          ? await applyReplacementsWithWorker(transformed, rules, docType, detail.name, (ids) => replacementInvalidListener?.(ids))
           : transformed
         if (mode !== 'off') transformed = await convertChinese(transformed, mode)
       }
@@ -913,8 +991,8 @@ export class FoliateReader implements BookReader {
   private conversion: ChineseConversion = conversionMode
   // Snapshot of the rules this instance last applied, for change detection —
   // the same rule set re-delivered by a query refetch must not reload the view.
-  private transformsJson = JSON.stringify(activeTransforms)
-  private transforms: TextTransformRule[] = activeTransforms
+  private replacementsJson = JSON.stringify(activeReplacements)
+  private replacements: TextReplacementRule[] = activeReplacements
   private continuousScroll: ContinuousScroll = 'off'
   private pageAnimation = true
   private showHeader = true
@@ -1307,11 +1385,11 @@ export class FoliateReader implements BookReader {
       if (this.destroyed) return
       this.book = epub
       // Snapshot the rules in force at open time; later rule changes go
-      // through applyTextTransforms, which detects the diff and reloads.
-      this.transformsJson = JSON.stringify(activeTransforms)
+      // through applyTextReplacements, which detects the diff and reloads.
+      this.replacementsJson = JSON.stringify(activeReplacements)
       // Point patches report their invalid ids here (P2); the module-level
       // listener is shared with the load-time data pipeline.
-      setTransformInvalidListener((ids) => this.emit('transformInvalid', { ids }))
+      setReplacementInvalidListener((ids) => this.emit('replacementInvalid', { ids }))
       attachBookDataTransform(epub)
       await applyTocConversion(epub, this.conversion)
 
@@ -1442,6 +1520,16 @@ export class FoliateReader implements BookReader {
     // server chapter/TOC index: one XHTML resource may contain multiple TOC
     // entries, and a TOC entry may share a resource with its neighbors.
     const chapterIndex = Number.isFinite(section?.current) ? section.current : undefined
+    let anchorCfi = typeof cfi === 'string' && cfi ? cfi : undefined
+    if (anchorCfi && chapterIndex !== undefined && range?.cloneRange && this.view?.getCFI) {
+      try {
+        const anchorRange = range.cloneRange()
+        anchorRange.collapse(true)
+        anchorCfi = this.view.getCFI(chapterIndex, anchorRange)
+      } catch {
+        // Keep the engine-provided CFI if the cross-realm range cannot be cloned.
+      }
+    }
     if (chapterIndex !== undefined) {
       this.currentSectionIndex = chapterIndex
       this.scheduleTextPrefetch(chapterIndex)
@@ -1508,6 +1596,7 @@ export class FoliateReader implements BookReader {
     }
     const location: ReaderLocation = {
       cfi: effectiveCfi,
+      anchorCfi,
       percent: frac != null ? Math.round(frac * 100) : 0,
       fraction: frac ?? undefined,
       chapter: tocItem?.label,
@@ -1822,17 +1911,17 @@ export class FoliateReader implements BookReader {
     return this.conversionReload
   }
 
-  // Text transforms (正文变换 P1): same load-time caching as Chinese
+  // Text replacements (文本替换 P1): same load-time caching as Chinese
   // conversion, so a rule-set change takes effect via the same close/reopen
   // reload. The module-level rules are always updated — they are what the
   // transformTarget listener reads for sections loaded after this call.
-  applyTextTransforms(rules: TextTransformRule[]): Promise<void> {
-    this.transforms = rules
+  applyTextReplacements(rules: TextReplacementRule[]): Promise<void> {
+    this.replacements = rules
     const json = JSON.stringify(rules)
-    if (json === this.transformsJson) return this.conversionReload
-    this.transformsJson = json
+    if (json === this.replacementsJson) return this.conversionReload
+    this.replacementsJson = json
     this.emit('readingSettingsChanged')
-    setActiveTransforms(rules)
+    setActiveReplacements(rules)
     if (!this.view || !this.book) return Promise.resolve()
     this.conversionReload = this.conversionReload
       .catch(() => {})
@@ -1841,7 +1930,7 @@ export class FoliateReader implements BookReader {
   }
 
   private async reloadViewForConversion() {
-    // Load-time content transforms (text transforms, Chinese conversion) are
+    // Load-time content replacements (text replacements, Chinese conversion) are
     // cached per section URL, so a change only takes effect by tearing the
     // view down — paginator
     // destroy() unloads every loaded section (adjacent preloads in continuous
@@ -2403,9 +2492,9 @@ export class FoliateReader implements BookReader {
     // the currently rendered sections (chapter-scoped searches are instant and
     // their key would need the section index, so they're never cached)
     const cacheable = opts?.scope !== 'chapter'
-    const transformKey = JSON.stringify(this.transforms)
+    const replacementKey = JSON.stringify(this.replacements)
     const cacheKey = cacheable
-      ? `${this.url}|${opts?.scope ?? 'book'}|${opts?.mode ?? 'contains'}|${opts?.matchCase ?? false}|${this.conversion}|${transformKey}|${q}`
+      ? `${this.url}|${opts?.scope ?? 'book'}|${opts?.mode ?? 'contains'}|${opts?.matchCase ?? false}|${this.conversion}|${replacementKey}|${q}`
       : ''
     const cached = cacheable ? searchCache.get(cacheKey) : undefined
     if (cached) {
@@ -2450,7 +2539,7 @@ export class FoliateReader implements BookReader {
       const index = indices[done]!
       const chapterText = await getChapterText(this.book, index, {
         chineseConversion: this.conversion,
-        transforms: this.transforms,
+        replacements: this.replacements,
       })
       if (stale()) break
       if (chapterText?.text) {
@@ -2545,10 +2634,10 @@ export class FoliateReader implements BookReader {
 
   // Match counts per pattern rule across the whole book ("N 处" badges in the
   // reader's per-book dialog). Reads the raw section markup through the same
-  // memoized loader the render pipeline uses (original text, pre-transforms),
+  // memoized loader the render pipeline uses (original text, pre-replacements),
   // so counting never re-applies the rules. Cost: one parse per section, so
   // the caller shows it async and caches by rule signature.
-  async countTransformMatches(rules: TextTransformRule[]): Promise<Record<string, number>> {
+  async countReplacementMatches(rules: TextReplacementRule[]): Promise<Record<string, number>> {
     const book = this.book
     if (!book) return {}
     const patternRules = rules.filter((r) => r.matchType === 'pattern' && r.pattern && r.id)
@@ -2603,7 +2692,7 @@ export class FoliateReader implements BookReader {
   }
 
   getAiCorpusVersion(): string {
-    return readerTextVersion(this.conversion, this.transforms)
+    return readerTextVersion(this.conversion, this.replacements)
   }
 
   async getAiCorpus(signal?: AbortSignal): Promise<AiIndexCorpus> {
@@ -2615,7 +2704,7 @@ export class FoliateReader implements BookReader {
       if (signal?.aborted || this.destroyed) throw new DOMException('The reader corpus request was aborted', 'AbortError')
       const chapterText = await getChapterText(book, sectionIndex, {
         chineseConversion: this.conversion,
-        transforms: this.transforms,
+        replacements: this.replacements,
       })
       if (signal?.aborted || this.destroyed) throw new DOMException('The reader corpus request was aborted', 'AbortError')
       if (!chapterText) throw new Error('Reader chapter content is not available')
@@ -2632,7 +2721,7 @@ export class FoliateReader implements BookReader {
     if (signal?.aborted || this.destroyed) throw new DOMException('The reader chapter request was aborted', 'AbortError')
     const chapterText = await getChapterText(book, sectionIndex, {
       chineseConversion: this.conversion,
-      transforms: this.transforms,
+      replacements: this.replacements,
     })
     if (signal?.aborted || this.destroyed) throw new DOMException('The reader chapter request was aborted', 'AbortError')
     if (!chapterText) throw new Error('Reader chapter content is not available')
@@ -2641,11 +2730,9 @@ export class FoliateReader implements BookReader {
 
   getSnippet(cfi: string, maxLength = 80): string {
     try {
-      // chapter:{index}:{fraction} — scrolled-mode TXT books
+      // chapter:{index}:{fraction} — scrolled-mode positions without a content CFI
       if (cfi.startsWith('chapter:')) {
-        const text = this.lastRange?.startContainer?.textContent
-        if (text) return text.slice(0, maxLength).replace(/\s+/g, ' ').trim().slice(0, maxLength)
-        return ''
+        return this.lastRange ? this.snippetFromRange(this.lastRange, maxLength) : ''
       }
       const resolved = this.book?.resolveCFI?.(cfi)
       if (!resolved) return ''
@@ -2839,7 +2926,7 @@ export class FoliateReader implements BookReader {
     this.disposeFootnoteEntries()
     this.footnoteHandler?.removeEventListener?.('before-render', this.handleFootnoteBeforeRender)
     this.footnoteHandler = null
-    setTransformInvalidListener(null)
+    setReplacementInvalidListener(null)
     this.navigationPending.dispose()
     this.resizeObserver?.disconnect()
     this.resizeObserver = null

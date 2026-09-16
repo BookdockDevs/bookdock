@@ -4,13 +4,13 @@
 // book). Contains matching here is a lowercased `indexOf` sliding window
 // (O(n)); regex delegates to the native engine.
 //
-// Search text is derived from the same text-transform and Chinese-conversion
+// Search text is derived from the same text-replacement and Chinese-conversion
 // pipeline as the rendered section, so result offsets can be mapped back to
 // the live transformed document.
 
 import type { ChineseConversion } from '../types'
 import { convertChinese } from '@/lib/chinese'
-import { applyTransforms, type TextTransformRule } from './text-transforms'
+import { applyReplacementsWithWorker, type TextReplacementRule } from './text-replacements'
 
 // length for context in excerpts (mirrors foliate's search.js)
 const EXCERPT_CONTEXT_LENGTH = 50
@@ -34,7 +34,7 @@ export interface SearchMatchOptions {
 
 export interface ChapterTextOptions {
   chineseConversion?: ChineseConversion
-  transforms?: TextTransformRule[]
+  replacements?: TextReplacementRule[]
 }
 
 // Script/style/noscript subtrees are markup, not book text — same exclusion
@@ -162,11 +162,11 @@ async function loadChapterText(
     doc = parser.parseFromString(markup, docType)
   }
   const conversion = options?.chineseConversion ?? 'off'
-  const transforms = options?.transforms ?? []
-  if (!transforms.length && conversion === 'off') return extractChapterText(doc)
+  const replacements = options?.replacements ?? []
+  if (!replacements.length && conversion === 'off') return extractChapterText(doc)
 
-  let transformedMarkup = transforms.length
-    ? applyTransforms(markup, transforms, docType)
+  let transformedMarkup = replacements.length
+    ? await applyReplacementsWithWorker(markup, replacements, docType)
     : markup
   if (conversion !== 'off') transformedMarkup = await convertChinese(transformedMarkup, conversion)
   doc = parser.parseFromString(transformedMarkup, docType)
@@ -188,7 +188,7 @@ export function getChapterText(
   }
   const cacheKey = `${index}:${JSON.stringify({
     chineseConversion: options?.chineseConversion ?? 'off',
-    transforms: options?.transforms ?? [],
+    replacements: options?.replacements ?? [],
   })}`
   const cached = cache.get(cacheKey)
   if (cached) return cached

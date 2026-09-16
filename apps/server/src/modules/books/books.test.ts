@@ -300,6 +300,16 @@ describe('lazy EPUB cover repair', () => {
 
     expect(await getBookCover(userId, book.id)).toBeNull()
   })
+
+  it('keeps an existing cover accessible for trashed books', async () => {
+    const coverKey = 'blobs/co/book.cover.jpg'
+    const book = seedBook(db, userId, { coverKey })
+    mem.files.set(coverKey, Buffer.from('cover-bytes'))
+
+    await trashBook(userId, book.id)
+
+    expect(await getBookCover(userId, book.id)).toEqual({ coverKey })
+  })
 })
 describe('POST /api/v1/books upload membership', () => {
   let db: ReturnType<typeof createTestDb>

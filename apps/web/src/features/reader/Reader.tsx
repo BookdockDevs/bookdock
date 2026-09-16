@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { apiGet, apiPatch, apiPut } from '@/api/client'
 import { usePrefetchBookReadingStats } from '@/api/hooks/reading-records'
-import { useBookTransforms } from '@/api/hooks/useTransforms'
+import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
@@ -40,8 +40,8 @@ import HistoryCapsule from './components/HistoryCapsule'
 import ReaderFooterControls from './components/ReaderFooterControls'
 import AutoReadingProgressBar from './components/AutoReadingProgressBar'
 import { getLastHighlightStyle } from './components/annotation-colors'
-import { setActiveTransforms, setAutoMarkSelectionMode } from './renderers/FoliateReader'
-import TransformForm from '../settings/components/TransformForm'
+import { setActiveReplacements, setAutoMarkSelectionMode } from './renderers/FoliateReader'
+import ReplacementForm from '../settings/components/ReplacementForm'
 import { ViewSettingsContext } from './view-settings-context'
 import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './lib/view-settings'
 import { readingRateOf, RATE_SAMPLE_MIN_INTERVAL_MS } from './lib/progress-model'
@@ -62,6 +62,7 @@ export default function Reader() {
   const [percent, setPercent] = useState(0)
   const [pageInfo, setPageInfo] = useState<{ page: number; total: number } | null>(null)
   const [currentCfi, setCurrentCfi] = useState<string | null>(null)
+  const [currentAnchorCfi, setCurrentAnchorCfi] = useState<string | null>(null)
   const [chapterFraction, setChapterFraction] = useState<number | undefined>(undefined)
   const [_atChapterStart, setAtChapterStart] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -89,8 +90,7 @@ export default function Reader() {
     footerVisibleRef.current = footerVisible
   }, [footerVisible])
   const setSelection = useReaderState((s) => s.setSelection)
-  const setAiContext = useReaderState((s) => s.setAiContext)
-  const setAiPendingCommand = useReaderState((s) => s.setAiPendingCommand)
+  const resetForBook = useReaderState((s) => s.resetForBook)
   const replaceTarget = useReaderState((s) => s.replaceTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const setTocItems = useReaderState((s) => s.setTocItems)
@@ -109,9 +109,9 @@ export default function Reader() {
   const deepLinkHandled = useRef(false)
 
   const currentBookmark = useMemo(() => {
-    if (!currentCfi) return undefined
-    return annotations?.data?.find((a) => a.type === 'bookmark' && a.cfiRange === currentCfi)
-  }, [annotations?.data, currentCfi])
+    if (!currentCfi && !currentAnchorCfi) return undefined
+    return annotations?.data?.find((a) => a.type === 'bookmark' && (a.cfiRange === currentAnchorCfi || a.cfiRange === currentCfi))
+  }, [annotations?.data, currentAnchorCfi, currentCfi])
 
   const readingThemeId = useUiStore((s) => s.readingThemeId)
   const lightReadingThemeId = useUiStore((s) => s.lightReadingThemeId)
@@ -474,28 +474,31 @@ export default function Reader() {
   }
 
   const [bookReady, setBookReady] = useState(false)
+  const [readyContentUrl, setReadyContentUrl] = useState<string | null>(null)
+  const readerReady = bookReady && readyContentUrl === contentUrl
   // kind=timeout: watchdog fired, likely network-related; kind=parse: renderer
   // onError, the file itself failed to load
   const [loadError, setLoadError] = useState<{ kind: 'timeout' | 'parse' } | null>(null)
   useEffect(() => {
     setBookReady(false)
+    setReadyContentUrl(null)
     setLoadError(null)
   }, [contentUrl])
 
   // Timeout: if the reader doesn't render within 30s, show error instead of infinite loading
   useEffect(() => {
-    if (bookReady || !contentUrl) return
+    if (readerReady || !contentUrl) return
     const timer = setTimeout(() => {
-      if (!bookReady) setLoadError({ kind: 'timeout' })
+      if (!readerReady) setLoadError({ kind: 'timeout' })
     }, 30000)
     return () => clearTimeout(timer)
-  }, [bookReady, contentUrl])
+  }, [readerReady, contentUrl])
 
   // Count only time after the book has actually rendered; the manual timer
   // mode disables auto recording entirely (sessions belong to the pill)
   const readingTimerMode = useUiStore((s) => s.readingTimerMode)
   const { flush: flushReadingTimer, ping: pingReadingTimer } = useReadingTimer(
-    readingTimerMode === 'auto' ? (bookReady ? id : undefined) : undefined,
+    readingTimerMode === 'auto' ? (readerReady ? id : undefined) : undefined,
   )
   // Warm the sidebar stats tab's queries so first open is instant
   usePrefetchBookReadingStats(readingTimerMode === 'off' ? undefined : id)
@@ -509,16 +512,16 @@ export default function Reader() {
       : c.endOffset - (c.contentStartOffset ?? c.startOffset)))
   }, [chaptersQuery.data])
 
-  // Text transforms (正文变换 P1): the module-level rule set must be populated
-  // before the renderer mounts (transforms apply at section load time), so
+  // Text replacements (文本替换 P1): the module-level rule set must be populated
+  // before the renderer mounts (replacements apply at section load time), so
   // this effect is declared before useReaderRenderer. Cleared on unmount and
   // book switch so rules never leak into another book's reader.
-  const { data: transformsData } = useBookTransforms(id)
-  const transformRules = useMemo(() => transformsData?.data ?? [], [transformsData])
+  const { data: replacementsData } = useBookReplacements(id)
+  const replacementRules = useMemo(() => replacementsData?.data ?? [], [replacementsData])
   useEffect(() => {
-    setActiveTransforms(transformRules)
-    return () => setActiveTransforms([])
-  }, [transformRules])
+    setActiveReplacements(replacementRules)
+    return () => setActiveReplacements([])
+  }, [replacementRules])
 
   // A stale replace dialog must not follow the reader into another book
   useEffect(() => {
@@ -537,6 +540,7 @@ export default function Reader() {
     chapterWordCounts,
     onRendered: () => {
       setBookReady(true)
+      setReadyContentUrl(contentUrl)
       setLoadError(null)
     },
     onError: () => setLoadError({ kind: 'parse' }),
@@ -553,6 +557,7 @@ export default function Reader() {
       if (e.source !== 'tts') pingReadingTimer()
       setPercent(e.percent)
       setCurrentCfi(e.cfi)
+      setCurrentAnchorCfi(e.anchorCfi ?? e.cfi)
       currentCfiRef.current = e.cfi
       setChapterFraction(e.chapterFraction)
       if (e.page !== undefined && e.total !== undefined) {
@@ -607,7 +612,7 @@ export default function Reader() {
       if (!annotation || current?.cfiRange === e.cfiRange) { setSelection(null); return }
       setSelection({ cfiRange: e.cfiRange, text: annotation.text, rect: e.rect })
     },
-    onTocReady: (items) => setTocItems(items),
+    onTocReady: (items) => setTocItems(items, id),
     onJumpConfirmed: (e) => {
       if (!e.cfi) return
       jumpHistoryRef.current.push(e.cfi)
@@ -634,15 +639,15 @@ export default function Reader() {
       }
     },
     onUserJump: () => closeSegment(segmentTrackerRef.current),
-    onTransformInvalid: (e) => {
+    onReplacementInvalid: (e) => {
       // The same invalid patch is reported again on every section reload —
       // toast only the freshly discovered ones
-      const known = useReaderState.getState().invalidTransformIds
+      const known = useReaderState.getState().invalidReplacementIds
       const fresh = e.ids.filter((id) => !known.includes(id))
       if (fresh.length) {
-        notify.error({ key: 'reader.transformsInvalidToast', params: { count: fresh.length } })
+        notify.error({ key: 'reader.replacementsInvalidToast', params: { count: fresh.length } })
       }
-      useReaderState.getState().addInvalidTransformIds(e.ids)
+      useReaderState.getState().addInvalidReplacementIds(e.ids)
     },
     onAnnotationOrphaned: (e) => {
       useReaderState.getState().addOrphanedAnnotationKeys([`${e.cfiRange}|${e.type}`])
@@ -666,7 +671,7 @@ export default function Reader() {
   const playbackCoordinator = useMemo(() => new ReaderPlaybackCoordinator(), [])
 
   useEffect(() => {
-    if (deepLinkHandled.current || !bookReady || !renderer) return
+    if (deepLinkHandled.current || !readerReady || !renderer) return
     const annotation = deepLinkAnnotation
       ? annotations?.data?.find((item) => item.id === deepLinkAnnotation)
       : undefined
@@ -674,15 +679,15 @@ export default function Reader() {
     if (!target) return
     deepLinkHandled.current = true
     void renderer.display(target)
-  }, [annotations?.data, bookReady, deepLinkAnnotation, deepLinkCfi, renderer])
+  }, [annotations?.data, readerReady, deepLinkAnnotation, deepLinkCfi, renderer])
 
   // Rule-set changes after mount must invalidate the cached sections: the
   // renderer tears the view down and reopens it (same mechanism as the
   // Chinese-conversion switch). No-op while the query is still loading.
   useEffect(() => {
-    if (!renderer || transformsData === undefined) return
-    void renderer.applyTextTransforms(transformRules)
-  }, [renderer, transformRules, transformsData])
+    if (!renderer || replacementsData === undefined) return
+    void renderer.applyTextReplacements(replacementRules)
+  }, [renderer, replacementRules, replacementsData])
 
   // Byte-weight section boundaries (foliate's own progress model) for the
   // progress strip's drag preview — same model the seek lands by, so the
@@ -719,10 +724,7 @@ export default function Reader() {
   }, [renderer, annotations?.data, noteEditorRange])
 
   useEffect(() => {
-    setCurrentChapter(null)
-    setCurrentChapterIndex(null)
-    setAiContext(null)
-    setAiPendingCommand(null)
+    resetForBook()
     // chapterCount starts empty; the effect below syncs it when chapters arrive
     segmentTrackerRef.current = createSegmentTracker()
     lastSegmentStartRef.current = null
@@ -731,7 +733,9 @@ export default function Reader() {
     syncHistoryCaps()
     historyAutoHideRef.current?.dispose()
     currentCfiRef.current = null
-  }, [id, setAiContext, setAiPendingCommand, setCurrentChapter, setCurrentChapterIndex, syncHistoryCaps])
+    setCurrentCfi(null)
+    setCurrentAnchorCfi(null)
+  }, [id, resetForBook, syncHistoryCaps])
 
   // The displacement threshold scales with the chapter count (big books cap it
   // at two chapter widths); update it once the chapters arrive
@@ -952,7 +956,8 @@ export default function Reader() {
   }, [])
 
   const onAddBookmark = useCallback(async () => {
-    if (!currentCfi) return
+    const bookmarkCfi = currentAnchorCfi ?? currentCfi
+    if (!bookmarkCfi) return
     if (currentBookmark) {
       try {
         await deleteAnnotation.mutateAsync(currentBookmark.id)
@@ -963,10 +968,10 @@ export default function Reader() {
       return
     }
     try {
-      const snippet = rendererRef.current?.getSnippet?.(currentCfi, 80)
+      const snippet = rendererRef.current?.getSnippet?.(bookmarkCfi, 80)
       await createAnnotation.mutateAsync({
-        cfiRange: currentCfi,
-        cfiAnchor: currentCfi,
+        cfiRange: bookmarkCfi,
+        cfiAnchor: bookmarkCfi,
         type: 'bookmark',
         text: snippet?.trim() || currentChapter || _('reader.bookmark'),
         chapter: currentChapter ?? undefined,
@@ -975,7 +980,7 @@ export default function Reader() {
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'reader.bookmarkFailed'))
     }
-  }, [currentBookmark, currentChapter, currentCfi, createAnnotation, deleteAnnotation, _])
+  }, [currentAnchorCfi, currentBookmark, currentChapter, currentCfi, createAnnotation, deleteAnnotation, _])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1123,7 +1128,14 @@ export default function Reader() {
             {/* Top hover zone: hot strip + header belong to the same group so hover is continuous.
                 Touch: no group/hot strip — pinned (middle tap) is the only reveal. */}
             <div className={cn('absolute inset-x-0 top-0 z-40 pointer-events-none', !isTouch && 'group')}>
-              {!isTouch && <div className="absolute inset-x-0 top-0 h-12 pointer-events-auto" />}
+              {!isTouch && (
+                <div
+                  className={cn(
+                    'absolute left-0 top-0 h-12 pointer-events-auto',
+                    readingMode === 'scroll' ? 'right-5' : 'right-0',
+                  )}
+                />
+              )}
               <ReaderHeader
                 title={currentChapter || book.title}
                 visible
@@ -1161,7 +1173,7 @@ export default function Reader() {
                 </div>
               </div>
             )}
-            {!bookReady && (
+            {!readerReady && (
               // Solid theme background: the foliate iframe behind is blank
               // white until its theme styles are injected — without this the
               // loading overlay would flash white on every reader open
@@ -1295,7 +1307,7 @@ export default function Reader() {
         <ShareCardDialog bookId={id} />
         {replaceTarget && (
           <Modal title={_('annotation.replaceSelection')} onClose={() => setReplaceTarget(null)}>
-            <TransformForm
+            <ReplacementForm
               bookId={id}
               selection={replaceTarget}
               onDone={() => setReplaceTarget(null)}

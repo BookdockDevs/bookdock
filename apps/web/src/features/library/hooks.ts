@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryObserverResult } from '@tanstack/react-query'
+import { useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookMetadata, PaginatedResponse, ReadStatus, ShelfListItem, TagListItem } from '@bookdock/shared'
@@ -72,8 +72,28 @@ export function useInfiniteBooks(params: UseInfiniteBooksParams) {
     queryFn: ({ pageParam }) =>
       infiniteBooksFn(pageParam, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash),
     initialPageParam: 1,
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) => {
+      const prevParams = previousQuery?.queryKey[2] as UseInfiniteBooksParams | undefined
+      // Never retain regular books when switching into Trash, or vice versa
+      if (prevParams && prevParams.trash !== params.trash) {
+        return undefined
+      }
+      return previousData
+    },
     getNextPageParam: (last) => {
+      const totalPages = Math.ceil(last.total / last.pageSize)
+      return last.page < totalPages ? last.page + 1 : undefined
+    },
+  })
+}
+
+export function prefetchInfiniteBooks(queryClient: QueryClient, params: UseInfiniteBooksParams) {
+  return queryClient.prefetchInfiniteQuery({
+    queryKey: ['books', 'infinite', params],
+    queryFn: ({ pageParam }) =>
+      infiniteBooksFn(pageParam as number, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash),
+    initialPageParam: 1,
+    getNextPageParam: (last: PaginatedResponse<BookListItem>) => {
       const totalPages = Math.ceil(last.total / last.pageSize)
       return last.page < totalPages ? last.page + 1 : undefined
     },
@@ -185,14 +205,14 @@ export function useUploadBooks() {
     uploadOne(next)
   }, [items, uploadOne])
 
-  // Settlement: once nothing is queued/uploading/processing, invalidate once
-  // and surface a summary toast.
+  // Settlement: once nothing is pending, queued, uploading, or processing,
+  // invalidate once and surface a summary toast.
   useEffect(() => {
     if (items.length === 0) {
       settledRef.current = false
       return
     }
-    const active = items.some((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'processing')
+    const active = items.some((it) => it.status === 'pending' || it.status === 'queued' || it.status === 'uploading' || it.status === 'processing')
     if (active) {
       settledRef.current = false
       return

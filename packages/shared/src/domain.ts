@@ -97,22 +97,23 @@ export interface ViewSettings {
   pageVerticalPadding?: number
 }
 
-export type TransformMatchType = 'pattern' | 'point'
+export type ReplacementMatchType = 'pattern' | 'point'
 
-export type TransformScope = 'book' | 'global'
+export type ReplacementScope = 'book' | 'global'
+export type ReplacementApplyTo = 'content' | 'title' | 'both'
 
-export interface TextTransform {
+export interface TextReplacement {
   id: string
   userId: string
   /** Null = user-global pattern rule; set = book-scoped (point patches always carry their book) */
   bookId: string | null
-  matchType: TransformMatchType
+  matchType: ReplacementMatchType
   /** Required for matchType 'pattern'; null for point patches */
   pattern: string | null
   /** Null/empty = delete (hide) the matched content */
   replacement: string | null
   isRegex: boolean
-  caseSensitive: boolean
+  applyTo: ReplacementApplyTo
   enabled: boolean
   name: string | null
   /** Lightweight grouping label, list display only */

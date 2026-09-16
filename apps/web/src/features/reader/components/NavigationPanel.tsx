@@ -190,6 +190,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const _ = useTranslation()
   const tab = useReaderState((s) => s.activeNavTab)
   const tocItems = useReaderState((s) => s.tocItems)
+  const tocBookId = useReaderState((s) => s.tocBookId)
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const { renderer } = useReaderApi()
@@ -339,14 +340,15 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   }, [tab, notesSelectionMode])
 
   const tocChapters = useMemo(() => {
-    if (tocItems.length) {
-      return tocItems.map((item) => ({ ...item, level: item.level ?? 1 }))
+    const currentBookTocItems = tocBookId === null || tocBookId === bookId ? tocItems : []
+    if (currentBookTocItems.length) {
+      return currentBookTocItems.map((item) => ({ ...item, level: item.level ?? 1 }))
     }
     if (chaptersQuery.data?.data?.length) {
       return chaptersQuery.data.data.map((c, i) => ({ label: c.title, href: `chapter:${i}`, level: c.level }))
     }
     return []
-  }, [chaptersQuery.data, tocItems])
+  }, [bookId, chaptersQuery.data, tocBookId, tocItems])
 
   const tree = useMemo(() => buildTocTree(tocChapters), [tocChapters])
   const chapterOrder = useMemo(() => tocChapters.map((c) => c.label), [tocChapters])

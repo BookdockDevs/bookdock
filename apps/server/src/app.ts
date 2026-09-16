@@ -21,7 +21,7 @@ import annotationRoutes from './modules/annotations/annotations.routes'
 import shelvesRoutes from './modules/shelves/shelves.routes'
 import tagsRoutes from './modules/tags/tags.routes'
 import fontsRoutes from './modules/fonts/fonts.routes'
-import transformRoutes from './modules/transforms/transforms.routes'
+import replacementRoutes from './modules/replacements/replacements.routes'
 import tocRuleRoutes from './modules/toc-rules/toc-rules.routes'
 import ttsRoutes from './modules/tts/tts.routes'
 import aiRoutes from './modules/ai/ai.routes'
@@ -49,7 +49,7 @@ app.route('/api/v1/annotations', annotationRoutes)
 app.route('/api/v1/shelves', shelvesRoutes)
 app.route('/api/v1/tags', tagsRoutes)
 app.route('/api/v1/fonts', fontsRoutes)
-app.route('/api/v1/transforms', transformRoutes)
+app.route('/api/v1/replacements', replacementRoutes)
 app.route('/api/v1/toc-rules', tocRuleRoutes)
 app.route('/api/v1/tts', ttsRoutes)
 app.route('/api/v1/ai', aiRoutes)

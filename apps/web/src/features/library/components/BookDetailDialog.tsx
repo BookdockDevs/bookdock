@@ -32,7 +32,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
   const _ = useTranslation()
   const queryClient = useQueryClient()
 
-  const { data: detailData } = useBook(book?.id ?? null)
+  const { data: detailData, isLoading: detailLoading } = useBook(book?.id ?? null)
   const detail = detailData?.data
   const displayBook: BookListItem = detail ?? book!
   const bookmeta = detail?.meta?.bookmeta
@@ -130,8 +130,15 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
     setDraft(draftFrom(displayBook, bookmeta))
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
-    setShelfSel(memShelves.data?.data ?? null)
-    setTagSel(new Set(memTags.data?.data ?? []))
+    setShelfSel(memShelves.data?.data !== undefined ? memShelves.data.data : (book.shelfId ?? null))
+    setTagSel(
+      new Set(
+        memTags.data?.data ??
+          (tagsData?.data ?? [])
+            .filter((t) => (book.tags ?? []).includes(t.name))
+            .map((t) => t.id),
+      ),
+    )
     setConfirmReset(false)
     setEditing(true)
   }
@@ -187,13 +194,24 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
 
   if (!book) return null
 
-  const currentShelfId = memShelves.data?.data ?? null
-  const tagIds = new Set(memTags.data?.data ?? [])
+  const currentShelfId =
+    memShelves.data?.data !== undefined ? memShelves.data.data : (book.shelfId ?? null)
+  const tagIds = memTags.data?.data ? new Set(memTags.data.data) : null
   const shelfName = currentShelfId
-    ? (shelvesData?.data ?? []).find((s) => s.id === currentShelfId)?.name
+    ? (shelvesData?.data ?? []).find((s) => s.id === currentShelfId)?.name ?? book.shelfName ?? undefined
     : undefined
-  const memberTags = (tagsData?.data ?? []).filter((t) => tagIds.has(t.id))
-  const identifier = bookmeta?.isbn || bookmeta?.identifier || ''
+  const memberTags = tagIds
+    ? (tagsData?.data ?? []).filter((t) => tagIds.has(t.id))
+    : (book.tags ?? []).map((name) => {
+        const found = (tagsData?.data ?? []).find((t) => t.name === name)
+        return { id: found ? found.id : name, name }
+      })
+  const isMachineId = (id: string) =>
+    /^urn:uuid:/i.test(id.trim()) ||
+    /^uuid:/i.test(id.trim()) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim())
+  const rawId = bookmeta?.isbn || bookmeta?.identifier || ''
+  const identifier = rawId && (bookmeta?.isbn || !isMachineId(rawId)) ? rawId : ''
 
   return (
     <>
@@ -202,12 +220,12 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
       onClick={closeDialog}
     >
       <div
-        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:max-h-[85vh] sm:rounded-2xl dark:bg-stone-900"
+        className="flex min-h-[340px] max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:min-h-[380px] sm:max-h-[85vh] sm:rounded-2xl dark:bg-stone-900"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-stone-100 px-4 py-3 sm:px-5 dark:border-stone-800">
           <h2 className="font-serif text-base font-semibold text-stone-900 dark:text-stone-100">
-            {editing ? _('library.edit') : _('library.details')}
+            {editing ? _('library.editBook') : _('library.bookDetails')}
           </h2>
           <div className="flex items-center gap-1">
             {displayBook.format === 'txt' && (
@@ -266,7 +284,8 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
               type="button"
               onClick={closeDialog}
               className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-              aria-label={_('library.cancel')}
+              aria-label={_('library.close')}
+              title={_('library.close')}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 6L6 18M6 6l12 12" />
@@ -313,6 +332,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
               shelfName={shelfName}
               currentShelfId={currentShelfId}
               memberTags={memberTags}
+              isLoading={detailLoading || !detail}
               onEdit={enterEdit}
               onDelete={onDelete}
               onClose={onClose}

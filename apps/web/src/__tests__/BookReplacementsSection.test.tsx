@@ -1,20 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 
-import type { TextTransformRes } from '@bookdock/shared'
+import type { TextReplacementRes } from '@bookdock/shared'
 
-import { useBookTransforms, useSetTransformOverride, useUpdateTransform } from '@/api/hooks/useTransforms'
+import { useBookReplacements, useSetReplacementOverride, useUpdateReplacement } from '@/api/hooks/useReplacements'
 import i18n from '../i18n/i18n'
-import BookTransformsSection from '../features/library/components/BookTransformsSection'
-import { nextOverrideValue } from '../features/library/transform-overrides'
+import BookReplacementsSection from '../features/library/components/BookReplacementsSection'
+import { nextOverrideValue } from '../features/library/replacement-overrides'
 
-vi.mock('@/api/hooks/useTransforms', () => ({
-  useBookTransforms: vi.fn(() => ({ data: { data: [] } })),
-  useSetTransformOverride: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
-  useUpdateTransform: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+vi.mock('@/api/hooks/useReplacements', () => ({
+  useBookReplacements: vi.fn(() => ({ data: { data: [] } })),
+  useSetReplacementOverride: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useUpdateReplacement: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }))
 
-const rule = (overrides: Partial<TextTransformRes> = {}): TextTransformRes => ({
+const rule = (overrides: Partial<TextReplacementRes> = {}): TextReplacementRes => ({
   id: 't1',
   bookId: null,
   scope: 'global',
@@ -22,7 +22,7 @@ const rule = (overrides: Partial<TextTransformRes> = {}): TextTransformRes => ({
   pattern: '广告词',
   replacement: null,
   isRegex: false,
-  caseSensitive: true,
+  applyTo: 'content',
   enabled: true,
   name: null,
   group: null,
@@ -34,7 +34,7 @@ const rule = (overrides: Partial<TextTransformRes> = {}): TextTransformRes => ({
   ...overrides,
 })
 
-const point = (overrides: Partial<TextTransformRes> = {}): TextTransformRes => ({
+const point = (overrides: Partial<TextReplacementRes> = {}): TextReplacementRes => ({
   id: 'p1',
   bookId: 'b1',
   scope: 'book',
@@ -42,7 +42,7 @@ const point = (overrides: Partial<TextTransformRes> = {}): TextTransformRes => (
   pattern: null,
   replacement: '测试一处',
   isRegex: false,
-  caseSensitive: true,
+  applyTo: 'content',
   enabled: true,
   name: null,
   group: null,
@@ -54,13 +54,13 @@ const point = (overrides: Partial<TextTransformRes> = {}): TextTransformRes => (
   ...overrides,
 })
 
-const mockRules = (list: TextTransformRes[]) => {
-  vi.mocked(useBookTransforms).mockReturnValue({ data: { data: list } } as ReturnType<typeof useBookTransforms>)
+const mockRules = (list: TextReplacementRes[]) => {
+  vi.mocked(useBookReplacements).mockReturnValue({ data: { data: list } } as ReturnType<typeof useBookReplacements>)
 }
 
 const mockSetOverride = () => {
   const mutation = { mutate: vi.fn(), isPending: false }
-  vi.mocked(useSetTransformOverride).mockReturnValue(mutation as unknown as ReturnType<typeof useSetTransformOverride>)
+  vi.mocked(useSetReplacementOverride).mockReturnValue(mutation as unknown as ReturnType<typeof useSetReplacementOverride>)
   return mutation
 }
 
@@ -85,14 +85,14 @@ describe('nextOverrideValue', () => {
   })
 })
 
-describe('BookTransformsSection', () => {
+describe('BookReplacementsSection', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
     mockRules([])
   })
 
   it('shows the empty hint when there are no rules', () => {
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     expect(screen.getByText(/还没有规则/)).toBeInTheDocument()
   })
@@ -103,7 +103,7 @@ describe('BookTransformsSection', () => {
       rule({ id: 't2', name: '停用规则', enabled: false, effectiveEnabled: false, hasOverride: false }),
       rule({ id: 't3', matchType: 'point', pattern: null, originalText: '错字', bookId: 'b1' }),
     ])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     expect(screen.getByText('去广告')).toBeInTheDocument()
     expect(screen.getByText('全局开')).toBeInTheDocument()
@@ -114,7 +114,7 @@ describe('BookTransformsSection', () => {
 
   it('shows the override badge when a per-book override exists', () => {
     mockRules([rule({ enabled: true, effectiveEnabled: false, hasOverride: true })])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     expect(screen.getByText('本书关')).toBeInTheDocument()
   })
@@ -122,11 +122,11 @@ describe('BookTransformsSection', () => {
   it('toggling without an override sets the flipped effective value', () => {
     const mutation = mockSetOverride()
     mockRules([rule({ enabled: true, effectiveEnabled: true, hasOverride: false })])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     fireEvent.click(screen.getByRole('switch'))
     expect(mutation.mutate).toHaveBeenCalledWith(
-      { transformId: 't1', body: { bookId: 'b1', enabled: false } },
+      { replacementId: 't1', body: { bookId: 'b1', enabled: false } },
       expect.objectContaining({ onError: expect.any(Function) }),
     )
   })
@@ -134,11 +134,11 @@ describe('BookTransformsSection', () => {
   it('toggling an override back to the global default restores inheritance (null)', () => {
     const mutation = mockSetOverride()
     mockRules([rule({ enabled: true, effectiveEnabled: false, hasOverride: true })])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     fireEvent.click(screen.getByRole('switch'))
     expect(mutation.mutate).toHaveBeenCalledWith(
-      { transformId: 't1', body: { bookId: 'b1', enabled: null } },
+      { replacementId: 't1', body: { bookId: 'b1', enabled: null } },
       expect.objectContaining({ onError: expect.any(Function) }),
     )
   })
@@ -146,29 +146,29 @@ describe('BookTransformsSection', () => {
   it('toggling an override away from the global default updates the override', () => {
     const mutation = mockSetOverride()
     mockRules([rule({ enabled: true, effectiveEnabled: true, hasOverride: true })])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     fireEvent.click(screen.getByRole('switch'))
     expect(mutation.mutate).toHaveBeenCalledWith(
-      { transformId: 't1', body: { bookId: 'b1', enabled: false } },
+      { replacementId: 't1', body: { bookId: 'b1', enabled: false } },
       expect.objectContaining({ onError: expect.any(Function) }),
     )
   })
 
   it('lists book-scoped pattern rules with a book-only badge and a direct enabled toggle', () => {
-    const updateTransform = { mutate: vi.fn(), isPending: false }
-    vi.mocked(useUpdateTransform).mockReturnValue(updateTransform as unknown as ReturnType<typeof useUpdateTransform>)
+    const updateReplacement = { mutate: vi.fn(), isPending: false }
+    vi.mocked(useUpdateReplacement).mockReturnValue(updateReplacement as unknown as ReturnType<typeof useUpdateReplacement>)
     mockRules([
       rule({ id: 's1', bookId: 'b1', scope: 'book', name: '本书专属规则', enabled: true, effectiveEnabled: true }),
     ])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     expect(screen.getByText('本书专属规则')).toBeInTheDocument()
     expect(screen.getByText('本书规则')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('switch'))
     // Book-scoped rules flip their own enabled switch — no override layer
-    expect(updateTransform.mutate).toHaveBeenCalledWith(
+    expect(updateReplacement.mutate).toHaveBeenCalledWith(
       { id: 's1', body: { enabled: false } },
       expect.objectContaining({ onError: expect.any(Function) }),
     )
@@ -176,7 +176,7 @@ describe('BookTransformsSection', () => {
 
   it('keeps book-scoped rules of other books out of the list', () => {
     mockRules([rule({ id: 's2', bookId: 'other', scope: 'book', name: '别书的规则' })])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     expect(screen.queryByText('别书的规则')).not.toBeInTheDocument()
     expect(screen.getByText(/还没有规则/)).toBeInTheDocument()
@@ -184,13 +184,13 @@ describe('BookTransformsSection', () => {
 
   it('shows per-rule match counts when provided', () => {
     mockRules([rule({ id: 't1', name: '去广告' }), rule({ id: 't2', name: '改错字' })])
-    render(<BookTransformsSection bookId="b1" counts={{ t1: 42, t2: 3 }} />)
+    render(<BookReplacementsSection bookId="b1" counts={{ t1: 42, t2: 3 }} />)
 
     expect(screen.getByText('42 处')).toBeInTheDocument()
     expect(screen.getByText('3 处')).toBeInTheDocument()
     // Rows without a count get no badge
     mockRules([rule({ id: 't3' })])
-    const { container } = render(<BookTransformsSection bookId="b1" counts={{ t1: 1 }} />)
+    const { container } = render(<BookReplacementsSection bookId="b1" counts={{ t1: 1 }} />)
     expect(container.querySelectorAll('li')).toHaveLength(1)
     expect(screen.queryByText('1 处')).not.toBeInTheDocument()
   })
@@ -199,7 +199,7 @@ describe('BookTransformsSection', () => {
     mockRules([rule({ id: 't1', name: '去广告' })])
     const onEdit = vi.fn()
     const onDelete = vi.fn()
-    render(<BookTransformsSection bookId="b1" onEdit={onEdit} onDelete={onDelete} />)
+    render(<BookReplacementsSection bookId="b1" onEdit={onEdit} onDelete={onDelete} />)
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }))
@@ -211,7 +211,7 @@ describe('BookTransformsSection', () => {
 
   it('omits edit/delete buttons without callbacks (book detail view)', () => {
     mockRules([rule({ id: 't1' })])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
@@ -220,7 +220,7 @@ describe('BookTransformsSection', () => {
   it('merges point patches into the list with a chapter prefix and no point badge', () => {
     mockRules([rule({ id: 't1', name: '去广告' })])
     render(
-      <BookTransformsSection
+      <BookReplacementsSection
         bookId="b1"
         points={[point()]}
         chapterOf={(href) => (href === 'ch12.xhtml' ? '第 12 章' : null)}
@@ -235,7 +235,7 @@ describe('BookTransformsSection', () => {
 
   it('marks invalid point patches with a red badge', () => {
     render(
-      <BookTransformsSection
+      <BookReplacementsSection
         bookId="b1"
         points={[point({ spineHref: 'c1', originalText: '坏', replacement: '好' })]}
         invalidIds={['p1']}
@@ -247,21 +247,21 @@ describe('BookTransformsSection', () => {
 
   it('renders an unnamed rule as a single pattern line (no duplicated title)', () => {
     mockRules([rule({ id: 't1', pattern: '那也是我亲侄子', name: null })])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     expect(screen.getAllByText((_, el) => el?.tagName === 'P' && el.textContent?.startsWith('那也是我亲侄子'))).toHaveLength(1)
   })
 
   it('shows the replacement summary for pattern rows', () => {
     mockRules([rule({ id: 't1', pattern: '测试一下啦', replacement: '嘻嘻' })])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent?.includes('测试一下啦 → 嘻嘻'))).toBeInTheDocument()
   })
 
   it('shows a null replacement as a bare pattern — no arrow, no delete label', () => {
     mockRules([rule({ id: 't1', pattern: '广告词', replacement: null })])
-    render(<BookTransformsSection bookId="b1" />)
+    render(<BookReplacementsSection bookId="b1" />)
 
     const row = screen.getByText((_, el) => el?.tagName === 'P' && el.textContent?.startsWith('广告词'))
     expect(row.textContent).toBe('广告词')
@@ -269,7 +269,7 @@ describe('BookTransformsSection', () => {
 
   it('shows a null point replacement as a bare snapshot — no arrow', () => {
     render(
-      <BookTransformsSection
+      <BookReplacementsSection
         bookId="b1"
         points={[point({ spineHref: 'ch12.xhtml', originalText: '我掐灭烟蒂', replacement: null })]}
       />,

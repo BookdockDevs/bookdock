@@ -1,6 +1,6 @@
-import type { TextTransformRes } from '@bookdock/shared'
+import type { TextReplacementRes } from '@bookdock/shared'
 
-import { useBookTransforms, useSetTransformOverride, useUpdateTransform } from '@/api/hooks/useTransforms'
+import { useBookReplacements, useSetReplacementOverride, useUpdateReplacement } from '@/api/hooks/useReplacements'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import Toggle from '@/components/ui/Toggle'
@@ -9,24 +9,24 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
-import { nextOverrideValue } from '../transform-overrides'
+import { nextOverrideValue } from '../replacement-overrides'
 
-interface BookTransformsSectionProps {
+interface BookReplacementsSectionProps {
   bookId: string
   /** Per-rule match counts ("N 处"), computed per book by the reader renderer */
   counts?: Record<string, number>
   /** This book's point patches, merged into one list */
-  points?: TextTransformRes[]
+  points?: TextReplacementRes[]
   /** spineHref → chapter label (from the reader's TOC) */
   chapterOf?: (href: string | null) => string | null
   /** Point patches that failed to apply, marked with a red 失效 badge */
   invalidIds?: string[]
   /** When provided, pattern rows get edit/delete buttons (reader dialog) */
-  onEdit?: (rule: TextTransformRes) => void
-  onDelete?: (rule: TextTransformRes) => void
+  onEdit?: (rule: TextReplacementRes) => void
+  onDelete?: (rule: TextReplacementRes) => void
 }
 
-export default function BookTransformsSection({
+export default function BookReplacementsSection({
   bookId,
   counts,
   points,
@@ -34,17 +34,17 @@ export default function BookTransformsSection({
   invalidIds,
   onEdit,
   onDelete,
-}: BookTransformsSectionProps) {
+}: BookReplacementsSectionProps) {
   const _ = useTranslation()
-  const transformsQuery = useBookTransforms(bookId)
-  const { data } = transformsQuery
-  const setOverride = useSetTransformOverride()
-  const updateTransform = useUpdateTransform()
+  const replacementsQuery = useBookReplacements(bookId)
+  const { data } = replacementsQuery
+  const setOverride = useSetReplacementOverride()
+  const updateReplacement = useUpdateReplacement()
 
   // Global pattern rules take their per-book state from overrides; rules
   // already scoped to this book toggle their own enabled switch instead.
   // Groups are ordered newest-first (stable — the user looks for recent edits).
-  const byNewest = (a: TextTransformRes, b: TextTransformRes) => b.createdAt - a.createdAt
+  const byNewest = (a: TextReplacementRes, b: TextReplacementRes) => b.createdAt - a.createdAt
   const globalRules = (data?.data ?? [])
     .filter((r) => r.matchType === 'pattern' && r.bookId === null)
     .sort(byNewest)
@@ -53,22 +53,22 @@ export default function BookTransformsSection({
     .sort(byNewest)
   const rows = [...bookRules, ...globalRules, ...(points ?? [])]
 
-  function onGlobalToggle(rule: TextTransformRes) {
+  function onGlobalToggle(rule: TextReplacementRes) {
     setOverride.mutate(
-      { transformId: rule.id, body: { bookId, enabled: nextOverrideValue(rule) } },
+      { replacementId: rule.id, body: { bookId, enabled: nextOverrideValue(rule) } },
       { onError: (err) => notify.error(getUserErrorNotification(err, 'errors.updateFailed')) },
     )
   }
 
-  function onBookRuleToggle(rule: TextTransformRes) {
-    updateTransform.mutate(
+  function onBookRuleToggle(rule: TextReplacementRes) {
+    updateReplacement.mutate(
       { id: rule.id, body: { enabled: !rule.enabled } },
       { onError: (err) => notify.error(getUserErrorNotification(err, 'errors.updateFailed')) },
     )
   }
 
-  function onPointToggle(rule: TextTransformRes) {
-    updateTransform.mutate(
+  function onPointToggle(rule: TextReplacementRes) {
+    updateReplacement.mutate(
       { id: rule.id, body: { enabled: !rule.enabled } },
       { onError: (err) => notify.error(getUserErrorNotification(err, 'errors.updateFailed')) },
     )
@@ -76,10 +76,10 @@ export default function BookTransformsSection({
 
   return (
     <section>
-      {transformsQuery.isError ? (
-        <QueryErrorState isRetrying={transformsQuery.isFetching} onRetry={transformsQuery.refetch} />
+      {replacementsQuery.isError ? (
+        <QueryErrorState isRetrying={replacementsQuery.isFetching} onRetry={replacementsQuery.refetch} />
       ) : rows.length === 0 ? (
-        <SettingsEmptyState>{_('reader.transformsEmptyCreate')}</SettingsEmptyState>
+        <SettingsEmptyState>{_('reader.replacementsEmptyCreate')}</SettingsEmptyState>
       ) : (
         <ul className="divide-y divide-stone-100 dark:divide-stone-800">
           {rows.map((rule) =>
@@ -103,7 +103,7 @@ export default function BookTransformsSection({
                 onDelete={onDelete ? () => onDelete(rule) : undefined}
               />
             ) : (
-              <BookTransformRow
+              <BookReplacementRow
                 key={rule.id}
                 rule={rule}
                 count={counts?.[rule.id]}
@@ -128,7 +128,7 @@ function BookScopedRow({
   onEdit,
   onDelete,
 }: {
-  rule: TextTransformRes
+  rule: TextReplacementRes
   count?: number
   onToggle: () => void
   onEdit?: () => void
@@ -152,20 +152,20 @@ function BookScopedRow({
       </div>
       {count !== undefined && <MatchCountBadge count={count} />}
       <StatusBadge effective={effective} bookScoped />
-      <Toggle checked={effective} onChange={onToggle} ariaLabel={_('library.transformsToggle')} />
+      <Toggle checked={effective} onChange={onToggle} ariaLabel={_('library.replacementsToggle')} />
       <RowActions onEdit={onEdit} onDelete={onDelete} />
     </li>
   )
 }
 
-function BookTransformRow({
+function BookReplacementRow({
   rule,
   count,
   onToggle,
   onEdit,
   onDelete,
 }: {
-  rule: TextTransformRes
+  rule: TextReplacementRes
   count?: number
   onToggle: () => void
   onEdit?: () => void
@@ -190,7 +190,7 @@ function BookTransformRow({
       </div>
       {count !== undefined && <MatchCountBadge count={count} />}
       <StatusBadge effective={effective} override={override} />
-      <Toggle checked={effective} onChange={onToggle} ariaLabel={_('library.transformsToggle')} />
+      <Toggle checked={effective} onChange={onToggle} ariaLabel={_('library.replacementsToggle')} />
       <RowActions onEdit={onEdit} onDelete={onDelete} />
     </li>
   )
@@ -207,7 +207,7 @@ function PointRow({
   onEdit,
   onDelete,
 }: {
-  patch: TextTransformRes
+  patch: TextReplacementRes
   invalid: boolean
   chapter: string | null
   onToggle: () => void
@@ -241,10 +241,10 @@ function PointRow({
       </div>
       {invalid && (
         <span className="shrink-0 rounded border border-red-300 px-1.5 py-0.5 text-[11px] text-red-500 dark:border-red-800 dark:text-red-400">
-          {_('reader.transformsInvalidBadge')}
+          {_('reader.replacementsInvalidBadge')}
         </span>
       )}
-      <Toggle checked={patch.enabled} onChange={onToggle} ariaLabel={_('settings.transformsEnabled')} />
+      <Toggle checked={patch.enabled} onChange={onToggle} ariaLabel={_('settings.replacementsEnabled')} />
       <RowActions onEdit={onEdit} onDelete={onDelete} />
     </li>
   )
@@ -255,10 +255,10 @@ function PointRow({
 function StatusBadge({ effective, override, bookScoped }: { effective: boolean; override?: boolean; bookScoped?: boolean }) {
   const _ = useTranslation()
   const key = bookScoped
-    ? 'settings.transformsBookRule'
+    ? 'settings.replacementsBookRule'
     : override
-      ? effective ? 'library.transformsOverrideOn' : 'library.transformsOverrideOff'
-      : effective ? 'library.transformsFollowGlobalOn' : 'library.transformsFollowGlobalOff'
+      ? effective ? 'library.replacementsOverrideOn' : 'library.replacementsOverrideOff'
+      : effective ? 'library.replacementsFollowGlobalOn' : 'library.replacementsFollowGlobalOff'
   return (
     <span
       className={cn(
@@ -277,7 +277,7 @@ function MatchCountBadge({ count }: { count: number }) {
   const _ = useTranslation()
   return (
     <span className="shrink-0 text-[11px] tabular-nums text-stone-400 dark:text-stone-500">
-      {_('reader.transformsMatches', { count })}
+      {_('reader.replacementsMatches', { count })}
     </span>
   )
 }

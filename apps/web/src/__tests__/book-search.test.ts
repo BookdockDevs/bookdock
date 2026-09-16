@@ -7,7 +7,7 @@ import {
   makeExcerpt,
   offsetsToRange,
 } from '../features/reader/lib/book-search'
-import type { TextTransformRule } from '../features/reader/lib/text-transforms'
+import type { TextReplacementRule } from '../features/reader/lib/text-replacements'
 
 const parseXhtml = (markup: string) =>
   new DOMParser().parseFromString(markup, 'application/xhtml+xml')
@@ -139,13 +139,13 @@ describe('offsetsToRange', () => {
 })
 
 describe('getChapterText', () => {
-  const makeRule = (overrides: Partial<TextTransformRule> = {}): TextTransformRule => ({
+  const makeRule = (overrides: Partial<TextReplacementRule> = {}): TextReplacementRule => ({
     id: 'rule-1',
     matchType: 'pattern',
     pattern: '广告',
     replacement: null,
     isRegex: false,
-    caseSensitive: false,
+    applyTo: 'content',
     enabled: true,
     effectiveEnabled: true,
     spineHref: null,
@@ -191,12 +191,12 @@ describe('getChapterText', () => {
     expect(await getChapterText({ sections: [{ id: 'a.xhtml' }] }, 0)).toBeNull()
   })
 
-  it('matches the rendered text after transforms and Chinese conversion', async () => {
+  it('matches the rendered text after replacements and Chinese conversion', async () => {
     const loadSectionText = vi.fn(async () => `${XHTML_HEAD}<p>我喜欢读书。广告内容</p>${XHTML_TAIL}`)
     const book = makeBook(loadSectionText)
     const text = await getChapterText(book, 0, {
       chineseConversion: 'traditional',
-      transforms: [makeRule()],
+      replacements: [makeRule()],
     })
 
     expect(text?.text).toBe('我喜歡讀書。內容')

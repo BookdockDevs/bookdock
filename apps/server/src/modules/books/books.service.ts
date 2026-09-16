@@ -1205,7 +1205,7 @@ export async function updateBookCover(userId: string, bookId: string, file: File
 
 export async function getBookCover(userId: string, bookId: string): Promise<{ coverKey: string } | null> {
   const db = getDb()
-  const book = await getActiveBook(userId, bookId)
+  const book = await getBook(userId, bookId)
   const storage = getStorage()
   if (book.coverKey && await storage.exists(book.coverKey)) return { coverKey: book.coverKey }
   if (book.format !== 'epub' || book.meta?.coverSuppressed === true) return null

@@ -4,6 +4,7 @@ import {
   createZipEntryMap,
   FULL_DOWNLOAD_MAX_BYTES,
   FoliateReader,
+  memoizeLoadBlob,
   memoizeLoadText,
   selectZipLoadStrategy,
   transformEpubStylesheet,
@@ -189,9 +190,48 @@ describe('FoliateReader book-style overrides', () => {
     })
 
     expect(onRelocated).toHaveBeenCalledWith(expect.objectContaining({
+      anchorCfi: 'epubcfi(/6/2!/4/2)',
       fraction: 0.4,
       percent: 40,
     }))
+  })
+
+  it('emits a collapsed content anchor at the visible range start', () => {
+    const reader = new FoliateReader('')
+    const onRelocated = vi.fn()
+    const collapse = vi.fn()
+    const getCFI = vi.fn(() => 'epubcfi(/6/2!/4/2:17)')
+    reader.on('relocated', onRelocated)
+    ;(reader as any).view = { getCFI, renderer: undefined }
+
+    ;(reader as any).handleRelocate({
+      cfi: 'epubcfi(/6/2!/4/2:17,/4/4:42)',
+      range: { cloneRange: () => ({ collapse }) },
+      section: { current: 0, total: 1 },
+      fraction: 0.4,
+    })
+
+    expect(collapse).toHaveBeenCalledWith(true)
+    expect(getCFI).toHaveBeenCalledWith(0, expect.any(Object))
+    expect(onRelocated).toHaveBeenCalledWith(expect.objectContaining({
+      anchorCfi: 'epubcfi(/6/2!/4/2:17)',
+    }))
+  })
+
+  it('starts a fallback bookmark snippet at the visible range start', () => {
+    const reader = new FoliateReader('')
+    const doc = document.implementation.createHTMLDocument()
+    const paragraph = doc.createElement('p')
+    paragraph.textContent = '视口上方的文字视口开始的文字以及后续内容'
+    doc.body.append(paragraph)
+    const text = paragraph.firstChild
+    if (!text) throw new Error('test paragraph has no text node')
+    const range = doc.createRange()
+    range.setStart(text, 7)
+    range.setEnd(text, text.textContent?.length ?? 0)
+    ;(reader as any).lastRange = range
+
+    expect(reader.getSnippet('chapter:0:0.5', 80)).toBe('视口开始的文字以及后续内容')
   })
 
   it('sets line-height directly on paragraphs when layout override is enabled', () => {
@@ -473,7 +513,7 @@ describe('memoizeLoadText', () => {
     expect(await loadText('missing.xhtml')).toBeNull()
   })
 
-  it('has() reports warmth: requested-and-not-failed entries only', async () => {
+  it('has() reports warmth only after successful resolution', async () => {
     const loadText = memoizeLoadText(async (name: string) => {
       if (name === 'fail.xhtml') throw new Error('boom')
       return name
@@ -483,6 +523,39 @@ describe('memoizeLoadText', () => {
     expect(loadText.has('a.xhtml')).toBe(true)
     await expect(loadText('fail.xhtml')).rejects.toThrow('boom')
     expect(loadText.has('fail.xhtml')).toBe(false)
+  })
+
+  it('does not report an in-flight or missing load as warm', async () => {
+    let resolveText!: (value: string) => void
+    const pending = new Promise<string>((resolve) => { resolveText = resolve })
+    const loadText = memoizeLoadText(() => pending)
+    const request = loadText('pending.xhtml')
+
+    expect(loadText.has('pending.xhtml')).toBe(false)
+    resolveText('ready')
+    await request
+    expect(loadText.has('pending.xhtml')).toBe(true)
+
+    const missing = memoizeLoadText(() => null)
+    await expect(missing('missing.xhtml')).resolves.toBeNull()
+    expect(missing.has('missing.xhtml')).toBe(false)
+  })
+})
+
+describe('memoizeLoadBlob', () => {
+  it('dedupes concurrent resource loads and serves later reads from the cache', async () => {
+    let calls = 0
+    const loadBlob = memoizeLoadBlob('book-v1', async (name: string) => {
+      calls++
+      return new Blob([`blob:${name}`])
+    })
+
+    const [a, b] = await Promise.all([loadBlob('image.jpg'), loadBlob('image.jpg')])
+    expect(await a?.text()).toBe('blob:image.jpg')
+    expect(await b?.text()).toBe('blob:image.jpg')
+    expect(calls).toBe(1)
+    await loadBlob('image.jpg')
+    expect(calls).toBe(1)
   })
 })
 

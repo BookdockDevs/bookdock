@@ -70,7 +70,7 @@ describe('AI lexical retrieval service', () => {
       bookId: 'book-1',
       visibleTextVersion: 'reader-transformed',
       chapters: [
-        { chapterIndex: 0, text: '第一章 这是经过正文变换后的可见关键词。' },
+        { chapterIndex: 0, text: '第一章 这是经过文本替换后的可见关键词。' },
         { chapterIndex: 1, text: '第二章 这是当前阅读器展示的内容。' },
       ],
     })
@@ -92,7 +92,7 @@ describe('AI lexical retrieval service', () => {
       index: 0,
       id: 'ch-0',
       title: '第一章',
-      content: '第一章 这是经过正文变换后的可见关键词。',
+      content: '第一章 这是经过文本替换后的可见关键词。',
     })
     await expect(getVisibleAiChapterContent('user-1', 'book-1', 0, 'reader-other', 10_000)).resolves.toBeNull()
   })

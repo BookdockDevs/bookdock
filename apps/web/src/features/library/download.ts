@@ -41,7 +41,7 @@ async function downloadExport(
   URL.revokeObjectURL(url)
 }
 
-/** Edited TXT: normalized text with the user's effective transforms applied */
+/** Edited TXT: normalized text with the user's effective replacements applied */
 export function downloadEditedTxt(bookId: string, title: string) {
   return downloadExport(bookId, title, 'export.txt', '.校订版.txt')
 }
@@ -52,7 +52,7 @@ export function downloadOriginalTxt(bookId: string, title: string) {
   return downloadExport(bookId, title, 'export.txt?plain=1', '.txt')
 }
 
-/** Edited EPUB: freshly regenerated from the book with transforms applied */
+/** Edited EPUB: freshly regenerated from the book with replacements applied */
 export function downloadEpub(bookId: string, title: string, opts: { plain?: boolean } = {}) {
   return downloadExport(
     bookId,

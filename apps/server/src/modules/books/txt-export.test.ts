@@ -19,10 +19,10 @@ import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
 import booksRoutes from './books.routes'
 import { uploadBook } from './books.service'
-import { createTransform } from '../transforms/transforms.service'
+import { createReplacement } from '../replacements/replacements.service'
 import {
   assembleTxt,
-  applyChapterTransforms,
+  applyChapterReplacements,
   exportEpubBook,
   exportTxtBook,
   extractChapterRuns,
@@ -112,7 +112,7 @@ const rule = (overrides: Partial<ExportRule> = {}): ExportRule => ({
   pattern: 'foo',
   replacement: 'bar',
   isRegex: false,
-  caseSensitive: true,
+  applyTo: 'content',
   effectiveEnabled: true,
   spineHref: null,
   textOffset: null,
@@ -133,22 +133,28 @@ describe('txt export engine', () => {
     })
   })
 
-  it('applies effective pattern rules to every run, including the title', () => {
+  it('applies content rules without touching the title', () => {
     const runs = [{ text: '第1章' }, { text: 'foo 内容' }]
-    applyChapterTransforms(runs, [rule()], 'ch.xhtml')
+    applyChapterReplacements(runs, [rule()], 'ch.xhtml')
     expect(runs).toEqual([{ text: '第1章' }, { text: 'bar 内容' }])
+  })
+
+  it('applies title scope independently from content scope', () => {
+    const runs = [{ text: 'foo 标题' }, { text: 'foo 内容' }]
+    applyChapterReplacements(runs, [rule({ applyTo: 'title' })], 'ch.xhtml')
+    expect(runs).toEqual([{ text: 'bar 标题' }, { text: 'foo 内容' }])
   })
 
   it('skips disabled pattern rules', () => {
     const runs = [{ text: 'foo' }]
-    applyChapterTransforms(runs, [rule({ effectiveEnabled: false })], 'ch.xhtml')
+    applyChapterReplacements(runs, [rule({ effectiveEnabled: false })], 'ch.xhtml')
     expect(runs).toEqual([{ text: 'foo' }])
   })
 
   it('applies a point patch at the offset that includes the title prefix', () => {
     // rendered section text = "第1章" + "第一段" + "第二段" — offset 8 is 第二段's start
     const runs = [{ text: '第1章' }, { text: '第一段' }, { text: '第二段' }]
-    applyChapterTransforms(runs, [
+    applyChapterReplacements(runs, [
       rule({
         id: 'p1',
         matchType: 'point',
@@ -165,7 +171,7 @@ describe('txt export engine', () => {
 
   it('applies a point patch across runs', () => {
     const runs = [{ text: '前错' }, { text: '误后' }]
-    applyChapterTransforms(runs, [
+    applyChapterReplacements(runs, [
       rule({
         id: 'p1',
         matchType: 'point',
@@ -182,7 +188,7 @@ describe('txt export engine', () => {
 
   it('only touches the section the patch anchors to', () => {
     const runs = [{ text: '第二段' }]
-    applyChapterTransforms(runs, [
+    applyChapterReplacements(runs, [
       rule({ id: 'p1', matchType: 'point', pattern: null, replacement: '改', effectiveEnabled: true, spineHref: 'other.xhtml', textOffset: 0, originalText: '第二段' }),
     ], 'ch.xhtml')
     expect(runs).toEqual([{ text: '第二段' }])
@@ -190,7 +196,7 @@ describe('txt export engine', () => {
 
   it('silently skips an invalid patch whose snapshot is gone', () => {
     const runs = [{ text: '正文内容' }]
-    applyChapterTransforms(runs, [
+    applyChapterReplacements(runs, [
       rule({ id: 'p1', matchType: 'point', pattern: null, replacement: '改', effectiveEnabled: true, spineHref: 'ch.xhtml', textOffset: 0, originalText: '不存在的文本' }),
     ], 'ch.xhtml')
     expect(runs).toEqual([{ text: '正文内容' }])
@@ -231,20 +237,20 @@ describe('exportTxtBook', () => {
   })
 
   it('applies effective pattern rules and anchored point patches', async () => {
-    await createTransform(ownerId, { pattern: '第一段', replacement: '改后段' })
+    await createReplacement(ownerId, { pattern: '第一段', replacement: '改后段' })
     // section text = "第1章"(3) + "第一段文字内容"(7) + "第二段文字内容" — 第二段 starts at 14.
     // The spine href is the full zip path the reader records (foliate section id).
-    await createTransform(ownerId, {
+    await createReplacement(ownerId, {
       matchType: 'point', bookId, spineHref: 'OEBPS/chapter-0001.xhtml', textOffset: 14,
       originalText: '第二段文字内容', replacement: '测试一处',
     })
     // invalid patch (snapshot gone) must be skipped silently
-    await createTransform(ownerId, {
+    await createReplacement(ownerId, {
       matchType: 'point', bookId, spineHref: 'OEBPS/chapter-0001.xhtml', textOffset: 0,
       originalText: '不存在', replacement: 'x',
     })
     // a patch anchored with a bare href (not the reader's form) must not apply
-    await createTransform(ownerId, {
+    await createReplacement(ownerId, {
       matchType: 'point', bookId, spineHref: 'chapter-0001.xhtml', textOffset: 0,
       originalText: '第一段文字内容', replacement: '不应生效',
     })
@@ -254,13 +260,13 @@ describe('exportTxtBook', () => {
   })
 
   it('honors per-book overrides in the export', async () => {
-    const created = await createTransform(ownerId, { pattern: '第一段', replacement: '改后段' })
+    const created = await createReplacement(ownerId, { pattern: '第一段', replacement: '改后段' })
     const db = client.getDb()
-    db.insert(schema.textTransformOverrides).values({
+    db.insert(schema.textReplacementOverrides).values({
       id: createId('tfo'),
       userId: ownerId,
       bookId,
-      transformId: created.id,
+      replacementId: created.id,
       enabled: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -270,14 +276,14 @@ describe('exportTxtBook', () => {
     expect(text).toBe('第1章\n\n第一段文字内容\n第二段文字内容\n')
   })
 
-  it('returns the untransformed text for the plain (原文) variant even with rules', async () => {
-    await createTransform(ownerId, { pattern: '第一段', replacement: '改后段' })
+  it('returns the unreplaced text for the plain (原文) variant even with rules', async () => {
+    await createReplacement(ownerId, { pattern: '第一段', replacement: '改后段' })
     const { text } = await exportTxtBook(ownerId, bookId, true)
     expect(text).toBe('第1章\n\n第一段文字内容\n第二段文字内容\n')
   })
 
   it('reports edited=false when no rule is effectively enabled', async () => {
-    await createTransform(ownerId, { pattern: '第一段', replacement: '改后段' })
+    await createReplacement(ownerId, { pattern: '第一段', replacement: '改后段' })
     const { edited } = await exportTxtBook(ownerId, bookId)
     expect(edited).toBe(true)
     const { edited: off } = await exportTxtBook(ownerId, bookId, true)
@@ -285,14 +291,14 @@ describe('exportTxtBook', () => {
   })
 
   it('reports edited=false when every rule is disabled or overridden off', async () => {
-    await createTransform(ownerId, { pattern: 'x', replacement: 'y', enabled: false })
-    const overridden = await createTransform(ownerId, { pattern: 'z', replacement: 'w' })
+    await createReplacement(ownerId, { pattern: 'x', replacement: 'y', enabled: false })
+    const overridden = await createReplacement(ownerId, { pattern: 'z', replacement: 'w' })
     const db = client.getDb()
-    db.insert(schema.textTransformOverrides).values({
+    db.insert(schema.textReplacementOverrides).values({
       id: createId('tfo'),
       userId: ownerId,
       bookId,
-      transformId: overridden.id,
+      replacementId: overridden.id,
       enabled: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -335,7 +341,7 @@ describe('exportEpubBook', () => {
   })
 
   it('regenerates an epub with the rules applied and the current metadata', async () => {
-    await createTransform(ownerId, { pattern: '第一段', replacement: '改后段' })
+    await createReplacement(ownerId, { pattern: '第一段', replacement: '改后段' })
     client.getDb().update(schema.books)
       .set({ title: '改名后的书', author: '某作者' })
       .where(eq(schema.books.id, bookId)).run()
@@ -350,8 +356,8 @@ describe('exportEpubBook', () => {
     expect(chapter).not.toContain('<p>第一段文字内容</p>')
   })
 
-  it('returns the untransformed content for the plain variant even with rules', async () => {
-    await createTransform(ownerId, { pattern: '第一段', replacement: '改后段' })
+  it('returns the unreplaced content for the plain variant even with rules', async () => {
+    await createReplacement(ownerId, { pattern: '第一段', replacement: '改后段' })
     const { buffer } = await exportEpubBook(ownerId, bookId, true)
     const zip = await JSZip.loadAsync(buffer)
     const chapter = await zip.file('OEBPS/chapter-0001.xhtml')!.async('string')
@@ -421,7 +427,7 @@ describe('GET /books/:id/export.txt', () => {
   it('returns the edited text as a download attachment', async () => {
     const file = new File(['第1章\n\n正文内容'], 'book.txt', { type: 'text/plain' })
     const { book } = await uploadBook(ownerId, file)
-    await createTransform(ownerId, { pattern: '正文', replacement: '改文' })
+    await createReplacement(ownerId, { pattern: '正文', replacement: '改文' })
 
     const res = await createFileApp().request(`/api/v1/books/${book.id}/export.txt`)
     expect(res.status).toBe(200)
@@ -467,7 +473,7 @@ describe('GET /books/:id/export.epub', () => {
   it('returns the edited epub as a download attachment', async () => {
     const file = new File(['第1章\n\n正文内容'], 'book.txt', { type: 'text/plain' })
     const { book } = await uploadBook(ownerId, file)
-    await createTransform(ownerId, { pattern: '正文', replacement: '改文' })
+    await createReplacement(ownerId, { pattern: '正文', replacement: '改文' })
 
     const res = await createFileApp().request(`/api/v1/books/${book.id}/export.epub`)
     expect(res.status).toBe(200)
@@ -481,7 +487,7 @@ describe('GET /books/:id/export.epub', () => {
   it('supports the plain variant via ?plain=1', async () => {
     const file = new File(['第1章\n\n正文内容'], 'book.txt', { type: 'text/plain' })
     const { book } = await uploadBook(ownerId, file)
-    await createTransform(ownerId, { pattern: '正文', replacement: '改文' })
+    await createReplacement(ownerId, { pattern: '正文', replacement: '改文' })
 
     const res = await createFileApp().request(`/api/v1/books/${book.id}/export.epub?plain=1`)
     expect(res.status).toBe(200)
@@ -495,7 +501,7 @@ describe('GET /books/:id/export.epub', () => {
   it('names the default export 原文 when no rule is effectively enabled', async () => {
     const file = new File(['第1章\n\n正文内容'], 'book.txt', { type: 'text/plain' })
     const { book } = await uploadBook(ownerId, file)
-    await createTransform(ownerId, { pattern: '正文', replacement: '改文', enabled: false })
+    await createReplacement(ownerId, { pattern: '正文', replacement: '改文', enabled: false })
 
     const res = await createFileApp().request(`/api/v1/books/${book.id}/export.epub`)
     expect(res.status).toBe(200)
@@ -506,7 +512,7 @@ describe('GET /books/:id/export.epub', () => {
   it('applies the point patch anchored to the reader-style full zip path', async () => {
     const file = new File(['第1章\n\n第一段文字内容\n\n第二段文字内容'], 'book.txt', { type: 'text/plain' })
     const { book } = await uploadBook(ownerId, file)
-    await createTransform(ownerId, {
+    await createReplacement(ownerId, {
       matchType: 'point', bookId: book.id, spineHref: 'OEBPS/chapter-0001.xhtml', textOffset: 12,
       originalText: '第二段文字内容', replacement: '定点生效',
     })

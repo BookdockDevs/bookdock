@@ -1,4 +1,6 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router'
+import SettingsPending from '@/features/settings/components/SettingsPending'
+
 import { rootRoute } from './__root'
 
 export interface SettingsSearch {
@@ -18,4 +20,5 @@ export const settingsRoute = createRoute({
     focus: input.focus === 'tts' ? 'tts' : undefined,
   }),
   component: lazyRouteComponent(() => import('@/features/settings/Settings')),
+  pendingComponent: SettingsPending,
 })

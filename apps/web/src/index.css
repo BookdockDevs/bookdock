@@ -30,6 +30,22 @@ body {
   margin: 0;
 }
 
+/* Reader sidebar resize handle & active dragging cursor */
+.reader-resize-cursor {
+  cursor: col-resize;
+}
+
+body.reader-resizing,
+body.reader-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.reader-resizing iframe {
+  pointer-events: none !important;
+}
+
+
 /* Custom modern scrollbar for UI containers */
 .custom-scrollbar {
   scrollbar-width: thin;

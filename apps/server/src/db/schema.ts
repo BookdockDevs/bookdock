@@ -244,11 +244,11 @@ export const annotations = sqliteTable('annotations', {
     .where(sql`${table.type} != 'note'`),
 }))
 
-// Text transforms (P1): regex/filter rules and point patches share one table,
+// Text replacements (P1): regex/filter rules and point patches share one table,
 // discriminated by matchType. Pattern rules are user-global (bookId always null);
-// `enabled` is the global default, overridable per book via text_transform_overrides.
+// `enabled` is the global default, overridable per book via text_replacement_overrides.
 // Point patches are inherently single-book (bookId required) and never overridden.
-export const textTransforms = sqliteTable('text_transforms', {
+export const textReplacements = sqliteTable('text_replacements', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   bookId: text('book_id').references(() => books.id, { onDelete: 'cascade' }),
@@ -256,7 +256,7 @@ export const textTransforms = sqliteTable('text_transforms', {
   pattern: text('pattern'),
   replacement: text('replacement'),
   isRegex: integer('is_regex').notNull().default(0),
-  caseSensitive: integer('case_sensitive').notNull().default(0),
+  applyTo: text('apply_to', { enum: ['content', 'title', 'both'] }).notNull().default('content'),
   enabled: integer('enabled').notNull().default(1),
   name: text('name'),
   // `group` is a SQL reserved word; the column keeps the API field name via the property
@@ -268,22 +268,22 @@ export const textTransforms = sqliteTable('text_transforms', {
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
-  userBookIdx: index('text_transforms_user_book_idx').on(table.userId, table.bookId),
+  userBookIdx: index('text_replacements_user_book_idx').on(table.userId, table.bookId),
 }))
 
 // Per-book enable overrides for pattern rules: a row's existence is the override,
 // `enabled` is the value for that book. effectiveEnabled = override.enabled ?? rule.enabled
-export const textTransformOverrides = sqliteTable('text_transform_overrides', {
+export const textReplacementOverrides = sqliteTable('text_replacement_overrides', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
-  transformId: text('transform_id').notNull().references(() => textTransforms.id, { onDelete: 'cascade' }),
+  replacementId: text('replacement_id').notNull().references(() => textReplacements.id, { onDelete: 'cascade' }),
   enabled: integer('enabled').notNull(),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
-  bookTransformUnique: uniqueIndex('text_transform_overrides_book_transform_unique').on(table.bookId, table.transformId),
-  userBookIdx: index('text_transform_overrides_user_book_idx').on(table.userId, table.bookId),
+  bookReplacementUnique: uniqueIndex('text_replacement_overrides_book_replacement_unique').on(table.bookId, table.replacementId),
+  userBookIdx: index('text_replacement_overrides_user_book_idx').on(table.userId, table.bookId),
 }))
 
 export const fonts = sqliteTable('fonts', {

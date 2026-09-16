@@ -1,12 +1,14 @@
 import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import i18n from 'i18next'
 
 import type { BookDetailRes, BookListItem } from '@bookdock/shared'
 
-import { useBookTransforms } from '@/api/hooks/useTransforms'
+import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { Button } from '@/components/ui/Button'
 import MenuFlyout from '@/components/ui/MenuFlyout'
 import SmartMenu from '@/components/ui/SmartMenu'
+import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -19,12 +21,36 @@ import ReadStatusChip from './ReadStatusChip'
 import { copyText, middleTruncate } from './types'
 import { ActionIcon, FilterChip, GroupLabel } from './ui'
 
+function isMachineIdentifier(id: string): boolean {
+  const trimmed = id.trim()
+  return (
+    /^urn:uuid:/i.test(trimmed) ||
+    /^uuid:/i.test(trimmed) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)
+  )
+}
+
+function formatLanguage(lang: string, locale: string): string {
+  try {
+    const normalized = lang.replace(/_/g, '-').trim()
+    if (/^zh-cn$|^zh-hans/i.test(normalized)) return '简体中文'
+    if (/^zh-tw$|^zh-hant|^zh-hk/i.test(normalized)) return '繁体中文'
+    if (/^zh$/i.test(normalized)) return '中文'
+    const displayNames = new Intl.DisplayNames([locale], { type: 'language' })
+    const formatted = displayNames.of(normalized)
+    return formatted || lang
+  } catch {
+    return lang
+  }
+}
+
 interface BookDetailViewProps {
   book: BookListItem
   detail?: BookDetailRes
   shelfName?: string
   currentShelfId: string | null
   memberTags: Array<{ id: string; name: string }>
+  isLoading?: boolean
   onEdit: () => void
   onDelete: (book: BookListItem) => void
   onClose: () => void
@@ -36,6 +62,7 @@ export default function BookDetailView({
   shelfName,
   currentShelfId,
   memberTags,
+  isLoading,
   onEdit,
   onDelete,
   onClose,
@@ -46,10 +73,10 @@ export default function BookDetailView({
   const displayBook = detail ?? book
   const bookmeta = detail?.meta?.bookmeta
 
-  const { data: transformsData } = useBookTransforms(book.id)
+  const { data: replacementsData } = useBookReplacements(book.id)
   const hasEffectiveRules = useMemo(
-    () => (transformsData?.data ?? []).some((r) => (r.effectiveEnabled ?? r.enabled)),
-    [transformsData],
+    () => (replacementsData?.data ?? []).some((r) => (r.effectiveEnabled ?? r.enabled)),
+    [replacementsData],
   )
   const canExportEdited = displayBook.format === 'txt' && hasEffectiveRules
 
@@ -95,18 +122,25 @@ export default function BookDetailView({
   }
 
   const hasProgress = displayBook.progress != null && displayBook.progress > 0
-  const identifier = bookmeta?.isbn || bookmeta?.identifier || ''
+  const hasReadingState = hasProgress || Boolean(displayBook.lastReadAt)
+  const rawIdentifier = bookmeta?.isbn || bookmeta?.identifier || ''
+  const isIsbn = Boolean(bookmeta?.isbn)
 
   const metaRows: { label: string; value: string; copyable?: boolean; onClick?: () => void }[] = []
   if (bookmeta?.publisher) metaRows.push({ label: _('library.publisher'), value: bookmeta.publisher })
   if (bookmeta?.published) metaRows.push({ label: _('library.published'), value: bookmeta.published })
-  metaRows.push({ label: _('library.updatedAt'), value: formatDate(displayBook.updatedAt) })
-  metaRows.push({ label: _('library.addedAt'), value: formatDate(displayBook.createdAt) })
-  if (bookmeta?.language) metaRows.push({ label: _('library.language'), value: bookmeta.language })
-  if (bookmeta?.subjects?.length) metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、') })
+  if (bookmeta?.language) {
+    metaRows.push({ label: _('library.language'), value: formatLanguage(bookmeta.language, i18n.language) })
+  }
   metaRows.push({ label: _('library.format'), value: displayBook.format.toUpperCase() })
   metaRows.push({ label: _('library.sortBy.size'), value: formatBytes(displayBook.size) })
-  if (identifier) metaRows.push({ label: bookmeta?.isbn ? 'ISBN' : _('library.identifier'), value: identifier, copyable: true })
+  metaRows.push({ label: _('library.addedAt'), value: formatDate(displayBook.createdAt) })
+  if (rawIdentifier && (isIsbn || !isMachineIdentifier(rawIdentifier))) {
+    metaRows.push({ label: isIsbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true })
+  }
+  if (bookmeta?.subjects?.length) {
+    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、') })
+  }
   if (bookmeta?.series) {
     metaRows.push({
       label: _('library.seriesSection'),
@@ -141,9 +175,6 @@ export default function BookDetailView({
 
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <ReadStatusChip book={displayBook} />
-            <span className="inline-flex items-center rounded-md bg-stone-100 px-2 py-0.5 font-mono text-[11px] font-medium uppercase tracking-wide text-stone-600 dark:bg-stone-800 dark:text-stone-300">
-              {displayBook.format}
-            </span>
             {shelfName && currentShelfId ? (
               <FilterChip prefix="📁" label={shelfName} onClick={() => goToFilter({ shelf: currentShelfId })} />
             ) : null}
@@ -152,15 +183,37 @@ export default function BookDetailView({
             ))}
           </div>
 
-          {hasProgress && (
-            <div className="mt-3 flex items-center gap-2">
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700">
-                <div
-                  className="h-full rounded-full bg-stone-700 dark:bg-stone-400"
-                  style={{ width: `${displayBook.progress}%` }}
-                />
+          {hasReadingState && (
+            <div className="mt-3 space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
+                {hasReadingState ? (
+                  <span className="tabular-nums font-medium text-stone-600 dark:text-stone-300">
+                    {Math.round(displayBook.progress ?? 0)}%
+                  </span>
+                ) : (
+                  <span />
+                )}
+                {displayBook.lastReadAt ? (
+                  <span className="text-[11px] text-stone-400 dark:text-stone-500">
+                    {formatRelativeTime(_, displayBook.lastReadAt)}
+                  </span>
+                ) : null}
               </div>
-              <span className="shrink-0 text-xs tabular-nums text-stone-500">{Math.round(displayBook.progress ?? 0)}%</span>
+              {hasReadingState && (
+                <div
+                  role="progressbar"
+                  aria-label="阅读进度"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(displayBook.progress ?? 0)}
+                  className="h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700"
+                >
+                  <div
+                    className="h-full rounded-full bg-stone-700 dark:bg-stone-400"
+                    style={{ width: `${displayBook.progress ?? 0}%` }}
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -276,7 +329,6 @@ export default function BookDetailView({
       )}
 
       <section className="mt-5">
-        <GroupLabel>{_('library.metaSection')}</GroupLabel>
         <div className="rounded-xl border border-stone-200/70 bg-stone-50/70 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
             {metaRows.map((row) => (
@@ -309,6 +361,18 @@ export default function BookDetailView({
                 )}
               </div>
             ))}
+            {isLoading && (
+              <>
+                <div className="min-w-0 space-y-1">
+                  <div className="h-3 w-12 animate-pulse rounded bg-stone-200/70 dark:bg-stone-700/50" />
+                  <div className="h-4 w-20 animate-pulse rounded bg-stone-200/50 dark:bg-stone-700/30" />
+                </div>
+                <div className="min-w-0 space-y-1">
+                  <div className="h-3 w-10 animate-pulse rounded bg-stone-200/70 dark:bg-stone-700/50" />
+                  <div className="h-4 w-24 animate-pulse rounded bg-stone-200/50 dark:bg-stone-700/30" />
+                </div>
+              </>
+            )}
           </dl>
         </div>
       </section>

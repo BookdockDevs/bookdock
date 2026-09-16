@@ -1,9 +1,11 @@
 import type { AiIndexChapter } from '@bookdock/shared'
 
-import type { TextTransformRule } from './lib/text-transforms'
+import type { TextReplacementRule } from './lib/text-replacements'
 
 export interface ReaderLocation {
   cfi: string
+  /** Stable visible-content CFI for annotations; unlike cfi, this is not rewritten to a scroll fraction */
+  anchorCfi?: string
   percent: number
   /** Book-wide viewport-start position 0-1 from the engine, for seek and read-interval tracking */
   fraction?: number
@@ -57,7 +59,7 @@ export interface SelectionInfo {
   anchor?: string
   rect?: PopupRect
   /** Point-patch anchor: character offset of the selection start in the
-   * section's text content (same traversal applyTransforms counts). */
+   * section's text content (same traversal applyReplacements counts). */
   startOffset?: number
   /** Point-patch anchor: current section's manifest href (book.sections[index].id) */
   sectionHref?: string
@@ -115,11 +117,11 @@ export interface RendererEvents {
    */
   userJump: () => void
   /**
-   * Point patches (正文变换) that could not be applied to a loaded section —
+   * Point patches (文本替换) that could not be applied to a loaded section —
    * snapshot not found at/around the recorded offset. Emitted per section load;
    * the reader dedupes by patch id.
    */
-  transformInvalid: (e: { ids: string[] }) => void
+  replacementInvalid: (e: { ids: string[] }) => void
   /**
    * An annotation whose CFI no longer resolves in the book's spine (or whose
    * text offset overflows the section) — it can never be drawn again.
@@ -158,7 +160,7 @@ export interface BookReader {
   applyParagraphStyle(cfg: ParagraphStyle): void
   applyPageWidth(width: number): void
   applyChineseConversion(mode: ChineseConversion): Promise<void>
-  applyTextTransforms(rules: TextTransformRule[]): Promise<void>
+  applyTextReplacements(rules: TextReplacementRule[]): Promise<void>
   applyContinuousScroll(mode: ContinuousScroll): void
   applyClickSettings(mode: ClickAreaMode): void
   /** While >0, click-to-turn and chrome-toggle are swallowed: the click that
@@ -202,13 +204,13 @@ export interface BookReader {
   getAiCorpus(signal?: AbortSignal): Promise<AiIndexCorpus>
   /** Read one transformed chapter for an explicit AI composer reference. */
   getAiChapterText(chapterIndex: number, signal?: AbortSignal): Promise<string>
-  /** Stable fingerprint for the current visible text transformation settings. */
+  /** Stable fingerprint for the current visible text replacement and conversion settings. */
   getAiCorpusVersion(): string
   /**
    * Match counts per pattern rule across the whole book ("N 处" badges).
    * Counts against the original section markup, one parse per section.
    */
-  countTransformMatches(rules: TextTransformRule[]): Promise<Record<string, number>>
+  countReplacementMatches(rules: TextReplacementRule[]): Promise<Record<string, number>>
   /** Render highlight/note annotations on the content and keep them in sync */
   setAnnotations(annotations: ReaderAnnotation[]): void
   /** Collapse any in-content text selection (e.g. after a toolbar action) */

@@ -168,32 +168,54 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
         </div>}
       </div>
 
-      {isGuest ? <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.ttsGuestHint')}</p> : servicesQuery.isError ? <QueryErrorState isRetrying={servicesQuery.isFetching} onRetry={servicesQuery.refetch} /> : services.length === 0 ? <SettingsEmptyState>{_('settings.ttsEmpty')}</SettingsEmptyState> : <div className="divide-y divide-stone-100 dark:divide-stone-800">
-        {services.map((service) => <div key={service.id} className="flex items-center gap-3 py-3">
-          <TtsProviderIcon provider={service.provider} className="h-8 w-8" />
-          <div className="min-w-0 flex-1"><p className="truncate text-sm text-stone-800 dark:text-stone-100">{service.name}</p><p className="mt-0.5 truncate text-xs text-stone-400">{PROVIDER_NAMES[service.provider]}{service.model ? ` · ${service.model}` : ''}</p></div>
-          <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={() => openEdit(service)}
-              aria-label={_('library.edit')}
-              title={_('library.edit')}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-            >
-              <EditIcon />
-            </button>
-            <button
-              type="button"
-              onClick={() => setPendingDelete(service)}
-              aria-label={_('settings.fontsDelete')}
-              title={_('settings.fontsDelete')}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"
-            >
-              <TrashIcon />
-            </button>
-          </div>
-        </div>)}
-      </div>}
+      {isGuest ? (
+        <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.ttsGuestHint')}</p>
+      ) : servicesQuery.isError ? (
+        <QueryErrorState isRetrying={servicesQuery.isFetching} onRetry={servicesQuery.refetch} />
+      ) : servicesQuery.isPending && !servicesQuery.data ? (
+        <div className="space-y-3 py-1">
+          {[1, 2].map((i) => (
+            <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
+              <div className="space-y-1.5">
+                <div className="h-4 w-28 rounded bg-stone-200/80 dark:bg-stone-800" />
+                <div className="h-3 w-44 rounded bg-stone-100 dark:bg-stone-800/60" />
+              </div>
+              <div className="h-5 w-9 rounded-full bg-stone-200/80 dark:bg-stone-800" />
+            </div>
+          ))}
+        </div>
+      ) : services.length === 0 ? (
+        <SettingsEmptyState>{_('settings.ttsEmpty')}</SettingsEmptyState>
+      ) : (
+        <div className="divide-y divide-stone-100 dark:divide-stone-800">
+          {services.map((service) => (
+            <div key={service.id} className="flex items-center gap-3 py-3">
+              <TtsProviderIcon provider={service.provider} className="h-8 w-8" />
+              <div className="min-w-0 flex-1"><p className="truncate text-sm text-stone-800 dark:text-stone-100">{service.name}</p><p className="mt-0.5 truncate text-xs text-stone-400">{PROVIDER_NAMES[service.provider]}{service.model ? ` · ${service.model}` : ''}</p></div>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => openEdit(service)}
+                  aria-label={_('library.edit')}
+                  title={_('library.edit')}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                >
+                  <EditIcon />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingDelete(service)}
+                  aria-label={_('settings.fontsDelete')}
+                  title={_('settings.fontsDelete')}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"
+                >
+                  <TrashIcon />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.ttsDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
       {form && <Modal title={_(form.id ? 'settings.ttsEdit' : 'settings.ttsAdd')} onClose={() => setForm(null)}>

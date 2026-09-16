@@ -1,4 +1,4 @@
-import type { TextTransformRes } from '@bookdock/shared'
+import type { TextReplacementRes } from '@bookdock/shared'
 
 /**
  * Computes the override payload for a toggle click:
@@ -7,7 +7,7 @@ import type { TextTransformRes } from '@bookdock/shared'
  * - otherwise: the flipped value updates the override
  */
 export function nextOverrideValue(
-  rule: Pick<TextTransformRes, 'enabled' | 'effectiveEnabled' | 'hasOverride'>,
+  rule: Pick<TextReplacementRes, 'enabled' | 'effectiveEnabled' | 'hasOverride'>,
 ): boolean | null {
   const target = !(rule.effectiveEnabled ?? rule.enabled)
   if (rule.hasOverride && target === rule.enabled) return null

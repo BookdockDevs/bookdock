@@ -1,37 +1,37 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import type { TextTransformRes } from '@bookdock/shared'
+import type { TextReplacementRes } from '@bookdock/shared'
 
-import { useBookTransforms, useDeleteTransform } from '@/api/hooks/useTransforms'
+import { useBookReplacements, useDeleteReplacement } from '@/api/hooks/useReplacements'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
-import TransformForm from '../../settings/components/TransformForm'
-import BookTransformsSection from '../../library/components/BookTransformsSection'
+import ReplacementForm from '../../settings/components/ReplacementForm'
+import BookReplacementsSection from '../../library/components/BookReplacementsSection'
 import Modal from '@/components/ui/Modal'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useReaderState } from '../state/reader-state'
 
-interface BookTransformsDialogProps {
+interface BookReplacementsDialogProps {
   bookId: string
   onClose: () => void
 }
 
-type FormState = { mode: 'create' } | { mode: 'edit'; rule: TextTransformRes } | null
+type FormState = { mode: 'create' } | { mode: 'edit'; rule: TextReplacementRes } | null
 
 // Match counts are expensive to (re)compute for big books; keying by
 // bookId + rule signature means reopening the dialog or toggling a rule
 // never re-walks the book (a rule edit changes the signature and recomputes).
 const countCache = new Map<string, { counts: Record<string, number> }>()
 
-export default function BookTransformsDialog({ bookId, onClose }: BookTransformsDialogProps) {
+export default function BookReplacementsDialog({ bookId, onClose }: BookReplacementsDialogProps) {
   const _ = useTranslation()
   const { renderer } = useReaderApi()
-  const { data } = useBookTransforms(bookId)
-  const deleteTransform = useDeleteTransform()
-  const invalidIds = useReaderState((s) => s.invalidTransformIds)
+  const { data } = useBookReplacements(bookId)
+  const deleteReplacement = useDeleteReplacement()
+  const invalidIds = useReaderState((s) => s.invalidReplacementIds)
   const tocItems = useReaderState((s) => s.tocItems)
   const pointPatches = useMemo(
     () => (data?.data ?? []).filter((r) => r.matchType === 'point'),
@@ -45,7 +45,7 @@ export default function BookTransformsDialog({ bookId, onClose }: BookTransforms
     [data],
   )
   const countSignature = useMemo(
-    () => JSON.stringify(patternRules.map((r) => [r.id, r.pattern, r.replacement, r.isRegex, r.caseSensitive])),
+    () => JSON.stringify(patternRules.map((r) => [r.id, r.pattern, r.replacement, r.isRegex, r.applyTo])),
     [patternRules],
   )
   const [counts, setCounts] = useState<Record<string, number>>({})
@@ -61,7 +61,7 @@ export default function BookTransformsDialog({ bookId, onClose }: BookTransforms
       setCounts({})
       return
     }
-    void renderer?.countTransformMatches(patternRules)
+    void renderer?.countReplacementMatches(patternRules)
       .then((c) => {
         if (cancelled) return
         setCounts(c)
@@ -99,18 +99,18 @@ export default function BookTransformsDialog({ bookId, onClose }: BookTransforms
   ), [pointPatches, chapterIndex])
 
   const [form, setForm] = useState<FormState>(null)
-  const [pendingDelete, setPendingDelete] = useState<TextTransformRes | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<TextReplacementRes | null>(null)
 
   function confirmDelete() {
     if (!pendingDelete) return
-    deleteTransform.mutate(pendingDelete.id, {
+    deleteReplacement.mutate(pendingDelete.id, {
       onSuccess: () => { if (form?.mode === 'edit' && form.rule.id === pendingDelete.id) setForm(null) },
       onError: (err) => notify.error(getUserErrorNotification(err, 'errors.deleteFailed')),
     })
     setPendingDelete(null)
   }
 
-  function onDelete(rule: TextTransformRes) {
+  function onDelete(rule: TextReplacementRes) {
     setPendingDelete(rule)
   }
 
@@ -123,8 +123,8 @@ export default function BookTransformsDialog({ bookId, onClose }: BookTransforms
     <>
       <Modal
         title={form
-          ? _(form.mode === 'create' ? 'settings.transformsNew' : 'settings.transformsEdit')
-          : _('reader.transforms')}
+          ? _(form.mode === 'create' ? 'settings.replacementsNew' : 'settings.replacementsEdit')
+          : _('reader.replacements')}
         // The X always closes; in form mode that means "back to the list"
         onClose={() => (form ? setForm(null) : onClose())}
         containerProps={{ 'data-settings-toggle': '' }}
@@ -132,8 +132,8 @@ export default function BookTransformsDialog({ bookId, onClose }: BookTransforms
           <button
             type="button"
             onClick={() => setForm({ mode: 'create' })}
-            aria-label={_('settings.transformsNew')}
-            title={_('settings.transformsNew')}
+            aria-label={_('settings.replacementsNew')}
+            title={_('settings.replacementsNew')}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -143,13 +143,13 @@ export default function BookTransformsDialog({ bookId, onClose }: BookTransforms
         )}
       >
         {form ? (
-          <TransformForm
+          <ReplacementForm
             bookId={bookId}
             initial={form.mode === 'edit' ? form.rule : null}
             onDone={() => setForm(null)}
           />
         ) : (
-          <BookTransformsSection
+          <BookReplacementsSection
             bookId={bookId}
             counts={effectiveCounts}
             points={sortedPoints}
@@ -163,7 +163,7 @@ export default function BookTransformsDialog({ bookId, onClose }: BookTransforms
       {pendingDelete && (
         <ConfirmDialog
           title={_('settings.confirmDeleteTitle')}
-          message={_('settings.transformsDeleteConfirm', { name: pendingDelete.name?.trim() || pendingDelete.pattern || _('library.unknown') })}
+          message={_('settings.replacementsDeleteConfirm', { name: pendingDelete.name?.trim() || pendingDelete.pattern || _('library.unknown') })}
           confirmLabel={_('settings.confirmDeleteAction')}
           onConfirm={confirmDelete}
           onClose={() => setPendingDelete(null)}

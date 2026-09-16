@@ -1,6 +1,6 @@
 import type { AiReadingScope, AiToolName, BookFormat, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
-import type { AnnotationStyle, AnnotationType, TocRulePattern, TransformMatchType, TransformScope, ViewSettings } from './domain'
+import type { AnnotationStyle, AnnotationType, TocRulePattern, ReplacementMatchType, ReplacementScope, ViewSettings } from './domain'
 
 export interface ApiResponse<T> {
   data: T
@@ -1143,19 +1143,19 @@ export interface ReadingRecordTagItem {
   durationSeconds: number
 }
 
-export type TransformCreateReq = {
+export type ReplacementCreateReq = {
   /**
    * Pattern rules with a bookId are book-scoped ("all matches in this book");
    * without it they are user-global. Point patches are inherently
    * single-book: bookId is required.
    */
   bookId?: string | null
-  matchType?: TransformMatchType
+  matchType?: ReplacementMatchType
   pattern?: string
   /** Null/empty = delete (hide) the matched content */
   replacement?: string | null
   isRegex?: boolean
-  caseSensitive?: boolean
+  applyTo?: 'content' | 'title' | 'both'
   enabled?: boolean
   name?: string
   group?: string
@@ -1164,38 +1164,38 @@ export type TransformCreateReq = {
   originalText?: string
 }
 
-export type TransformUpdateReq = {
+export type ReplacementUpdateReq = {
   name?: string | null
   group?: string | null
   pattern?: string
   replacement?: string | null
   isRegex?: boolean
-  caseSensitive?: boolean
+  applyTo?: 'content' | 'title' | 'both'
   enabled?: boolean
   /** Type conversion: point → pattern only (the snapshot becomes the pattern).
    *  pattern → point is rejected — point patches need anchors from a selection. */
-  matchType?: TransformMatchType
+  matchType?: ReplacementMatchType
   /** Scope conversion: null = user-global; a value = bind to a book */
   bookId?: string | null
   /** Point-patch snapshot edit (anchor offset is kept where the user selected) */
   originalText?: string
 }
 
-export interface TextTransformRes {
+export interface TextReplacementRes {
   id: string
   /** Null = user-global pattern rule; set = book-scoped (point patches always carry their book) */
   bookId: string | null
-  scope: TransformScope
-  matchType: TransformMatchType
+  scope: ReplacementScope
+  matchType: ReplacementMatchType
   pattern: string | null
   replacement: string | null
   isRegex: boolean
-  caseSensitive: boolean
+  applyTo: 'content' | 'title' | 'both'
   /** Global default switch: applies to every book unless overridden per book */
   enabled: boolean
-  /** Effective value for the queried book after applying its override; only set on `GET /transforms?bookId=` */
+  /** Effective value for the queried book after applying its override; only set on `GET /replacements?bookId=` */
   effectiveEnabled?: boolean | null
-  /** Whether a per-book override row exists; only set on `GET /transforms?bookId=` */
+  /** Whether a per-book override row exists; only set on `GET /replacements?bookId=` */
   hasOverride?: boolean
   name: string | null
   group: string | null
@@ -1207,7 +1207,7 @@ export interface TextTransformRes {
 }
 
 /** Per-book override for a pattern rule: boolean upserts the override, null deletes it (restore inheritance) */
-export type TransformOverrideReq = {
+export type ReplacementOverrideReq = {
   bookId: string
   enabled: boolean | null
 }

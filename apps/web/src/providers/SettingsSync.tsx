@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import type { SettingsRes } from '@bookdock/shared'
 
@@ -115,6 +115,7 @@ function applySettings(settings: Partial<SettingsRes>) {
 }
 
 export function SettingsSync() {
+  const queryClient = useQueryClient()
   const { mutate: saveSettings } = useMutation({
     mutationFn: (settings: SettingsRes) => apiPut('/settings', settings),
   })
@@ -150,10 +151,11 @@ export function SettingsSync() {
     apiGet<{ data: SettingsRes }>('/settings')
       .then((res) => {
         if (!res.data) return
+        queryClient.setQueryData(['settings'], res)
         applySettings(res.data)
       })
       .catch(() => undefined)
-  }, [userId])
+  }, [queryClient, userId])
 
   useEffect(() => {
     const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(SYNC_CHANNEL) : null

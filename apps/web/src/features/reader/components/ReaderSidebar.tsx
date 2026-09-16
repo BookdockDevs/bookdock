@@ -33,6 +33,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
 
   const SIDEBAR_MIN = 200
   const SIDEBAR_MAX = 640
+  const DEFAULT_SIDEBAR_WIDTH = 288
   const [locked, setLocked] = useState(toolbarLocked)
   const [hovered, setHovered] = useState(false)
   // Touch uses a bottom control sheet; the desktop dock keeps its hover/lock behavior.
@@ -46,7 +47,6 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   const [resizing, setResizing] = useState(false)
   const resizingRef = useRef(false)
   const panelRefWidth = useRef(panelWidth)
-  const panelContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setLocked(toolbarLocked)
@@ -73,11 +73,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
     e.preventDefault()
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
     resizingRef.current = true
-    dragState.current.width = panelContainerRef.current?.getBoundingClientRect().width ?? panelWidth
+    dragState.current.width = panelWidth
     dragState.current.clientX = e.clientX
     setResizing(true)
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
+    document.body.classList.add('reader-resizing')
   }, [panelWidth])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
@@ -92,9 +91,18 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
     if (!resizingRef.current) return
     resizingRef.current = false
     setResizing(false)
-    document.body.style.cursor = ''
-    document.body.style.userSelect = ''
+    document.body.classList.remove('reader-resizing')
     setSidebarWidth(panelRefWidth.current)
+  }, [setSidebarWidth])
+
+  useEffect(() => () => {
+    document.body.classList.remove('reader-resizing')
+  }, [])
+
+  const handleResetWidth = useCallback(() => {
+    setPanelWidth(DEFAULT_SIDEBAR_WIDTH)
+    panelRefWidth.current = DEFAULT_SIDEBAR_WIDTH
+    setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)
   }, [setSidebarWidth])
 
   const handleNavTab = useCallback((tab: NavTab) => {
@@ -171,7 +179,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
         'relative shrink-0 overflow-hidden',
         isTouch
           ? cn('order-1 w-full h-0 transition-[height]', sidebarOpen && (activeNavTab === 'ai' ? 'h-[80dvh] max-h-[720px]' : 'h-[65dvh] max-h-[520px]'))
-          : cn('order-none h-full', !resizing && 'transition-all duration-200', sidebarOpen ? '' : 'w-0'),
+          : cn('order-none h-full border-r border-[var(--bd-read-accent)]', !resizing && 'transition-all duration-200', sidebarOpen ? '' : 'w-0 border-r-0'),
       )}
       style={isTouch
         ? { backgroundColor: 'var(--bd-read-bg)' }
@@ -182,6 +190,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
         style={isTouch ? undefined : { width: panelWidth }}
       >
         <NavigationPanel
+          key={bookId}
           ref={panelRef}
           bookId={bookId}
           open={sidebarOpen}
@@ -190,16 +199,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
           onClose={handleClosePanel}
         />
       </div>
-      {sidebarOpen && !isTouch && (
-        <div
-          className="absolute right-0 top-0 z-50 h-full w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-500/40 active:w-1.5 active:bg-blue-500/60"
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-        />
-      )}
     </div>
-
   )
 
   if (isTouch) {
@@ -233,7 +233,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       id="reader-navigation"
       data-testid="reader-sidebar"
       className={cn(
-        'relative z-50 flex h-full shrink-0 overflow-hidden',
+        'relative z-50 flex h-full shrink-0 overflow-visible',
         !resizing && 'transition-all duration-200',
       )}
       style={{ width: totalWidth }}
@@ -242,6 +242,37 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
     >
       {toolDock}
       {navigationPanel}
+      {sidebarOpen && !isTouch && (
+        <div
+          data-testid="reader-sidebar-resize-handle"
+          className="group absolute left-full top-0 z-50 h-full w-2.5 reader-resize-cursor"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onDoubleClick={handleResetWidth}
+          title="双击恢复默认宽度"
+        >
+          {/* Active dragging guide line along the seam: invisible on hover/rest, softly glows with theme primary color during drag */}
+          <div
+            className={cn(
+              'pointer-events-none absolute left-0 top-0 h-full w-[2px] -translate-x-1/2 transition-colors duration-150',
+              resizing
+                ? 'bg-[var(--bd-read-primary)]/85 shadow-[0_0_8px_var(--bd-read-primary)]/30'
+                : 'bg-transparent',
+            )}
+          />
+          {/* Tactile centered grip pill: understated indicator that gently reveals on hover and deepens on drag */}
+          <span
+            className={cn(
+              'pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all duration-150',
+              resizing
+                ? 'h-14 w-1 bg-[var(--bd-read-primary)] shadow-[0_0_0_2px_var(--bd-read-primary)]/20'
+                : 'h-10 w-1 bg-transparent group-hover:bg-[var(--bd-read-sub)]/50',
+            )}
+          />
+        </div>
+      )}
     </div>
   )
 })

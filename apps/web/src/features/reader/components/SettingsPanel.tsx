@@ -7,7 +7,7 @@ import { blendColors, cn } from '@/lib/utils'
 import { resolveReadingTheme, PRESET_READING_THEMES, type CustomReadingTheme } from '@/lib/reading-theme'
 import { useUiStore } from '@/stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
-import { useBookTransforms } from '@/api/hooks/useTransforms'
+import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { useViewSettings } from '../view-settings-context'
 import { MARGINAL_FIELDS } from '../lib/marginals'
 import type { MarginalField } from '../types'
@@ -16,7 +16,7 @@ import { buildFontOptions, ensureBuiltinFontLoaded, ensureBuiltinFontsLoaded, en
 import { useReaderState } from '../state/reader-state'
 import { DownloadIcon, SpinnerIcon } from './annotation-icons'
 import ReadingPresetPicker from './ReadingPresetPicker'
-import BookTransformsDialog from './BookTransformsDialog'
+import BookReplacementsDialog from './BookReplacementsDialog'
 
 type Section = 'font' | 'layout' | 'display' | 'behavior' | 'theme'
 
@@ -855,7 +855,7 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
 
           {bookId && (
             <div className="border-t border-[var(--bd-read-accent)]/20 pt-1">
-              <TransformsEntryRow bookId={bookId} />
+              <ReplacementsEntryRow bookId={bookId} />
             </div>
           )}
         </div>
@@ -1043,15 +1043,15 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
   )
 }
 
-// 正文变换 entry (P2): low-frequency per-book management lives behind a row in
+// 文本替换 entry (P2): low-frequency per-book management lives behind a row in
 // the behavior section instead of a dedicated tab — the badge shows how many
 // rules are active for this book plus any invalid point patches, and the
 // dialog reuses the book-detail per-book view.
-function TransformsEntryRow({ bookId }: { bookId: string }) {
+function ReplacementsEntryRow({ bookId }: { bookId: string }) {
   const _ = useTranslation()
   const [open, setOpen] = useState(false)
-  const { data } = useBookTransforms(bookId)
-  const invalidCount = useReaderState((s) => s.invalidTransformIds.length)
+  const { data } = useBookReplacements(bookId)
+  const invalidCount = useReaderState((s) => s.invalidReplacementIds.length)
   const effectiveCount = useMemo(
     () => (data?.data ?? []).filter((r) => (r.effectiveEnabled ?? r.enabled)).length,
     [data],
@@ -1063,14 +1063,14 @@ function TransformsEntryRow({ bookId }: { bookId: string }) {
         onClick={() => setOpen(true)}
         className="flex w-full items-center justify-between gap-2 rounded-xl border border-stone-200/70 bg-stone-500/5 px-3.5 py-2.5 text-left transition-all duration-150 hover:border-stone-300/80 hover:bg-stone-500/10 active:scale-[0.99] dark:border-stone-800/80 dark:hover:border-stone-700/80"
       >
-        <span className="text-[13.5px] font-medium text-current">{_('reader.transforms')}</span>
+        <span className="text-[13.5px] font-medium text-current">{_('reader.replacements')}</span>
         <div className="flex shrink-0 items-center gap-1.5 text-xs">
           <span className="tabular-nums text-[var(--bd-read-sub)]">
-            {_('reader.transformsEffectiveCount', { count: effectiveCount })}
+            {_('reader.replacementsEffectiveCount', { count: effectiveCount })}
           </span>
           {invalidCount > 0 && (
             <span className="tabular-nums text-red-500">
-              {_('reader.transformsInvalidCount', { count: invalidCount })}
+              {_('reader.replacementsInvalidCount', { count: invalidCount })}
             </span>
           )}
           <svg
@@ -1088,7 +1088,7 @@ function TransformsEntryRow({ bookId }: { bookId: string }) {
         </div>
       </button>
       {open && createPortal(
-        <BookTransformsDialog bookId={bookId} onClose={() => setOpen(false)} />,
+        <BookReplacementsDialog bookId={bookId} onClose={() => setOpen(false)} />,
         document.body,
       )}
     </>
