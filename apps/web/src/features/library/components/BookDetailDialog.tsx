@@ -127,7 +127,10 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
 
   function enterEdit() {
     if (!book) return
-    setDraft(draftFrom(displayBook, bookmeta))
+    setDraft({
+      ...draftFrom(displayBook, bookmeta),
+      coverPaletteId: detail?.meta?.coverPaletteId ?? displayBook.coverPaletteId ?? null,
+    })
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
     setShelfSel(memShelves.data?.data !== undefined ? memShelves.data.data : (book.shelfId ?? null))
@@ -154,6 +157,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
           title,
           author: draft.author.trim(),
           bookmeta: draftToBookmeta(draft),
+          coverPaletteId: draft.coverPaletteId,
         }),
         apiPut(`/books/${book.id}/shelves`, { shelfId: shelfSel }),
         apiPut(`/books/${book.id}/tags`, { tagIds: [...tagSel] }),
@@ -308,7 +312,9 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
                     pendingCoverFile={pendingCoverFile}
                     coverPreviewUrl={coverPreviewUrl}
                     saving={saving}
+                    coverPaletteId={draft.coverPaletteId}
                     onCoverFile={handleCoverFile}
+                    onPaletteChange={(id) => setDraft((d) => (d ? { ...d, coverPaletteId: id } : d))}
                     onRemoveCover={() => {
                       if (!saving) {
                         setPendingCoverFile(null)

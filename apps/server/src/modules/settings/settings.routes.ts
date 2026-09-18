@@ -1,14 +1,18 @@
 import { Hono } from 'hono'
 import { settingsUpdateSchema } from '@bookdock/shared'
 import { getSettings, getTrashSettings, updateSettings, updateTrashSettings } from './settings.service'
-import type { SettingsRes } from '@bookdock/shared'
+import { emptyTrash } from '../books/books.service'
+import { config } from '../../config'
+import type { SettingsRes, TrashSettings } from '@bookdock/shared'
 
 const settingsRoutes = new Hono()
 
 settingsRoutes.get('/', async (c) => {
   const user = c.get('user')
   const data = getSettings(user.id)
-  return c.json({ data: { ...(data ?? {}), trash: getTrashSettings(user.id) } })
+  // uploadMaxBytes is instance-level read-only info; settingsUpdateSchema
+  // strips it from PUT bodies, so it is never persisted per user.
+  return c.json({ data: { ...(data ?? {}), trash: getTrashSettings(user.id), uploadMaxBytes: config.uploadMaxBytes } })
 })
 
 settingsRoutes.put('/', async (c) => {
@@ -24,7 +28,17 @@ settingsRoutes.put('/', async (c) => {
   if (Object.keys(ui).length > 0) {
     updateSettings(user.id, { ...(getSettings(user.id) ?? {}), ...ui } as SettingsRes)
   }
-  if (trash) updateTrashSettings(user.id, trash)
+  if (trash) {
+    const current = getTrashSettings(user.id)
+    const merged: TrashSettings = {
+      autoCleanDays: trash.autoCleanDays ?? current.autoCleanDays,
+      enabled: trash.enabled ?? current.enabled,
+    }
+    // Turning trash off is destructive by design: the UI confirms that the
+    // current contents will be permanently deleted, and this honors that.
+    if (merged.enabled === false) await emptyTrash(user.id)
+    updateTrashSettings(user.id, merged)
+  }
   return c.json({ data: parsed.data })
 })
 

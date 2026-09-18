@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
@@ -19,6 +19,7 @@ import { TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
 import booksRoutes from './books.routes'
+import settingsRoutes from '../settings/settings.routes'
 import {
   getBook,
   getActiveBook,
@@ -219,6 +220,15 @@ describe('uploadBook dedup flag', () => {
     expect((loaded.meta as Record<string, unknown>).bookmeta).toEqual({})
   })
 
+  it('persists the original file name and keeps it across metadata edits', async () => {
+    const { book } = await uploadBook(ownerId, new File(['chapter one text'], 'my-old-book.txt', { type: 'text/plain' }))
+    expect((book.meta as Record<string, unknown>).fileName).toBe('my-old-book.txt')
+
+    await updateBook(ownerId, book.id, { title: 'Renamed Title' })
+    const loaded = await getBook(ownerId, book.id)
+    expect((loaded.meta as Record<string, unknown>).fileName).toBe('my-old-book.txt')
+  })
+
 })
 
 describe('uploadBook membership', () => {
@@ -259,6 +269,29 @@ describe('uploadBook membership', () => {
     await expect(
       uploadBook(ownerId, new File(['book content'], 'book.txt', { type: 'text/plain' }), { shelfId }),
     ).rejects.toMatchObject({ code: 'SHELF_NOT_FOUND' })
+  })
+
+  it('merges tags but keeps the shelf when a duplicate upload carries membership', async () => {
+    const tagId = createId('tag')
+    const shelfA = createId('shelf')
+    const shelfB = createId('shelf')
+    db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
+    db.insert(schema.shelves).values({ id: shelfA, userId: ownerId, name: 'A', sortOrder: 0, createdAt: Date.now() }).run()
+    db.insert(schema.shelves).values({ id: shelfB, userId: ownerId, name: 'B', sortOrder: 1, createdAt: Date.now() }).run()
+
+    const file = new File(['dup membership content'], 'dup.txt', { type: 'text/plain' })
+    const { book } = await uploadBook(ownerId, file, { shelfId: shelfA })
+
+    const { book: dup, duplicated } = await uploadBook(ownerId, file, { shelfId: shelfB, tagIds: [tagId] })
+    expect(duplicated).toBe(true)
+    expect(dup.id).toBe(book.id)
+    expect(dup.shelfId).toBe(shelfA)
+    const rows = db.select().from(schema.bookTags).where(eq(schema.bookTags.bookId, book.id)).all()
+    expect(rows).toEqual([{ bookId: book.id, tagId }])
+
+    // re-applying the same tag must stay idempotent
+    await uploadBook(ownerId, file, { tagIds: [tagId] })
+    expect(db.select().from(schema.bookTags).where(eq(schema.bookTags.bookId, book.id)).all()).toHaveLength(1)
   })
 })
 
@@ -501,6 +534,136 @@ describe('listBooks createdAt sortOrder', () => {
   })
 })
 
+describe('listBooks trash view', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  const DAY_MS = 24 * 60 * 60 * 1000
+
+  const trashList = (sortBy?: string, sortOrder?: string) =>
+    listBooks(ownerId, 1, 20, undefined, sortBy, sortOrder, undefined, undefined, undefined, undefined, true)
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  it('sorts by deletedAt and does not pin-first trashed books', async () => {
+    seedBook(db, ownerId, { title: 'Older', deletedAt: Date.now() - 5 * DAY_MS, pinnedAt: Date.now() })
+    seedBook(db, ownerId, { title: 'Fresher', deletedAt: Date.now() - DAY_MS })
+    seedBook(db, ownerId, { title: 'Active' })
+
+    const desc = await trashList('deletedAt', 'desc')
+    expect(desc.data.map((b) => b.title)).toEqual(['Fresher', 'Older'])
+    const asc = await trashList('deletedAt', 'asc')
+    expect(asc.data.map((b) => b.title)).toEqual(['Older', 'Fresher'])
+  })
+
+  it('reports totalSize summed over all matching rows, not just the page', async () => {
+    seedBook(db, ownerId, { deletedAt: Date.now() - DAY_MS, size: 100 })
+    seedBook(db, ownerId, { deletedAt: Date.now() - DAY_MS, size: 250 })
+    seedBook(db, ownerId, { size: 999 })
+
+    const trash = await trashList()
+    expect(trash.total).toBe(2)
+    expect(trash.totalSize).toBe(350)
+  })
+})
+
+describe('trash disabled mode (routes)', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let mem: ReturnType<typeof createMemoryStorage>
+
+  function createApp() {
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('/api/v1/*', async (c, next) => {
+      c.set('user', { id: ownerId, username: 'owner', role: 'owner', avatarKey: null })
+      return next()
+    })
+    app.route('/api/v1/books', booksRoutes)
+    app.route('/api/v1/settings', settingsRoutes)
+    return app
+  }
+
+  function setTrashSettings(value: Record<string, unknown>) {
+    db.insert(schema.settings).values({ id: createId('setting'), userId: ownerId, key: 'trash', value }).run()
+  }
+
+  async function putTrash(body: unknown) {
+    return createApp().request('/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  }
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    mem = createMemoryStorage()
+    vi.spyOn(storage, 'getStorage').mockReturnValue(mem.driver)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  it('permanently deletes on DELETE /books/:id when trash is disabled', async () => {
+    setTrashSettings({ autoCleanDays: 30, enabled: false })
+    const book = seedBook(db, ownerId)
+    mem.files.set(book.filePath, Buffer.from('x'))
+
+    const response = await createApp().request(`/api/v1/books/${book.id}`, { method: 'DELETE' })
+    expect(response.status).toBe(200)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()).toBeUndefined()
+    expect(mem.files.has(book.filePath)).toBe(false)
+  })
+
+  it('still soft-deletes on DELETE /books/:id when trash is enabled', async () => {
+    const book = seedBook(db, ownerId)
+
+    const response = await createApp().request(`/api/v1/books/${book.id}`, { method: 'DELETE' })
+    expect(response.status).toBe(200)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()!.deletedAt).not.toBeNull()
+  })
+
+  it('rejects trash listing, restore and empty-trash with TRASH_DISABLED when off', async () => {
+    setTrashSettings({ autoCleanDays: 30, enabled: false })
+    const book = seedBook(db, ownerId, { deletedAt: Date.now() })
+    const app = createApp()
+
+    const list = await app.request('/api/v1/books?trash=1')
+    expect(list.status).toBe(403)
+    expect((await list.json() as { error: { code: string } }).error.code).toBe('TRASH_DISABLED')
+    expect((await app.request(`/api/v1/books/${book.id}/restore`, { method: 'POST' })).status).toBe(403)
+    expect((await app.request('/api/v1/books/trash', { method: 'DELETE' })).status).toBe(403)
+  })
+
+  it('purges all trashed books when PUT /settings disables trash', async () => {
+    const trashed = seedBook(db, ownerId, { deletedAt: Date.now() })
+    const active = seedBook(db, ownerId)
+    mem.files.set(trashed.filePath, Buffer.from('x'))
+
+    const response = await putTrash({ trash: { enabled: false } })
+    expect(response.status).toBe(200)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, trashed.id)).get()).toBeUndefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, active.id)).get()).toBeDefined()
+    expect(mem.files.has(trashed.filePath)).toBe(false)
+  })
+
+  it('merges the toggle onto stored settings instead of replacing them', async () => {
+    setTrashSettings({ autoCleanDays: 7 })
+
+    const response = await putTrash({ trash: { enabled: false } })
+    expect(response.status).toBe(200)
+    const row = db
+      .select()
+      .from(schema.settings)
+      .where(and(eq(schema.settings.userId, ownerId), eq(schema.settings.key, 'trash')))
+      .get()
+    expect(row!.value).toEqual({ autoCleanDays: 7, enabled: false })
+  })
+})
+
 describe('books ownership', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
@@ -591,6 +754,47 @@ describe('updateBook viewSettings (per-book reading settings)', () => {
     await updateBook(ownerId, book.id, { viewSettings: { fontSize: 24, lineHeight: 2.2 } })
     await updateBook(ownerId, book.id, { viewSettings: null })
     expect(metaOf().viewSettings).toBeUndefined()
+  })
+})
+
+describe('updateBook coverPaletteId (pinned placeholder cover palette)', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let book: ReturnType<typeof seedBook>
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+    book = seedBook(db, ownerId)
+  })
+
+  function metaOf() {
+    const row = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()!
+    return row.meta as Record<string, unknown>
+  }
+
+  it('pins a palette under meta.coverPaletteId and overwrites on re-pick', async () => {
+    await updateBook(ownerId, book.id, { coverPaletteId: 'sage' })
+    expect(metaOf().coverPaletteId).toBe('sage')
+
+    await updateBook(ownerId, book.id, { coverPaletteId: 'amber' })
+    expect(metaOf().coverPaletteId).toBe('amber')
+  })
+
+  it('keeps unrelated meta keys when pinning a palette', async () => {
+    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 20 } })
+    await updateBook(ownerId, book.id, { coverPaletteId: 'teal' })
+    const meta = metaOf()
+    expect(meta.coverPaletteId).toBe('teal')
+    expect(meta.viewSettings).toEqual({ fontSize: 20 })
+  })
+
+  it('removes the key with null so the cover falls back to the id hash', async () => {
+    await updateBook(ownerId, book.id, { coverPaletteId: 'rose' })
+    await updateBook(ownerId, book.id, { coverPaletteId: null })
+    expect(metaOf().coverPaletteId).toBeUndefined()
   })
 })
 

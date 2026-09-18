@@ -82,6 +82,12 @@ describe('LibraryHeader', () => {
     expect(screen.getByRole('button', { name: 'library.emptyTrash' })).toBeInTheDocument()
   })
 
+  it('trash mode exposes the view menu and the total trashed size', () => {
+    renderHeader({ trash: true, bookCount: 3, bookSize: 1048576 })
+    expect(screen.getByRole('button', { name: 'library.viewMenu' })).toBeInTheDocument()
+    expect(screen.getByText(/library\.bookCount/)).toHaveTextContent('1 MB')
+  })
+
   it('shows and handles the temporary metadata-filter reset action', () => {
     const onResetMetadataFilter = vi.fn()
     renderHeader({ title: '作者：Author', onResetMetadataFilter })

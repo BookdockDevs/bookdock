@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
@@ -103,6 +104,18 @@ describe('tags service', () => {
     await removeBooksFromTag(userId, tag.id, [bookId])
     const tagsAfter = await listTags(userId)
     expect(tagsAfter[0].bookCount).toBe(0)
+  })
+
+  it('should exclude trashed books from tag counts', async () => {
+    const tag = await createTag(userId, 'Tag A')
+    await addBooksToTag(userId, tag.id, [bookId])
+    expect((await listTags(userId))[0].bookCount).toBe(1)
+
+    db.update(schema.books).set({ deletedAt: Date.now() }).where(eq(schema.books.id, bookId)).run()
+    expect((await listTags(userId))[0].bookCount).toBe(0)
+
+    db.update(schema.books).set({ deletedAt: null }).where(eq(schema.books.id, bookId)).run()
+    expect((await listTags(userId))[0].bookCount).toBe(1)
   })
 
   it('should delete a tag', async () => {

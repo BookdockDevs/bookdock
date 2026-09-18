@@ -1,9 +1,12 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { SettingsRes, TrashSettings } from '@bookdock/shared'
 
 import { apiGet, apiPut } from '@/api/client'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { cn } from '@/lib/utils'
@@ -20,13 +23,18 @@ const LABEL_KEYS: Record<TrashSettings['autoCleanDays'], string> = {
 export default function TrashSettingsRow() {
   const _ = useTranslation()
   const queryClient = useQueryClient()
+  const [disableOpen, setDisableOpen] = useState(false)
   const settingsQuery = useQuery({
     queryKey: ['settings'],
     queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
   })
   const mutation = useMutation({
-    mutationFn: (trash: TrashSettings) => apiPut('/settings', { trash }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
+    mutationFn: (trash: Partial<TrashSettings>) => apiPut('/settings', { trash }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+      // Disabling permanently deletes the trash contents; refresh book lists.
+      queryClient.invalidateQueries({ queryKey: ['books'] })
+    },
     onError: (error) => notify.error(getUserErrorNotification(error, 'errors.updateFailed')),
   })
   if (settingsQuery.isError) {
@@ -44,33 +52,66 @@ export default function TrashSettingsRow() {
     )
   }
 
-  const current = settingsQuery.data?.data.trash?.autoCleanDays ?? 30
+  const trashSettings = settingsQuery.data?.data.trash
+  const enabled = trashSettings?.enabled !== false
+  const current = trashSettings?.autoCleanDays ?? 30
 
   return (
-    <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trashAutoClean')}</p>
-        <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashAutoCleanHint')}</p>
+    <div className="flex flex-col divide-y divide-stone-100 dark:divide-stone-800/80">
+      <div className="flex items-center justify-between gap-4 py-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trashEnabled')}</p>
+          <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashEnabledHint')}</p>
+        </div>
+        <Toggle
+          checked={enabled}
+          disabled={mutation.isPending}
+          ariaLabel={_('settings.trashEnabled')}
+          onChange={(v) => {
+            if (!v) setDisableOpen(true)
+            else mutation.mutate({ enabled: true })
+          }}
+        />
       </div>
-      <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.trashAutoClean')}>
-        {AUTO_CLEAN_DAYS.map((days) => (
-          <button
-            key={days}
-            type="button"
-            aria-pressed={current === days}
-            disabled={mutation.isPending}
-            onClick={() => mutation.mutate({ autoCleanDays: days })}
-            className={cn(
-              'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
-              current === days
-                ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-            )}
-          >
-            {_(LABEL_KEYS[days])}
-          </button>
-        ))}
-      </div>
+      {enabled && (
+        <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trashAutoClean')}</p>
+            <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashAutoCleanHint')}</p>
+          </div>
+          <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.trashAutoClean')}>
+            {AUTO_CLEAN_DAYS.map((days) => (
+              <button
+                key={days}
+                type="button"
+                aria-pressed={current === days}
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate({ autoCleanDays: days })}
+                className={cn(
+                  'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
+                  current === days
+                    ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                    : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
+                )}
+              >
+                {_(LABEL_KEYS[days])}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {disableOpen && (
+        <ConfirmDialog
+          title={_('settings.trashDisable')}
+          message={_('settings.trashDisableConfirm')}
+          confirmLabel={_('settings.trashDisableConfirmAction')}
+          onConfirm={() => {
+            setDisableOpen(false)
+            mutation.mutate({ enabled: false })
+          }}
+          onClose={() => setDisableOpen(false)}
+        />
+      )}
     </div>
   )
 }

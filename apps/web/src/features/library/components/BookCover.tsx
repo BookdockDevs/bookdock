@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { BookListItem } from '@bookdock/shared'
+import type { BookListItem, CoverPaletteId } from '@bookdock/shared'
 
 import { useUiStore } from '@/stores/ui.store'
 import { cn } from '@/lib/utils'
@@ -10,7 +10,7 @@ interface BookCoverProps {
   book: BookListItem
   size?: 'sm' | 'md'
   coverSrc?: string | null
-  coverPaletteId?: string | null
+  coverPaletteId?: CoverPaletteId | null
 }
 
 const EXT_RE = /\.(epub|txt|pdf|mobi|azw3?|fb2)$/i
@@ -24,8 +24,8 @@ function displayTitle(title: string): string {
 export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId }: BookCoverProps) {
   const [error, setError] = useState(false)
   const coverFit = useUiStore((s) => s.coverFit)
-  const paletteKey = book.title?.trim() || book.id
-  const palette = getCoverPalette(paletteKey, coverPaletteId)
+  // Hash by id, not title: renaming must not repaint the placeholder cover.
+  const palette = getCoverPalette(book.id, coverPaletteId ?? book.coverPaletteId)
   const isSm = size === 'sm'
   const source = coverSrc === undefined
     ? (book.coverKey || book.format === 'epub'

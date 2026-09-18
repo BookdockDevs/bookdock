@@ -51,6 +51,11 @@ export function getTrashSettings(userId: string): TrashSettings {
   return getValue<TrashSettings>(userId, TRASH_KEY) ?? DEFAULT_TRASH
 }
 
+/** Trash is on unless the stored settings explicitly disable it. */
+export function isTrashEnabled(userId: string): boolean {
+  return getTrashSettings(userId).enabled !== false
+}
+
 export function updateTrashSettings(userId: string, value: TrashSettings) {
   upsertValue(userId, TRASH_KEY, value)
 }

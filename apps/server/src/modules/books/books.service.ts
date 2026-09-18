@@ -24,7 +24,7 @@ import { sha256 } from '../../lib/hash'
 import { countWords } from '../../lib/word-count'
 import { readProgressFile } from '../../lib/progress-file'
 import { log } from '../../lib/logger'
-import type { AppendContentCandidate, AppendContentPreviewRes, BookFormat, BookMetadata, Chapter, TocPreviewChapter, TocPreviewRes, TocRulePattern, TrashSettings, ViewSettings } from '@bookdock/shared'
+import type { AppendContentCandidate, AppendContentPreviewRes, BookFormat, BookMetadata, CoverPaletteId, Chapter, TocPreviewChapter, TocPreviewRes, TocRulePattern, TrashSettings, ViewSettings } from '@bookdock/shared'
 
 /**
  * The effective TOC preset for a book: the pinned rule id in books.meta
@@ -155,6 +155,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     sortBy === 'progress' ? (sortOrder === 'asc' ? asc(books.progress) : desc(books.progress)) :
     sortBy === 'lastReadAt' ? (sortOrder === 'asc' ? asc(books.lastReadAt) : desc(books.lastReadAt)) :
     sortBy === 'updatedAt' ? (sortOrder === 'asc' ? asc(books.updatedAt) : desc(books.updatedAt)) :
+    sortBy === 'deletedAt' ? (sortOrder === 'asc' ? asc(books.deletedAt) : desc(books.deletedAt)) :
     sortOrder === 'asc' ? asc(books.createdAt) : desc(books.createdAt)
   const offset = (page - 1) * pageSize
   const where = and(...conditions)
@@ -174,11 +175,15 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     deletedAt: books.deletedAt,
     shelfId: books.shelfId,
     shelfName: shelves.name,
+    // Extracted, not the whole meta column: list payloads must stay chapter-free.
+    coverPaletteId: sql<CoverPaletteId | null>`json_extract(${books.meta}, '$.coverPaletteId')`,
   }).from(books).leftJoin(shelves, eq(books.shelfId, shelves.id)).where(where)
+  // Pin-first is meaningless in the trash; there the chosen sort rules alone.
   const items = baseQuery()
-    .orderBy(asc(sql`pinned_at IS NULL`), orderBy)
+    .orderBy(...(trash ? [] : [asc(sql`pinned_at IS NULL`)]), orderBy)
     .limit(pageSize).offset(offset).all()
-  const total = db.select({ count: sql<number>`count(*)` }).from(books).where(where).get()
+  const agg = db.select({ count: sql<number>`count(*)`, totalSize: sql<number>`coalesce(sum(${books.size}), 0)` })
+    .from(books).where(where).get()
   // Tag names are fetched per page in a second query: joining book_tags into
   // the paginated query would multiply rows per book and break LIMIT/OFFSET.
   const tagRows = items.length > 0
@@ -195,7 +200,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     tagsByBook.set(row.bookId, list)
   }
   const data = items.map((b) => ({ ...b, tags: tagsByBook.get(b.id) ?? [] }))
-  return { data, page, pageSize, total: total?.count ?? 0 }
+  return { data, page, pageSize, total: agg?.count ?? 0, totalSize: agg?.totalSize ?? 0 }
 }
 
 // Book rows returned to clients must not carry meta.chapters (huge payload);
@@ -259,6 +264,16 @@ export async function uploadBook(userId: string, file: File, membership?: { shel
     and(eq(books.userId, userId), eq(books.contentHash, contentHash), isNull(books.deletedAt)),
   ).get()
   if (existing) {
+    // Tags are additive and side-effect-free, so honor the requested assignment
+    // even for a duplicate. Shelf is deliberately not touched: it is a
+    // single-value column and moving an already-shelved book silently would
+    // be destructive - the UI surfaces the mismatch instead.
+    if (tagIds.length > 0) {
+      db.insert(bookTags)
+        .values(tagIds.map((tagId) => ({ bookId: existing.id, tagId })))
+        .onConflictDoNothing()
+        .run()
+    }
     return { book: stripMetaChapters(db.select().from(books).where(eq(books.id, existing.id)).get()!), duplicated: true }
   }
 
@@ -275,6 +290,9 @@ export async function uploadBook(userId: string, file: File, membership?: { shel
   const meta: Record<string, unknown> = {}
   // Persist bookmeta for every upload so book reads never need a metadata pass.
   meta.bookmeta = parsed.meta.bookmeta ?? {}
+  // Keep the upload's file name for provenance: content is stored under a
+  // content-hash key and the title may later be edited away from it.
+  meta.fileName = fileName
   let fileKey: string
   let size = buffer.length
 
@@ -1132,7 +1150,7 @@ export async function getBookEpubBuffer(userId: string, bookId: string): Promise
   return bufferFromStream(await storage.get(book.filePath))
 }
 
-export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata; viewSettings?: ViewSettings | null; boundPresetId?: string | null; tocRuleId?: string | null }) {
+export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata; viewSettings?: ViewSettings | null; boundPresetId?: string | null; tocRuleId?: string | null; coverPaletteId?: CoverPaletteId | null }) {
   const db = getDb()
   const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
@@ -1179,6 +1197,16 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
       if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
       meta.tocRuleId = data.tocRuleId
       meta.tocRuleAuto = false
+    }
+    set.meta = meta
+  }
+  if (data.coverPaletteId !== undefined) {
+    // Decorative pin: null removes the key so the cover falls back to the id hash.
+    const meta = { ...(book.meta as Record<string, unknown>), ...(set.meta as Record<string, unknown> | undefined) }
+    if (data.coverPaletteId === null) {
+      delete meta.coverPaletteId
+    } else {
+      meta.coverPaletteId = data.coverPaletteId
     }
     set.meta = meta
   }

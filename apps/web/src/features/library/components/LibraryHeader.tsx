@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 
 import type { LibrarySearch } from '@/routes/index'
@@ -18,6 +19,7 @@ interface LibraryHeaderProps {
   onUploadClick: () => void
   trash?: boolean
   trashCount?: number
+  bookSize?: number
   onEmptyTrash?: () => void
   selectionActive?: boolean
   onToggleSelectMode?: () => void
@@ -27,7 +29,7 @@ interface LibraryHeaderProps {
   onResetMetadataFilter?: () => void
 }
 
-export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter }: LibraryHeaderProps) {
   const _ = useTranslation()
   const [searchInput, setSearchInput] = useState(query)
 
@@ -69,6 +71,7 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
                 {bookCount !== undefined && (
                   <p className="text-xs tabular-nums text-stone-400 dark:text-stone-500">
                     {_('library.bookCount', { count: bookCount })}
+                    {bookSize !== undefined && bookSize > 0 && <> · {formatBytes(bookSize)}</>}
                   </p>
                 )}
                 {onResetMetadataFilter && (
@@ -133,16 +136,15 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
             </button>
           )}
 
-          {!trash && (
-            <ViewMenu
-              navSearch={navSearch}
-              view={view}
-              sortBy={sortBy}
-              sortOrder={sortOrder}
-              format={format}
-              readStatus={readStatus}
-            />
-          )}
+          <ViewMenu
+            navSearch={navSearch}
+            view={view}
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            format={format}
+            readStatus={readStatus}
+            trash={trash}
+          />
 
           {trash ? (
             trashCount > 0 && (

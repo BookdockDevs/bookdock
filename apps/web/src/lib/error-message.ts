@@ -30,6 +30,10 @@ const ERROR_KEYS: Record<string, string> = {
   INTERNAL_ERROR: 'errors.operationFailed',
 }
 
+export function getErrorKeyByCode(code: string | null | undefined): string | null {
+  return code ? ERROR_KEYS[code] ?? null : null
+}
+
 export function getUserErrorNotification(error: unknown, fallback = 'errors.operationFailed'): ToastMessage {
   if (error instanceof TypeError) return { key: 'errors.network' }
   if (error instanceof ApiError) return { key: ERROR_KEYS[error.code] ?? fallback }

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 import { PADDING, type SmartPosition } from '@/lib/position'
 
@@ -55,7 +56,9 @@ export default function SmartMenu({ innerRef, triggerRef, position, onClose, wid
 
   const finalPos = clamped ?? position
 
-  return (
+  // Portaled to body: fixed + z-50 only escapes ancestors that create a
+  // stacking context (e.g. the sticky sidebar) when the DOM node is a root child.
+  return createPortal(
     <div
       ref={innerRef}
       data-smart-menu="true"
@@ -69,6 +72,7 @@ export default function SmartMenu({ innerRef, triggerRef, position, onClose, wid
       } as React.CSSProperties}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   )
 }

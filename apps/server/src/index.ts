@@ -11,6 +11,20 @@ import { bootstrapAuth } from './modules/auth/auth.service'
 import { migrateTxtArtifacts, purgeAllExpiredTrash } from './modules/books/books.service'
 import { interruptStaleAiGenerationRuns } from './modules/ai/ai.runs.service'
 
+const TRASH_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000
+
+async function runTrashSweep() {
+  const startedAt = Date.now()
+  try {
+    await purgeAllExpiredTrash()
+    log('info', 'trash.sweep.completed', { durationMs: Date.now() - startedAt })
+  } catch (err) {
+    // Trash cleanup is deliberately fail-silent so an operational cleanup
+    // problem never makes an otherwise healthy library unavailable.
+    log('warn', 'trash.sweep.failed', { durationMs: Date.now() - startedAt, error: err })
+  }
+}
+
 async function start() {
   const startedAt = Date.now()
   log('info', 'server.starting')
@@ -43,15 +57,10 @@ async function start() {
     return
   }
 
-  const trashStartedAt = Date.now()
-  try {
-    await purgeAllExpiredTrash()
-    log('info', 'trash.sweep.completed', { durationMs: Date.now() - trashStartedAt })
-  } catch (err) {
-    // Trash cleanup is deliberately fail-silent so an operational cleanup
-    // problem never makes an otherwise healthy library unavailable.
-    log('warn', 'trash.sweep.failed', { durationMs: Date.now() - trashStartedAt, error: err })
-  }
+  await runTrashSweep()
+  // Long-running containers never hit the boot sweep or open the trash, so
+  // expired rows would hold storage indefinitely without this.
+  setInterval(() => void runTrashSweep(), TRASH_SWEEP_INTERVAL_MS).unref()
 
   try {
     serve(

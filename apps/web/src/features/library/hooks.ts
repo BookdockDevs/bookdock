@@ -1,11 +1,10 @@
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookMetadata, PaginatedResponse, ReadStatus, ShelfListItem, TagListItem } from '@bookdock/shared'
+import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
-import { useTranslation } from '@/hooks/useTranslation'
-import { getUserErrorNotification } from '@/lib/error-message'
+import { getErrorKeyByCode, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
 export interface UseBooksParams {
@@ -41,10 +40,11 @@ function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, ta
   return `/books?${params.toString()}`
 }
 
-export function useBooks(params: UseBooksParams): QueryObserverResult<PaginatedResponse<BookListItem>> {
+export function useBooks(params: UseBooksParams, options?: { enabled?: boolean }): QueryObserverResult<BookListRes> {
   return useQuery({
     queryKey: ['books', params],
-    queryFn: () => apiGet<PaginatedResponse<BookListItem>>(buildBooksPath(params)),
+    queryFn: () => apiGet<BookListRes>(buildBooksPath(params)),
+    enabled: options?.enabled ?? true,
   })
 }
 
@@ -63,12 +63,13 @@ export interface UseInfiniteBooksParams {
 }
 
 function infiniteBooksFn(page: number, pageSize: number, search: string, sortBy: string, sortOrder: string, shelfId: string | null, tagId: string | null, author: string | null | undefined, series: string | null | undefined, format: BookFormat | null, readStatus: ReadStatus | null, trash: boolean) {
-  return apiGet<PaginatedResponse<BookListItem>>(buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash }))
+  return apiGet<BookListRes>(buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash }))
 }
 
-export function useInfiniteBooks(params: UseInfiniteBooksParams) {
+export function useInfiniteBooks(params: UseInfiniteBooksParams, options?: { enabled?: boolean }) {
   return useInfiniteQuery({
     queryKey: ['books', 'infinite', params],
+    enabled: options?.enabled ?? true,
     queryFn: ({ pageParam }) =>
       infiniteBooksFn(pageParam, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash),
     initialPageParam: 1,
@@ -93,7 +94,7 @@ export function prefetchInfiniteBooks(queryClient: QueryClient, params: UseInfin
     queryFn: ({ pageParam }) =>
       infiniteBooksFn(pageParam as number, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash),
     initialPageParam: 1,
-    getNextPageParam: (last: PaginatedResponse<BookListItem>) => {
+    getNextPageParam: (last: BookListRes) => {
       const totalPages = Math.ceil(last.total / last.pageSize)
       return last.page < totalPages ? last.page + 1 : undefined
     },
@@ -111,12 +112,31 @@ export interface UploadItem {
   progress: number
   shelfId?: string
   tagIds?: string[]
-  message?: string
+  /** i18n key resolved client-side; raw server messages are never displayed */
+  messageKey?: string
 }
 
 export interface UploadAssignment {
   shelfId?: string
   tagIds?: string[]
+}
+
+/** Instance-level upload limit (read-only, injected by GET /settings). */
+export function useUploadSettings() {
+  const { data } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
+  })
+  return { maxBytes: data?.data.uploadMaxBytes }
+}
+
+/** Trash feature switch; on while settings load or when stored settings predate the toggle. */
+export function useTrashEnabled(): boolean {
+  const { data } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
+  })
+  return data?.data.trash?.enabled !== false
 }
 
 export const UPLOAD_ACCEPTED_EXTENSIONS = ['.epub', '.txt']
@@ -134,7 +154,6 @@ const UPLOAD_CONCURRENCY = 3
  */
 export function useUploadBooks() {
   const queryClient = useQueryClient()
-  const _ = useTranslation()
   const [items, setItems] = useState<UploadItem[]>([])
   const runningRef = useRef(0)
   const settledRef = useRef(false)
@@ -164,36 +183,53 @@ export function useUploadBooks() {
       xhr.addEventListener('load', () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           let duplicated = false
+          let shelfId: string | null | undefined
           try {
-            const body = JSON.parse(xhr.responseText) as { duplicated?: boolean }
+            const body = JSON.parse(xhr.responseText) as { duplicated?: boolean; data?: { shelfId?: string | null } }
             duplicated = body.duplicated === true
+            shelfId = body.data?.shelfId
           } catch {
             // keep false
           }
-          patchItem(item.id, { status: duplicated ? 'duplicate' : 'success', progress: 100 })
+          if (duplicated) {
+            // A duplicate keeps its own shelf: tell the user when the requested
+            // shelf was not applied instead of a bare "already exists".
+            const notMoved = Boolean(item.shelfId) && shelfId !== item.shelfId
+            patchItem(item.id, {
+              status: 'duplicate',
+              progress: 100,
+              messageKey: notMoved ? 'library.uploadDuplicateNotMoved' : undefined,
+            })
+          } else {
+            patchItem(item.id, { status: 'success', progress: 100 })
+          }
         } else {
-          let message = xhr.statusText
+          let code: string | null = null
           try {
             const body = JSON.parse(xhr.responseText)
-            message = body?.error?.message ?? message
+            code = body?.error?.code ?? null
           } catch {
             // ignore
           }
-          patchItem(item.id, { status: 'error', progress: 100, message })
+          patchItem(item.id, {
+            status: 'error',
+            progress: 100,
+            messageKey: getErrorKeyByCode(code) ?? 'library.uploadFailed',
+          })
         }
       })
       xhr.addEventListener('error', () => {
-        patchItem(item.id, { status: 'error', progress: 100, message: _('library.uploadFailed') })
+        patchItem(item.id, { status: 'error', progress: 100, messageKey: 'library.uploadFailed' })
       })
       xhr.addEventListener('abort', () => {
-        patchItem(item.id, { status: 'error', progress: 100, message: 'Aborted' })
+        patchItem(item.id, { status: 'error', progress: 100, messageKey: 'library.uploadFailed' })
       })
       xhr.addEventListener('loadend', () => {
         runningRef.current -= 1
       })
       xhr.send(formData)
     },
-    [patchItem, _],
+    [patchItem],
   )
 
   // Scheduler: each item state change starts at most one more queued upload
@@ -234,16 +270,18 @@ export function useUploadBooks() {
   }, [items, queryClient])
 
   const addFiles = useCallback(
-    (files: FileList | File[], opts?: { autoStart?: boolean } & UploadAssignment) => {
+    (files: FileList | File[], opts?: { autoStart?: boolean; maxBytes?: number } & UploadAssignment) => {
       const list = Array.from(files)
       const accepted = list.filter(isAcceptedUploadFile)
-      const rejected = list.length - accepted.length
+      const oversized = opts?.maxBytes ? accepted.filter((f) => f.size > opts.maxBytes!) : []
+      const inRange = accepted.filter((f) => !opts?.maxBytes || f.size <= opts.maxBytes!)
+      const rejected = list.length - inRange.length - oversized.length
       // Drag-dropped files start immediately; picker-selected files wait for
       // an explicit "upload" click (pending -> queued via startUpload)
       const status = opts?.autoStart ? ('queued' as const) : ('pending' as const)
       setItems((prev) => [
         ...prev,
-        ...accepted.map((file) => ({
+        ...inRange.map((file) => ({
           id: `up-${Date.now()}-${nextIdRef.current++}`,
           name: file.name,
           file,
@@ -254,6 +292,7 @@ export function useUploadBooks() {
         })),
       ])
       if (rejected > 0) notify.info({ key: 'library.uploadIgnored', params: { count: rejected } })
+      if (oversized.length > 0) notify.info({ key: 'library.uploadOversized', params: { count: oversized.length } })
     },
     [],
   )
@@ -271,13 +310,29 @@ export function useUploadBooks() {
     }))
   }, [])
 
+  const retry = useCallback((id: string) => {
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id === id && it.status === 'error'
+          ? { ...it, status: 'queued' as const, progress: 0, messageKey: undefined }
+          : it,
+      ),
+    )
+  }, [])
+
   const isUploading = items.some((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'processing')
 
   const clearQueue = useCallback(() => {
     setItems((prev) => prev.filter((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'processing'))
   }, [])
 
-  return { items, addFiles, startUpload, isUploading, clearQueue }
+  // Reopening the sheet must not resurrect finished rows from a background
+  // upload that settled after the sheet was closed.
+  const pruneSettled = useCallback(() => {
+    setItems((prev) => prev.filter((it) => it.status !== 'success' && it.status !== 'duplicate' && it.status !== 'error'))
+  }, [])
+
+  return { items, addFiles, startUpload, retry, pruneSettled, isUploading, clearQueue }
 }
 
 export function useDeleteBook() {
@@ -287,7 +342,10 @@ export function useDeleteBook() {
     mutationFn: (id: string) => apiDelete<{ data: null }>(`/books/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      notify.success({ key: 'library.movedToTrash' })
+      // The server deletes permanently when trash is off; match the toast.
+      const settings = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+      const trashOn = settings?.data.trash?.enabled !== false
+      notify.success({ key: trashOn ? 'library.movedToTrash' : 'reader.deleted' })
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'errors.deleteFailed'))

@@ -1,5 +1,7 @@
+import type { CoverPaletteId } from '@bookdock/shared'
+
 export interface CoverPalette {
-  id: string
+  id: CoverPaletteId
   label: string
   className: string
 }
@@ -25,7 +27,7 @@ export function hashHue(id: string): number {
   return h
 }
 
-export function getCoverPalette(key: string, customPaletteId?: string | null): CoverPalette {
+export function getCoverPalette(key: string, customPaletteId?: CoverPaletteId | null): CoverPalette {
   if (customPaletteId) {
     const matched = MORANDI_PALETTES.find((p) => p.id === customPaletteId)
     if (matched) return matched

@@ -2,7 +2,37 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.2.3] - Unreleased
+## [0.2.4] - Unreleased
+
+### Highlights
+
+- Rebuilt the legacy text-transform feature into the unified text replacement module, with global pattern rules and book-local point patches, wired through reader search, AI visible content, and TXT/EPUB export.
+- Expanded the reader media experience with a media-overlay pill with scrubbing, a dedicated image viewer, and deferred, theme-aware inline video.
+- Overhauled trash, upload, and cover workflows: retention countdown details and a per-user trash master switch, resilient upload feedback, and durable placeholder cover colors that users can pin.
+
+### Added
+
+- Media overlay pill with dual-color progress, interactive scrubbing, text-cue synchronization, SMIL time tolerance, and mutual pause coordination with TTS, plus an image viewer and image context menu with zoom, pan, save, and copy actions.
+- Per-user trash master switch: turning it off permanently deletes the current trash and bypasses the trash for later deletions; the trash now also shows deleted-days and purge countdown, total and freed sizes, server-side deleted-at sorting, and list/grid parity.
+- Per-item upload retry, a sheet that stays resumable when closed mid-upload, localized row errors mapped from server codes, and a read-only instance upload limit (`uploadMaxBytes`) used for client-side pre-checks.
+- Pinned placeholder-cover palettes picked from the edit dialog's cover overlay; the default palette now hashes the immutable book id, and the library list surfaces the pin without shipping full book meta.
+- Book details show the original uploaded file name as a copyable row, and the library list response carries the total size of all matching books.
+
+### Changed
+
+- The text-transform module is now text replacement: pattern rules with global and per-book scopes, book-local point patches, per-book enablement overrides, validation with isolated regex execution, management dialogs, and a migration that preserves legacy transform data.
+- Inline media decompress after text is on screen instead of during chapter preparation, videos gain themed wrapper cards with tap-to-play, and legacy cover-float and 0em table styles are normalized to prevent multi-column pagination overflow.
+- Duplicate uploads merge requested tags into the existing book without silently moving its shelf, and the sheet reports the already-exists outcome.
+- Stabilized reader lifecycle across book switches (loading, navigation, cached content, TOC state, bookmark anchors); started books now display an explicit 0% progress bar.
+- Delete confirmations and toasts switch to permanent-delete wording while the trash switch is off.
+
+### Fixed
+
+- Shelf and tag sidebar counts no longer include trashed books.
+- The upload sheet no longer closes on mouse release after a drop (Chrome's trailing `dragleave`), reopening shows a clean queue instead of stale completed rows, and drag-over highlighting is a subtle tone swap rather than a flashing border invert.
+- Navigating to chapters that begin with tall images syncs TOC and marginal titles immediately by counting viewport-overlapping replaced elements.
+
+## [0.2.3] - 2026-09-16
 
 ### Highlights
 
@@ -123,7 +153,37 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.2.3] - 待发布
+### [0.2.4] - 待发布
+
+#### 主要更新
+
+- 将原有正文变换模块重构为统一的文本替换功能，支持全局规则与书内点替换，贯通阅读器搜索、AI 可见正文与 TXT/EPUB 导出。
+- 扩展阅读器媒体体验：支持拖拽进度条的媒体同步悬浮球、独立的图片查看器，以及延迟解压、贴合主题的内嵌视频。
+- 全面完善回收站、上传与封面流程：保留期倒计时与回收站用户级总开关、更可靠的上传反馈，以及可持久化、可自选的占位封面配色。
+
+#### 新增
+
+- 媒体同步悬浮球，支持双色进度轨道、拖拽跳转、文本线索同步、SMIL 时间容错以及与 TTS 的互斥暂停；新增图片查看器与图片右键/长按菜单，支持缩放、拖移、保存和复制。
+- 回收站用户级总开关：关闭时永久删除现有回收站内容，后续删除绕过回收站；回收站同时新增删除天数与清理倒计时、总大小与清空可释放空间、按删除时间服务端排序，以及列表视图对齐。
+- 上传支持单条重试、中途关闭后可继续、按服务端错误码本地化的行内错误，并展示只读的实例上传大小上限（`uploadMaxBytes`）用于客户端预检。
+- 占位封面配色可在编辑弹窗的封面浮层中钉选；默认配色改为按不可变的书籍 id 哈希，改名不再变色；书库列表接口以轻量字段透出钉选值。
+- 书籍详情展示可复制的原始上传文件名，书库列表响应附带全部匹配书籍的总大小。
+
+#### 变更
+
+- 正文变换升级为文本替换：规则支持全局/按书作用域、模式与点位匹配类型、按书启用覆盖、带隔离执行的正则校验、管理对话框，以及保留旧变换数据的迁移。
+- 内嵌媒体改为正文呈现后再解压，视频获得贴合主题的卡片式外框与点击播放，并规范化旧式封面浮动与 0em 表格样式，避免多栏分页溢出或塌陷。
+- 重复上传会将所选标签合并进已有书籍但不再静默移动书架，并明确提示"已存在"结果。
+- 提升切书场景下阅读器生命周期稳定性（加载、导航、缓存内容、目录状态、书签锚点）；已开始阅读但无进度的书籍显示明确的 0% 进度条。
+- 回收站开关关闭时，删除确认与提示文案切换为永久删除语义。
+
+#### 修复
+
+- 修复书架和标签侧边栏计数包含已回收书籍的问题。
+- 修复上传面板在拖放松开后意外关闭（Chrome 多余的 `dragleave`）、重新打开时残留已完成条目，以及拖入时高亮对比过强闪烁的问题。
+- 修复跳转至以高图开头的章节时目录与页眉标题不同步的问题（可视范围计算纳入跨越视口的替换元素）。
+
+### [0.2.3] - 2026-09-16
 
 #### 主要更新
 

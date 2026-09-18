@@ -17,8 +17,18 @@ export type TextReplacementRule = Pick<
   | 'originalText'
 >
 
-const SKIPPED_TAGS = new Set(['SCRIPT', 'STYLE'])
+// HEAD is skipped because its <title> duplicates the visible heading text in
+// generated EPUB chapters — counting/replacing it would double every title hit
+// while being invisible in the reader viewport.
+const SKIPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'HEAD'])
 const TITLE_TAGS = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TITLE'])
+
+// EPUB chapters are parsed as application/xhtml+xml (strict XML), where tagName
+// keeps its lowercase source form; HTML parsing uppercases it. Match tags
+// case-insensitively so both parse modes treat the same elements as titles.
+function hasTag(tags: Set<string>, el: Element): boolean {
+  return tags.has(el.tagName.toUpperCase())
+}
 
 // Collect the section's text nodes in document order, skipping script/style
 // subtrees — the single traversal shared by the engine and the creation-side
@@ -34,7 +44,7 @@ function collectTextNodes(doc: Document): Text[] {
   return nodes.filter((n) => {
     let ancestor = n.parentElement
     while (ancestor) {
-      if (SKIPPED_TAGS.has(ancestor.tagName)) return false
+      if (hasTag(SKIPPED_TAGS, ancestor)) return false
       ancestor = ancestor.parentElement
     }
     return true
@@ -215,7 +225,7 @@ export function countPatternMatches(
   for (const node of nodes) {
     if (!isTitleTextNode(node)) continue
     let title = node.parentElement
-    while (title && !TITLE_TAGS.has(title.tagName)) title = title.parentElement
+    while (title && !hasTag(TITLE_TAGS, title)) title = title.parentElement
     if (!title) continue
     titleTexts.set(title, `${titleTexts.get(title) ?? ''}${node.nodeValue ?? ''}`)
   }
@@ -231,7 +241,7 @@ export function countPatternMatches(
 function isTitleTextNode(node: Text): boolean {
   let ancestor = node.parentElement
   while (ancestor) {
-    if (TITLE_TAGS.has(ancestor.tagName)) return true
+    if (hasTag(TITLE_TAGS, ancestor)) return true
     ancestor = ancestor.parentElement
   }
   return false
@@ -241,7 +251,7 @@ function applyTitleRules(nodes: Text[], rules: TextReplacementRule[]): void {
   const groups = new Map<Element, Text[]>()
   for (const node of nodes) {
     let title = node.parentElement
-    while (title && !TITLE_TAGS.has(title.tagName)) title = title.parentElement
+    while (title && !hasTag(TITLE_TAGS, title)) title = title.parentElement
     if (!title) continue
     const group = groups.get(title) ?? []
     group.push(node)

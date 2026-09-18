@@ -1,4 +1,4 @@
-import { eq, and, inArray, sql, asc, ne } from 'drizzle-orm'
+import { eq, and, inArray, isNull, sql, asc, ne } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import { books, shelves } from '../../db/schema'
@@ -13,7 +13,7 @@ export async function listShelves(userId: string) {
       bookCount: sql<number>`count(${books.id})`,
     })
     .from(shelves)
-    .leftJoin(books, eq(shelves.id, books.shelfId))
+    .leftJoin(books, and(eq(shelves.id, books.shelfId), isNull(books.deletedAt)))
     .where(eq(shelves.userId, userId))
     .groupBy(shelves.id)
     .orderBy(asc(shelves.sortOrder), asc(shelves.createdAt))

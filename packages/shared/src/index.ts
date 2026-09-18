@@ -1,5 +1,5 @@
-export type { AiReadingScope, AiToolName, BookFormat, SortField, ReadStatus } from './constants'
-export { AI_CORE_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, BOOK_FORMATS, normalizeAiToolName, READ_STATUSES, PAGINATION, SORT_FIELDS } from './constants'
+export type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, SortField, ReadStatus } from './constants'
+export { AI_CORE_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, BOOK_FORMATS, COVER_PALETTE_IDS, normalizeAiToolName, READ_STATUSES, PAGINATION, SORT_FIELDS } from './constants'
 export { normalizeAiCitationMarkers, sanitizeAiCitationMarkers } from './ai-citations'
 export { expandAiPrompt, getAiPromptVariables } from './ai-prompts'
 export type { AiPromptValues, AiPromptVariable } from './ai-prompts'
@@ -29,6 +29,7 @@ export type {
   ApiResponse,
   ApiErrorBody,
   PaginatedResponse,
+  BookListRes,
   HealthCheckRes,
   LoginReq,
   LoginRes,

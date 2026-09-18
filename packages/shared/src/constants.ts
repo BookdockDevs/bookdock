@@ -20,6 +20,10 @@ export const AUTH_REGISTER_USERNAME_MAX_LENGTH = 30
 export const SORT_FIELDS = ['title', 'author', 'createdAt', 'updatedAt', 'lastReadAt', 'size'] as const
 export type SortField = (typeof SORT_FIELDS)[number]
 
+// Placeholder cover palettes; ids must stay in sync with MORANDI_PALETTES in web.
+export const COVER_PALETTE_IDS = ['stone', 'sage', 'slate', 'amber', 'rose', 'teal', 'sky', 'violet', 'orange', 'zinc'] as const
+export type CoverPaletteId = (typeof COVER_PALETTE_IDS)[number]
+
 /** Maximum transformed text accepted in one explicit reader corpus snapshot. */
 export const AI_MAX_INDEX_CORPUS_CHARS = 10_000_000
 

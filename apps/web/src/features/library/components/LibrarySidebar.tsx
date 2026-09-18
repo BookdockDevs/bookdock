@@ -14,7 +14,7 @@ import type { LibrarySearch } from '@/routes/index'
 import SmartMenu from '@/components/ui/SmartMenu'
 import AccountMenu from '@/features/auth/AccountMenu'
 import { applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
-import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag } from '../hooks'
+import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useTrashEnabled } from '../hooks'
 import DeleteConfirm from './DeleteConfirm'
 import ShelfDialog from './ShelfDialog'
 import TagDialog from './TagDialog'
@@ -57,6 +57,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
     () => applyTagOrder(tagsData?.data ?? [], tagOrderOverride),
     [tagsData, tagOrderOverride],
   )
+  const trashEnabled = useTrashEnabled()
   const { data: trashData } = useBooks({
     page: 1,
     pageSize: 1,
@@ -68,7 +69,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
     format: null,
     readStatus: null,
     trash: true,
-  })
+  }, { enabled: trashEnabled })
   const trashCount = trashData?.total
 
   const { data: uncategorizedData } = useBooks({
@@ -270,20 +271,22 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
           </SortableContext>
         )}
 
-        <div className="mt-6 border-t border-stone-200/60 pt-4 dark:border-stone-800/50">
-          <NavItem
-            label={_('library.trash')}
-            count={trashCount}
-            active={trash}
-            icon={
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
-              </svg>
-            }
-            onClick={() => selectNavigation({ trash: true, shelf: undefined, tag: undefined, status: undefined })}
-            onPointerEnter={() => onPrefetchNavigation?.({ trash: true, shelf: undefined, tag: undefined, status: undefined })}
-          />
-        </div>
+        {trashEnabled && (
+          <div className="mt-6 border-t border-stone-200/60 pt-4 dark:border-stone-800/50">
+            <NavItem
+              label={_('library.trash')}
+              count={trashCount}
+              active={trash}
+              icon={
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+                </svg>
+              }
+              onClick={() => selectNavigation({ trash: true, shelf: undefined, tag: undefined, status: undefined })}
+              onPointerEnter={() => onPrefetchNavigation?.({ trash: true, shelf: undefined, tag: undefined, status: undefined })}
+            />
+          </div>
+        )}
       </nav>
 
       <div

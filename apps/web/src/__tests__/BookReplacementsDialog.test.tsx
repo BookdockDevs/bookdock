@@ -54,11 +54,12 @@ describe('BookReplacementsDialog', () => {
   })
 
   it('carries data-settings-toggle so the portaled dialog never closes the settings popover', () => {
-    const { container } = render(<BookReplacementsDialog bookId="b1" onClose={() => {}} />)
+    render(<BookReplacementsDialog bookId="b1" onClose={() => {}} />)
 
     // The backdrop is the dialog root; SettingsPopover's capture-phase close
-    // handler ignores clicks inside [data-settings-toggle]
-    const root = container.querySelector('[data-settings-toggle]')
+    // handler ignores clicks inside [data-settings-toggle]. The dialog portals
+    // to body, so it isn't under the render container.
+    const root = document.body.querySelector('[data-settings-toggle]')
     expect(root).not.toBeNull()
     expect(root).toHaveClass('fixed', 'inset-0')
   })

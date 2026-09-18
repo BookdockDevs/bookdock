@@ -1,4 +1,4 @@
-import type { BookListItem, BookMetadata } from '@bookdock/shared'
+import type { BookListItem, BookMetadata, CoverPaletteId } from '@bookdock/shared'
 
 import { notify } from '@/lib/notifications'
 
@@ -13,6 +13,8 @@ export interface MetaDraft {
   series: string
   seriesIndex: string
   description: string
+  /** Pinned placeholder-cover palette; null = none picked (id-hash palette applies) */
+  coverPaletteId: CoverPaletteId | null
 }
 
 export function draftFrom(book: BookListItem, bookmeta?: BookMetadata): MetaDraft {
@@ -27,6 +29,7 @@ export function draftFrom(book: BookListItem, bookmeta?: BookMetadata): MetaDraf
     series: bookmeta?.series ?? '',
     seriesIndex: bookmeta?.seriesIndex != null ? String(bookmeta.seriesIndex) : '',
     description: bookmeta?.description ?? '',
+    coverPaletteId: book.coverPaletteId ?? null,
   }
 }
 
@@ -47,11 +50,37 @@ export function draftToBookmeta(draft: MetaDraft): BookMetadata {
   return bookmeta
 }
 
+// CJK/fullwidth glyphs render at roughly twice the width of ASCII, so truncating
+// by code-point count under-truncates Chinese file names (a 22-char title still
+// wraps to 3 lines). Count display width instead.
+const WIDE_CHAR = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/
+
+function charWidth(ch: string): number {
+  return WIDE_CHAR.test(ch) ? 2 : 1
+}
+
 export function middleTruncate(value: string, max = 28): string {
-  if (value.length <= max) return value
-  const head = Math.ceil((max - 1) / 2)
-  const tail = Math.floor((max - 1) / 2)
-  return `${value.slice(0, head)}…${value.slice(-tail)}`
+  const chars = Array.from(value)
+  const total = chars.reduce((sum, ch) => sum + charWidth(ch), 0)
+  if (total <= max) return value
+  const headTarget = Math.ceil((max - 1) / 2)
+  const tailTarget = Math.floor((max - 1) / 2)
+  const head: string[] = []
+  const tail: string[] = []
+  let headW = 0
+  for (const ch of chars) {
+    if (headW + charWidth(ch) > headTarget) break
+    head.push(ch)
+    headW += charWidth(ch)
+  }
+  let tailW = 0
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const ch = chars[i]
+    if (tailW + charWidth(ch) > tailTarget) break
+    tail.unshift(ch)
+    tailW += charWidth(ch)
+  }
+  return `${head.join('')}…${tail.join('')}`
 }
 
 export function autoGrow(el: HTMLTextAreaElement | null) {

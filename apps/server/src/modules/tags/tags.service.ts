@@ -1,4 +1,4 @@
-import { eq, and, inArray, sql, asc, ne } from 'drizzle-orm'
+import { eq, and, inArray, isNull, sql, asc, ne } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import { books, tags, bookTags } from '../../db/schema'
@@ -10,10 +10,11 @@ export async function listTags(userId: string) {
   const rows = db
     .select({
       tag: tags,
-      bookCount: sql<number>`count(${bookTags.bookId})`,
+      bookCount: sql<number>`count(${books.id})`,
     })
     .from(tags)
     .leftJoin(bookTags, eq(tags.id, bookTags.tagId))
+    .leftJoin(books, and(eq(books.id, bookTags.bookId), isNull(books.deletedAt)))
     .where(eq(tags.userId, userId))
     .groupBy(tags.id)
     .orderBy(asc(tags.sortOrder), asc(tags.name))

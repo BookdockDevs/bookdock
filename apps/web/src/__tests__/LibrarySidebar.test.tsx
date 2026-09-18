@@ -15,6 +15,7 @@ vi.mock('../features/library/hooks', () => ({
   useShelves: vi.fn(),
   useBooks: vi.fn(),
   useTags: vi.fn(),
+  useTrashEnabled: vi.fn(),
   useCreateShelf: vi.fn(),
   useRenameShelf: vi.fn(),
   useDeleteShelf: vi.fn(),
@@ -32,11 +33,12 @@ vi.mock('@/features/auth/AccountMenu', () => ({
 interface ShelfItemData { id: string; name: string; bookCount: number }
 interface TagItemData { id: string; name: string; bookCount: number }
 
-function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1 }: { shelves?: ShelfItemData[]; tags?: TagItemData[]; uncategorizedTotal?: number } = {}) {
+function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1, trashEnabled = true }: { shelves?: ShelfItemData[]; tags?: TagItemData[]; uncategorizedTotal?: number; trashEnabled?: boolean } = {}) {
   ;(libraryHooks.useShelves as ReturnType<typeof vi.fn>).mockReturnValue({
     data: { data: shelves },
     isLoading: false,
   })
+  ;(libraryHooks.useTrashEnabled as ReturnType<typeof vi.fn>).mockReturnValue(trashEnabled)
   ;(libraryHooks.useBooks as ReturnType<typeof vi.fn>).mockReturnValue({
     data: { data: [], total: uncategorizedTotal },
   })
@@ -155,6 +157,13 @@ describe('LibrarySidebar', () => {
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
     fireEvent.click(screen.getByText('回收站'))
     expect(navSearch).toHaveBeenCalledWith({ trash: true, shelf: undefined, tag: undefined, status: undefined })
+  })
+
+  it('hides the trash entry when the trash feature is disabled', () => {
+    mockHooks({ trashEnabled: false })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    expect(screen.queryByText('回收站')).toBeNull()
   })
 
   it('opens the tag context menu with rename and delete actions', () => {

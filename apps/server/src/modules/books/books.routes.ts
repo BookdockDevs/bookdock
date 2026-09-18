@@ -27,7 +27,7 @@ import {
   previewAppendTxtBookContent,
   appendTxtBookContent,
 } from './books.service'
-import { getTrashSettings } from '../settings/settings.service'
+import { getTrashSettings, isTrashEnabled } from '../settings/settings.service'
 import { getStorage } from '../../storage'
 import { config } from '../../config'
 import { AppError } from '../../middleware/error'
@@ -91,6 +91,7 @@ booksRoutes.get('/', async (c) => {
   const trash = query['trash'] === '1'
   // Opening the trash lazily purges the current user's expired rows
   if (trash) {
+    if (!isTrashEnabled(user.id)) throw new AppError('TRASH_DISABLED', 'Trash is disabled')
     await purgeExpiredTrash(user.id, getTrashSettings(user.id).autoCleanDays)
   }
   const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series)
@@ -320,6 +321,7 @@ booksRoutes.post('/:id/re-toc', async (c) => {
 
 booksRoutes.delete('/trash', async (c) => {
   const user = c.get('user')
+  if (!isTrashEnabled(user.id)) throw new AppError('TRASH_DISABLED', 'Trash is disabled')
   const count = await emptyTrash(user.id)
   return c.json({ data: { count } })
 })
@@ -327,13 +329,16 @@ booksRoutes.delete('/trash', async (c) => {
 booksRoutes.delete('/:id', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
-  await trashBook(user.id, id)
+  // With trash disabled, deletion is immediate and unrecoverable.
+  if (isTrashEnabled(user.id)) await trashBook(user.id, id)
+  else await deleteBook(user.id, id)
   return c.json({ data: null })
 })
 
 booksRoutes.post('/:id/restore', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
+  if (!isTrashEnabled(user.id)) throw new AppError('TRASH_DISABLED', 'Trash is disabled')
   await restoreBook(user.id, id)
   return c.json({ data: null })
 })

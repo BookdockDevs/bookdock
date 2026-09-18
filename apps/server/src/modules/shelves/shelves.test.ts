@@ -112,6 +112,18 @@ describe('shelves service', () => {
     expect(shelvesAfter[0].bookCount).toBe(0)
   })
 
+  it('should exclude trashed books from shelf counts', async () => {
+    const shelf = await createShelf(userId, 'Shelf A')
+    await moveBooksToShelf(userId, shelf.id, [bookId])
+    expect((await listShelves(userId))[0].bookCount).toBe(1)
+
+    db.update(schema.books).set({ deletedAt: Date.now() }).where(eq(schema.books.id, bookId)).run()
+    expect((await listShelves(userId))[0].bookCount).toBe(0)
+
+    db.update(schema.books).set({ deletedAt: null }).where(eq(schema.books.id, bookId)).run()
+    expect((await listShelves(userId))[0].bookCount).toBe(1)
+  })
+
   it('should keep a single shelf per book when moving between shelves', async () => {
     const shelfA = await createShelf(userId, 'Shelf A')
     const shelfB = await createShelf(userId, 'Shelf B')

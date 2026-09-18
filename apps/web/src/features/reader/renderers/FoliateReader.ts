@@ -1052,14 +1052,17 @@ function originalToc(book: object & { toc?: unknown }): FoliateTocItem[] {
 export async function convertTocLabels(
   items: FoliateTocItem[],
   mode: ChineseConversion,
-  replacementRules: TextReplacementRule[] = [],
+  rules: TextReplacementRule[] = [],
 ): Promise<FoliateTocItem[]> {
+  // Same activation gate as the content engine (effectiveEnabled ?? enabled):
+  // a rule toggled off must not keep transforming TOC labels.
+  const activeRules = rules.filter((r) => (r.effectiveEnabled ?? r.enabled) && r.matchType === 'pattern')
   return Promise.all(items.map(async (item) => ({
     ...item,
     ...(typeof item.label === 'string'
-      ? { label: await convertChinese(applyTitleReplacements(item.label, replacementRules), mode) }
+      ? { label: await convertChinese(applyTitleReplacements(item.label, activeRules), mode) }
       : {}),
-    ...(Array.isArray(item.subitems) ? { subitems: await convertTocLabels(item.subitems, mode, replacementRules) } : {}),
+    ...(Array.isArray(item.subitems) ? { subitems: await convertTocLabels(item.subitems, mode, activeRules) } : {}),
   })))
 }
 

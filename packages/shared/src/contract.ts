@@ -1,4 +1,4 @@
-import type { AiReadingScope, AiToolName, BookFormat, ReadStatus } from './constants'
+import type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
 import type { AnnotationStyle, AnnotationType, TocRulePattern, ReplacementMatchType, ReplacementScope, ViewSettings } from './domain'
 
@@ -19,6 +19,11 @@ export interface PaginatedResponse<T> {
   page: number
   pageSize: number
   total: number
+}
+
+/** GET /books response: totalSize sums every matching row (not just the page) */
+export interface BookListRes extends PaginatedResponse<BookListItem> {
+  totalSize: number
 }
 
 export interface HealthCheckRes {
@@ -127,6 +132,8 @@ export interface UpdateUserReq {
 export interface TrashSettings {
   /** Days a trashed book is kept before auto-purge; 0 disables auto-clean */
   autoCleanDays: 0 | 7 | 30
+  /** Soft-delete trash feature master switch; omitted = enabled (pre-toggle stored rows) */
+  enabled?: boolean
 }
 
 export interface SettingsRes {
@@ -183,6 +190,12 @@ export interface SettingsRes {
   ttsAutoNext?: boolean
   ttsFollow?: boolean
   trash?: TrashSettings
+  /**
+   * Read-only instance limit (env UPLOAD_MAX_BYTES), injected by GET /settings
+   * for client-side display/pre-check. settingsUpdateSchema strips it from PUT
+   * bodies, so it is never persisted per user.
+   */
+  uploadMaxBytes?: number
   /**
    * Named reading-setting profiles (global config + presets + active pointer),
    * serialized as JSON by the web client and passed through by the server.
@@ -898,6 +911,8 @@ export interface BookListItem {
   shelfName?: string | null
   /** Tag names attached to the book; list view info line only */
   tags?: string[]
+  /** Pinned placeholder-cover palette picked by the user; absent = auto id-hash palette */
+  coverPaletteId?: CoverPaletteId | null
 }
 
 export interface BookContributor {
@@ -936,6 +951,8 @@ export interface BookMetadata {
 export interface BookMeta {
   chapters?: Chapter[]
   bookmeta?: BookMetadata
+  /** Original uploaded file name (provenance; stored once at upload, survives title edits) */
+  fileName?: string
   /** Total word count of the book (sum of chapter word counts) */
   wordCount?: number
   /** Per-book reading-setting overrides (F1), see ViewSettings */
@@ -950,6 +967,9 @@ export interface BookMeta {
   tocRuleAuto?: boolean
   /** Book-specific TOC patterns when not using a global preset */
   customTocPatterns?: TocRulePattern[]
+  /** Palette pinned by the user for the placeholder cover (decorative; ignored
+   * while a real cover image exists). Unset = deterministic hash of book.id. */
+  coverPaletteId?: CoverPaletteId
   /** Detected chapter boundaries suppressed for this book only */
   tocExcludedChapterIds?: string[]
   /** Internal source-order preservation for a suppressed synthetic preface */

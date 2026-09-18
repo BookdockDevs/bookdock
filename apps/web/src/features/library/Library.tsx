@@ -21,6 +21,7 @@ import type { BookListItem } from '@bookdock/shared'
 
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
+import { formatBytes } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 
 import QueryErrorState from '@/components/ui/QueryErrorState'
@@ -41,9 +42,11 @@ import ListItemInfo from './components/ListItemInfo'
 import ReadingStatsCard from './components/ReadingStatsCard'
 import RecentlyRead from './components/RecentlyRead'
 import SelectionBar from './components/SelectionBar'
+import TrashInfo from './components/TrashInfo'
 import UploadSheet from './components/UploadSheet'
+import UnpinButton, { PinIcon } from './components/UnpinButton'
 import { applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
-import { useInfiniteBooks, prefetchInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags } from './hooks'
+import { useInfiniteBooks, prefetchInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useTrashEnabled } from './hooks'
 
 const PAGE_SIZE = 20
 
@@ -60,15 +63,18 @@ export default function Library() {
   // bd-sort-order), so a linked/shared URL still controls its own view
   const view = search.view ?? viewPref
   const query = search.q ?? ''
-  const sortBy = search.sortBy ?? sortByPref
-  const sortOrder = search.sortOrder ?? sortOrderPref
+  const trash = search.trash ?? false
+  const trashEnabled = useTrashEnabled()
+  // The trash defaults to newest-deleted first; the library sort preference
+  // is a separate concern and must not be overwritten by trash-only sorting
+  const sortBy = search.sortBy ?? (trash ? 'deletedAt' : sortByPref)
+  const sortOrder = search.sortOrder ?? (trash ? 'desc' : sortOrderPref)
   const shelfId = search.shelf ?? null
   const tagId = search.tag ?? null
   const author = search.author ?? null
   const series = search.series ?? null
   const format = search.format ?? null
   const readStatus = search.status ?? null
-  const trash = search.trash ?? false
 
   const prefetchLibrary = useCallback(
     (patch: Partial<LibrarySearch>) => {
@@ -76,11 +82,15 @@ export default function Library() {
       const nextTagId = 'tag' in patch ? (patch.tag ?? null) : tagId
       const nextTrash = 'trash' in patch ? (patch.trash ?? false) : false
       const nextStatus = 'status' in patch ? (patch.status ?? null) : readStatus
+      // Mirror navSearch's sort reset so the prefetched key matches the fetch
+      const crossing = nextTrash !== trash
+      const nextSortBy = crossing ? (nextTrash ? 'deletedAt' : sortByPref) : sortBy
+      const nextSortOrder = crossing ? (nextTrash ? 'desc' : sortOrderPref) : sortOrder
       void prefetchInfiniteBooks(queryClient, {
         pageSize: PAGE_SIZE,
         search: query,
-        sortBy,
-        sortOrder,
+        sortBy: nextSortBy,
+        sortOrder: nextSortOrder,
         shelfId: nextShelfId,
         tagId: nextTagId,
         author: null,
@@ -90,7 +100,7 @@ export default function Library() {
         trash: nextTrash,
       })
     },
-    [queryClient, query, sortBy, sortOrder, shelfId, tagId, format, readStatus],
+    [queryClient, query, trash, sortByPref, sortOrderPref, sortBy, sortOrder, shelfId, tagId, format, readStatus],
   )
 
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -313,12 +323,15 @@ export default function Library() {
     format,
     readStatus,
     trash,
-  })
+    // Server rejects trash queries while the feature is off; the redirect
+    // effect below swaps the URL out before the next render settles.
+  }, { enabled: !trash || trashEnabled })
 
   const allBooks = useMemo(() => data?.pages.flatMap((p) => p.data) ?? [], [data])
   const isEmpty = !isLoading && allBooks.length === 0
 
   const total = data?.pages[0]?.total ?? 0
+  const totalSize = data?.pages[0]?.totalSize ?? 0
 
   const shelvesQuery = useShelves()
   const tagsQuery = useTags()
@@ -413,10 +426,22 @@ export default function Library() {
 
   const navSearch = useCallback(
     (patch: Partial<LibrarySearch>) => {
-      navigate({ to: '/', search: { ...search, ...patch }, replace: true })
+      // The trash has its own default sort; URL sort params are meaningful only
+      // within the list/trash domain they were set in, so drop them on crossing
+      const nextTrash = 'trash' in patch ? (patch.trash ?? false) : trash
+      const sortPatch = nextTrash !== trash ? { sortBy: undefined, sortOrder: undefined } : null
+      navigate({ to: '/', search: { ...search, ...sortPatch, ...patch }, replace: true })
     },
-    [navigate, search],
+    [navigate, search, trash],
   )
+
+  // A shared/bookmarked ?trash=1 URL must not dead-end when the feature is
+  // switched off (e.g. in another tab): bounce back to the plain library.
+  useEffect(() => {
+    if (trash && !trashEnabled) {
+      navigate({ to: '/', search: { ...search, trash: undefined }, replace: true })
+    }
+  }, [trash, trashEnabled, navigate, search])
 
   const coverText = useUiStore((s) => s.coverText)
   const gridColumns = useUiStore((s) => s.gridColumns)
@@ -477,6 +502,7 @@ export default function Library() {
           trash={trash}
           onUploadClick={() => setUploadOpen(true)}
           trashCount={total}
+          bookSize={trash ? totalSize : undefined}
           onEmptyTrash={() => setEmptyTrashOpen(true)}
           selectionActive={selectionActive}
           onToggleSelectMode={toggleSelectionMode}
@@ -511,18 +537,6 @@ export default function Library() {
             ) : (
               <EmptyLibrary />
             )
-          ) : trash ? (
-            <TrashGrid
-              books={allBooks}
-              selection={selection}
-              selectionActive={selectionActive}
-              onToggleSelect={(id, index, shiftKey) => toggleSelect(id, index, shiftKey)}
-              onRestore={(b) => {
-                deselect(b.id)
-                void restoreBook.mutateAsync(b.id).catch(() => undefined)
-              }}
-              onPermanentDelete={setPermanentDeleteTarget}
-            />
           ) : view === 'grid' ? (
             <VirtuosoGrid
               totalCount={allBooks.length}
@@ -534,6 +548,26 @@ export default function Library() {
               itemContent={(index) => {
                 const book = allBooks[index]
                 if (!book) return null
+                if (trash) {
+                  return (
+                    <div
+                      className={`rounded-xl ${selectionActive && selection.has(book.id) ? 'ring-2 ring-stone-900 ring-offset-2 ring-offset-stone-50 dark:ring-stone-100 dark:ring-offset-stone-950' : ''}`}
+                    >
+                      <BookCard
+                        book={book}
+                        selected={selection.has(book.id)}
+                        selectionActive={selectionActive}
+                        coverText={true}
+                        onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                        onRestore={(b) => {
+                          deselect(b.id)
+                          void restoreBook.mutateAsync(b.id).catch(() => undefined)
+                        }}
+                        onPermanentDelete={setPermanentDeleteTarget}
+                      />
+                    </div>
+                  )
+                }
                 if (selectionActive) {
                   return (
                     <DraggableBookCard book={book} selection={selection} selectionActive>
@@ -595,6 +629,21 @@ export default function Library() {
               itemContent={(index) => {
                 const book = allBooks[index]
                 if (!book) return null
+                if (trash) {
+                  return (
+                    <TrashListRow
+                      book={book}
+                      selected={selection.has(book.id)}
+                      selectionActive={selectionActive}
+                      onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                      onRestore={(b) => {
+                        deselect(b.id)
+                        void restoreBook.mutateAsync(b.id).catch(() => undefined)
+                      }}
+                      onPermanentDelete={setPermanentDeleteTarget}
+                    />
+                  )
+                }
                 return (
                   <ListItemWrapper
                     book={book}
@@ -641,6 +690,18 @@ export default function Library() {
       <DeleteConfirm
         open={!!deleteTarget}
         bookTitle={deleteTarget?.title}
+        // With trash off this delete is unrecoverable, so use the permanent
+        // delete wording instead of the soft-delete promise.
+        title={trashEnabled ? undefined : _('library.permanentDelete')}
+        message={
+          trashEnabled ? undefined : (
+            <>
+              {_('library.permanentDeleteConfirm')}
+              <span className="mt-1 block truncate text-stone-700 dark:text-stone-200">{deleteTarget?.title ?? ''}</span>
+            </>
+          )
+        }
+        confirmLabel={trashEnabled ? undefined : _('library.permanentDelete')}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => {
           const target = deleteTarget
@@ -656,7 +717,7 @@ export default function Library() {
         message={
           <>
             {_('library.permanentDeleteConfirm')}
-            <span className="mt-1 block truncate text-stone-700 dark:text-stone-200">{'\u300c'}{permanentDeleteTarget?.title ?? ''}{'\u300d'}</span>
+            <span className="mt-1 block truncate text-stone-700 dark:text-stone-200">{permanentDeleteTarget?.title ?? ''}</span>
           </>
         }
         confirmLabel={_('library.permanentDelete')}
@@ -673,7 +734,16 @@ export default function Library() {
       <DeleteConfirm
         open={emptyTrashOpen}
         title={_('library.emptyTrash')}
-        message={_('library.emptyTrashConfirm')}
+        message={
+          <>
+            {_('library.emptyTrashConfirm')}
+            {totalSize > 0 && (
+              <span className="mt-1 block text-stone-700 dark:text-stone-200">
+                {_('library.emptyTrashFrees', { size: formatBytes(totalSize) })}
+              </span>
+            )}
+          </>
+        }
         confirmLabel={_('library.emptyTrash')}
         onCancel={() => setEmptyTrashOpen(false)}
         onConfirm={() => {
@@ -798,31 +868,93 @@ function EmptyTrash() {
   )
 }
 
-function TrashGrid({ books, selection, selectionActive, onToggleSelect, onRestore, onPermanentDelete }: {
-  books: BookListItem[]
-  selection: Set<string>
+function TrashListRow({ book, selected, selectionActive, onToggleSelect, onRestore, onPermanentDelete }: {
+  book: BookListItem
+  selected: boolean
   selectionActive: boolean
-  onToggleSelect: (id: string, index: number, shiftKey?: boolean) => void
+  onToggleSelect: (id: string, shiftKey?: boolean) => void
   onRestore: (b: BookListItem) => void
   onPermanentDelete: (b: BookListItem) => void
 }) {
+  const _ = useTranslation()
+
+  function handleRowClick(e: React.MouseEvent) {
+    // Trash rows have no destination: plain clicks only select in selection mode
+    if (selectionActive || e.ctrlKey || e.metaKey || e.shiftKey) {
+      onToggleSelect(book.id, e.shiftKey)
+    }
+  }
+
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-5 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-      {books.map((book, index) => (
-        <div
-          key={book.id}
-          className={`rounded-xl ${selectionActive && selection.has(book.id) ? 'ring-2 ring-stone-900 ring-offset-2 ring-offset-stone-50 dark:ring-stone-100 dark:ring-offset-stone-950' : ''}`}
-        >
-          <BookCard
-            book={book}
-            selected={selection.has(book.id)}
-            selectionActive={selectionActive}
-            onToggleSelect={(id, shiftKey) => onToggleSelect(id, index, shiftKey)}
-            onRestore={onRestore}
-            onPermanentDelete={onPermanentDelete}
-          />
+    <div
+      onClick={handleRowClick}
+      className={`group flex items-center gap-3.5 rounded-xl px-3 py-2.5 select-none transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
+    >
+      <div className="shrink-0 rounded-xl opacity-80 grayscale-[60%]">
+        <BookCover book={book} size="sm" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-serif text-sm font-medium text-stone-900 dark:text-stone-100">
+          {book.title}
         </div>
-      ))}
+        <div className="mt-0.5 flex items-baseline gap-2">
+          {book.author && (
+            <span className="truncate text-xs text-stone-500 dark:text-stone-400">{book.author}</span>
+          )}
+          <TrashInfo book={book} className="shrink-0" />
+        </div>
+      </div>
+      <span className="shrink-0 rounded border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500">
+        {book.format}
+      </span>
+      {selectionActive ? (
+        <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+          selected
+            ? 'border-stone-900 bg-stone-900 dark:border-stone-100 dark:bg-stone-100'
+            : 'border-stone-300 dark:border-stone-600'
+        }`}>
+          {selected && (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="dark:stroke-stone-900">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          )}
+        </div>
+      ) : (
+        <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+          <button
+            type="button"
+            aria-label={_('library.restore')}
+            title={_('library.restore')}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onRestore(book)
+            }}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-label={_('library.permanentDelete')}
+            title={_('library.permanentDelete')}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onPermanentDelete(book)
+            }}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -957,10 +1089,12 @@ function ListItemContent({ book }: { book: BookListItem }) {
           {book.title}
         </span>
         {book.pinnedAt && (
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400 dark:text-stone-500">
-            <path d="M12 17v5" />
-            <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-          </svg>
+          <UnpinButton
+            bookId={book.id}
+            className="shrink-0 rounded-md p-1 text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 md:opacity-0 md:group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-stone-700 dark:hover:text-stone-200"
+          >
+            <PinIcon size={11} />
+          </UnpinButton>
         )}
       </div>
       {book.author && (
@@ -1013,30 +1147,45 @@ const LIST_COMPONENTS: Components<unknown, unknown> = { Item: ListItem }
 function useGlobalDragToggle(setOpen: (open: boolean) => void) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
+    // Chrome fires a cleanup dragleave after a completed drop; only a leave
+    // while the drag session is still in flight may auto-close the sheet.
+    let dragging = false
+    const cancelClose = () => {
+      if (timer.current) {
+        clearTimeout(timer.current)
+        timer.current = null
+      }
+    }
     const onDragOver = (e: DragEvent) => {
       if (e.dataTransfer?.types.includes('Files')) {
         e.preventDefault()
+        dragging = true
         setOpen(true)
-        if (timer.current) clearTimeout(timer.current)
+        cancelClose()
       }
     }
     const onDragLeave = () => {
-      if (timer.current) clearTimeout(timer.current)
+      if (!dragging) return
+      cancelClose()
       timer.current = setTimeout(() => setOpen(false), 200)
     }
-    const onDrop = (e: DragEvent) => {
+    const endSession = (e: DragEvent) => {
       if (e.dataTransfer?.types.includes('Files')) {
         e.preventDefault()
       }
+      dragging = false
+      cancelClose()
     }
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('dragleave', onDragLeave)
-    window.addEventListener('drop', onDrop)
+    window.addEventListener('drop', endSession)
+    window.addEventListener('dragend', endSession)
     return () => {
       window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('dragleave', onDragLeave)
-      window.removeEventListener('drop', onDrop)
-      if (timer.current) clearTimeout(timer.current)
+      window.removeEventListener('drop', endSession)
+      window.removeEventListener('dragend', endSession)
+      cancelClose()
     }
   }, [setOpen])
 }

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { Button } from '@/components/ui/Button'
+import { formatBytes } from '@/lib/utils'
 
-import { useShelves, useTags, useUploadBooks, type UploadAssignment, type UploadItem } from '../hooks'
+import { useShelves, useTags, useUploadBooks, useUploadSettings, type UploadAssignment, type UploadItem } from '../hooks'
 
 interface UploadSheetProps {
   open: boolean
@@ -32,13 +33,18 @@ function statusLabel(item: UploadItem): string | null {
   }
 }
 
+function hasFiles(e: { dataTransfer: DataTransfer | null }): boolean {
+  return Boolean(e.dataTransfer?.types.includes('Files'))
+}
+
 export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadSheetProps) {
   const _ = useTranslation()
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [includeCurrentTag, setIncludeCurrentTag] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const { items, addFiles, startUpload, isUploading, clearQueue } = useUploadBooks()
+  const { items, addFiles, startUpload, retry, pruneSettled, isUploading, clearQueue } = useUploadBooks()
+  const { maxBytes } = useUploadSettings()
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()
 
@@ -72,6 +78,24 @@ export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadShe
     setIncludeCurrentTag(false)
   }, [open, tagId])
 
+  // The auto drag-toggle can close the sheet without clearQueue, so finished
+  // rows must be pruned on (re)open instead of lingering as stale "done" items.
+  useEffect(() => {
+    if (open) pruneSettled()
+  }, [open, pruneSettled])
+
+  // The whole sheet accepts file drops: the global drag listener opens it
+  // wherever the pointer is, so a release outside the small dropzone must not
+  // silently swallow the files. Only the backdrop carries the handlers;
+  // drops on the panel/dropzone bubble into this one path.
+  function acceptDrop(e: ReactDragEvent) {
+    if (!hasFiles(e)) return
+    e.preventDefault()
+    setDragOver(false)
+    setError(null)
+    if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files, { autoStart: true, maxBytes, ...assignment })
+  }
+
   const hasPending = items.some((it) => it.status === 'pending')
   const settled = items.length > 0 && !isUploading && !hasPending
 
@@ -81,8 +105,10 @@ export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadShe
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
       onClick={handleClose}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => e.preventDefault()}
+      onDragOver={(e) => {
+        if (hasFiles(e)) e.preventDefault()
+      }}
+      onDrop={acceptDrop}
     >
       <div
         className="max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-2xl border border-stone-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
@@ -95,21 +121,20 @@ export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadShe
         <div
           onClick={() => inputRef.current?.click()}
           onDragOver={(e) => {
+            if (!hasFiles(e)) return
             e.preventDefault()
             setDragOver(true)
           }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault()
+          onDragLeave={(e) => {
+            // dragleave bubbles from child nodes; only clear when the pointer
+            // actually left the dropzone, otherwise the highlight flickers
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
             setDragOver(false)
-            setError(null)
-            // Dropped files upload immediately on mouse release
-            if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files, { autoStart: true, ...assignment })
           }}
           className={
-            'flex h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed text-center transition-colors ' +
+            'flex h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed text-center transition-colors duration-150 ' +
             (dragOver
-              ? 'border-stone-900 bg-stone-50 dark:border-stone-300 dark:bg-stone-900/50'
+              ? 'border-stone-400 bg-stone-100/70 dark:border-stone-500 dark:bg-stone-800/40'
               : 'border-stone-300 dark:border-stone-700')
           }
         >
@@ -118,6 +143,9 @@ export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadShe
           </svg>
           <div className="space-y-2 text-center">
             <p className="text-sm text-stone-500">{_('library.uploadHint')}</p>
+            {maxBytes ? (
+              <p className="text-xs text-stone-400">{_('library.uploadMaxSize', { size: formatBytes(maxBytes) })}</p>
+            ) : null}
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
         </div>
@@ -143,6 +171,7 @@ export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadShe
           <ul className="mt-4 max-h-52 space-y-2 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
             {items.map((item) => {
               const key = statusLabel(item)
+              const note = item.messageKey ? _(item.messageKey) : null
               return (
                 <li key={item.id} className="flex items-center gap-3 text-sm">
                   <span className="w-2 shrink-0 text-center">
@@ -155,11 +184,30 @@ export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadShe
                     ) : null}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-stone-700 dark:text-stone-300">{item.name}</span>
-                  {key && (
-                    <span className="shrink-0 text-xs text-stone-400">{_(`library.${key}`)}</span>
-                  )}
-                  {item.status === 'error' && (
-                    <span className="shrink-0 text-xs text-red-600">{item.message}</span>
+                  {item.status === 'error' ? (
+                    <>
+                      {note && <span className="shrink-0 text-xs text-red-600 dark:text-red-400">{note}</span>}
+                      <button
+                        type="button"
+                        onClick={() => retry(item.id)}
+                        className="shrink-0 text-xs font-medium text-stone-600 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100"
+                      >
+                        {_('library.uploadRetry')}
+                      </button>
+                    </>
+                  ) : (
+                    key && (
+                      <span
+                        className={
+                          'shrink-0 text-xs ' +
+                          (item.status === 'duplicate' && note
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-stone-400')
+                        }
+                      >
+                        {note ?? _(`library.${key}`)}
+                      </span>
+                    )
                   )}
                   {(item.status === 'uploading' || item.status === 'processing') && (
                     <span className="w-24 shrink-0">
@@ -187,7 +235,7 @@ export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadShe
             </>
           ) : (
             <>
-              <Button variant="ghost" onClick={handleClose} disabled={isUploading}>
+              <Button variant="ghost" onClick={handleClose}>
                 {_('library.cancel')}
               </Button>
               {hasPending ? (
@@ -208,7 +256,7 @@ export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadShe
           onChange={(e) => {
             setError(null)
             // Picker-selected files wait for an explicit upload click
-            if (e.target.files?.length) addFiles(e.target.files, assignment)
+            if (e.target.files?.length) addFiles(e.target.files, { maxBytes, ...assignment })
             e.target.value = ''
           }}
         />

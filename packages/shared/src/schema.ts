@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, PAGINATION } from './constants'
+import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
@@ -168,8 +168,10 @@ export const settingsUpdateSchema = z.object({
   // Named reading-setting profiles; JSON serialized by the web client, server passes it through.
   readingConfig: z.string().optional(),
   customThemes: z.string().optional(),
+  // Partial updates are allowed; the server merges onto the stored settings.
   trash: z.object({
-    autoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]),
+    autoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]).optional(),
+    enabled: z.boolean().optional(),
   }).optional(),
 })
 
@@ -680,4 +682,6 @@ export const bookUpdateSchema = z.object({
   boundPresetId: z.string().nullable().optional(),
   // null removes the pinned TOC rule and restores automatic selection
   tocRuleId: z.string().nullable().optional(),
+  // null clears the pinned placeholder-cover palette (falls back to the id hash)
+  coverPaletteId: z.enum(COVER_PALETTE_IDS).nullable().optional(),
 })

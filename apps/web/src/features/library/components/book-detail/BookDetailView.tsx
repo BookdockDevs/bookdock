@@ -134,6 +134,9 @@ export default function BookDetailView({
   }
   metaRows.push({ label: _('library.format'), value: displayBook.format.toUpperCase() })
   metaRows.push({ label: _('library.sortBy.size'), value: formatBytes(displayBook.size) })
+  if (detail?.meta?.fileName) {
+    metaRows.push({ label: _('library.originalFile'), value: detail.meta.fileName, copyable: true })
+  }
   metaRows.push({ label: _('library.addedAt'), value: formatDate(displayBook.createdAt) })
   if (rawIdentifier && (isIsbn || !isMachineIdentifier(rawIdentifier))) {
     metaRows.push({ label: isIsbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true })
@@ -153,7 +156,7 @@ export default function BookDetailView({
     <div>
       <div className="flex flex-col gap-4 sm:flex-row sm:gap-5">
         <div className="w-32 shrink-0 self-center rounded-lg shadow-md shadow-stone-900/10 sm:self-start">
-          <BookCover book={displayBook} />
+          <BookCover book={displayBook} coverPaletteId={detail?.meta?.coverPaletteId} />
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="font-serif text-xl font-semibold leading-snug text-stone-900 dark:text-stone-100">
@@ -340,7 +343,7 @@ export default function BookDetailView({
                       type="button"
                       title={row.value}
                       onClick={() => void copyText(row.value)}
-                      className="break-all font-mono text-sm text-stone-700 transition-colors hover:text-stone-900 dark:text-stone-200 dark:hover:text-stone-100"
+                      className="line-clamp-2 break-all font-mono text-sm text-stone-700 transition-colors hover:text-stone-900 dark:text-stone-200 dark:hover:text-stone-100"
                     >
                       {middleTruncate(row.value)}
                     </button>
@@ -351,13 +354,13 @@ export default function BookDetailView({
                       type="button"
                       title={row.value}
                       onClick={row.onClick}
-                      className="break-words text-left text-sm text-stone-700 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-200 dark:decoration-stone-600 dark:hover:text-stone-100"
+                      className="line-clamp-2 break-words text-left text-sm text-stone-700 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-200 dark:decoration-stone-600 dark:hover:text-stone-100"
                     >
                       {row.value}
                     </button>
                   </dd>
                 ) : (
-                  <dd className="mt-0.5 break-words text-sm text-stone-700 dark:text-stone-200">{row.value}</dd>
+                  <dd className="mt-0.5 line-clamp-2 break-words text-sm text-stone-700 dark:text-stone-200">{row.value}</dd>
                 )}
               </div>
             ))}

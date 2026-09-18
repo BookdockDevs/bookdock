@@ -16,6 +16,7 @@ import {
   convertTocLabels,
 } from '../features/reader/renderers/FoliateReader'
 import type { ReaderAnnotation } from '../features/reader/types'
+import type { TextReplacementRule } from '../features/reader/lib/text-replacements'
 
 function ann(cfiRange: string, type: ReaderAnnotation['type'] = 'highlight'): ReaderAnnotation {
   return { cfiRange, type, color: 'yellow', style: 'underline', note: null }
@@ -741,5 +742,34 @@ describe('convertTocLabels', () => {
     const traditional = await convertTocLabels(source, 'traditional')
     expect(traditional[0]?.label).toBe('第一章 內容')
     expect(traditional[0]?.subitems?.[0]?.label).toBe('閱讀設定')
+  })
+
+  it('applies only active title rules, mirroring the content engine gate', async () => {
+    const source = [{ label: '第一章 你是南慕容?', href: 'chapter-1.xhtml' }]
+    const rule = (overrides: Partial<TextReplacementRule> = {}): TextReplacementRule => ({
+      id: 'r1',
+      matchType: 'pattern',
+      pattern: '南慕容',
+      replacement: '慕容',
+      isRegex: false,
+      applyTo: 'title',
+      enabled: true,
+      spineHref: null,
+      textOffset: null,
+      originalText: null,
+      ...overrides,
+    })
+
+    const on = await convertTocLabels(source, 'off', [rule()])
+    expect(on[0]?.label).toBe('第一章 你是慕容?')
+
+    const disabled = await convertTocLabels(source, 'off', [rule({ enabled: false })])
+    expect(disabled[0]?.label).toBe('第一章 你是南慕容?')
+
+    const overridden = await convertTocLabels(source, 'off', [rule({ effectiveEnabled: false })])
+    expect(overridden[0]?.label).toBe('第一章 你是南慕容?')
+
+    const contentScoped = await convertTocLabels(source, 'off', [rule({ applyTo: 'content' })])
+    expect(contentScoped[0]?.label).toBe('第一章 你是南慕容?')
   })
 })

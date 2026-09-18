@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type HTMLAttributes, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
@@ -62,8 +63,11 @@ export default function Modal({
     const handleKeyDown = (e: KeyboardEvent) => {
       const alertDialog = document.querySelector<HTMLElement>('[role="alertdialog"][aria-modal="true"]')
       if (alertDialog && !dialogRef.current?.contains(alertDialog)) return
+      // A smart menu is only in the DOM while open; since it portals to body it
+      // is no longer a DOM child of this dialog, so let any open menu consume
+      // Escape first instead of closing the modal underneath it.
       const smartMenu = document.querySelector<HTMLElement>('[data-smart-menu="true"]')
-      if (smartMenu && dialogRef.current?.contains(smartMenu)) return
+      if (smartMenu) return
 
       if (e.key === 'Escape') {
         e.preventDefault()
@@ -109,7 +113,9 @@ export default function Modal({
     }
   }, [])
 
-  return (
+  // Portaled to body so the fixed overlay escapes any ancestor stacking
+  // context (e.g. the sticky sidebar's menus/dialogs).
+  return createPortal(
     <div
       {...containerProps}
       className={`fixed inset-0 z-50 flex items-end justify-center overscroll-none bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4 animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
@@ -145,6 +151,7 @@ export default function Modal({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:px-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

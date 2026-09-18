@@ -289,6 +289,54 @@ describe('BookDetailDialog cover draft', () => {
   })
 })
 
+describe('BookDetailDialog cover palette', () => {
+  it('pins a palette color from the popover and sends it on save', async () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '封面配色' }))
+    const swatch = screen.getByRole('button', { name: 'Sage Green' })
+    expect(swatch).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(swatch)
+
+    expect(screen.getByRole('button', { name: 'Sage Green' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(apiPatch).toHaveBeenCalled())
+    const body = apiPatch.mock.calls[0][1] as { coverPaletteId?: string | null }
+    expect(body.coverPaletteId).toBe('sage')
+  })
+
+  it('pre-selects the swatch pinned in detail meta', () => {
+    bookDetail = { data: { ...book, meta: { coverPaletteId: 'amber' } } }
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '封面配色' }))
+
+    expect(screen.getByRole('button', { name: 'Warm Amber' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('sends a null palette when nothing was picked', async () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(apiPatch).toHaveBeenCalled())
+    const body = apiPatch.mock.calls[0][1] as { coverPaletteId?: string | null }
+    expect(body.coverPaletteId).toBeNull()
+  })
+
+  it('hides the palette button while a real cover is shown', () => {
+    render(<BookDetailDialog book={{ ...book, coverKey: 'covers/book-1.jpg' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    expect(screen.getByRole('button', { name: '移除封面' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '封面配色' })).toBeNull()
+  })
+})
+
 describe('BookDetailDialog identity chips', () => {
   it('navigates to the exact author filter from the author link', () => {
     const onClose = vi.fn()
@@ -385,10 +433,25 @@ describe('BookDetailDialog metadata rows', () => {
     expect(screen.queryByText('标识符')).toBeNull()
     expect(screen.queryByText('系列')).toBeNull()
     expect(screen.queryByText('更新日期')).toBeNull()
+    expect(screen.queryByText('原始文件')).toBeNull()
 
     expect(screen.getByText('添加时间')).toBeInTheDocument()
     expect(screen.getByText('格式')).toBeInTheDocument()
     expect(screen.getByText('大小')).toBeInTheDocument()
+  })
+
+  it('shows the original file name as a copyable row', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    bookDetail = { data: { ...book, meta: { fileName: 'my-old-book.txt' } } }
+    renderDialog()
+
+    expect(screen.getByText('原始文件')).toBeInTheDocument()
+    const button = screen.getByTitle('my-old-book.txt')
+    expect(button).toBeInTheDocument()
+
+    fireEvent.click(button)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('my-old-book.txt'))
   })
 
   it('renders lastRead in reading progress area when lastReadAt is present', () => {

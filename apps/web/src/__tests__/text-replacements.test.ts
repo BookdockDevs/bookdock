@@ -311,3 +311,42 @@ describe('countPatternMatches', () => {
     expect(countPatternMatches(doc('<p>foo</p>'), [])).toEqual({})
   })
 })
+
+// EPUB chapters are parsed as application/xhtml+xml (strict XML), where tagName
+// keeps its lowercase source form — title/script detection must not depend on
+// HTML parsing's tag uppercasing.
+describe('xhtml (case-sensitive) parsing', () => {
+  const XHTML = 'application/xhtml+xml' as DOMParserSupportedType
+  const chapter =
+    '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章 你是南慕容?</h1>'
+    + '<style>.foo{}</style><script>var foo</script><p>南慕容 与 慕容复</p></body></html>'
+
+  it('applies title rules to lowercase headings and leaves body text to content rules', () => {
+    const out = applyReplacements(chapter, [rule({ pattern: '南慕容', replacement: '南宫', applyTo: 'title' })], XHTML)
+    expect(out).toContain('<h1>第一章 你是南宫?</h1>')
+    expect(out).toContain('<p>南慕容 与 慕容复</p>')
+  })
+
+  it('counts title-scoped and content-scoped matches in their own regions', () => {
+    const counts = countPatternMatches(chapter, [
+      rule({ id: 't', pattern: '南慕容', applyTo: 'title' }),
+      rule({ id: 'c', pattern: '南慕容', applyTo: 'content' }),
+    ], XHTML)
+    expect(counts).toEqual({ t: 1, c: 1 })
+  })
+
+  it('never counts inside script/style subtrees', () => {
+    const counts = countPatternMatches(chapter, [rule({ id: 'r', pattern: 'foo' })], XHTML)
+    expect(counts).toEqual({ r: 0 })
+  })
+
+  it('ignores the invisible head <title> that repeats the heading', () => {
+    const full = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章 你是南慕容?</title></head>'
+      + '<body><h1>第一章 你是南慕容?</h1><p>正文</p></body></html>'
+    const counts = countPatternMatches(full, [rule({ id: 't', pattern: '南慕容', applyTo: 'title' })], XHTML)
+    expect(counts).toEqual({ t: 1 })
+    const out = applyReplacements(full, [rule({ pattern: '南慕容', replacement: '南宫', applyTo: 'title' })], XHTML)
+    expect(out).toContain('<h1>第一章 你是南宫?</h1>')
+    expect(out).toContain('<title>第一章 你是南慕容?</title>')
+  })
+})

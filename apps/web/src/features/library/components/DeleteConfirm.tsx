@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 import { Button } from '@/components/ui/Button'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -26,7 +27,13 @@ export default function DeleteConfirm({ open, bookTitle, title, message, confirm
 
   if (!open) return null
 
-  return (
+  // Chinese TXT uploads often take their title straight from the filename and
+  // already carry 《》; wrapping those in 「」 too reads as 「《x》」.
+  const bareTitle = (bookTitle ?? '').startsWith('《')
+
+  // Portaled to body so the fixed overlay escapes the sticky sidebar's
+  // stacking context (same reason as Modal/SmartMenu).
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onCancel}
@@ -39,7 +46,7 @@ export default function DeleteConfirm({ open, bookTitle, title, message, confirm
           {title ?? _('library.deleteBook')}
         </h2>
         <p className="mb-6 text-sm text-stone-500">
-          {message ?? _('library.deleteConfirm', { title: bookTitle ?? '' })}
+          {message ?? _(bareTitle ? 'library.deleteConfirmBare' : 'library.deleteConfirm', { title: bookTitle ?? '' })}
         </p>
         <div className="flex justify-end gap-3">
           <Button variant="ghost" onClick={onCancel}>
@@ -50,6 +57,7 @@ export default function DeleteConfirm({ open, bookTitle, title, message, confirm
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

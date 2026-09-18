@@ -3,12 +3,15 @@ import { memo } from 'react'
 import type { BookListItem } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { cn } from '@/lib/utils'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 
 import BookCover from './BookCover'
 import { useContextMenu } from './use-context-menu'
 import { ContextMenuContent } from './BookContextMenu'
+import TrashInfo from './TrashInfo'
+import UnpinButton, { PinIcon } from './UnpinButton'
 
 interface BookCardProps {
   book: BookListItem
@@ -61,16 +64,18 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
       className={`group relative flex min-w-0 select-none flex-col gap-1.5 ${selectable ? 'cursor-pointer' : ''}`}
     >
       <div className="relative rounded-xl transition-all duration-300 ease-out group-hover:-translate-y-1.5 group-hover:shadow-xl group-hover:shadow-stone-900/15 dark:group-hover:shadow-black/50">
-        <BookCover book={book} />
+        <div className={cn('rounded-xl', trashCard && 'opacity-80 grayscale-[60%]')}>
+          <BookCover book={book} />
+        </div>
         <div className="pointer-events-none absolute inset-0 rounded-xl ring-1 ring-inset ring-stone-900/10 dark:ring-white/10" />
         {!selectionActive && book.pinnedAt && (
-          <div className="pointer-events-none absolute left-1.5 top-1.5 flex items-center gap-1">
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-black/45 backdrop-blur-sm">
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 17v5" />
-                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-              </svg>
-            </span>
+          <div className="absolute left-1.5 top-1.5 z-10 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
+            <UnpinButton
+              bookId={book.id}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
+            >
+              <PinIcon size={12} />
+            </UnpinButton>
           </div>
         )}
         {selected && (
@@ -156,6 +161,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           {book.author && (
             <p className="mt-0.5 truncate text-xs text-stone-500 dark:text-stone-400">{book.author}</p>
           )}
+          {trashCard && <TrashInfo book={book} className="mt-0.5" />}
         </div>
       )}
 

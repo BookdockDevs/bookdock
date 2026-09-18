@@ -14,6 +14,7 @@ interface ViewMenuProps {
   sortOrder: string
   format: string | null
   readStatus: string | null
+  trash?: boolean
 }
 
 const COLUMN_OPTIONS = ['auto', '2', '3', '4', '5', '6', '7', '8'] as const
@@ -25,6 +26,13 @@ const SORT_FIELDS: { field: string; defaultOrder: 'asc' | 'desc'; labelKey: stri
   { field: 'size', defaultOrder: 'desc', labelKey: 'library.sortBy.size' },
   { field: 'progress', defaultOrder: 'desc', labelKey: 'library.sortBy.progress' },
   { field: 'lastReadAt', defaultOrder: 'desc', labelKey: 'library.sortBy.lastRead' },
+]
+
+const TRASH_SORT_FIELDS: { field: string; defaultOrder: 'asc' | 'desc'; labelKey: string }[] = [
+  { field: 'deletedAt', defaultOrder: 'desc', labelKey: 'library.sortBy.deletedAt' },
+  { field: 'title', defaultOrder: 'asc', labelKey: 'library.sortBy.title' },
+  { field: 'author', defaultOrder: 'asc', labelKey: 'library.sortBy.author' },
+  { field: 'size', defaultOrder: 'desc', labelKey: 'library.sortBy.size' },
 ]
 
 const menuDivider = <div className="mx-2 my-1.5 border-t border-stone-100 dark:border-stone-800" />
@@ -57,7 +65,7 @@ const LIST_INFO_LABEL_KEYS: Record<ListInfoItem, string> = {
   createdAt: 'library.sortBy.createdAt',
 }
 
-export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, readStatus }: ViewMenuProps) {
+export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, readStatus, trash = false }: ViewMenuProps) {
   const _ = useTranslation()
   const [open, setOpen] = useState(false)
   const [isNarrow, setIsNarrow] = useState(false)
@@ -114,17 +122,21 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
   const isFilterActive = Boolean(format) || Boolean(readStatus)
 
   function handleSort(field: string, defaultOrder: 'asc' | 'desc') {
+    // Trash sorting is ephemeral: it must not overwrite the library-wide preference
     if (sortBy === field) {
-      // Toggle direction; both the URL and the persisted preference update
       const next = sortOrder === 'asc' ? 'desc' : 'asc'
-      setSortOrder(next)
+      if (!trash) setSortOrder(next)
       navSearch({ sortOrder: next })
     } else {
-      setSortBy(field)
-      setSortOrder(defaultOrder)
+      if (!trash) {
+        setSortBy(field)
+        setSortOrder(defaultOrder)
+      }
       navSearch({ sortBy: field, sortOrder: defaultOrder })
     }
   }
+
+  const sortFields = trash ? TRASH_SORT_FIELDS : SORT_FIELDS
 
   const viewOptions: { value: 'grid' | 'list'; label: string; icon: ReactNode }[] = [
     {
@@ -205,32 +217,38 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
             ))}
           </div>
 
-          <div className="px-2.5 pb-1 pt-1 text-[11px] text-stone-400 dark:text-stone-500">{_('library.showRecentShelf')}</div>
-          <div className="mx-1 flex gap-1 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
-            {RECENTLY_READ_STYLES.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                aria-pressed={recentlyReadStyle === opt.value}
-                onClick={() => setRecentlyReadStyle(opt.value)}
-                className={cn(
-                  'h-7 flex-1 rounded-md text-xs transition-colors',
-                  recentlyReadStyle === opt.value
-                    ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                    : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
-                )}
-              >
-                {_(opt.labelKey)}
-              </button>
-            ))}
-          </div>
+          {!trash && (
+            <>
+              <div className="px-2.5 pb-1 pt-1 text-[11px] text-stone-400 dark:text-stone-500">{_('library.showRecentShelf')}</div>
+              <div className="mx-1 flex gap-1 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
+                {RECENTLY_READ_STYLES.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    aria-pressed={recentlyReadStyle === opt.value}
+                    onClick={() => setRecentlyReadStyle(opt.value)}
+                    className={cn(
+                      'h-7 flex-1 rounded-md text-xs transition-colors',
+                      recentlyReadStyle === opt.value
+                        ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                        : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
+                    )}
+                  >
+                    {_(opt.labelKey)}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           {view === 'grid' && (
             <>
-              <ToggleRow
-                label={_('library.coverText')}
-                checked={coverText}
-                onChange={() => setCoverText(!coverText)}
-              />
+              {!trash && (
+                <ToggleRow
+                  label={_('library.coverText')}
+                  checked={coverText}
+                  onChange={() => setCoverText(!coverText)}
+                />
+              )}
               <div className="px-2.5 pb-1 pt-1 text-[11px] text-stone-400 dark:text-stone-500">{_('library.coverFit')}</div>
               <div className="mx-1 mb-0.5 flex gap-1 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
                 {COVER_FITS.map((opt) => (
@@ -267,7 +285,7 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
             </>
           )}
 
-          {view === 'list' && (
+          {view === 'list' && !trash && (
             <>
               <div className="px-2.5 pb-1 pt-1 text-[11px] text-stone-400 dark:text-stone-500">{_('library.listInfo')}</div>
               <div className="mx-1 mb-0.5 grid grid-cols-3 gap-1 rounded-lg bg-stone-100 p-1 dark:bg-stone-800">
@@ -302,7 +320,7 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
 
           <SectionLabel>{_('library.sort')}</SectionLabel>
           <div className="mx-1 mb-0.5 grid grid-cols-3 gap-1 rounded-lg bg-stone-100 p-1 dark:bg-stone-800">
-            {SORT_FIELDS.map((opt) => {
+            {sortFields.map((opt) => {
               const active = sortBy === opt.field
               return (
                 <button
@@ -328,43 +346,47 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
             })}
           </div>
 
-          {menuDivider}
+          {!trash && (
+            <>
+              {menuDivider}
 
-          <SectionLabel>{_('library.filter')}</SectionLabel>
-          <div className="mx-1 mb-1.5 flex gap-1 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
-            {(['', 'epub', 'txt'] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                onClick={() => navSearch({ format: f === '' ? undefined : f as BookFormat })}
-                className={cn(
-                  'h-7 flex-1 rounded-md text-xs transition-colors',
-                  (format ?? '') === f
-                    ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                    : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
-                )}
-              >
-                {f === '' ? _('library.formatAll') : f === 'epub' ? 'EPUB' : 'TXT'}
-              </button>
-            ))}
-          </div>
-          <div className="mx-1 mb-0.5 grid grid-cols-3 gap-1 rounded-lg bg-stone-100 p-1 dark:bg-stone-800">
-            {(['', 'wishlist', 'reading', 'finished', 'idle', 'abandoned'] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => navSearch({ status: s === '' ? undefined : s as ReadStatus })}
-                className={cn(
-                  'h-7 whitespace-nowrap rounded-md text-xs transition-colors',
-                  (readStatus ?? '') === s
-                    ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                    : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
-                )}
-              >
-                {s === '' ? _('library.readStatusAll') : _(STATUS_FILTER_KEYS[s])}
-              </button>
-            ))}
-          </div>
+              <SectionLabel>{_('library.filter')}</SectionLabel>
+              <div className="mx-1 mb-1.5 flex gap-1 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
+                {(['', 'epub', 'txt'] as const).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => navSearch({ format: f === '' ? undefined : f as BookFormat })}
+                    className={cn(
+                      'h-7 flex-1 rounded-md text-xs transition-colors',
+                      (format ?? '') === f
+                        ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                        : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
+                    )}
+                  >
+                    {f === '' ? _('library.formatAll') : f === 'epub' ? 'EPUB' : 'TXT'}
+                  </button>
+                ))}
+              </div>
+              <div className="mx-1 mb-0.5 grid grid-cols-3 gap-1 rounded-lg bg-stone-100 p-1 dark:bg-stone-800">
+                {(['', 'wishlist', 'reading', 'finished', 'idle', 'abandoned'] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => navSearch({ status: s === '' ? undefined : s as ReadStatus })}
+                    className={cn(
+                      'h-7 whitespace-nowrap rounded-md text-xs transition-colors',
+                      (readStatus ?? '') === s
+                        ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                        : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
+                    )}
+                  >
+                    {s === '' ? _('library.readStatusAll') : _(STATUS_FILTER_KEYS[s])}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
