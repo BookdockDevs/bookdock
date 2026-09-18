@@ -12,10 +12,11 @@ describe('foliate paginator renderer contract', () => {
   let continuousScrollTrimBefore: typeof import('../../public/foliate-js/paginator.js').continuousScrollTrimBefore
   let snapWheelStep: typeof import('../../public/foliate-js/paginator.js').snapWheelStep
   let resolvePaginatedColumnCount: typeof import('../../public/foliate-js/paginator.js').resolvePaginatedColumnCount
+  let getVisibleRange: typeof import('../../public/foliate-js/paginator.js').getVisibleRange
 
   beforeAll(async () => {
     vi.stubGlobal('ResizeObserver', ResizeObserverStub)
-    ;({ Paginator, getDocumentBackground, continuousScrollTrimBefore, snapWheelStep, resolvePaginatedColumnCount } = await import('../../public/foliate-js/paginator.js'))
+    ;({ Paginator, getDocumentBackground, continuousScrollTrimBefore, snapWheelStep, resolvePaginatedColumnCount, getVisibleRange } = await import('../../public/foliate-js/paginator.js'))
   })
 
   it('supports preload and continuous-scroll controls', () => {
@@ -116,5 +117,40 @@ describe('foliate paginator renderer contract', () => {
 
     await expect(renderer.next()).rejects.toThrow()
     await expect(renderer.next()).rejects.toThrow()
+  })
+
+  it('detects visible range on tall images that exceed the viewport height', () => {
+    const doc = new DOMParser().parseFromString(
+      `<html><body><div id="wrapper"><img id="tall-image" src="illustration.jpg" /></div><p id="after-text">Some text after the image</p></body></html>`,
+      'text/html',
+    )
+
+    const wrapper = doc.getElementById('wrapper')!
+    const img = doc.getElementById('tall-image')!
+    const p = doc.getElementById('after-text')!
+
+    // Mock bounding rects:
+    // Viewport is [start: 0, end: 800]
+    // Wrapper and tall image span [top: 0, bottom: 1600]
+    // Text paragraph is below at [top: 1620, bottom: 1700]
+    wrapper.getBoundingClientRect = () => ({
+      left: 0, right: 600, top: 0, bottom: 1600, width: 600, height: 1600, x: 0, y: 0, toJSON: () => {},
+    } as DOMRect)
+    img.getBoundingClientRect = () => ({
+      left: 0, right: 600, top: 0, bottom: 1600, width: 600, height: 1600, x: 0, y: 0, toJSON: () => {},
+    } as DOMRect)
+    p.getBoundingClientRect = () => ({
+      left: 0, right: 600, top: 1620, bottom: 1700, width: 600, height: 80, x: 0, y: 1620, toJSON: () => {},
+    } as DOMRect)
+
+    // mapRect for vertical scrolling maps rect.top/bottom to left/right
+    const mapRect = (rect: DOMRect) => ({ left: rect.top, right: rect.bottom })
+
+    const range = getVisibleRange(doc, 0, 800, mapRect)
+    expect(range).not.toBeNull()
+    expect(range?.collapsed).toBe(false)
+    expect(range?.startContainer).toBe(doc.getElementById('wrapper'))
+    expect(range?.startOffset).toBe(0)
+    expect(range?.endOffset).toBe(1)
   })
 })

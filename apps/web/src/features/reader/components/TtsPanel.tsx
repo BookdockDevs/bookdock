@@ -301,6 +301,7 @@ export default function TtsPanel() {
           label={_('reader.ttsEngine')}
           value={selectedEngine}
           onChange={changeEngine}
+          disabled={!controller}
           options={[
             { value: 'system', label: _('reader.ttsSystem') },
             { value: 'edge', label: 'Edge TTS' },
@@ -312,6 +313,7 @@ export default function TtsPanel() {
           label={_('reader.ttsVoice')}
           value={ttsVoiceId}
           onChange={setTtsVoiceId}
+          disabled={!controller}
           options={[
             { value: '', label: _('reader.ttsVoiceDefault') },
             ...state.voices.map((voice) => ({ value: voice.id, label: `${voice.name}${voice.lang ? ` (${voice.lang})` : ''}` })),

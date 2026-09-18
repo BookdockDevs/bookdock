@@ -34,6 +34,7 @@ import { ReaderHeader } from './components/ReaderHeader'
 import { ReaderSidebar } from './components/ReaderSidebar'
 import { Ribbon } from './components/Ribbon'
 import { SelectionToolbar } from './components/SelectionToolbar'
+import { ImageContextMenu } from './components/ImageContextMenu'
 import ShareCardDialog from './components/share/ShareCardDialog'
 import { ProgressStrip } from './components/ProgressStrip'
 import HistoryCapsule from './components/HistoryCapsule'
@@ -46,9 +47,10 @@ import { ViewSettingsContext } from './view-settings-context'
 import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './lib/view-settings'
 import { readingRateOf, RATE_SAMPLE_MIN_INTERVAL_MS } from './lib/progress-model'
 import type { PerBookSettingKey, GlobalViewSettings } from './lib/view-settings'
-import type { FootnoteEntry, ReaderAnnotation } from './types'
+import type { FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, ReaderAnnotation } from './types'
 import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
 import { FootnotePopup } from './components/FootnotePopup'
+import { ImageViewer } from './components/ImageViewer'
 import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 
 export default function Reader() {
@@ -69,6 +71,9 @@ export default function Reader() {
   const [ttsOpen, setTtsOpen] = useState(false)
   const [autoReadingOpen, setAutoReadingOpen] = useState(false)
   const [footnoteEntry, setFootnoteEntry] = useState<FootnoteEntry | null>(null)
+  const [imageViewer, setImageViewer] = useState<ImageMediaInfo | null>(null)
+  const [imageContextMenu, setImageContextMenu] = useState<ImageMediaContextInfo | null>(null)
+  const mediaErrorCooldownRef = useRef(false)
   // Chapter-switch loading indicator (slow cross-chapter navigation)
   const [navPending, setNavPending] = useState(false)
   // Middle click-area tap reveals the top/bottom bars (mobile: no hover);
@@ -526,6 +531,8 @@ export default function Reader() {
   // A stale replace dialog must not follow the reader into another book
   useEffect(() => {
     setReplaceTarget(null)
+    setImageViewer(null)
+    setImageContextMenu(null)
     deepLinkHandled.current = false
   }, [id, setReplaceTarget])
 
@@ -551,6 +558,23 @@ export default function Reader() {
       setFootnoteEntry(entry)
     },
     onFootnoteClose: () => setFootnoteEntry(null),
+    onImageClicked: (image) => {
+      setImageContextMenu(null)
+      setImageViewer(image)
+    },
+    onImageContextMenu: (image) => {
+      setImageViewer(null)
+      setImageContextMenu(image)
+    },
+    onMediaError: () => {
+      if (mediaErrorCooldownRef.current) return
+      mediaErrorCooldownRef.current = true
+      setTimeout(() => { mediaErrorCooldownRef.current = false }, 3000)
+      notify.error({ key: 'reader.mediaLoadFailed' })
+    },
+    onMediaPlay: () => {
+      void playbackCoordinator.claim('media')
+    },
     onRelocated: (e) => {
       if (e.source !== 'tts' && !keepChromePinnedRef.current) setChromePinned(false)
       setSelection(null)
@@ -996,6 +1020,7 @@ export default function Reader() {
         }
         return
       }
+      if (e.defaultPrevented && e.key !== 'Escape') return
       if (e.key === 'Escape') {
         // Boss key: popups mark the consumed flag synchronously in their own
         // Esc branches; listeners run in registration order (ours first), so
@@ -1286,6 +1311,7 @@ export default function Reader() {
               )}
               <ReaderFooterControls
                 bookId={id}
+                coordinator={playbackCoordinator}
                 footerVisible={footerVisible}
                 isTouch={isTouch}
                 mobileDockVisible={mobileDockVisible}
@@ -1313,6 +1339,24 @@ export default function Reader() {
               onDone={() => setReplaceTarget(null)}
             />
           </Modal>
+        )}
+        {imageViewer && (
+          <ImageViewer
+            image={imageViewer}
+            bookTitle={bookQuery.data?.data?.title}
+            onClose={() => setImageViewer(null)}
+          />
+        )}
+        {imageContextMenu && (
+          <ImageContextMenu
+            image={imageContextMenu}
+            bookTitle={bookQuery.data?.data?.title}
+            onClose={() => setImageContextMenu(null)}
+            onView={(info) => {
+              setImageContextMenu(null)
+              setImageViewer(info)
+            }}
+          />
         )}
       </div>
       </TtsSessionProvider>

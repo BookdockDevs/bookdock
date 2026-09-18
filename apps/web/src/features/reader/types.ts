@@ -1,6 +1,7 @@
 import type { AiIndexChapter } from '@bookdock/shared'
 
 import type { TextReplacementRule } from './lib/text-replacements'
+import type { MediaOverlayCue } from './lib/media-overlay'
 
 export interface ReaderLocation {
   cfi: string
@@ -40,6 +41,31 @@ export interface FootnoteEntry {
   view: HTMLElement
   anchorRect?: PopupRect
   canGoBack: boolean
+}
+
+export interface ImageMediaInfo {
+  sectionIndex: number
+  cfi: string
+  src: string
+  alt: string
+  title: string
+  kind: 'image' | 'svg-image'
+}
+
+export interface ImageMediaContextInfo extends ImageMediaInfo {
+  x: number
+  y: number
+}
+
+export interface MediaErrorInfo {
+  sectionIndex: number
+  kind: 'audio' | 'video' | 'object' | 'embed'
+  src: string
+}
+
+export interface MediaPlayInfo {
+  sectionIndex: number
+  kind: 'audio' | 'video'
 }
 
 export interface SelectionInfo {
@@ -82,6 +108,11 @@ export interface TtsSegment {
   text: string
   cfi: string
   chapterIndex: number
+  mediaOverlay?: {
+    sectionIndex: number
+    cueIndex: number
+    cue: MediaOverlayCue
+  }
 }
 
 export interface RendererEvents {
@@ -90,6 +121,10 @@ export interface RendererEvents {
   /** A non-collapsed text selection has started in the reading content. */
   textSelectionStart: () => void
   annotationClicked: (e: { cfiRange: string; rect?: PopupRect }) => void
+  imageClicked: (e: ImageMediaInfo) => void
+  imageContextMenu: (e: ImageMediaContextInfo) => void
+  mediaError: (e: MediaErrorInfo) => void
+  mediaPlay: (e: MediaPlayInfo) => void
   instantAnnotation: (e: SelectionInfo) => void
   rendered: () => void
   tocReady: (items: { label: string; href: string; level?: number }[]) => void
@@ -220,6 +255,17 @@ export interface BookReader {
   /** Clear the DOM selection without emitting events — keeps React toolbar state */
   deselect(): void
   getTtsSegment(startCfi?: string): Promise<TtsSegment | null>
+  getMediaOverlayCues(sectionIndex?: number): Promise<MediaOverlayCue[]>
+  hasMediaOverlay(): boolean
+  getMediaOverlayCueRange(sectionIndex: number, cueIndex: number): Promise<Range | null>
+  getMediaOverlaySegment(startCfi?: string): Promise<TtsSegment | null>
+  nextMediaOverlaySegment(segment: TtsSegment): Promise<TtsSegment | null>
+  previousMediaOverlaySegment(segment: TtsSegment): Promise<TtsSegment | null>
+  getMediaOverlayAudio(segment: TtsSegment): Promise<Blob | null>
+  getMediaOverlayAudioByHref(audioHref: string): Promise<Blob | null>
+  pauseInlineMedia(): void
+  setMediaOverlayHighlight(range: Range | null): void
+  clearMediaOverlayHighlight(): void
   getTtsChapterStartSegment(): Promise<TtsSegment | null>
   /** Return following segments without moving the foliate TTS cursor or viewport. */
   peekTtsSegments(count?: number): Promise<TtsSegment[]>

@@ -2,6 +2,8 @@ import { cn } from '@/lib/utils'
 
 import TimerPill from './TimerPill'
 import TtsPill from './TtsPill'
+import MediaOverlayPill from './MediaOverlayPill'
+import type { ReaderPlaybackCoordinator } from '../lib/playback-coordinator'
 
 interface ReaderFooterControlsProps {
   bookId: string
@@ -11,6 +13,7 @@ interface ReaderFooterControlsProps {
   onPointerEnter: () => void
   onPointerLeave: () => void
   readingTimerMode: string
+  coordinator?: ReaderPlaybackCoordinator
 }
 
 export default function ReaderFooterControls({
@@ -21,6 +24,7 @@ export default function ReaderFooterControls({
   onPointerEnter,
   onPointerLeave,
   readingTimerMode,
+  coordinator,
 }: ReaderFooterControlsProps) {
   return (
     <div
@@ -38,6 +42,7 @@ export default function ReaderFooterControls({
     >
       {readingTimerMode === 'manual' && <TimerPill bookId={bookId} inline />}
       <TtsPill inline />
+      {coordinator && <MediaOverlayPill coordinator={coordinator} inline />}
     </div>
   )
 }

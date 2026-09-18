@@ -22,6 +22,10 @@ interface UseReaderRendererOptions {
   onRelocated?: (e: Parameters<RendererEvents['relocated']>[0]) => void
   onSelected?: (e: Parameters<RendererEvents['selected']>[0]) => void
   onAnnotationClicked?: (e: Parameters<RendererEvents['annotationClicked']>[0]) => void
+  onImageClicked?: (e: Parameters<RendererEvents['imageClicked']>[0]) => void
+  onImageContextMenu?: (e: Parameters<RendererEvents['imageContextMenu']>[0]) => void
+  onMediaError?: (e: Parameters<RendererEvents['mediaError']>[0]) => void
+  onMediaPlay?: (e: Parameters<RendererEvents['mediaPlay']>[0]) => void
   onInstantAnnotation?: (e: Parameters<RendererEvents['instantAnnotation']>[0]) => void
   onRendered?: () => void
   onError?: (err: Error) => void
@@ -46,6 +50,10 @@ export function useReaderRenderer({
   onRelocated,
   onSelected,
   onAnnotationClicked,
+  onImageClicked,
+  onImageContextMenu,
+  onMediaError,
+  onMediaPlay,
   onInstantAnnotation,
   onRendered,
   onError,
@@ -119,6 +127,10 @@ export function useReaderRenderer({
   const onRelocatedRef = useRef(onRelocated)
   const onSelectedRef = useRef(onSelected)
   const onAnnotationClickedRef = useRef(onAnnotationClicked)
+  const onImageClickedRef = useRef(onImageClicked)
+  const onImageContextMenuRef = useRef(onImageContextMenu)
+  const onMediaErrorRef = useRef(onMediaError)
+  const onMediaPlayRef = useRef(onMediaPlay)
   const onInstantAnnotationRef = useRef(onInstantAnnotation)
   const onRenderedRef = useRef(onRendered)
   const onErrorRef = useRef(onError)
@@ -154,6 +166,10 @@ export function useReaderRenderer({
   onRelocatedRef.current = onRelocated
   onSelectedRef.current = onSelected
   onAnnotationClickedRef.current = onAnnotationClicked
+  onImageClickedRef.current = onImageClicked
+  onImageContextMenuRef.current = onImageContextMenu
+  onMediaErrorRef.current = onMediaError
+  onMediaPlayRef.current = onMediaPlay
   onInstantAnnotationRef.current = onInstantAnnotation
   onRenderedRef.current = onRendered
   onErrorRef.current = onError
@@ -231,6 +247,10 @@ export function useReaderRenderer({
     const unsubRelocated = newRenderer.on('relocated', (e) => { if (isCurrentRenderer()) onRelocatedRef.current?.(e) })
     const unsubSelected = newRenderer.on('selected', (e) => { if (isCurrentRenderer()) onSelectedRef.current?.(e) })
     const unsubAnnotationClicked = newRenderer.on('annotationClicked', (e) => { if (isCurrentRenderer()) onAnnotationClickedRef.current?.(e) })
+    const unsubImageClicked = newRenderer.on('imageClicked', (e) => { if (isCurrentRenderer()) onImageClickedRef.current?.(e) })
+    const unsubImageContextMenu = newRenderer.on('imageContextMenu', (e) => { if (isCurrentRenderer()) onImageContextMenuRef.current?.(e) })
+    const unsubMediaError = newRenderer.on('mediaError', (e) => { if (isCurrentRenderer()) onMediaErrorRef.current?.(e) })
+    const unsubMediaPlay = newRenderer.on('mediaPlay', (e) => { if (isCurrentRenderer()) onMediaPlayRef.current?.(e) })
     const unsubInstantAnnotation = newRenderer.on('instantAnnotation', (e) => { if (isCurrentRenderer()) onInstantAnnotationRef.current?.(e) })
     const unsubRendered = newRenderer.on('rendered', () => { if (isCurrentRenderer()) onRenderedRef.current?.() })
     const unsubToc = newRenderer.on('tocReady', (items) => { if (isCurrentRenderer()) onTocReadyRef.current?.(items) })
@@ -248,6 +268,10 @@ export function useReaderRenderer({
       unsubRelocated()
       unsubSelected()
       unsubAnnotationClicked()
+      unsubImageClicked()
+      unsubImageContextMenu()
+      unsubMediaError()
+      unsubMediaPlay()
       unsubInstantAnnotation()
       unsubRendered()
       unsubToc()

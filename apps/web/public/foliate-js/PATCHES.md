@@ -20,6 +20,13 @@
 
 运行时入口只有 `FoliateReader.ts` → `/foliate-js/reader-entry.js` → 上游 `View` → `foliate-paginator` 或 `foliate-fxl` 这一条阅读链。旧 `epubjs` 依赖已移除；没有第二套 renderer 运行时选择。
 
+### 0.1 本轮基线整理结论（2026-09-18）
+
+- 当前运行时基线仍固定为本节记录的 parent `4512f398` / submodule `74d8022c`；没有用未核对的外部新快照直接覆盖生产核心。
+- 候选快照中的坏 XHTML、动态资源引用计数、脚本可测量布局、fixed-layout 位图 viewport 和媒体交互边界，已按 Bookdock 语义逐项重放为本地补丁；对应条目见 §2、§3 和本文件末尾的 media entries。
+- `epub.js`、`view.js`、`paginator.js`、`fixed-layout.js` 的运行时职责、`reader-entry.js` 的浏览器 import graph、脚本默认拒绝和 manifest-first 资源策略均已明确；未登记的上游差异不得直接进入 `public/foliate-js/`。
+- 目前未完成的不是“还有一套未接入的核心”，而是样本/浏览器验收、完整检查命令和 P2 级 EPUB3 扩展；这些不改变当前 authoritative baseline。
+
 ## 1. 上游基线的公共表面对照
 
 | 文件 | 上游基线导出/公共表面 | Bookdock 处理 |
@@ -159,9 +166,9 @@
 
 19. **`epub.js` / `Loader.loadItem` 与 `Loader.loadHref` 缺失资源回退**
     - 对应版本：Upstream `foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`。
-    - 需求：CSS/XHTML 中引用了 manifest 声明但实际 ZIP entry 不存在的字体、图片或样式时，不把 `null` 包成伪 Blob，也不让缺失可选资源阻断章节；保留原引用作为浏览器可忽略的降级路径。
+    - 需求：CSS/XHTML 中引用了 manifest 声明但实际 ZIP entry 不存在的字体、图片或样式时，不把 `null` 包成伪 Blob，也不让缺失可选资源阻断章节；保留原引用作为浏览器可忽略的降级路径。常见未闭合 XHTML void 元素（例如 `br`、`img`）先修复后再走 XML 解析；manifest href 大小写不同但唯一匹配时使用 manifest 的真实路径和 MIME，大小写冲突的未声明资源继续拒绝猜测。
     - 不能只放适配层：缺失发生在核心递归资源替换的 `loadItem`/`loadHref` 之间；外部在文档生成后无法恢复 CSS、XHTML、图片和字体的统一资源生命周期。
-    - 影响/验证：只影响资源缺失/损坏时的 fallback，不改变已存在资源的 Blob URL、缓存和引用计数；`epub-compatibility.test.ts` 缺失字体/图片契约，真实样书资源扫描。
+    - 影响/验证：只影响资源缺失/损坏时的 fallback 与 XHTML 容错，不改变已存在资源的 Blob URL、缓存和引用计数；`epub-compatibility.test.ts` 覆盖 void 元素、唯一的大小写不敏感 manifest 匹配、歧义 archive fallback，后续补齐缺失字体/图片契约和真实样书资源扫描。
 
 ### 2.4 TTS、脚注和业务桥接
 
@@ -257,8 +264,8 @@
 34. **`epub.js` / script policy and manifest-first archive fallback**
     - 对应版本：Bookdock current security/product policy，兼容 v0.2.2 的默认脚本拒绝边界。
     - 需求：脚本默认不加载；未来设置项不得绕过核心策略。manifest 未列出的本地资源若实际存在于同一 ZIP，可经过规范化、无歧义查找后按扩展名推断 MIME 并加载；不存在的资源保留自然失败。
-    - 实现：`EPUB`/`Loader` 默认 `allowScript = false`，可由未来受控核心策略显式传入；资源 fallback 统一检查精确/大小写安全 entry，覆盖 CSS、SVG、图片、字体、音视频及文档类型，不猜测冲突路径。
-    - 影响/验证：脚本和资源 fallback 共用同一 Loader 生命周期、缓存和 Blob URL；`epub-compatibility.test.ts` 覆盖默认/显式脚本策略、漏列 CSS/SVG 和缺失资源降级。
+    - 实现：`EPUB`/`Loader` 默认 `allowScript = false`，可由未来受控核心策略显式传入；资源 fallback 统一检查精确/大小写安全 entry，覆盖 CSS、SVG、图片、字体、音视频及文档类型，不猜测冲突路径。每个 section 还暴露 `loadHref` 与 `observeDynamicResources`，分页版和 fixed-layout 版在 iframe 建立后挂载资源观察器，在 View/frame 销毁或移除时断开观察器并释放动态资源引用。
+    - 影响/验证：脚本和资源 fallback 共用同一 Loader 生命周期、缓存和 Blob URL；默认脚本拒绝边界不变，动态资源只在显式开启脚本并实际写入 DOM 后才会被解析。`epub-compatibility.test.ts` 覆盖默认/显式脚本策略、漏列 CSS/SVG、缺失资源降级、唯一大小写匹配、void 标签修复和动态插入媒体。
 
 35. **`paginator.js` / marginal grid dimensions**
     - 对应版本：当前上游 paginator 的 `#top` CSS grid 与 Bookdock 页眉/页脚信息栏。
@@ -271,6 +278,48 @@
     - 需求：设置为 1/2/3 栏时必须实际使用该列数；窄视口或较大的 `max-inline-size` 不能把显式的 3 栏静默降为 2 栏。
     - 实现：`max-column-count > 0` 直接决定 paginated spread 的 `columnCount`；仅非正值自动模式按可用宽度推导列数。
     - 影响/验证：显式列数会相应缩小每栏正文宽度，但不改变页面推进范围；契约测试覆盖 1/2/3 与窄视口，浏览器确认设置切换后的实际列宽。
+
+37. **`paginator.js` + `fixed-layout.js` / scripted canvas layout and bitmap viewport fallback**
+    - 对应版本：Upstream foliate-js candidate fixes `f71a084`（scripted layout）与 `a3816a8`（fixed-layout bitmap viewport）。
+    - 根因：脚本在 `display:none` 的 iframe 文档加载阶段执行时，依赖容器尺寸的 canvas 会测到 `0x0`；浏览器为直接位图 spine 文档注入的 `width=device-width` viewport 也不是固定页面宽高，会遮挡自然图片尺寸回退。
+    - 实现：Paginator iframe 改为 `visibility:hidden` 但保留布局盒，脚本可以测量真实容器；渲染前短暂隐藏以读取/应用布局，渲染后恢复可见。Fixed-layout 只接受同时拥有正数 width/height 的 viewport meta，否则继续使用 book viewport 或图片 `naturalWidth`/`naturalHeight`；`getViewport` 导出供契约测试复用。
+    - 影响/验证：只影响 scripted EPUB 的 canvas 初始化和直接位图 fixed-layout 尺寸，不改变默认脚本拒绝策略；`foliate-fixed-layout.test.ts` 覆盖 synthetic image viewport，Paginator 相关契约继续通过，真实 IDPF/位图样书仍需浏览器回归。
+
+38. **`view.js` / standalone image click bridge**
+    - 对应版本：Upstream foliate-js `iframe-open-media` interaction boundary，适配 Bookdock 的 `click-view` page-turn handling。
+    - 需求：正文独立 `img` 与 SVG `image` 点击不能误触翻页；链接、按钮、脚注引用等交互元素必须保留原语义，并向宿主提供 section、CFI、资源地址、alt/title 和图片类型。
+    - 实现：`View.#handleClick` 在通用 click-area 计算前识别独立图片（含点击 SVG 容器时向上/向下定位子 `image`），发出 `open-media` 事件并跳过 `click-view`；SVG `image` 的 href 以标准 xlink 命名空间/属性与 iframe `baseURI` 解析为绝对地址，杜绝 `NS` 命名空间未定义的异常；`FoliateReader` 转成 `imageClicked`，`useReaderRenderer` 提供宿主回调边界。图片位于链接或其他控件内时继续由原有 link/control handler 处理。
+    - 影响/验证：只改变独立图片点击的事件路由和 SVG 资源地址，不改变普通链接/控件行为；`foliate-view.test.ts` 覆盖 SVG 封面点击事件派发，查看器、缩放、保存和复制由 React 宿主层实现。
+
+39. **`view.js` / inline media interaction and error bridge**
+    - 对应版本：Bookdock host boundary for native EPUB audio/video controls.
+    - 需求：静态 `<audio>`/`<video>` 及其 `source`/`track`/`poster` 资源必须保留浏览器原生控件；点击媒体不能触发阅读器翻页；资源解码失败不能阻断章节正文。
+    - 实现：`View.#handleClick` 将 audio、video、object、embed 和 iframe 视为交互控件，不发出 `click-view`；`View.#handleMedia` 用文档捕获监听覆盖静态和脚本动态插入的媒体 `error` 事件，转成带 section、kind 和 source 的 `media-error`；`FoliateReader` 转发为 `mediaError`，Reader 以非阻塞 toast 提示。资源替换和 Blob 引用释放继续由 Loader 与 frame 生命周期负责。
+    - 影响/验证：不创建自定义播放器，不改变 `controls`/`source`/`track`/`poster` 语义；静态媒体 fixture 与真实编码播放仍需浏览器回归。
+
+40. **`view.js` / standalone image context-menu bridge**
+    - 对应版本：Bookdock host boundary for image context-menu and long-press actions.
+    - 需求：独立正文图片的桌面右键和移动端长按必须进入宿主菜单；链接、按钮和脚注引用内的图片不得截断原控件语义，也不得触发阅读器翻页。
+    - 实现：`View.#handleContextMenu` 复用图片资源/CFI 解析，阻止默认菜单并发出 `open-media-menu`，携带顶层 viewport 坐标；对 touch/pen 增加 500ms pointer 长按和移动阈值，并与浏览器 `contextmenu` 事件去重；`FoliateReader` 转成 `imageContextMenu`，React 菜单复用查看器的 Blob 保存/PNG 复制动作。
+    - 影响/验证：菜单只提供查看、保存、复制，不创建系统分享或图片集合；Escape、点击空白和切书会关闭菜单，真实触屏长按仍需浏览器回归。
+
+41. **`epub.js` / Loader 顶层资源引用计数和 `loadContent()` 重复引用**
+    - 对应版本：Upstream foliate-js `Loader.ref` 与 `loadItemXHTMLContent` 修复，按 Bookdock 当前 section/frame 生命周期重放。
+    - 根因：没有 parent 的顶层 section load 共享一个 `undefined` 子引用桶，多 View 同时打开同一章节时可能跳过第二次计数并提前 revoke；`loadItemXHTMLContent()` 又会在 `section.load()` 后额外占用一个永不释放的引用。
+    - 实现：无 parent 时每次 `ref()` 都独立增加计数；`loadItemXHTMLContent()` 优先复用已有缓存 URL，不再重复调用 `loadItem()`。
+    - 影响/验证：只改变同一 EPUB 多 View、脚注 popup 和 section 内容读取的 Blob 生命周期，不改变资源路径或脚本权限；需补多 View/footnote 与重复 `loadContent()` 的定向测试，真实切章内存回收仍待验收。
+
+42. **`epub.js` / deferred heavy media (video/audio) loading for instant text rendering**
+    - 对应版本：Bookdock chapter fast text rendering and async media boundary.
+    - 需求：含大型视频或音频的 EPUB 章节必须优先秒开显示正文文本；重媒体的解压不得阻塞章节 XHTML 解析，媒体后台并发载入，前端提供加载态视觉反馈，且排版尺寸完全锁定、零布局抖动。
+    - 实现：`loadReplaced` 中遍历 `[src]` 时识别 `video`、`audio`、`source`、`track`，将待解析地址转存至 `data-bd-deferred-src` 并跳过首屏阻塞解压；宿主 `normalizeEpubDocumentImages` 针对 `data-bd-deferred-src` 注入卡片加载转圈（`.is-media-loading`），并通过 `section.loadHref()` 后台异步解析 Blob 注入 `src`；固定 `16:9` 盒模型确保解析前后排版零变动。
+    - 影响/验证：首屏文本立即渲染，视频/音频异步就绪；单测验证 `loadContent()` 跳过媒体阻塞，DOM 正确标记 deferred-src。
+
+43. **`paginator.js` / `getVisibleRange` viewport detection on tall images and replaced elements**
+    - 对应版本：Upstream foliate-js `paginator.js` `getVisibleRange` DOM visibility detection.
+    - 根因：`getVisibleRange()` 中 DOM TreeWalker 的 `acceptNode` 原先仅在元素整体完全处于视口内时（`left >= start && right <= end`）返回 `FILTER_ACCEPT`。当章节开头包含超出视口高度的超长插图/大图时（如高度 1600px 超过视口 800px），`right <= end` 判定为 false；同时因为 `<img>` 是叶子/替换元素，没有子文本节点，TreeWalker 会跳过该元素导致在当前视口内找不到任何可见节点，返回折叠 range（`range.collapsed === true`）。外层判定 `range.collapsed` 直接跳过该章节，导致目录（TOC）跳转后章节正文虽已呈现，但高亮与页眉章节名始终不更新，直到用户向下滚动越过长图并露出正文文本。
+    - 实现：在 `paginator.js` 的 `getVisibleRange` 中优化叶子与替换元素（`img`、`image`、`svg`、`video`、`canvas`、`audio`、`object`、`embed`、`iframe`、`hr` 或无子节点元素）的视口相交判定：只要与当前视口重叠（`right >= start && left <= end`），即使单张图片尺寸超出视口也予以接收；构造 Range 时，若起点/终点为元素节点，使用 `setStartBefore` / `setEndAfter`，杜绝空/折叠 Range。
+    - 影响/验证：解决了章节开头长图时目录与页眉更新被阻断的问题，不影响普通图文排版与分页计算；`foliate-paginator.test.ts` 覆盖超高大图与叶子元素的视口识别契约。
 
 ## 3. Bookdock 宿主适配（不属于第二套核心）
 

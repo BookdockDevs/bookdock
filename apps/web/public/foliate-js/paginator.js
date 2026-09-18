@@ -382,7 +382,7 @@ const getBoundingClientRect = target => {
     return new DOMRect(left, top, right - left, bottom - top)
 }
 
-const getVisibleRange = (doc, start, end, mapRect) => {
+export const getVisibleRange = (doc, start, end, mapRect) => {
     // A resize/scroll callback can fire after the view's document has been
     // torn down (e.g. during teardown, or while an async section load is still
     // settling); there is nothing to measure without a body.
@@ -405,9 +405,12 @@ const getVisibleRange = (doc, start, end, mapRect) => {
             // elements must be completely in view to be considered visible
             // because you can't specify offsets for elements
             if (left >= start && right <= end) return FILTER_ACCEPT
-            // TODO: it should probably allow elements that do not contain text
-            // because they can exceed the whole viewport in both directions
-            // especially in scrolled mode
+            // Allow leaf or replaced elements that do not contain text
+            // (e.g. images, svg, video, canvas) to be accepted when partially in view,
+            // especially in scrolled mode where long images exceed the viewport.
+            const isLeafOrReplaced = /^(?:img|image|svg|video|canvas|audio|object|embed|iframe|hr)$/i.test(name)
+                || !node.hasChildNodes()
+            if (isLeafOrReplaced && right >= start && left <= end) return FILTER_ACCEPT
         } else {
             // ignore empty text nodes
             if (!node.nodeValue?.trim()) return FILTER_SKIP
@@ -447,8 +450,19 @@ const getVisibleRange = (doc, start, end, mapRect) => {
         })
 
     const range = doc.createRange()
-    range.setStart(from, startOffset)
-    range.setEnd(to, endOffset)
+    if (from.nodeType === 1) {
+        if (from === doc.body || !from.parentNode) range.setStart(from, 0)
+        else range.setStartBefore(from)
+    } else {
+        range.setStart(from, startOffset)
+    }
+
+    if (to.nodeType === 1) {
+        if (to === doc.body || !to.parentNode) range.setEnd(to, from === doc.body ? to.childNodes.length : 0)
+        else range.setEndAfter(to)
+    } else {
+        range.setEnd(to, endOffset)
+    }
     return range
 }
 
@@ -618,6 +632,7 @@ class View {
     #layout = {}
     #contentPages = 0
     #bgImageSize = null
+    #disposeDynamicResources
     fontReady = Promise.resolve()
     constructor({ container, onExpand }) {
         this.container = container
@@ -637,7 +652,7 @@ class View {
         Object.assign(this.#iframe.style, {
             overflow: 'hidden',
             border: '0',
-            display: 'none',
+            visibility: 'hidden',
             width: '100%', height: '100%',
         })
         // `allow-scripts` is needed for events because of WebKit bug
@@ -654,16 +669,19 @@ class View {
     get contentPages() {
         return this.#contentPages
     }
-    async load(src, data, afterLoad, beforeRender) {
+    async load(src, data, afterLoad, beforeRender, observeDynamicResources) {
         if (typeof src !== 'string') throw new Error(`${src} is not string`)
         return new Promise(resolve => {
             this.#iframe.addEventListener('load', async () => {
                 const doc = this.document
                 afterLoad?.(doc)
+                this.#disposeDynamicResources?.()
+                this.#disposeDynamicResources = observeDynamicResources?.(doc) ?? null
 
                 this.#iframe.setAttribute('aria-label', doc.title)
-                // it needs to be visible for Firefox to get computed style
-                this.#iframe.style.display = 'block'
+                // Keep the iframe laid out while scripts initialize their canvas.
+                // display:none would make container measurements zero.
+                this.#iframe.style.visibility = 'visible'
                 const { vertical, rtl } = getDirection(doc)
                 this.docBackground = getBackground(doc)
                 doc.body.style.background = 'none'
@@ -713,14 +731,14 @@ class View {
                 // have been torn down or reloaded meanwhile — don't render into
                 // a stale document.
                 if (this.document !== doc) return resolve()
-                this.#iframe.style.display = 'none'
+                this.#iframe.style.visibility = 'hidden'
 
                 this.#vertical = vertical
                 this.#rtl = rtl
 
                 this.#contentRange.selectNodeContents(doc.body)
                 const layout = beforeRender?.({ vertical, rtl })
-                this.#iframe.style.display = 'block'
+                this.#iframe.style.visibility = 'visible'
                 this.render(layout)
                 bgRendered = true
                 this.#observer.observe(doc.body)
@@ -1186,6 +1204,8 @@ class View {
             this.#overlayer.clearHole()
     }
     destroy() {
+        this.#disposeDynamicResources?.()
+        this.#disposeDynamicResources = null
         if (this.document?.body) this.#observer.unobserve(this.document.body)
         this.destroyLoupe()
     }
@@ -3371,7 +3391,8 @@ export class Paginator extends HTMLElement {
                     onLoad?.({ doc, index })
                 }
                 const beforeRender = this.#beforeRender.bind(this)
-                await view.load(src, data, afterLoad, beforeRender)
+                await view.load(src, data, afterLoad, beforeRender,
+                    this.sections[index].observeDynamicResources)
                 if (!isCurrent()) {
                     if (this.#views.get(index) === view) this.#destroyView(index)
                     return
@@ -3504,7 +3525,8 @@ export class Paginator extends HTMLElement {
             // global state (direction, CSS classes, dir attribute, etc.).
             const cachedLayout = this.#lastLayout
             const beforeRender = () => cachedLayout
-            await view.load(src, data, afterLoad, beforeRender)
+            await view.load(src, data, afterLoad, beforeRender,
+                section.observeDynamicResources)
             // Cache direction for future preload boundary checks
             if (view.document) {
                 const dir = getDirection(view.document)

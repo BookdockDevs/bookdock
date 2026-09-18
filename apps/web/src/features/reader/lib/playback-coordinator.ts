@@ -1,4 +1,4 @@
-export type ReaderPlaybackOwner = 'auto' | 'tts'
+export type ReaderPlaybackOwner = 'auto' | 'tts' | 'media'
 
 export interface PlaybackClaim {
   accepted: boolean
@@ -7,7 +7,7 @@ export interface PlaybackClaim {
 
 type Stopper = () => void | Promise<void>
 
-/** Serializes the two reader playback features so a stale async start cannot take over later. */
+/** Serializes reader playback features so a stale async start cannot take over later. */
 export class ReaderPlaybackCoordinator {
   private generation = 0
   private owner: ReaderPlaybackOwner | null = null
@@ -22,8 +22,10 @@ export class ReaderPlaybackCoordinator {
 
   async claim(owner: ReaderPlaybackOwner): Promise<PlaybackClaim> {
     const generation = ++this.generation
-    const peer = owner === 'auto' ? 'tts' : 'auto'
-    if (this.owner === peer) await this.stoppers.get(peer)?.()
+    const peers: ReaderPlaybackOwner[] = ['auto', 'tts', 'media']
+    for (const peer of peers) {
+      if (peer !== owner && this.owner === peer) await this.stoppers.get(peer)?.()
+    }
     const accepted = generation === this.generation
     if (accepted) this.owner = owner
     return {

@@ -131,4 +131,39 @@ describe('foliate view renderer search contract', () => {
     expect((book.media as { activeClass?: string }).activeClass).toBe('-epub-media-overlay-active')
     view.close()
   })
+
+  it('emits open-media event when clicking an SVG cover image without throwing NS reference error', async () => {
+    const doc = document.implementation.createHTMLDocument('cover')
+    doc.body.innerHTML = `
+      <div id="cover-container">
+        <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 600 800">
+          <image width="600" height="800" href="cover.jpeg" xlink:href="cover.jpeg" />
+        </svg>
+      </div>
+    `
+    const book = {
+      metadata: { language: 'zh-CN' },
+      rendition: { layout: 'reflowable' },
+      sections: [{
+        createDocument: async () => doc,
+      }],
+      dir: 'ltr',
+    }
+    const view = new View()
+    await view.open(book as never)
+    view.renderer.dispatchEvent(new CustomEvent('load', { detail: { doc, index: 0 } }))
+
+    const onOpenMedia = vi.fn()
+    view.addEventListener('open-media', (e: Event) => onOpenMedia((e as CustomEvent).detail))
+
+    const svg = doc.querySelector('svg')!
+    svg.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+
+    expect(onOpenMedia).toHaveBeenCalledWith(expect.objectContaining({
+      src: expect.stringContaining('cover.jpeg'),
+      kind: 'svg-image',
+    }))
+
+    view.close()
+  })
 })

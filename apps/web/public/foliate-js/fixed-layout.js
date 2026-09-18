@@ -6,7 +6,7 @@ const parseViewport = str => str
     ?.filter(x => x)
     ?.map(x => x.split('=').map(x => x.trim()))
 
-const getViewport = (doc, viewport) => {
+export const getViewport = (doc, viewport) => {
     // use `viewBox` for SVG
     if (doc.documentElement.localName === 'svg') {
         const [, , width, height] = doc.documentElement
@@ -17,7 +17,13 @@ const getViewport = (doc, viewport) => {
     // get `viewport` `meta` element
     const meta = parseViewport(doc.querySelector('meta[name="viewport"]')
         ?.getAttribute('content'))
-    if (meta) return Object.fromEntries(meta)
+    if (meta) {
+        const props = Object.fromEntries(meta)
+        // A bitmap spine item can expose a synthetic viewport such as
+        // width=device-width, which is not a fixed page size.
+        if (parseFloat(props.width) > 0 && parseFloat(props.height) > 0)
+            return props
+    }
 
     // fallback to book's viewport
     if (typeof viewport === 'string') return parseViewport(viewport)
@@ -425,12 +431,15 @@ export class FixedLayout extends HTMLElement {
                 const doc = iframe.contentDocument
                 iframe.dataset.sectionIndex = index
                 this.dispatchEvent(new CustomEvent('load', { detail: { doc, index } }))
+                const disposeDynamicResources =
+                    this.book.sections[index]?.observeDynamicResources?.(doc)
                 const { width, height } = getViewport(doc, this.defaultViewport)
                 resolve({
                     element, iframe,
                     width: parseFloat(width),
                     height: parseFloat(height),
                     onZoom,
+                    disposeDynamicResources,
                     detached,
                 })
             }, { once: true })
@@ -440,6 +449,10 @@ export class FixedLayout extends HTMLElement {
                 iframe.src = src
             }
         })
+    }
+    #disposeFrame(frame) {
+        frame?.disposeDynamicResources?.()
+        frame?.element?.remove()
     }
     #render(side = this.#side, pageTurn = false) {
         if (this.#scrollMode) {
@@ -870,12 +883,15 @@ export class FixedLayout extends HTMLElement {
                 const doc = iframe.contentDocument
                 iframe.dataset.sectionIndex = pageData.index
                 this.dispatchEvent(new CustomEvent('load', { detail: { doc, index: pageData.index } }))
+                const disposeDynamicResources =
+                    this.book.sections[pageData.index]?.observeDynamicResources?.(doc)
                 const { width, height } = getViewport(doc, this.defaultViewport)
                 resolve({
                     element, iframe,
                     width: parseFloat(width),
                     height: parseFloat(height),
                     onZoom,
+                    disposeDynamicResources,
                 })
             }, { once: true })
             if (data) {
@@ -909,7 +925,7 @@ export class FixedLayout extends HTMLElement {
             const frame = await this.#createScrollFrame(pageData, src)
             // Bail if cancelled during frame creation
             if (this.#scrollLoadGen.get(pageData.index) !== gen || !this.#scrollMode) {
-                frame.element?.remove()
+                this.#disposeFrame(frame)
                 pageData.state = 'idle'
                 return
             }
@@ -981,7 +997,7 @@ export class FixedLayout extends HTMLElement {
         if (pageData.frame) {
             const idx = pageData.index
             this.#overlayers.delete(idx)
-            pageData.frame.element?.remove()
+            this.#disposeFrame(pageData.frame)
         }
         pageData.frame = null
         pageData.state = 'idle'
@@ -1156,10 +1172,10 @@ export class FixedLayout extends HTMLElement {
         this.#preloadCache.clear()
         for (const frames of this.#prerenderedSpreads.values()) {
             if (frames.center) {
-                frames.center.element?.remove()
+                this.#disposeFrame(frames.center)
             } else {
-                frames.left?.element?.remove()
-                frames.right?.element?.remove()
+                this.#disposeFrame(frames.left)
+                this.#disposeFrame(frames.right)
             }
         }
         this.#prerenderedSpreads.clear()
@@ -1368,12 +1384,12 @@ export class FixedLayout extends HTMLElement {
                 if (frames) {
                     if (frames.center) {
                         this.#removeOverlayerForFrame(frames.center)
-                        frames.center.element?.remove()
+                        this.#disposeFrame(frames.center)
                     } else {
                         this.#removeOverlayerForFrame(frames.left)
                         this.#removeOverlayerForFrame(frames.right)
-                        frames.left?.element?.remove()
-                        frames.right?.element?.remove()
+                        this.#disposeFrame(frames.left)
+                        this.#disposeFrame(frames.right)
                     }
                 }
 
@@ -1633,10 +1649,10 @@ export class FixedLayout extends HTMLElement {
         }
         for (const frames of this.#prerenderedSpreads.values()) {
             if (frames.center) {
-                frames.center.element?.remove()
+                this.#disposeFrame(frames.center)
             } else {
-                frames.left?.element?.remove()
-                frames.right?.element?.remove()
+                this.#disposeFrame(frames.left)
+                this.#disposeFrame(frames.right)
             }
         }
         this.#prerenderedSpreads.clear()

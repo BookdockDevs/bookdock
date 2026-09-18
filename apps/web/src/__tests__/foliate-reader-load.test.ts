@@ -325,6 +325,22 @@ describe('FoliateReader book-style overrides', () => {
     expect(css.indexOf('@import url("reader.css");')).toBeLessThan(css.indexOf('--bd-font-size'))
   })
 
+  it('injects legacy cover reset and video compatibility CSS rules', () => {
+    const reader = new FoliateReader('')
+    const setStyles = vi.fn()
+    ;(reader as any).view = { renderer: { setStyles } }
+
+    ;(reader as any).applyStyles()
+
+    const css = String(setStyles.mock.calls[0]?.[0] ?? '')
+    expect(css).toContain('.wedge')
+    expect(css).toContain('.videoplay')
+    expect(css).toContain('.bd-video-wrapper')
+    expect(css).toContain('.bd-video-play-btn')
+    expect(css).toContain('accent-color: var(--bd-theme-primary)')
+    expect(css).toContain('max-height: calc(var(--bd-available-height, 100%) * 1px);')
+  })
+
   it('applies the reading theme to fixed-layout HTML documents', () => {
     const reader = new FoliateReader('')
     const doc = document.implementation.createHTMLDocument('fixed')
@@ -450,6 +466,152 @@ describe('normalizeEpubDocumentImages', () => {
     const svg = new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg"><image href="cover.png"/></svg>', 'image/svg+xml')
 
     expect(() => normalizeEpubDocumentImages(svg)).not.toThrow()
+  })
+
+  it('normalizes legacy cover wedge and container height to prevent multi-column collapse', () => {
+    document.body.innerHTML = `
+      <div class="wedge" style="float: left; height: 50%; margin-bottom: -360px;"></div>
+      <div class="container" style="clear: both; height: 0em; position: relative;">
+        <table style="height: 720px; width: 100%;">
+          <tbody>
+            <tr>
+              <td>
+                <img src="cover.jpg" class="image" alt="Cover" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `
+
+    normalizeEpubDocumentImages(document)
+
+    const wedge = document.querySelector('.wedge') as HTMLElement
+    const container = document.querySelector('.container') as HTMLElement
+    const table = document.querySelector('table') as HTMLElement
+    const td = document.querySelector('td') as HTMLElement
+
+    expect(wedge.style.display).toBe('none')
+    expect(container.style.height).toBe('auto')
+    expect(container.style.position).toBe('static')
+    expect(table.style.height).toBe('auto')
+    expect(td.style.height).toBe('auto')
+  })
+
+  it('adds controls and playsinline attributes to video and audio elements lacking controls', () => {
+    document.body.innerHTML = `
+      <div class="videoplay">
+        <video class="embedded-video" poster="poster.jpg">
+          <source src="blob:http://localhost/video.mp4" type="video/mp4" />
+        </video>
+      </div>
+      <audio src="audio.mp3"></audio>
+    `
+
+    normalizeEpubDocumentImages(document)
+
+    const video = document.querySelector('video') as HTMLVideoElement
+    const audio = document.querySelector('audio') as HTMLAudioElement
+
+    expect(video.hasAttribute('controls')).toBe(true)
+    expect(video.hasAttribute('playsinline')).toBe(true)
+    expect(video.hasAttribute('preload')).toBe(true)
+    expect(video.preload).toBe('auto')
+    expect(video.controls).toBe(true)
+    expect(video.src).toBe('blob:http://localhost/video.mp4')
+    expect(audio.hasAttribute('controls')).toBe(true)
+    expect(audio.hasAttribute('preload')).toBe(true)
+    expect(audio.preload).toBe('auto')
+    expect(audio.controls).toBe(true)
+
+    // Verify wrapper and play button overlay
+    const wrapper = document.querySelector('.bd-video-wrapper') as HTMLElement
+    expect(wrapper).not.toBeNull()
+    const playBtn = wrapper.querySelector('.bd-video-play-btn') as HTMLButtonElement
+    expect(playBtn).not.toBeNull()
+    expect(video.hasAttribute('controlslist')).toBe(true)
+
+    // Verify click-to-play on video body
+    const playMock = vi.fn().mockResolvedValue(undefined)
+    video.play = playMock
+    video.getBoundingClientRect = () => ({ top: 0, bottom: 400, left: 0, right: 300, width: 300, height: 400, x: 0, y: 0, toJSON: () => {} })
+
+    // Click in upper body (y = 100) -> plays
+    video.dispatchEvent(new MouseEvent('click', { clientY: 100, bubbles: true }))
+    expect(playMock).toHaveBeenCalled()
+
+    // Click in bottom control bar (y = 380) -> does not trigger custom play toggle
+    playMock.mockClear()
+    video.dispatchEvent(new MouseEvent('click', { clientY: 380, bubbles: true }))
+    expect(playMock).not.toHaveBeenCalled()
+
+    // Verify clicking playBtn triggers play
+    playMock.mockClear()
+    playBtn.click()
+    expect(playMock).toHaveBeenCalled()
+
+    // Verify play/pause events toggle wrapper is-playing state
+    video.dispatchEvent(new Event('play'))
+    expect(wrapper.classList.contains('is-playing')).toBe(true)
+
+    video.dispatchEvent(new Event('pause'))
+    expect(wrapper.classList.contains('is-playing')).toBe(false)
+  })
+
+  it('handles deferred video and audio sources with loading state and async resolution', async () => {
+    const document = new DOMParser().parseFromString(
+      `<html><body>
+        <div class="videoplay">
+          <video poster="poster.jpg">
+            <source data-bd-deferred-src="movie.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <audio data-bd-deferred-src="track.mp3"></audio>
+      </body></html>`,
+      'text/html',
+    )
+
+    let resolveVideo: (url: string) => void = () => {}
+    const videoPromise = new Promise<string>((res) => { resolveVideo = res })
+    let resolveAudio: (url: string) => void = () => {}
+    const audioPromise = new Promise<string>((res) => { resolveAudio = res })
+
+    const mockSection = {
+      id: 'section-0',
+      loadHref: vi.fn((href: string) => {
+        if (href === 'movie.mp4') return videoPromise
+        if (href === 'track.mp3') return audioPromise
+        return Promise.resolve(href)
+      }),
+    }
+
+    normalizeEpubDocumentImages(document, { section: mockSection })
+
+    const video = document.querySelector('video') as HTMLVideoElement
+    const audio = document.querySelector('audio') as HTMLAudioElement
+    const wrapper = document.querySelector('.bd-video-wrapper') as HTMLElement
+    const spinner = wrapper.querySelector('.bd-video-spinner') as HTMLElement
+
+    // Initial state: wrapper has loading state and spinner, audio has loading class
+    expect(wrapper.classList.contains('is-media-loading')).toBe(true)
+    expect(spinner).not.toBeNull()
+    expect(spinner.textContent).toContain('媒体加载中')
+    expect(audio.classList.contains('bd-audio-loading')).toBe(true)
+    expect(video.src).toBe('')
+
+    // Resolve video and audio
+    resolveVideo('blob:http://localhost/resolved-movie.mp4')
+    resolveAudio('blob:http://localhost/resolved-track.mp3')
+
+    await new Promise((r) => setTimeout(r, 0))
+
+    // Resolved state: sources updated, loading states removed, spinner removed
+    expect(video.src).toBe('blob:http://localhost/resolved-movie.mp4')
+    expect(wrapper.classList.contains('is-media-loading')).toBe(false)
+    expect(wrapper.querySelector('.bd-video-spinner')).toBeNull()
+
+    expect(audio.src).toBe('blob:http://localhost/resolved-track.mp3')
+    expect(audio.classList.contains('bd-audio-loading')).toBe(false)
   })
 })
 

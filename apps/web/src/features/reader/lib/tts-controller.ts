@@ -289,7 +289,8 @@ export class TtsController {
     this.abortController?.abort()
     this.bufferedQueue = []
     this.activePreparations = 0
-    await this.client.stop()
+    const canContinue = preservePlaying && this.client.canContinueTo?.(segment) === true
+    if (!canContinue) await this.client.stop()
     if (generation !== this.generation || this.restartRequested) return
     const controller = new AbortController()
     this.abortController = controller

@@ -29,9 +29,10 @@ export interface TtsSpeakOptions {
 export type TtsPreparedAudio = DecodedTtsAudio
 
 export interface TtsClient {
-  readonly id: 'system' | 'edge' | 'service'
+  readonly id: 'system' | 'edge' | 'service' | 'media-overlay'
   readonly pauseResume: boolean
   listVoices(): TtsVoice[]
+  canContinueTo?(segment: TtsSegment): boolean
   speak(segment: TtsSegment, options: TtsSpeakOptions, signal: AbortSignal, events: TtsPlaybackEvents): Promise<void>
   prepare?(segment: TtsSegment, options: TtsSpeakOptions, signal: AbortSignal): Promise<TtsPreparedAudio>
   playPrepared?(segment: TtsSegment, audio: TtsPreparedAudio, options: TtsSpeakOptions, signal: AbortSignal, events: TtsPlaybackEvents): Promise<void>

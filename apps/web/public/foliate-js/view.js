@@ -234,6 +234,7 @@ export class View extends HTMLElement {
     #pageProgress
     #cfiProgress
     #searchResults = new Map()
+    #suppressedImageClicks = new WeakSet()
     #ttsValue
     #cursorAutohider = new CursorAutohider(this, () =>
         this.hasAttribute('autohide-cursor'))
@@ -372,10 +373,41 @@ export class View extends HTMLElement {
             doc.documentElement.dir ||= this.language.direction ?? ''
 
         this.#handleLinks(doc, index)
+        this.#handleMedia(doc, index)
+        this.#handleContextMenu(doc, index)
         this.#handleClick(doc, index)
         this.#cursorAutohider.cloneFor(doc.documentElement)
 
         this.#emit('load', { doc, index })
+    }
+    #handleMedia(doc, index) {
+        doc.addEventListener('error', event => {
+            let element = event.target
+            if (element?.localName === 'source' || element?.localName === 'track')
+                element = element.closest('audio, video')
+            if (!['audio', 'video', 'object', 'embed'].includes(element?.localName)) return
+            if (element.dataset.bookdockMediaError === '1') return
+            element.dataset.bookdockMediaError = '1'
+            const src = element.currentSrc
+                || element.getAttribute('src')
+                || element.getAttribute('data')
+                || element.querySelector('source[src]')?.getAttribute('src')
+                || ''
+            this.#emit('media-error', {
+                sectionIndex: index,
+                kind: element.localName,
+                src,
+            })
+        }, true)
+        doc.addEventListener('play', event => {
+            const element = event.target
+            if (element?.localName === 'audio' || element?.localName === 'video') {
+                this.#emit('media-play', {
+                    sectionIndex: index,
+                    kind: element.localName,
+                })
+            }
+        }, true)
     }
     #handleLinks(doc, index) {
         const { book } = this
@@ -405,10 +437,142 @@ export class View extends HTMLElement {
             }
         })
     }
+    #getImageDetail(index, image) {
+        const svgImage = image.localName === 'image'
+        const rawSrc = svgImage
+            ? image.getAttributeNS('http://www.w3.org/1999/xlink', 'href')
+                ?? image.getAttribute('xlink:href')
+                ?? image.getAttribute('href')
+            : image.currentSrc || image.getAttribute('src')
+        let src = rawSrc ?? ''
+        if (src && svgImage) {
+            try { src = new URL(src, image.baseURI).href } catch { /* keep the raw reference */ }
+        }
+        const range = image.ownerDocument.createRange()
+        range.selectNode(image)
+        let cfi = ''
+        try {
+            cfi = this.getCFI(index, range)
+        } catch (e) {
+            console.warn(e)
+        }
+        return {
+            sectionIndex: index,
+            cfi,
+            src,
+            alt: image.getAttribute('alt')
+                ?? image.closest('figure')?.querySelector('figcaption')?.textContent?.trim()
+                ?? '',
+            title: image.getAttribute('title') ?? '',
+            kind: svgImage ? 'svg-image' : 'image',
+        }
+    }
+    #handleContextMenu(doc, index) {
+        let longPressTimer = null
+        let longPressPointerId = null
+        let longPressStart = null
+        let longPressTriggered = false
+        const suppressImageClick = image => {
+            this.#suppressedImageClicks.add(image)
+            setTimeout(() => this.#suppressedImageClicks.delete(image), 1000)
+        }
+        const cancelLongPress = () => {
+            if (longPressTimer !== null) clearTimeout(longPressTimer)
+            longPressTimer = null
+            longPressPointerId = null
+            longPressStart = null
+        }
+        const eligibleImage = target => {
+            let image = target?.closest?.('img, image')
+            if (!image) {
+                const svg = target?.closest?.('svg')
+                if (svg) image = svg.querySelector('image, img')
+            }
+            if (!image) return null
+            if (image.closest('a[href], button, input, select, textarea')) return null
+            return image
+        }
+        const coordinates = (clientX, clientY) => {
+            const iframe = doc.defaultView?.frameElement
+            if (iframe) {
+                const rect = iframe.getBoundingClientRect()
+                return { x: clientX + rect.left, y: clientY + rect.top }
+            }
+            return { x: clientX, y: clientY }
+        }
+        const emitMenu = (image, clientX, clientY) => {
+            const detail = this.#getImageDetail(index, image)
+            if (!detail.src) return false
+            const point = coordinates(clientX, clientY)
+            this.#emit('open-media-menu', { ...detail, x: point.x, y: point.y })
+            return true
+        }
+        doc.addEventListener('pointerdown', event => {
+            if (event.pointerType === 'mouse') return
+            const image = eligibleImage(event.target)
+            if (!image) return
+            cancelLongPress()
+            longPressTriggered = false
+            longPressPointerId = event.pointerId
+            longPressStart = { x: event.clientX, y: event.clientY }
+            longPressTimer = setTimeout(() => {
+                if (!longPressStart || !image.isConnected) return
+                if (!emitMenu(image, longPressStart.x, longPressStart.y)) return
+                longPressTriggered = true
+                suppressImageClick(image)
+            }, 500)
+        })
+        doc.addEventListener('pointermove', event => {
+            if (event.pointerId !== longPressPointerId || !longPressStart) return
+            if (Math.hypot(event.clientX - longPressStart.x, event.clientY - longPressStart.y) > 10) {
+                longPressTriggered = false
+                cancelLongPress()
+            }
+        })
+        const endLongPress = event => {
+            if (event.pointerId !== longPressPointerId) return
+            if (!longPressTriggered) cancelLongPress()
+            else {
+                longPressPointerId = null
+                longPressStart = null
+            }
+        }
+        doc.addEventListener('pointerup', endLongPress)
+        doc.addEventListener('pointercancel', endLongPress)
+        doc.addEventListener('contextmenu', e => {
+            if (e.defaultPrevented || doc.getSelection()?.type === 'Range') return
+            const image = eligibleImage(e.target)
+            if (!image) return
+            e.preventDefault()
+            if (longPressTriggered) {
+                longPressTriggered = false
+                cancelLongPress()
+                return
+            }
+            const hadTouchPress = longPressPointerId !== null
+            cancelLongPress()
+            if (emitMenu(image, e.clientX, e.clientY) && hadTouchPress) suppressImageClick(image)
+        })
+    }
     #handleClick(doc, index) {
         doc.addEventListener('click', e => {
             if (e.defaultPrevented || doc.getSelection()?.type === 'Range') return
-            const target = e.target?.closest?.('a, button, input, select, textarea')
+            let image = e.target?.closest?.('img, image')
+            if (!image) {
+                const svg = e.target?.closest?.('svg')
+                if (svg) image = svg.querySelector('image, img')
+            }
+            if (image) {
+                if (this.#suppressedImageClicks.has(image)) {
+                    this.#suppressedImageClicks.delete(image)
+                    return
+                }
+                const control = image.closest('a[href], button, input, select, textarea')
+                if (control) return
+                this.#emit('open-media', this.#getImageDetail(index, image))
+                return
+            }
+            const target = e.target?.closest?.('a, button, input, select, textarea, audio, video, object, embed, iframe')
             if (target) return
             let { clientX, clientY } = e
             const overlay = this.#getOverlayer(index)?.overlayer

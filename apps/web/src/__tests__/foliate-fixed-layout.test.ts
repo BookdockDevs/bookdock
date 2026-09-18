@@ -5,6 +5,7 @@ import {
   computePaginatedScroll,
   computeSpreadInlineMargins,
   computeSpreadSpineOverlap,
+  getViewport,
   planScrollModePages,
   restoreScrollModeAnchor,
   scrollGapToCss,
@@ -60,5 +61,20 @@ describe('foliate fixed-layout compatibility helpers', () => {
     expect(scrollGapToCss('12')).toBe('12px')
     expect(scrollGapToCss('-1')).toBeNull()
     expect(scrollGapToCss('invalid')).toBeNull()
+  })
+
+  it('falls back to bitmap natural size for synthetic image viewports', () => {
+    const doc = new DOMParser().parseFromString(
+      '<html><head><meta name="viewport" content="width=device-width,minimum-scale=0.1"></head><body><img></body></html>',
+      'text/html',
+    )
+    const image = doc.querySelector('img')!
+    Object.defineProperties(image, {
+      naturalWidth: { configurable: true, value: 1200 },
+      naturalHeight: { configurable: true, value: 800 },
+    })
+
+    expect(getViewport(doc)).toEqual({ width: 1200, height: 800 })
+    expect(getViewport(doc, { width: 600, height: 400 })).toEqual({ width: 600, height: 400 })
   })
 })

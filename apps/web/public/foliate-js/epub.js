@@ -145,6 +145,21 @@ const replaceSeries = async (str, regex, f) => {
 
 const regexEscape = str => str.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
 
+const XHTML_VOID_ELEMENTS = new Set([
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+    'link', 'meta', 'param', 'source', 'track', 'wbr',
+])
+
+// Common EPUB XHTML leaves void elements unclosed. Repair only the HTML void
+// elements before the XML parse so valid XHTML keeps its namespace and CFI tree.
+const repairXHTMLVoidElements = str => str.replace(
+    /<([a-z][\w:.-]*)(\s[^<>]*?)?>/gi,
+    (match, name, attrs = '') => {
+        if (!XHTML_VOID_ELEMENTS.has(name.toLowerCase())
+            || /\/\s*$/.test(attrs)) return match
+        return `<${name}${attrs.trimEnd()}/>`
+    })
+
 const tidy = obj => {
     for (const [key, val] of Object.entries(obj))
         if (val == null) delete obj[key]
@@ -901,6 +916,13 @@ class Loader {
         return url
     }
     ref(href, parent) {
+        // A top-level load has no parent document to own its reference. Keep
+        // those references independent because multiple views can open the
+        // same section at the same time.
+        if (!parent) {
+            this.#refCount.set(href, this.#refCount.get(href) + 1)
+            return this.#cache.get(href)
+        }
         const childList = this.#children.get(parent)
         if (!childList?.includes(href)) {
             this.#refCount.set(href, this.#refCount.get(href) + 1)
@@ -926,6 +948,11 @@ class Loader {
             if (childList) while (childList.length) this.unref(childList.pop())
             this.#children.delete(href)
         } else this.#refCount.set(href, count)
+    }
+    #releaseChildren(parent) {
+        const childList = this.#children.get(parent)
+        if (childList) while (childList.length) this.unref(childList.pop())
+        this.#children.delete(parent)
     }
     // load manifest item, recursively loading all resources as needed
     async loadItem(item, parents = []) {
@@ -954,7 +981,7 @@ class Loader {
         return this.createURL(href, blob, mediaType, parent)
     }
     async loadItemXHTMLContent(item, parents = []) {
-        const url = await this.loadItem(item, parents)
+        const url = this.#cache.get(item?.href) ?? await this.loadItem(item, parents)
         if (url) return this.#cacheXHTMLContent.get(url)?.data
     }
     getArchiveEntryItem(path) {
@@ -962,14 +989,103 @@ class Loader {
         if (!entry) return null
         return { href: path, mediaType: getFallbackMediaType(path) }
     }
-    async loadHref(href, base, parents = []) {
+    async loadHref(href, base, parents = [], parent) {
         if (isExternal(href)) return href
         const path = resolveURL(href, base)
         let item = this.manifest.find(item => item.href === path)
+        if (!item) {
+            const matches = this.manifest.filter(item =>
+                item.href?.toLowerCase() === path.toLowerCase())
+            if (matches.length === 1) item = matches[0]
+        }
         if (!item) item = this.getArchiveEntryItem(path)
         if (!item) return href
-        const url = await this.loadItem(item, parents.concat(base))
+        const loadParents = parents.concat(base)
+        if (parent !== undefined) loadParents.push(parent)
+        const url = await this.loadItem(item, loadParents)
         return url ?? href
+    }
+    observeDynamicResources(doc, base) {
+        const Observer = doc?.defaultView?.MutationObserver
+            ?? globalThis.MutationObserver
+        if (!Observer || !doc?.documentElement) return () => {}
+
+        const parent = {}
+        let disposed = false
+        const load = async href => {
+            const resolved = await this.loadHref(href, base, [], parent)
+            if (disposed) this.#releaseChildren(parent)
+            return resolved
+        }
+        const process = async el => {
+            if (disposed || !el.isConnected) return
+            const resolve = async attr => {
+                const value = el.getAttribute(attr)
+                if (!value) return
+                const resolved = await load(value)
+                if (disposed) return
+                if (resolved !== value) el.setAttribute(attr, resolved)
+            }
+            if (el.hasAttribute('src')) await resolve('src')
+            if (el.hasAttribute('poster')) await resolve('poster')
+            if (el.localName === 'object' && el.hasAttribute('data'))
+                await resolve('data')
+            if (el.localName === 'link' && el.hasAttribute('href'))
+                await resolve('href')
+            if (el.hasAttribute('srcset')) {
+                const value = el.getAttribute('srcset')
+                const replaced = await replaceSeries(value,
+                    /(\s*)(.+?)\s*((?:\s[\d.]+[wx])+\s*(?:,|$)|,\s+|$)/g,
+                    (_, p1, p2, p3) => load(p2)
+                        .then(p2 => `${p1}${p2}${p3}`))
+                if (!disposed && replaced !== value) el.setAttribute('srcset', replaced)
+            }
+            if (el.hasAttribute('style')) {
+                const value = el.getAttribute('style')
+                const replaced = await this.replaceCSS(value, base, [], parent)
+                if (!disposed && replaced !== value) el.setAttribute('style', replaced)
+            }
+            const xlinkHref = el.getAttributeNS(NS.XLINK, 'href')
+            if (xlinkHref && !el.hasAttribute('href')) {
+                const resolved = await load(xlinkHref)
+                if (!disposed && resolved !== xlinkHref)
+                    el.setAttributeNS(NS.XLINK, 'href', resolved)
+            }
+        }
+        const collect = (node, elements) => {
+            if (node.nodeType !== 1) return
+            elements.add(node)
+            node.querySelectorAll?.('[src], [poster], object[data], link[href], [srcset], [style], [*|href]:not([href])')
+                .forEach(el => elements.add(el))
+        }
+        const processRecords = records => {
+            const elements = new Set()
+            for (const record of records) {
+                if (record.type === 'attributes') elements.add(record.target)
+                else for (const node of record.addedNodes) collect(node, elements)
+            }
+            return Promise.all([...elements].map(process))
+        }
+
+        let pending = Promise.resolve()
+        const observer = new Observer(records => {
+            pending = pending.then(() => processRecords(records)).catch(() => {})
+        })
+        observer.observe(doc.documentElement, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ['src', 'poster', 'data', 'href', 'srcset', 'style', 'xlink:href'],
+        })
+        const initial = [...doc.querySelectorAll(
+            '[src], [poster], object[data], link[href], [srcset], [style], [*|href]:not([href])')]
+        pending = pending.then(() => Promise.all(initial.map(process))).catch(() => {})
+        return () => {
+            if (disposed) return
+            disposed = true
+            observer.disconnect()
+            this.#releaseChildren(parent)
+        }
     }
     async loadReplaced(item, parents = []) {
         const { href, mediaType } = item
@@ -993,13 +1109,15 @@ class Loader {
 
         // parse and replace in HTML
         if ([MIME.XHTML, MIME.HTML, MIME.SVG].includes(mediaType)) {
-            let doc = new DOMParser().parseFromString(str, mediaType)
+            const source = mediaType === MIME.XHTML
+                ? repairXHTMLVoidElements(str) : str
+            let doc = new DOMParser().parseFromString(source, mediaType)
             // change to HTML if it's not valid XHTML
             if (mediaType === MIME.XHTML && (doc.querySelector('parsererror')
             || !doc.documentElement?.namespaceURI)) {
                 console.warn(doc.querySelector('parsererror')?.innerText ?? 'Invalid XHTML')
                 item.mediaType = MIME.HTML
-                doc = new DOMParser().parseFromString(str, item.mediaType)
+                doc = new DOMParser().parseFromString(source, item.mediaType)
             }
             // replace hrefs in XML processing instructions
             // this is mainly for SVGs that use xml-stylesheet
@@ -1020,8 +1138,27 @@ class Loader {
             // replace hrefs (excluding anchors)
             const replace = async (el, attr) => el.setAttribute(attr,
                 await this.loadHref(el.getAttribute(attr), href, parents))
+            const isHeavyMedia = el => {
+                const tag = el.localName?.toLowerCase()
+                if (tag === 'video' || tag === 'audio') return true
+                if (tag === 'source' || tag === 'track') {
+                    const parentTag = el.parentElement?.localName?.toLowerCase()
+                    return parentTag === 'video' || parentTag === 'audio'
+                }
+                return false
+            }
             for (const el of doc.querySelectorAll('link[href]')) await replace(el, 'href')
-            for (const el of doc.querySelectorAll('[src]')) await replace(el, 'src')
+            for (const el of doc.querySelectorAll('[src]')) {
+                if (isHeavyMedia(el)) {
+                    const rawSrc = el.getAttribute('src')
+                    if (rawSrc) {
+                        el.setAttribute('data-bd-deferred-src', rawSrc)
+                        el.removeAttribute('src')
+                    }
+                    continue
+                }
+                await replace(el, 'src')
+            }
             for (const el of doc.querySelectorAll('[poster]')) await replace(el, 'poster')
             for (const el of doc.querySelectorAll('object[data]')) await replace(el, 'data')
             for (const el of doc.querySelectorAll('[*|href]:not([href])'))
@@ -1049,15 +1186,15 @@ class Loader {
             : await this.replaceString(str, href, parents)
         return this.createURL(href, result, mediaType, parent)
     }
-    async replaceCSS(str, href, parents = []) {
+    async replaceCSS(str, href, parents = [], parent) {
         const replacedUrls = await replaceSeries(str,
             /url\(\s*["']?([^'"\n]*?)\s*["']?\s*\)/gi,
-            (_, url) => this.loadHref(url, href, parents)
+            (_, url) => this.loadHref(url, href, parents, parent)
                 .then(url => `url("${url}")`))
         // apart from `url()`, strings can be used for `@import` (but why?!)
         return replaceSeries(replacedUrls,
             /@import\s*["']([^"'\n]*?)["']/gi,
-            (_, url) => this.loadHref(url, href, parents)
+            (_, url) => this.loadHref(url, href, parents, parent)
                 .then(url => `@import "${url}"`))
     }
     // find & replace all possible relative paths for all assets without parsing
@@ -1199,6 +1336,9 @@ ${doc.querySelector('parsererror').innerText}`)
                 unload: () => this.#loader.unloadItem(item),
                 loadText: () => this.#loader.loadText(item.href),
                 loadContent: () => this.#loader.loadItemXHTMLContent(item),
+                loadHref: (href, base = item.href) => this.#loader.loadHref(href, base),
+                observeDynamicResources: doc =>
+                    this.#loader.observeDynamicResources(doc, item.href),
                 createDocument: () => this.loadDocument(item),
                 size: this.getSize(item.href),
                 cfi: this.resources.cfis[index],

@@ -13,7 +13,11 @@ import type {
   ContinuousScroll,
   FontConfig,
   FootnoteEntry,
+  ImageMediaContextInfo,
+  ImageMediaInfo,
   MarginalConfig,
+  MediaErrorInfo,
+  MediaPlayInfo,
   ParagraphStyle,
   PopupRect,
   ReaderAnnotation,
@@ -27,6 +31,7 @@ import type {
 } from '../types'
 import { FONT_OPTIONS } from '../types'
 import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
+import { MediaOverlaySection, type MediaOverlayCue } from '../lib/media-overlay'
 import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, type TextReplacementRule } from '../lib/text-replacements'
 import { NavigationPending } from '../lib/navigation-pending'
 import { sectionFractionBoundaries } from '../lib/progress-model'
@@ -493,7 +498,13 @@ export function transformEpubMarkup(markup: string, viewportWidth: number, viewp
   )
 }
 
-export function normalizeEpubDocumentImages(doc: Document): void {
+export interface NormalizeEpubDocumentOptions {
+  sectionIndex?: number
+  section?: { id?: string; loadHref?: (href: string) => Promise<string> }
+  onMediaError?: (detail: MediaErrorInfo) => void
+}
+
+export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEpubDocumentOptions): void {
   const view = doc.defaultView ?? (typeof window === 'undefined' ? null : window)
   if (!view) return
 
@@ -535,6 +546,223 @@ export function normalizeEpubDocumentImages(doc: Document): void {
 
   for (const rule of Array.from(doc.querySelectorAll('hr'))) {
     if (view.getComputedStyle(rule).backgroundImage !== 'none') rule.classList.add('background-img')
+  }
+
+  // Legacy cover float-hack normalization: legacy authoring tools insert a float wedge (.wedge)
+  // with negative margin-bottom and a 0em container (.container) wrapping a
+  // fixed-height table. In multi-column pagination this collapses the cover into
+  // a thin horizontal strip. Reset them to normal flow and auto heights.
+  for (const wedge of Array.from(doc.querySelectorAll('.wedge'))) {
+    ;(wedge as HTMLElement).style.setProperty('display', 'none', 'important')
+    const parent = wedge.parentElement
+    if (parent) {
+      for (const container of Array.from(parent.querySelectorAll('.container'))) {
+        ;(container as HTMLElement).style.setProperty('height', 'auto', 'important')
+        ;(container as HTMLElement).style.setProperty('min-height', 'auto', 'important')
+        ;(container as HTMLElement).style.setProperty('position', 'static', 'important')
+        const table = container.querySelector('table')
+        if (table) {
+          table.style.setProperty('height', 'auto', 'important')
+          for (const cell of Array.from(table.querySelectorAll('tr, td, th'))) {
+            ;(cell as HTMLElement).style.setProperty('height', 'auto', 'important')
+          }
+        }
+      }
+    }
+  }
+
+  for (const container of Array.from(doc.querySelectorAll('.container'))) {
+    const table = container.querySelector('table')
+    if (table && table.querySelector('img')) {
+      ;(container as HTMLElement).style.setProperty('height', 'auto', 'important')
+      ;(container as HTMLElement).style.setProperty('min-height', 'auto', 'important')
+      ;(container as HTMLElement).style.setProperty('position', 'static', 'important')
+      table.style.setProperty('height', 'auto', 'important')
+      for (const cell of Array.from(table.querySelectorAll('tr, td, th'))) {
+        ;(cell as HTMLElement).style.setProperty('height', 'auto', 'important')
+      }
+    }
+  }
+
+  // Ensure embedded media (e.g. legacy video markup) expose native
+  // playback controls, warm preloading, and click-to-play when authoring markup omits them.
+  for (const video of Array.from(doc.querySelectorAll('video'))) {
+    if (!video.hasAttribute('controls')) {
+      video.setAttribute('controls', '')
+      video.controls = true
+    }
+    if (!video.hasAttribute('playsinline')) {
+      video.setAttribute('playsinline', '')
+    }
+    if (!video.hasAttribute('preload')) {
+      video.setAttribute('preload', 'auto')
+      video.preload = 'auto'
+    }
+
+    if (!video.hasAttribute('controlslist')) {
+      video.setAttribute('controlslist', 'nodownload noplaybackrate')
+    }
+
+    // Wrap video in card container with frosted-glass center play button overlay
+    let wrapper = video.parentElement?.classList.contains('bd-video-wrapper')
+      ? (video.parentElement as HTMLElement)
+      : null
+
+    if (!wrapper && video.parentNode) {
+      wrapper = doc.createElement('div')
+      wrapper.className = 'bd-video-wrapper'
+      video.parentNode.insertBefore(wrapper, video)
+      wrapper.appendChild(video)
+
+      const playBtn = doc.createElement('button')
+      playBtn.className = 'bd-video-play-btn'
+      playBtn.type = 'button'
+      playBtn.setAttribute('aria-label', 'Play')
+
+      const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      svg.setAttribute('viewBox', '0 0 24 24')
+      svg.setAttribute('width', '28')
+      svg.setAttribute('height', '28')
+      const polygon = doc.createElementNS('http://www.w3.org/2000/svg', 'polygon')
+      polygon.setAttribute('points', '6,3 20,12 6,21')
+      polygon.setAttribute('fill', 'white')
+      svg.appendChild(polygon)
+      playBtn.appendChild(svg)
+
+      playBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        e.preventDefault()
+        if (video.paused) {
+          void video.play().catch(() => {})
+        } else {
+          video.pause()
+        }
+      })
+
+      wrapper.appendChild(playBtn)
+
+      video.addEventListener('play', () => wrapper?.classList.add('is-playing'))
+      video.addEventListener('pause', () => wrapper?.classList.remove('is-playing'))
+      video.addEventListener('ended', () => wrapper?.classList.remove('is-playing'))
+      if (!video.paused) wrapper.classList.add('is-playing')
+    }
+
+    // Deferred heavy media resolution:
+    // If the video source was deferred during chapter XHTML parsing,
+    // show a spinner in the wrapper and asynchronously fetch its Blob URL in the background.
+    const deferredSrc = video.dataset.bdDeferredSrc
+      || video.querySelector('[data-bd-deferred-src]')?.getAttribute('data-bd-deferred-src')
+
+    if (!video.src && deferredSrc && wrapper) {
+      wrapper.classList.add('is-media-loading')
+      let spinner = wrapper.querySelector('.bd-video-spinner')
+      if (!spinner) {
+        spinner = doc.createElement('div')
+        spinner.className = 'bd-video-spinner'
+        spinner.setAttribute('aria-label', 'Loading media')
+        const ring = doc.createElement('div')
+        ring.className = 'bd-video-spinner-ring'
+        const label = doc.createElement('span')
+        label.className = 'bd-video-spinner-label'
+        label.textContent = '媒体加载中...'
+        spinner.appendChild(ring)
+        spinner.appendChild(label)
+        wrapper.appendChild(spinner)
+      }
+
+      if (options?.section?.loadHref) {
+        options.section.loadHref(deferredSrc)
+          .then((blobUrl: string) => {
+            if (!video.isConnected) return
+            const firstSource = video.querySelector('source')
+            if (firstSource) {
+              firstSource.src = blobUrl
+              firstSource.removeAttribute('data-bd-deferred-src')
+            }
+            video.src = blobUrl
+            video.removeAttribute('data-bd-deferred-src')
+            wrapper?.classList.remove('is-media-loading')
+            spinner?.remove()
+          })
+          .catch((_err: unknown) => {
+            if (!video.isConnected) return
+            wrapper?.classList.remove('is-media-loading')
+            wrapper?.classList.add('is-media-error')
+            spinner?.remove()
+            options?.onMediaError?.({
+              sectionIndex: options.sectionIndex ?? 0,
+              kind: 'video',
+              src: deferredSrc,
+            })
+          })
+      }
+    } else {
+      // Directly bind the first source's blob URL to the video element if unset.
+      const firstSource = video.querySelector('source')
+      if (firstSource?.src && !video.src) {
+        video.src = firstSource.src
+      }
+    }
+
+    if (!video.dataset.bdMediaNormalized) {
+      video.dataset.bdMediaNormalized = 'true'
+      // Click-to-play on video body: native desktop browsers do not play when
+      // clicking the video canvas/poster. Clicking the upper body toggles playback,
+      // while preserving clicks on the bottom 48px native control bar (scrubber/volume/fullscreen).
+      video.addEventListener('click', (e) => {
+        const rect = video.getBoundingClientRect()
+        if (e.clientY > rect.bottom - 48) return
+        e.preventDefault()
+        if (video.paused) {
+          void video.play().catch(() => {})
+        } else {
+          video.pause()
+        }
+      })
+    }
+  }
+  for (const audio of Array.from(doc.querySelectorAll('audio'))) {
+    if (!audio.hasAttribute('controls')) {
+      audio.setAttribute('controls', '')
+      audio.controls = true
+    }
+    if (!audio.hasAttribute('preload')) {
+      audio.setAttribute('preload', 'auto')
+      audio.preload = 'auto'
+    }
+
+    const deferredAudioSrc = audio.dataset.bdDeferredSrc
+      || audio.querySelector('[data-bd-deferred-src]')?.getAttribute('data-bd-deferred-src')
+
+    if (!audio.src && deferredAudioSrc && options?.section?.loadHref) {
+      audio.classList.add('bd-audio-loading')
+      options.section.loadHref(deferredAudioSrc)
+        .then((blobUrl: string) => {
+          if (!audio.isConnected) return
+          const firstSource = audio.querySelector('source')
+          if (firstSource) {
+            firstSource.src = blobUrl
+            firstSource.removeAttribute('data-bd-deferred-src')
+          }
+          audio.src = blobUrl
+          audio.removeAttribute('data-bd-deferred-src')
+          audio.classList.remove('bd-audio-loading')
+        })
+        .catch((_err: unknown) => {
+          if (!audio.isConnected) return
+          audio.classList.remove('bd-audio-loading')
+          options?.onMediaError?.({
+            sectionIndex: options.sectionIndex ?? 0,
+            kind: 'audio',
+            src: deferredAudioSrc,
+          })
+        })
+    } else {
+      const firstSource = audio.querySelector('source')
+      if (firstSource?.src && !audio.src) {
+        audio.src = firstSource.src
+      }
+    }
   }
 }
 
@@ -998,6 +1226,7 @@ export class FoliateReader implements BookReader {
   private showHeader = true
   private showFooter = true
   private currentSectionIndex = 0
+  private mediaOverlaySections = new Map<number, MediaOverlaySection>()
   private ttsNavigation = false
   private autoReadingActive = false
   private autoReadingSnapTurn: boolean | null = null
@@ -1241,6 +1470,7 @@ export class FoliateReader implements BookReader {
         text-align: ${this.paragraph.textAlignJustify ? 'justify' : 'start'} !important;
       }
       img { max-width: 100% !important; height: auto !important; }
+      audio, video, object, embed { max-width: 100% !important; box-sizing: border-box !important; }
       table { max-width: 100% !important; overflow-x: auto !important; }
       ${hidden ? 'aside { display: block !important; }' : ''}
     `)
@@ -1313,6 +1543,58 @@ export class FoliateReader implements BookReader {
       } catch {
         return ''
       }
+    })
+  }
+
+  private handleOpenMedia = (event: Event) => {
+    const detail = (event as CustomEvent).detail as Partial<ImageMediaInfo> | undefined
+    if (!detail || typeof detail.sectionIndex !== 'number' || typeof detail.src !== 'string' || !detail.src) return
+    this.emit('imageClicked', {
+      sectionIndex: detail.sectionIndex,
+      cfi: typeof detail.cfi === 'string' ? detail.cfi : '',
+      src: detail.src,
+      alt: typeof detail.alt === 'string' ? detail.alt : '',
+      title: typeof detail.title === 'string' ? detail.title : '',
+      kind: detail.kind === 'svg-image' ? 'svg-image' : 'image',
+    })
+  }
+
+  private handleOpenMediaMenu = (event: Event) => {
+    const detail = (event as CustomEvent).detail as Partial<ImageMediaContextInfo> | undefined
+    if (!detail || typeof detail.sectionIndex !== 'number' || typeof detail.src !== 'string' || !detail.src) return
+    if (typeof detail.x !== 'number' || typeof detail.y !== 'number') return
+    this.emit('imageContextMenu', {
+      sectionIndex: detail.sectionIndex,
+      cfi: typeof detail.cfi === 'string' ? detail.cfi : '',
+      src: detail.src,
+      alt: typeof detail.alt === 'string' ? detail.alt : '',
+      title: typeof detail.title === 'string' ? detail.title : '',
+      kind: detail.kind === 'svg-image' ? 'svg-image' : 'image',
+      x: detail.x,
+      y: detail.y,
+    })
+  }
+
+  private handleMediaError = (event: Event) => {
+    const detail = (event as CustomEvent).detail as Partial<MediaErrorInfo> | undefined
+    if (!detail || typeof detail.sectionIndex !== 'number') return
+    const kind = detail.kind === 'video' || detail.kind === 'object' || detail.kind === 'embed'
+      ? detail.kind
+      : 'audio'
+    this.emit('mediaError', {
+      sectionIndex: detail.sectionIndex,
+      kind,
+      src: typeof detail.src === 'string' ? detail.src : '',
+    })
+  }
+
+  private handleMediaPlay = (event: Event) => {
+    const detail = (event as CustomEvent).detail as Partial<MediaPlayInfo> | undefined
+    if (!detail || typeof detail.sectionIndex !== 'number') return
+    const kind = detail.kind === 'video' ? 'video' : 'audio'
+    this.emit('mediaPlay', {
+      sectionIndex: detail.sectionIndex,
+      kind,
     })
   }
 
@@ -1406,6 +1688,10 @@ export class FoliateReader implements BookReader {
       })
       view.addEventListener('load', () => this.syncDoc())
       view.addEventListener('click-view', this.handleClickView)
+      view.addEventListener('open-media', this.handleOpenMedia)
+      view.addEventListener('open-media-menu', this.handleOpenMediaMenu)
+      view.addEventListener('media-error', this.handleMediaError)
+      view.addEventListener('media-play', this.handleMediaPlay)
       view.addEventListener('wheel', () => this.emit('userInteraction'), { passive: true })
       view.addEventListener('doctouchstart', () => this.emit('userInteraction'))
       view.addEventListener('doctouchend', () => this.emit('userInteractionEnd'))
@@ -2085,6 +2371,130 @@ export class FoliateReader implements BookReader {
     }
   }
 
+  async getMediaOverlayCues(sectionIndex = this.currentSectionIndex): Promise<MediaOverlayCue[]> {
+    const section = this.book?.sections?.[sectionIndex]
+    const mediaOverlayHref = section?.mediaOverlay?.href
+    const loadText = this.book?.loadSectionText ?? this.book?.loadText
+    if (!section?.id || typeof mediaOverlayHref !== 'string' || typeof loadText !== 'function') return []
+    let adapter = this.mediaOverlaySections.get(sectionIndex)
+    if (!adapter) {
+      adapter = new MediaOverlaySection({
+        sectionIndex,
+        sectionHref: section.id,
+        mediaOverlayHref,
+        loadText: (href) => loadText.call(this.book, href),
+      })
+      this.mediaOverlaySections.set(sectionIndex, adapter)
+    }
+    return adapter.load()
+  }
+
+  hasMediaOverlay(): boolean {
+    return Boolean(this.book?.sections?.some((section: any) => section.mediaOverlay))
+  }
+
+  async getMediaOverlayCueRange(sectionIndex: number, cueIndex: number): Promise<Range | null> {
+    const cues = await this.getMediaOverlayCues(sectionIndex)
+    const cue = cues[cueIndex]
+    if (!cue) return null
+    const content = this.view?.renderer?.getContents?.().find((item: any) => item.index === sectionIndex)
+    if (!content?.doc) return null
+    const adapter = this.mediaOverlaySections.get(sectionIndex)
+    return adapter?.resolveRange(cue, content.doc) ?? null
+  }
+
+  private async mediaOverlaySegmentAt(sectionIndex: number, cueIndex: number): Promise<TtsSegment | null> {
+    const cues = await this.getMediaOverlayCues(sectionIndex)
+    const cue = cues[cueIndex]
+    const adapter = this.mediaOverlaySections.get(sectionIndex)
+    if (!cue || !adapter) return null
+    let range = await this.getMediaOverlayCueRange(sectionIndex, cueIndex)
+    if (!range && this.view?.renderer?.goTo) {
+      this.ttsNavigation = true
+      try {
+        await this.view.renderer.goTo({
+          index: sectionIndex,
+          anchor: (doc: Document) => adapter.resolveRange(cue, doc),
+        })
+      } finally {
+        this.ttsNavigation = false
+      }
+      range = await this.getMediaOverlayCueRange(sectionIndex, cueIndex)
+    }
+    if (!range) return null
+    const text = range.toString().replace(/\s+/g, ' ').trim()
+    if (!text) return null
+    let cfi = ''
+    try {
+      cfi = this.view?.getCFI?.(sectionIndex, range) ?? ''
+    } catch {
+      cfi = ''
+    }
+    if (!cfi) return null
+    return {
+      id: `${this.bookId}:${sectionIndex}:media-overlay:${cueIndex}:${ttsTextHash(text)}`,
+      text,
+      cfi,
+      chapterIndex: sectionIndex,
+      mediaOverlay: { sectionIndex, cueIndex, cue },
+    }
+  }
+
+  async getMediaOverlaySegment(startCfi?: string): Promise<TtsSegment | null> {
+    let startIndex = this.currentSectionIndex
+    if (startCfi?.startsWith('epubcfi(')) {
+      startIndex = this.view?.resolveCFI?.(startCfi)?.index ?? startIndex
+    }
+    for (let sectionIndex = Math.max(0, startIndex); sectionIndex < (this.book?.sections?.length ?? 0); sectionIndex++) {
+      const cues = await this.getMediaOverlayCues(sectionIndex)
+      for (let cueIndex = 0; cueIndex < cues.length; cueIndex++) {
+        const segment = await this.mediaOverlaySegmentAt(sectionIndex, cueIndex)
+        if (segment) return segment
+      }
+    }
+    return null
+  }
+
+  async nextMediaOverlaySegment(segment: TtsSegment): Promise<TtsSegment | null> {
+    const metadata = segment.mediaOverlay
+    if (!metadata) return this.getMediaOverlaySegment()
+    const sectionCount = this.book?.sections?.length ?? 0
+    for (let sectionIndex = metadata.sectionIndex; sectionIndex < sectionCount; sectionIndex++) {
+      const cues = await this.getMediaOverlayCues(sectionIndex)
+      const firstCue = sectionIndex === metadata.sectionIndex ? metadata.cueIndex + 1 : 0
+      for (let cueIndex = firstCue; cueIndex < cues.length; cueIndex++) {
+        const next = await this.mediaOverlaySegmentAt(sectionIndex, cueIndex)
+        if (next) return next
+      }
+    }
+    return null
+  }
+
+  async previousMediaOverlaySegment(segment: TtsSegment): Promise<TtsSegment | null> {
+    const metadata = segment.mediaOverlay
+    if (!metadata) return this.getMediaOverlaySegment()
+    for (let sectionIndex = metadata.sectionIndex; sectionIndex >= 0; sectionIndex--) {
+      const cues = await this.getMediaOverlayCues(sectionIndex)
+      const firstCue = sectionIndex === metadata.sectionIndex ? metadata.cueIndex - 1 : cues.length - 1
+      for (let cueIndex = firstCue; cueIndex >= 0; cueIndex--) {
+        const previous = await this.mediaOverlaySegmentAt(sectionIndex, cueIndex)
+        if (previous) return previous
+      }
+    }
+    return null
+  }
+
+  async getMediaOverlayAudio(segment: TtsSegment): Promise<Blob | null> {
+    const cue = segment.mediaOverlay?.cue
+    return cue ? this.getMediaOverlayAudioByHref(cue.audioHref) : null
+  }
+
+  async getMediaOverlayAudioByHref(audioHref: string): Promise<Blob | null> {
+    const loadBlob = this.book?.loadBlob
+    if (!audioHref || typeof loadBlob !== 'function') return null
+    return loadBlob.call(this.book, audioHref)
+  }
+
   private ttsDetailToSegment(detail: any): TtsSegment | null {
     const text = typeof detail?.text === 'string' ? detail.text.replace(/\s+/g, ' ').trim() : ''
     const cfi = typeof detail?.cfi === 'string' ? detail.cfi : ''
@@ -2266,6 +2676,34 @@ export class FoliateReader implements BookReader {
 
   clearTtsHighlight() {
     try { this.view?.initTTS?.(true) } catch { /* view may be between reloads */ }
+  }
+
+  pauseInlineMedia(): void {
+    for (const doc of this.activeDocs) {
+      for (const el of doc.querySelectorAll('audio, video')) {
+        try {
+          const media = el as HTMLMediaElement
+          if (!media.paused) media.pause()
+        } catch { /* ignore */ }
+      }
+    }
+  }
+
+  setMediaOverlayHighlight(range: Range | null): void {
+    if (!range) {
+      this.clearMediaOverlayHighlight()
+      return
+    }
+    try {
+      const cfi = this.view?.getCFI?.(this.currentSectionIndex, range)
+      if (cfi) {
+        this.view?.tts?.highlightCfi?.(cfi)
+      }
+    } catch { /* ignore */ }
+  }
+
+  clearMediaOverlayHighlight(): void {
+    this.clearTtsHighlight()
   }
 
   // --- Selection & annotations -------------------------------------------
@@ -2841,7 +3279,10 @@ export class FoliateReader implements BookReader {
       for (const { doc, index } of contents) {
         if (!doc || this.activeDocs.has(doc)) continue
         this.applyFixedLayoutDocumentStyles(doc)
-        normalizeEpubDocumentImages(doc)
+        normalizeEpubDocumentImages(doc, {
+          section: this.book?.sections?.[index],
+          onMediaError: (detail) => this.emit('mediaError', detail),
+        })
         doc.addEventListener('click', this.handleDocInteraction)
         const handler = () => this.handleSelection(doc, index)
         const selectionChangeHandler = () => this.handleSelectionChange(doc)
@@ -2933,6 +3374,10 @@ export class FoliateReader implements BookReader {
     if (this.prefetchTimer !== null) { clearTimeout(this.prefetchTimer); this.prefetchTimer = null }
     if (this.marginalTimer !== null) { clearTimeout(this.marginalTimer); this.marginalTimer = null }
     this.view?.removeEventListener('link', this.handleFootnoteLink)
+    this.view?.removeEventListener('open-media', this.handleOpenMedia)
+    this.view?.removeEventListener('open-media-menu', this.handleOpenMediaMenu)
+    this.view?.removeEventListener('media-error', this.handleMediaError)
+    this.view?.removeEventListener('media-play', this.handleMediaPlay)
     try { this.view?.close() } catch { /* view may be partially initialized */ }
     try { this.view?.remove() } catch { /* ignore */ }
     for (const doc of this.activeDocs) {
@@ -2948,6 +3393,7 @@ export class FoliateReader implements BookReader {
     }
     this.selectionDocs.clear()
     this.activeDocs.clear()
+    this.mediaOverlaySections.clear()
     this.listeners = []
     this.view = null
     this.book = null
@@ -3116,6 +3562,11 @@ export class FoliateReader implements BookReader {
       img:not([height]), svg:not([height]) {
         height: auto;
       }
+      video {
+        max-height: calc(var(--bd-available-height, 100%) * 1px);
+        height: auto;
+        cursor: pointer;
+      }
       .ie6 img {
         width: unset;
         height: unset;
@@ -3260,6 +3711,143 @@ export class FoliateReader implements BookReader {
       .calibre {
         color: unset;
         background-color: unset;
+      }
+      /* Legacy cover float-hack reset */
+      .wedge {
+        display: none !important;
+        float: none !important;
+        height: 0 !important;
+        margin: 0 !important;
+      }
+      .wedge ~ .container,
+      .container:has(table img) {
+        height: auto !important;
+        min-height: auto !important;
+        position: static !important;
+      }
+      .wedge ~ .container table,
+      .wedge ~ .container tr,
+      .wedge ~ .container th,
+      .wedge ~ .container td,
+      .container:has(table img) table,
+      .container:has(table img) tr,
+      .container:has(table img) th,
+      .container:has(table img) td {
+        height: auto !important;
+      }
+      /* Video card styling and play overlay */
+      .bd-video-wrapper {
+        position: relative !important;
+        display: inline-block !important;
+        max-width: 100% !important;
+        margin: 0.8em auto !important;
+        line-height: 0 !important;
+        text-align: center !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
+        box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.12), 0 2px 6px -1px rgba(0, 0, 0, 0.08) !important;
+        outline: 1px solid rgba(128, 128, 128, 0.18) !important;
+        background-color: rgba(0, 0, 0, 0.06) !important;
+        min-width: 240px !important;
+        min-height: 135px !important;
+        aspect-ratio: 16 / 9;
+      }
+      .bd-video-wrapper video {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: calc(var(--bd-available-height, 100%) * 1px) !important;
+        height: auto !important;
+        border-radius: 8px !important;
+        accent-color: var(--bd-theme-primary) !important;
+        cursor: pointer !important;
+      }
+      .bd-video-play-btn {
+        position: absolute !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: 54px !important;
+        height: 54px !important;
+        border-radius: 50% !important;
+        border: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: rgba(0, 0, 0, 0.45) !important;
+        backdrop-filter: blur(8px) !important;
+        -webkit-backdrop-filter: blur(8px) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+        cursor: pointer !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease !important;
+        pointer-events: auto !important;
+        z-index: 5 !important;
+      }
+      .bd-video-play-btn:hover {
+        background: rgba(0, 0, 0, 0.65) !important;
+        transform: translate(-50%, -50%) scale(1.08) !important;
+      }
+      .bd-video-play-btn svg {
+        margin-left: 3px !important;
+        width: 24px !important;
+        height: 24px !important;
+        fill: #ffffff !important;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4)) !important;
+      }
+      .bd-video-wrapper.is-playing .bd-video-play-btn {
+        opacity: 0 !important;
+        pointer-events: none !important;
+        transform: translate(-50%, -50%) scale(0.85) !important;
+      }
+      .bd-video-wrapper.is-media-loading .bd-video-play-btn {
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+      .bd-video-spinner {
+        position: absolute !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 8px !important;
+        z-index: 6 !important;
+        pointer-events: none !important;
+      }
+      .bd-video-spinner-ring {
+        width: 32px !important;
+        height: 32px !important;
+        border-radius: 50% !important;
+        border: 3px solid rgba(255, 255, 255, 0.3) !important;
+        border-top-color: #ffffff !important;
+        animation: bd-media-spin 0.8s linear infinite !important;
+        filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5)) !important;
+      }
+      .bd-video-spinner-label {
+        font-size: 12px !important;
+        line-height: 1 !important;
+        color: #ffffff !important;
+        font-family: system-ui, -apple-system, sans-serif !important;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8) !important;
+        letter-spacing: 0.02em !important;
+      }
+      @keyframes bd-media-spin {
+        to { transform: rotate(360deg); }
+      }
+      audio.bd-audio-loading {
+        opacity: 0.6 !important;
+        filter: grayscale(0.5) !important;
+        pointer-events: none !important;
+      }
+      /* Embedded video container compatibility */
+      .videoplay {
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        text-align: center !important;
       }`
     const themeCompatibilityStyles = isDarkTheme
       ? `
