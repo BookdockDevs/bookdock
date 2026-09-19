@@ -312,7 +312,7 @@ export default function Library() {
     return () => window.removeEventListener('pointermove', onPointerMove)
   }, [dragKind])
 
-  const { data, isLoading, isError, isFetching, isFetchingNextPage, isFetchNextPageError, hasNextPage, fetchNextPage, refetch } = useInfiniteBooks({
+  const { data, isLoading, isError, isPlaceholderData, isFetching, isFetchingNextPage, isFetchNextPageError, hasNextPage, fetchNextPage, refetch } = useInfiniteBooks({
     pageSize: PAGE_SIZE,
     search: query,
     sortBy,
@@ -443,6 +443,26 @@ export default function Library() {
       navigate({ to: '/', search: { ...search, trash: undefined }, replace: true })
     }
   }, [trash, trashEnabled, navigate, search])
+
+  // Uncategorized is a virtual view: staying on it after the last book is
+  // moved/deleted away is a dead end, so leave back to all books. A view
+  // entered already empty keeps its empty state — bookmarked ?shelf=none
+  // URLs must not be bounced.
+  const uncategorizedEmptyOnEntryRef = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (shelfId !== 'none') {
+      uncategorizedEmptyOnEntryRef.current = null
+      return
+    }
+    // The placeholder total belongs to the previous view, not this one
+    if (isLoading || isPlaceholderData) return
+    if (uncategorizedEmptyOnEntryRef.current === null) {
+      uncategorizedEmptyOnEntryRef.current = total === 0
+    } else if (!uncategorizedEmptyOnEntryRef.current && total === 0) {
+      uncategorizedEmptyOnEntryRef.current = null
+      navSearch({ shelf: undefined })
+    }
+  }, [shelfId, isLoading, isPlaceholderData, total, navSearch])
 
   const coverText = useUiStore((s) => s.coverText)
   const gridColumns = useUiStore((s) => s.gridColumns)

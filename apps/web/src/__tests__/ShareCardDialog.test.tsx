@@ -63,13 +63,12 @@ describe('ShareCardDialog', () => {
 
   it('renders the font row as a single list in the default order, without group labels', async () => {
     renderDialog()
-    fireEvent.click(await screen.findByText('更换模板'))
 
     expect(screen.queryByText('在线字体')).not.toBeInTheDocument()
     expect(screen.queryByText('系统字体')).not.toBeInTheDocument()
     expect(screen.queryByText('我的字体')).not.toBeInTheDocument()
 
-    const fontRow = screen.getByText('字体', { selector: 'span' }).parentElement!
+    const fontRow = (await screen.findByText('字体', { selector: 'span' })).parentElement!
     const chips = Array.from(fontRow.querySelectorAll('button'))
     expect(chips[0]).toHaveTextContent('宋体')
     expect(chips.map((c) => c.textContent)).toEqual([
@@ -86,11 +85,10 @@ describe('ShareCardDialog', () => {
     expect(screen.queryByText('更多')).not.toBeInTheDocument()
   })
 
-  it('loads builtin stylesheets when the font customization list opens', async () => {
+  it('loads builtin stylesheets when the share card dialog opens', async () => {
     const { container } = renderDialog()
-    fireEvent.click(await screen.findByText('更换模板'))
 
-    const wenkaiChip = screen.getByText('霞鹜文楷').closest('button')!
+    const wenkaiChip = (await screen.findByText('霞鹜文楷')).closest('button')!
     expect(wenkaiChip.querySelector('.animate-spin')).toBeTruthy()
     expect(document.head.querySelectorAll('link[data-bd-font]')).toHaveLength(3)
 
@@ -100,5 +98,17 @@ describe('ShareCardDialog', () => {
     // System and uploaded chips never carry a builtin loading status icon.
     expect(screen.getByText('宋体').closest('button')!.querySelector('svg')).toBeNull()
     expect(screen.getByText('我的手写体').closest('button')!.querySelector('svg')).toBeNull()
+  })
+
+  it('renders the brand options as a segmented control and persistent export actions', async () => {
+    renderDialog()
+    expect(await screen.findByRole('button', { name: 'Bookdock' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '书坞' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '不显示' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复制图片' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存图片' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '书坞' }))
+    expect(loadShareCardPrefs().brand).toBe('zh')
   })
 })

@@ -17,23 +17,15 @@ import { markEscConsumed } from '../../lib/esc-consumed'
 
 import { useReaderState } from '../../state/reader-state'
 import { buildFontOptions, ensureBuiltinFontLoaded, ensureBuiltinFontsLoaded, ensureUploadedFontLoaded, resolveFont, useFontLoaderStore, type FontOption } from '../../fonts'
-import { ChevronLeftIcon, CloseIcon, DownloadIcon, ShareIcon, SpinnerIcon, TemplateIcon } from '../annotation-icons'
+import { CloseIcon, CopyIcon, DownloadIcon, SpinnerIcon } from '../annotation-icons'
 import ShareCard, { SHARE_CARD_WIDTH } from './ShareCard'
-import { BACKGROUND_OPTIONS, SHARE_CARD_TEMPLATES, loadShareCardPrefs, nextBrand, saveShareCardPrefs, type ShareCardPrefs } from './card-prefs'
+import { BACKGROUND_OPTIONS, BRAND_OPTIONS, SHARE_CARD_TEMPLATES, loadShareCardPrefs, saveShareCardPrefs, type ShareCardPrefs } from './card-prefs'
 import { copyCardBlob, downloadCardBlob, getCardBlob } from './export-image'
 import { formatChineseDate, formatShareDate, shareFileName } from './share-text'
 
 interface ShareCardDialogProps {
   bookId: string
 }
-
-const actionBtn =
-  'flex flex-col items-center gap-1.5 text-xs text-stone-600 transition-colors hover:text-stone-900 disabled:opacity-50 dark:text-stone-400 dark:hover:text-stone-100'
-const actionIcon =
-  'flex h-12 w-12 items-center justify-center rounded-full bg-stone-100 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700'
-const chip =
-  'rounded-lg border border-stone-300 px-3 py-1.5 text-sm transition-colors hover:border-stone-500 dark:border-stone-700 dark:hover:border-stone-500'
-const chipActive = 'border-stone-900 dark:border-stone-100'
 
 /** Centered modal with a live card preview and image export actions. The card
  * DOM stays at SHARE_CARD_WIDTH; the preview scales down via transform on a
@@ -66,7 +58,6 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const [{ scale, height }, setMetrics] = useState({ scale: 1, height: 0 })
   const [exporting, setExporting] = useState(false)
-  const [customizing, setCustomizing] = useState(false)
   const [prefs, setPrefs] = useState<ShareCardPrefs>(loadShareCardPrefs)
 
   useEffect(() => {
@@ -100,7 +91,6 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
 
   useLayoutEffect(() => {
     if (!shareTarget) return
-    setCustomizing(false)
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         markEscConsumed()
@@ -127,24 +117,18 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   }, [shareTarget, book, setShareTarget])
 
   // The card preview/export renders in the main document: the selected font
-  // must be loaded there (export already awaits document.fonts.ready). While
-  // The card preview renders in the main document. Mount all public builtin
-  // stylesheets while the font list is open so each chip uses its real face.
+  // must be loaded there (export already awaits document.fonts.ready).
+  // Mount public builtin stylesheets so each font option chip uses its real face.
   useEffect(() => {
     if (!shareTarget) return
     const fonts = fontsData?.data ?? []
     const resolved = resolveFont(prefs.font, fonts, fontPreferences, fontOrder)
     if (resolved.builtin) ensureBuiltinFontLoaded(resolved.builtin.id)
     if (resolved.uploaded) void ensureUploadedFontLoaded(resolved.uploaded)
-    if (!customizing) return
     ensureBuiltinFontsLoaded()
     fonts.forEach((f) => void ensureUploadedFontLoaded(f))
-  }, [shareTarget, prefs.font, customizing, fontsData, fontPreferences, fontOrder])
+  }, [shareTarget, prefs.font, fontsData, fontPreferences, fontOrder])
 
-  // Warm the export cache in the background while the user reads the preview,
-  // so copy/save resolve from cache instead of paying the render cost on
-  // click; debounced so rapid template/font/background switching collapses
-  // into one render
   useEffect(() => {
     if (!shareTarget) return
     const timer = setTimeout(() => {
@@ -240,19 +224,23 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
       onClick={() => setShareTarget(null)}
     >
       <div
-        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] shadow-xl sm:max-h-full sm:rounded-2xl dark:bg-stone-900 animate-modal-panel"
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl sm:max-h-[92vh] sm:rounded-2xl dark:bg-stone-900 animate-modal-panel"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex justify-end px-4 pt-3">
+        <div className="flex items-center justify-between px-5 pt-3.5 pb-2">
+          <span className="text-sm font-semibold tracking-wide text-stone-700 dark:text-stone-300">
+            {_('annotation.shareExcerpt')}
+          </span>
           <button
+            type="button"
             onClick={() => setShareTarget(null)}
             title={_('share.close')}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-500/10 hover:text-stone-600 dark:hover:text-stone-200"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-500/10 hover:text-stone-600 dark:hover:text-stone-200"
           >
-            <CloseIcon />
+            <CloseIcon size={16} />
           </button>
         </div>
-        <div ref={previewRef} className="flex min-h-0 flex-1 justify-center overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] px-4 pb-2 sm:px-6">
+        <div ref={previewRef} className="flex min-h-0 flex-1 justify-center overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] px-4 py-3 sm:px-6">
           <div style={{ width: SHARE_CARD_WIDTH * scale, height }} className="shrink-0">
             <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: SHARE_CARD_WIDTH }}>
               <ShareCard
@@ -274,88 +262,134 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
             </div>
           </div>
         </div>
-        {customizing ? (
-          <div className="shrink-0 border-t border-stone-200/60 px-4 py-4 sm:px-6 dark:border-stone-800/60">
-            <div className="mb-3 flex items-center">
-              <button
-                onClick={() => setCustomizing(false)}
-                title={_('share.back')}
-                className="flex h-7 w-7 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-500/10 hover:text-stone-600 dark:hover:text-stone-200"
-              >
-                <ChevronLeftIcon />
-              </button>
+        <div className="shrink-0 border-t border-stone-200/70 bg-stone-50/50 px-4 pt-3.5 pb-4 sm:px-6 dark:border-stone-800/80 dark:bg-stone-900/50">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-8 shrink-0 text-xs font-medium text-stone-400 dark:text-stone-500">
+                {_('share.templateLabel')}
+              </span>
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-0.5">
+                {SHARE_CARD_TEMPLATES.map((t) => {
+                  const active = prefs.template === t
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => patchPrefs({ template: t })}
+                      className={`shrink-0 rounded-full px-3 py-1 text-xs transition-all ${
+                        active
+                          ? 'bg-stone-900 font-medium text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
+                          : 'bg-stone-200/70 text-stone-600 hover:bg-stone-200 hover:text-stone-900 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100'
+                      }`}
+                    >
+                      {_(`share.template.${t}`)}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 overflow-x-auto">
-                <span className="w-8 shrink-0 text-xs text-stone-500 dark:text-stone-400">{_('share.templateLabel')}</span>
-                {SHARE_CARD_TEMPLATES.map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => patchPrefs({ template: t })}
-                    className={`${chip} shrink-0 ${prefs.template === t ? chipActive : ''}`}
-                  >
-                    {_(`share.template.${t}`)}
-                  </button>
-                ))}
+            <div className="flex items-center gap-2">
+              <span className="w-8 shrink-0 text-xs font-medium text-stone-400 dark:text-stone-500">
+                {_('share.font')}
+              </span>
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-0.5">
+                {enabledFontOptions.map((opt) => {
+                  const active = prefs.font === opt.id
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => onSelectFont(opt)}
+                      style={{ fontFamily: opt.stack }}
+                      className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs transition-all ${
+                        active
+                          ? 'bg-stone-900 font-medium text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
+                          : 'border border-stone-300/80 bg-white text-stone-700 hover:border-stone-400 hover:text-stone-900 dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300 dark:hover:border-stone-500 dark:hover:text-stone-100'
+                      }`}
+                    >
+                      <span>{opt.name}</span>
+                      {opt.status === 'idle' && (
+                        <span className={active ? 'text-stone-300 dark:text-stone-600' : 'text-stone-400 dark:text-stone-500'}>
+                          <DownloadIcon size={12} />
+                        </span>
+                      )}
+                      {opt.status === 'loading' && <SpinnerIcon size={12} />}
+                    </button>
+                  )
+                })}
               </div>
-              <div className="flex items-center gap-2 overflow-x-auto">
-                <span className="w-8 shrink-0 text-xs text-stone-500 dark:text-stone-400">{_('share.font')}</span>
-                {enabledFontOptions.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => onSelectFont(opt)}
-                    style={{ fontFamily: opt.stack }}
-                    className={`${chip} flex shrink-0 items-center gap-1 ${prefs.font === opt.id ? chipActive : ''}`}
-                  >
-                    {opt.name}
-                    {opt.status === 'idle' && <DownloadIcon size={12} />}
-                    {opt.status === 'loading' && <SpinnerIcon size={12} />}
-                  </button>
-                ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-8 shrink-0 text-xs font-medium text-stone-400 dark:text-stone-500">
+                {_('share.background')}
+              </span>
+              <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar py-2.5 px-1.5">
+                {BACKGROUND_OPTIONS.map((b) => {
+                  const active = prefs.background === b.id
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => patchPrefs({ background: b.id })}
+                      title={_(`share.bg.${b.id}`)}
+                      style={{ background: b.colors.bg }}
+                      className={`h-6 w-6 shrink-0 rounded-full transition-all ${
+                        active
+                          ? 'ring-2 ring-stone-900 ring-offset-2 shadow-xs dark:ring-stone-100 dark:ring-offset-stone-900'
+                          : 'border border-stone-300/80 hover:scale-110 dark:border-stone-600'
+                      }`}
+                    />
+                  )
+                })}
               </div>
-              <div className="flex items-center gap-2 overflow-x-auto">
-                <span className="w-8 shrink-0 text-xs text-stone-500 dark:text-stone-400">{_('share.background')}</span>
-                {BACKGROUND_OPTIONS.map((b) => (
-                  <button
-                    key={b.id}
-                    onClick={() => patchPrefs({ background: b.id })}
-                    title={_(`share.bg.${b.id}`)}
-                    style={{ background: b.colors.bg }}
-                    className={`h-8 w-8 shrink-0 rounded-full transition-colors ${
-                      prefs.background === b.id
-                        ? 'border-2 border-stone-900 dark:border-stone-100'
-                        : 'border border-stone-300 hover:border-stone-500 dark:border-stone-600 dark:hover:border-stone-400'
-                    }`}
-                  />
-                ))}
-              </div>
-              <div className="flex items-center gap-2 overflow-x-auto">
-                <span className="w-8 shrink-0 text-xs text-stone-500 dark:text-stone-400">{_('share.brandLabel')}</span>
-                <button
-                  onClick={() => patchPrefs({ brand: nextBrand(prefs.brand) })}
-                  className={`${chip} shrink-0`}
-                >
-                  {_(`share.brand.${prefs.brand}`)}
-                </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-8 shrink-0 text-xs font-medium text-stone-400 dark:text-stone-500">
+                {_('share.brandLabel')}
+              </span>
+              <div className="inline-flex rounded-lg bg-stone-200/60 p-0.5 dark:bg-stone-800">
+                {BRAND_OPTIONS.map((b) => {
+                  const active = prefs.brand === b
+                  return (
+                    <button
+                      key={b}
+                      type="button"
+                      translate="no"
+                      onClick={() => patchPrefs({ brand: b })}
+                      className={`notranslate rounded-md px-2.5 py-1 text-xs transition-all ${
+                        active
+                          ? 'bg-white font-medium text-stone-900 shadow-xs dark:bg-stone-700 dark:text-stone-100'
+                          : 'text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200'
+                      }`}
+                    >
+                      {_(`share.brand.${b}`)}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           </div>
-        ) : (
-          <div className="flex shrink-0 items-center justify-center gap-6 border-t border-stone-200/60 px-4 py-4 sm:gap-10 sm:px-6 dark:border-stone-800/60">
-            <button onClick={() => setCustomizing(true)} className={actionBtn}>
-              <span className={actionIcon}><TemplateIcon /></span>
-              {_('share.changeTemplate')}
+          <div className="mt-4 flex items-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => void copyImage()}
+              disabled={exporting}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-stone-300/80 bg-white py-2.5 px-4 text-xs sm:text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 hover:text-stone-900 disabled:opacity-50 dark:border-stone-700 dark:bg-stone-800/80 dark:text-stone-200 dark:hover:bg-stone-700 dark:hover:text-stone-100"
+            >
+              <CopyIcon size={16} />
+              <span>{_('share.copyImage')}</span>
             </button>
-            <button onClick={() => void saveImage()} disabled={exporting} className={actionBtn}>
-              <span className={actionIcon}><DownloadIcon /></span>
-              {_('share.saveImage')}
-            </button>
-            <button onClick={() => void copyImage()} disabled={exporting} className={actionBtn}>
-              <span className={actionIcon}><ShareIcon /></span>
-              {_('share.copyImage')}
+            <button
+              type="button"
+              onClick={() => void saveImage()}
+              disabled={exporting}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-stone-900 py-2.5 px-4 text-xs sm:text-sm font-medium text-white shadow-xs transition-colors hover:bg-stone-800 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+            >
+              {exporting ? <SpinnerIcon size={16} /> : <DownloadIcon size={16} />}
+              <span>{_('share.saveImage')}</span>
             </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

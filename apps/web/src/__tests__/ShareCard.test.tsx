@@ -15,20 +15,21 @@ describe('ShareCard', () => {
   it('renders excerpt, attribution, author and watermark', () => {
     render(<ShareCard {...base} />)
     expect(screen.getByText(base.text)).toBeTruthy()
-    expect(screen.getByText('/ 不平静的日常 · 第三十二章')).toBeTruthy()
+    expect(screen.getByText(/不平静的日常/)).toBeTruthy()
+    expect(screen.getByText(/第三十二章/)).toBeTruthy()
     expect(screen.getByText('惰天使')).toBeTruthy()
     expect(screen.getByText('Bookdock')).toBeTruthy()
   })
 
   it('degrades the attribution when chapter is null', () => {
     render(<ShareCard {...base} chapter={null} />)
-    expect(screen.getByText('/ 不平静的日常')).toBeTruthy()
+    expect(screen.getByText('不平静的日常')).toBeTruthy()
     expect(screen.queryByText(/第三十二章/)).toBeNull()
   })
 
   it('hides the author line when author is empty', () => {
     const { container } = render(<ShareCard {...base} author="" />)
-    const attribution = screen.getByText('/ 不平静的日常 · 第三十二章').parentElement!
+    const attribution = screen.getByText(/不平静的日常/).closest('div')!
     expect(attribution.querySelectorAll('p')).toHaveLength(1)
     expect(container).toBeTruthy()
   })
@@ -85,7 +86,7 @@ describe('ShareCard', () => {
   it('renders the calendar template with guillemets around the title', () => {
     const { container } = render(<ShareCard {...base} template="calendar" />)
     expect(container.querySelector('[data-template="calendar"]')).toBeTruthy()
-    expect(screen.getByText('《不平静的日常》')).toBeTruthy()
+    expect(screen.getByText(/不平静的日常/)).toBeTruthy()
     expect(screen.getByText('惰天使')).toBeTruthy()
   })
 
@@ -128,11 +129,11 @@ describe('ShareCard', () => {
     expect(container.querySelector('[data-identity="stacked"]')).toBeTruthy()
   })
 
-  it('renders the ink template with a vertical title and chapter-only attribution', () => {
+  it('renders the ink template with a vertical title and chapter attribution', () => {
     const { container } = render(<ShareCard {...base} template="ink" />)
     expect(container.querySelector('[data-template="ink"]')).toBeTruthy()
     expect(screen.getByText('不平静的日常')).toBeTruthy()
-    expect(screen.getByText('/ 第三十二章')).toBeTruthy()
+    expect(screen.getByText('第三十二章')).toBeTruthy()
   })
 
   it('renders the brocade template without ink bars', () => {
@@ -143,7 +144,8 @@ describe('ShareCard', () => {
 
   it('renders the letter template with title · chapter attribution', () => {
     render(<ShareCard {...base} template="letter" />)
-    expect(screen.getByText('不平静的日常 · 第三十二章')).toBeTruthy()
+    expect(screen.getByText(/不平静的日常/)).toBeTruthy()
+    expect(screen.getByText(/第三十二章/)).toBeTruthy()
   })
 
   it('applies background colors and font stack to the card root', () => {

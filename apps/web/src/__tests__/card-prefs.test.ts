@@ -68,7 +68,7 @@ describe('nextBrand', () => {
 
 describe('cardColors', () => {
   it('inverts text on dark backgrounds', () => {
-    expect(cardColors('cream').text).toBe('#292524')
+    expect(cardColors('cream').text).toBe('#1c1917')
     expect(cardColors('black').text).toBe('#f5f5f4')
     expect(cardColors('navy').bg).toBe('#1f2a52')
   })

@@ -21,18 +21,18 @@ export interface BackgroundOption {
   colors: CardColors
 }
 
-const LIGHT_TEXT = { text: '#292524', sub: '#78716c', accent: '#3e322c', watermark: '#a8a29e' }
-const DARK_TEXT = { text: '#f5f5f4', sub: '#d6d3d1', accent: '#e7e5e4', watermark: '#78716c' }
+const LIGHT_TEXT = { text: '#1c1917', sub: '#57534e', accent: '#44403c', watermark: '#8c857e' }
+const DARK_TEXT = { text: '#f5f5f4', sub: '#d6d3d1', accent: '#e7e5e4', watermark: '#8c857e' }
 
 export const BACKGROUND_OPTIONS: BackgroundOption[] = [
   { id: 'white', colors: { bg: '#ffffff', ...LIGHT_TEXT } },
-  { id: 'cream', colors: { bg: '#faf8f5', ...LIGHT_TEXT } },
+  { id: 'cream', colors: { bg: '#f9f6f0', ...LIGHT_TEXT } },
   { id: 'pink', colors: { bg: '#fbf3ef', ...LIGHT_TEXT } },
   { id: 'green', colors: { bg: '#f1f6ef', ...LIGHT_TEXT } },
   { id: 'blue', colors: { bg: '#eef4fa', ...LIGHT_TEXT } },
   { id: 'black', colors: { bg: '#1c1917', ...DARK_TEXT } },
   { id: 'navy', colors: { bg: '#1f2a52', ...DARK_TEXT } },
-  { id: 'slate', colors: { bg: '#63799c', text: '#f8fafc', sub: '#e2e8f0', accent: '#e2e8f0', watermark: '#aebdd4' } },
+  { id: 'slate', colors: { bg: '#586c8a', text: '#f8fafc', sub: '#e2e8f0', accent: '#e2e8f0', watermark: '#aebdd4' } },
 ]
 
 export function cardColors(id: ShareCardBackground): CardColors {
@@ -50,6 +50,7 @@ export interface ShareCardPrefs {
 
 export type ShareCardBrand = 'off' | 'en' | 'zh'
 
+export const BRAND_OPTIONS: ShareCardBrand[] = ['en', 'zh', 'off']
 const BRAND_CYCLE: ShareCardBrand[] = ['off', 'en', 'zh']
 
 export function nextBrand(brand: ShareCardBrand): ShareCardBrand {

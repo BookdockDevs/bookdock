@@ -76,6 +76,16 @@ body.reader-resizing iframe {
   height: 0;
 }
 
+/* Hide scrollbars while keeping smooth scroll behavior */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 .bd-slider {
   -webkit-appearance: none;
   appearance: none;

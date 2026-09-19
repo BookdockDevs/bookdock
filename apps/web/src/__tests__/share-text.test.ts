@@ -16,13 +16,15 @@ import {
 
 describe('excerptFontSize', () => {
   it('uses the largest size for short excerpts', () => {
-    expect(excerptFontSize(0)).toBe(24)
-    expect(excerptFontSize(160)).toBe(24)
+    expect(excerptFontSize(0)).toBe(28)
+    expect(excerptFontSize(60)).toBe(28)
   })
 
-  it('drops one tier for medium excerpts', () => {
-    expect(excerptFontSize(161)).toBe(20)
-    expect(excerptFontSize(320)).toBe(20)
+  it('uses medium sizes for intermediate excerpts', () => {
+    expect(excerptFontSize(61)).toBe(23)
+    expect(excerptFontSize(160)).toBe(23)
+    expect(excerptFontSize(161)).toBe(19)
+    expect(excerptFontSize(320)).toBe(19)
   })
 
   it('floors at the minimum size for long excerpts', () => {
@@ -69,12 +71,12 @@ describe('excerptParagraphs', () => {
 })
 
 describe('attributionLine', () => {
-  it('joins title and chapter', () => {
-    expect(attributionLine('不平静的日常', '第三十二章')).toBe('/ 不平静的日常 · 第三十二章')
+  it('joins title and chapter with middle dot', () => {
+    expect(attributionLine('不平静的日常', '第三十二章')).toBe('不平静的日常 · 第三十二章')
   })
 
-  it('degrades to title only without a chapter', () => {
-    expect(attributionLine('不平静的日常', null)).toBe('/ 不平静的日常')
+  it('degrades to title without a chapter', () => {
+    expect(attributionLine('不平静的日常', null)).toBe('不平静的日常')
   })
 })
 

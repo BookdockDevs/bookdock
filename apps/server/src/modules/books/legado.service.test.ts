@@ -74,14 +74,14 @@ describe('Legado chapter replacement projection', () => {
   })
 
   it('removes only a leading EPUB heading duplicated by Legado', () => {
-    const duplicateHeadingMarkup = `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body>\n<h2>第一章<br/>母上出场</h2><p>正文第一段。</p><h2>正文中的小标题</h2><p>正文第二段。</p></body></html>`
+    const duplicateHeadingMarkup = `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body>\n<h2>第一章<br/>故人来访</h2><p>正文第一段。</p><h2>正文中的小标题</h2><p>正文第二段。</p></body></html>`
     const content = projectEpubChapterMarkup(
       duplicateHeadingMarkup,
       [],
       'OEBPS/Text/chapter.xhtml',
       undefined,
       [],
-      '第一章 母上出场',
+      '第一章 故人来访',
     )
 
     expect(content).not.toContain('<h2>第一章')

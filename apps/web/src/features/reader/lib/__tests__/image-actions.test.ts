@@ -13,7 +13,7 @@ describe('formatImageFileName', () => {
       title: 'cover',
       kind: 'image',
     }
-    expect(formatImageFileName(cover, '重生之官道', 'jpeg')).toBe('重生之官道_封面.jpeg')
+    expect(formatImageFileName(cover, '星海漫游', 'jpeg')).toBe('星海漫游_封面.jpeg')
   })
 
   it('formats illustration filename with book title and alt label', () => {
@@ -25,7 +25,7 @@ describe('formatImageFileName', () => {
       title: '',
       kind: 'image',
     }
-    expect(formatImageFileName(illustration, '重生之官道', 'png')).toBe('重生之官道_地理舆图.png')
+    expect(formatImageFileName(illustration, '星海漫游', 'png')).toBe('星海漫游_地理舆图.png')
   })
 
   it('formats unnamed illustration filename with section index fallback', () => {
@@ -37,7 +37,7 @@ describe('formatImageFileName', () => {
       title: '',
       kind: 'image',
     }
-    expect(formatImageFileName(illustration, '重生之官道', 'webp')).toBe('重生之官道_插图_5.webp')
+    expect(formatImageFileName(illustration, '星海漫游', 'webp')).toBe('星海漫游_插图_5.webp')
   })
 
   it('sanitizes illegal filename characters and extra whitespace', () => {

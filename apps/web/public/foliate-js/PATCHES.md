@@ -373,6 +373,6 @@
 - 2026-09-15 repair pass: the four focused Web test files passed 19/19 after restoring chapterLocation, navigation-lock cleanup, Media Overlay default class, legacy TTS compatibility, SSML selector closure, default script denial, and manifest-first archive fallback.
 - 2026-09-15 browser repair pass: with both `show-header` and `show-footer`, the paginator kept an 874px full-width scroll surface and rendered the 28px marginal bands without the former left-half layout collapse.
 - Web production build、server build、typecheck、lint passed；vendored JavaScript syntax check passed。
-- Sample EPUB (`重生之官道.epub`)：archive 16,946,053 bytes；OPF `OEBPS/content.opf`；title `重生之官道`；author `录事参军`；server parser 776 chapters；first spine chapter `OEBPS/Text/cover.xhtml`，first non-cover TOC entry `版权声明`；cover 1,542,212 bytes, JPEG signature and `image/jpeg`.
+- Sample EPUB（本地未入库的大体积真实书样本）：archive ~17 MB；OPF `OEBPS/content.opf`；server parser 776 chapters；first spine chapter `OEBPS/Text/cover.xhtml`，first non-cover TOC entry `版权声明`；cover ~1.5 MB, JPEG signature and `image/jpeg`.
 - Sample resource scan：manifest 791 items；2/2 CSS loaded；9/9 declared images loaded；CSS references include 5 missing font files, 5 missing decorative images and missing `regular.css`—these are explicit optional/missing-resource fallback cases in the sample, not parser failures.
 - Browser visual/interaction comparison with upstream baseline remains `[B]` and must be performed by the user.

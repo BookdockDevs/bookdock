@@ -3,19 +3,33 @@ export const NOTE_MAX_CHARS = 600
 /** The quoted excerpt on an idea card is context, not the subject — capped tighter */
 export const QUOTE_MAX_CHARS = 200
 
-const FONT_TIERS = [
-  { max: 160, size: 24 },
-  { max: 320, size: 20 },
+export interface ExcerptTypography {
+  fontSize: number
+  lineHeight: number
+  letterSpacing?: string
+}
+
+const TYPO_TIERS = [
+  { max: 60, size: 28, lineHeight: 1.65, letterSpacing: '0.025em' },
+  { max: 160, size: 23, lineHeight: 1.75, letterSpacing: '0.01em' },
+  { max: 320, size: 19, lineHeight: 1.8, letterSpacing: 'normal' },
 ] as const
 
 export const EXCERPT_MIN_FONT_SIZE = 16
 
+/** Adaptive excerpt typography: adjusts font size, line height and letter spacing by length */
+export function excerptTypography(length: number): ExcerptTypography {
+  for (const tier of TYPO_TIERS) {
+    if (length <= tier.max) {
+      return { fontSize: tier.size, lineHeight: tier.lineHeight, letterSpacing: tier.letterSpacing }
+    }
+  }
+  return { fontSize: EXCERPT_MIN_FONT_SIZE, lineHeight: 1.85, letterSpacing: 'normal' }
+}
+
 /** Adaptive excerpt font size: longer text renders smaller, down to a floor */
 export function excerptFontSize(length: number): number {
-  for (const tier of FONT_TIERS) {
-    if (length <= tier.max) return tier.size
-  }
-  return EXCERPT_MIN_FONT_SIZE
+  return excerptTypography(length).fontSize
 }
 
 /** Hard cap for the card body; truncation is display-only, the annotation keeps full text */
@@ -36,9 +50,9 @@ export function excerptParagraphs(text: string): string[] {
     .filter(Boolean)
 }
 
-/** `/ 书名 · 章节名`, degrading to `/ 书名` when the chapter is unknown */
+/** `书名 · 章节名`, degrading to `书名` when the chapter is unknown */
 export function attributionLine(title: string, chapter: string | null): string {
-  return chapter ? `/ ${title} · ${chapter}` : `/ ${title}`
+  return chapter ? `${title} · ${chapter}` : title
 }
 
 /** `书摘-书名-YYYYMMDD.png` with filesystem-hostile characters stripped */

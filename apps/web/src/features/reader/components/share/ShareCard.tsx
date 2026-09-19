@@ -5,10 +5,9 @@ import { cardColors, type CardColors, type ShareCardBackground, type ShareCardBr
 import {
   NOTE_MAX_CHARS,
   QUOTE_MAX_CHARS,
-  attributionLine,
   calendarDateParts,
-  excerptFontSize,
   excerptParagraphs,
+  excerptTypography,
   truncateExcerpt,
 } from './share-text'
 
@@ -40,16 +39,30 @@ interface ShareCardProps {
   ref?: Ref<HTMLDivElement>
 }
 
-/** Body line-height is uniform 1.9 across all five reference templates
- *  (measured: advance/ink ≈ 1.82–1.93). Left-aligned bodies are justified —
- *  CJK justifies cleanly, killing the ragged right edge (wrap slack of up to
- *  one glyph per line read as asymmetric padding); centered bodies (calendar)
- *  stay centered */
-function Body({ paragraphs, fontSize, center }: { paragraphs: string[]; fontSize: number; center?: boolean }) {
+/** Body typography: uses dynamic font size, line-height and letter-spacing with CJK justification,
+ *  anti-orphan formatting (text-wrap: pretty), strict punctuation line-breaking and punctuation compression */
+function Body({
+  paragraphs,
+  fontSize,
+  lineHeight,
+  letterSpacing,
+  center,
+}: {
+  paragraphs: string[]
+  fontSize: number
+  lineHeight?: number
+  letterSpacing?: string
+  center?: boolean
+}) {
   return (
-    <div style={{ fontSize, lineHeight: 1.9 }} className={`tracking-wide ${center ? 'text-center' : 'text-justify'}`}>
+    <div
+      style={{ fontSize, lineHeight: lineHeight ?? 1.8, letterSpacing }}
+      className={`[text-wrap:pretty] [overflow-wrap:break-word] [line-break:strict] [font-feature-settings:'halt','chws'] ${
+        center ? 'text-center' : 'text-justify'
+      }`}
+    >
       {paragraphs.map((p, i) => (
-        <p key={i} style={i > 0 ? { marginTop: '0.6em' } : undefined}>
+        <p key={i} style={i > 0 ? { marginTop: '0.85em' } : undefined}>
           {p}
         </p>
       ))}
@@ -59,11 +72,11 @@ function Body({ paragraphs, fontSize, center }: { paragraphs: string[]; fontSize
 
 function QuoteBlock({ quote, colors, center }: { quote: string; colors: CardColors; center?: boolean }) {
   return (
-    <div className={`mt-12 w-full ${center ? 'flex flex-col items-center text-center' : 'text-left'}`}>
+    <div className={`mt-10 w-full ${center ? 'flex flex-col items-center text-center' : 'text-left'}`}>
       <span aria-hidden style={{ color: colors.watermark }}>
-        <QuoteLeftIcon height={24} />
+        <QuoteLeftIcon height={22} />
       </span>
-      <p className="mt-5 whitespace-pre-wrap text-xl" style={{ color: colors.sub, lineHeight: 1.7 }}>
+      <p className="mt-4 whitespace-pre-wrap text-lg [text-wrap:pretty]" style={{ color: colors.sub, lineHeight: 1.7 }}>
         {quote}
       </p>
     </div>
@@ -78,16 +91,16 @@ function IdentityHeader({ authorName, avatarUrl, writtenAt, colors, avatar = tru
     return (
       <div>
         <p className="text-2xl font-semibold">{authorName}</p>
-        {writtenAt && <p className="mt-4 text-lg" style={{ color: colors.sub }}>{writtenAt}</p>}
+        {writtenAt && <p className="mt-3 text-base opacity-75" style={{ color: colors.sub }}>{writtenAt}</p>}
       </div>
     )
   }
   const circle = avatarUrl ? (
-    <img src={avatarUrl} alt={authorName ?? ''} className="h-13 w-13 shrink-0 rounded-full object-cover" />
+    <img src={avatarUrl} alt={authorName ?? ''} className="h-12 w-12 shrink-0 rounded-full object-cover" />
   ) : (
     <span
-      className="flex h-13 w-13 shrink-0 items-center justify-center rounded-full text-xl"
-      style={{ background: `${colors.watermark}4d`, color: colors.sub }}
+      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-lg font-medium"
+      style={{ background: `${colors.watermark}35`, color: colors.text }}
     >
       {[...(authorName ?? '')][0] ?? ''}
     </span>
@@ -96,48 +109,65 @@ function IdentityHeader({ authorName, avatarUrl, writtenAt, colors, avatar = tru
     return (
       <div data-identity="stacked">
         {circle}
-        <p className="mt-5 text-2xl font-semibold">{authorName}</p>
-        {writtenAt && <p className="mt-4 text-lg" style={{ color: colors.sub }}>{writtenAt}</p>}
+        <p className="mt-4 text-2xl font-semibold">{authorName}</p>
+        {writtenAt && <p className="mt-2 text-base opacity-75" style={{ color: colors.sub }}>{writtenAt}</p>}
       </div>
     )
   }
   return (
-    <div className="flex items-center gap-4">
+    <div className="flex items-center gap-3.5">
       {circle}
       <div>
-        <p className="text-2xl font-semibold">{authorName}</p>
-        {writtenAt && <p className="mt-2 text-lg" style={{ color: colors.sub }}>{writtenAt}</p>}
+        <p className="text-xl font-semibold">{authorName}</p>
+        {writtenAt && <p className="mt-1 text-sm opacity-75" style={{ color: colors.sub }}>{writtenAt}</p>}
       </div>
     </div>
   )
 }
 
 function Divider({ colors, className = '' }: { colors: CardColors; className?: string }) {
-  return <div className={`h-px w-full ${className}`} style={{ background: `${colors.watermark}80` }} />
+  return <div className={`h-px w-full ${className}`} style={{ background: `${colors.watermark}60` }} />
 }
 
 function BrandMark({ brand, colors, align = 'right' }: { brand: ShareCardBrand; colors: CardColors; align?: 'left' | 'center' | 'right' }) {
   if (brand === 'off') return null
   const alignClass = align === 'center' ? 'text-center' : align === 'left' ? 'text-left' : 'text-right'
   return (
-    <p className={`mt-6 w-full text-base tracking-widest ${alignClass}`} style={{ color: colors.watermark }}>
+    <p
+      translate="no"
+      className={`notranslate mt-6 w-full text-xs font-mono tracking-[0.2em] uppercase opacity-75 ${alignClass}`}
+      style={{ color: colors.watermark }}
+    >
       {brand === 'zh' ? '书坞' : 'Bookdock'}
     </p>
   )
 }
 
-/** The ink bars use square-edged warm brown rectangles with page-colored nicks
- *  scattered inside
- *  (a few touching the edges for roughness). Speckle positions are fixed so
- *  repeated exports render identically. */
+function SealMark({ text }: { text?: string }) {
+  if (!text) return null
+  const chars = [...text.trim()].slice(0, 2).join('')
+  if (!chars) return null
+  return (
+    <span
+      aria-hidden
+      className="inline-flex shrink-0 items-center justify-center rounded-[2px] border border-[#a12822] bg-[#be3730] px-1 py-1 text-[11px] font-medium leading-none text-[#fffbf0] opacity-90 shadow-xs select-none"
+      style={{ writingMode: 'vertical-rl', letterSpacing: '0.08em' }}
+    >
+      {chars}
+    </span>
+  )
+}
+
 function InkBar({ colors, className = '' }: { colors: CardColors; className?: string }) {
   const nick = (x: number, y: number, r: number) =>
     `radial-gradient(circle ${r}px at ${x}% ${y}%, ${colors.bg} 60%, transparent 70%)`
   return (
     <div
-      className={`h-3 ${className}`}
+      className={`h-2 rounded-full ${className}`}
       style={{
         backgroundColor: colors.accent,
+        maskImage: 'linear-gradient(to right, transparent, black 10px, black calc(100% - 10px), transparent)',
+        WebkitMaskImage: 'linear-gradient(to right, transparent, black 10px, black calc(100% - 10px), transparent)',
         backgroundImage: [
           nick(4, 20, 1.5), nick(9, 80, 1), nick(15, 45, 2), nick(21, 10, 1),
           nick(27, 60, 1.5), nick(33, 90, 1), nick(39, 30, 2), nick(46, 70, 1),
@@ -149,33 +179,64 @@ function InkBar({ colors, className = '' }: { colors: CardColors; className?: st
   )
 }
 
-/** Vertical book-title block pinned top-left (ink / brocade templates).
- *  writing-mode must live on each column, not the flex container — putting it
- *  on the container rotates the flex main axis and drops the author column
- *  below the title instead of beside it. */
-function VerticalTitle({ title, author, colors }: { title: string; author: string; colors: CardColors }) {
+function VerticalTitle({
+  title,
+  author,
+  colors,
+  seal = false,
+}: {
+  title: string
+  author: string
+  colors: CardColors
+  seal?: boolean
+}) {
   return (
-    <div className="flex gap-6 self-start">
+    <div className="flex items-start gap-5 self-start">
       <p
         className="overflow-hidden font-semibold tracking-widest"
-        style={{ writingMode: 'vertical-rl', fontSize: 42, maxHeight: 420 }}
+        style={{ writingMode: 'vertical-rl', fontSize: 38, maxHeight: 400 }}
       >
         {title}
       </p>
-      {author && (
-        <p className="text-lg tracking-widest" style={{ color: colors.sub, writingMode: 'vertical-rl' }}>
-          {author}
-        </p>
+      {(author || seal) && (
+        <div className="flex flex-col items-center gap-2.5">
+          {author && (
+            <p className="text-base tracking-widest opacity-80" style={{ color: colors.sub, writingMode: 'vertical-rl' }}>
+              {author}
+            </p>
+          )}
+          {seal && <SealMark text={author || '书坞'} />}
+        </div>
       )}
     </div>
   )
 }
 
-function TitleChapterAttribution({ title, chapter, author, colors }: { title: string; chapter: string | null; author: string; colors: CardColors }) {
+function TitleChapterAttribution({
+  title,
+  chapter,
+  author,
+  colors,
+  align = 'left',
+}: {
+  title: string
+  chapter: string | null
+  author: string
+  colors: CardColors
+  align?: 'left' | 'center'
+}) {
+  const alignClass = align === 'center' ? 'text-center' : 'text-left'
   return (
-    <div className="mt-6 text-lg" style={{ color: colors.sub }}>
-      <p>{chapter ? `${title} · ${chapter}` : title}</p>
-      {author && <p className="mt-4">{author}</p>}
+    <div className={`mt-8 ${alignClass}`}>
+      <p className="text-base font-medium tracking-wide" style={{ color: colors.text }}>
+        {title}
+        {chapter && <span className="font-normal opacity-75"> · {chapter}</span>}
+      </p>
+      {author && (
+        <p className="mt-1.5 text-xs tracking-wider opacity-65" style={{ color: colors.sub }}>
+          {author}
+        </p>
+      )}
     </div>
   )
 }
@@ -203,10 +264,11 @@ export default function ShareCard({
   const isIdea = !!note
   const body = note ?? text
   const paragraphs = excerptParagraphs(truncateExcerpt(body, isIdea ? NOTE_MAX_CHARS : undefined))
-  // Reference idea cards set the note one tier larger than the same template's
-  // excerpt body (measured advance: classic +0, letter/calendar +1, ink/brocade +2)
+  const typo = excerptTypography([...body].length)
   const ideaBoost = template === 'ink' || template === 'brocade' ? 2 : template === 'classic' ? 0 : 1
-  const fontSize = excerptFontSize([...body].length) + (isIdea ? ideaBoost : 0)
+  const fontSize = typo.fontSize + (isIdea ? ideaBoost : 0)
+  const lineHeight = typo.lineHeight
+  const letterSpacing = typo.letterSpacing
   const quote = isIdea && text ? truncateExcerpt(text, QUOTE_MAX_CHARS) : null
 
   return (
@@ -215,120 +277,144 @@ export default function ShareCard({
       data-template={template}
       data-kind={isIdea ? 'idea' : 'excerpt'}
       style={{ width: SHARE_CARD_WIDTH, background: colors.bg, color: colors.text, fontFamily: fontStack }}
-      className={`box-border rounded-2xl shadow-xl ${
+      className={`box-border flex min-h-[380px] flex-col justify-between rounded-2xl shadow-xl antialiased ${
         template === 'letter' ? 'p-6'
-        : template === 'brocade' ? 'px-13 py-16'
-        : template === 'ink' ? 'px-10 py-16'
-        : template === 'calendar' ? 'px-12 py-20'
-        : 'px-11 py-16'
+        : template === 'brocade' ? 'px-13 py-14'
+        : template === 'ink' ? 'px-10 py-14'
+        : template === 'calendar' ? 'px-12 py-16'
+        : 'px-11 py-14'
       }`}
     >
       {template === 'classic' && (
         <>
-          {isIdea && <div className="mb-12"><IdentityHeader authorName={authorName} avatarUrl={avatarUrl} writtenAt={writtenAt} colors={colors} stacked /></div>}
-          <Body paragraphs={paragraphs} fontSize={fontSize} />
-          {quote && <QuoteBlock quote={quote} colors={colors} />}
-          <div className={`${isIdea ? 'mt-6' : 'mt-9'} text-lg`} style={{ color: colors.sub }}>
-            <p>{attributionLine(title, chapter)}</p>
-            {author && <p className="mt-4">{author}</p>}
+          <div>
+            {isIdea && (
+              <div className="mb-10">
+                <IdentityHeader authorName={authorName} avatarUrl={avatarUrl} writtenAt={writtenAt} colors={colors} stacked />
+              </div>
+            )}
+            <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} />
+            {quote && <QuoteBlock quote={quote} colors={colors} />}
           </div>
-          {isIdea && <Divider colors={colors} className="mt-10" />}
-          <BrandMark brand={brand} colors={colors} />
+          <div>
+            <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} />
+            {isIdea && <Divider colors={colors} className="mt-8" />}
+            <BrandMark brand={brand} colors={colors} />
+          </div>
         </>
       )}
 
       {template === 'calendar' && (
-        <div className="flex flex-col items-center">
-          {(() => {
-            const { day, monthYear, weekday } = calendarDateParts()
-            return (
-              <>
-                <p style={{ fontSize: 138, lineHeight: 1 }} className="font-semibold">{day}</p>
-                <p style={{ fontSize: 34 }} className="mt-7 font-bold tracking-wide">{monthYear}</p>
-                <p className="mt-6 text-base" style={{ color: colors.sub }}>{weekday}</p>
-                <div className="mb-14 mt-12 h-px w-16" style={{ background: colors.accent }} />
-              </>
-            )
-          })()}
-          <Body paragraphs={paragraphs} fontSize={fontSize} center />
-          {quote && <QuoteBlock quote={quote} colors={colors} center />}
-          <div className="mt-10 text-center text-lg" style={{ color: colors.sub }}>
-            <p>《{title}》</p>
-            {author && <p className="mt-4">{author}</p>}
+        <>
+          <div className="flex flex-col items-center">
+            <div
+              aria-hidden
+              className="-mt-8 mb-8 w-full border-b border-dashed opacity-35"
+              style={{ borderColor: colors.accent }}
+            />
+            {(() => {
+              const { day, monthYear, weekday } = calendarDateParts()
+              return (
+                <>
+                  <p style={{ fontSize: 120, lineHeight: 1 }} className="font-semibold tracking-tight">{day}</p>
+                  <p style={{ fontSize: 26 }} className="mt-5 font-bold tracking-[0.25em] uppercase">{monthYear}</p>
+                  <p className="mt-3 text-xs tracking-[0.2em] uppercase opacity-70" style={{ color: colors.sub }}>{weekday}</p>
+                  <div className="mb-10 mt-8 h-0.5 w-12 rounded-full opacity-50" style={{ background: colors.accent }} />
+                </>
+              )
+            })()}
+            <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} center />
+            {quote && <QuoteBlock quote={quote} colors={colors} center />}
           </div>
-          <BrandMark brand={brand} colors={colors} align="center" />
-        </div>
+          <div>
+            <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} align="center" />
+            <BrandMark brand={brand} colors={colors} align="center" />
+          </div>
+        </>
       )}
 
       {template === 'ink' && !isIdea && (
-        <div className="flex flex-col">
-          <InkBar colors={colors} />
-          <div className="mt-10"><VerticalTitle title={title} author={author} colors={colors} /></div>
-          <div className="mt-16">
-            <Body paragraphs={paragraphs} fontSize={fontSize} />
+        <div className="flex min-h-[380px] flex-col justify-between">
+          <div>
+            <InkBar colors={colors} />
+            <div className="mt-8"><VerticalTitle title={title} author={author} colors={colors} seal /></div>
+            <div className="mt-12">
+              <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} />
+            </div>
           </div>
-          {chapter && (
-            <p className="mt-8 text-lg" style={{ color: colors.sub }}>
-              / {chapter}
-            </p>
-          )}
-          <InkBar colors={colors} className="mt-10" />
-          <BrandMark brand={brand} colors={colors} />
+          <div>
+            {chapter && (
+              <p className="mt-6 text-sm tracking-wide opacity-75" style={{ color: colors.sub }}>
+                {chapter}
+              </p>
+            )}
+            <InkBar colors={colors} className="mt-8" />
+            <BrandMark brand={brand} colors={colors} />
+          </div>
         </div>
       )}
 
       {template === 'ink' && isIdea && (
-        <div className="flex flex-col">
-          <InkBar colors={colors} />
-          <div className="mt-11"><IdentityHeader authorName={authorName} writtenAt={writtenAtCn ?? writtenAt} colors={colors} avatar={false} /></div>
-          <Divider colors={colors} className="my-10" />
-          <Body paragraphs={paragraphs} fontSize={fontSize} />
-          {quote && <QuoteBlock quote={quote} colors={colors} />}
-          <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} />
-          <Divider colors={colors} className="mt-8" />
-          <BrandMark brand={brand} colors={colors} align="left" />
-          <InkBar colors={colors} className="mt-4" />
+        <div className="flex min-h-[380px] flex-col justify-between">
+          <div>
+            <InkBar colors={colors} />
+            <div className="mt-8"><IdentityHeader authorName={authorName} writtenAt={writtenAtCn ?? writtenAt} colors={colors} avatar={false} /></div>
+            <Divider colors={colors} className="my-8" />
+            <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} />
+            {quote && <QuoteBlock quote={quote} colors={colors} />}
+          </div>
+          <div>
+            <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} />
+            <Divider colors={colors} className="mt-6" />
+            <BrandMark brand={brand} colors={colors} align="left" />
+            <InkBar colors={colors} className="mt-4" />
+          </div>
         </div>
       )}
 
       {template === 'letter' && (
-        <div className="border-2 p-1.5" style={{ borderColor: colors.accent }}>
-          <div className="border px-7 py-11" style={{ borderColor: colors.accent }}>
-            {isIdea && <IdentityHeader authorName={authorName} avatarUrl={avatarUrl} writtenAt={writtenAt} colors={colors} />}
-            {isIdea && <Divider colors={colors} className="my-10" />}
-            <Body paragraphs={paragraphs} fontSize={fontSize} />
-            {quote && <QuoteBlock quote={quote} colors={colors} />}
-            <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} />
-            <Divider colors={colors} className="mt-8" />
-            <BrandMark brand={brand} colors={colors} align="left" />
+        <div className="rounded-xs border-2 p-2" style={{ borderColor: colors.accent }}>
+          <div className="flex min-h-[340px] flex-col justify-between border px-7 py-10" style={{ borderColor: `${colors.accent}80` }}>
+            <div>
+              {isIdea && <IdentityHeader authorName={authorName} avatarUrl={avatarUrl} writtenAt={writtenAt} colors={colors} />}
+              {isIdea && <Divider colors={colors} className="my-8" />}
+              <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} />
+              {quote && <QuoteBlock quote={quote} colors={colors} />}
+            </div>
+            <div>
+              <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} />
+              {isIdea && <Divider colors={colors} className="mt-6" />}
+              <BrandMark brand={brand} colors={colors} align="left" />
+            </div>
           </div>
         </div>
       )}
 
       {template === 'brocade' && (
-        <div className="flex flex-col">
-          <VerticalTitle title={title} author={author} colors={colors} />
-          {isIdea && (
-            <div className="mt-12">
-              <IdentityHeader authorName={authorName} writtenAt={writtenAt} colors={colors} avatar={false} />
+        <div className="flex min-h-[380px] flex-col justify-between">
+          <div>
+            <div className="border-l-2 pl-5" style={{ borderColor: `${colors.accent}40` }}>
+              <VerticalTitle title={title} author={author} colors={colors} />
             </div>
-          )}
-          <div className={isIdea ? 'mt-10' : 'mt-20'}>
-            <Body paragraphs={paragraphs} fontSize={fontSize} />
+            {isIdea && (
+              <div className="mt-10">
+                <IdentityHeader authorName={authorName} writtenAt={writtenAt} colors={colors} avatar={false} />
+              </div>
+            )}
+            <div className={isIdea ? 'mt-8' : 'mt-14'}>
+              <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} />
+            </div>
+            {quote && <QuoteBlock quote={quote} colors={colors} />}
           </div>
-          {quote && <QuoteBlock quote={quote} colors={colors} />}
-          {chapter && (
-            <p className={`${isIdea ? 'mt-6' : 'mt-9'} text-lg`} style={{ color: colors.sub }}>
-              / {chapter}
-            </p>
-          )}
-          {isIdea && (
-            <>
-              <Divider colors={colors} className="mt-10" />
-              <BrandMark brand={brand} colors={colors} align="left" />
-            </>
-          )}
-          {!isIdea && <BrandMark brand={brand} colors={colors} />}
+          <div>
+            {chapter && (
+              <p className={`${isIdea ? 'mt-4' : 'mt-6'} text-sm tracking-wide opacity-75`} style={{ color: colors.sub }}>
+                {chapter}
+              </p>
+            )}
+            {isIdea && <Divider colors={colors} className="mt-8" />}
+            <BrandMark brand={brand} colors={colors} align={isIdea ? 'left' : 'right'} />
+          </div>
         </div>
       )}
     </div>
