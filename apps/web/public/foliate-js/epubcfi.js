@@ -270,6 +270,19 @@ const partsToNode = (node, parts, filter) => {
 }
 
 const nodeToParts = (node, offset, filter) => {
+    // An element container with a child index (e.g. setStartBefore(p) puts the
+    // boundary on the parent) would attach the index as an offset on an even
+    // element step, which partToString drops — the CFI then resolves to the
+    // parent's start and the position is lost. Descend into the referenced
+    // child so the position is encoded as a step into it.
+    if (isElementNode(node) && offset != null) {
+        const child = node.childNodes[offset]
+        if (child) return nodeToParts(child, 0, filter)
+        const last = node.childNodes[node.childNodes.length - 1]
+        if (!last) return nodeToParts(node, null, filter)
+        return nodeToParts(last,
+            isTextNode(last) ? last.nodeValue.length : last.childNodes.length, filter)
+    }
     const { id } = node
     // A cfi-skip wrapper is invisible to CFI, so index this node within the
     // wrapper's nearest non-skip ancestor — where rawChildNodes has hoisted it —

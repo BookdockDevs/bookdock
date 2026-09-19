@@ -326,6 +326,11 @@
     - 实现：`scrollByViewport` 目标与当前位置差 ≤0.5（被钳位）时，若处于 `#snapTurn` 且非 `#continuous` 且未在切章中，复用 `#onWheelSnap` 同款路径 `#adjacentIndex(direction)` + `#goTo({ index, anchor: 0/1 })` 直接切章。离散一键 = "下一章"意图，不做轮询式累计阈值；关闭模式与长卷行为不变。
     - 影响/验证：只影响 scrolled + snap 模式在章节边界的离散导航；jsdom 无布局无法驱动该路径，`node --check` 与全量测试保持通过，浏览器实机验证章尾点击/方向键切章、章首反向、以及关闭/长卷模式无回归。
 
+45. **`epubcfi.js` / `nodeToParts` 元素容器边界的子索引丢失**
+    - 根因：Range 边界容器是元素时（`getVisibleRange` 在视口顶恰好压在段落边界时走 `setStartBefore(from)`，startContainer 变成父元素 + 子索引），`nodeToParts` 把子索引挂在偶数元素步的 `offset` 上，而 `partToString` 按规范只对文本步输出 offset——子索引在 CFI 字符串里被丢弃，反解析后落在父元素开头。TXT 转制件每章是少数大段落，滚动模式吸附翻页让视口顶频繁对齐段边界，书签/进度 cfi 因此被钉到章顶（跳转去章顶、与章内任意视口位置产生 ribbon 误匹配）。
+    - 实现：`nodeToParts` 开头拦截"元素容器 + 非空 offset"：下钻到 `childNodes[offset]` 以 offset 0 编码（指向子元素之后即越过末尾时，编码最后一个子节点的末尾）；空元素无子节点时退化为纯元素步。文本容器路径不变。
+    - 影响/验证：影响所有 `fromRange` 产物（书签、视口范围定位、任何元素边界 Range）；`epubcfi-element-container.test.ts` 覆盖 setStartBefore/setEndAfter/空元素往返解析，cfi-overlap 与全量 Web 测试保持通过。历史数据中已丢失位置的 `,/4,...` 形态 CFI 无法恢复，需要用户重建书签。
+
 ## 3. Bookdock 宿主适配（不属于第二套核心）
 
 这些行为保留在 `apps/web/src/features/reader/renderers/FoliateReader.ts`，不再复制进旧 renderer：

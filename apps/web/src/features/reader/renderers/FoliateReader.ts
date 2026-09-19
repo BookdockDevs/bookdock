@@ -1343,6 +1343,11 @@ export class FoliateReader implements BookReader {
   // after a pending blur (Chromium, where hasFocus never goes false).
   // click-view consumes an arm only while no fresh blur has re-stamped the
   // window, so same-gesture focus steals still turn pages.
+  // Tab switches are NOT reactivations: Chromium fires a blur/focus pair and
+  // flips hasFocus() with tab visibility while the window never lost OS
+  // focus. The click that takes a tab from hidden to visible lands on the tab
+  // strip / taskbar, never on page content, so becoming visible disarms the
+  // guard and the first in-page click counts as real intent.
   private activationGuardReady = false
   private startupClickPending = false
   private awaitingActivationClick = false
@@ -1363,6 +1368,13 @@ export class FoliateReader implements BookReader {
   }
   private handleWindowBlur = () => this.handleActivationBlur(document, false)
   private handleWindowFocus = () => this.handleActivationRefocus(false)
+  private handleActivationVisibilityChange = () => {
+    if (document.hidden || !this.activationGuardReady) return
+    this.awaitingActivationClick = false
+    this.lastBlurAt = 0
+    this.lastBlurFromFrame = false
+    this.activationReturnPending = false
+  }
   private handleActivationBlur = (blurredDoc: Document, fromFrame: boolean) => {
     const now = performance.now()
     const topHasFocus = document.hasFocus()
@@ -1916,6 +1928,7 @@ export class FoliateReader implements BookReader {
       // can never leave listeners behind (destroy() has already run by then)
       window.addEventListener('blur', this.handleWindowBlur)
       window.addEventListener('focus', this.handleWindowFocus)
+      document.addEventListener('visibilitychange', this.handleActivationVisibilityChange)
       document.addEventListener('pointerdown', this.handleActivationPointerDown, true)
       this.emitTocReady()
 
@@ -3575,6 +3588,7 @@ export class FoliateReader implements BookReader {
     this.navigationPending.dispose()
     window.removeEventListener('blur', this.handleWindowBlur)
     window.removeEventListener('focus', this.handleWindowFocus)
+    document.removeEventListener('visibilitychange', this.handleActivationVisibilityChange)
     document.removeEventListener('pointerdown', this.handleActivationPointerDown, true)
     for (const win of this.frameFocusWatch.keys()) this.unwatchFrameFocus(win)
     this.resizeObserver?.disconnect()

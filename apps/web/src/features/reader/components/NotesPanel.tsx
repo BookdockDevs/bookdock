@@ -10,6 +10,8 @@ import { notify } from '@/lib/notifications'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { kindOf, type NoteSort } from '../hooks/useNotesFilter'
+import { compareCfiPosition } from '../lib/cfi-overlap'
+import { buildChapterOrderLookup } from '../lib/chapter-order'
 import { markEscConsumed } from '../lib/esc-consumed'
 import { useReaderState } from '../state/reader-state'
 import AnnotationExportDialog from './AnnotationExportDialog'
@@ -263,15 +265,24 @@ export const NotesPanel = memo(function NotesPanel({
       if (!byChapter.has(key)) byChapter.set(key, [])
       byChapter.get(key)!.push(a)
     }
+    const lookupChapter = buildChapterOrderLookup(chapterOrder)
     const orderIndex = (name: string) => {
-      const i = chapterOrder.indexOf(name)
+      const i = lookupChapter(name)
       return i < 0 ? chapterOrder.length : i
     }
     const reverse = sort === 'chapter-desc'
+    // Same start position (a bookmark on a highlight's first char): order by
+    // range end, then creation time, then id so the list never depends on
+    // server arrival order
+    const compareItems = (a: AnnotationRes, b: AnnotationRes) =>
+      compareCfiPosition(a.cfiRange, b.cfiRange)
+      || compareCfiPosition(a.cfiRange, b.cfiRange, true)
+      || a.createdAt - b.createdAt
+      || a.id.localeCompare(b.id)
     return Array.from(byChapter.entries())
       .map(([chapter, list]) => ({
         chapter,
-        list: list.sort((a, b) => (reverse ? -1 : 1) * a.cfiRange.localeCompare(b.cfiRange)),
+        list: list.sort((a, b) => (reverse ? -1 : 1) * compareItems(a, b)),
       }))
       .sort((g1, g2) => {
         const a = orderIndex(g1.chapter)

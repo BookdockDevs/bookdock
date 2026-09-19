@@ -38,6 +38,41 @@ export function cfiRangesIntersect(cfi: CfiModule, a: string, b: string): boolea
   return cfi.compare(startA, endB) <= 0 && cfi.compare(startB, endA) <= 0
 }
 
+// Sort key for annotation lists: every CFI step/offset digit run compared
+// numerically (epubcfi.compare semantics without the async module load).
+// Takes the range start point, or the end point when `toEnd`: foliate emits
+// `parent,start,end` where the fragments are relative, so the collapsed
+// point is segment 0 + the chosen fragment; the 2-segment form's segments
+// are already full start/end points. Returns null for non-`epubcfi(...)`
+// values (chapter:/txt: positions), which callers fall back to string compare.
+function cfiPositionKey(cfi: string, toEnd = false): number[] | null {
+  const inner = /^epubcfi\((.*)\)$/.exec(cfi)?.[1]
+  if (!inner) return null
+  const segments = inner.split(',')
+  const point = toEnd
+    ? segments.length >= 3
+      ? segments[0] + segments[2]
+      : segments[segments.length - 1]
+    : segments.length >= 3
+      ? segments[0] + segments[1]
+      : segments[0]
+  return Array.from(point.matchAll(/\d+(?:\.\d+)?/g), (m) => Number(m[0]))
+}
+
+export function compareCfiPosition(a: string, b: string, toEnd = false): number {
+  const ka = cfiPositionKey(a, toEnd)
+  const kb = cfiPositionKey(b, toEnd)
+  if (!ka || !kb) return a.localeCompare(b)
+  for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+    const x = ka[i]
+    const y = kb[i]
+    if (x === undefined) return -1
+    if (y === undefined) return 1
+    if (x !== y) return x - y
+  }
+  return 0
+}
+
 export async function annotationsOverlap(a: string, b: string): Promise<boolean> {
   const cfi = await loadCfiModule()
   return cfiRangesOverlap(cfi, a, b)

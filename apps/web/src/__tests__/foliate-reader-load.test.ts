@@ -845,6 +845,7 @@ describe('FoliateReader activation-click guard', () => {
     handleActivationBlur: (blurredDoc: Document, fromFrame: boolean) => void
     handleActivationRefocus: (fromFrame?: boolean) => void
     handleActivationPointerDown: () => void
+    handleActivationVisibilityChange: () => void
     watchFrameFocus: (win: Window) => void
     unwatchFrameFocus: (win: Window | null) => void
     awaitingActivationClick: boolean
@@ -1119,5 +1120,40 @@ describe('FoliateReader activation-click guard', () => {
     reader.awaitingActivationClick = false
     frameWin.dispatchEvent(new Event('blur'))
     expect(reader.awaitingActivationClick).toBe(false)
+  })
+
+  it('disarms the guard when the tab becomes visible again (tab switch-back)', () => {
+    const reader = setup()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    // Chromium's tab-hide blur arms the guard and the tab-return focus pair
+    // keeps it armed — but that switch never cost the window OS focus, so the
+    // click that lands on the page after re-visibility is real intent
+    reader.handleActivationBlur(document, false)
+    ageBlur(reader)
+    reader.handleActivationRefocus()
+    expect(reader.awaitingActivationClick).toBe(true)
+
+    reader.handleActivationVisibilityChange()
+    expect(reader.awaitingActivationClick).toBe(false)
+    expect(reader.lastBlurAt).toBe(0)
+
+    reader.handleClickView(clickView(700))
+    expect(reader.next).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the arm when the tab goes hidden', () => {
+    const reader = setup()
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
+    try {
+      reader.awaitingActivationClick = true
+      reader.lastBlurAt = performance.now() - 1000
+
+      reader.handleActivationVisibilityChange()
+
+      expect(reader.awaitingActivationClick).toBe(true)
+      expect(reader.lastBlurAt).toBeGreaterThan(0)
+    } finally {
+      delete (document as { hidden?: unknown }).hidden
+    }
   })
 })

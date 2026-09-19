@@ -16,6 +16,8 @@ import {
   type AnnotationExportLabels,
   type AnnotationExportOptions,
 } from '../lib/annotation-export'
+import { compareCfiPosition } from '../lib/cfi-overlap'
+import { buildChapterOrderLookup } from '../lib/chapter-order'
 import { COLOR_LABEL_KEYS, STYLE_LABEL_KEYS } from './annotation-colors'
 import { CheckIcon, ChevronDownIcon, CopyIcon, DocumentExportIcon } from './annotation-icons'
 
@@ -101,15 +103,20 @@ export default function AnnotationExportDialog({
     if (sort === 'time-desc') return next.sort((a, b) => b.createdAt - a.createdAt)
     if (sort === 'time-asc') return next.sort((a, b) => a.createdAt - b.createdAt)
     const reverse = sort === 'chapter-desc'
-    const chapterIndex = (chapter: string | null) => (chapter ? chapterOrder.indexOf(chapter) : -1)
+    const lookupChapter = buildChapterOrderLookup(chapterOrder)
     return next.sort((a, b) => {
-      const aIndex = chapterIndex(a.chapter)
-      const bIndex = chapterIndex(b.chapter)
+      const aIndex = lookupChapter(a.chapter)
+      const bIndex = lookupChapter(b.chapter)
       const aUnknown = aIndex < 0
       const bUnknown = bIndex < 0
       if (aUnknown !== bUnknown) return aUnknown ? 1 : -1
       if (aIndex !== bIndex) return (reverse ? -1 : 1) * (aIndex - bIndex)
-      return (reverse ? -1 : 1) * a.cfiRange.localeCompare(b.cfiRange)
+      return (reverse ? -1 : 1) * (
+        compareCfiPosition(a.cfiRange, b.cfiRange)
+        || compareCfiPosition(a.cfiRange, b.cfiRange, true)
+        || a.createdAt - b.createdAt
+        || a.id.localeCompare(b.id)
+      )
     })
   }, [annotations, chapterOrder, sort])
 
