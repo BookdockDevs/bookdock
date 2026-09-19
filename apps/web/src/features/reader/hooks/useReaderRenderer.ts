@@ -218,7 +218,17 @@ export function useReaderRenderer({
     let cancelled = false
     const isCurrentRenderer = () => !cancelled && rendererRef.current === newRenderer
     const initialTarget = initialCfi
-    newRenderer.mount(containerRef.current, initialTarget, initialFraction).then(async () => {
+    // Fires once the view is live but BEFORE the initial chapter load resolves:
+    // exposing the renderer here lets TOC jumps navigate immediately (a user
+    // jump supersedes the in-flight open). lastDisplayedCfiRef is recorded in
+    // the same call so the saved-position effect below never re-navigates over
+    // a jump the user already made.
+    const markReady = () => {
+      if (!isCurrentRenderer()) return
+      lastDisplayedCfiRef.current = initialTarget
+      setRenderer(newRenderer)
+    }
+    newRenderer.mount(containerRef.current, initialTarget, initialFraction, markReady).then(async () => {
       // StrictMode double-invokes this effect: the loser must not become the
       // current renderer — its view already bailed out of mount
       if (!isCurrentRenderer()) return

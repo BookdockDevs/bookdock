@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useRef, useState } from 'react'
 
 import type { ReadingDetailManualItem, ReadingSessionUpdateReq } from '@bookdock/shared'
 
 import { useDeleteSession, useReadingDetailInfinite, useUpdateSession } from '@/api/hooks/reading-records'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -61,24 +62,8 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!menu) return
-    function handle(e: Event) {
-      if (!document.getElementById('reading-detail-menu')?.contains(e.target as Node)) {
-        setMenu(null)
-      }
-    }
-    // Clicks inside the foliate iframe never reach document; the renderer
-    // relays them as a bubbling `content-click` on the reader container
-    document.addEventListener('mousedown', handle)
-    document.addEventListener('content-click', handle)
-    return () => {
-      document.removeEventListener('mousedown', handle)
-      document.removeEventListener('content-click', handle)
-    }
-  }, [menu])
 
   const handleDelete = (id: string) => {
     setPendingDeleteId(id)
@@ -88,13 +73,13 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
     if (!pendingDeleteId) return
     deleteSession.mutate(pendingDeleteId, {
       onSuccess: () => notify.success({ key: 'reader.sessionDeleted' }),
-      onError: notifyError,
+      onError: (err) => notifyError(err, 'reader.sessionDeleteFailed'),
     })
     setPendingDeleteId(null)
   }
 
-  const notifyError = (err: unknown) => {
-    notify.error(getUserErrorNotification(err, 'reader.sessionActionFailed'))
+  const notifyError = (err: unknown, fallback = 'reader.sessionActionFailed') => {
+    notify.error(getUserErrorNotification(err, fallback))
   }
 
   // Global ordinal (index + 1), not chapter titles: novels with volumes restart
@@ -172,7 +157,7 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
                             notify.success({ key: 'reader.sessionUpdated' })
                             setEditingId(null)
                           },
-                          onError: notifyError,
+                          onError: (err) => notifyError(err, 'reader.sessionUpdateFailed'),
                         })
                       }}
                     />
@@ -202,16 +187,20 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
       )}
       {addOpen && <AddRecordDialog bookId={bookId} onClose={() => setAddOpen(false)} />}
       {menu && (
-        <div
+        <SmartMenu
           id="reading-detail-menu"
-          className="fixed z-[60] min-w-[9rem] rounded-lg border border-stone-200/60 bg-[var(--bd-read-bg)] py-1 shadow-xl dark:border-stone-800/60"
-          style={{ left: menu.x, top: menu.y }}
+          innerRef={menuRef}
+          variant="reader"
+          width={130}
+          position={{ left: menu.x, top: menu.y, dir: 'down' }}
+          onClose={() => setMenu(null)}
         >
           <button
+            type="button"
             onClick={() => { setEditingId(menu.id); setMenu(null) }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"
           >
-            <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4">
+            <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
               </svg>
@@ -219,10 +208,11 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
             {_('reader.sessionEdit')}
           </button>
           <button
+            type="button"
             onClick={() => { handleDelete(menu.id); setMenu(null) }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-500/5"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-red-500 transition-colors hover:bg-red-500/10"
           >
-            <span className="[&>svg]:h-4 [&>svg]:w-4">
+            <span className="[&>svg]:h-3.5 [&>svg]:w-3.5">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
                 <path d="M10 11v6M14 11v6" />
@@ -230,7 +220,7 @@ export default function ReadingDetailList({ bookId }: ReadingDetailListProps) {
             </span>
             {_('reader.sessionDelete')}
           </button>
-        </div>
+        </SmartMenu>
       )}
       {pendingDeleteId && (
         <ConfirmDialog

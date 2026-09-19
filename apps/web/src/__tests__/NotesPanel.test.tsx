@@ -47,7 +47,7 @@ const ANNOTATIONS: AnnotationRes[] = [
   makeAnnotation({ id: 'h1', cfiRange: 'cfi:1', text: '直线划线甲', color: 'yellow', style: 'underline', chapter: '第一章', createdAt: 1000 }),
   makeAnnotation({ id: 'h2', cfiRange: 'cfi:2', text: '波浪划线乙', color: 'red', style: 'squiggly', chapter: '第二章', createdAt: 2000 }),
   makeAnnotation({ id: 'n1', cfiRange: 'cfi:3', type: 'note', text: '想法原文丙', note: '我的想法丙', color: 'blue', style: 'highlight', chapter: '第一章', createdAt: 3000 }),
-  makeAnnotation({ id: 'b1', cfiRange: 'cfi:4', cfiAnchor: 'cfi:4', type: 'bookmark', text: '书签丁', chapter: '第二章', createdAt: 4000 }),
+  makeAnnotation({ id: 'b1', cfiRange: 'cfi:4', cfiAnchor: 'cfi-anchor', type: 'bookmark', text: '书签丁', chapter: '第二章', createdAt: 4000 }),
   makeAnnotation({ id: 'h3', cfiRange: 'cfi:5', text: '无章节划线', color: 'green', style: 'highlight', chapter: null, createdAt: 5000 }),
 ]
 
@@ -107,7 +107,7 @@ describe('NotesPanel', () => {
     fireEvent.click(screen.getByText('直线划线甲'))
     expect(display).toHaveBeenCalledWith('cfi:1')
     expect(onClose).toHaveBeenCalled()
-    // bookmarks navigate by their anchor
+    // bookmarks navigate by their persisted restore position
     fireEvent.click(screen.getByText('书签丁'))
     expect(display).toHaveBeenCalledWith('cfi:4')
   })

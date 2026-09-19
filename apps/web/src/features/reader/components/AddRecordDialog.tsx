@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import { localDateString, useAddReadingRecord } from '@/api/hooks/reading-records'
 import { Button } from '@/components/ui/Button'
+import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -34,16 +35,10 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
   const [endPct, setEndPct] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        markEscConsumed()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const handleClose = () => {
+    markEscConsumed()
+    onClose()
+  }
 
   const durationSeconds = Math.max(0, hours) * 3600 + Math.max(0, minutes) * 60
 
@@ -58,7 +53,7 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
     }
     const start = Number(startPct)
     const end = Number(endPct)
-    if (hasStartPct && (end < start)) {
+    if (hasStartPct && end < start) {
       setError(_('reader.addRecordPercentOrder'))
       return
     }
@@ -78,28 +73,20 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
       {
         onSuccess: () => {
           notify.success({ key: 'reader.addRecordSuccess' })
-          onClose()
+          handleClose()
         },
-        onError: (err) => setError(getUserErrorMessage(err, _, 'reader.sessionActionFailed')),
+        onError: (err) => setError(getUserErrorMessage(err, _, 'reader.sessionAddFailed')),
       },
     )
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={onClose}
-    >
-      <form
-        onSubmit={handleSubmit}
-        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-2xl border border-stone-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="mb-4 font-serif text-base font-medium text-stone-900 dark:text-stone-100">
-          {_('reader.addRecordTitle')}
-        </h2>
+    <Modal title={_('reader.addRecordTitle')} onClose={handleClose} size="sm">
+      <form onSubmit={handleSubmit}>
         <div className="mb-3">
-          <label htmlFor="addRecordDate" className={labelCls}>{_('reader.addRecordDate')}</label>
+          <label htmlFor="addRecordDate" className={labelCls}>
+            {_('reader.addRecordDate')}
+          </label>
           <input
             id="addRecordDate"
             type="date"
@@ -135,7 +122,9 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
           </div>
         </div>
         <div className="mb-3">
-          <label htmlFor="addRecordStartTime" className={labelCls}>{_('reader.addRecordStartTime')}</label>
+          <label htmlFor="addRecordStartTime" className={labelCls}>
+            {_('reader.addRecordStartTime')}
+          </label>
           <input
             id="addRecordStartTime"
             type="time"
@@ -146,7 +135,9 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
         </div>
         <div className="mb-4 grid grid-cols-2 gap-3 sm:flex">
           <div className="flex-1">
-            <label htmlFor="addRecordStartPct" className={labelCls}>{_('reader.sessionStartPercent')}</label>
+            <label htmlFor="addRecordStartPct" className={labelCls}>
+              {_('reader.sessionStartPercent')}
+            </label>
             <input
               id="addRecordStartPct"
               type="number"
@@ -158,7 +149,9 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
             />
           </div>
           <div className="flex-1">
-            <label htmlFor="addRecordEndPct" className={labelCls}>{_('reader.sessionEndPercent')}</label>
+            <label htmlFor="addRecordEndPct" className={labelCls}>
+              {_('reader.sessionEndPercent')}
+            </label>
             <input
               id="addRecordEndPct"
               type="number"
@@ -171,8 +164,8 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
           </div>
         </div>
         {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
-        <div className="flex justify-end gap-3">
-          <Button type="button" variant="ghost" onClick={onClose}>
+        <div className="flex justify-end gap-3 pt-2">
+          <Button type="button" variant="ghost" onClick={handleClose}>
             {_('library.cancel')}
           </Button>
           <Button type="submit" disabled={addRecord.isPending || durationSeconds <= 0}>
@@ -180,6 +173,6 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
           </Button>
         </div>
       </form>
-    </div>
+    </Modal>
   )
 }

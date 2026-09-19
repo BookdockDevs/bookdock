@@ -147,7 +147,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     try {
       const promise = create.mutateAsync({
         cfiRange: selection.cfiRange,
-        cfiAnchor: selection.anchor,
+        cfiAnchor: selection.cfiRange,
         type: 'highlight',
         color: last.color,
         style: last.style,
@@ -178,7 +178,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     try {
       await update.mutateAsync({ id: target.id, body: patch.color ? patch : { style, color } })
     } catch (err) {
-      notify.error(getUserErrorNotification(err, 'annotation.saveFailed'))
+      notify.error(getUserErrorNotification(err, 'annotation.styleUpdateFailed'))
     }
   }
 
@@ -187,7 +187,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     if (!annotationId) return
     try {
       await del.mutateAsync(annotationId)
-      notify.success({ key: 'reader.deleted' })
+      notify.success({ key: 'annotation.deleted' })
       if (createdLocal?.id === annotationId) setCreatedLocal(null)
       // Deleting one of several ideas at the same range drops back to the
       // overlay's list level; only the last remaining idea closes it
@@ -198,7 +198,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         : []
       if (remaining.length === 0) close()
     } catch (err) {
-      notify.error(getUserErrorNotification(err, 'reader.deleteFailed'))
+      notify.error(getUserErrorNotification(err, 'annotation.deleteFailed'))
     }
   }
 
@@ -218,7 +218,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         const last = getLastHighlightStyle()
         await create.mutateAsync({
           cfiRange: selection.cfiRange,
-          cfiAnchor: selection.anchor,
+          cfiAnchor: selection.cfiRange,
           type: 'note',
           color: last.color,
           style: last.style,

@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type Mo
 
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
+import SmartMenu from '@/components/ui/SmartMenu'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
@@ -176,6 +177,7 @@ export const NotesPanel = memo(function NotesPanel({
   // navigate instead of silently landing nowhere
   const orphanedKeys = useReaderState((s) => s.orphanedAnnotationKeys)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: AnnotationRes } | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [internalSelectedIds, setInternalSelectedIds] = useState<Set<string>>(new Set())
   const selectedIds = externalSelectedIds ?? internalSelectedIds
@@ -286,22 +288,7 @@ export const NotesPanel = memo(function NotesPanel({
     return [...items].sort((a, b) => (sort === 'time-asc' ? a.createdAt - b.createdAt : b.createdAt - a.createdAt))
   }, [items, sort])
 
-  useEffect(() => {
-    if (!contextMenu) return
-    function handle(e: Event) {
-      if (!document.getElementById('notes-context-menu')?.contains(e.target as Node)) {
-        setContextMenu(null)
-      }
-    }
-    // Clicks inside the foliate iframe never reach document; the renderer
-    // relays them as a bubbling `content-click` on the reader container
-    document.addEventListener('mousedown', handle)
-    document.addEventListener('content-click', handle)
-    return () => {
-      document.removeEventListener('mousedown', handle)
-      document.removeEventListener('content-click', handle)
-    }
-  }, [contextMenu])
+
 
   // The click that dismisses the context menu must not also turn a page
   useEffect(() => {
@@ -315,7 +302,7 @@ export const NotesPanel = memo(function NotesPanel({
       notify.info({ key: 'annotation.orphanedNotice' })
       return
     }
-    renderer?.display(item.type === 'bookmark' ? item.cfiAnchor || item.cfiRange : item.cfiRange)
+    renderer?.display(item.cfiRange)
     if (!locked) onClose?.()
   }
 
@@ -683,32 +670,37 @@ export const NotesPanel = memo(function NotesPanel({
       )}
 
       {contextMenu && (
-        <div
+        <SmartMenu
           id="notes-context-menu"
-          className="fixed z-[60] min-w-[9rem] rounded-lg border border-stone-200/60 bg-[var(--bd-read-bg)] py-1 shadow-xl dark:border-stone-800/60"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          innerRef={contextMenuRef}
+          variant="reader"
+          width={130}
+          position={{ left: contextMenu.x, top: contextMenu.y, dir: 'down' }}
+          onClose={() => setContextMenu(null)}
         >
           <button
+            type="button"
             onClick={() => {
               void copyItem(contextMenu.item)
               setContextMenu(null)
             }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"
           >
-            <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4">
+            <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5">
               <CopyIcon />
             </span>
             {_('annotation.copy')}
           </button>
           {contextMenu.item.type !== 'bookmark' && (
             <button
+              type="button"
               onClick={() => {
                 shareItem(contextMenu.item)
                 setContextMenu(null)
               }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4">
+              <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5">
                 <ShareIcon />
               </span>
               {_('annotation.share')}
@@ -716,13 +708,14 @@ export const NotesPanel = memo(function NotesPanel({
           )}
           {contextMenu.item.type === 'bookmark' && (
             <button
+              type="button"
               onClick={() => {
                 setEditingId(contextMenu.item.id)
                 setContextMenu(null)
               }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4">
+              <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5">
                 <PencilIcon />
               </span>
               {_('annotation.rename')}
@@ -730,31 +723,33 @@ export const NotesPanel = memo(function NotesPanel({
           )}
           {kindOf(contextMenu.item) === 'idea' && (
             <button
+              type="button"
               onClick={() => {
                 setEditingId(contextMenu.item.id)
                 setContextMenu(null)
               }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4">
+              <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5">
                 <PencilIcon />
               </span>
               {_('annotation.editNote')}
             </button>
           )}
           <button
+            type="button"
             onClick={() => {
               deleteItem(contextMenu.item)
               setContextMenu(null)
             }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-500/5"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-red-500 transition-colors hover:bg-red-500/10"
           >
-            <span className="[&>svg]:h-4 [&>svg]:w-4">
+            <span className="[&>svg]:h-3.5 [&>svg]:w-3.5">
               <TrashIcon />
             </span>
             {_('reader.delete')}
           </button>
-        </div>
+        </SmartMenu>
       )}
       {exportOpen && (
         <AnnotationExportDialog

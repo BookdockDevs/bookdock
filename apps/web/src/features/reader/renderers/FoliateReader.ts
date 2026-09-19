@@ -504,6 +504,40 @@ export interface NormalizeEpubDocumentOptions {
   onMediaError?: (detail: MediaErrorInfo) => void
 }
 
+function firstParagraphTextNode(node: Node): Text | null {
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) return child as Text
+    if (child.nodeType !== Node.ELEMENT_NODE) continue
+    const tag = (child as Element).tagName.toLowerCase()
+    if (tag === 'br' || tag === 'img' || tag === 'svg') return null
+    const textNode = firstParagraphTextNode(child)
+    if (textNode) return textNode
+  }
+  return null
+}
+
+const paragraphWhitespacePrefixes = new WeakMap<Element, string>()
+
+export function setEpubParagraphWhitespace(doc: Document, normalize: boolean): void {
+  for (const paragraph of Array.from(doc.querySelectorAll('p'))) {
+    const textNode = firstParagraphTextNode(paragraph)
+    if (!textNode?.nodeValue) continue
+
+    let prefix = paragraphWhitespacePrefixes.get(paragraph)
+    if (prefix === undefined) {
+      prefix = textNode.nodeValue.match(/^[\s\u3000]*/)?.[0] ?? ''
+      paragraphWhitespacePrefixes.set(paragraph, prefix)
+    }
+
+    const content = textNode.nodeValue.replace(/^[\s\u3000]+/, '')
+    textNode.nodeValue = normalize ? content : `${prefix}${content}`
+  }
+}
+
+export function normalizeEpubParagraphWhitespace(doc: Document): void {
+  setEpubParagraphWhitespace(doc, true)
+}
+
 export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEpubDocumentOptions): void {
   const view = doc.defaultView ?? (typeof window === 'undefined' ? null : window)
   if (!view) return
@@ -1191,7 +1225,7 @@ export class FoliateReader implements BookReader {
     size: 18,
     lineHeight: 1.8,
     fontWeight: 400,
-    overrideBookFont: true,
+    overrideBookFont: false,
   }
   private paragraph: ParagraphStyle = {
     paragraphSpacing: 0.5,
@@ -1200,7 +1234,7 @@ export class FoliateReader implements BookReader {
     verticalPadding: 0,
     horizontalPadding: 0,
     textAlignJustify: false,
-    overrideBookLayout: true,
+    overrideBookLayout: false,
   }
   private theme: { bg: string; text: string; primary?: string } = { bg: '#ffffff', text: '#000000' }
   private pageWidth = 0
@@ -1286,6 +1320,119 @@ export class FoliateReader implements BookReader {
   }
   popPopupGuard() {
     this.popupGuardCount = Math.max(0, this.popupGuardCount - 1)
+  }
+  // Activation-click guard: when the browser window regains OS focus through
+  // a click, that same click must not turn a page or toggle the chrome.
+  // Engine facts this walks between (verified on the user's machines):
+  // - Chromium keeps `document.hasFocus()` true after the window loses OS
+  //   focus and dispatches the activating click AFTER the window `focus`
+  //   event; Firefox reports hasFocus() false on real blur and dispatches the
+  //   activating click BEFORE `focus`.
+  // - Once focus sits inside a book iframe, the top window stops seeing blur
+  //   at all when the app is left — the section contentWindow gets it, so
+  //   every live section window is watched too.
+  // - Turning a page / the OS activation itself makes foliate move focus
+  //   between our documents, producing blur/focus pairs WHILE the app stays
+  //   active. A blur within the gap window of the last click we handled (or a
+  //   parent pointerdown) is post-activity fallout and ignored. An in-app
+  //   shuffle blur never satisfies the hasFocus() arm condition, so a focus
+  //   landing back-to-back on a blur only voids that blur's timestamp — the
+  //   arm state survives (Firefox's real deactivate fires a frame focus 0ms
+  //   after the leave blur; disarming there cost the guard its first switch).
+  // Armed = a blur that reported real focus loss (Firefox) or a focus >300ms
+  // after a pending blur (Chromium, where hasFocus never goes false).
+  // click-view consumes an arm only while no fresh blur has re-stamped the
+  // window, so same-gesture focus steals still turn pages.
+  private activationGuardReady = false
+  private startupClickPending = false
+  private awaitingActivationClick = false
+  private lastBlurAt = 0
+  private lastBlurFromFrame = false
+  private activationReturnPending = false
+  private lastActivationActivityAt = 0
+  private static ACTIVATION_GAP_MS = 300
+  // section contentWindows currently watched for blur/focus -> their handlers
+  private frameFocusWatch = new Map<Window, { blur: () => void; focus: () => void }>()
+  private markActivationActivity = () => {
+    this.lastActivationActivityAt = performance.now()
+    if (!this.awaitingActivationClick) {
+      this.lastBlurAt = 0
+      this.lastBlurFromFrame = false
+      this.activationReturnPending = false
+    }
+  }
+  private handleWindowBlur = () => this.handleActivationBlur(document, false)
+  private handleWindowFocus = () => this.handleActivationRefocus(false)
+  private handleActivationBlur = (blurredDoc: Document, fromFrame: boolean) => {
+    const now = performance.now()
+    const topHasFocus = document.hasFocus()
+    if (!this.activationGuardReady) return
+    if (now - this.lastActivationActivityAt < FoliateReader.ACTIVATION_GAP_MS) return
+    this.lastBlurAt = now
+    this.lastBlurFromFrame = fromFrame
+    const topLost = !topHasFocus
+    // A frame blur only counts when the whole app lost focus (Firefox leave);
+    // in Chromium top hasFocus stays true, so its frame blurs never arm —
+    // the return-focus path covers Chromium instead
+    if (fromFrame ? topLost && !blurredDoc.hasFocus() : topLost) {
+      this.startupClickPending = false
+      this.awaitingActivationClick = true
+    }
+  }
+  private handleActivationRefocus = (fromFrame = false) => {
+    const now = performance.now()
+    if (!this.activationGuardReady) return
+    const gap = now - this.lastBlurAt
+    if (this.lastBlurAt === 0) return
+    if (gap <= FoliateReader.ACTIVATION_GAP_MS) {
+      if (fromFrame && this.awaitingActivationClick && !this.lastBlurFromFrame && !this.activationReturnPending) {
+        this.awaitingActivationClick = false
+        this.lastBlurAt = 0
+        this.lastBlurFromFrame = false
+        this.markActivationActivity()
+        return
+      }
+      // Back-to-back blur+focus: this focus says nothing about the arm — an
+      // in-app shuffle blur never armed, and Firefox's real deactivate is
+      // followed by a spurious frame focus 0ms later. Keep a possible frame
+      // blur pending so a later top-level focus can still confirm Chromium's
+      // return from another app; a confirmed arm may safely discard its stamp.
+      if (!fromFrame && this.awaitingActivationClick) this.activationReturnPending = true
+      if (!fromFrame || this.awaitingActivationClick) this.lastBlurAt = 0
+      return
+    }
+    // A book iframe can regain focus during normal rendering or chapter
+    // switches while the browser window remains active. It is not enough to
+    // identify a return from another app, and arming here swallows the first
+    // click after refresh. Firefox is covered by the blur path above; on
+    // Chromium the top-level focus event is the activation signal.
+    if (fromFrame) return
+    this.startupClickPending = false
+    this.awaitingActivationClick = true
+    this.activationReturnPending = true
+  }
+  private handleActivationPointerDown = () => {
+    this.startupClickPending = false
+    this.awaitingActivationClick = false
+    this.lastBlurAt = 0
+    this.activationReturnPending = false
+    this.markActivationActivity()
+  }
+  private watchFrameFocus(win: Window) {
+    if (win === window || this.frameFocusWatch.has(win)) return
+    const blur = () => this.handleActivationBlur(win.document, true)
+    const focus = () => this.handleActivationRefocus(true)
+    win.addEventListener('blur', blur)
+    win.addEventListener('focus', focus)
+    this.frameFocusWatch.set(win, { blur, focus })
+  }
+  private unwatchFrameFocus(win: Window | null) {
+    if (!win) return
+    const handlers = this.frameFocusWatch.get(win)
+    if (!handlers) return
+    win.removeEventListener('blur', handlers.blur)
+    win.removeEventListener('focus', handlers.focus)
+    this.frameFocusWatch.delete(win)
   }
 
   private invalidateFootnoteRequests() {
@@ -1480,6 +1627,30 @@ export class FoliateReader implements BookReader {
   }
 
   private handleClickView = (event: Event) => {
+    if (this.startupClickPending) {
+      this.startupClickPending = false
+      this.awaitingActivationClick = false
+      this.lastBlurAt = 0
+      this.lastBlurFromFrame = false
+      this.activationReturnPending = false
+    }
+    if (this.activationGuardReady && this.awaitingActivationClick) {
+      if (performance.now() - this.lastBlurAt > FoliateReader.ACTIVATION_GAP_MS) {
+        this.awaitingActivationClick = false
+        this.lastBlurAt = 0
+        this.lastBlurFromFrame = false
+        this.activationReturnPending = false
+        this.markActivationActivity()
+        return
+      }
+      // blur younger than the gap: same-gesture iframe focus steal, not an
+      // OS reactivation — let the click through and disarm
+      this.awaitingActivationClick = false
+      this.lastBlurAt = 0
+    }
+    // Every handled click anchors the activity window: blur/focus fallout
+    // from the resulting page turn must not re-arm the guard
+    this.markActivationActivity()
     if (this.selectionDismissPending) {
       this.selectionDismissPending = false
       return
@@ -1646,7 +1817,7 @@ export class FoliateReader implements BookReader {
     this.bookId = bookId
   }
 
-  async mount(container: HTMLElement, initialTarget?: string, initialFraction?: number) {
+  async mount(container: HTMLElement, initialTarget?: string, initialFraction?: number, onReady?: () => void) {
     this.container = container
     // [bd] mount timing: the first open pays the one-time costs below (module
     // load, zip open, parse); re-entries hit the parse cache and only rebuild
@@ -1741,9 +1912,19 @@ export class FoliateReader implements BookReader {
         view.remove()
         return
       }
+      // Registered past the destroyed bails so a StrictMode zombie instance
+      // can never leave listeners behind (destroy() has already run by then)
+      window.addEventListener('blur', this.handleWindowBlur)
+      window.addEventListener('focus', this.handleWindowFocus)
+      document.addEventListener('pointerdown', this.handleActivationPointerDown, true)
       this.emitTocReady()
 
       this.applyAllSettings()
+      // The view is live (TOC emitted, settings applied). Hand control back to
+      // the host before the initial navigation so directory jumps execute
+      // immediately even while the first chapter is still loading — the
+      // paginator's display-generation bump supersedes the in-flight open.
+      onReady?.()
       // Navigate to saved position before mount completes, so the user never
       // sees the default chapter. Internal: the initial open is not a "jump".
       if (initialTarget) {
@@ -1757,6 +1938,19 @@ export class FoliateReader implements BookReader {
         // Ensure first section is visible after applyAllSettings re-render
         await this.view?.renderer?.goTo?.({ index: 0 })
       }
+      // Initial view creation and saved-position navigation can move focus
+      // between the host document and book iframes. Do not let that startup
+      // choreography consume the first real user click; subsequent focus
+      // changes are handled by the activation guard above.
+      this.awaitingActivationClick = false
+      this.lastBlurAt = 0
+      this.lastBlurFromFrame = false
+      this.activationReturnPending = false
+      this.activationGuardReady = true
+      this.startupClickPending = true
+      // Do not treat renderer readiness as user activity. A real window blur
+      // immediately after opening the book must still arm reactivation guard.
+      this.lastActivationActivityAt = 0
       const tMount3 = performance.now()
       console.debug(
         `[bd] reader mount: foliate ${(tMount1 - tMount0).toFixed(0)}ms, ` +
@@ -1795,6 +1989,15 @@ export class FoliateReader implements BookReader {
     // The content has become visible at this point. Do not keep a spinner up
     // while a paginator background-fill or font/layout promise finishes.
     this.navigationPending.settle()
+    // Firefox can report the old section iframe losing focus while a user
+    // jump is loading. Once the destination is visible, that blur belongs to
+    // the internal section swap, not to an OS reactivation.
+    this.awaitingActivationClick = false
+    this.lastBlurAt = 0
+    this.lastBlurFromFrame = false
+    this.activationReturnPending = false
+    if (this.startupClickPending) this.lastActivationActivityAt = 0
+    else this.markActivationActivity()
     this.lastRange = range ?? null
     // fraction is NaN on transient relocate paths (section reload with zero viewSize)
     // Paginated foliate progress includes the visible page tail in `fraction`.
@@ -1809,16 +2012,7 @@ export class FoliateReader implements BookReader {
     // server chapter/TOC index: one XHTML resource may contain multiple TOC
     // entries, and a TOC entry may share a resource with its neighbors.
     const chapterIndex = Number.isFinite(section?.current) ? section.current : undefined
-    let anchorCfi = typeof cfi === 'string' && cfi ? cfi : undefined
-    if (anchorCfi && chapterIndex !== undefined && range?.cloneRange && this.view?.getCFI) {
-      try {
-        const anchorRange = range.cloneRange()
-        anchorRange.collapse(true)
-        anchorCfi = this.view.getCFI(chapterIndex, anchorRange)
-      } catch {
-        // Keep the engine-provided CFI if the cross-realm range cannot be cloned.
-      }
-    }
+    const contentCfi = typeof cfi === 'string' && cfi ? cfi : undefined
     if (chapterIndex !== undefined) {
       this.currentSectionIndex = chapterIndex
       this.scheduleTextPrefetch(chapterIndex)
@@ -1885,7 +2079,7 @@ export class FoliateReader implements BookReader {
     }
     const location: ReaderLocation = {
       cfi: effectiveCfi,
-      anchorCfi,
+      contentCfi,
       percent: frac != null ? Math.round(frac * 100) : 0,
       fraction: frac ?? undefined,
       chapter: tocItem?.label,
@@ -2153,6 +2347,7 @@ export class FoliateReader implements BookReader {
   applyParagraphStyle(cfg: ParagraphStyle) {
     this.paragraph = cfg
     this.emit('readingSettingsChanged')
+    for (const doc of this.activeDocs) setEpubParagraphWhitespace(doc, cfg.overrideBookLayout)
     this.applyStyles()
     this.updateLayout()
   }
@@ -2797,15 +2992,18 @@ export class FoliateReader implements BookReader {
   }
 
   deselect() {
+    // Silent on purpose: without clearing the flag first the doc's
+    // selectionchange listener emits ('selected', null) and unmounts the
+    // toolbar before it can show the fresh highlight's restyle state.
+    // Callers that DO want the bubble gone emit the event themselves.
+    this.selectionActive = false
     try { this.view?.deselect?.() } catch { /* view may be gone */ }
   }
 
   clearSelection() {
+    const wasActive = this.selectionActive
     this.deselect()
-    if (this.selectionActive) {
-      this.selectionActive = false
-      this.emit('selected', null)
-    }
+    if (wasActive) this.emit('selected', null)
   }
 
   setAnnotations(annotations: ReaderAnnotation[]) {
@@ -3266,6 +3464,7 @@ export class FoliateReader implements BookReader {
       for (const doc of this.activeDocs) {
         if (!docs.has(doc)) {
           doc.removeEventListener('click', this.handleDocInteraction)
+          this.unwatchFrameFocus(doc.defaultView)
           const sel = this.selectionDocs.get(doc)
           if (sel) {
             doc.removeEventListener('pointerdown', sel.startHandler)
@@ -3282,11 +3481,13 @@ export class FoliateReader implements BookReader {
       for (const { doc, index } of contents) {
         if (!doc || this.activeDocs.has(doc)) continue
         this.applyFixedLayoutDocumentStyles(doc)
+        setEpubParagraphWhitespace(doc, this.paragraph.overrideBookLayout)
         normalizeEpubDocumentImages(doc, {
           section: this.book?.sections?.[index],
           onMediaError: (detail) => this.emit('mediaError', detail),
         })
         doc.addEventListener('click', this.handleDocInteraction)
+        if (doc.defaultView) this.watchFrameFocus(doc.defaultView)
         const handler = () => this.handleSelection(doc, index)
         const selectionChangeHandler = () => this.handleSelectionChange(doc)
         const startHandler = () => {
@@ -3372,6 +3573,10 @@ export class FoliateReader implements BookReader {
     this.footnoteHandler = null
     setReplacementInvalidListener(null)
     this.navigationPending.dispose()
+    window.removeEventListener('blur', this.handleWindowBlur)
+    window.removeEventListener('focus', this.handleWindowFocus)
+    document.removeEventListener('pointerdown', this.handleActivationPointerDown, true)
+    for (const win of this.frameFocusWatch.keys()) this.unwatchFrameFocus(win)
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
     if (this.prefetchTimer !== null) { clearTimeout(this.prefetchTimer); this.prefetchTimer = null }
@@ -3435,6 +3640,7 @@ export class FoliateReader implements BookReader {
     const fontCss = this.font.fontCss ?? ''
     const isDarkTheme = !isLightCssColor(this.theme.bg)
     const forceBookdockFont = this.font.overrideBookFont
+    const forceBookdockLayout = this.paragraph.overrideBookLayout
     const fontDeclarations = `
         font-size: ${this.font.size}px !important;
         font-weight: ${this.font.fontWeight};
@@ -3456,14 +3662,10 @@ export class FoliateReader implements BookReader {
       font[size="6"] { font-size: ${Number((this.font.size * 2).toFixed(2))}px; }
       font[size="7"] { font-size: ${Number((this.font.size * 3).toFixed(2))}px; }
       [style*="font-size: 16px"], [style*="font-size:16px"] { font-size: 1rem !important; }`
-    const layoutDeclarations = `
+    const layoutDeclarations = forceBookdockLayout ? `
         line-height: ${this.font.lineHeight} !important;
-        letter-spacing: ${this.paragraph.letterSpacing}px !important;`
-    // Reader paragraph controls are application settings, not the switch that
-    // decides whether EPUB-specific compatibility rules replace book CSS.
-    // TXT is wrapped in generated XHTML with its own stylesheet, so these
-    // controls must remain effective when book-style override is disabled.
-    const paragraphStyles = `
+        letter-spacing: ${this.paragraph.letterSpacing}px !important;` : ''
+    const paragraphStyles = forceBookdockLayout ? (`
       p {
         line-height: ${this.font.lineHeight} !important;
         letter-spacing: ${this.paragraph.letterSpacing}px !important;
@@ -3471,7 +3673,7 @@ export class FoliateReader implements BookReader {
         margin-bottom: ${this.paragraph.paragraphSpacing}em !important;
         text-align: ${this.paragraph.textAlignJustify ? 'justify' : 'start'} !important;
       }`
-      + (this.paragraph.overrideBookLayout ? `
+      + `
       html {
         hanging-punctuation: allow-end last;
         orphans: 2;
@@ -3533,7 +3735,8 @@ export class FoliateReader implements BookReader {
       blockquote[align="center"], div[align="center"], p[align="center"], dd[align="center"],
       .aligned-center {
         text-indent: 0 !important;
-      }` : '')
+      }`
+      ) : ''
     const contentOverflowStyles = this.view?.isFixedLayout
       ? ''
       : `
@@ -3546,7 +3749,7 @@ export class FoliateReader implements BookReader {
       body {
         margin: 0 !important;
         overflow: unset;
-        line-height: unset !important;
+        ${forceBookdockLayout ? 'line-height: unset !important;' : ''}
       }
       img {
         -webkit-touch-callout: none;

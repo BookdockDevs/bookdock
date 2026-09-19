@@ -5,8 +5,8 @@ import type { MediaOverlayCue } from './lib/media-overlay'
 
 export interface ReaderLocation {
   cfi: string
-  /** Stable visible-content CFI for annotations; unlike cfi, this is not rewritten to a scroll fraction */
-  anchorCfi?: string
+  /** Raw EPUB CFI for the live visible range; unlike cfi, this is not rewritten to a scroll fraction */
+  contentCfi?: string
   percent: number
   /** Book-wide viewport-start position 0-1 from the engine, for seek and read-interval tracking */
   fraction?: number

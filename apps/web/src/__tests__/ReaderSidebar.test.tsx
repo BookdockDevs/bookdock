@@ -137,4 +137,25 @@ describe('ReaderSidebar on pointer devices', () => {
     expect(handle.parentElement).toBe(outerEl(container))
     expect(handle.closest('[data-testid="navigation-panel"]')).toBeNull()
   })
+
+  it('does not summon toolbar in header zone (clientY < 48) and collapses when moving into header', () => {
+    const originalUserAgent = navigator.userAgent
+    Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', configurable: true })
+    try {
+      const { container } = renderSidebar(false)
+      // Moving in header zone: remains collapsed
+      fireEvent.pointerEnter(outerEl(container), { clientY: 24 })
+      expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
+
+      // Moving below header: summons dock
+      fireEvent.pointerMove(outerEl(container), { clientY: 100 })
+      expect(dockEl(container)).toHaveClass('opacity-100')
+
+      // Moving back up into header: collapses dock so back button is never obstructed
+      fireEvent.pointerMove(outerEl(container), { clientY: 24 })
+      expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
+    } finally {
+      Object.defineProperty(navigator, 'userAgent', { value: originalUserAgent, configurable: true })
+    }
+  })
 })

@@ -321,6 +321,11 @@
     - 实现：在 `paginator.js` 的 `getVisibleRange` 中优化叶子与替换元素（`img`、`image`、`svg`、`video`、`canvas`、`audio`、`object`、`embed`、`iframe`、`hr` 或无子节点元素）的视口相交判定：只要与当前视口重叠（`right >= start && left <= end`），即使单张图片尺寸超出视口也予以接收；构造 Range 时，若起点/终点为元素节点，使用 `setStartBefore` / `setEndAfter`，杜绝空/折叠 Range。
     - 影响/验证：解决了章节开头长图时目录与页眉更新被阻断的问题，不影响普通图文排版与分页计算；`foliate-paginator.test.ts` 覆盖超高大图与叶子元素的视口识别契约。
 
+44. **`paginator.js` / `scrollByViewport` 跳章模式边界切章**
+    - 根因：跳章（`snap-turn` + 非 continuous）模式下滚轮在 `#onWheelSnap` 有双段累计切章、自动阅读在 `scrollByPixels` 有边界推进，但离散导航入口 `scrollByViewport`（点击翻页区、上下方向键/PageDown、底栏上下页按钮经由 `FoliateReader.scrollByPages` 全部落在这里）在章尾被 `#renderedViewSize` 钳位后直接 return——`no-continuous-scroll` 下缓冲区只含当前章，钳位即"到底"，导致点击和键盘都无法切到下一章。
+    - 实现：`scrollByViewport` 目标与当前位置差 ≤0.5（被钳位）时，若处于 `#snapTurn` 且非 `#continuous` 且未在切章中，复用 `#onWheelSnap` 同款路径 `#adjacentIndex(direction)` + `#goTo({ index, anchor: 0/1 })` 直接切章。离散一键 = "下一章"意图，不做轮询式累计阈值；关闭模式与长卷行为不变。
+    - 影响/验证：只影响 scrolled + snap 模式在章节边界的离散导航；jsdom 无布局无法驱动该路径，`node --check` 与全量测试保持通过，浏览器实机验证章尾点击/方向键切章、章首反向、以及关闭/长卷模式无回归。
+
 ## 3. Bookdock 宿主适配（不属于第二套核心）
 
 这些行为保留在 `apps/web/src/features/reader/renderers/FoliateReader.ts`，不再复制进旧 renderer：

@@ -29,6 +29,7 @@ import { createSegmentTracker, trackPosition, closeSegment } from './stats/readi
 import { createJumpHistory } from './jump-history'
 import { createHistoryAutoHide, type HistoryAutoHide } from './history-auto-hide'
 import { consumeEscFlag } from './lib/esc-consumed'
+import { cfiRangesIntersect, loadCfiModule } from './lib/cfi-overlap'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
 import { ReaderSidebar } from './components/ReaderSidebar'
@@ -63,8 +64,7 @@ export default function Reader() {
   const queryClient = useQueryClient()
   const [percent, setPercent] = useState(0)
   const [pageInfo, setPageInfo] = useState<{ page: number; total: number } | null>(null)
-  const [currentCfi, setCurrentCfi] = useState<string | null>(null)
-  const [currentAnchorCfi, setCurrentAnchorCfi] = useState<string | null>(null)
+  const [currentContentCfi, setCurrentContentCfi] = useState<string | null>(null)
   const [chapterFraction, setChapterFraction] = useState<number | undefined>(undefined)
   const [_atChapterStart, setAtChapterStart] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -113,10 +113,43 @@ export default function Reader() {
   const { data: annotations } = useAnnotations(id)
   const deepLinkHandled = useRef(false)
 
-  const currentBookmark = useMemo(() => {
-    if (!currentCfi && !currentAnchorCfi) return undefined
-    return annotations?.data?.find((a) => a.type === 'bookmark' && (a.cfiRange === currentAnchorCfi || a.cfiRange === currentCfi))
-  }, [annotations?.data, currentAnchorCfi, currentCfi])
+  const bookmarks = useMemo(
+    () => (annotations?.data ?? []).filter((annotation) => annotation.type === 'bookmark'),
+    [annotations?.data],
+  )
+  const [currentBookmarkId, setCurrentBookmarkId] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!currentContentCfi || bookmarks.length === 0) {
+      setCurrentBookmarkId(null)
+      return () => { cancelled = true }
+    }
+
+    const exact = bookmarks.find((bookmark) => bookmark.cfiRange === currentContentCfi)
+    if (exact) {
+      setCurrentBookmarkId(exact.id)
+      return () => { cancelled = true }
+    }
+
+    setCurrentBookmarkId(null)
+    void loadCfiModule()
+      .then((cfi) => {
+        if (cancelled) return
+        const match = bookmarks.find((bookmark) => cfiRangesIntersect(cfi, bookmark.cfiRange, currentContentCfi))
+        setCurrentBookmarkId(match?.id ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentBookmarkId(null)
+      })
+
+    return () => { cancelled = true }
+  }, [bookmarks, currentContentCfi])
+
+  const currentBookmark = useMemo(
+    () => bookmarks.find((bookmark) => bookmark.id === currentBookmarkId),
+    [bookmarks, currentBookmarkId],
+  )
 
   const readingThemeId = useUiStore((s) => s.readingThemeId)
   const lightReadingThemeId = useUiStore((s) => s.lightReadingThemeId)
@@ -580,8 +613,7 @@ export default function Reader() {
       setSelection(null)
       if (e.source !== 'tts') pingReadingTimer()
       setPercent(e.percent)
-      setCurrentCfi(e.cfi)
-      setCurrentAnchorCfi(e.anchorCfi ?? e.cfi)
+      setCurrentContentCfi(e.contentCfi ?? null)
       currentCfiRef.current = e.cfi
       setChapterFraction(e.chapterFraction)
       if (e.page !== undefined && e.total !== undefined) {
@@ -680,6 +712,7 @@ export default function Reader() {
       const lastStyle = getLastHighlightStyle()
       createAnnotation.mutate({
         cfiRange: e.cfiRange,
+        cfiAnchor: e.cfiRange,
         type: 'highlight',
         // Same rawText preference as the toolbar — see SelectionToolbar.highlight
         text: (e.rawText ?? e.text).slice(0, 500),
@@ -699,7 +732,7 @@ export default function Reader() {
     const annotation = deepLinkAnnotation
       ? annotations?.data?.find((item) => item.id === deepLinkAnnotation)
       : undefined
-    const target = deepLinkCfi || annotation?.cfiAnchor || annotation?.cfiRange
+    const target = deepLinkCfi || annotation?.cfiRange || annotation?.cfiAnchor
     if (!target) return
     deepLinkHandled.current = true
     void renderer.display(target)
@@ -748,7 +781,11 @@ export default function Reader() {
   }, [renderer, annotations?.data, noteEditorRange])
 
   useEffect(() => {
-    resetForBook()
+    // A locked desktop toolbar is persistent by intent — reopen the sidebar
+    // with it, unless the user last collapsed it (remembered while locked).
+    // Touch devices have no lock, so the sidebar always starts closed.
+    const ui = useUiStore.getState()
+    resetForBook(!isTouch && ui.toolbarLocked && ui.sidebarRememberedOpen)
     // chapterCount starts empty; the effect below syncs it when chapters arrive
     segmentTrackerRef.current = createSegmentTracker()
     lastSegmentStartRef.current = null
@@ -757,9 +794,19 @@ export default function Reader() {
     syncHistoryCaps()
     historyAutoHideRef.current?.dispose()
     currentCfiRef.current = null
-    setCurrentCfi(null)
-    setCurrentAnchorCfi(null)
-  }, [id, resetForBook, syncHistoryCaps])
+    setCurrentContentCfi(null)
+  }, [id, resetForBook, syncHistoryCaps, isTouch])
+
+  // While locked, every open/closed toggle is a deliberate choice — remember
+  // it (device-local) so the next book open honors it instead of forcing open.
+  // Skip stale renders: on a cold refresh the seed effect above has already
+  // opened the sidebar while this render still holds the initial `false`, and
+  // recording that would wipe the memory before the seed value lands.
+  useEffect(() => {
+    if (isTouch || !toolbarLocked) return
+    if (useReaderState.getState().sidebarOpen !== sidebarOpen) return
+    useUiStore.getState().setSidebarRememberedOpen(sidebarOpen)
+  }, [sidebarOpen, toolbarLocked, isTouch])
 
   // The displacement threshold scales with the chapter count (big books cap it
   // at two chapter widths); update it once the chapters arrive
@@ -980,7 +1027,7 @@ export default function Reader() {
   }, [])
 
   const onAddBookmark = useCallback(async () => {
-    const bookmarkCfi = currentAnchorCfi ?? currentCfi
+    const bookmarkCfi = currentContentCfi
     if (!bookmarkCfi) return
     if (currentBookmark) {
       try {
@@ -1004,7 +1051,7 @@ export default function Reader() {
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'reader.bookmarkFailed'))
     }
-  }, [currentAnchorCfi, currentBookmark, currentChapter, currentCfi, createAnnotation, deleteAnnotation, _])
+  }, [currentBookmark, currentChapter, currentContentCfi, createAnnotation, deleteAnnotation, _])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1152,7 +1199,7 @@ export default function Reader() {
           <div className="relative flex flex-1 flex-col">
             {/* Top hover zone: hot strip + header belong to the same group so hover is continuous.
                 Touch: no group/hot strip — pinned (middle tap) is the only reveal. */}
-            <div className={cn('absolute inset-x-0 top-0 z-40 pointer-events-none', !isTouch && 'group')}>
+            <div className={cn('absolute inset-x-0 top-0 z-50 pointer-events-none', !isTouch && 'group')}>
               {!isTouch && (
                 <div
                   className={cn(

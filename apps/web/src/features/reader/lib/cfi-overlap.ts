@@ -29,6 +29,15 @@ export function cfiRangesOverlap(cfi: CfiModule, a: string, b: string): boolean 
   return cfi.compare(startA, endB) < 0 && cfi.compare(startB, endA) < 0
 }
 
+export function cfiRangesIntersect(cfi: CfiModule, a: string, b: string): boolean {
+  if (!cfi.isCFI.test(a) || !cfi.isCFI.test(b)) return a === b
+  const startA = cfi.collapse(a)
+  const endA = cfi.collapse(a, true)
+  const startB = cfi.collapse(b)
+  const endB = cfi.collapse(b, true)
+  return cfi.compare(startA, endB) <= 0 && cfi.compare(startB, endA) <= 0
+}
+
 export async function annotationsOverlap(a: string, b: string): Promise<boolean> {
   const cfi = await loadCfiModule()
   return cfiRangesOverlap(cfi, a, b)

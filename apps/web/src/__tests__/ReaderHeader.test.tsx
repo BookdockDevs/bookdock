@@ -6,6 +6,13 @@ import { IDLE_TTS_STATE, TtsSessionContext } from '../features/reader/hooks/tts-
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: ReactNode }) => <a href="/">{children}</a>,
+  useNavigate: () => vi.fn(),
+  useRouter: () => ({
+    history: {
+      canGoBack: () => false,
+      back: vi.fn(),
+    },
+  }),
 }))
 
 describe('ReaderHeader', () => {
@@ -21,8 +28,9 @@ describe('ReaderHeader', () => {
       />,
     )
 
-    const bookmarkButton = screen.getByTitle('添加书签')
+    const bookmarkButton = screen.getByTitle('移除书签')
     expect(bookmarkButton).toHaveClass('border-current', 'text-current')
+    expect(bookmarkButton).toHaveAttribute('aria-label', '移除书签')
     const svg = bookmarkButton.querySelector('svg')
     expect(svg).toHaveAttribute('fill', 'currentColor')
   })
@@ -41,6 +49,7 @@ describe('ReaderHeader', () => {
 
     const bookmarkButton = screen.getByTitle('添加书签')
     expect(bookmarkButton).toHaveClass('border-[var(--bd-read-accent)]', 'text-[var(--bd-read-text)]')
+    expect(bookmarkButton).toHaveAttribute('aria-label', '添加书签')
     const svg = bookmarkButton.querySelector('svg')
     expect(svg).toHaveAttribute('fill', 'none')
   })

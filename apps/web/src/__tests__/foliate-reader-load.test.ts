@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createZipEntryMap,
@@ -9,6 +9,8 @@ import {
   selectZipLoadStrategy,
   transformEpubStylesheet,
   transformEpubMarkup,
+  setEpubParagraphWhitespace,
+  normalizeEpubParagraphWhitespace,
   normalizeEpubDocumentImages,
   buildAnnotationBuckets,
   cfiSpinePrefix,
@@ -191,13 +193,13 @@ describe('FoliateReader book-style overrides', () => {
     })
 
     expect(onRelocated).toHaveBeenCalledWith(expect.objectContaining({
-      anchorCfi: 'epubcfi(/6/2!/4/2)',
+      contentCfi: 'epubcfi(/6/2!/4/2)',
       fraction: 0.4,
       percent: 40,
     }))
   })
 
-  it('emits a collapsed content anchor at the visible range start', () => {
+  it('keeps the engine content CFI as the canonical visible location', () => {
     const reader = new FoliateReader('')
     const onRelocated = vi.fn()
     const collapse = vi.fn()
@@ -212,10 +214,10 @@ describe('FoliateReader book-style overrides', () => {
       fraction: 0.4,
     })
 
-    expect(collapse).toHaveBeenCalledWith(true)
-    expect(getCFI).toHaveBeenCalledWith(0, expect.any(Object))
+    expect(collapse).not.toHaveBeenCalled()
+    expect(getCFI).not.toHaveBeenCalled()
     expect(onRelocated).toHaveBeenCalledWith(expect.objectContaining({
-      anchorCfi: 'epubcfi(/6/2!/4/2:17)',
+      contentCfi: 'epubcfi(/6/2!/4/2:17,/4/4:42)',
     }))
   })
 
@@ -273,7 +275,7 @@ describe('FoliateReader book-style overrides', () => {
     expect(css).toContain('-webkit-touch-callout: none;')
   })
 
-  it('keeps reader paragraph controls when book-style overrides are disabled', () => {
+  it('leaves book text layout rules untouched when book-style overrides are disabled', () => {
     const reader = new FoliateReader('')
     const setStyles = vi.fn()
     ;(reader as any).view = { renderer: { setStyles } }
@@ -284,10 +286,11 @@ describe('FoliateReader book-style overrides', () => {
 
     const css = String(setStyles.mock.calls[0]?.[0] ?? '')
     expect(css).not.toContain('font-family: serif !important;')
-    expect(css).toContain('line-height: 1.8 !important;')
-    expect(css).toContain('text-indent: 2em !important;')
-    expect(css).toContain('margin-bottom: 0.5em !important;')
-    expect(css).not.toContain('body *:not(pre, code, kbd)')
+    expect(css).not.toContain('line-height: 1.8 !important;')
+    expect(css).not.toContain('text-indent: 2em !important;')
+    expect(css).not.toContain('margin-bottom: 0.5em !important;')
+    expect(css).not.toContain('line-height: unset !important;')
+    expect(css).not.toContain('hanging-punctuation: allow-end last;')
   })
 
   it('uses the reader font as a fallback when the book does not declare a font', () => {
@@ -424,6 +427,58 @@ describe('FoliateReader auto-scroll boundary', () => {
     expect(renderer.removeAttribute).not.toHaveBeenCalledWith('snap-turn')
     reader.setAutoReadingActive(false)
     expect(renderer.setAttribute).toHaveBeenCalledWith('snap-turn', '')
+  })
+})
+
+describe('FoliateReader selection dismissal', () => {
+  it('deselect() clears the native selection without emitting selected:null', () => {
+    const reader = new FoliateReader('')
+    const viewDeselect = vi.fn()
+    ;(reader as any).view = { deselect: viewDeselect }
+    ;(reader as any).selectionActive = true
+    const events: unknown[] = []
+    reader.on('selected', (e) => events.push(e))
+
+    reader.deselect()
+
+    expect(viewDeselect).toHaveBeenCalled()
+    expect((reader as any).selectionActive).toBe(false)
+    // The toolbar must survive (restyle state) — no dismissal event
+    expect(events).toHaveLength(0)
+  })
+
+  it('clearSelection() still emits selected:null exactly once while a selection is active', () => {
+    const reader = new FoliateReader('')
+    ;(reader as any).view = { deselect: vi.fn() }
+    ;(reader as any).selectionActive = true
+    const events: unknown[] = []
+    reader.on('selected', (e) => events.push(e))
+
+    reader.clearSelection()
+    reader.clearSelection()
+
+    expect(events).toEqual([null])
+  })
+})
+
+describe('normalizeEpubParagraphWhitespace', () => {
+  it('removes literal paragraph prefixes before the reader applies its indent', () => {
+    document.body.innerHTML = '<p>　　<span>第一句</span> 后续内容</p><p><img src="cover.png">　　图片说明</p>'
+
+    normalizeEpubParagraphWhitespace(document)
+
+    expect(document.querySelector('p')?.textContent).toBe('第一句 后续内容')
+    expect(document.querySelectorAll('p')[1]?.textContent).toBe('　　图片说明')
+  })
+
+  it('restores source paragraph prefixes when reader layout override is disabled', () => {
+    document.body.innerHTML = '<p>　　第一句</p>'
+
+    setEpubParagraphWhitespace(document, true)
+    expect(document.querySelector('p')?.textContent).toBe('第一句')
+
+    setEpubParagraphWhitespace(document, false)
+    expect(document.querySelector('p')?.textContent).toBe('　　第一句')
   })
 })
 
@@ -771,5 +826,298 @@ describe('convertTocLabels', () => {
 
     const contentScoped = await convertTocLabels(source, 'off', [rule({ applyTo: 'content' })])
     expect(contentScoped[0]?.label).toBe('第一章 你是南慕容?')
+  })
+})
+
+describe('FoliateReader activation-click guard', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  interface GuardReader {
+    container: unknown
+    readingMode: string
+    next: () => Promise<void>
+    prev: () => Promise<void>
+    on: (type: string, fn: (...args: unknown[]) => void) => void
+    handleClickView: (event: Event) => void
+    handleRelocate: (detail: unknown) => void
+    handleActivationBlur: (blurredDoc: Document, fromFrame: boolean) => void
+    handleActivationRefocus: (fromFrame?: boolean) => void
+    handleActivationPointerDown: () => void
+    watchFrameFocus: (win: Window) => void
+    unwatchFrameFocus: (win: Window | null) => void
+    awaitingActivationClick: boolean
+    startupClickPending: boolean
+    lastBlurAt: number
+    lastBlurFromFrame: boolean
+    activationReturnPending: boolean
+    frameFocusWatch: Map<Window, unknown>
+  }
+
+  function setup() {
+    const reader = new FoliateReader('') as unknown as GuardReader
+    reader.container = { getBoundingClientRect: () => ({ left: 0, width: 800 }) }
+    reader.readingMode = 'page'
+    reader.activationGuardReady = true
+    reader.startupClickPending = false
+    reader.next = vi.fn(async () => undefined)
+    reader.prev = vi.fn(async () => undefined)
+    vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    return reader
+  }
+
+  const clickView = (x: number) => new CustomEvent('click-view', { detail: { x } })
+
+  // A real OS reactivation leaves a gap well above the 300ms window between
+  // blur and the activating click; age the recorded blur instead of faking timers.
+  function ageBlur(reader: GuardReader) {
+    reader.lastBlurAt = performance.now() - 1000
+  }
+
+  it('turns pages on normal clicks', () => {
+    const reader = setup()
+    reader.handleClickView(clickView(700))
+    expect(reader.next).toHaveBeenCalled()
+  })
+
+  it('does not swallow startup focus fallout before the reader is ready', () => {
+    const reader = setup()
+    reader.activationGuardReady = false
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    reader.handleActivationBlur(document, false)
+    ageBlur(reader)
+
+    reader.handleClickView(clickView(700))
+
+    expect(reader.next).toHaveBeenCalled()
+    expect(reader.awaitingActivationClick).toBe(false)
+  })
+
+  it('lets the first reader click through after startup focus churn', () => {
+    const reader = setup()
+    reader.startupClickPending = true
+    reader.awaitingActivationClick = true
+    ageBlur(reader)
+
+    reader.handleClickView(clickView(700))
+
+    expect(reader.next).toHaveBeenCalled()
+    expect(reader.startupClickPending).toBe(false)
+    expect(reader.awaitingActivationClick).toBe(false)
+  })
+
+  it('lets the first chrome click through after startup focus churn', () => {
+    const reader = setup()
+    const onToggle = vi.fn()
+    reader.on('chromeToggle', onToggle)
+    reader.startupClickPending = true
+    reader.awaitingActivationClick = true
+    ageBlur(reader)
+
+    reader.handleClickView(clickView(400))
+
+    expect(onToggle).toHaveBeenCalledTimes(1)
+    expect(reader.startupClickPending).toBe(false)
+    expect(reader.awaitingActivationClick).toBe(false)
+  })
+
+  it('lets the first click through after an internal section relocation', () => {
+    const reader = setup()
+    reader.awaitingActivationClick = true
+    ageBlur(reader)
+
+    reader.handleRelocate({})
+    reader.handleClickView(clickView(700))
+
+    expect(reader.next).toHaveBeenCalledTimes(1)
+    expect(reader.awaitingActivationClick).toBe(false)
+    expect(reader.lastBlurAt).toBe(0)
+  })
+
+  it('releases a top-level blur when Firefox immediately focuses a book frame', () => {
+    const reader = setup()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+
+    reader.handleActivationBlur(document, false)
+    reader.handleActivationRefocus(true)
+    reader.handleClickView(clickView(700))
+
+    expect(reader.awaitingActivationClick).toBe(false)
+    expect(reader.lastBlurFromFrame).toBe(false)
+    expect(reader.next).toHaveBeenCalledTimes(1)
+  })
+
+  it('arms the first real window blur after startup', () => {
+    const reader = setup()
+    reader.startupClickPending = true
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+
+    reader.handleActivationBlur(document, false)
+
+    expect(reader.awaitingActivationClick).toBe(true)
+  })
+
+  it('does not let startup relocation suppress the first reactivation', () => {
+    const reader = setup()
+    reader.startupClickPending = true
+    reader.handleRelocate({})
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+
+    reader.handleActivationBlur(document, false)
+
+    expect(reader.awaitingActivationClick).toBe(true)
+  })
+
+  it('keeps the guard when top-level refocus precedes the frame handoff', () => {
+    const reader = setup()
+    reader.awaitingActivationClick = true
+    reader.lastBlurAt = performance.now() - 1000
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+
+    reader.handleActivationRefocus(false)
+    reader.handleActivationBlur(document, false)
+    reader.handleActivationRefocus(true)
+
+    expect(reader.activationReturnPending).toBe(true)
+    expect(reader.awaitingActivationClick).toBe(true)
+    reader.handleClickView(clickView(700))
+    expect(reader.next).not.toHaveBeenCalled()
+  })
+
+  it('swallows the reactivation click after a Firefox-style app leave', () => {
+    const reader = setup()
+    const onToggle = vi.fn()
+    reader.on('chromeToggle', onToggle)
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    reader.handleActivationBlur(document, false)
+    ageBlur(reader)
+
+    // activating click: no page turn, no chrome toggle
+    reader.handleClickView(clickView(700))
+    expect(reader.next).not.toHaveBeenCalled()
+    expect(onToggle).not.toHaveBeenCalled()
+
+    // only that one click is swallowed; later clicks behave normally
+    reader.handleClickView(clickView(400))
+    expect(onToggle).toHaveBeenCalledTimes(1)
+    reader.handleClickView(clickView(700))
+    expect(reader.next).toHaveBeenCalledTimes(1)
+  })
+
+  it('arms on refocus when blur never reported focus loss (Chromium)', () => {
+    const reader = setup()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    reader.handleActivationBlur(document, false)
+    expect(reader.awaitingActivationClick).toBe(false)
+
+    ageBlur(reader)
+    reader.handleActivationRefocus()
+    expect(reader.awaitingActivationClick).toBe(true)
+
+    reader.handleClickView(clickView(700))
+    expect(reader.next).not.toHaveBeenCalled()
+  })
+
+  it('lets the click through when the blur is a same-gesture iframe focus steal', () => {
+    const reader = setup()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    reader.handleActivationBlur(document, false)
+    expect(reader.awaitingActivationClick).toBe(true)
+
+    // blur is younger than the gap window: an in-page click, not a reactivation
+    reader.handleClickView(clickView(700))
+    expect(reader.next).toHaveBeenCalled()
+    expect(reader.awaitingActivationClick).toBe(false)
+  })
+
+  it('releases the armed flag when the user clicks parent chrome', () => {
+    const reader = setup()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    reader.handleActivationBlur(document, false)
+    reader.handleActivationPointerDown()
+    expect(reader.awaitingActivationClick).toBe(false)
+    expect(reader.lastBlurAt).toBe(0)
+
+    reader.handleClickView(clickView(700))
+    expect(reader.next).toHaveBeenCalled()
+  })
+
+  it('ignores blur fallout right after a handled click (page-turn focus shuffle)', () => {
+    const reader = setup()
+    reader.handleClickView(clickView(700))
+    expect(reader.next).toHaveBeenCalledTimes(1)
+
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    reader.handleActivationBlur(document, false)
+    expect(reader.awaitingActivationClick).toBe(false)
+    expect(reader.lastBlurAt).toBe(0)
+
+    reader.handleClickView(clickView(700))
+    expect(reader.next).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the arm through a back-to-back focus but voids the blur stamp (Firefox deactivate)', () => {
+    const reader = setup()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    reader.handleActivationBlur(document, false)
+    expect(reader.awaitingActivationClick).toBe(true)
+
+    // Firefox fires a spurious frame focus 0ms after the real leave blur —
+    // it may not disarm the guard that the blur legitimately armed
+    reader.handleActivationRefocus()
+    expect(reader.awaitingActivationClick).toBe(true)
+    expect(reader.lastBlurAt).toBe(0)
+
+    // with no live stamp the arm always outlives the gap window: swallowed
+    reader.handleClickView(clickView(700))
+    expect(reader.next).not.toHaveBeenCalled()
+
+    // and the very next click turns again
+    reader.handleClickView(clickView(700))
+    expect(reader.next).toHaveBeenCalled()
+  })
+
+  it('never arms from a frame blur while the top document keeps focus', () => {
+    const reader = setup()
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    reader.handleActivationBlur(document, true)
+    expect(reader.awaitingActivationClick).toBe(false)
+    // the blur timestamp still survives for the Chromium return-focus path
+    expect(reader.lastBlurAt).toBeGreaterThan(0)
+  })
+
+  it('watches section windows without arming from normal iframe refocus', () => {
+    const reader = setup()
+    const iframe = document.createElement('iframe')
+    document.body.append(iframe)
+    const frameWin = iframe.contentWindow
+    if (!frameWin) throw new Error('jsdom frame window missing')
+
+    // the top window is already covered by the mount listeners
+    reader.watchFrameFocus(window)
+    expect(reader.frameFocusWatch.size).toBe(0)
+
+    reader.watchFrameFocus(frameWin)
+    reader.watchFrameFocus(frameWin)
+    expect(reader.frameFocusWatch.size).toBe(1)
+
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    frameWin.dispatchEvent(new Event('blur'))
+    expect(reader.awaitingActivationClick).toBe(true)
+
+    reader.awaitingActivationClick = false
+    ageBlur(reader)
+    frameWin.dispatchEvent(new Event('focus'))
+    expect(reader.awaitingActivationClick).toBe(false)
+
+    reader.handleActivationRefocus()
+    expect(reader.awaitingActivationClick).toBe(true)
+
+    reader.unwatchFrameFocus(frameWin)
+    expect(reader.frameFocusWatch.size).toBe(0)
+    reader.awaitingActivationClick = false
+    frameWin.dispatchEvent(new Event('blur'))
+    expect(reader.awaitingActivationClick).toBe(false)
   })
 })

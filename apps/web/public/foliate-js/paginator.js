@@ -3823,7 +3823,25 @@ export class Paginator extends HTMLElement {
         const target = direction > 0
             ? Math.min(max, this.#renderedStart + distance)
             : Math.max(0, this.#renderedStart - distance)
-        if (Math.abs(target - this.#renderedStart) <= 0.5) return
+        if (Math.abs(target - this.#renderedStart) <= 0.5) {
+            // Clamped at the buffer edge. Discrete next/prev intents (click
+            // zones, arrow keys, page buttons) must still cross the chapter in
+            // snap mode — the wheel accumulates because it is continuous, a
+            // deliberate one-shot press at the boundary means "next chapter".
+            if (!this.#snapTurn || this.#continuous || this.#snapNavigating) return
+            const index = this.#adjacentIndex(direction)
+            if (index == null) return
+            this.#snapNavigating = true
+            try {
+                await this.#goTo({
+                    index,
+                    anchor: direction > 0 ? () => 0 : () => 1,
+                })
+            } finally {
+                this.#snapNavigating = false
+            }
+            return
+        }
         await this.#scrollTo(target, null, true)
     }
     async scrollByPixels(delta) {

@@ -500,7 +500,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
   const initialMemoryRef = useRef<AiPanelMemory | null>(null)
   if (initialMemoryRef.current === null) initialMemoryRef.current = readAiPanelMemory(memoryUserId, bookId)
   const initialMemory = initialMemoryRef.current
-  const showError = (error: unknown, fallback = 'errors.operationFailed') => notify.error(getUserErrorNotification(error, fallback))
+  const showError = (error: unknown, fallback = 'reader.aiRequestFailed') => notify.error(getUserErrorNotification(error, fallback))
   const queryClient = useQueryClient()
   const aiContext = useReaderState((s) => s.aiContext)
   const setAiContext = useReaderState((s) => s.setAiContext)
@@ -748,7 +748,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     if (savedSettings.readingScope === readingScope && toolsMatch && modeMatch) return
     const timer = window.setTimeout(() => {
       updateThreadSettings({ id: threadId, body: { settings: { readingScope, enabledTools, assistantModeId: selectedAssistantModeId } } }, {
-        onError: (error) => notify.error(getUserErrorNotification(error)),
+        onError: (error) => notify.error(getUserErrorNotification(error, 'reader.aiConversationSettingsFailed')),
       })
     }, 250)
     return () => window.clearTimeout(timer)

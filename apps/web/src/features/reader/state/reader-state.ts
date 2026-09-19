@@ -48,7 +48,7 @@ interface ReaderState {
   addInvalidReplacementIds: (ids: string[]) => void
   addOrphanedAnnotationKeys: (keys: string[]) => void
   setReplaceTarget: (target: SelectionInfo | null) => void
-  resetForBook: () => void
+  resetForBook: (initialSidebarOpen?: boolean) => void
 }
 
 export const useReaderState = create<ReaderState>((set) => ({
@@ -83,7 +83,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   addOrphanedAnnotationKeys: (keys) =>
     set((s) => ({ orphanedAnnotationKeys: Array.from(new Set([...s.orphanedAnnotationKeys, ...keys])) })),
   setReplaceTarget: (replaceTarget) => set({ replaceTarget }),
-  resetForBook: () => set({
+  resetForBook: (initialSidebarOpen = false) => set({
     activeNavTab: 'toc',
     tocItems: [],
     tocBookId: null,
@@ -92,7 +92,7 @@ export const useReaderState = create<ReaderState>((set) => ({
     selection: null,
     aiContext: null,
     aiPendingCommand: null,
-    sidebarOpen: false,
+    sidebarOpen: initialSidebarOpen,
     pendingSearchQuery: null,
     noteEditorRange: null,
     shareTarget: null,

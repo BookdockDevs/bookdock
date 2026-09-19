@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useRef, useState } from 'react'
 
+import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore } from '@/stores/ui.store'
 import { cn } from '@/lib/utils'
@@ -45,28 +45,7 @@ export default function ReadingPresetPicker() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
-
-  useEffect(() => {
-    if (!menu) return
-    const onDismiss = (e: Event) => {
-      if (!document.getElementById('preset-context-menu')?.contains(e.target as Node)) {
-        setMenu(null)
-      }
-    }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenu(null)
-    }
-    // Clicks inside the foliate iframe never reach document; the renderer
-    // relays them as a bubbling `content-click` on the reader container
-    document.addEventListener('mousedown', onDismiss)
-    document.addEventListener('content-click', onDismiss)
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onDismiss)
-      document.removeEventListener('content-click', onDismiss)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [menu])
+  const menuRef = useRef<HTMLDivElement>(null)
 
   const cfg = parseReadingConfig(readingConfig)
   const presets = cfg?.presets ?? []
@@ -258,16 +237,14 @@ export default function ReadingPresetPicker() {
         )}
       </div>
 
-      {/* Portaled to body: the settings popover sits inside the transformed
-          ReaderHeader, which would capture `fixed` positioning and break both
-          the menu coordinates and dismissal. Style mirrors the NotesPanel
-          context menu. */}
-      {menu && menuPreset && createPortal(
-        <div
+      {menu && menuPreset && (
+        <SmartMenu
           id="preset-context-menu"
-          role="menu"
-          className="fixed z-[60] min-w-28 rounded-lg border border-stone-200/60 bg-[var(--bd-read-bg)] py-1 shadow-xl dark:border-stone-800/60"
-          style={{ left: menu.x, top: menu.y }}
+          innerRef={menuRef}
+          variant="reader"
+          width={130}
+          position={{ left: menu.x, top: menu.y, dir: 'down' }}
+          onClose={() => setMenu(null)}
         >
           {setBoundPreset && (
             <button
@@ -276,9 +253,9 @@ export default function ReadingPresetPicker() {
                 setBoundPreset(menuPreset.id === boundPresetId ? null : menuPreset.id)
                 setMenu(null)
               }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><PinIcon /></span>
+              <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5"><PinIcon /></span>
               {menuPreset.id === boundPresetId ? _('reader.presetUnbind') : _('reader.presetBind')}
             </button>
           )}
@@ -288,9 +265,9 @@ export default function ReadingPresetPicker() {
               startRename(menuPreset)
               setMenu(null)
             }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-stone-500/5"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"
           >
-            <span className="text-[var(--bd-read-sub)] [&>svg]:h-4 [&>svg]:w-4"><PencilIcon /></span>
+            <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5"><PencilIcon /></span>
             {_('reader.presetRename')}
           </button>
           <button
@@ -299,13 +276,12 @@ export default function ReadingPresetPicker() {
               deleteReadingPreset(menuPreset.id)
               setMenu(null)
             }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-500 hover:bg-red-500/5"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-red-500 transition-colors hover:bg-red-500/10"
           >
-            <span className="[&>svg]:h-4 [&>svg]:w-4"><TrashIcon /></span>
+            <span className="[&>svg]:h-3.5 [&>svg]:w-3.5"><TrashIcon /></span>
             {_('reader.presetDelete')}
           </button>
-        </div>,
-        document.body,
+        </SmartMenu>
       )}
     </div>
   )

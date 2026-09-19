@@ -49,7 +49,7 @@ function annotationUrl(book: AnnotationExportBook, annotation: AnnotationRes): s
   const base = typeof window === 'undefined' ? 'http://localhost' : window.location.origin
   const url = new URL(`/books/${encodeURIComponent(book.id)}`, base)
   url.searchParams.set('annotation', annotation.id)
-  url.searchParams.set('cfi', annotation.cfiAnchor || annotation.cfiRange)
+  url.searchParams.set('cfi', annotation.cfiRange || annotation.cfiAnchor || '')
   return url.toString()
 }
 
@@ -138,7 +138,7 @@ export function buildAnnotationCsv(
       annotation.note ?? '',
     ]
     if (options.includeDetails) row.push(kindValue(annotation), annotation.color, annotation.style)
-    row.push(annotation.id, annotation.cfiAnchor || annotation.cfiRange)
+    row.push(annotation.id, annotation.cfiRange || annotation.cfiAnchor || '')
     if (options.includeTime) row.push(csvDate(annotation.createdAt), csvDate(annotation.updatedAt))
     if (options.includeDeepLink) row.push(annotationUrl(book, annotation))
     return row

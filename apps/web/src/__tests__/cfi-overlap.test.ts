@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 // @ts-expect-error plain vendored ESM without type declarations
 import * as epubcfi from '../../public/foliate-js/epubcfi.js'
 
-import { cfiRangesOverlap, type CfiModule } from '../features/reader/lib/cfi-overlap'
+import { cfiRangesIntersect, cfiRangesOverlap, type CfiModule } from '../features/reader/lib/cfi-overlap'
 
 const cfi = epubcfi as CfiModule
 
@@ -12,6 +12,7 @@ const range = (start: number, end: number, chapter = 4) =>
   `epubcfi(/6/${chapter}!/4/2,/1:${start},/1:${end})`
 
 const overlap = (a: string, b: string) => cfiRangesOverlap(cfi, a, b)
+const intersect = (a: string, b: string) => cfiRangesIntersect(cfi, a, b)
 
 describe('cfiRangesOverlap', () => {
   it('compares CFIs with different indirection depths without throwing', () => {
@@ -54,5 +55,16 @@ describe('cfiRangesOverlap', () => {
     expect(overlap('txt:100', 'txt:100')).toBe(true)
     expect(overlap('txt:100', 'txt:200')).toBe(false)
     expect(overlap('txt:100', range(0, 10))).toBe(false)
+  })
+})
+
+describe('cfiRangesIntersect', () => {
+  it('includes a bookmark at the current visible-range boundary', () => {
+    expect(intersect('epubcfi(/6/4!/4/2/1:0)', range(0, 10))).toBe(true)
+    expect(intersect('epubcfi(/6/4!/4/2/1:10)', range(0, 10))).toBe(true)
+  })
+
+  it('still rejects ranges from different chapters', () => {
+    expect(intersect(range(0, 10, 4), range(0, 10, 6))).toBe(false)
   })
 })

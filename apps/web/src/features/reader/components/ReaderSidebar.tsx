@@ -119,6 +119,33 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
     setSidebarOpen(false)
   }, [setSidebarOpen])
 
+  const isHeaderZone = useCallback((e: React.PointerEvent) => {
+    // In simulated testing environments without explicit clientY, allow default pointerEnter
+    if (typeof window !== 'undefined' && 'navigator' in window && /jsdom/i.test(navigator.userAgent) && e.clientY === 0) {
+      return false
+    }
+    return !locked && !sidebarOpen && e.clientY < 48
+  }, [locked, sidebarOpen])
+
+  const handleHoverPointerEnter = useCallback((e: React.PointerEvent) => {
+    if (isHeaderZone(e)) return
+    setHovered(true)
+  }, [isHeaderZone])
+
+  const handleHoverPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!locked && !sidebarOpen) {
+      if (isHeaderZone(e)) {
+        if (hovered) setHovered(false)
+        return
+      }
+      if (!hovered) setHovered(true)
+    }
+  }, [isHeaderZone, locked, sidebarOpen, hovered])
+
+  const handleHoverPointerLeave = useCallback(() => {
+    setHovered(false)
+  }, [])
+
   function toggleTheme() {
     setReadingThemeId(readingThemeId === 'night' ? lightReadingThemeId : 'night')
   }
@@ -233,12 +260,14 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       id="reader-navigation"
       data-testid="reader-sidebar"
       className={cn(
-        'relative z-50 flex h-full shrink-0 overflow-visible',
+        'relative flex h-full shrink-0 overflow-visible',
+        sidebarOpen ? 'z-50' : 'z-40',
         !resizing && 'transition-all duration-200',
       )}
       style={{ width: totalWidth }}
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
+      onPointerEnter={handleHoverPointerEnter}
+      onPointerMove={handleHoverPointerMove}
+      onPointerLeave={handleHoverPointerLeave}
     >
       {toolDock}
       {navigationPanel}

@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import { Link } from '@tanstack/react-router'
+import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { formatDuration } from '@/lib/format-duration'
@@ -59,23 +60,25 @@ interface ReaderHeaderProps {
 
 export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
   const _ = useTranslation()
+  const onBack = useBackNavigation('/')
   const { state: ttsState } = useTtsSession()
   const { state: autoReadingState } = useAutoReadingSession()
   const ttsActive = ttsState.status === 'starting' || ttsState.status === 'playing' || ttsState.status === 'paused'
   return (
     <header
       className={cn(
-        'pointer-events-none absolute left-0 right-0 top-0 z-40 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] transition-transform duration-300 sm:px-4',
+        'pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] transition-transform duration-300 sm:px-3',
         visible ? 'group-hover:translate-y-0' : '',
         settingsOpen || ttsOpen || autoReadingOpen || pinned ? 'translate-y-0' : '-translate-y-full',
         className,
       )}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-1.5">
         <Link
           to="/"
+          onClick={onBack}
           aria-label={_('reader.back')}
-          className="pointer-events-auto inline-flex items-center text-[var(--bd-read-sub)] hover:text-current"
+          className="pointer-events-auto -ml-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
         >
           <svg width="18" height="18" viewBox="1.5 1.5 21 21" fill="none" stroke="currentColor" strokeWidth="1.17" strokeLinecap="round" strokeLinejoin="round">
             <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -140,8 +143,8 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
         {onAddBookmark && (
           <button
             onClick={onAddBookmark}
-            title="添加书签"
-            aria-label="添加书签"
+            title={bookmarkActive ? '移除书签' : '添加书签'}
+            aria-label={bookmarkActive ? '移除书签' : '添加书签'}
             aria-pressed={bookmarkActive}
             className={cn(
               'pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg border bg-transparent transition-colors hover:bg-stone-500/10 sm:h-8 sm:w-8',
