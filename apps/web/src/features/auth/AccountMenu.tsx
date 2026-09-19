@@ -39,6 +39,15 @@ function SignInIcon() {
   )
 }
 
+function ProfileIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={iconClass}>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </svg>
+  )
+}
+
 export default function AccountMenu() {
   const _ = useTranslation()
   const navigate = useNavigate()
@@ -55,14 +64,20 @@ export default function AccountMenu() {
   if (!user && !isGuest) return null
 
   const username = user?.username ?? _('auth.guest')
-  const menuHeight = 88
+  const menuHeight = isGuest ? 88 : 120
 
   return (
     <>
       <button
         ref={menu.btnRef}
         type="button"
-        onClick={() => menu.toggleFromButton()}
+        onClick={() => {
+          if (isGuest) {
+            menu.toggleFromButton()
+            return
+          }
+          void navigate({ to: '/profile' })
+        }}
         onContextMenu={(e) => {
           e.preventDefault()
           menu.openFromEvent(e)
@@ -120,17 +135,30 @@ export default function AccountMenu() {
             </button>
           )
         ) : (
-          <button
-            type="button"
-            onClick={() => {
-              menu.close()
-              logout.mutate()
-            }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-          >
-            <SignOutIcon />
-            {_('auth.signOut')}
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                menu.close()
+                navigate({ to: '/profile' })
+              }}
+              className={menuItemClass}
+            >
+              <ProfileIcon />
+              {_('profile.open')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                menu.close()
+                logout.mutate()
+              }}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+            >
+              <SignOutIcon />
+              {_('auth.signOut')}
+            </button>
+          </>
         )}
       </SmartMenu>
     </>

@@ -30,13 +30,35 @@ export default function BookTimeList({ date, period, range }: BookTimeListProps)
     )
   }
 
+  const isBooksLoading = booksQuery.isLoading && !data
+
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <h2 className="mb-4 text-sm font-medium">
         <span>{_('stats.bookRanking')}</span>
         <span className="tabular-nums text-stone-500 dark:text-stone-400"> · {scopeLabel}</span>
       </h2>
-      {items.length === 0 ? (
+      {isBooksLoading ? (
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="h-14 w-10 shrink-0 animate-pulse rounded bg-stone-200/70 dark:bg-stone-800" />
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="h-4 w-32 animate-pulse rounded bg-stone-200/70 dark:bg-stone-800" />
+                  <div className="h-3.5 w-10 animate-pulse rounded bg-stone-200/50 dark:bg-stone-800/60" />
+                </div>
+                <div className="h-3 w-20 animate-pulse rounded bg-stone-200/50 dark:bg-stone-800/60" />
+                <div className="h-1 w-24 animate-pulse rounded-full bg-stone-200/60 dark:bg-stone-800" />
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <div className="h-4 w-14 animate-pulse rounded bg-stone-200/70 dark:bg-stone-800" />
+                <div className="h-3 w-8 animate-pulse rounded bg-stone-200/50 dark:bg-stone-800/60" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : items.length === 0 ? (
         <p className="py-6 text-center text-sm text-stone-400 dark:text-stone-500">{_('stats.emptyBooks')}</p>
       ) : (
         <ul className="flex flex-col gap-3">

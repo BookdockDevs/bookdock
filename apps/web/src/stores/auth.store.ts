@@ -8,6 +8,7 @@ export interface AuthUser {
   avatarKey?: string | null
   /** True for guest-injected sessions (no real login); mirrors MeRes.guest. */
   guest?: boolean
+  createdAt?: number
 }
 
 export function getUserDisplayName(user: AuthUser | null | undefined, guestLabel: string): string {

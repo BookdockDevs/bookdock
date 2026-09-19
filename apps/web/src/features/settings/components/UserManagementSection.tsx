@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useAdminUsers, useUpdateUser } from '@/features/auth/hooks'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
-import DeleteConfirm from '@/features/library/components/DeleteConfirm'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -34,7 +34,7 @@ export default function UserManagementSection() {
   function runUpdate(id: string, req: UpdateUserReq) {
     updateUser.mutate(
       { id, ...req },
-      { onError: (err) => notify.error(getUserErrorNotification(err, 'auth.errors.generic')) },
+      { onError: (err) => notify.error(getUserErrorNotification(err, 'auth.errors.userUpdateFailed')) },
     )
   }
 
@@ -83,18 +83,20 @@ export default function UserManagementSection() {
         </div>
       )}
 
-      <DeleteConfirm
-        open={pendingAction !== null}
-        title={pendingAction?.title}
-        message={pendingAction?.message}
-        confirmLabel={_('admin.confirm')}
-        onCancel={() => setPendingAction(null)}
-        onConfirm={() => {
-          const action = pendingAction
-          setPendingAction(null)
-          if (action) runUpdate(action.user.id, action.req)
-        }}
-      />
+      {pendingAction && (
+        <ConfirmDialog
+          title={pendingAction.title}
+          message={pendingAction.message}
+          confirmLabel={_('admin.confirm')}
+          confirmVariant="danger"
+          onClose={() => setPendingAction(null)}
+          onConfirm={() => {
+            const action = pendingAction
+            setPendingAction(null)
+            runUpdate(action.user.id, action.req)
+          }}
+        />
+      )}
 
       <ResetPasswordDialog
         user={resetTarget}

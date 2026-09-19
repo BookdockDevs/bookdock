@@ -4,11 +4,11 @@ import SettingsPending from '@/features/settings/components/SettingsPending'
 import { rootRoute } from './__root'
 
 export interface SettingsSearch {
-  section?: 'general' | 'account' | 'reading' | 'library' | 'admin'
+  section?: 'general' | 'reading' | 'library' | 'integrations' | 'admin'
   focus?: 'tts'
 }
 
-const VALID_SECTIONS = new Set(['general', 'account', 'reading', 'library', 'admin'])
+const VALID_SECTIONS = new Set(['general', 'reading', 'library', 'integrations', 'admin'])
 
 export const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,

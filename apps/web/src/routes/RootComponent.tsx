@@ -19,21 +19,23 @@ export function RootComponent() {
   const setAuth = useAuthStore((s) => s.setAuth)
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const pathname = location.pathname
+  const isLegadoLogin = pathname === '/login' && new URLSearchParams(window.location.search).get('legado') === '1'
   const isPublic = PUBLIC_PATHS.includes(pathname)
+  const shouldProbeSession = pathname === '/login' || !isPublic
 
   const instanceQuery = useInstanceInfo()
   const instance = instanceQuery.data?.data
 
   // Session state comes from the cookie; /auth/me doubles as the guard probe.
-  // staleTime 60s preserves the old debounce behavior via the query cache.
   const meQuery = useQuery({
     queryKey: ME_QUERY_KEY,
     queryFn: () => apiGet<{ data: MeRes }>('/auth/me'),
-    staleTime: 60_000,
     retry: false,
     // Guest injection is only reachable after initialization, so me is only
     // meaningful once the instance has a password user.
-    enabled: !isPublic && Boolean(instance?.initialized),
+    enabled: shouldProbeSession && Boolean(instance?.initialized),
+    refetchOnMount: pathname === '/login' ? 'always' : true,
+    staleTime: pathname === '/login' ? 0 : 60_000,
   })
 
   useEffect(() => {
@@ -62,6 +64,21 @@ export function RootComponent() {
       navigate({ to: '/login' })
       return
     }
+    if (pathname === '/login') {
+      if (meQuery.isPending || meQuery.isFetching) return
+      const me = meQuery.isError ? undefined : meQuery.data?.data
+      if (me) {
+        setAuth(me)
+        if (isLegadoLogin) {
+          window.location.assign('/')
+        } else {
+          navigate({ to: '/', replace: true })
+        }
+      } else {
+        clearAuth()
+      }
+      return
+    }
     if (isPublic) return
     if (meQuery.isPending) return
     const me = meQuery.data?.data
@@ -74,7 +91,7 @@ export function RootComponent() {
     clearAuth()
     // No session: guests pass through only when guest access is enabled.
     if (!instance.allowGuestAccess) navigate({ to: '/login' })
-  }, [instance, pathname, isPublic, meQuery.isPending, meQuery.data, navigate, setAuth, clearAuth])
+  }, [instance, pathname, isPublic, isLegadoLogin, meQuery.isPending, meQuery.isFetching, meQuery.isError, meQuery.data, navigate, setAuth, clearAuth])
 
   if (instanceQuery.isError && !instance) {
     return (
@@ -92,7 +109,9 @@ export function RootComponent() {
     if (!instance.initialized) {
       ready = pathname === '/setup'
     } else if (isPublic) {
-      ready = pathname !== '/setup' && !(pathname === '/register' && !instance.allowRegistration)
+      ready = pathname !== '/setup'
+        && !(pathname === '/register' && !instance.allowRegistration)
+        && !(pathname === '/login' && (meQuery.isPending || meQuery.isFetching || meQuery.data))
     } else if (meQuery.isPending) {
       ready = false
     } else if (meQuery.data) {

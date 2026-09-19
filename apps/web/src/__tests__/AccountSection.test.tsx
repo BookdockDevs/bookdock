@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 
 import { useDeleteAvatar, useUpdateUsername } from '@/features/auth/hooks'
+import ProfileSettingsDialog from '@/features/profile/components/ProfileSettingsDialog'
 import i18n from '../i18n/i18n'
 import AccountSection from '../features/settings/components/AccountSection'
 import { useAuthStore } from '../stores/auth.store'
@@ -49,23 +50,30 @@ describe('AccountSection', () => {
     expect(clickSpy).toHaveBeenCalled()
   })
 
-  it('edits and saves the username', () => {
+  it('triggers onOpenSettings when clicking the settings button', () => {
+    const onOpenSettings = vi.fn()
+    render(<AccountSection onOpenSettings={onOpenSettings} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '主页设置' }))
+    expect(onOpenSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('edits and saves the username in ProfileSettingsDialog', () => {
     const updateUsername = { mutateAsync: vi.fn().mockResolvedValue({}), isPending: false }
     vi.mocked(useUpdateUsername).mockReturnValue(updateUsername as unknown as ReturnType<typeof useUpdateUsername>)
-    render(<AccountSection />)
+    render(<ProfileSettingsDialog open={true} onClose={vi.fn()} />)
 
-    fireEvent.click(screen.getByText('修改'))
     const input = screen.getByDisplayValue('tester')
     fireEvent.change(input, { target: { value: '  newname  ' } })
-    fireEvent.click(screen.getByText('保存'))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(updateUsername.mutateAsync).toHaveBeenCalledWith({ username: 'newname' })
   })
 
-  it('opens the change-password dialog from the account section', () => {
-    render(<AccountSection />)
+  it('opens the change-password dialog from ProfileSettingsDialog', () => {
+    render(<ProfileSettingsDialog open={true} onClose={vi.fn()} />)
 
     expect(screen.queryByText('旧密码')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByText('修改密码'))
+    fireEvent.click(screen.getByRole('button', { name: '修改密码' }))
     expect(screen.getByText('旧密码')).toBeInTheDocument()
   })
 

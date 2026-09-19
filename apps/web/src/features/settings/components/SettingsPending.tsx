@@ -1,8 +1,10 @@
 import { Link } from '@tanstack/react-router'
+import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { useTranslation } from '@/hooks/useTranslation'
 
 export default function SettingsPending() {
   const _ = useTranslation()
+  const onBack = useBackNavigation('/')
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col p-4 sm:p-6" aria-busy="true">
@@ -10,6 +12,7 @@ export default function SettingsPending() {
         <div className="flex items-center gap-3">
           <Link
             to="/"
+            onClick={onBack}
             aria-label={_('settings.back')}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
             title={_('settings.back')}

@@ -126,7 +126,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
   const showScope = !!bookId || !!selection || initial?.matchType === 'point'
 
   function onError(err: unknown) {
-    notify.error(getUserErrorNotification(err))
+    notify.error(getUserErrorNotification(err, 'settings.replacementOperationFailed'))
   }
 
   function onSaved() {

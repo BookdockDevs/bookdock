@@ -35,7 +35,7 @@ export default function TocRulesSettingsSection() {
   const [editor, setEditor] = useState<{ open: boolean; initial: TocRuleRes | null }>({ open: false, initial: null })
   const [pendingDelete, setPendingDelete] = useState<TocRuleRes | null>(null)
   const busy = updateRule.isPending || deleteRule.isPending || reorderRules.isPending || seedRules.isPending
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.tocRuleOperationFailed'))
 
   function onToggle(rule: TocRuleRes) {
     const enabled = !rule.enabled

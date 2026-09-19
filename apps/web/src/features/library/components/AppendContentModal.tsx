@@ -240,7 +240,7 @@ export default function AppendContentModal({ bookId, onClose }: AppendContentMod
             : { key: 'library.appendSuccessNoChapter' })
           onClose()
         },
-        onError: (error) => notify.error(getUserErrorNotification(error, 'errors.operationFailed')),
+        onError: (error) => notify.error(getUserErrorNotification(error, 'library.appendFailed')),
       },
     )
   }

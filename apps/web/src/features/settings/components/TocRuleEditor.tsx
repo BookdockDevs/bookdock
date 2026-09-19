@@ -83,7 +83,7 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
   }
 
   function onError(err: unknown) {
-    notify.error(getUserErrorNotification(err))
+    notify.error(getUserErrorNotification(err, 'settings.tocRuleOperationFailed'))
   }
 
   function handleSubmit(e: React.FormEvent) {

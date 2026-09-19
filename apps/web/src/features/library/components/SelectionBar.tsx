@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { ReadStatus } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPost, apiPut } from '@/api/client'
 import { Button } from '@/components/ui/Button'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
@@ -52,28 +53,55 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
     return () => observer.disconnect()
   }, [updateScrollState, selectedIds.length, trash])
 
-  async function runBatch(action: (bookId: string) => Promise<unknown>) {
+  async function runBatch(
+    action: (bookId: string) => Promise<unknown>,
+    successKey: string,
+    actionKey: string,
+    ids = selectedIds,
+  ) {
     setMarking(true)
-    const results = await Promise.allSettled(selectedIds.map(action))
+    const results = await Promise.allSettled(ids.map(action))
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
     void queryClient.invalidateQueries({ queryKey: ['books'] })
     if (failed === 0) {
-      notify.success({ key: 'library.batchSucceeded', params: { count: succeeded } })
+      notify.success({ key: successKey, params: { count: succeeded } })
     } else {
-      notify.error({ key: 'library.batchPartial', params: { succeeded, failed } })
+      const failedIds = ids.filter((_, index) => results[index]?.status === 'rejected')
+      notify.warning(
+        { key: 'library.batchPartial', params: { action: _(actionKey), succeeded, failed } },
+        {
+          duration: 'persistent',
+          action: {
+            label: _('library.batchRetryFailed'),
+            onClick: () => {
+              void runBatch(action, successKey, actionKey, failedIds).then((ok) => {
+                if (ok) onComplete()
+              })
+            },
+          },
+        },
+      )
     }
     setMarking(false)
     return failed === 0
   }
 
   async function handleBatchStatus(value: ReadStatus) {
-    const ok = await runBatch((bookId) => apiPatch(`/books/${bookId}`, { readStatus: value }))
+    const ok = await runBatch(
+      (bookId) => apiPatch(`/books/${bookId}`, { readStatus: value }),
+      'library.batchStatusSucceeded',
+      'library.batchActionStatus',
+    )
     if (ok) onComplete()
   }
 
   async function handleBatchRestore() {
-    const ok = await runBatch((bookId) => apiPost(`/books/${bookId}/restore`))
+    const ok = await runBatch(
+      (bookId) => apiPost(`/books/${bookId}/restore`),
+      'library.batchRestoreSucceeded',
+      'library.batchActionRestore',
+    )
     if (ok) onComplete()
   }
 
@@ -207,9 +235,12 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
     void queryClient.invalidateQueries({ queryKey: ['shelves'] })
     void queryClient.invalidateQueries({ queryKey: ['tags'] })
     if (failed === 0) {
-      notify.success({ key: 'library.batchSucceeded', params: { count: succeeded } })
+      notify.success({ key: 'library.batchClassifySucceeded', params: { count: succeeded } })
     } else {
-      notify.error({ key: 'library.batchPartial', params: { succeeded, failed } })
+      notify.warning({
+        key: 'library.batchPartial',
+        params: { action: _('library.batchActionClassify'), succeeded, failed },
+      })
     }
     if (failed === 0) {
       onDone()
@@ -342,9 +373,12 @@ function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: (
     void queryClient.invalidateQueries({ queryKey: ['shelves'] })
     void queryClient.invalidateQueries({ queryKey: ['tags'] })
     if (failed === 0) {
-      notify.success({ key: 'library.batchSucceeded', params: { count: succeeded } })
+      notify.success({ key: 'library.batchDeleteSucceeded', params: { count: succeeded } })
     } else {
-      notify.error({ key: 'library.batchPartial', params: { succeeded, failed } })
+      notify.warning({
+        key: 'library.batchPartial',
+        params: { action: _('library.batchActionDelete'), succeeded, failed },
+      })
     }
     if (failed === 0) {
       onDone()
@@ -355,28 +389,15 @@ function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: (
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4">
-      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
-        <h2 className="mb-2 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
-          {_('library.batchDelete')}
-        </h2>
-        <p className="mb-6 text-sm text-stone-500">
-          {_('library.batchDeleteConfirm', { count: ids.length })}
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose} disabled={deleting}>
-            {_('library.cancel')}
-          </Button>
-          <Button
-            variant="danger"
-            disabled={deleting}
-            onClick={() => void handleDelete()}
-          >
-            {_('library.batchDelete')}
-          </Button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      title={_('library.batchDelete')}
+      message={_('library.batchDeleteConfirm', { count: ids.length })}
+      confirmLabel={_('library.batchDelete')}
+      confirmVariant="danger"
+      confirmDisabled={deleting}
+      onClose={onClose}
+      onConfirm={() => void handleDelete()}
+    />
   )
 }
 
@@ -392,9 +413,12 @@ function BatchPermanentDeleteDialog({ ids, onClose, onDone }: { ids: string[]; o
     const succeeded = results.length - failed
     void queryClient.invalidateQueries({ queryKey: ['books'] })
     if (failed === 0) {
-      notify.success({ key: 'library.batchSucceeded', params: { count: succeeded } })
+      notify.success({ key: 'library.batchPermanentDeleteSucceeded', params: { count: succeeded } })
     } else {
-      notify.error({ key: 'library.batchPartial', params: { succeeded, failed } })
+      notify.warning({
+        key: 'library.batchPartial',
+        params: { action: _('library.batchActionPermanentDelete'), succeeded, failed },
+      })
     }
     if (failed === 0) {
       onDone()
@@ -405,27 +429,14 @@ function BatchPermanentDeleteDialog({ ids, onClose, onDone }: { ids: string[]; o
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4">
-      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
-        <h2 className="mb-2 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
-          {_('library.permanentDelete')}
-        </h2>
-        <p className="mb-6 text-sm text-stone-500">
-          {_('library.batchPermanentDeleteConfirm', { count: ids.length })}
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose} disabled={deleting}>
-            {_('library.cancel')}
-          </Button>
-          <Button
-            variant="danger"
-            disabled={deleting}
-            onClick={() => void handleDelete()}
-          >
-            {_('library.permanentDelete')}
-          </Button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      title={_('library.permanentDelete')}
+      message={_('library.batchPermanentDeleteConfirm', { count: ids.length })}
+      confirmLabel={_('library.permanentDelete')}
+      confirmVariant="danger"
+      confirmDisabled={deleting}
+      onClose={onClose}
+      onConfirm={() => void handleDelete()}
+    />
   )
 }

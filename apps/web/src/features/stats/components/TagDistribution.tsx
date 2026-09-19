@@ -61,13 +61,31 @@ export default function TagDistribution({ date, period, range }: TagDistribution
     return { ...s, frac, offset }
   })
 
+  const isTagsLoading = tagsQuery.isLoading && !data
+
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <h2 className="mb-4 text-sm font-medium">
         <span>{_('stats.tagDistribution')}</span>
         <span className="tabular-nums text-stone-500 dark:text-stone-400"> · {scopeLabel}</span>
       </h2>
-      {total === 0 ? (
+      {isTagsLoading ? (
+        <div className="flex flex-col items-center gap-6 sm:flex-row">
+          <div className="flex h-36 w-36 shrink-0 items-center justify-center">
+            <div className="h-32 w-32 animate-pulse rounded-full border-[14px] border-stone-200/60 dark:border-stone-800" />
+          </div>
+          <div className="flex w-full min-w-0 flex-1 flex-col gap-2.5">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-stone-200/70 dark:bg-stone-800" />
+                <div className="h-3.5 w-24 animate-pulse rounded bg-stone-200/70 dark:bg-stone-800" />
+                <div className="ml-auto h-3.5 w-12 animate-pulse rounded bg-stone-200/50 dark:bg-stone-800/60" />
+                <div className="h-3.5 w-8 animate-pulse rounded bg-stone-200/40 dark:bg-stone-800/40" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : total === 0 ? (
         <p className="py-6 text-center text-sm text-stone-400 dark:text-stone-500">{_('stats.emptyTags')}</p>
       ) : (
         <div className="flex flex-col items-center gap-6 sm:flex-row">

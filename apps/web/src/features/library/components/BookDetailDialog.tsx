@@ -6,6 +6,7 @@ import type { BookListItem } from '@bookdock/shared'
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
 import { Button } from '@/components/ui/Button'
+import Modal from '@/components/ui/Modal'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -174,7 +175,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
       notify.success({ key: 'toast.bookUpdated' })
       discardEdit()
     } catch (err) {
-      notify.error(getUserErrorNotification(err, 'errors.updateFailed'))
+      notify.error(getUserErrorNotification(err, 'toast.updateBookFailed'))
     } finally {
       setSaving(false)
     }
@@ -219,86 +220,112 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
 
   return (
     <>
-      <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4"
-      onClick={closeDialog}
-    >
-      <div
-        className="flex min-h-[340px] max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:min-h-[380px] sm:max-h-[85vh] sm:rounded-2xl dark:bg-stone-900"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-stone-100 px-4 py-3 sm:px-5 dark:border-stone-800">
-          <h2 className="font-serif text-base font-semibold text-stone-900 dark:text-stone-100">
-            {editing ? _('library.editBook') : _('library.bookDetails')}
-          </h2>
-          <div className="flex items-center gap-1">
-            {displayBook.format === 'txt' && (
-              <div ref={moreAnchorRef} className="relative">
+      <Modal
+        title={editing ? _('library.editBook') : _('library.bookDetails')}
+        onClose={closeDialog}
+        closeLabel={_('library.close')}
+        size="xl"
+        actions={
+          displayBook.format === 'txt' ? (
+            <div ref={moreAnchorRef} className="relative">
+              <button
+                type="button"
+                onClick={toggleMoreMenu}
+                aria-label={_('library.moreActions')}
+                title={_('library.moreActions')}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="1" />
+                  <circle cx="19" cy="12" r="1" />
+                  <circle cx="5" cy="12" r="1" />
+                </svg>
+              </button>
+              {moreMenu && (
+                <SmartMenu innerRef={moreMenuRef} position={moreMenu} onClose={() => setMoreMenu(null)}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreMenu(null)
+                      setTocRuleOpen(true)
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                      <line x1="8" y1="6" x2="21" y2="6" />
+                      <line x1="8" y1="12" x2="21" y2="12" />
+                      <line x1="8" y1="18" x2="21" y2="18" />
+                      <line x1="3" y1="6" x2="3.01" y2="6" />
+                      <line x1="3" y1="12" x2="3.01" y2="12" />
+                      <line x1="3" y1="18" x2="3.01" y2="18" />
+                    </svg>
+                    <span className="flex-1">{_('library.changeTocRule')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreMenu(null)
+                      setAppendContentOpen(true)
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                    <span className="flex-1">{_('library.appendContent')}</span>
+                  </button>
+                </SmartMenu>
+              )}
+            </div>
+          ) : undefined
+        }
+        footer={
+          editing ? (
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+              {confirmReset ? (
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-xs text-stone-500 dark:text-stone-400">{_('library.resetMetadataConfirm')}</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleReset()}
+                    disabled={resetMetadata.isPending}
+                    className="shrink-0 text-xs font-medium text-red-600 hover:underline dark:text-red-400"
+                  >
+                    {_('library.resetMetadata')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmReset(false)}
+                    className="shrink-0 text-xs text-stone-400 hover:underline"
+                  >
+                    {_('library.cancel')}
+                  </button>
+                </div>
+              ) : (
                 <button
                   type="button"
-                  onClick={toggleMoreMenu}
-                  aria-label={_('library.moreActions')}
-                  title={_('library.moreActions')}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  onClick={() => setConfirmReset(true)}
+                  className="inline-flex items-center gap-1.5 text-xs text-stone-400 transition-colors hover:text-stone-700 dark:hover:text-stone-200"
                 >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="1" />
-                    <circle cx="19" cy="12" r="1" />
-                    <circle cx="5" cy="12" r="1" />
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-70">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
                   </svg>
+                  <span>{_('library.resetMetadata')}</span>
                 </button>
-                {moreMenu && (
-                  <SmartMenu innerRef={moreMenuRef} position={moreMenu} onClose={() => setMoreMenu(null)}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMoreMenu(null)
-                        setTocRuleOpen(true)
-                      }}
-                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
-                    >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                        <line x1="8" y1="6" x2="21" y2="6" />
-                        <line x1="8" y1="12" x2="21" y2="12" />
-                        <line x1="8" y1="18" x2="21" y2="18" />
-                        <line x1="3" y1="6" x2="3.01" y2="6" />
-                        <line x1="3" y1="12" x2="3.01" y2="12" />
-                        <line x1="3" y1="18" x2="3.01" y2="18" />
-                      </svg>
-                      <span className="flex-1">{_('library.changeTocRule')}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMoreMenu(null)
-                        setAppendContentOpen(true)
-                      }}
-                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
-                    >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                        <path d="M12 5v14M5 12h14" />
-                      </svg>
-                      <span className="flex-1">{_('library.appendContent')}</span>
-                    </button>
-                  </SmartMenu>
-                )}
+              )}
+              <div className="flex shrink-0 items-center gap-2">
+                <Button variant="secondary" onClick={discardEdit} disabled={saving}>
+                  {_('library.cancel')}
+                </Button>
+                <Button onClick={() => void handleSave()} disabled={saving || !draft?.title.trim()}>
+                  {saving ? `${_('library.save')}...` : _('library.save')}
+                </Button>
               </div>
-            )}
-            <button
-              type="button"
-              onClick={closeDialog}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-              aria-label={_('library.close')}
-              title={_('library.close')}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:px-5">
+            </div>
+          ) : undefined
+        }
+      >
           {editing && draft ? (
             <div>
               <BookMetaForm
@@ -355,55 +382,8 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
               currentChapters={chaptersData?.data}
               onClose={() => setTocRuleOpen(false)}
             />
-          )}
-        </div>
-
-        {editing && (
-          <div className="flex shrink-0 flex-col gap-3 border-t border-stone-100 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:px-5 dark:border-stone-800">
-            {confirmReset ? (
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="truncate text-xs text-stone-500 dark:text-stone-400">{_('library.resetMetadataConfirm')}</span>
-                <button
-                  type="button"
-                  onClick={() => void handleReset()}
-                  disabled={resetMetadata.isPending}
-                  className="shrink-0 text-xs font-medium text-red-600 hover:underline dark:text-red-400"
-                >
-                  {_('library.resetMetadata')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmReset(false)}
-                  className="shrink-0 text-xs text-stone-400 hover:underline"
-                >
-                  {_('library.cancel')}
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setConfirmReset(true)}
-                className="inline-flex items-center gap-1.5 text-xs text-stone-400 transition-colors hover:text-stone-700 dark:hover:text-stone-200"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-70">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                  <path d="M3 3v5h5" />
-                </svg>
-                <span>{_('library.resetMetadata')}</span>
-              </button>
-            )}
-            <div className="flex shrink-0 items-center gap-2">
-              <Button variant="secondary" onClick={discardEdit} disabled={saving}>
-                {_('library.cancel')}
-              </Button>
-              <Button onClick={() => void handleSave()} disabled={saving || !draft?.title.trim()}>
-                {saving ? `${_('library.save')}...` : _('library.save')}
-              </Button>
-            </div>
-          </div>
         )}
-      </div>
-    </div>
+      </Modal>
       {appendContentOpen && <AppendContentModal bookId={book.id} onClose={() => setAppendContentOpen(false)} />}
     </>
   )

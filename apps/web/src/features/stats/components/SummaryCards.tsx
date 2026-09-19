@@ -109,6 +109,8 @@ export default function SummaryCards() {
     },
   ]
 
+  const isSummaryLoading = summaryQuery.isLoading && !s
+
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
       {cards.map((c) => (
@@ -117,9 +119,18 @@ export default function SummaryCards() {
           className="rounded-2xl border border-stone-200 bg-white p-3 shadow-sm sm:p-4 dark:border-stone-800 dark:bg-stone-900"
         >
           <p className="text-xs text-stone-500 dark:text-stone-400">{c.label}</p>
-          <p className="mt-1 text-2xl font-bold tabular-nums">{c.value}</p>
-          {c.sub && <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{c.sub}</p>}
-          {c.delta && <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{c.delta}</p>}
+          {isSummaryLoading ? (
+            <div className="mt-2 space-y-2">
+              <div className="h-7 w-20 animate-pulse rounded bg-stone-200/70 dark:bg-stone-800" />
+              <div className="h-3.5 w-14 animate-pulse rounded bg-stone-200/50 dark:bg-stone-800/80" />
+            </div>
+          ) : (
+            <>
+              <p className="mt-1 text-2xl font-bold tabular-nums">{c.value}</p>
+              {c.sub && <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{c.sub}</p>}
+              {c.delta && <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{c.delta}</p>}
+            </>
+          )}
         </section>
       ))}
     </div>

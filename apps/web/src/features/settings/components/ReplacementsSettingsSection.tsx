@@ -68,7 +68,7 @@ export default function ReplacementsSettingsSection() {
   const [deleteGroupTarget, setDeleteGroupTarget] = useState<{ name: string; rules: TextReplacementRes[] } | null>(null)
   const [editing, setEditing] = useState(false)
   const busy = updateReplacement.isPending || deleteReplacement.isPending
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.replacementOperationFailed'))
 
   function onToggle(rule: TextReplacementRes) {
     updateReplacement.mutate(
@@ -273,7 +273,7 @@ function RenameGroupModal({ oldName, rules, onClose }: { oldName: string; rules:
   const _ = useTranslation()
   const [name, setName] = useState(oldName)
   const updateReplacement = useUpdateReplacement()
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.replacementOperationFailed'))
   const [busy, setBusy] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
@@ -343,7 +343,7 @@ function DeleteGroupModal({ name, rules, onClose }: { name: string; rules: TextR
   const [deleteRules, setDeleteRules] = useState(false)
   const updateReplacement = useUpdateReplacement()
   const deleteReplacement = useDeleteReplacement()
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.replacementOperationFailed'))
   const [busy, setBusy] = useState(false)
 
   async function handleConfirm() {

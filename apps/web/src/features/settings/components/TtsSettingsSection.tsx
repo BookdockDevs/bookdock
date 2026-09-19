@@ -96,7 +96,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
   const providerMenuRef = useRef<HTMLDivElement>(null)
   const [pendingDelete, setPendingDelete] = useState<TtsServiceRes | null>(null)
   const services = useMemo(() => servicesData?.data ?? [], [servicesData])
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.ttsOperationFailed'))
   useDismissiblePopup(providerMenuOpen, providerMenuRef, () => setProviderMenuOpen(false))
 
   function openCreate(provider: TtsProvider) {

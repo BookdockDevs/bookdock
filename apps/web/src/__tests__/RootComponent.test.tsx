@@ -39,7 +39,7 @@ function renderRoot() {
   )
 }
 
-const INITIALIZED: InstanceInfoRes = { initialized: true, allowRegistration: false, allowGuestAccess: false }
+const INITIALIZED: InstanceInfoRes = { initialized: true, allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: 104857600 }
 
 describe('RootComponent guard', () => {
   beforeEach(() => {
@@ -103,6 +103,18 @@ describe('RootComponent guard', () => {
     })
     expect(useAuthStore.getState().user).toEqual(me)
     expect(navigateMock).not.toHaveBeenCalled()
+  })
+
+  it('redirects an already authenticated client away from the login page', async () => {
+    currentPath = '/login'
+    const me = { id: 'u1', username: 'admin', role: 'owner' }
+    mockApi({ instance: INITIALIZED, me })
+    renderRoot()
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/', replace: true })
+    })
+    expect(useAuthStore.getState().user).toEqual(me)
   })
 
   it('redirects /register to /login when registration is closed', async () => {

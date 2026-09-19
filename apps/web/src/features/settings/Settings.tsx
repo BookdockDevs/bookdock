@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useSearch } from '@tanstack/react-router'
 
+import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
@@ -10,22 +11,24 @@ import InstanceSettingsSection from './components/InstanceSettingsSection'
 import UserManagementSection from './components/UserManagementSection'
 import LanguageSwitcher from './components/LanguageSwitcher'
 import TrashSettingsRow from './components/TrashSettingsRow'
+import TitleSettingsRow from './components/TitleSettingsRow'
+import UploadSettingsSection from './components/UploadSettingsSection'
 import ReadingDataSettingsSection from './components/ReadingDataSettingsSection'
 import FontsSettingsSection from './components/FontsSettingsSection'
 import ReplacementsSettingsSection from './components/ReplacementsSettingsSection'
 import TocRulesSettingsSection from './components/TocRulesSettingsSection'
-import AccountSection from './components/AccountSection'
 import TtsSettingsSection from './components/TtsSettingsSection'
 import AiSettingsSection from './components/AiSettingsSection'
+import LegadoSettingsSection from './components/LegadoSettingsSection'
 
-type SectionId = 'general' | 'account' | 'reading' | 'library' | 'admin'
+type SectionId = 'general' | 'reading' | 'library' | 'integrations' | 'admin'
 
 export default function Settings() {
   const _ = useTranslation()
   usePageTitle(_('settings.title'))
+  const onBack = useBackNavigation('/')
   const user = useAuthStore((s) => s.user)
   const isOwner = user?.role === 'owner' && user.guest !== true
-  const isGuest = user?.role === 'guest' || user?.guest === true
   const search = useSearch({ from: '/settings' })
   const [active, setActive] = useState<SectionId>(search.section ?? 'general')
   const [visitedSections, setVisitedSections] = useState<Set<SectionId>>(() => new Set([search.section ?? 'general']))
@@ -70,21 +73,6 @@ export default function Settings() {
         </svg>
       ),
     },
-    // The guest account is shared and anonymous: no personal profile to edit
-    ...(!isGuest && user
-      ? [
-          {
-            id: 'account' as const,
-            label: _('settings.account'),
-            icon: (
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-            ),
-          },
-        ]
-      : []),
     {
       id: 'reading',
       label: _('settings.reading'),
@@ -102,6 +90,19 @@ export default function Settings() {
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="3" width="7" height="18" rx="1" />
           <rect x="14" y="3" width="7" height="18" rx="1" />
+        </svg>
+      ),
+    },
+    {
+      id: 'integrations',
+      label: _('settings.integrations'),
+      icon: (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="18" cy="5" r="3" />
+          <circle cx="6" cy="12" r="3" />
+          <circle cx="18" cy="19" r="3" />
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
         </svg>
       ),
     },
@@ -126,6 +127,7 @@ export default function Settings() {
         <div className="flex items-center gap-3">
           <Link
             to="/"
+            onClick={onBack}
             aria-label={_('settings.back')}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
             title={_('settings.back')}
@@ -171,11 +173,6 @@ export default function Settings() {
               <ReadingDataSettingsSection />
             </div>
           )}
-          {!isGuest && visitedSections.has('account') && (
-            <div className={active === 'account' ? 'block' : 'hidden'}>
-              <AccountSection />
-            </div>
-          )}
           {visitedSections.has('reading') && (
             <div className={active === 'reading' ? 'flex flex-col gap-6' : 'hidden'}>
               <TocRulesSettingsSection />
@@ -186,11 +183,21 @@ export default function Settings() {
             </div>
           )}
           {visitedSections.has('library') && (
-            <div className={active === 'library' ? 'block' : 'hidden'}>
+            <div className={active === 'library' ? 'flex flex-col gap-6' : 'hidden'}>
               <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
                 <h2 className="mb-4 text-sm font-medium">{_('settings.trash')}</h2>
                 <TrashSettingsRow />
               </section>
+              <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+                <h2 className="mb-2 text-sm font-medium">{_('settings.upload')}</h2>
+                <TitleSettingsRow />
+                {isOwner && <UploadSettingsSection />}
+              </section>
+            </div>
+          )}
+          {visitedSections.has('integrations') && (
+            <div className={active === 'integrations' ? 'flex flex-col gap-6' : 'hidden'}>
+              <LegadoSettingsSection />
             </div>
           )}
           {isOwner && visitedSections.has('admin') && (

@@ -37,6 +37,8 @@ export default function YearHeatmap({ selectedDate, onSelectDate }: YearHeatmapP
     )
   }
 
+  const isHeatmapLoading = dailyQuery.isLoading && !data
+
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <h2 className="mb-4 text-sm font-medium">
@@ -44,7 +46,7 @@ export default function YearHeatmap({ selectedDate, onSelectDate }: YearHeatmapP
         <span className="tabular-nums text-stone-500 dark:text-stone-400"> · {year}</span>
       </h2>
       <div className="overflow-x-auto">
-        <div className="grid w-max grid-flow-col grid-rows-7 gap-[3px]">
+        <div className={cn('grid w-max grid-flow-col grid-rows-7 gap-[3px]', isHeatmapLoading && 'animate-pulse')}>
           {weeks.flat().map((date, i) =>
             date === null ? (
               <div key={`pad-${i}`} className="h-3 w-3" />
@@ -57,7 +59,7 @@ export default function YearHeatmap({ selectedDate, onSelectDate }: YearHeatmapP
                 onClick={() => onSelectDate(date)}
                 className={cn(
                   'h-3 w-3 rounded-[3px] transition-transform hover:scale-125',
-                  levelClass(secondsByDate.get(date) ?? 0, max),
+                  isHeatmapLoading ? 'bg-stone-200/50 dark:bg-stone-800/80' : levelClass(secondsByDate.get(date) ?? 0, max),
                   selectedDate === date && 'ring-2 ring-amber-500 ring-offset-1 dark:ring-offset-stone-900',
                 )}
               />

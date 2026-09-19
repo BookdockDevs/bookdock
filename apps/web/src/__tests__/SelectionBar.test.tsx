@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
 import { useToastStore } from '@/stores/toast.store'
@@ -77,10 +77,19 @@ describe('SelectionBar', () => {
       expect(toasts.some((t) => (
         typeof t.message !== 'string'
         && t.message.key === 'library.batchPartial'
-        && t.type === 'error'
+        && t.type === 'warning'
+        && t.message.params?.action === 'library.batchActionStatus'
       ))).toBe(true)
     })
     expect(onClear).not.toHaveBeenCalled()
+
+    const partialToast = useToastStore.getState().toasts.find((toast) => (
+      typeof toast.message !== 'string' && toast.message.key === 'library.batchPartial'
+    ))
+    expect(partialToast?.action?.label).toBe('library.batchRetryFailed')
+    act(() => partialToast?.action?.onClick())
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(4))
+    await waitFor(() => expect(onClear).toHaveBeenCalledTimes(1))
   })
 
   it('batch delete calls the api per book and clears selection', async () => {

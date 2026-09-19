@@ -151,6 +151,28 @@ describe('LibrarySidebar', () => {
     expect(screen.getByText('未分类')).toBeInTheDocument()
   })
 
+  it('renders skeleton loading instead of prematurely showing uncategorized while loading', () => {
+    ;(libraryHooks.useShelves as ReturnType<typeof vi.fn>).mockReturnValue({
+      data: { data: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] },
+      isLoading: false,
+    })
+    ;(libraryHooks.useTrashEnabled as ReturnType<typeof vi.fn>).mockReturnValue(true)
+    ;(libraryHooks.useBooks as ReturnType<typeof vi.fn>).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+    })
+    ;(libraryHooks.useTags as ReturnType<typeof vi.fn>).mockReturnValue({
+      data: { data: [] },
+      isLoading: false,
+    })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+
+    expect(screen.queryByText('未分类')).toBeNull()
+    const shelvesSection = screen.getByText('书架').closest('div')?.parentElement
+    expect(shelvesSection?.querySelector('[aria-busy="true"]')).toBeInTheDocument()
+  })
+
   it('enters trash view when trash is clicked', () => {
     mockHooks()
 

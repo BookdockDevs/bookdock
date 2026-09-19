@@ -91,6 +91,8 @@ export default function PeriodBarChart({
     )
   }
 
+  const isChartLoading = dailyQuery.isLoading && !data
+
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -129,30 +131,46 @@ export default function PeriodBarChart({
         </div>
       </div>
 
-      <div className="flex h-28 items-end gap-1">
-        {bars.map((b) => (
-          <button
-            key={b.key}
-            type="button"
-            data-testid={b.testId}
-            title={`${b.key.startsWith('month-') ? b.testId.slice(10) : b.key}: ${formatDuration(b.seconds, _)}`}
-            onClick={b.onClick}
-            className="flex h-full min-w-0 flex-1 items-end"
-          >
-            <div
-              className={cn(
-                'w-full rounded-t-sm transition-colors',
-                b.seconds > 0
-                  ? b.selected
-                    ? 'bg-amber-500 dark:bg-amber-400'
-                    : 'bg-stone-700/80 hover:bg-stone-700 dark:bg-stone-300/80 dark:hover:bg-stone-300'
-                  : 'bg-stone-200/70 dark:bg-stone-800',
-              )}
-              style={{ height: b.seconds > 0 && max > 0 ? `${Math.max(4, (b.seconds / max) * 100)}%` : '2px' }}
-            />
-          </button>
-        ))}
-      </div>
+      {isChartLoading ? (
+        <div className="flex h-28 items-end gap-1">
+          {Array.from({ length: period === 'week' ? 7 : period === 'month' ? 30 : 12 }).map((_, i) => (
+            <div key={i} className="flex h-full min-w-0 flex-1 items-end">
+              <div
+                className="w-full animate-pulse rounded-t-sm bg-stone-200/60 dark:bg-stone-800"
+                style={{
+                  height: `${[35, 60, 25, 75, 45, 80, 50, 65, 40, 70, 30, 55][i % 12]}%`,
+                  animationDelay: `${i * 40}ms`,
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex h-28 items-end gap-1">
+          {bars.map((b) => (
+            <button
+              key={b.key}
+              type="button"
+              data-testid={b.testId}
+              title={`${b.key.startsWith('month-') ? b.testId.slice(10) : b.key}: ${formatDuration(b.seconds, _)}`}
+              onClick={b.onClick}
+              className="flex h-full min-w-0 flex-1 items-end"
+            >
+              <div
+                className={cn(
+                  'w-full rounded-t-sm transition-colors',
+                  b.seconds > 0
+                    ? b.selected
+                      ? 'bg-amber-500 dark:bg-amber-400'
+                      : 'bg-stone-700/80 hover:bg-stone-700 dark:bg-stone-300/80 dark:hover:bg-stone-300'
+                    : 'bg-stone-200/70 dark:bg-stone-800',
+                )}
+                style={{ height: b.seconds > 0 && max > 0 ? `${Math.max(4, (b.seconds / max) * 100)}%` : '2px' }}
+              />
+            </button>
+          ))}
+        </div>
+      )}
       <div className="mt-1 flex gap-1">
         {bars.map((b) => (
           <span key={b.key} className="min-w-0 flex-1 truncate text-center text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
@@ -160,7 +178,9 @@ export default function PeriodBarChart({
           </span>
         ))}
       </div>
-      {peak && (
+      {isChartLoading ? (
+        <div className="mt-3 h-3.5 w-48 animate-pulse rounded bg-stone-200/50 dark:bg-stone-800/80" />
+      ) : peak ? (
         <p className="mt-3 text-xs text-stone-400 dark:text-stone-500">
           {_('stats.insight', {
             period: _(`stats.${period}`).toLowerCase(),
@@ -169,7 +189,7 @@ export default function PeriodBarChart({
             time: formatDuration(peak.durationSeconds, _),
           })}
         </p>
-      )}
+      ) : null}
     </section>
   )
 }

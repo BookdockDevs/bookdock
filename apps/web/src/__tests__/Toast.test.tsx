@@ -17,7 +17,7 @@ describe('Toast', () => {
 
     render(<Toast />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('书籍已更新')
+    expect(screen.getByRole('status')).toHaveTextContent('书籍信息已保存')
     expect(screen.getByRole('alert')).toHaveTextContent('Failed')
     expect(screen.getAllByRole('button', { name: '关闭通知' })).toHaveLength(2)
   })

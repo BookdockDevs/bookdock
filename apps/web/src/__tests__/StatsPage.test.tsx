@@ -26,6 +26,13 @@ vi.mock('@tanstack/react-router', () => ({
       {children}
     </a>
   ),
+  useNavigate: () => vi.fn(),
+  useRouter: () => ({
+    history: {
+      canGoBack: () => false,
+      back: vi.fn(),
+    },
+  }),
 }))
 
 const SUMMARY = {
@@ -200,5 +207,18 @@ describe('Stats page', () => {
     const monthBar = screen.getByTestId(`bar-month-${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`)
     fireEvent.click(monthBar)
     expect(screen.getByText(`${today.getFullYear()}.${today.getMonth() + 1}`)).toBeInTheDocument()
+  })
+
+  it('renders skeleton loading states when queries are loading without flashing empty states', () => {
+    ;(useReadingSummary as Mock).mockReturnValue({ isLoading: true, data: undefined })
+    ;(useReadingDaily as Mock).mockReturnValue({ isLoading: true, data: undefined })
+    ;(useReadingByBook as Mock).mockReturnValue({ isLoading: true, data: undefined })
+    ;(useReadingHourly as Mock).mockReturnValue({ isLoading: true, data: undefined })
+    ;(useReadingByTag as Mock).mockReturnValue({ isLoading: true, data: undefined })
+
+    const { container } = render(<Stats />)
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
+    expect(screen.queryByText('stats.emptyBooks')).not.toBeInTheDocument()
+    expect(screen.queryByText('stats.emptyTags')).not.toBeInTheDocument()
   })
 })

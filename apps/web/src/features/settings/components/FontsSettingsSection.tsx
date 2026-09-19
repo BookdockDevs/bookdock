@@ -47,7 +47,7 @@ export default function FontsSettingsSection() {
   const displayFonts = sorting ? draftFonts ?? fonts : fonts
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const enabledCount = displayFonts.filter((font) => font.enabled).length
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.fontOperationFailed'))
 
   useEffect(() => {
     uploadedFonts.forEach((font) => void ensureUploadedFontLoaded(font))

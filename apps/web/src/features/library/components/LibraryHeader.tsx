@@ -20,6 +20,7 @@ interface LibraryHeaderProps {
   trash?: boolean
   trashCount?: number
   bookSize?: number
+  trashCapBytes?: number
   onEmptyTrash?: () => void
   selectionActive?: boolean
   onToggleSelectMode?: () => void
@@ -29,7 +30,7 @@ interface LibraryHeaderProps {
   onResetMetadataFilter?: () => void
 }
 
-export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter }: LibraryHeaderProps) {
   const _ = useTranslation()
   const [searchInput, setSearchInput] = useState(query)
 
@@ -72,6 +73,7 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
                   <p className="text-xs tabular-nums text-stone-400 dark:text-stone-500">
                     {_('library.bookCount', { count: bookCount })}
                     {bookSize !== undefined && bookSize > 0 && <> · {formatBytes(bookSize)}</>}
+                    {trashCapBytes !== undefined && <> · {_('library.trashCap', { size: formatBytes(trashCapBytes) })}</>}
                   </p>
                 )}
                 {onResetMetadataFilter && (

@@ -43,6 +43,8 @@ export default function HourDistribution({ date, period, range }: HourDistributi
     )
   }
 
+  const isHourlyLoading = hourlyQuery.isLoading && !data
+
   return (
     <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <h2 className="mb-4 text-sm font-medium">
@@ -51,29 +53,45 @@ export default function HourDistribution({ date, period, range }: HourDistributi
           {' · '}{selectedBar ? `${String(selectedBar.hour).padStart(2, '0')}:00 · ${formatDuration(selectedBar.seconds, _)}` : scopeLabel}
         </span>
       </h2>
-      <div className="flex h-28 items-end gap-1">
-        {bars.map((b) => (
-          <button
-            key={b.hour}
-            type="button"
-            title={`${b.hour}:00: ${formatDuration(b.seconds, _)}`}
-            aria-label={`${String(b.hour).padStart(2, '0')}:00: ${formatDuration(b.seconds, _)}`}
-            aria-pressed={selectedHour === b.hour}
-            onClick={() => setSelectedHour((current) => (current === b.hour ? null : b.hour))}
-            className="flex h-full min-w-0 flex-1 items-end border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
-          >
-            <div
-              className={cn(
-                'w-full rounded-t-sm transition-colors',
-                selectedHour === b.hour
-                  ? 'bg-blue-600 dark:bg-blue-400'
-                  : b.seconds > 0 ? 'bg-stone-700/80 dark:bg-stone-300/80' : 'bg-stone-200/70 dark:bg-stone-800',
-              )}
-              style={{ height: b.seconds > 0 && max > 0 ? `${Math.max(4, (b.seconds / max) * 100)}%` : '2px' }}
-            />
-          </button>
-        ))}
-      </div>
+      {isHourlyLoading ? (
+        <div className="flex h-28 items-end gap-1">
+          {Array.from({ length: 24 }).map((_, hour) => (
+            <div key={hour} className="flex h-full min-w-0 flex-1 items-end">
+              <div
+                className="w-full animate-pulse rounded-t-sm bg-stone-200/60 dark:bg-stone-800"
+                style={{
+                  height: `${[15, 10, 5, 5, 5, 10, 25, 40, 35, 50, 60, 45, 55, 70, 65, 80, 75, 90, 85, 95, 70, 60, 45, 25][hour]}%`,
+                  animationDelay: `${hour * 30}ms`,
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex h-28 items-end gap-1">
+          {bars.map((b) => (
+            <button
+              key={b.hour}
+              type="button"
+              title={`${b.hour}:00: ${formatDuration(b.seconds, _)}`}
+              aria-label={`${String(b.hour).padStart(2, '0')}:00: ${formatDuration(b.seconds, _)}`}
+              aria-pressed={selectedHour === b.hour}
+              onClick={() => setSelectedHour((current) => (current === b.hour ? null : b.hour))}
+              className="flex h-full min-w-0 flex-1 items-end border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+            >
+              <div
+                className={cn(
+                  'w-full rounded-t-sm transition-colors',
+                  selectedHour === b.hour
+                    ? 'bg-blue-600 dark:bg-blue-400'
+                    : b.seconds > 0 ? 'bg-stone-700/80 dark:bg-stone-300/80' : 'bg-stone-200/70 dark:bg-stone-800',
+                )}
+                style={{ height: b.seconds > 0 && max > 0 ? `${Math.max(4, (b.seconds / max) * 100)}%` : '2px' }}
+              />
+            </button>
+          ))}
+        </div>
+      )}
       <div className="mt-1 flex gap-1">
         {bars.map((b) => (
           <span key={b.hour} className="min-w-0 flex-1 truncate text-center text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
@@ -81,11 +99,13 @@ export default function HourDistribution({ date, period, range }: HourDistributi
           </span>
         ))}
       </div>
-      {peak && (
+      {isHourlyLoading ? (
+        <div className="mt-3 h-3.5 w-44 animate-pulse rounded bg-stone-200/50 dark:bg-stone-800/80" />
+      ) : peak ? (
         <p className="mt-3 text-xs text-stone-400 dark:text-stone-500">
           {_('stats.hourInsight', { range: `${peak.hour}:00-${peak.hour + 1}:00`, time: formatDuration(peak.durationSeconds, _) })}
         </p>
-      )}
+      ) : null}
     </section>
   )
 }

@@ -15,7 +15,7 @@ import SmartMenu from '@/components/ui/SmartMenu'
 import AccountMenu from '@/features/auth/AccountMenu'
 import { applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
 import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useTrashEnabled } from '../hooks'
-import DeleteConfirm from './DeleteConfirm'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import ShelfDialog from './ShelfDialog'
 import TagDialog from './TagDialog'
 import { useContextMenu } from './use-context-menu'
@@ -72,7 +72,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
   }, { enabled: trashEnabled })
   const trashCount = trashData?.total
 
-  const { data: uncategorizedData } = useBooks({
+  const { data: uncategorizedData, isLoading: uncategorizedLoading } = useBooks({
     page: 1,
     pageSize: 1,
     search: '',
@@ -94,6 +94,8 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
   const deleteTag = useDeleteTag()
 
   const isAllActive = !shelfId && !tagId && !author && !series && !trash
+  const isUncategorizedActive = !trash && shelfId === 'none'
+  const isShelvesLoading = Boolean(shelvesLoading || (uncategorizedLoading && !isUncategorizedActive))
 
   const localNavRef = useRef<HTMLElement | null>(null)
   const [canScrollUp, setCanScrollUp] = useState(false)
@@ -196,13 +198,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
             </svg>
           </button>
         </div>
-        <UncategorizedDropTarget
-          count={uncategorizedCount}
-          active={!trash && shelfId === 'none'}
-          onClick={() => selectNavigation({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
-          onPointerEnter={() => onPrefetchNavigation?.({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
-        />
-        {shelvesLoading ? (
+        {isShelvesLoading ? (
           <div className="space-y-1 py-1" aria-busy="true">
             <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
               <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
@@ -213,22 +209,32 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
               <div className="h-3 w-14 rounded bg-stone-200/60 dark:bg-stone-800/60" />
             </div>
           </div>
-        ) : shelves.length > 0 ? (
-          <SortableContext items={shelves.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-            {shelves.map((shelf) => (
-                <ShelfItem
-                  key={shelf.id}
-                  shelf={shelf}
-                  active={!trash && shelfId === shelf.id}
-                  settling={settleShelfId === shelf.id}
-                  onClick={() => selectNavigation({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
-                  onPointerEnter={() => onPrefetchNavigation?.({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
-                  onRename={() => setShelfDialog({ shelfId: shelf.id, initialName: shelf.name })}
-                  onDelete={() => setDeleteShelfTarget(shelf)}
-                />
-            ))}
-          </SortableContext>
-        ) : null}
+        ) : (
+          <>
+            <UncategorizedDropTarget
+              count={uncategorizedCount}
+              active={isUncategorizedActive}
+              onClick={() => selectNavigation({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
+              onPointerEnter={() => onPrefetchNavigation?.({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
+            />
+            {shelves.length > 0 ? (
+              <SortableContext items={shelves.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+                {shelves.map((shelf) => (
+                  <ShelfItem
+                    key={shelf.id}
+                    shelf={shelf}
+                    active={!trash && shelfId === shelf.id}
+                    settling={settleShelfId === shelf.id}
+                    onClick={() => selectNavigation({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
+                    onPointerEnter={() => onPrefetchNavigation?.({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
+                    onRename={() => setShelfDialog({ shelfId: shelf.id, initialName: shelf.name })}
+                    onDelete={() => setDeleteShelfTarget(shelf)}
+                  />
+                ))}
+              </SortableContext>
+            ) : null}
+          </>
+        )}
 
         <div className="mb-1 mt-6 flex items-center justify-between px-3">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
@@ -353,35 +359,37 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
         onClose={() => setTagDialog(null)}
       />
 
-      <DeleteConfirm
-        open={deleteShelfTarget !== null}
-        title={_('library.deleteShelf')}
-        message={_('library.deleteShelfConfirm', { name: deleteShelfTarget?.name ?? '' })}
-        confirmLabel={_('reader.delete')}
-        onCancel={() => setDeleteShelfTarget(null)}
-        onConfirm={() => {
-          const target = deleteShelfTarget
-          if (!target) return
-          setDeleteShelfTarget(null)
-          if (shelfId === target.id) selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
-          void deleteShelf.mutateAsync(target.id).catch(() => undefined)
-        }}
-      />
+      {deleteShelfTarget && (
+        <ConfirmDialog
+          title={_('library.deleteShelf')}
+          message={_('library.deleteShelfConfirm', { name: deleteShelfTarget.name ?? '' })}
+          confirmLabel={_('reader.delete')}
+          confirmVariant="danger"
+          onClose={() => setDeleteShelfTarget(null)}
+          onConfirm={() => {
+            const target = deleteShelfTarget
+            setDeleteShelfTarget(null)
+            if (shelfId === target.id) selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
+            void deleteShelf.mutateAsync(target.id).catch(() => undefined)
+          }}
+        />
+      )}
 
-      <DeleteConfirm
-        open={deleteTagTarget !== null}
-        title={_('library.deleteTag')}
-        message={_('library.deleteTagConfirm', { name: deleteTagTarget?.name ?? '' })}
-        confirmLabel={_('reader.delete')}
-        onCancel={() => setDeleteTagTarget(null)}
-        onConfirm={() => {
-          const target = deleteTagTarget
-          if (!target) return
-          setDeleteTagTarget(null)
-          if (tagId === target.id) selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
-          void deleteTag.mutateAsync(target.id).catch(() => undefined)
-        }}
-      />
+      {deleteTagTarget && (
+        <ConfirmDialog
+          title={_('library.deleteTag')}
+          message={_('library.deleteTagConfirm', { name: deleteTagTarget.name ?? '' })}
+          confirmLabel={_('reader.delete')}
+          confirmVariant="danger"
+          onClose={() => setDeleteTagTarget(null)}
+          onConfirm={() => {
+            const target = deleteTagTarget
+            setDeleteTagTarget(null)
+            if (tagId === target.id) selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
+            void deleteTag.mutateAsync(target.id).catch(() => undefined)
+          }}
+        />
+      )}
       </aside>
     </>
   )
@@ -468,7 +476,7 @@ function UncategorizedDropTarget({
   const { active: dragActive } = useDndContext()
   const isBookDragging = isBookDrag(dragActive?.data.current)
   const dropHint = isBookDragging && isOver
-  const visible = active || count === undefined || count > 0 || isBookDragging
+  const visible = active || (count !== undefined && count > 0) || isBookDragging
 
   if (!visible) return null
 

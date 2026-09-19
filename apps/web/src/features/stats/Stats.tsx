@@ -1,21 +1,23 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 
+import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 
-import SummaryCards from './components/SummaryCards'
-import PeriodBarChart from './components/PeriodBarChart'
-import HourDistribution from './components/HourDistribution'
-import YearHeatmap from './components/YearHeatmap'
 import BookTimeList from './components/BookTimeList'
+import HourDistribution from './components/HourDistribution'
+import PeriodBarChart from './components/PeriodBarChart'
+import SummaryCards from './components/SummaryCards'
 import TagDistribution from './components/TagDistribution'
+import YearHeatmap from './components/YearHeatmap'
 import { periodRange, shiftPeriod } from './date-utils'
 import type { StatsPeriod } from './date-utils'
 
 export default function Stats() {
   const _ = useTranslation()
   usePageTitle(_('stats.title'))
+  const onBack = useBackNavigation('/')
   const [period, setPeriod] = useState<StatsPeriod>('week')
   const [anchor, setAnchor] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -38,7 +40,9 @@ export default function Stats() {
       <div className="flex items-center gap-3">
         <Link
           to="/"
-          aria-label={_('settings.back')}
+          onClick={onBack}
+          aria-label={_('stats.back')}
+          title={_('stats.back')}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-300"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -98,6 +98,36 @@ describe('useUploadBooks', () => {
     expect(item.messageKey).toBe('errors.uploadTooLarge')
   })
 
+  it('reports the number of newly imported books', () => {
+    const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
+
+    act(() => {
+      result.current.addFiles([new File(['x'], 'book.epub')], { autoStart: true })
+    })
+    act(() => {
+      FakeXHR.instances[0]!.respond(201, { data: { id: 'book-1' }, duplicated: false })
+    })
+
+    const toast = useToastStore.getState().toasts[0]
+    expect(toast?.type).toBe('success')
+    expect(toast?.message).toEqual({ key: 'library.uploadImported', params: { count: 1 } })
+  })
+
+  it('reports duplicate-only uploads as a warning', () => {
+    const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
+
+    act(() => {
+      result.current.addFiles([new File(['x'], 'book.epub')], { autoStart: true })
+    })
+    act(() => {
+      FakeXHR.instances[0]!.respond(201, { data: { id: 'book-1' }, duplicated: true })
+    })
+
+    const toast = useToastStore.getState().toasts[0]
+    expect(toast?.type).toBe('warning')
+    expect(toast?.message).toEqual({ key: 'library.uploadDuplicateOnly', params: { count: 1 } })
+  })
+
   it('re-queues an errored item on retry', () => {
     const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
 

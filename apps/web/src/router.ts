@@ -2,6 +2,7 @@ import { createRouter } from '@tanstack/react-router'
 import { rootRoute } from './routes/__root'
 import { indexRoute } from './routes/index'
 import { loginRoute } from './routes/login'
+import { profileRoute } from './routes/profile'
 import { registerRoute } from './routes/register'
 import { setupRoute } from './routes/setup'
 import { readerRoute } from './routes/books.$id'
@@ -10,6 +11,7 @@ import { statsRoute } from './routes/stats'
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  profileRoute,
   loginRoute,
   registerRoute,
   setupRoute,

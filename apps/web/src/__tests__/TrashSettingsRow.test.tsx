@@ -67,8 +67,22 @@ describe('TrashSettingsRow', () => {
     const toggle = screen.getByRole('switch')
     expect(toggle).toHaveAttribute('aria-checked', 'false')
     expect(screen.queryByText('settings.trashAutoClean')).not.toBeInTheDocument()
+    expect(screen.queryByText('settings.trashCap')).not.toBeInTheDocument()
 
     fireEvent.click(toggle)
     await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/settings', { trash: { enabled: true } }))
+  })
+
+  it('marks the stored cap pressed and saves the clicked cap', async () => {
+    renderRow({ autoCleanDays: 30, maxTrashBytes: 1073741824 })
+    expect(screen.getByRole('button', { name: 'settings.trashCap1GB' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.trashCap5GB' }))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/settings', { trash: { maxTrashBytes: 5368709120 } }))
+  })
+
+  it('defaults the cap selection to unlimited when unset', () => {
+    renderRow({ autoCleanDays: 30 })
+    expect(screen.getByRole('button', { name: 'settings.trashCapUnlimited' })).toHaveAttribute('aria-pressed', 'true')
   })
 })

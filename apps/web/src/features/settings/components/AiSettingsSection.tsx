@@ -164,7 +164,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   const modelListIsStale = Boolean(form && availableModels.length && modelsLoadedFingerprint && currentFingerprint !== modelsLoadedFingerprint)
   const saving = create.isPending || updateProfile.isPending || updateConfig.isPending
   const defaultPrompts = useMemo(() => defaultPromptTemplates(_), [_])
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.aiOperationFailed'))
   formRef.current = form
 
   useEffect(() => {
@@ -474,7 +474,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
 
 function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; update: ReturnType<typeof useUpdateAiConfig> }) {
   const _ = useTranslation()
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error))
+  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.aiPromptSaveFailed'))
   const [drafts, setDrafts] = useState(prompts)
   const [form, setForm] = useState<AiPromptFormState | null>(null)
   const [pendingDelete, setPendingDelete] = useState<AiPromptTemplate | null>(null)

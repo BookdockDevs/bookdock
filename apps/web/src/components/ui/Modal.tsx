@@ -8,10 +8,14 @@ interface ModalProps {
   onClose: () => void
   /** Extra header actions between the title and the close button */
   actions?: ReactNode
+  /** Optional sticky footer bar below the scrollable content */
+  footer?: ReactNode
+  /** Accessible label for the close button. Defaults to library.close */
+  closeLabel?: string
   /** Spread onto the backdrop (e.g. the settings-popover ignore flag) */
-  containerProps?: HTMLAttributes<HTMLDivElement> & Record<string, string | undefined>
+  containerProps?: HTMLAttributes<HTMLDivElement> & Record<string, unknown>
   variant?: 'default' | 'reader'
-  size?: 'sm' | 'default' | 'wide'
+  size?: 'sm' | 'default' | 'xl' | 'wide'
   children: ReactNode
 }
 
@@ -26,12 +30,15 @@ export default function Modal({
   title,
   onClose,
   actions,
+  footer,
+  closeLabel,
   containerProps,
   variant = 'default',
   size = 'default',
   children,
 }: ModalProps) {
   const _ = useTranslation()
+  const resolvedCloseLabel = closeLabel ?? _('library.cancel')
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
   const previousActiveElementRef = useRef<HTMLElement | null>(
@@ -41,7 +48,8 @@ export default function Modal({
   onCloseRef.current = onClose
 
   const reader = variant === 'reader'
-  const width = size === 'wide' ? 'max-w-2xl' : size === 'sm' ? 'max-w-sm' : 'max-w-lg'
+  const width =
+    size === 'wide' ? 'max-w-2xl' : size === 'xl' ? 'max-w-xl' : size === 'sm' ? 'max-w-sm' : 'max-w-lg'
   const btn = reader
     ? 'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-[var(--bd-read-text)]'
     : 'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'
@@ -118,7 +126,7 @@ export default function Modal({
   return createPortal(
     <div
       {...containerProps}
-      className={`fixed inset-0 z-50 flex items-end justify-center overscroll-none bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4 animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
+      className={`fixed inset-0 z-50 flex items-end justify-center overscroll-none bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
       onClick={onClose}
       onWheel={(event) => { if (event.target === event.currentTarget) event.preventDefault() }}
     >
@@ -139,8 +147,8 @@ export default function Modal({
             <button
               type="button"
               onClick={onClose}
-              aria-label={_('library.cancel')}
-              title={_('library.cancel')}
+              aria-label={resolvedCloseLabel}
+              title={resolvedCloseLabel}
               className={btn}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -149,7 +157,12 @@ export default function Modal({
             </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:px-5">{children}</div>
+        <div className={`min-h-0 flex-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] overscroll-contain px-4 ${footer ? 'pb-4' : 'pb-[calc(1rem+env(safe-area-inset-bottom))]'} pt-4 sm:px-5`}>{children}</div>
+        {footer && (
+          <div className={`flex shrink-0 items-center justify-between border-t px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:px-5 ${reader ? 'border-[var(--bd-read-accent)]' : 'border-stone-100 dark:border-stone-800'}`}>
+            {footer}
+          </div>
+        )}
       </div>
     </div>,
     document.body,

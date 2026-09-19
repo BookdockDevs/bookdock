@@ -44,7 +44,7 @@ export default function FontEditor({ font, isOwner, onClose }: FontEditorProps) 
       notify.success({ key: 'toast.fontSaved' })
       onClose()
     } catch (error) {
-      notify.error(getUserErrorNotification(error))
+      notify.error(getUserErrorNotification(error, 'settings.fontOperationFailed'))
     }
   }
 

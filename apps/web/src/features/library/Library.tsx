@@ -29,12 +29,12 @@ import SmartMenu from '@/components/ui/SmartMenu'
 
 import { indexRoute, type LibrarySearch } from '@/routes/index'
 
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import BookCard from './components/BookCard'
 import BookCover from './components/BookCover'
 import { useContextMenu } from './components/use-context-menu'
 import { ContextMenuContent } from './components/BookContextMenu'
 import BookDetailDialog from './components/BookDetailDialog'
-import DeleteConfirm from './components/DeleteConfirm'
 import EmptyLibrary from './components/EmptyLibrary'
 import LibraryHeader from './components/LibraryHeader'
 import LibrarySidebar from './components/LibrarySidebar'
@@ -46,7 +46,7 @@ import TrashInfo from './components/TrashInfo'
 import UploadSheet from './components/UploadSheet'
 import UnpinButton, { PinIcon } from './components/UnpinButton'
 import { applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
-import { useInfiniteBooks, prefetchInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useTrashEnabled } from './hooks'
+import { useInfiniteBooks, prefetchInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useTrashEnabled, useTrashCapBytes } from './hooks'
 
 const PAGE_SIZE = 20
 
@@ -65,6 +65,7 @@ export default function Library() {
   const query = search.q ?? ''
   const trash = search.trash ?? false
   const trashEnabled = useTrashEnabled()
+  const trashCapBytes = useTrashCapBytes()
   // The trash defaults to newest-deleted first; the library sort preference
   // is a separate concern and must not be overwritten by trash-only sorting
   const sortBy = search.sortBy ?? (trash ? 'deletedAt' : sortByPref)
@@ -503,6 +504,7 @@ export default function Library() {
           onUploadClick={() => setUploadOpen(true)}
           trashCount={total}
           bookSize={trash ? totalSize : undefined}
+          trashCapBytes={trash ? trashCapBytes : undefined}
           onEmptyTrash={() => setEmptyTrashOpen(true)}
           selectionActive={selectionActive}
           onToggleSelectMode={toggleSelectionMode}
@@ -687,70 +689,80 @@ export default function Library() {
         }}
       />
 
-      <DeleteConfirm
-        open={!!deleteTarget}
-        bookTitle={deleteTarget?.title}
-        // With trash off this delete is unrecoverable, so use the permanent
-        // delete wording instead of the soft-delete promise.
-        title={trashEnabled ? undefined : _('library.permanentDelete')}
-        message={
-          trashEnabled ? undefined : (
+      {deleteTarget && (
+        <ConfirmDialog
+          title={trashEnabled ? _('library.deleteBook') : _('library.permanentDelete')}
+          message={
+            trashEnabled ? (
+              (deleteTarget.title ?? '').startsWith('《')
+                ? _('library.deleteConfirmBare', { title: deleteTarget.title ?? '' })
+                : _('library.deleteConfirm', { title: deleteTarget.title ?? '' })
+            ) : (
+              <>
+                {_('library.permanentDeleteConfirm')}
+                <span className="mt-1 block truncate text-stone-700 dark:text-stone-200">{deleteTarget.title ?? ''}</span>
+              </>
+            )
+          }
+          confirmLabel={trashEnabled ? _('library.delete') : _('library.permanentDelete')}
+          confirmVariant="danger"
+          warning={
+            trashEnabled && trashCapBytes && deleteTarget.size > trashCapBytes
+              ? _('library.trashCapImmediate', { size: formatBytes(deleteTarget.size), cap: formatBytes(trashCapBytes) })
+              : undefined
+          }
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            const target = deleteTarget
+            setDeleteTarget(null)
+            void deleteBook.mutateAsync(target.id).catch(() => undefined)
+          }}
+        />
+      )}
+
+      {permanentDeleteTarget && (
+        <ConfirmDialog
+          title={_('library.permanentDelete')}
+          message={
             <>
               {_('library.permanentDeleteConfirm')}
-              <span className="mt-1 block truncate text-stone-700 dark:text-stone-200">{deleteTarget?.title ?? ''}</span>
+              <span className="mt-1 block truncate text-stone-700 dark:text-stone-200">{permanentDeleteTarget.title ?? ''}</span>
             </>
-          )
-        }
-        confirmLabel={trashEnabled ? undefined : _('library.permanentDelete')}
-        onCancel={() => setDeleteTarget(null)}
-        onConfirm={() => {
-          const target = deleteTarget
-          if (!target) return
-          setDeleteTarget(null)
-          void deleteBook.mutateAsync(target.id).catch(() => undefined)
-        }}
-      />
+          }
+          confirmLabel={_('library.permanentDelete')}
+          confirmVariant="danger"
+          onClose={() => setPermanentDeleteTarget(null)}
+          onConfirm={() => {
+            const target = permanentDeleteTarget
+            setPermanentDeleteTarget(null)
+            deselect(target.id)
+            void permanentDeleteBook.mutateAsync(target.id).catch(() => undefined)
+          }}
+        />
+      )}
 
-      <DeleteConfirm
-        open={!!permanentDeleteTarget}
-        title={_('library.permanentDelete')}
-        message={
-          <>
-            {_('library.permanentDeleteConfirm')}
-            <span className="mt-1 block truncate text-stone-700 dark:text-stone-200">{permanentDeleteTarget?.title ?? ''}</span>
-          </>
-        }
-        confirmLabel={_('library.permanentDelete')}
-        onCancel={() => setPermanentDeleteTarget(null)}
-        onConfirm={() => {
-          const target = permanentDeleteTarget
-          if (!target) return
-          setPermanentDeleteTarget(null)
-          deselect(target.id)
-          void permanentDeleteBook.mutateAsync(target.id).catch(() => undefined)
-        }}
-      />
-
-      <DeleteConfirm
-        open={emptyTrashOpen}
-        title={_('library.emptyTrash')}
-        message={
-          <>
-            {_('library.emptyTrashConfirm')}
-            {totalSize > 0 && (
-              <span className="mt-1 block text-stone-700 dark:text-stone-200">
-                {_('library.emptyTrashFrees', { size: formatBytes(totalSize) })}
-              </span>
-            )}
-          </>
-        }
-        confirmLabel={_('library.emptyTrash')}
-        onCancel={() => setEmptyTrashOpen(false)}
-        onConfirm={() => {
-          setEmptyTrashOpen(false)
-          void emptyTrash.mutateAsync().catch(() => undefined)
-        }}
-      />
+      {emptyTrashOpen && (
+        <ConfirmDialog
+          title={_('library.emptyTrash')}
+          message={
+            <>
+              {_('library.emptyTrashConfirm')}
+              {totalSize > 0 && (
+                <span className="mt-1 block text-stone-700 dark:text-stone-200">
+                  {_('library.emptyTrashFrees', { size: formatBytes(totalSize) })}
+                </span>
+              )}
+            </>
+          }
+          confirmLabel={_('library.emptyTrash')}
+          confirmVariant="danger"
+          onClose={() => setEmptyTrashOpen(false)}
+          onConfirm={() => {
+            setEmptyTrashOpen(false)
+            void emptyTrash.mutateAsync().catch(() => undefined)
+          }}
+        />
+      )}
       </div>
 
       {/* The DragOverlay mounts only during book drags: dnd-kit auto-detects

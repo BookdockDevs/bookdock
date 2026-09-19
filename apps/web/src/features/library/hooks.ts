@@ -139,6 +139,16 @@ export function useTrashEnabled(): boolean {
   return data?.data.trash?.enabled !== false
 }
 
+/** Trash size cap in bytes; undefined when unlimited (0 or unset). */
+export function useTrashCapBytes(): number | undefined {
+  const { data } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
+  })
+  const cap = data?.data.trash?.maxTrashBytes
+  return cap && cap > 0 ? cap : undefined
+}
+
 export const UPLOAD_ACCEPTED_EXTENSIONS = ['.epub', '.txt']
 
 export function isAcceptedUploadFile(file: File): boolean {
@@ -262,10 +272,13 @@ export function useUploadBooks() {
     // Shelf rows carry their own aggregated bookCount, so refreshing book
     // lists alone leaves the sidebar count stale after an upload.
     queryClient.invalidateQueries({ queryKey: ['shelves'] })
-    if (failed > 0) {
-      notify.error({ key: 'library.uploadSummary', params: { succeeded, duplicated, failed } })
+    if (failed > 0 || (succeeded > 0 && duplicated > 0)) {
+      const showSummary = failed > 0 ? notify.error : notify.warning
+      showSummary({ key: 'library.uploadSummary', params: { succeeded, duplicated, failed } })
+    } else if (duplicated > 0) {
+      notify.warning({ key: 'library.uploadDuplicateOnly', params: { count: duplicated } })
     } else {
-      notify.success({ key: 'library.uploadSuccess' })
+      notify.success({ key: 'library.uploadImported', params: { count: succeeded } })
     }
   }, [items, queryClient])
 
@@ -345,10 +358,10 @@ export function useDeleteBook() {
       // The server deletes permanently when trash is off; match the toast.
       const settings = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
       const trashOn = settings?.data.trash?.enabled !== false
-      notify.success({ key: trashOn ? 'library.movedToTrash' : 'reader.deleted' })
+      notify.success({ key: trashOn ? 'library.bookMovedToTrash' : 'library.bookPermanentlyDeleted' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.deleteFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.deleteBookFailed'))
     },
   })
 }
@@ -360,10 +373,10 @@ export function useRestoreBook() {
     mutationFn: (id: string) => apiPost<{ data: null }>(`/books/${id}/restore`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      notify.success({ key: 'library.restored' })
+      notify.success({ key: 'library.bookRestored' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.restoreFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.restoreBookFailed'))
     },
   })
 }
@@ -375,10 +388,10 @@ export function usePermanentDeleteBook() {
     mutationFn: (id: string) => apiDelete<{ data: null }>(`/books/${id}/permanent`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      notify.success({ key: 'reader.deleted' })
+      notify.success({ key: 'library.bookPermanentlyDeleted' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.permanentDeleteFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.permanentDeleteBookFailed'))
     },
   })
 }
@@ -388,12 +401,12 @@ export function useEmptyTrash() {
 
   return useMutation({
     mutationFn: () => apiDelete<{ data: { count: number } }>('/books/trash'),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      notify.success({ key: 'reader.deleted' })
+      notify.success({ key: 'library.trashEmptied', params: { count: result.data.count } })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.permanentDeleteFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.emptyTrashFailed'))
     },
   })
 }
@@ -422,7 +435,7 @@ export function useCreateShelf() {
       notify.success({ key: 'toast.shelfCreated' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.createFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.createShelfFailed'))
     },
   })
 }
@@ -437,7 +450,7 @@ export function useRenameShelf() {
       notify.success({ key: 'toast.shelfRenamed' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.renameFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.renameShelfFailed'))
     },
   })
 }
@@ -452,7 +465,7 @@ export function useDeleteShelf() {
       notify.success({ key: 'toast.shelfDeleted' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.deleteFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.deleteShelfFailed'))
     },
   })
 }
@@ -475,7 +488,7 @@ export function useReorderShelves() {
     },
     onError: (error, _shelfIds, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(['shelves'], ctx.prev)
-      notify.error(getUserErrorNotification(error, 'errors.reorderFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.reorderShelvesFailed'))
     },
   })
 }
@@ -498,7 +511,7 @@ export function useReorderTags() {
     },
     onError: (error, _tagIds, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(['tags'], ctx.prev)
-      notify.error(getUserErrorNotification(error, 'errors.reorderFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.reorderTagsFailed'))
     },
   })
 }
@@ -514,7 +527,7 @@ export function useUpdateBook() {
       notify.success({ key: 'toast.bookUpdated' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.updateFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.updateBookFailed'))
     },
   })
 }
@@ -577,10 +590,10 @@ export function useUploadCover() {
       apiUpload<{ data: BookListItem }>(`/books/${bookId}/cover`, file, 'PUT'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      notify.success({ key: 'toast.bookUpdated' })
+      notify.success({ key: 'toast.bookCoverUpdated' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.updateFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.updateBookCoverFailed'))
     },
   })
 }
@@ -592,10 +605,10 @@ export function useRemoveCover() {
     mutationFn: (bookId: string) => apiDelete<{ data: BookListItem }>(`/books/${bookId}/cover`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      notify.success({ key: 'toast.bookUpdated' })
+      notify.success({ key: 'toast.bookCoverRemoved' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.updateFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.removeBookCoverFailed'))
     },
   })
 }
@@ -610,7 +623,7 @@ export function useResetMetadata() {
       notify.success({ key: 'toast.metadataReset' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.resetFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.resetMetadataFailed'))
     },
   })
 }
@@ -625,7 +638,7 @@ export function useCreateTag() {
       notify.success({ key: 'toast.tagCreated' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.createFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.createTagFailed'))
     },
   })
 }
@@ -640,7 +653,7 @@ export function useRenameTag() {
       notify.success({ key: 'toast.tagRenamed' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.renameFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.renameTagFailed'))
     },
   })
 }
@@ -656,7 +669,7 @@ export function useDeleteTag() {
       notify.success({ key: 'toast.tagDeleted' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.deleteFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.deleteTagFailed'))
     },
   })
 }
@@ -678,7 +691,7 @@ export function useUpdateBookMembership() {
       notify.success({ key: 'toast.membershipUpdated' })
     },
     onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'errors.membershipUpdateFailed'))
+      notify.error(getUserErrorNotification(error, 'toast.updateMembershipFailed'))
     },
   })
 }
@@ -711,14 +724,17 @@ export function useMoveBooksToShelf() {
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       const failed = results.filter((r) => r.status === 'rejected').length
       if (failed > 0) {
-        notify.error({ key: 'errors.membershipUpdateFailed' })
+        notify.warning({
+          key: 'library.moveBooksPartial',
+          params: { succeeded: results.length - failed, failed },
+        })
         return
       }
       const shelves = queryClient.getQueryData<{ data: ShelfListItem[] }>(['shelves'])
       const name = shelves?.data.find((s) => s.id === variables.shelfId)?.name
       notify.success(name
-        ? { key: 'toast.movedToShelf', params: { name } }
-        : { key: 'toast.movedOutOfShelf' })
+        ? { key: 'toast.movedToShelf', params: { name, count: variables.bookIds.length } }
+        : { key: 'toast.movedOutOfShelf', params: { count: variables.bookIds.length } })
     },
   })
 }

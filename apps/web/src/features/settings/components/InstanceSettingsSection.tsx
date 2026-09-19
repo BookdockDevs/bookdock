@@ -23,7 +23,7 @@ export default function InstanceSettingsSection() {
   function toggle(key: 'allowRegistration' | 'allowGuestAccess', value: boolean) {
     updateInstance.mutate(
       { [key]: value },
-      { onError: (error) => notify.error(getUserErrorNotification(error, 'errors.updateFailed')) },
+      { onError: (error) => notify.error(getUserErrorNotification(error, 'settings.instanceSettingsUpdateFailed')) },
     )
   }
 

@@ -56,21 +56,21 @@ export default function BookReplacementsSection({
   function onGlobalToggle(rule: TextReplacementRes) {
     setOverride.mutate(
       { replacementId: rule.id, body: { bookId, enabled: nextOverrideValue(rule) } },
-      { onError: (err) => notify.error(getUserErrorNotification(err, 'errors.updateFailed')) },
+      { onError: (err) => notify.error(getUserErrorNotification(err, 'library.replacementUpdateFailed')) },
     )
   }
 
   function onBookRuleToggle(rule: TextReplacementRes) {
     updateReplacement.mutate(
       { id: rule.id, body: { enabled: !rule.enabled } },
-      { onError: (err) => notify.error(getUserErrorNotification(err, 'errors.updateFailed')) },
+      { onError: (err) => notify.error(getUserErrorNotification(err, 'library.replacementUpdateFailed')) },
     )
   }
 
   function onPointToggle(rule: TextReplacementRes) {
     updateReplacement.mutate(
       { id: rule.id, body: { enabled: !rule.enabled } },
-      { onError: (err) => notify.error(getUserErrorNotification(err, 'errors.updateFailed')) },
+      { onError: (err) => notify.error(getUserErrorNotification(err, 'library.replacementUpdateFailed')) },
     )
   }
 

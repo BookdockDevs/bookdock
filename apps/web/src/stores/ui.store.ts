@@ -190,8 +190,12 @@ interface UiState {
   // Reader sidebar prefs
   toolbarLocked: boolean
   sidebarWidth: number
+  /** Last explicit open/closed choice while locked; seeds the sidebar on book
+   *  open (locked + open). Device-local like toolbarLocked. */
+  sidebarRememberedOpen: boolean
   setToolbarLocked: (v: boolean) => void
   setSidebarWidth: (v: number) => void
+  setSidebarRememberedOpen: (v: boolean) => void
 
   setUiTheme: (t: UiTheme) => void
   setReadingThemeId: (id: string) => void
@@ -460,6 +464,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   view: getInitial<string>('bd-library-view', 'grid') === 'list' ? ('list' as const) : ('grid' as const),
   toolbarLocked: getInitialBoolean('bd-reader-toolbar-locked', false),
   sidebarWidth: getInitialNumber('bd-sidebar-width', 288, 200, 640),
+  sidebarRememberedOpen: getInitialBoolean('bd-reader-sidebar-open', true),
 
   setCoverText: (coverText) => {
     setStorage('bd-cover-text', String(coverText))
@@ -488,6 +493,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setToolbarLocked: (toolbarLocked) => {
     setStorage('bd-reader-toolbar-locked', String(toolbarLocked))
     set({ toolbarLocked })
+  },
+  setSidebarRememberedOpen: (sidebarRememberedOpen) => {
+    setStorage('bd-reader-sidebar-open', String(sidebarRememberedOpen))
+    set({ sidebarRememberedOpen })
   },
   setSidebarWidth: (sidebarWidth) => {
     setStorage('bd-sidebar-width', String(sidebarWidth))

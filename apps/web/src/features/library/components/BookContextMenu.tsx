@@ -32,7 +32,11 @@ function StatusFlyout({ book, onClose }: { book: BookListItem; onClose: () => vo
       row={({ open, flip, toggle }) => (
         <button
           type="button"
-          onClick={toggle}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            toggle()
+          }}
           className={`${itemClass} ${open ? 'bg-stone-100 dark:bg-stone-800' : ''}`}
         >
           <MenuIcon>

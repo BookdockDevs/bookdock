@@ -13,6 +13,7 @@ export default function Login() {
   const _ = useTranslation()
   usePageTitle(_('auth.signIn'))
   const navigate = useNavigate()
+  const isLegadoLogin = new URLSearchParams(window.location.search).get('legado') === '1'
   const login = useLogin()
   const { data: instanceData } = useInstanceInfo()
   const allowRegistration = instanceData?.data.allowRegistration ?? false
@@ -48,7 +49,11 @@ export default function Login() {
     }
     try {
       await login.mutateAsync({ username: normalizedUsername, password })
-      navigate({ to: '/' })
+      if (isLegadoLogin) {
+        window.location.assign('/')
+      } else {
+        navigate({ to: '/' })
+      }
     } catch (err) {
       setError(_(authErrorKey(err)))
     }
