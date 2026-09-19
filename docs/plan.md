@@ -29,6 +29,7 @@ The private v0.2 release does not include an in-app backup center or online rest
 - [x] Close EPUB footnote compatibility using the existing foliate footnote support
 - [x] Add minimal structured server logs and request context for self-hosted troubleshooting
 - [x] Web TTS R09 baseline: visible-text-consistent playback, chapter/selection start, voice/rate controls, sentence highlighting, follow decoupling, chapter continuation, online prefetch, and user-owned AI voice services
+- [x] Legado book source integration: expose the user's own library to the Legado app as a read-only source with explore/search, replacement-aware chapters, media projection, and optional login-free scoped access keys (distinct from the out-of-scope online book-source engines)
 - [ ] Web TTS follow-up: word-boundary highlighting, adaptive audible-time prefetch/backpressure, persistent/offline cache, background/media controls, sleep timer, pitch-preserving rate change, and multi-role narration
 
 The following are intentionally excluded from this Web milestone: brightness control, volume-key navigation, E-Ink mode, native-style PWA behavior, and deep 3×3 gesture customization.

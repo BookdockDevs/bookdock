@@ -77,7 +77,7 @@ export default function ProfileStatsSection() {
               </div>
             )}
             <p className="mt-1 truncate text-[11px] text-stone-400 dark:text-stone-500">
-              {s && s.longestStreak > 0 ? `${_('stats.streakLongest')} ${s.longestStreak} ${_('stats.days')}` : '保持节奏'}
+              {s && s.longestStreak > 0 ? `${_('stats.streakLongest')} ${s.longestStreak} ${_('stats.days')}` : _('stats.keepMomentum')}
             </p>
           </div>
         </div>
@@ -152,7 +152,7 @@ export default function ProfileStatsSection() {
               </div>
             )}
             <p className="mt-1 truncate text-[11px] text-stone-400 dark:text-stone-500">
-              累计已读
+              {_('stats.cumulativeRead')}
             </p>
           </div>
         </div>

@@ -73,7 +73,7 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
                   <p className="text-xs tabular-nums text-stone-400 dark:text-stone-500">
                     {_('library.bookCount', { count: bookCount })}
                     {bookSize !== undefined && bookSize > 0 && <> · {formatBytes(bookSize)}</>}
-                    {trashCapBytes !== undefined && <> · {_('library.trashCap', { size: formatBytes(trashCapBytes) })}</>}
+                    {trashCapBytes !== undefined && <> · {_('settings.trashCap')} {formatBytes(trashCapBytes)}</>}
                   </p>
                 )}
                 {onResetMetadataFilter && (

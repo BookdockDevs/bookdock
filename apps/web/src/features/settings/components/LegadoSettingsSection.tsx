@@ -408,10 +408,10 @@ export default function LegadoSettingsSection() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-stone-400">
                 <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
               </svg>
-              <span>WebDAV & 网盘</span>
+              <span>{_('settings.webdav')}</span>
             </div>
             <p className="mt-1 text-xs text-stone-400 dark:text-stone-500 leading-relaxed">
-              支持坚果云、Alist、OneDrive 等网络挂载，实现多端云同步与灾备。
+              {_('settings.webdavDesc')}
             </p>
           </div>
         </div>

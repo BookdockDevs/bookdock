@@ -2,7 +2,54 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.2.4] - Unreleased
+## [0.3.0] - Unreleased
+
+### Highlights
+
+- Introduced the Legado book-source integration: Bookdock can serve its library to the Legado app with category browsing and search, rich-HTML chapter content with text replacements applied, EPUB images and media-overlay audio/video, and login-free scoped access keys.
+- Added a personal Profile page with reading achievements and a currently-reading showcase, replacing the account section in Settings, plus an Integrations settings section with planned-integration previews.
+- New governance controls: a per-user trash capacity cap with oldest-first auto-purge, an owner-set instance upload limit, and a per-user book-title auto-detection toggle (Auto-detect book titles).
+- The reader now respects each book's own typography by default, EPUB TOC keeps its native nesting, and reading-position bookmarks survive layout changes reliably.
+- Library batch operations gained per-action toasts with failed-item retry, and the whole client moved onto shared Modal/ConfirmDialog/SmartMenu surfaces with consistent, action-specific toast copy.
+
+### Added
+
+- Legado book source service under `/api/v1/legado`: source manifest, explore with a dynamic category page (section headings, sort selector, shelf and tag buttons; chosen sort persists), search, book info, TOC with volume detection, chapter content, covers, and in-book media resources. Settings gains an Integrations section with an enable switch, access mode (Sign in before use / Sign-in-free access), an Include illustrations and media toggle, copyable source URL, one-tap import, QR import, and source-link regeneration.
+- Read-only scoped access keys (one active key per user; SHA-256 hash for authentication, an AES-256-GCM encrypted copy so the key can be viewed again later) for login-free Legado access, carried as a `?key=` parameter in the generated source URL, with 90-day / 1-year / permanent durations; automatically revoked when the service is disabled or the access mode changes. New `legado_access_keys` table (migration 0004).
+- Legado renders content as rich HTML (`<usehtml>`): EPUB chapters keep inline styles and paragraph indentation, book details aggregate the synopsis plus file size / original file name / added and updated dates into the intro, and search/explore items carry kind and word-count badges with covers.
+- Legado media: when Include illustrations and media is on, chapters embed images, media-overlay audio becomes tap-to-play cues, and videos open through Legado's player; covers and media are served from a cache-aware, path-traversal-guarded resource route.
+- Profile page (`/profile`): hero card with avatar/username/member days, Reading Achievements stat cards, a Currently Reading continue-reading shelf, a home-settings dialog for per-module visibility and public-profile preferences (stored locally); avatar/username/password management moved from Settings.
+- Auto-detect book titles: title and author extracted from noisy file names (noise brackets, author suffixes, site watermark tails) at upload and metadata reset; per-user toggle, default on.
+- Trash capacity cap (Unlimited / 1–5 GB): exceeding it permanently deletes the oldest trashed books, checked on trash access and at boot.
+- Owner-only instance upload limit: presets from 100 MB to 5 GB in Settings, validated server-side within 5 MiB–10 GiB, enforced on upload and TXT append; the public instance endpoint exposes the effective cap so anonymous visitors see the real limit before signing in.
+- Library search now also matches format, description, series, subjects, publisher, ISBN, identifier, source, shelf, and tag names; added sort by upload time.
+- Batch actions report per-action results, and failed items can be retried alone; a partial shelf-move failure now warns explicitly instead of looking successful.
+- Integrations settings previews planned connectors (OPDS, KOReader sync, WebDAV & cloud drives) as disabled roadmap cards.
+- Reader reading-position bookmarks persist via the canonical `contentCfi` location (renamed from `anchorCfi`), which stays accurate across scroll/resize re-layouts.
+
+### Changed
+
+- With Override Book Layout off, the reader keeps each EPUB's own line-height, indent, paragraph spacing, and alignment (no injected paragraph CSS); the override defaults now start off.
+- Snap page-turn across chapter boundaries at the scroll clamp (foliate-js patch #44); the click that refocuses the window no longer double-turns a page, and the activation-click guard was broadened to more browser focus scenarios.
+- Upload sheet and book details rebuilt on the shared Modal; the add-reading-record dialog and share card moved onto the same shared surfaces; duplicate-only uploads now warn instead of silently succeeding.
+- Destructive confirmations standardize on the upgraded shared ConfirmDialog (backdrop blur, focus management, contextual warnings).
+- Reader side menus and the selection bar unified on SmartMenu/MenuFlyout behaviors; the reader sidebar's hover-expand zone no longer overlaps the top header strip.
+- Toast copy de-genericized across the app: delete/restore/purge, upload, batch, and settings-save toasts now name the affected book or the specific failure instead of a shared success/failure string; the stats page uses loading skeletons.
+- Settings reorganized into Library and Upload groups; account entry in the header now opens the Profile page with a left click.
+- Chinese UI copy consistency pass: the product is written 书坞 everywhere (profile member-days and public-profile hint included), hard-coded stats/WebDAV strings moved into i18n, metadata-save and read-status labels reworded.
+- Reading-position bookmark detection uses CFI range intersection; the sidebar reopens to its remembered state after toolbar unlock.
+- EPUB TOC now preserves the native nesting of NCX navMap and EPUB3 nested lists; stored chapter levels of existing books are upgraded lazily (the upgrade intentionally does not bump the book's update time).
+- AI citation ordering now follows the cfiRange reading order so multi-cite answers list passages in book sequence.
+
+### Fixed
+
+- The library header's trash-cap indicator showed a malformed raw warning string with an empty size; it now renders the short cap label with the formatted limit.
+- TXT multi-volume joins no longer mis-offset chapter boundaries when volumes are merged before parsing.
+- Recovering a normalized TXT no longer duplicates the first-chapter title; a duplicated leading heading inside chapter content is now removed.
+- A single malformed replacement regex no longer breaks TXT export or Legado chapter delivery (rules are isolated per-rule).
+- The annotation highlight bubble no longer lingers or misplaces after selection changes, and the library sidebar's uncategorized row renders correctly in both list and grid modes.
+
+## [0.2.4] - 2026-09-19
 
 ### Highlights
 
@@ -153,7 +200,54 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.2.4] - 待发布
+### [0.3.0] - 待发布
+
+#### 主要更新
+
+- 新增开源阅读（Legado）书源集成：书坞可将藏书作为书源接入开源阅读 APP，支持分类浏览与搜索、应用文本替换后的富文本章节、EPUB 插图与媒体同步音频/视频，并提供免登录的范围化访问凭证。
+- 新增个人主页：阅读成就统计与「当前阅读」书架替代了设置中的账号区块；设置新增「集成」分区，并附后续集成路线图预览卡片。
+- 补齐空间与命名治理：回收站容量上限（超限自动清理最早书籍）、实例级上传大小限制（仅管理员可设）、书名自动识别开关。
+- 阅读器默认尊重书籍自身排版，EPUB 目录保留原生层级，阅读位置书签在版面变化后可稳定恢复。
+- 批量操作提供逐项结果提示与失败项单独重试；全端统一使用共享弹窗与菜单组件，提示文案具体化。
+
+#### 新增
+
+- 开源阅读书源服务：书源清单、动态发现页（分组标题、排序选择器、书架与标签按钮，排序选择会保留）、搜索、书籍详情、含分卷识别的目录、章节正文、封面与书内媒体接口；设置「集成」分区含启用开关、访问方式（登录后使用/免登录访问）、包含插图与媒体开关、书源地址复制、一键导入与扫码导入、链接重新生成。
+- 免登录访问凭证：每用户一条有效凭证（SHA-256 哈希用于鉴权，另存 AES-256-GCM 加密副本以便随时再次查看），以 `?key=` 参数编入生成的书源地址，可选 90 天 / 1 年 / 永久有效期；停用服务或切换访问方式时自动吊销。新增 `legado_access_keys` 表（迁移 0004）。
+- 开源阅读内容以富文本（`<usehtml>`）呈现：EPUB 章节保留内联样式与段首缩进；书籍详情简介聚合内容简介与文件大小/原始文件名/添加与更新时间；搜索与发现列表携带分类、字数徽标与封面。
+- 开启「包含插图与媒体」后，章节内嵌图片，媒体同步音频支持点按播放，视频调起开源阅读播放器；封面与媒体由带缓存、防路径穿越的资源路由提供。
+- 个人主页：含头像、昵称与入驻天数的头部卡片，阅读成就统计卡，「当前阅读」续读书架，主页设置弹窗（模块展示与公开主页偏好，保存在本地）；头像/昵称/密码管理自设置迁入。
+- 书名自动识别：上传与重置元数据时从文件名剥离噪声括号、作者后缀与站点尾巴，提取书名与作者；按用户启用，默认开启。
+- 回收站容量上限（不限/1–5 GB）：超限时按删除时间从最早开始永久清理，在打开回收站与启动时检查。
+- 仅管理员可设置的实例上传上限：设置界面提供 100 MB–5 GB 预设，服务端在 5 MiB–10 GiB 范围内校验，对上传与 TXT 追加强制生效；公开实例接口暴露实际上限值，未登录访客也能看到真实限制。
+- 书库搜索扩展匹配格式、简介、丛书、主题、出版社、ISBN、标识符、来源、书架与标签名；新增按上传时间排序。
+- 批量操作按动作分类提示结果，失败项可单独重试；书架移动部分失败会明确警告而不再看似成功。
+- 设置「集成」分区以禁用态卡片预览规划中的连接能力（OPDS、KOReader 同步、WebDAV 与网盘）。
+- 阅读位置书签改以规范化的 contentCfi 定位（自 anchorCfi 更名），在滚动/窗口缩放引发的重排后依然准确。
+
+#### 变更
+
+- 关闭「覆盖书籍排版」时，EPUB 保留自身行高、缩进、段距与对齐，不再注入覆盖样式；覆盖开关默认改为关闭。
+- 连续滚动模式支持在章节边界吸附翻页（foliate-js 补丁 #44）；重新聚焦窗口的首次点击不再翻两页，且该防误触保护扩展覆盖更多浏览器聚焦场景。
+- 上传面板与书籍详情重构为共享弹窗；添加阅读记录弹窗与分享卡片同样迁移到共享弹窗框架；重复上传会给出提醒而非静默成功。
+- 所有危险操作确认统一迁移至增强版通用确认弹窗（背景虚化、焦点管理、情境警告）。
+- 阅读器侧边菜单与取词栏统一到共享菜单组件行为；侧栏悬停展开区域不再与顶部工具条重叠。
+- 全端提示文案具体化：删除/恢复/彻底删除、上传、批量与设置保存的提示都会点名受影响的书籍或具体失败原因；统计页改用加载骨架屏。
+- 设置重组为「书库」与「上传」两组；顶部账号入口改为左键直接进入个人主页。
+- 中文文案一致性梳理：应用名统一为「书坞」（含入驻天数与公开主页提示），统计与 WebDAV 卡片等硬编码文案接入本地化，元数据保存与阅读状态文案重述。
+- 书签定位改用 CFI 范围相交判定；工具栏锁定解除后侧边栏恢复上次展开状态。
+- EPUB 目录保留 NCX 与 EPUB3 原生嵌套层级，已入库旧书的章节层级在打开时惰性升级（升级不会改动书籍的更新时间）。
+- AI 引用按 cfiRange 阅读顺序排列，多段引用的答案按书中先后呈现。
+
+#### 修复
+
+- 书库顶栏回收站容量提示此前渲染出残缺的警告原文与空数值，现改为简短上限标签加格式化容量。
+- TXT 多卷合并不再因拼接偏移导致章节边界错位。
+- 修复 TXT 规范化文本恢复时重复首章标题的问题；章节正文开头与章节标题重复的首行标题现会被去除。
+- 单条损坏的正则替换规则不再导致 TXT 导出或开源阅读章节整体失败。
+- 取词后高亮气泡不再残留或错位；书库侧栏「未分类」行在列表与网格两种形态下渲染正确。
+
+### [0.2.4] - 2026-09-19
 
 #### 主要更新
 

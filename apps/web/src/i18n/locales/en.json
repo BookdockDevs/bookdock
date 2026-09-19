@@ -1170,6 +1170,8 @@
     "opdsDesc": "Connect KOReader, Moon+ Reader, and other OPDS-compatible clients.",
     "koreaderSync": "KOReader Sync",
     "koreaderSyncDesc": "Sync reading progress, bookmarks, and highlights with E-ink devices.",
+    "webdav": "WebDAV & Cloud Drives",
+    "webdavDesc": "Mount network storage such as Jianguoyun, Alist, and OneDrive for multi-device sync and disaster recovery.",
     "webdavStorage": "WebDAV Storage & Backup",
     "webdavStorageDesc": "Mount remote WebDAV directories as book sources and automated backups."
   },
@@ -1407,6 +1409,8 @@
     "thisWeek": "This Week",
     "thisMonth": "This Month",
     "totalWords": "Total Words Read",
+    "cumulativeRead": "Total read",
+    "keepMomentum": "Keep the momentum",
     "wordsRead": "Total Words Read",
     "wordsWan": "{{n}}k words",
     "words": "{{n}} words",

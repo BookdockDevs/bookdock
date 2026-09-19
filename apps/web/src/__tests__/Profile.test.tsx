@@ -113,7 +113,7 @@ describe('Profile Page', () => {
 
     expect(screen.getByText('ReaderMaster')).toBeInTheDocument()
     expect(screen.getByText('所有者')).toBeInTheDocument()
-    expect(screen.getByText(/在书栈驻留第 15 天/)).toBeInTheDocument()
+    expect(screen.getByText(/在书坞驻留第 15 天/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '主页设置' })).toBeInTheDocument()
     expect(screen.queryByText('修改密码')).not.toBeInTheDocument()
     expect(screen.queryByText('修改')).not.toBeInTheDocument()

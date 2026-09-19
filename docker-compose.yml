@@ -1,7 +1,7 @@
 services:
   bookdock:
     container_name: bookdock
-    image: ${BOOKDOCK_IMAGE:-loofffff/bookdock:0.2.4}
+    image: ${BOOKDOCK_IMAGE:-loofffff/bookdock:0.3.0}
     build:
       context: .
     ports:
@@ -9,23 +9,8 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/data
-    environment:
-      NODE_ENV: production
-      DATA_DIR: /data
-      DEFAULT_USERNAME: ${DEFAULT_USERNAME:-admin}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      AUTH_RPM: ${AUTH_RPM:-5}
-      # Optional: when omitted, a random secret is generated and persisted to /data/.jwt-secret.
-      JWT_SECRET: ${JWT_SECRET:-}
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - >-
-          fetch('http://127.0.0.1:3000/api/v1/health').then((r) =>
-          process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
-      retries: 3
+    # No environment block: NODE_ENV and DATA_DIR are set by the image, and all
+    # other variables have working defaults (see docs/architecture.md, Config & Env).
+    # Add overrides here when needed, e.g.:
+    # environment:
+    #   LOG_LEVEL: debug
