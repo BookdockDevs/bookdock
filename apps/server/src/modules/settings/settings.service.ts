@@ -3,10 +3,12 @@ import { and, eq } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import { settings } from '../../db/schema'
 import { createId } from '../../lib/id'
-import type { SettingsRes, TrashSettings } from '@bookdock/shared'
+import type { IntegrationsSettings, LibrarySettings, SettingsRes, TrashSettings } from '@bookdock/shared'
 
 const UI_KEY = 'ui'
 const TRASH_KEY = 'trash'
+const LIBRARY_KEY = 'library'
+const INTEGRATIONS_KEY = 'integrations'
 
 const DEFAULT_TRASH: TrashSettings = { autoCleanDays: 30 }
 
@@ -58,4 +60,40 @@ export function isTrashEnabled(userId: string): boolean {
 
 export function updateTrashSettings(userId: string, value: TrashSettings) {
   upsertValue(userId, TRASH_KEY, value)
+}
+
+export function getLibrarySettings(userId: string): LibrarySettings {
+  return getValue<LibrarySettings>(userId, LIBRARY_KEY) ?? {}
+}
+
+/** File-name title normalization is on unless the stored settings disable it. */
+export function isTitleNormalizeEnabled(userId: string): boolean {
+  return getLibrarySettings(userId).normalizeTitle !== false
+}
+
+export function updateLibrarySettings(userId: string, value: LibrarySettings) {
+  upsertValue(userId, LIBRARY_KEY, value)
+}
+
+export function getIntegrationsSettings(userId: string): IntegrationsSettings {
+  return getValue<IntegrationsSettings>(userId, INTEGRATIONS_KEY) ?? {}
+}
+
+/** Legado source server is off until the user explicitly enables it. */
+export function isLegadoEnabled(userId: string): boolean {
+  return getIntegrationsSettings(userId).legado?.enabled === true
+}
+
+export function isLegadoAccessKeyEnabled(userId: string): boolean {
+  const legado = getIntegrationsSettings(userId).legado
+  return legado?.enabled === true && legado.authMode === 'accessKey'
+}
+
+/** EPUB media in Legado is included unless the stored settings disable it. */
+export function isLegadoEpubMediaEnabled(userId: string): boolean {
+  return getIntegrationsSettings(userId).legado?.includeEpubMedia !== false
+}
+
+export function updateIntegrationsSettings(userId: string, value: IntegrationsSettings) {
+  upsertValue(userId, INTEGRATIONS_KEY, value)
 }

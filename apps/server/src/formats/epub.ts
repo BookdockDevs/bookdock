@@ -13,11 +13,18 @@ interface ManifestItem {
   href: string
   mediaType: string
   properties?: string
+  mediaOverlay?: string
+}
+
+export interface EpubChapterMedia {
+  type: 'audio' | 'video'
+  path: string
 }
 
 interface EpubChapter {
   title: string
   href: string
+  level: number
 }
 
 function isMarkupMediaType(mediaType: string): boolean {
@@ -57,6 +64,23 @@ function joinPath(base: string, href: string): string {
       ? rawBase.slice(0, rawBase.lastIndexOf('/') + 1)
       : ''
   return normalizeArchivePath(`${baseDir}${rawHref}`)
+}
+
+function isSafeArchivePath(value: string): boolean {
+  let path = value.trim().replace(/\\/g, '/')
+  try {
+    path = decodeURIComponent(path)
+  } catch {
+    return false
+  }
+  return !path.startsWith('/') && !path.split('/').some((part) => part === '..')
+}
+
+export function resolveEpubResourcePath(baseHref: string, resourceHref: string): string | null {
+  const value = resourceHref.trim()
+  if (!value || value.startsWith('#') || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(value)) return null
+  const path = joinPath(baseHref, value)
+  return path && isSafeArchivePath(path) ? path : null
 }
 
 function createArchiveFileLookup(zip: JSZip): (href: string) => JSZip.JSZipObject | null {
@@ -156,6 +180,45 @@ function getTextContent(elem: XmlElement | null): string {
 
 function nodeListToArray(list: ArrayLike<XmlElement>): XmlElement[] {
   return Array.from(list)
+}
+
+function childElements(root: XmlElement): XmlElement[] {
+  return Array.from(root.childNodes).filter((node) => node.nodeType === 1) as XmlElement[]
+}
+
+function childElementsByLocalName(root: XmlElement, localName: string): XmlElement[] {
+  return childElements(root).filter((element) => {
+    const name = element.localName ?? element.tagName.split(':').pop()
+    return name?.toLowerCase() === localName.toLowerCase()
+  })
+}
+
+function collectNcxNavPoints(parent: XmlElement, chapters: EpubChapter[], level: number): void {
+  for (const navPoint of childElementsByLocalName(parent, 'navPoint')) {
+    const textEl = firstElement(elementsByLocalName(navPoint, 'text'))
+    const contentEl = firstElement(elementsByLocalName(navPoint, 'content'))
+    const label = getTextContent(textEl)
+    const src = contentEl ? getAttribute(contentEl, 'src') : null
+    if (src) {
+      const href = src.split('#')[0]
+      if (href) chapters.push({ title: label || href, href, level })
+    }
+    collectNcxNavPoints(navPoint, chapters, level + 1)
+  }
+}
+
+function collectEpub3NavList(list: XmlElement, chapters: EpubChapter[], level: number): void {
+  for (const item of childElementsByLocalName(list, 'li')) {
+    const link = firstElement(childElementsByLocalName(item, 'a'))
+    const href = link ? getAttribute(link, 'href') : null
+    if (href) {
+      const base = href.split('#')[0]
+      if (base) chapters.push({ title: getTextContent(link) || base, href: base, level })
+    }
+    for (const nestedList of childElementsByLocalName(item, 'ol')) {
+      collectEpub3NavList(nestedList, chapters, level + 1)
+    }
+  }
 }
 
 function elementsByLocalName(root: { getElementsByTagName: (name: string) => ArrayLike<XmlElement> }, localName: string): XmlElement[] {
@@ -397,6 +460,7 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
           href: joinPath(opfDir, href),
           mediaType: mediaType.trim().toLowerCase().split(';', 1)[0],
           properties: getAttribute(item, 'properties') ?? undefined,
+          mediaOverlay: getAttribute(item, 'media-overlay') ?? undefined,
         }
       }
     }
@@ -517,15 +581,14 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
     if (ncxFile) {
       const ncxXml = await readArchiveText(ncxFile)
       const ncxDoc = new DOMParser().parseFromString(ncxXml, 'application/xml')
-      for (const navPoint of elementsByLocalName(ncxDoc, 'navPoint')) {
-        const textEl = firstElement(elementsByLocalName(navPoint, 'text'))
-        const contentEl = firstElement(elementsByLocalName(navPoint, 'content'))
-        const label = getTextContent(textEl)
-        const src = contentEl ? getAttribute(contentEl, 'src') : null
-        if (src) {
-          const href = src.split('#')[0]
-          chapters.push({ title: label || href, href: joinPath(ncxItem.href, href) })
-        }
+      const navMap = firstElement(elementsByLocalName(ncxDoc, 'navMap'))
+      if (navMap) {
+        const tocEntries: EpubChapter[] = []
+        collectNcxNavPoints(navMap, tocEntries, 1)
+        chapters.push(...tocEntries.map((chapter) => ({
+          ...chapter,
+          href: joinPath(ncxItem.href, chapter.href),
+        })))
       }
     }
   }
@@ -547,15 +610,24 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
           const type = getAttribute(nav, 'epub:type') ?? getAttribute(nav, 'type') ?? ''
           return type.split(/\s+/).some((value) => value.toLowerCase() === 'toc')
         })
-        const links = elementsByLocalName(tocNav ?? navDoc, 'a')
-        for (const link of nodeListToArray(links)) {
-          const href = getAttribute(link, 'href')
-          if (href) {
-            const base = href.split('#')[0]
-            if (!base) continue
-            chapters.push({ title: getTextContent(link) || base, href: joinPath(navItem.href, base) })
+        const tocEntries: EpubChapter[] = []
+        const tocList = tocNav ? firstElement(elementsByLocalName(tocNav, 'ol')) : null
+        if (tocList) {
+          collectEpub3NavList(tocList, tocEntries, 1)
+        } else {
+          const links = elementsByLocalName(tocNav ?? navDoc, 'a')
+          for (const link of nodeListToArray(links)) {
+            const href = getAttribute(link, 'href')
+            if (href) {
+              const base = href.split('#')[0]
+              if (base) tocEntries.push({ title: getTextContent(link) || base, href: base, level: 1 })
+            }
           }
         }
+        chapters.push(...tocEntries.map((chapter) => ({
+          ...chapter,
+          href: joinPath(navItem.href, chapter.href),
+        })))
       }
     }
   }
@@ -564,7 +636,7 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
     for (const idref of spine) {
       const item = manifest[idref]
       if (item && isMarkupMediaType(item.mediaType)) {
-        chapters.push({ title: item.href, href: item.href })
+        chapters.push({ title: item.href, href: item.href, level: 1 })
       }
     }
   }
@@ -591,7 +663,12 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
     // file only once so per-chapter counts sum to the true book total.
     const wordCount = countedFiles.has(c.href) ? 0 : countWords(text)
     countedFiles.add(c.href)
-    chaptersWithCounts.push({ title: c.title, content: c.href, wordCount })
+    chaptersWithCounts.push({
+      title: c.title,
+      content: c.href,
+      ...(c.level > 1 ? { level: c.level } : {}),
+      wordCount,
+    })
   }
 
   return {
@@ -636,15 +713,107 @@ function normalizeReadingText(text: string): string {
     .trim()
 }
 
+async function loadEpubChapterMedia(zip: JSZip, chapterHref: string): Promise<EpubChapterMedia[]> {
+  const findArchiveFile = createArchiveFileLookup(zip)
+  const containerFile = findArchiveFile('META-INF/container.xml')
+  if (!containerFile) return []
+  const containerDoc = new DOMParser().parseFromString(await readArchiveText(containerFile), 'application/xml')
+  const rootfile = elementsByLocalName(containerDoc, 'rootfile')[0]
+  const opfPath = rootfile ? normalizeArchivePath(getAttribute(rootfile, 'full-path') ?? '') : ''
+  if (!opfPath) return []
+  const opfFile = findArchiveFile(opfPath)
+  if (!opfFile) return []
+  const opfDoc = new DOMParser().parseFromString(await readArchiveText(opfFile), 'application/xml')
+  const opfDir = opfPath.includes('/') ? `${opfPath.slice(0, opfPath.lastIndexOf('/'))}/` : ''
+  const manifest = new Map<string, ManifestItem>()
+  for (const item of elementsByLocalName(opfDoc, 'item')) {
+    const id = getAttribute(item, 'id')
+    const href = getAttribute(item, 'href')
+    const mediaType = getAttribute(item, 'media-type')
+    if (!id || !href || !mediaType) continue
+    manifest.set(id, {
+      id,
+      href: joinPath(opfDir, href),
+      mediaType: mediaType.trim().toLowerCase().split(';', 1)[0],
+      mediaOverlay: getAttribute(item, 'media-overlay') ?? undefined,
+    })
+  }
+
+  const chapter = [...manifest.values()].find((item) => item.href === normalizeArchivePath(chapterHref))
+  const overlay = chapter?.mediaOverlay ? manifest.get(chapter.mediaOverlay) : undefined
+  if (!overlay || !overlay.mediaType.includes('smil')) return []
+  const smilFile = findArchiveFile(overlay.href)
+  if (!smilFile) return []
+  const smilDoc = new DOMParser().parseFromString(await readArchiveText(smilFile), 'application/xml')
+  const media = new Map<string, EpubChapterMedia>()
+  for (const audio of elementsByLocalName(smilDoc, 'audio')) {
+    const src = getAttribute(audio, 'src')
+    const path = src ? resolveEpubResourcePath(overlay.href, src) : null
+    if (path && !media.has(path)) media.set(path, { type: 'audio', path })
+  }
+  return [...media.values()]
+}
+
 /** Extract one chapter in reading order for server-side AI tools. */
-export async function extractEpubChapterText(buffer: Buffer, chapterIndex: number): Promise<string> {
+export async function loadEpubChapterMarkup(buffer: Buffer, chapterIndex: number): Promise<{ href: string; markup: string; media: EpubChapterMedia[] } | null> {
   const parsed = await parseEpubBuffer(buffer)
   const chapter = parsed.chapters[chapterIndex]
-  if (!chapter) return ''
+  if (!chapter) return null
   const zip = await JSZip.loadAsync(buffer)
   const file = createArchiveFileLookup(zip)(chapter.content)
-  if (!file) return ''
-  const doc = new DOMParser().parseFromString(await readArchiveText(file), 'application/xml')
+  if (!file) return null
+  return { href: chapter.content, markup: await readArchiveText(file), media: await loadEpubChapterMedia(zip, chapter.content) }
+}
+
+export interface EpubResource {
+  data: Buffer
+  mediaType: string
+}
+
+function epubResourceMediaType(path: string): string | null {
+  const extension = path.toLowerCase().split(/[./]/).pop() ?? ''
+  return {
+    avif: 'image/avif',
+    gif: 'image/gif',
+    jpeg: 'image/jpeg',
+    jpg: 'image/jpeg',
+    m4a: 'audio/mp4',
+    mid: 'audio/midi',
+    midi: 'audio/midi',
+    mp3: 'audio/mpeg',
+    mp4: 'video/mp4',
+    oga: 'audio/ogg',
+    ogg: 'audio/ogg',
+    opus: 'audio/opus',
+    png: 'image/png',
+    svg: 'image/svg+xml',
+    wav: 'audio/wav',
+    webm: 'video/webm',
+    webp: 'image/webp',
+  }[extension] ?? null
+}
+
+export function isEpubMediaPath(path: string): boolean {
+  return epubResourceMediaType(path) !== null
+}
+
+export async function loadEpubResource(buffer: Buffer, resourcePath: string): Promise<EpubResource | null> {
+  if (!isSafeArchivePath(resourcePath)) return null
+  const mediaType = epubResourceMediaType(resourcePath)
+  if (!mediaType) return null
+  const zip = await JSZip.loadAsync(buffer)
+  const file = createArchiveFileLookup(zip)(resourcePath)
+  if (!file) return null
+  return {
+    data: Buffer.from(await file.async('uint8array')),
+    mediaType,
+  }
+}
+
+export async function extractEpubChapterText(buffer: Buffer, chapterIndex: number): Promise<string> {
+  const chapter = await loadEpubChapterMarkup(buffer, chapterIndex)
+  if (!chapter) return ''
+  const doc = new DOMParser().parseFromString(chapter.markup, 'application/xml')
   const body = firstElement(doc.getElementsByTagName('body')) ?? doc.documentElement
   return body ? normalizeReadingText(collectReadingText(body)) : ''
 }

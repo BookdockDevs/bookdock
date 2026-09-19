@@ -17,9 +17,10 @@ import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { registerParser } from '../../formats/registry'
-import { TxtParser } from '../../formats/txt'
+import { normalizeText, TxtParser } from '../../formats/txt'
 import booksRoutes from './books.routes'
 import settingsRoutes from '../settings/settings.routes'
+import { resetInstanceCache } from '../auth/auth.service'
 import {
   getBook,
   getActiveBook,
@@ -28,6 +29,7 @@ import {
   restoreBook,
   deleteBook,
   purgeExpiredTrash,
+  purgeTrashToCapacity,
   purgeAllExpiredTrash,
   listBooks,
   setBookShelf,
@@ -220,6 +222,31 @@ describe('uploadBook dedup flag', () => {
     expect((loaded.meta as Record<string, unknown>).bookmeta).toEqual({})
   })
 
+  it('recovers multi-volume TXT offsets without adding separators for empty volume nodes', async () => {
+    const text = [
+      '第一卷 韩国风云',
+      '第一章 开始',
+      '韩国局势开始变化。',
+      '第二卷 初入秦国',
+      '第一章 继续',
+      '秦国局势开始变化。',
+      '第三卷 逐鹿天下',
+      '第一章 终局',
+      '天下局势开始变化。',
+    ].join('\n\n')
+    const { book } = await uploadBook(ownerId, new File([text], 'book.txt', { type: 'text/plain' }))
+
+    await expect(getBookContent(ownerId, book.id)).resolves.toBe(normalizeText(text))
+    await expect(getBookChapterContent(ownerId, book.id, 3)).resolves.toMatchObject({
+      title: '第一章 继续',
+      content: '秦国局势开始变化。',
+    })
+    await expect(getBookChapterContent(ownerId, book.id, 5)).resolves.toMatchObject({
+      title: '第一章 终局',
+      content: '天下局势开始变化。',
+    })
+  })
+
   it('persists the original file name and keeps it across metadata edits', async () => {
     const { book } = await uploadBook(ownerId, new File(['chapter one text'], 'my-old-book.txt', { type: 'text/plain' }))
     expect((book.meta as Record<string, unknown>).fileName).toBe('my-old-book.txt')
@@ -389,6 +416,18 @@ describe('POST /api/v1/books upload membership', () => {
     expect(payload.data.shelfId).toBe(shelfId)
     expect(db.select().from(schema.bookTags).where(eq(schema.bookTags.bookId, payload.data.id)).all()).toEqual([{ bookId: payload.data.id, tagId }])
   })
+
+  it('rejects uploads above the owner-set instance cap', async () => {
+    db.insert(schema.instanceSettings).values({ key: 'uploadMaxBytes', value: String(5 * 1024 * 1024) }).run()
+    resetInstanceCache()
+    const body = new FormData()
+    body.append('file', new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'big.txt', { type: 'text/plain' }))
+
+    const response = await createUploadApp().request('/api/v1/books', { method: 'POST', body })
+
+    expect(response.status).toBe(413)
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe('UPLOAD_TOO_LARGE')
+  })
 })
 
 describe('listBooks search escaping', () => {
@@ -422,6 +461,31 @@ describe('listBooks search escaping', () => {
     seedBook(db, ownerId, { title: 'Dune', author: 'Frank Herbert' })
     const byAuthor = await listBooks(ownerId, 1, 20, 'frank')
     expect(byAuthor.data.map((b) => b.title)).toEqual(['Dune'])
+  })
+
+  it('matches catalog metadata, shelf names, and tag names', async () => {
+    const shelfId = createId('shelf')
+    const tagId = createId('tag')
+    db.insert(schema.shelves).values({ id: shelfId, userId: ownerId, name: '历史小说', sortOrder: 0, createdAt: Date.now() }).run()
+    db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '宫斗', sortOrder: 0 }).run()
+    const book = seedBook(db, ownerId, {
+      title: 'Metadata Book',
+      shelfId,
+      meta: { bookmeta: { description: '简介关键词', series: '王朝系列', subjects: ['古代'] } },
+    })
+    db.insert(schema.bookTags).values({ bookId: book.id, tagId }).run()
+
+    const byShelf = await listBooks(ownerId, 1, 20, '历史小说')
+    const byTag = await listBooks(ownerId, 1, 20, '宫斗')
+    const bySeries = await listBooks(ownerId, 1, 20, '王朝系列')
+    const bySubject = await listBooks(ownerId, 1, 20, '古代')
+    const byDescription = await listBooks(ownerId, 1, 20, '简介关键词')
+
+    expect(byShelf.data.map((item) => item.id)).toEqual([book.id])
+    expect(byTag.data.map((item) => item.id)).toEqual([book.id])
+    expect(bySeries.data.map((item) => item.id)).toEqual([book.id])
+    expect(bySubject.data.map((item) => item.id)).toEqual([book.id])
+    expect(byDescription.data.map((item) => item.id)).toEqual([book.id])
   })
 })
 
@@ -661,6 +725,100 @@ describe('trash disabled mode (routes)', () => {
       .where(and(eq(schema.settings.userId, ownerId), eq(schema.settings.key, 'trash')))
       .get()
     expect(row!.value).toEqual({ autoCleanDays: 7, enabled: false })
+  })
+})
+
+describe('library settings (routes)', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  function createApp() {
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('/api/v1/*', async (c, next) => {
+      c.set('user', { id: ownerId, username: 'owner', role: 'owner', avatarKey: null })
+      return next()
+    })
+    app.route('/api/v1/settings', settingsRoutes)
+    return app
+  }
+
+  async function putSettings(body: unknown) {
+    return createApp().request('/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  }
+
+  function libraryRow() {
+    return db
+      .select()
+      .from(schema.settings)
+      .where(and(eq(schema.settings.userId, ownerId), eq(schema.settings.key, 'library')))
+      .get()
+  }
+
+  it('GET /settings exposes the library row and defaults to on (empty object)', async () => {
+    const body = await (await createApp().request('/api/v1/settings')).json()
+    expect(body.data.library).toEqual({})
+
+    await putSettings({ library: { normalizeTitle: false } })
+    const after = await (await createApp().request('/api/v1/settings')).json()
+    expect(after.data.library).toEqual({ normalizeTitle: false })
+  })
+
+  it('stores library settings on their own row without touching ui', async () => {
+    await putSettings({ uiTheme: 'light' })
+    await putSettings({ library: { normalizeTitle: false } })
+
+    expect(libraryRow()!.value).toEqual({ normalizeTitle: false })
+    const uiRow = db
+      .select()
+      .from(schema.settings)
+      .where(and(eq(schema.settings.userId, ownerId), eq(schema.settings.key, 'ui')))
+      .get()
+    expect(uiRow!.value).toEqual({ uiTheme: 'light' })
+  })
+
+  it('merges partial library updates onto the stored value', async () => {
+    await putSettings({ library: { normalizeTitle: false } })
+    await putSettings({ library: {} })
+    expect(libraryRow()!.value).toEqual({ normalizeTitle: false })
+  })
+})
+
+describe('uploadBook title normalization', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  function junkFile() {
+    return new File(['第一章\n正文内容'], '间客（精校版全本）作者：猫腻.txt', { type: 'text/plain' })
+  }
+
+  it('normalizes the file-name title and backfills the author when enabled', async () => {
+    const { book } = await uploadBook(ownerId, junkFile(), undefined, { normalizeTitle: true })
+    expect(book.title).toBe('间客')
+    expect(book.author).toBe('猫腻')
+  })
+
+  it('keeps the raw file-name title when disabled', async () => {
+    const { book } = await uploadBook(ownerId, junkFile(), undefined, { normalizeTitle: false })
+    expect(book.title).toBe('间客（精校版全本）作者：猫腻')
+    expect(book.author).toBe('')
   })
 })
 
@@ -939,6 +1097,73 @@ describe('purgeExpiredTrash', () => {
   })
 })
 
+describe('purgeTrashToCapacity', () => {
+  let db: ReturnType<typeof createTestDb>
+  let userId: string
+
+  const DAY_MS = 24 * 60 * 60 * 1000
+  const MB = 1024 * 1024
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    userId = seedUser(db, 'cap-user')
+  })
+
+  it('evicts oldest-deleted rows only until back under the cap', async () => {
+    const oldest = seedBook(db, userId, { deletedAt: Date.now() - 3 * DAY_MS, size: MB })
+    const middle = seedBook(db, userId, { deletedAt: Date.now() - 2 * DAY_MS, size: MB })
+    const newest = seedBook(db, userId, { deletedAt: Date.now() - 1 * DAY_MS, size: MB })
+    const active = seedBook(db, userId, { size: MB })
+
+    // total trash 3MB over a 1.5MB cap: only the oldest row has to go (2MB is still over → two rows)
+    const purged = await purgeTrashToCapacity(userId, 1.5 * MB)
+    expect(purged).toBe(2)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, oldest.id)).get()).toBeUndefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, middle.id)).get()).toBeUndefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, newest.id)).get()).toBeDefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, active.id)).get()).toBeDefined()
+  })
+
+  it('purges a single book that alone exceeds the cap', async () => {
+    const oversized = seedBook(db, userId, { deletedAt: Date.now() - 1 * DAY_MS, size: 10 * MB })
+
+    const purged = await purgeTrashToCapacity(userId, 5 * MB)
+    expect(purged).toBe(1)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, oversized.id)).get()).toBeUndefined()
+  })
+
+  it('keeps trash untouched when total is at or under the cap', async () => {
+    const a = seedBook(db, userId, { deletedAt: Date.now() - 2 * DAY_MS, size: 2 * MB })
+    const b = seedBook(db, userId, { deletedAt: Date.now() - 1 * DAY_MS, size: 3 * MB })
+
+    const purged = await purgeTrashToCapacity(userId, 5 * MB)
+    expect(purged).toBe(0)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, a.id)).get()).toBeDefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, b.id)).get()).toBeDefined()
+  })
+
+  it('disables eviction when the cap is 0', async () => {
+    const kept = seedBook(db, userId, { deletedAt: Date.now() - 1 * DAY_MS, size: 100 * MB })
+
+    const purged = await purgeTrashToCapacity(userId, 0)
+    expect(purged).toBe(0)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, kept.id)).get()).toBeDefined()
+  })
+
+  it("never evicts another user's trash", async () => {
+    const other = seedUser(db, 'other-user')
+    const mine = seedBook(db, userId, { deletedAt: Date.now() - 2 * DAY_MS, size: 10 * MB })
+    const theirs = seedBook(db, other, { deletedAt: Date.now() - 1 * DAY_MS, size: 10 * MB })
+
+    const purged = await purgeTrashToCapacity(userId, 5 * MB)
+    expect(purged).toBe(1)
+    expect(db.select().from(schema.books).where(eq(schema.books.id, mine.id)).get()).toBeUndefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, theirs.id)).get()).toBeDefined()
+  })
+})
+
 describe('purgeAllExpiredTrash (boot sweep)', () => {
   const DAY_MS = 24 * 60 * 60 * 1000
   let db: ReturnType<typeof createTestDb>
@@ -976,6 +1201,23 @@ describe('purgeAllExpiredTrash (boot sweep)', () => {
 
     await purgeAllExpiredTrash()
     expect(db.select().from(schema.books).where(eq(schema.books.id, expired.id)).get()).toBeDefined()
+  })
+
+  it('applies the per-user size cap even when day auto-clean is disabled', async () => {
+    const a = seedUser(db, 'user-a')
+    const b = seedUser(db, 'user-b')
+    db.insert(schema.settings).values({ id: createId('setting'), userId: a, key: 'trash', value: { autoCleanDays: 0, maxTrashBytes: 150 } }).run()
+    const oldestA = seedBook(db, a, { deletedAt: Date.now() - 2 * DAY_MS, size: 100 })
+    const newestA = seedBook(db, a, { deletedAt: Date.now() - 1 * DAY_MS, size: 100 })
+    const keptB = seedBook(db, b, { deletedAt: Date.now() - 1 * DAY_MS, size: 1000 })
+
+    await purgeAllExpiredTrash()
+
+    // a: 200 > 150 cap → oldest evicted, newest (100 <= 150) survives the fresh time rule
+    expect(db.select().from(schema.books).where(eq(schema.books.id, oldestA.id)).get()).toBeUndefined()
+    expect(db.select().from(schema.books).where(eq(schema.books.id, newestA.id)).get()).toBeDefined()
+    // b has no cap: oversized trash is untouched without a day deadline
+    expect(db.select().from(schema.books).where(eq(schema.books.id, keptB.id)).get()).toBeDefined()
   })
 })
 
@@ -1404,6 +1646,15 @@ describe('reTocBook', () => {
   function seedTxtBook(text: string) {
     return uploadBook(ownerId, new File([text], 'book.txt', { type: 'text/plain' }))
   }
+
+  it('keeps TXT chapter content aligned after recovering a synthetic preface', async () => {
+    const { book } = await seedTxtBook('前言\n\n第一章 开篇\n\n正文一\n\n第二章 续篇\n\n正文二')
+
+    await expect(getBookChapterContent(ownerId, book.id, 1)).resolves.toMatchObject({
+      title: '第一章 开篇',
+      content: '正文一',
+    })
+  })
 
   it('pins an explicit rule (tocRuleAuto=false) and re-splits by it', async () => {
     const rule = createTocRule(ownerId, {

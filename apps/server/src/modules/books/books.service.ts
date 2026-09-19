@@ -21,6 +21,7 @@ import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { sha256 } from '../../lib/hash'
+import { normalizeBookTitle } from '../../lib/book-title'
 import { countWords } from '../../lib/word-count'
 import { readProgressFile } from '../../lib/progress-file'
 import { log } from '../../lib/logger'
@@ -39,6 +40,7 @@ interface CachedNormalizedText {
 }
 const normalizedTextCache = new Map<string, CachedNormalizedText>()
 const NORMALIZED_CACHE_TTL_MS = 5 * 60 * 1000
+const EPUB_TOC_LEVEL_VERSION = 1
 
 function getCachedNormalized(key: string): string | null {
   const item = normalizedTextCache.get(key)
@@ -121,7 +123,34 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     // must itself be escaped first.
     const escaped = search.replace(/[!%_]/g, (m) => '!' + m)
     const pattern = '%' + escaped + '%'
-    conditions.push(sql`(${books.title} LIKE ${pattern} ESCAPE '!' OR ${books.author} LIKE ${pattern} ESCAPE '!')`)
+    const shelfMatch = sql`EXISTS (
+      SELECT 1 FROM shelves AS search_shelf
+      WHERE search_shelf.id = ${books.shelfId}
+        AND search_shelf.user_id = ${userId}
+        AND search_shelf.name LIKE ${pattern} ESCAPE '!'
+    )`
+    const tagMatch = sql`EXISTS (
+      SELECT 1
+      FROM book_tags AS search_book_tag
+      INNER JOIN tags AS search_tag ON search_tag.id = search_book_tag.tag_id
+      WHERE search_book_tag.book_id = ${books.id}
+        AND search_tag.user_id = ${userId}
+        AND search_tag.name LIKE ${pattern} ESCAPE '!'
+    )`
+    conditions.push(sql`(
+      ${books.title} LIKE ${pattern} ESCAPE '!'
+      OR ${books.author} LIKE ${pattern} ESCAPE '!'
+      OR ${books.format} LIKE ${pattern} ESCAPE '!'
+      OR json_extract(${books.meta}, '$.bookmeta.description') LIKE ${pattern} ESCAPE '!'
+      OR json_extract(${books.meta}, '$.bookmeta.series') LIKE ${pattern} ESCAPE '!'
+      OR json_extract(${books.meta}, '$.bookmeta.subjects') LIKE ${pattern} ESCAPE '!'
+      OR json_extract(${books.meta}, '$.bookmeta.publisher') LIKE ${pattern} ESCAPE '!'
+      OR json_extract(${books.meta}, '$.bookmeta.isbn') LIKE ${pattern} ESCAPE '!'
+      OR json_extract(${books.meta}, '$.bookmeta.identifier') LIKE ${pattern} ESCAPE '!'
+      OR json_extract(${books.meta}, '$.bookmeta.source') LIKE ${pattern} ESCAPE '!'
+      OR ${shelfMatch}
+      OR ${tagMatch}
+    )`)
   }
   if (format) {
     conditions.push(eq(books.format, format))
@@ -155,6 +184,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     sortBy === 'progress' ? (sortOrder === 'asc' ? asc(books.progress) : desc(books.progress)) :
     sortBy === 'lastReadAt' ? (sortOrder === 'asc' ? asc(books.lastReadAt) : desc(books.lastReadAt)) :
     sortBy === 'updatedAt' ? (sortOrder === 'asc' ? asc(books.updatedAt) : desc(books.updatedAt)) :
+    sortBy === 'createdAt' ? (sortOrder === 'asc' ? asc(books.createdAt) : desc(books.createdAt)) :
     sortBy === 'deletedAt' ? (sortOrder === 'asc' ? asc(books.deletedAt) : desc(books.deletedAt)) :
     sortOrder === 'asc' ? asc(books.createdAt) : desc(books.createdAt)
   const offset = (page - 1) * pageSize
@@ -234,7 +264,12 @@ export async function bufferFromStream(stream: Readable): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
-export async function uploadBook(userId: string, file: File, membership?: { shelfId?: string | null; tagIds?: string[] }) {
+export async function uploadBook(
+  userId: string,
+  file: File,
+  membership?: { shelfId?: string | null; tagIds?: string[] },
+  opts?: { normalizeTitle?: boolean },
+) {
   const storage = getStorage()
   const fileName = file.name
   const mime = file.type
@@ -277,8 +312,14 @@ export async function uploadBook(userId: string, file: File, membership?: { shel
     return { book: stripMetaChapters(db.select().from(books).where(eq(books.id, existing.id)).get()!), duplicated: true }
   }
 
-  const title = parsed.meta.title || fileName.replace(/\.[^.]+$/, '')
-  const author = parsed.meta.author ?? ''
+  let title = parsed.meta.title
+  let author = parsed.meta.author ?? ''
+  if (!title) {
+    const derived = opts?.normalizeTitle ? normalizeBookTitle(fileName) : undefined
+    title = derived?.title || fileName.replace(/\.[^.]+$/, '')
+    // File names of web-novels often carry the author where metadata has none.
+    if (!author && derived?.author) author = derived.author
+  }
 
   let coverKey: string | null = null
   if (parsed.meta.cover) {
@@ -348,12 +389,13 @@ export async function uploadBook(userId: string, file: File, membership?: { shel
       meta.chapters = parsed.chapters.map((c, idx) => ({
         id: `ch-${idx}`,
         title: c.title,
-        level: 1,
+        level: c.level ?? 1,
         startOffset: 0,
         endOffset: 0,
         wordCount: c.wordCount ?? 0,
       }))
     }
+    meta.epubTocLevelVersion = EPUB_TOC_LEVEL_VERSION
   }
 
   const metaChapters = meta.chapters as Array<{ wordCount?: number }> | undefined
@@ -400,9 +442,56 @@ export async function getActiveBook(userId: string, bookId: string) {
   return book
 }
 
+export function getBookMembership(userId: string, bookId: string, shelfId: string | null) {
+  const db = getDb()
+  const shelfName = shelfId
+    ? db.select({ name: shelves.name })
+      .from(shelves)
+      .where(and(eq(shelves.id, shelfId), eq(shelves.userId, userId)))
+      .get()?.name ?? null
+    : null
+  const tagRows = db.select({ name: tags.name })
+    .from(bookTags)
+    .innerJoin(tags, eq(bookTags.tagId, tags.id))
+    .where(and(eq(bookTags.bookId, bookId), eq(tags.userId, userId)))
+    .orderBy(asc(tags.sortOrder), asc(tags.name))
+    .all()
+  return { shelfName, tags: tagRows.map((tag) => tag.name) }
+}
+
 export async function getBookChapters(userId: string, bookId: string) {
   const book = await getBook(userId, bookId)
-  return (book.meta?.chapters ?? []) as Chapter[]
+  const existingChapters = (book.meta?.chapters ?? []) as Chapter[]
+  if (book.format !== 'epub' || book.meta?.epubTocLevelVersion === EPUB_TOC_LEVEL_VERSION) {
+    return existingChapters
+  }
+
+  const storage = getStorage()
+  if (!(await storage.exists(book.filePath))) return existingChapters
+  const parser = getParser(book.filePath, '')
+  if (!parser) return existingChapters
+
+  try {
+    const parsed = await parser.parse(await storage.get(book.filePath))
+    const sameLength = parsed.chapters.length === existingChapters.length
+    const chapters = parsed.chapters.map((parsedChapter, index) => {
+      const existing = sameLength ? existingChapters[index] : undefined
+      return {
+        id: existing?.id ?? `ch-${index}`,
+        title: existing?.title ?? parsedChapter.title,
+        level: parsedChapter.level ?? existing?.level ?? 1,
+        startOffset: existing?.startOffset ?? 0,
+        endOffset: existing?.endOffset ?? 0,
+        wordCount: existing?.wordCount ?? parsedChapter.wordCount ?? 0,
+      }
+    })
+    const meta: Record<string, unknown> = { ...(book.meta as Record<string, unknown>), epubTocLevelVersion: EPUB_TOC_LEVEL_VERSION }
+    if (chapters.length > 0) meta.chapters = chapters
+    getDb().update(books).set({ meta, updatedAt: Date.now() }).where(and(eq(books.id, book.id), eq(books.userId, userId))).run()
+    return (chapters.length > 0 ? chapters : existingChapters) as Chapter[]
+  } catch {
+    return existingChapters
+  }
 }
 
 interface PreparedTxtAppend {
@@ -882,7 +971,12 @@ export async function getOrRecoverTxtNormalized(book: { filePath: string; id: st
   const cached = getCachedNormalized(cacheKey)
   if (cached) return cached
   let normalized = await recoverTxtNormalized(book)
-  const meta = (book as { meta?: { chapters?: Array<{ title?: string }>; tocExcludedLeadingText?: string } }).meta
+  const meta = (book as { meta?: { chapters?: Array<{ title?: string; startOffset?: number; contentStartOffset?: number }>; tocExcludedLeadingText?: string } }).meta
+  const firstChapter = meta?.chapters?.[0]
+  if (firstChapter?.startOffset === 0 && firstChapter.contentStartOffset === 0 && firstChapter.title) {
+    const generatedTitlePrefix = firstChapter.title.trim() + '\n\n'
+    if (normalized.startsWith(generatedTitlePrefix)) normalized = normalized.slice(generatedTitlePrefix.length)
+  }
   const leadingText = meta?.tocExcludedLeadingText?.trim()
   const firstTitle = meta?.chapters?.[0]?.title?.trim()
   if (leadingText && firstTitle) {
@@ -924,7 +1018,7 @@ export async function recoverTxtNormalized(book: { filePath: string }): Promise<
     const xhtml = await entry.async('string')
     const { title, paragraphs } = extractChapterRuns(xhtml)
     // Rebuild the normalized paragraph layout the server originally wrote
-    parts.push(`${title}\n\n${paragraphs.join('\n\n')}`)
+    parts.push([title, ...paragraphs].filter((part) => part.length > 0).join('\n\n'))
   }
   return parts.join('\n\n')
 }
@@ -1264,7 +1358,7 @@ export async function removeBookCover(userId: string, bookId: string) {
   return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
 }
 
-export async function resetBookMetadata(userId: string, bookId: string) {
+export async function resetBookMetadata(userId: string, bookId: string, opts?: { normalizeTitle?: boolean }) {
   const db = getDb()
   const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
   if (!book) throw new AppError('BOOK_NOT_FOUND')
@@ -1273,9 +1367,17 @@ export async function resetBookMetadata(userId: string, bookId: string) {
   if (!parser) throw new AppError('UNSUPPORTED_FORMAT')
   const parsed = await parser.parse(await storage.get(book.filePath))
   const meta = { ...(book.meta as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
+  let title = parsed.meta.title
+  let author = parsed.meta.author ?? ''
+  const originalFileName = (book.meta as Record<string, unknown>).fileName
+  if (!title && opts?.normalizeTitle && typeof originalFileName === 'string') {
+    const derived = normalizeBookTitle(originalFileName)
+    if (derived.title) title = derived.title
+    if (!author && derived.author) author = derived.author
+  }
   db.update(books).set({
-    title: parsed.meta.title || book.title,
-    author: parsed.meta.author ?? '',
+    title: title || book.title,
+    author,
     meta,
     updatedAt: Date.now(),
   }).where(eq(books.id, bookId)).run()
@@ -1319,21 +1421,45 @@ export async function purgeExpiredTrash(userId: string, days: number) {
   return expired.length
 }
 
-/** Boot-time sweep of every user's expired trash (B6): one settings read, one
- * expired query per distinct retention cutoff, rows processed in chunks with
- * event-loop yields so synchronous SQLite churn never stalls a busy server. */
+/** Evict trash oldest-deleted-first until the user's trash total is at or
+ * under `maxBytes`; stops as soon as the cap is back, so rows under the cap
+ * keep their full time-based grace period. `maxBytes` <= 0 disables. */
+export async function purgeTrashToCapacity(userId: string, maxBytes: number) {
+  if (maxBytes <= 0) return 0
+  const db = getDb()
+  const ownedTrash = and(eq(books.userId, userId), isNotNull(books.deletedAt))
+  const agg = db.select({ total: sql<number>`coalesce(sum(${books.size}), 0)` })
+    .from(books).where(ownedTrash).get()
+  let total = agg?.total ?? 0
+  if (total <= maxBytes) return 0
+  const rows = db.select({ id: books.id, size: books.size }).from(books)
+    .where(ownedTrash).orderBy(asc(books.deletedAt)).all()
+  let purged = 0
+  for (const row of rows) {
+    if (total <= maxBytes) break
+    await deleteBook(userId, row.id)
+    total -= row.size
+    purged++
+  }
+  return purged
+}
+
+/** Boot-time sweep of every user's trash (B6): day-based purge (one settings
+ * read, one expired query per distinct retention cutoff) plus a per-user
+ * capacity pass; rows processed in chunks with event-loop yields so
+ * synchronous SQLite churn never stalls a busy server. */
 export async function purgeAllExpiredTrash() {
   const db = getDb()
   const allUsers = db.select({ id: usersTable.id }).from(usersTable).all()
   if (allUsers.length === 0) return
   const settingsRows = db.select({ userId: settings.userId, value: settings.value })
     .from(settings).where(eq(settings.key, 'trash')).all()
-  const daysByUser = new Map(settingsRows.map((r) => [r.userId, (r.value as TrashSettings | undefined)?.autoCleanDays ?? 30]))
+  const trashSettingsByUser = new Map(settingsRows.map((r) => [r.userId, r.value as TrashSettings | undefined]))
 
   const now = Date.now()
   const groups = new Map<number, string[]>()
   for (const { id } of allUsers) {
-    const days = daysByUser.get(id) ?? 30
+    const days = trashSettingsByUser.get(id)?.autoCleanDays ?? 30
     if (days <= 0) continue
     const cutoff = now - days * 24 * 60 * 60 * 1000
     const list = groups.get(cutoff) ?? []
@@ -1348,6 +1474,12 @@ export async function purgeAllExpiredTrash() {
       await deleteBook(expired[i].userId, expired[i].id)
       if (i % 10 === 9) await new Promise((resolve) => setImmediate(resolve))
     }
+  }
+  // Capacity pass runs after the day purge so each rule only evicts what the
+  // other left behind; users without a stored cap cost one SUM query.
+  for (const { id } of allUsers) {
+    const purged = await purgeTrashToCapacity(id, trashSettingsByUser.get(id)?.maxTrashBytes ?? 0)
+    if (purged > 0) await new Promise((resolve) => setImmediate(resolve))
   }
 }
 

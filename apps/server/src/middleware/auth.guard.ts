@@ -7,6 +7,8 @@ import { getDb } from '../db/client'
 import { users } from '../db/schema'
 import { config } from '../config'
 import { getDefaultUser, getInstanceSettings, resetInstanceCache } from '../modules/auth/auth.service'
+import { resolveLegadoAccessKey } from '../modules/books/legado-access.service'
+import { isLegadoAccessKeyEnabled } from '../modules/settings/settings.service'
 
 export interface AuthUser {
   id: string
@@ -20,6 +22,10 @@ declare module 'hono' {
     user: AuthUser
     /** true when the request was allowed via allowGuestAccess without a token */
     guest: boolean
+    /** true when the request uses a scoped, read-only Legado access key */
+    legadoAccessKey: boolean
+    /** token string if authenticated via Legado access key */
+    legadoToken?: string
   }
 }
 
@@ -32,6 +38,8 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/v1/auth/setup',
   'POST /api/v1/auth/register',
   'POST /api/v1/auth/logout',
+  'GET /api/v1/legado/source.json',
+  'GET /api/v1/legado/login',
 ])
 
 const USER_CACHE_TTL = 30_000
@@ -104,8 +112,32 @@ export function authGuard(): MiddlewareHandler {
       return next()
     }
 
-    const token = extractToken(c.req.header('Authorization'), getCookie(c, TOKEN_COOKIE))
+    const authHeader = c.req.header('Authorization')
+    const cookieToken = getCookie(c, TOKEN_COOKIE)
+    const isLegadoRoute = c.req.path.startsWith('/api/v1/legado/')
+    const bearerAccessKey = authHeader?.startsWith('Bearer bd_src_') ? authHeader.slice(7) : null
+    const queryAccessKey = isLegadoRoute && c.req.query('key')?.startsWith('bd_src_') ? c.req.query('key') ?? null : null
+    let token = bearerAccessKey ?? queryAccessKey ?? extractToken(authHeader, cookieToken)
     if (token) {
+      if (isLegadoRoute && (authHeader?.startsWith('Bearer ') || token.startsWith('bd_src_'))) {
+        const accessKey = resolveLegadoAccessKey(token)
+        if (accessKey) {
+          if (!isLegadoAccessKeyEnabled(accessKey.userId)) {
+            return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or disabled Legado access key' } }, 401)
+          }
+          const user = getFreshUser(accessKey.userId)
+          if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired Legado access key' } }, 401)
+          if (user.disabled) return c.json({ error: { code: 'ACCOUNT_DISABLED', message: 'Account is disabled' } }, 403)
+          c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
+          c.set('legadoAccessKey', true)
+          c.set('legadoToken', token)
+          c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
+          return next()
+        }
+        if (token.startsWith('bd_src_')) {
+          return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired Legado access key' } }, 401)
+        }
+      }
       let userId: string
       try {
         const { payload } = await jwtVerify(token, new TextEncoder().encode(config.jwtSecret))
@@ -121,6 +153,7 @@ export function authGuard(): MiddlewareHandler {
         return c.json({ error: { code: 'ACCOUNT_DISABLED', message: 'Account is disabled' } }, 403)
       }
       c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
+      c.set('legadoAccessKey', false)
       c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
       return next()
     }
@@ -134,6 +167,7 @@ export function authGuard(): MiddlewareHandler {
       if (user && !user.disabled) {
         c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
         c.set('guest', true)
+        c.set('legadoAccessKey', false)
         c.set('actorRole', 'guest')
         return next()
       }

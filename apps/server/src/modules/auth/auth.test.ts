@@ -6,7 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 import { SignJWT } from 'jose'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
 vi.hoisted(() => {
   process.env.JWT_SECRET = 'test-secret'
@@ -21,7 +21,8 @@ import { config } from '../../config'
 import { hashPassword, verifyPassword } from '../../lib/password'
 import authRoutes from './auth.routes'
 import { resetLoginRateLimit } from './auth.rate-limit'
-import { changePassword, getDefaultUser, getInstanceInfo, register, setupUser, updateInstanceSettings } from './auth.service'
+import { changePassword, effectiveUploadMaxBytes, getDefaultUser, getInstanceInfo, register, setupUser, updateInstanceSettings } from './auth.service'
+import { issueLegadoAccessKey } from '../books/legado-access.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -65,6 +66,7 @@ function createGuardApp() {
   app.onError(errorHandler)
   app.use('/api/v1/*', authGuard())
   app.get('/api/v1/protected', (c) => c.json({ data: c.get('user') }))
+  app.get('/api/v1/legado/protected', (c) => c.json({ data: c.get('user') }))
   return app
 }
 
@@ -148,7 +150,22 @@ describe('auth module', () => {
     it('reads flags and reports initialized=false without a password user', () => {
       seedInstanceSettings(db, false, false)
       const info = getInstanceInfo()
-      expect(info).toEqual({ initialized: false, allowRegistration: false, allowGuestAccess: false })
+      expect(info).toEqual({ initialized: false, allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: config.uploadMaxBytes })
+    })
+
+    it('falls back to the env upload cap and honors the instance override', () => {
+      seedInstanceSettings(db, false, false)
+      expect(effectiveUploadMaxBytes()).toBe(config.uploadMaxBytes)
+      updateInstanceSettings({ uploadMaxBytes: 524288000 })
+      expect(effectiveUploadMaxBytes()).toBe(524288000)
+      expect(getInstanceInfo().uploadMaxBytes).toBe(524288000)
+    })
+
+    it('ignores a malformed stored upload cap and falls back to env', () => {
+      seedInstanceSettings(db, false, false)
+      db.insert(schema.instanceSettings).values({ key: 'uploadMaxBytes', value: 'not-a-number' }).run()
+      resetAuthCaches()
+      expect(effectiveUploadMaxBytes()).toBe(config.uploadMaxBytes)
     })
 
     it('updates flags', async () => {
@@ -206,6 +223,31 @@ describe('auth module', () => {
       expect(res.status).toBe(200)
       const body = await res.json()
       expect(body.data.allowRegistration).toBe(true)
+    })
+
+    it('rejects an out-of-range upload cap', async () => {
+      seedInstanceSettings(db, false, false)
+      const app = createAuthApp({ id: 'u1', username: 'own', role: 'owner' })
+      const res = await app.request('/api/v1/auth/instance', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uploadMaxBytes: 1024 }),
+      })
+      expect(res.status).toBe(400)
+    })
+
+    it('persists an owner-set upload cap and returns the effective value', async () => {
+      seedInstanceSettings(db, false, false)
+      const app = createAuthApp({ id: 'u1', username: 'own', role: 'owner' })
+      const res = await app.request('/api/v1/auth/instance', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uploadMaxBytes: 1073741824 }),
+      })
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.data.uploadMaxBytes).toBe(1073741824)
+      expect(getInstanceInfo().uploadMaxBytes).toBe(1073741824)
     })
   })
 
@@ -482,6 +524,42 @@ describe('auth module', () => {
       expect(res.status).toBe(200)
       const body = await res.json()
       expect(body.data.id).toBe(id)
+    })
+
+    it('accepts a scoped access key only on Legado routes', async () => {
+      seedInstanceSettings(db, false, false)
+      const id = await insertUser(db, { username: 'frank', role: 'member' })
+      db.insert(schema.settings).values({
+        id: createId('setting'),
+        userId: id,
+        key: 'integrations',
+        value: { legado: { enabled: true, authMode: 'accessKey' } },
+      }).run()
+      const key = issueLegadoAccessKey(id, '90d')
+      const app = createGuardApp()
+
+      const legadoResponse = await app.request('/api/v1/legado/protected', {
+        headers: { Authorization: `Bearer ${key.token}` },
+      })
+      expect(legadoResponse.status).toBe(200)
+      await expect(legadoResponse.json()).resolves.toMatchObject({ data: { id } })
+
+      const regularResponse = await app.request('/api/v1/protected', {
+        headers: { Authorization: `Bearer ${key.token}` },
+      })
+      expect(regularResponse.status).toBe(401)
+
+      db.update(schema.settings)
+        .set({ value: { legado: { enabled: true, authMode: 'login' } } })
+        .where(and(eq(schema.settings.userId, id), eq(schema.settings.key, 'integrations')))
+        .run()
+      const disabledModeResponse = await app.request('/api/v1/legado/protected', {
+        headers: {
+          Authorization: `Bearer ${key.token}`,
+          Cookie: `bd_token=${await signToken(id)}`,
+        },
+      })
+      expect(disabledModeResponse.status).toBe(401)
     })
   })
 })

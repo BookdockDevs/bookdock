@@ -26,6 +26,69 @@ export interface BookListRes extends PaginatedResponse<BookListItem> {
   totalSize: number
 }
 
+export interface LegadoBookSearchItem {
+  id: string
+  title: string
+  author: string
+  format: string
+  kind: string
+  wordCount: string | null
+  latestChapterTitle: string | null
+  intro: string
+  url: string
+  coverUrl: string | null
+}
+
+export interface LegadoSearchRes {
+  items: LegadoBookSearchItem[]
+  page: number
+  pageSize: number
+  total: number
+}
+
+export interface LegadoExploreCategory {
+  id: string
+  name: string
+}
+
+export interface LegadoExploreConfigRes {
+  shelves: LegadoExploreCategory[]
+  tags: LegadoExploreCategory[]
+}
+
+export interface LegadoBookInfoRes {
+  id: string
+  title: string
+  author: string
+  format: string
+  kind: string
+  description: string
+  intro: string
+  wordCount: number | null
+  coverUrl: string | null
+  tocUrl: string
+}
+
+export interface LegadoChapterItem {
+  id: string
+  index: number
+  title: string
+  level: number
+  isVolume: boolean
+  url: string
+}
+
+export interface LegadoTocRes {
+  chapters: LegadoChapterItem[]
+}
+
+export interface LegadoChapterContentRes {
+  id: string
+  index: number
+  title: string
+  content: string
+}
+
 export interface HealthCheckRes {
   ok: true
 }
@@ -88,11 +151,13 @@ export interface InstanceInfoRes {
   initialized: boolean
   allowRegistration: boolean
   allowGuestAccess: boolean
+  uploadMaxBytes: number
 }
 
 export interface UpdateInstanceReq {
   allowRegistration?: boolean
   allowGuestAccess?: boolean
+  uploadMaxBytes?: number
 }
 
 export interface RegisterReq {
@@ -134,6 +199,36 @@ export interface TrashSettings {
   autoCleanDays: 0 | 7 | 30
   /** Soft-delete trash feature master switch; omitted = enabled (pre-toggle stored rows) */
   enabled?: boolean
+  maxTrashBytes?: number
+}
+
+export interface LibrarySettings {
+  normalizeTitle?: boolean
+}
+
+export interface IntegrationsSettings {
+  legado?: {
+    enabled?: boolean
+    authMode?: 'login' | 'accessKey'
+    includeEpubMedia?: boolean
+  }
+}
+
+export type LegadoAccessKeyDuration = '90d' | '1y' | 'permanent'
+
+export interface LegadoAccessKeyInfo {
+  active: boolean
+  createdAt: number | null
+  expiresAt: number | null
+  sourceUrl?: string | null
+  importUrl?: string | null
+}
+
+export interface LegadoAccessKeyCreateRes {
+  sourceUrl: string
+  importUrl: string
+  createdAt: number
+  expiresAt: number | null
 }
 
 export interface SettingsRes {
@@ -190,6 +285,8 @@ export interface SettingsRes {
   ttsAutoNext?: boolean
   ttsFollow?: boolean
   trash?: TrashSettings
+  library?: LibrarySettings
+  integrations?: IntegrationsSettings
   /**
    * Read-only instance limit (env UPLOAD_MAX_BYTES), injected by GET /settings
    * for client-side display/pre-check. settingsUpdateSchema strips it from PUT

@@ -99,6 +99,40 @@ describe('epub metadata extraction', () => {
     expect(parsed.chapters).toEqual([{ title: '第一章', content: 'OPS/chapter.xhtml', wordCount: 2 }])
   })
 
+  it('preserves nested NCX and EPUB3 navigation levels', async () => {
+    const ncxBuffer = await buildEpubFixture(
+      `<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata><dc:title>Nested NCX</dc:title></metadata><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="one" href="one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="two.xhtml" media-type="application/xhtml+xml"/><item id="three" href="three.xhtml" media-type="application/xhtml+xml"/></manifest><spine toc="ncx"><itemref idref="one"/><itemref idref="two"/><itemref idref="three"/></spine></package>`,
+      [
+        { path: 'OPS/toc.ncx', data: '<ncx><navMap><navPoint><navLabel><text>第一卷</text></navLabel><content src="one.xhtml"/><navPoint><navLabel><text>第一章</text></navLabel><content src="two.xhtml"/></navPoint></navPoint><navPoint><navLabel><text>第二卷</text></navLabel><content src="three.xhtml"/></navPoint></navMap></ncx>' },
+        { path: 'OPS/one.xhtml', data: '<html><body><p>one</p></body></html>' },
+        { path: 'OPS/two.xhtml', data: '<html><body><p>two</p></body></html>' },
+        { path: 'OPS/three.xhtml', data: '<html><body><p>three</p></body></html>' },
+      ],
+    )
+    const ncx = await parseEpubBuffer(ncxBuffer)
+    expect(ncx.chapters.map(({ title, level }) => ({ title, level }))).toEqual([
+      { title: '第一卷', level: undefined },
+      { title: '第一章', level: 2 },
+      { title: '第二卷', level: undefined },
+    ])
+
+    const navBuffer = await buildEpubFixture(
+      `<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title>Nested nav</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="one" href="one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="two.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>`,
+      [
+        { path: 'OPS/nav.xhtml', data: '<html xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="one.xhtml">卷一</a><ol><li><a href="two.xhtml">第一章</a></li></ol></li></ol></nav></body></html>' },
+        { path: 'OPS/one.xhtml', data: '<html><body><p>one</p></body></html>' },
+        { path: 'OPS/two.xhtml', data: '<html><body><p>two</p></body></html>' },
+      ],
+    )
+    const nav = await parseEpubBuffer(navBuffer)
+    expect(nav.chapters.map(({ title, level }) => ({ title, level }))).toEqual([
+      { title: '卷一', level: undefined },
+      { title: '第一章', level: 2 },
+    ])
+  })
+
   it('extracts full bookmeta from OPF', async () => {
     const buffer = await buildEpub(`
     <dc:title>四大名著评注本</dc:title>

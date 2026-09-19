@@ -1,69 +1,13 @@
 import JSZip from 'jszip'
-import { and, eq, isNull, or } from 'drizzle-orm'
-
-import { applyPointMatch, applyRuleToRuns, findPointMatch } from '@bookdock/shared'
-
-import { getDb } from '../../db/client'
-import { textReplacementOverrides, textReplacements } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { AppError } from '../../middleware/error'
 import { convertTxtToEpub, type TxtToEpubCover } from '../../lib/txt-to-epub'
 
 import { bufferFromStream, getActiveBook } from './books.service'
+import { applyChapterReplacements, loadEffectiveBookReplacementRules, type BookReplacementRule } from './replacement-rules'
 
-export interface ExportRule {
-  id: string
-  matchType: 'pattern' | 'point'
-  pattern: string | null
-  replacement: string | null
-  isRegex: boolean
-  applyTo: 'content' | 'title' | 'both'
-  /** Per-book effective value (override ?? global default for pattern rules) */
-  effectiveEnabled: boolean
-  spineHref: string | null
-  textOffset: number | null
-  originalText: string | null
-}
-
-// The same filter and override resolution as the replacements module's
-// book-scoped list — global pattern rules + this book's scoped rows, with
-// effectiveEnabled = override ?? global default for global patterns.
-async function loadEffectiveRules(
-  db: ReturnType<typeof getDb>,
-  userId: string,
-  bookId: string,
-): Promise<ExportRule[]> {
-  const rows = await db.select().from(textReplacements).where(
-    and(
-      eq(textReplacements.userId, userId),
-      or(
-        and(eq(textReplacements.matchType, 'pattern'), isNull(textReplacements.bookId)),
-        eq(textReplacements.bookId, bookId),
-      ),
-    ),
-  ).all()
-  const overrides = await db.select().from(textReplacementOverrides).where(
-    and(eq(textReplacementOverrides.userId, userId), eq(textReplacementOverrides.bookId, bookId)),
-  ).all()
-  const overrideByReplacement = new Map(overrides.map((o) => [o.replacementId, o]))
-  return rows.map((row) => {
-    const override = row.matchType === 'pattern' && row.bookId === null
-      ? overrideByReplacement.get(row.id)
-      : undefined
-    return {
-      id: row.id,
-      matchType: row.matchType,
-      pattern: row.pattern,
-      replacement: row.replacement,
-      isRegex: row.isRegex === 1,
-      applyTo: row.applyTo as ExportRule['applyTo'],
-      effectiveEnabled: override ? override.enabled === 1 : row.enabled === 1,
-      spineHref: row.spineHref,
-      textOffset: row.textOffset,
-      originalText: row.originalText,
-    }
-  })
-}
+export type ExportRule = BookReplacementRule
+export { applyChapterReplacements } from './replacement-rules'
 
 // Reverse of txt-to-epub's escapeXml — the generated XHTML only ever contains
 // these five entities, so a direct map is lossless.
@@ -93,25 +37,6 @@ export function extractChapterRuns(xhtml: string): { title: string; paragraphs: 
 
 // Apply the effective rules to one chapter's runs: title and content use their
 // own logical streams, then point patches search the complete section stream.
-export function applyChapterReplacements(runs: { text: string }[], rules: ExportRule[], spineHref: string): void {
-  const patternRules = rules.filter((r) => r.matchType === 'pattern' && r.effectiveEnabled && r.pattern)
-  const titleRuns = runs.slice(0, 1)
-  const contentRuns = runs.slice(1)
-  for (const rule of patternRules) {
-    if (rule.applyTo !== 'content') applyRuleToRuns(titleRuns, rule)
-    if (rule.applyTo !== 'title') applyRuleToRuns(contentRuns, rule)
-  }
-  for (const patch of rules) {
-    if (patch.matchType !== 'point' || !patch.effectiveEnabled) continue
-    if (patch.spineHref !== spineHref) continue
-    const snapshot = patch.originalText ?? ''
-    if (!snapshot || patch.textOffset == null) continue
-    const found = findPointMatch(runs, snapshot, patch.textOffset)
-    if (!found) continue
-    applyPointMatch(runs, found, patch.replacement ?? '')
-  }
-}
-
 // Chapter = title line + blank line + paragraphs (one line each, no blank
 // lines between them — the layout the reader shows); chapters joined with
 // two blank lines (more separation than the paragraph blocks); single
@@ -176,7 +101,7 @@ async function getExportableTxtBook(userId: string, bookId: string) {
 // rule query entirely — the 原文 variant never applies replacements.
 async function loadExportInput(userId: string, bookId: string, plain: boolean) {
   const book = await getExportableTxtBook(userId, bookId)
-  const rules: ExportRule[] = plain ? [] : await loadEffectiveRules(getDb(), userId, bookId)
+  const rules: ExportRule[] = plain ? [] : await loadEffectiveBookReplacementRules(userId, bookId)
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) {
     throw new AppError('BOOK_FILE_MISSING', 'Book file not found')

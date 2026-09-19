@@ -302,7 +302,7 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
           endOffset: excerpt.length,
           excerpt,
           sourceType: 'annotation' as const,
-          sourceCfi: annotation.cfiAnchor ?? annotation.cfiRange,
+          sourceCfi: annotation.cfiRange ?? annotation.cfiAnchor,
         }
       })
       const results = boundedAnnotations.map(({ annotation, chapter }) => ({
@@ -311,7 +311,7 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
         chapter: annotation.chapter ?? chapter?.chapter.title ?? null,
         text: annotation.text.slice(0, AI_TOOL_MAX_NOTE_TEXT_CHARS),
         note: annotation.note?.slice(0, AI_TOOL_MAX_NOTE_CONTENT_CHARS) ?? null,
-        cfi: annotation.cfiAnchor ?? annotation.cfiRange,
+        cfi: annotation.cfiRange ?? annotation.cfiAnchor,
       }))
       const sourceChars = results.reduce((total, item) => total + item.text.length + (item.note?.length ?? 0), 0)
       return result(JSON.stringify({

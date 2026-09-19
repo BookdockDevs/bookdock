@@ -14,6 +14,7 @@ const baselineFile = path.join(migrationsDir, '0000_baseline.sql')
 const releaseMigrationFile = path.join(migrationsDir, '0001_release_0_2_1.sql')
 const replacementMigrationFile = path.join(migrationsDir, '0002_text_replacements.sql')
 const replacementScopeMigrationFile = path.join(migrationsDir, '0003_text_replacement_scope.sql')
+const legadoAccessKeyMigrationFile = path.join(migrationsDir, '0004_legado_access_keys.sql')
 
 function applyBaseline(sqlite: Database.Database) {
   const sql = fs.readFileSync(baselineFile, 'utf8')
@@ -38,6 +39,13 @@ function applyReplacementMigration(sqlite: Database.Database) {
 
 function applyReplacementScopeMigration(sqlite: Database.Database) {
   const sql = fs.readFileSync(replacementScopeMigrationFile, 'utf8')
+  for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
+    sqlite.exec(statement)
+  }
+}
+
+function applyLegadoAccessKeyMigration(sqlite: Database.Database) {
+  const sql = fs.readFileSync(legadoAccessKeyMigrationFile, 'utf8')
   for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
     sqlite.exec(statement)
   }
@@ -168,6 +176,12 @@ describe('text replacement migration', () => {
         VALUES ('r1', 'u1', 'old', 'new', 1, 1);
       INSERT INTO text_transform_overrides (id, user_id, book_id, transform_id, enabled, created_at, updated_at)
         VALUES ('o1', 'u1', 'b1', 'r1', 0, 1, 1);
+    `)
+
+    applyReplacementMigration(sqlite)
+    applyReplacementScopeMigration(sqlite)
+    applyLegadoAccessKeyMigration(sqlite)
+    sqlite.exec(`
       CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, created_at NUMERIC);
       INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('future-development-migration', 9999999999999);
     `)
@@ -181,7 +195,7 @@ describe('text replacement migration', () => {
     expect(sqlite.prepare('SELECT replacement_id, enabled FROM text_replacement_overrides WHERE id = ?').get('o1'))
       .toEqual({ replacement_id: 'r1', enabled: 0 })
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
-      .toEqual({ count: 4 })
+      .toEqual({ count: 5 })
 
     sqlite.close()
   })

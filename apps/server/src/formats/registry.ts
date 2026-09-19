@@ -9,7 +9,7 @@ export interface ParsedBook {
     cover?: Buffer
     bookmeta?: BookMetadata
   }
-  chapters: { title: string; content: string; wordCount?: number }[]
+  chapters: { title: string; content: string; level?: number; wordCount?: number }[]
 }
 
 export interface FormatParser {

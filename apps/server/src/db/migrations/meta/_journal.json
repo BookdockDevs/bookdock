@@ -29,6 +29,13 @@
       "when": 1789590000000,
       "tag": "0003_text_replacement_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789777200000,
+      "tag": "0004_legado_access_keys",
+      "breakpoints": true
     }
   ]
 }

@@ -16,6 +16,8 @@ const INSTANCE_CACHE_TTL = 5_000
 export interface InstanceSettings {
   allowRegistration: boolean
   allowGuestAccess: boolean
+  /** Owner-set upload cap override; undefined = follow the UPLOAD_MAX_BYTES env default */
+  uploadMaxBytes?: number
 }
 
 let instanceCache: { value: InstanceSettings; at: number } | null = null
@@ -38,16 +40,22 @@ export function getInstanceSettings(): InstanceSettings {
   const db = getDb()
   const rows = db.select().from(instanceSettings).all()
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]))
+  const storedCap = Number(map.uploadMaxBytes)
   const value: InstanceSettings = {
     allowRegistration: map.allowRegistration === 'true',
     allowGuestAccess: map.allowGuestAccess === 'true',
+    uploadMaxBytes: Number.isInteger(storedCap) && storedCap > 0 ? storedCap : undefined,
   }
   instanceCache = { value, at: Date.now() }
   return value
 }
 
+export function effectiveUploadMaxBytes(): number {
+  return getInstanceSettings().uploadMaxBytes ?? config.uploadMaxBytes
+}
+
 export function getInstanceInfo(): InstanceInfoRes {
-  return { initialized: hasPasswordUser(), ...getInstanceSettings() }
+  return { ...getInstanceSettings(), initialized: hasPasswordUser(), uploadMaxBytes: effectiveUploadMaxBytes() }
 }
 
 export function updateInstanceSettings(patch: UpdateInstanceReq): InstanceInfoRes {

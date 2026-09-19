@@ -21,6 +21,17 @@ export const paginationSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(PAGINATION.MAX_PAGE_SIZE).default(PAGINATION.DEFAULT_PAGE_SIZE),
 })
 
+export const legadoSearchSchema = z.object({
+  keyword: z.string().trim().max(200).default(''),
+  page: z.coerce.number().int().min(1).max(1_000).default(PAGINATION.DEFAULT_PAGE),
+})
+
+export const legadoExploreSchema = z.object({
+  page: z.coerce.number().int().min(1).max(1_000).default(PAGINATION.DEFAULT_PAGE),
+  sort: z.enum(['updated', 'added', 'title']).default('updated'),
+  order: z.enum(['asc', 'desc']).optional(),
+})
+
 export const readingProgressUpdateSchema = z.object({
   cfi: z.string().optional(),
   chapter: z.string().optional(),
@@ -171,8 +182,23 @@ export const settingsUpdateSchema = z.object({
   // Partial updates are allowed; the server merges onto the stored settings.
   trash: z.object({
     autoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]).optional(),
+    maxTrashBytes: z.union([z.literal(0), z.literal(1073741824), z.literal(2147483648), z.literal(5368709120)]).optional(),
     enabled: z.boolean().optional(),
   }).optional(),
+  library: z.object({
+    normalizeTitle: z.boolean().optional(),
+  }).optional(),
+  integrations: z.object({
+    legado: z.object({
+      enabled: z.boolean().optional(),
+      authMode: z.enum(['login', 'accessKey']).optional(),
+      includeEpubMedia: z.boolean().optional(),
+    }).optional(),
+  }).optional(),
+})
+
+export const legadoAccessKeySchema = z.object({
+  duration: z.enum(['90d', '1y', 'permanent']).optional().default('permanent'),
 })
 
 const ttsBaseUrlSchema = z.string().url().max(500).refine((value) => /^https?:\/\//i.test(value), 'Only HTTP(S) URLs are supported')
@@ -605,6 +631,9 @@ export const updateUsernameSchema = z.object({
 export const updateInstanceSchema = z.object({
   allowRegistration: z.boolean().optional(),
   allowGuestAccess: z.boolean().optional(),
+  // Effective book-upload cap in bytes. Range keeps the value sane (below 5MB
+  // nothing uploads, above 10GB the disk watermark question reopens).
+  uploadMaxBytes: z.number().int().min(5 * 1024 * 1024).max(10 * 1024 * 1024 * 1024).optional(),
 })
 
 export const updateUserSchema = z.object({

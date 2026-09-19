@@ -8,6 +8,7 @@ import {
   restoreBook,
   emptyTrash,
   purgeExpiredTrash,
+  purgeTrashToCapacity,
   uploadBook,
   updateBook,
   updateBookCover,
@@ -27,9 +28,9 @@ import {
   previewAppendTxtBookContent,
   appendTxtBookContent,
 } from './books.service'
-import { getTrashSettings, isTrashEnabled } from '../settings/settings.service'
+import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
+import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { getStorage } from '../../storage'
-import { config } from '../../config'
 import { AppError } from '../../middleware/error'
 import { decodeTextBuffer } from '../../formats/txt'
 import { exportEpubBook, exportTxtBook } from './txt-export'
@@ -43,6 +44,7 @@ function safeFileBase(title: string): string {
 }
 
 async function parseAppendRequest(c: Context): Promise<{ text: string; startOffset?: number }> {
+  const maxBytes = effectiveUploadMaxBytes()
   const contentType = c.req.header('content-type') ?? ''
   if (contentType.toLowerCase().includes('multipart/form-data')) {
     const body = await c.req.parseBody()
@@ -51,9 +53,9 @@ async function parseAppendRequest(c: Context): Promise<{ text: string; startOffs
       if (!(rawFile instanceof File)) throw new AppError('VALIDATION_ERROR', 'File is invalid')
       if (body['text'] !== undefined) throw new AppError('VALIDATION_ERROR', 'Provide either a file or text')
       if (!rawFile.name.toLowerCase().endsWith('.txt')) throw new AppError('UNSUPPORTED_FORMAT', 'Append file must be a TXT file')
-      if (rawFile.size > config.uploadMaxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
+      if (rawFile.size > maxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
       const buffer = Buffer.from(await rawFile.arrayBuffer())
-      if (buffer.length > config.uploadMaxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
+      if (buffer.length > maxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
       const options = appendOptionsSchema.safeParse({ startOffset: body['startOffset'] })
       if (!options.success) throw new AppError('VALIDATION_ERROR', 'Invalid append start offset', options.error.flatten())
       return { text: decodeTextBuffer(buffer), startOffset: options.data.startOffset }
@@ -61,13 +63,13 @@ async function parseAppendRequest(c: Context): Promise<{ text: string; startOffs
 
     const parsed = appendContentSchema.safeParse({ text: body['text'], startOffset: body['startOffset'] })
     if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid append content', parsed.error.flatten())
-    if (Buffer.byteLength(parsed.data.text, 'utf8') > config.uploadMaxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'Text too large')
+    if (Buffer.byteLength(parsed.data.text, 'utf8') > maxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'Text too large')
     return parsed.data
   }
 
   const parsed = appendContentSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid append content', parsed.error.flatten())
-  if (Buffer.byteLength(parsed.data.text, 'utf8') > config.uploadMaxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'Text too large')
+  if (Buffer.byteLength(parsed.data.text, 'utf8') > maxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'Text too large')
   return parsed.data
 }
 
@@ -89,10 +91,12 @@ booksRoutes.get('/', async (c) => {
   const format = formatParsed.success ? formatParsed.data : undefined
   const readStatus = query['readStatus']
   const trash = query['trash'] === '1'
-  // Opening the trash lazily purges the current user's expired rows
+  // Opening the trash lazily runs both cleanup rules for the current user
   if (trash) {
     if (!isTrashEnabled(user.id)) throw new AppError('TRASH_DISABLED', 'Trash is disabled')
-    await purgeExpiredTrash(user.id, getTrashSettings(user.id).autoCleanDays)
+    const trashSettings = getTrashSettings(user.id)
+    await purgeExpiredTrash(user.id, trashSettings.autoCleanDays)
+    await purgeTrashToCapacity(user.id, trashSettings.maxTrashBytes ?? 0)
   }
   const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series)
   return c.json(result)
@@ -105,7 +109,7 @@ booksRoutes.post('/', async (c) => {
   if (!file || !(file instanceof File)) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'File is required' } }, 400)
   }
-  if (file.size > config.uploadMaxBytes) {
+  if (file.size > effectiveUploadMaxBytes()) {
     return c.json({ error: { code: 'UPLOAD_TOO_LARGE', message: 'File too large' } }, 413)
   }
   const rawTagIds = body['tagIds']
@@ -124,7 +128,7 @@ booksRoutes.post('/', async (c) => {
   if (!membership.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid membership', details: membership.error.flatten() } }, 400)
   }
-  const { book, duplicated } = await uploadBook(user.id, file, membership.data)
+  const { book, duplicated } = await uploadBook(user.id, file, membership.data, { normalizeTitle: isTitleNormalizeEnabled(user.id) })
   return c.json({ data: book, duplicated }, 201)
 })
 
@@ -397,7 +401,7 @@ booksRoutes.delete('/:id/cover', async (c) => {
 booksRoutes.post('/:id/reset-metadata', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
-  const book = await resetBookMetadata(user.id, id)
+  const book = await resetBookMetadata(user.id, id, { normalizeTitle: isTitleNormalizeEnabled(user.id) })
   return c.json({ data: book })
 })
 

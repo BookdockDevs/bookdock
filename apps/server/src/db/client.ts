@@ -80,7 +80,7 @@ export function reconcileConsolidatedMigrationLedger(
   const tables = new Set(
     (db.all(sql.raw('SELECT name FROM sqlite_master WHERE type = \'table\'')) as Array<{ name: string }>).map(({ name }) => name),
   )
-  const requiredTables = ['users', 'books', 'tags', 'toc_rules', 'text_replacements', 'text_replacement_overrides']
+  const requiredTables = ['users', 'books', 'tags', 'toc_rules', 'text_replacements', 'text_replacement_overrides', 'legado_access_keys']
   const missingTables = requiredTables.filter((table) => !tables.has(table))
   if (missingTables.length > 0) {
     throw new Error(`Cannot reconcile migration ledger; missing tables: ${missingTables.join(', ')}`)
@@ -118,6 +118,11 @@ export function runMigrations() {
   const tocRuleIndexes = db.all(sql.raw('PRAGMA index_list(toc_rules)')) as Array<{ name: string }>
   if (tocRuleColumns.length > 0 && !tocRuleIndexes.some((index) => index.name === 'toc_rules_user_seed_key_unique')) {
     db.run(sql.raw('CREATE UNIQUE INDEX "toc_rules_user_seed_key_unique" ON "toc_rules" ("user_id", "seed_key")'))
+  }
+
+  const accessKeyColumns = db.all(sql.raw('PRAGMA table_info(legado_access_keys)')) as Array<{ name: string }>
+  if (accessKeyColumns.length > 0 && !accessKeyColumns.some((column) => column.name === 'encrypted_token')) {
+    db.run(sql.raw('ALTER TABLE "legado_access_keys" ADD COLUMN "encrypted_token" TEXT'))
   }
 
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)

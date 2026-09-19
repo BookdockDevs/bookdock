@@ -37,6 +37,16 @@ describe('detectTxtChapters', () => {
     expect(chapters.map((chapter) => chapter.level)).toEqual([1, 2, 3, 2])
   })
 
+  it('does not include a multi-level chapter heading in its extracted body', () => {
+    const normalized = normalizeText('第一卷 逐鹿天下\n\n第370章 入邺都\n\n入邺都\n\n将家里安顿好之后，许青和紫女等人告别')
+    const chapters = scanTxtChapters(normalized)
+    const chapter = chapters[1]!
+
+    expect(chapter.title).toBe('第370章 入邺都')
+    expect(getTxtChapterContent(normalized, chapter)).toBe('入邺都\n\n将家里安顿好之后，许青和紫女等人告别')
+    expect(getTxtChapterContent(normalized, chapter)).not.toContain('第370章 入邺都')
+  })
+
   it('splits LF text into chapters with correct offsets', () => {
     const content = '前言\n第一章 开篇\n正文内容\n第二章 续篇\n更多内容'
     const normalized = normalizeText(content)

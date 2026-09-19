@@ -72,6 +72,19 @@ export const settings = sqliteTable('settings', {
   userKeyIdx: uniqueIndex('settings_user_key_idx').on(table.userId, table.key),
 }))
 
+export const legadoAccessKeys = sqliteTable('legado_access_keys', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull(),
+  encryptedToken: text('encrypted_token'),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at'),
+  revokedAt: integer('revoked_at'),
+}, (table) => ({
+  userUnique: uniqueIndex('legado_access_keys_user_unique').on(table.userId),
+  tokenHashUnique: uniqueIndex('legado_access_keys_token_hash_unique').on(table.tokenHash),
+}))
+
 export const ttsServices = sqliteTable('tts_services', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
