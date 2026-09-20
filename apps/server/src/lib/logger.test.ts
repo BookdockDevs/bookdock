@@ -49,4 +49,20 @@ describe('structured logger', () => {
     const record = JSON.parse(stderr.mock.calls[0][0] as string)
     expect(record.error.message).toBe('password=[REDACTED]')
   })
+
+  it('redacts the bd_ token family and bare key= query values', () => {
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const token = 'bd_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq'
+    const legadoKey = 'bd_src_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq'
+
+    log('info', 'http.request.completed', {
+      path: `/api/v1/legado/source.json?key=${legadoKey}`,
+      message: `pasted ${token}, Authorization: Bearer ${token}, api key: ${token}`,
+    })
+
+    const record = JSON.parse(output.mock.calls[0][0] as string)
+    expect(record.path).toBe('/api/v1/legado/source.json?key=[REDACTED]')
+    expect(record.message).not.toContain(token)
+    expect(record.message).toContain('[REDACTED]')
+  })
 })

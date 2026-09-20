@@ -14,6 +14,7 @@ const PUBLIC_AUTH_PATHS = [
   '/auth/setup',
   '/auth/setup-required',
   '/auth/instance',
+  '/auth/me',
   '/auth/logout',
 ]
 

@@ -3,11 +3,15 @@ import type { MiddlewareHandler } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { jwtVerify } from 'jose'
 
+import { requiredPermissionFor } from '@bookdock/shared'
+import type { AccessTokenPermission } from '@bookdock/shared'
+
 import { getDb } from '../db/client'
 import { users } from '../db/schema'
 import { config } from '../config'
 import { getDefaultUser, getInstanceSettings, resetInstanceCache } from '../modules/auth/auth.service'
 import { resolveLegadoAccessKey } from '../modules/books/legado-access.service'
+import { resolveAccessToken } from '../modules/tokens/tokens.service'
 import { isLegadoAccessKeyEnabled } from '../modules/settings/settings.service'
 
 export interface AuthUser {
@@ -26,6 +30,12 @@ declare module 'hono' {
     legadoAccessKey: boolean
     /** token string if authenticated via Legado access key */
     legadoToken?: string
+    /**
+     * Permissions carried by the access token authenticating this request.
+     * Absent for cookie/JWT sessions and guest-injected requests, which are
+     * never permission-checked.
+     */
+    tokenPermissions?: AccessTokenPermission[]
   }
 }
 
@@ -137,6 +147,38 @@ export function authGuard(): MiddlewareHandler {
         if (token.startsWith('bd_src_')) {
           return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired Legado access key' } }, 401)
         }
+      }
+      // Operation-scoped access tokens (ADR-24). `bd_src_` was resolved above on
+      // its own routes and falls through to the same 401 everywhere else, so the
+      // only thing this branch adds is a second way to reach a user identity.
+      if (token.startsWith('bd_')) {
+        const lookup = resolveAccessToken(token)
+        if (lookup.status === 'disabled') {
+          return c.json({ error: { code: 'FORBIDDEN', message: 'Access token is disabled' } }, 403)
+        }
+        if (lookup.status === 'invalid') {
+          return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired access token' } }, 401)
+        }
+        const access = lookup.token
+        const user = getFreshUser(access.userId)
+        if (!user) {
+          return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired access token' } }, 401)
+        }
+        if (user.disabled) {
+          return c.json({ error: { code: 'ACCOUNT_DISABLED', message: 'Account is disabled' } }, 403)
+        }
+        // Default deny: an endpoint missing from the registry is never reachable
+        // with a token, which is also what keeps owner-only endpoints out of
+        // reach. `null` marks the permission-free identity probe.
+        const required = requiredPermissionFor(c.req.method, c.req.path)
+        if (required === undefined || (required !== null && !access.permissions.includes(required))) {
+          return c.json({ error: { code: 'FORBIDDEN', message: 'Access token is not allowed to perform this operation' } }, 403)
+        }
+        c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
+        c.set('legadoAccessKey', false)
+        c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
+        c.set('tokenPermissions', access.permissions)
+        return next()
       }
       let userId: string
       try {

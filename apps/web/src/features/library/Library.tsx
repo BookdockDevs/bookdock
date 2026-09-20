@@ -583,7 +583,7 @@ export default function Library() {
                         onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
                         onRestore={(b) => {
                           deselect(b.id)
-                          void restoreBook.mutateAsync(b.id).catch(() => undefined)
+                          void restoreBook.mutateAsync({ id: b.id, title: b.title }).catch(() => undefined)
                         }}
                         onPermanentDelete={setPermanentDeleteTarget}
                       />
@@ -660,7 +660,7 @@ export default function Library() {
                       onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
                       onRestore={(b) => {
                         deselect(b.id)
-                        void restoreBook.mutateAsync(b.id).catch(() => undefined)
+                        void restoreBook.mutateAsync({ id: b.id, title: b.title }).catch(() => undefined)
                       }}
                       onPermanentDelete={setPermanentDeleteTarget}
                     />
@@ -735,7 +735,7 @@ export default function Library() {
           onConfirm={() => {
             const target = deleteTarget
             setDeleteTarget(null)
-            void deleteBook.mutateAsync(target.id).catch(() => undefined)
+            void deleteBook.mutateAsync({ id: target.id, title: target.title }).catch(() => undefined)
           }}
         />
       )}
@@ -756,7 +756,7 @@ export default function Library() {
             const target = permanentDeleteTarget
             setPermanentDeleteTarget(null)
             deselect(target.id)
-            void permanentDeleteBook.mutateAsync(target.id).catch(() => undefined)
+            void permanentDeleteBook.mutateAsync({ id: target.id, title: target.title }).catch(() => undefined)
           }}
         />
       )}

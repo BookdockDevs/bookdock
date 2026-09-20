@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, blob, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core'
 
-import type { AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
+import type { AccessTokenPermission, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -83,6 +83,24 @@ export const legadoAccessKeys = sqliteTable('legado_access_keys', {
 }, (table) => ({
   userUnique: uniqueIndex('legado_access_keys_user_unique').on(table.userId),
   tokenHashUnique: uniqueIndex('legado_access_keys_token_hash_unique').on(table.tokenHash),
+}))
+
+// Operation-scoped access tokens (ADR-24). The plaintext is never stored: only
+// its sha256 hash and the last four characters (for list display) are kept.
+// There is no revocation field — disabling keeps the row, deleting removes it.
+export const accessTokens = sqliteTable('access_tokens', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  permissions: text('permissions', { mode: 'json' }).$type<AccessTokenPermission[]>().notNull(),
+  tokenHash: text('token_hash').notNull(),
+  tokenLast4: text('token_last4').notNull(),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at'),
+  disabledAt: integer('disabled_at'),
+}, (table) => ({
+  tokenHashUnique: uniqueIndex('access_tokens_token_hash_unique').on(table.tokenHash),
+  userCreatedIdx: index('access_tokens_user_created_idx').on(table.userId, table.createdAt),
 }))
 
 export const ttsServices = sqliteTable('tts_services', {

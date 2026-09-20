@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import { RootComponent } from '../routes/RootComponent'
 import { apiGet } from '@/api/client'
+import { INSTANCE_QUERY_KEY, ME_QUERY_KEY } from '@/features/auth/hooks'
 import { useAuthStore } from '@/stores/auth.store'
 import type { InstanceInfoRes } from '@bookdock/shared'
 
@@ -30,8 +31,7 @@ function mockApi({ instance, me }: { instance: InstanceInfoRes; me?: { id: strin
   })
 }
 
-function renderRoot() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+function renderRoot(queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={queryClient}>
       <RootComponent />
@@ -103,6 +103,31 @@ describe('RootComponent guard', () => {
     })
     expect(useAuthStore.getState().user).toEqual(me)
     expect(navigateMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps protected content hidden while revalidating a cached session', async () => {
+    const me = { id: 'u1', username: 'admin', role: 'owner' }
+    let resolveMe: (value: { data: typeof me }) => void = () => undefined
+    const mePromise = new Promise<{ data: typeof me }>((resolve) => {
+      resolveMe = resolve
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(INSTANCE_QUERY_KEY, { data: INITIALIZED })
+    queryClient.setQueryData(ME_QUERY_KEY, { data: me })
+    ;(apiGet as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
+      if (path === '/auth/me') return mePromise
+      return Promise.reject(new Error(`unexpected ${path}`))
+    })
+
+    renderRoot(queryClient)
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/auth/me'))
+    expect(screen.queryByTestId('outlet')).not.toBeInTheDocument()
+
+    resolveMe({ data: me })
+    await waitFor(() => {
+      expect(screen.getByTestId('outlet')).toBeInTheDocument()
+    })
   })
 
   it('redirects an already authenticated client away from the login page', async () => {

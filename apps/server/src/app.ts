@@ -8,6 +8,7 @@ import { compress } from 'hono/compress'
 import { errorHandler } from './middleware/error'
 import { requestContext } from './middleware/request-context'
 import { authGuard } from './middleware/auth.guard'
+import { tokenCors } from './middleware/token-cors'
 import { registerParser } from './formats/registry'
 import { EpubParser } from './formats/epub'
 import { TxtParser } from './formats/txt'
@@ -19,6 +20,7 @@ import legadoRoutes from './modules/books/legado.routes'
 import progressRoutes from './modules/progress/progress.routes'
 import readingRecordsRoutes from './modules/reading-records/reading-records.routes'
 import settingsRoutes from './modules/settings/settings.routes'
+import tokensRoutes from './modules/tokens/tokens.routes'
 import annotationRoutes from './modules/annotations/annotations.routes'
 import shelvesRoutes from './modules/shelves/shelves.routes'
 import tagsRoutes from './modules/tags/tags.routes'
@@ -41,6 +43,9 @@ app.onError(errorHandler)
 app.use('*', compress())
 
 app.use('/api/v1/*', requestContext())
+// Before the guard: a CORS preflight carries no credential and must be answered
+// without one. Emits nothing unless the request is a token request.
+app.use('/api/v1/*', tokenCors())
 app.get('/api/v1/health', (c) => c.json({ data: { ok: true } }))
 
 app.use('/api/v1/*', authGuard())
@@ -53,6 +58,7 @@ app.route('/api/v1/legado', legadoRoutes)
 app.route('/api/v1/progress', progressRoutes)
 app.route('/api/v1/reading-records', readingRecordsRoutes)
 app.route('/api/v1/settings', settingsRoutes)
+app.route('/api/v1/tokens', tokensRoutes)
 app.route('/api/v1/annotations', annotationRoutes)
 app.route('/api/v1/shelves', shelvesRoutes)
 app.route('/api/v1/tags', tagsRoutes)

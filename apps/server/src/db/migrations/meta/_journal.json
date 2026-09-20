@@ -36,6 +36,13 @@
       "when": 1789777200000,
       "tag": "0004_legado_access_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789919500000,
+      "tag": "0005_access_tokens",
+      "breakpoints": true
     }
   ]
 }

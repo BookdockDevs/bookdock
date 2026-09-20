@@ -34,7 +34,7 @@ export function RootComponent() {
     // Guest injection is only reachable after initialization, so me is only
     // meaningful once the instance has a password user.
     enabled: shouldProbeSession && Boolean(instance?.initialized),
-    refetchOnMount: pathname === '/login' ? 'always' : true,
+    refetchOnMount: 'always',
     staleTime: pathname === '/login' ? 0 : 60_000,
   })
 
@@ -80,8 +80,8 @@ export function RootComponent() {
       return
     }
     if (isPublic) return
-    if (meQuery.isPending) return
-    const me = meQuery.data?.data
+    if (meQuery.isPending || meQuery.isFetching) return
+    const me = meQuery.isError ? undefined : meQuery.data?.data
     if (me) {
       // Guest-injected sessions carry me.guest; the store keeps the user so
       // settings sync keeps working, and UI branches on the flag.
@@ -112,9 +112,9 @@ export function RootComponent() {
       ready = pathname !== '/setup'
         && !(pathname === '/register' && !instance.allowRegistration)
         && !(pathname === '/login' && (meQuery.isPending || meQuery.isFetching || meQuery.data))
-    } else if (meQuery.isPending) {
+    } else if (meQuery.isPending || meQuery.isFetching) {
       ready = false
-    } else if (meQuery.data) {
+    } else if (meQuery.data && !meQuery.isError) {
       ready = true
     } else {
       ready = instance.allowGuestAccess

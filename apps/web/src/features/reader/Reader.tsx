@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
-import { apiGet, apiPatch, apiPut } from '@/api/client'
+import { ApiError, apiGet, apiPatch, apiPut } from '@/api/client'
 import { usePrefetchBookReadingStats } from '@/api/hooks/reading-records'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { usePageTitle } from '@/hooks/usePageTitle'
@@ -498,10 +498,11 @@ export default function Reader() {
       chaptersErrorShownRef.current = false
       return
     }
+    if (chaptersQuery.error instanceof ApiError && chaptersQuery.error.code === 'UNAUTHORIZED') return
     if (chaptersErrorShownRef.current) return
     chaptersErrorShownRef.current = true
     notify.error({ key: 'reader.chapterLoadFailed' })
-  }, [chaptersQuery.isError])
+  }, [chaptersQuery.error, chaptersQuery.isError])
 
   // Gated on bookQuery resolution: the reader mounts only once the success
   // branch's container div exists — mounting earlier grabs the loading-branch

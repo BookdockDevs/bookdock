@@ -1,3 +1,4 @@
+import type { AccessTokenDuration, AccessTokenPermission } from './access-tokens'
 import type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
 import type { AnnotationStyle, AnnotationType, TocRulePattern, ReplacementMatchType, ReplacementScope, ViewSettings } from './domain'
@@ -229,6 +230,44 @@ export interface LegadoAccessKeyCreateRes {
   importUrl: string
   createdAt: number
   expiresAt: number | null
+}
+
+/** An operation-scoped access token (ADR-24) as exposed by the API. Never carries the plaintext. */
+export interface AccessToken {
+  id: string
+  name: string
+  permissions: AccessTokenPermission[]
+  /** Last four characters of the plaintext, so the list can show `bd_…x7f2` */
+  tokenLast4: string
+  createdAt: number
+  /** null = permanent */
+  expiresAt: number | null
+  /** true = disabled (the row is kept and the token is rejected); deleting removes the row */
+  disabled: boolean
+}
+
+export interface AccessTokenListRes {
+  tokens: AccessToken[]
+}
+
+export interface AccessTokenCreateReq {
+  name?: string
+  permissions: AccessTokenPermission[]
+  /** Defaults to 90 days, counted from creation */
+  expiresIn?: AccessTokenDuration
+}
+
+/** The only response that ever carries the plaintext, and only once. */
+export interface AccessTokenCreateRes {
+  token: AccessToken
+  plaintext: string
+}
+
+export interface AccessTokenUpdateReq {
+  name?: string
+  permissions?: AccessTokenPermission[]
+  /** When present, the new expiry counts from the moment of the edit, not from creation */
+  expiresIn?: AccessTokenDuration
 }
 
 export interface SettingsRes {

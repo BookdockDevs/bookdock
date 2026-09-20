@@ -15,6 +15,7 @@ const ERROR_KEYS: Record<string, string> = {
   REPLACEMENT_NOT_FOUND: 'errors.notFound',
   TOC_RULE_NOT_FOUND: 'errors.notFound',
   BOOK_FILE_MISSING: 'errors.bookFileMissing',
+  TOKEN_NOT_FOUND: 'errors.notFound',
   FORBIDDEN: 'errors.forbidden',
   UNAUTHORIZED: 'errors.unauthorized',
   USERNAME_TAKEN: 'auth.errors.usernameTaken',

@@ -56,8 +56,8 @@ describe('LegadoSettingsSection', () => {
   it('renders disabled by default without source URL or actions', () => {
     renderSection(undefined)
 
-    expect(screen.getByRole('heading', { name: '开源阅读' })).toBeInTheDocument()
-    expect(screen.getByRole('switch', { name: '启用开源阅读书源服务' })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('heading', { name: '书源服务' })).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: '启用书源服务' })).toHaveAttribute('aria-checked', 'false')
     expect(screen.queryByText('书源地址')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '一键导入' })).not.toBeInTheDocument()
   })
@@ -65,7 +65,7 @@ describe('LegadoSettingsSection', () => {
   it('toggles disabled and calls apiPut', async () => {
     renderSection({ legado: { enabled: true } })
 
-    const toggle = screen.getByRole('switch', { name: '启用开源阅读书源服务' })
+    const toggle = screen.getByRole('switch', { name: '启用书源服务' })
     fireEvent.click(toggle)
 
     await waitFor(() => {
@@ -78,7 +78,7 @@ describe('LegadoSettingsSection', () => {
   it('hides source url when disabled', () => {
     renderSection({ legado: { enabled: false } })
 
-    expect(screen.getByRole('switch', { name: '启用开源阅读书源服务' })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('switch', { name: '启用书源服务' })).toHaveAttribute('aria-checked', 'false')
     expect(screen.queryByText('书源地址')).not.toBeInTheDocument()
     expect(screen.queryByText('一键导入')).not.toBeInTheDocument()
   })
@@ -134,13 +134,13 @@ describe('LegadoSettingsSection', () => {
       </QueryClientProvider>,
     )
 
-    expect(screen.getByText('正在获取书源凭证...')).toBeInTheDocument()
+    expect(screen.getByText('正在获取书源地址...')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新生成' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '复制' })).toBeDisabled()
 
     resolveKey()
     await waitFor(() => {
-      expect(screen.queryByText('正在获取书源凭证...')).not.toBeInTheDocument()
+      expect(screen.queryByText('正在获取书源地址...')).not.toBeInTheDocument()
       expect((screen.getByRole('textbox') as HTMLInputElement).value).toContain('bd_src_delayed')
     })
   })

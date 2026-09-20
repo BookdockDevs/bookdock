@@ -20,6 +20,7 @@ import TocRulesSettingsSection from './components/TocRulesSettingsSection'
 import TtsSettingsSection from './components/TtsSettingsSection'
 import AiSettingsSection from './components/AiSettingsSection'
 import LegadoSettingsSection from './components/LegadoSettingsSection'
+import AccessTokensSection from './components/AccessTokensSection'
 
 type SectionId = 'general' | 'reading' | 'library' | 'integrations' | 'admin'
 
@@ -29,6 +30,8 @@ export default function Settings() {
   const onBack = useBackNavigation('/')
   const user = useAuthStore((s) => s.user)
   const isOwner = user?.role === 'owner' && user.guest !== true
+  // Guest sessions share one anonymous identity and cannot manage tokens at all.
+  const isGuest = user?.guest === true || user?.role === 'guest'
   const search = useSearch({ from: '/settings' })
   const [active, setActive] = useState<SectionId>(search.section ?? 'general')
   const [visitedSections, setVisitedSections] = useState<Set<SectionId>>(() => new Set([search.section ?? 'general']))
@@ -197,6 +200,7 @@ export default function Settings() {
           )}
           {visitedSections.has('integrations') && (
             <div className={active === 'integrations' ? 'flex flex-col gap-6' : 'hidden'}>
+              {!isGuest && <AccessTokensSection />}
               <LegadoSettingsSection />
             </div>
           )}

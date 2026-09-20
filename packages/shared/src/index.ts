@@ -4,6 +4,17 @@ export { normalizeAiCitationMarkers, sanitizeAiCitationMarkers } from './ai-cita
 export { expandAiPrompt, getAiPromptVariables } from './ai-prompts'
 export type { AiPromptValues, AiPromptVariable } from './ai-prompts'
 
+export type { AccessTokenDuration, AccessTokenPermission, AccessTokenPermissionDefinition } from './access-tokens'
+export {
+  ACCESS_TOKEN_DURATIONS,
+  ACCESS_TOKEN_NAME_MAX_LENGTH,
+  ACCESS_TOKEN_PERMISSION_FREE_ENDPOINTS,
+  ACCESS_TOKEN_PERMISSION_REGISTRY,
+  ACCESS_TOKEN_PERMISSIONS,
+  matchesEndpointPattern,
+  requiredPermissionFor,
+} from './access-tokens'
+
 export type {
   User,
   Book,
@@ -62,6 +73,11 @@ export type {
   LegadoAccessKeyDuration,
   LegadoAccessKeyInfo,
   LegadoAccessKeyCreateRes,
+  AccessToken,
+  AccessTokenListRes,
+  AccessTokenCreateReq,
+  AccessTokenCreateRes,
+  AccessTokenUpdateReq,
   TtsEngine,
   TtsProvider,
   FontPreference,
@@ -197,6 +213,8 @@ export {
   legadoSearchSchema,
   legadoExploreSchema,
   legadoAccessKeySchema,
+  accessTokenCreateSchema,
+  accessTokenUpdateSchema,
   readingProgressUpdateSchema,
   readingRecordCreateSchema,
   readingSessionUpdateSchema,

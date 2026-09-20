@@ -352,13 +352,16 @@ export function useDeleteBook() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (id: string) => apiDelete<{ data: null }>(`/books/${id}`),
-    onSuccess: () => {
+    mutationFn: ({ id }: { id: string; title: string }) => apiDelete<{ data: null }>(`/books/${id}`),
+    onSuccess: (_, { title }) => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
       // The server deletes permanently when trash is off; match the toast.
       const settings = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
       const trashOn = settings?.data.trash?.enabled !== false
-      notify.success({ key: trashOn ? 'library.bookMovedToTrash' : 'library.bookPermanentlyDeleted' })
+      notify.success({
+        key: trashOn ? 'library.bookMovedToTrash' : 'library.bookPermanentlyDeleted',
+        params: { title },
+      })
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.deleteBookFailed'))
@@ -370,10 +373,10 @@ export function useRestoreBook() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (id: string) => apiPost<{ data: null }>(`/books/${id}/restore`),
-    onSuccess: () => {
+    mutationFn: ({ id }: { id: string; title: string }) => apiPost<{ data: null }>(`/books/${id}/restore`),
+    onSuccess: (_, { title }) => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      notify.success({ key: 'library.bookRestored' })
+      notify.success({ key: 'library.bookRestored', params: { title } })
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.restoreBookFailed'))
@@ -385,10 +388,10 @@ export function usePermanentDeleteBook() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (id: string) => apiDelete<{ data: null }>(`/books/${id}/permanent`),
-    onSuccess: () => {
+    mutationFn: ({ id }: { id: string; title: string }) => apiDelete<{ data: null }>(`/books/${id}/permanent`),
+    onSuccess: (_, { title }) => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
-      notify.success({ key: 'library.bookPermanentlyDeleted' })
+      notify.success({ key: 'library.bookPermanentlyDeleted', params: { title } })
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.permanentDeleteBookFailed'))

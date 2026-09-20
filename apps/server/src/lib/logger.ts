@@ -32,7 +32,11 @@ export interface LogFields {
 }
 
 const LEVEL_VALUE: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 }
-const SENSITIVE_VALUE = /((?:authorization|cookie|token|password|secret|api[-_ ]?key)[\w-]*\s*[:=]\s*)[^\s,;]+|Bearer\s+[^\s]+/gi
+// `label: value` pairs, `Bearer <credential>`, the whole `bd_` token family
+// (access tokens and Legado access keys alike), and bare `?key=` query values.
+// The last two matter because a token pasted without a label, or carried in a
+// Legado source URL, would otherwise slip past the label-based alternatives.
+const SENSITIVE_VALUE = /((?:authorization|cookie|token|password|secret|api[-_ ]?key)[\w-]*\s*[:=]\s*)[^\s,;]+|Bearer\s+[^\s]+|\bbd_[A-Za-z0-9_-]+|([?&](?:key|token|secret|password)=)[^&\s]+/gi
 const SENSITIVE_KEY = /(?:authorization|cookie|token|password|secret|api[-_ ]?key)/i
 
 let minimumLevel: LogLevel = 'info'
@@ -46,7 +50,14 @@ export function getLogLevel() {
 }
 
 function safeText(value: unknown): string {
-  return String(value).replace(SENSITIVE_VALUE, '$1[REDACTED]')
+  // A replacer function instead of `$1`: the alternatives that carry no label
+  // have no capture group, and `$1` would silently delete the match instead of
+  // marking it as redacted.
+  return String(value).replace(SENSITIVE_VALUE, (match, label: string | undefined, queryKey: string | undefined) => {
+    if (label) return `${label}[REDACTED]`
+    if (queryKey) return `${queryKey}[REDACTED]`
+    return '[REDACTED]'
+  })
 }
 
 function serializeError(value: unknown): LogRecord['error'] | undefined {
