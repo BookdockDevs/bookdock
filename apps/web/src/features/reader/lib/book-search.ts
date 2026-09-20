@@ -18,7 +18,7 @@ const EXCERPT_CONTEXT_LENGTH = 50
 export interface ChapterText {
   /** Concatenated text of every text node in the section body */
   text: string
-  /** Per-node length map: node i occupies text[sum(nodeLengths[0..i-1]) .. +nodeLengths[i]] */
+  /** Per-text-node lengths; block boundaries add virtual spaces to `text` */
   nodeLengths: number[]
 }
 
@@ -66,20 +66,62 @@ function isContentTextNode(node: Node): boolean {
   return !(node.parentElement?.closest('script,style,noscript'))
 }
 
-export function extractChapterText(doc: Document): ChapterText {
+const SEARCH_BLOCK_TAGS = new Set([
+  'address', 'article', 'aside', 'blockquote', 'dd', 'div', 'dl', 'dt',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3',
+  'h4', 'h5', 'h6', 'header', 'li', 'main', 'nav', 'ol', 'p', 'pre',
+  'section', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul',
+])
+
+interface SearchTextNode {
+  node: Text
+  start: number
+  end: number
+}
+
+interface ExtractedSearchText extends ChapterText {
+  nodes: SearchTextNode[]
+}
+
+function searchBlockAncestor(node: Text): Element | null {
+  let element = node.parentElement
+  while (element) {
+    if (SEARCH_BLOCK_TAGS.has(element.localName.toLowerCase())) return element
+    element = element.parentElement
+  }
+  return null
+}
+
+function collectSearchText(doc: Document): ExtractedSearchText {
   const nodeLengths: number[] = []
+  const nodes: SearchTextNode[] = []
   let text = ''
-  if (!doc.body) return { text, nodeLengths }
+  let previousBlock: Element | null = null
+  if (!doc.body) return { text, nodeLengths, nodes }
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) =>
       isContentTextNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
   })
   let node: Node | null
   while ((node = walker.nextNode())) {
-    const value = node.textContent ?? ''
+    const textNode = node as Text
+    const value = textNode.textContent ?? ''
+    const block = searchBlockAncestor(textNode)
+    // Ignore XHTML formatting whitespace outside a content block. Keeping it
+    // would create a second separator next to the virtual paragraph space.
+    if (!value || (!block && /^[\t\n\r ]*$/.test(value))) continue
     nodeLengths.push(value.length)
+    if (nodes.length > 0 && block !== previousBlock) text += ' '
+    const start = text.length
     text += value
+    nodes.push({ node: textNode, start, end: text.length })
+    previousBlock = block
   }
+  return { text, nodeLengths, nodes }
+}
+
+export function extractChapterText(doc: Document): ChapterText {
+  const { text, nodeLengths } = collectSearchText(doc)
   return { text, nodeLengths }
 }
 
@@ -113,6 +155,20 @@ export function findMatches(text: string, query: string, opts?: SearchMatchOptio
 
 const normalizeWhitespace = (str: string) => str.replace(/\s+/g, ' ')
 
+
+export function formatCardExcerpt(
+  excerpt: { pre: string; match: string; post: string },
+  maxPre = 16,
+): { pre: string; match: string; post: string } {
+  const pre = excerpt.pre.trim()
+  if (pre.length <= maxPre) return excerpt
+  const sliced = pre.slice(-maxPre).replace(/^[…\s]+/, '')
+  return {
+    pre: `…${sliced}`,
+    match: excerpt.match,
+    post: excerpt.post,
+  }
+}
 export function makeExcerpt(
   text: string,
   start: number,
@@ -132,29 +188,35 @@ export function makeExcerpt(
 // Chinese conversion has rewritten its text nodes.
 export function offsetsToRange(doc: Document, start: number, end: number): Range | null {
   if (!doc.body || start < 0 || end < start) return null
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) =>
-      isContentTextNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
-  })
-  let pos = 0
-  let startNode: Node | null = null
-  let startOffset = 0
-  let node: Node | null
-  while ((node = walker.nextNode())) {
-    const length = node.textContent?.length ?? 0
-    if (startNode === null && start < pos + length) {
-      startNode = node
-      startOffset = start - pos
+  const extracted = collectSearchText(doc)
+  if (end > extracted.text.length || extracted.nodes.length === 0) return null
+
+  const resolve = (offset: number, side: 'start' | 'end'): { node: Text; local: number } | null => {
+    for (const [index, entry] of extracted.nodes.entries()) {
+      if (offset >= entry.start && offset <= entry.end) {
+        if (side === 'start' && offset === entry.end) {
+          const next = extracted.nodes[index + 1]
+          if (next && next.start > offset) return { node: next.node, local: 0 }
+        }
+        return { node: entry.node, local: offset - entry.start }
+      }
+      if (side === 'end' && offset < entry.start) {
+        const previous = extracted.nodes[index - 1]
+        if (previous) return { node: previous.node, local: previous.node.length }
+        return null
+      }
     }
-    if (startNode !== null && end <= pos + length) {
-      const range = doc.createRange()
-      range.setStart(startNode, startOffset)
-      range.setEnd(node, end - pos)
-      return range
-    }
-    pos += length
+    const last = extracted.nodes[extracted.nodes.length - 1]
+    return offset === last.end ? { node: last.node, local: last.node.length } : null
   }
-  return null
+
+  const startPoint = resolve(start, 'start')
+  const endPoint = resolve(end, 'end')
+  if (!startPoint || !endPoint) return null
+  const range = doc.createRange()
+  range.setStart(startPoint.node, startPoint.local)
+  range.setEnd(endPoint.node, endPoint.local)
+  return range
 }
 
 interface SearchableBook {

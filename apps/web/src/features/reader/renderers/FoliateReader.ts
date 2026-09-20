@@ -32,7 +32,7 @@ import type {
 import { FONT_OPTIONS } from '../types'
 import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
 import { MediaOverlaySection, type MediaOverlayCue } from '../lib/media-overlay'
-import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, type TextReplacementRule } from '../lib/text-replacements'
+import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, textContentRangeNearOffset, type TextReplacementRule } from '../lib/text-replacements'
 import { NavigationPending, type NavigationTarget } from '../lib/navigation-pending'
 import { chapterTextNamespaceFromUrl, withTextCache } from '../lib/chapter-text-cache'
 import { chapterIndexAtFraction, sectionFractionBoundaries } from '../lib/progress-model'
@@ -48,7 +48,7 @@ import {
   type SearchMatch,
 } from '../lib/book-search'
 import { convertChinese } from '@/lib/chinese'
-import { mix } from '@/lib/color'
+import { mix, isDark } from '@/lib/color'
 
 const ANNOTATION_COLORS: Record<string, string> = {
   yellow: '#eab308',
@@ -62,6 +62,7 @@ const DEFAULT_ANNOTATION_COLOR = ANNOTATION_COLORS.yellow
 // Must match SEARCH_PREFIX in foliate-js/view.js: values with this prefix are
 // drawn as transient search highlights and ignored by annotation click handling
 const SEARCH_ANNOTATION_PREFIX = 'foliate-search:'
+const SEARCH_ACTIVE_ANNOTATION_PREFIX = 'foliate-search-active:'
 
 function ttsTextHash(text: string): string {
   let hash = 2166136261
@@ -97,6 +98,16 @@ export function ttsHighlightColor(theme: { bg: string; text: string; primary?: s
 
 export function searchHighlightColor(theme: { bg: string; text: string; primary?: string }): string {
   return theme.primary ?? theme.text
+}
+
+export function searchActiveHighlightColor(theme: { bg: string; text: string; primary?: string }): string {
+  const dark = isDark(theme.bg)
+  return dark ? '#d97706' : '#fbbf24'
+}
+
+export function searchActiveBorderColor(theme: { bg: string; text: string; primary?: string }): string {
+  const dark = isDark(theme.bg)
+  return dark ? '#fcd34d' : '#d97706'
 }
 
 function textBeforeSelection(doc: Document, range: Range, maxLength = 2_000): string {
@@ -631,7 +642,11 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
   // Ensure embedded media (e.g. legacy video markup) expose native
   // playback controls, warm preloading, and click-to-play when authoring markup omits them.
   for (const video of Array.from(doc.querySelectorAll('video'))) {
-    if (!video.hasAttribute('controls')) {
+    const isDeferred = !video.src && Boolean(
+      video.dataset.bdDeferredSrc
+      || video.querySelector('[data-bd-deferred-src]')?.getAttribute('data-bd-deferred-src')
+    )
+    if (!video.hasAttribute('controls') && !isDeferred) {
       video.setAttribute('controls', '')
       video.controls = true
     }
@@ -659,40 +674,58 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
     if (!wrapper && video.parentNode) {
       wrapper = doc.createElement('div')
       wrapper.className = 'bd-video-wrapper'
+      const hasPosterOrSrc = video.hasAttribute('poster') || Boolean(video.src)
+      if (!hasPosterOrSrc) wrapper.classList.add('is-empty-placeholder')
       video.parentNode.insertBefore(wrapper, video)
       wrapper.appendChild(video)
+    }
 
-      const playBtn = doc.createElement('button')
-      playBtn.className = 'bd-video-play-btn'
-      playBtn.type = 'button'
-      playBtn.setAttribute('aria-label', 'Play')
+    if (wrapper) {
+      // Clean up any extraneous duplicate play buttons within this wrapper
+      const existingBtns = Array.from(wrapper.querySelectorAll('.bd-video-play-btn'))
+      for (let i = 1; i < existingBtns.length; i++) {
+        existingBtns[i].remove()
+      }
 
-      const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
-      svg.setAttribute('viewBox', '0 0 24 24')
-      svg.setAttribute('width', '28')
-      svg.setAttribute('height', '28')
-      const polygon = doc.createElementNS('http://www.w3.org/2000/svg', 'polygon')
-      polygon.setAttribute('points', '6,3 20,12 6,21')
-      polygon.setAttribute('fill', 'white')
-      svg.appendChild(polygon)
-      playBtn.appendChild(svg)
+      let playBtn = existingBtns[0] as HTMLButtonElement | undefined
+      if (!playBtn) {
+        playBtn = doc.createElement('button')
+        playBtn.className = 'bd-video-play-btn'
+        playBtn.type = 'button'
+        playBtn.setAttribute('aria-label', 'Play')
 
-      playBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        e.preventDefault()
-        if (startDeferredFetch && !video.src) {
-          video.dataset.bdMediaPlayIntent = 'true'
-          startDeferredFetch()
-          return
-        }
-        if (video.paused) {
-          void video.play().catch(() => {})
-        } else {
-          video.pause()
-        }
-      })
+        const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        svg.setAttribute('viewBox', '0 0 24 24')
+        svg.setAttribute('width', '28')
+        svg.setAttribute('height', '28')
+        const polygon = doc.createElementNS('http://www.w3.org/2000/svg', 'polygon')
+        polygon.setAttribute('points', '6,3 20,12 6,21')
+        polygon.setAttribute('fill', 'white')
+        svg.appendChild(polygon)
+        playBtn.appendChild(svg)
 
-      wrapper.appendChild(playBtn)
+        playBtn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          if (startDeferredFetch && !video.src) {
+            video.dataset.bdMediaPlayIntent = 'true'
+            startDeferredFetch()
+            return
+          }
+          if (video.paused) {
+            void video.play().catch(() => {})
+          } else {
+            video.pause()
+          }
+        })
+
+        wrapper.appendChild(playBtn)
+      }
+
+      if (wrapper.classList.contains('is-media-loading') || wrapper.classList.contains('is-media-error')) {
+        playBtn.style.setProperty('display', 'none', 'important')
+        playBtn.setAttribute('aria-hidden', 'true')
+      }
 
       video.addEventListener('play', () => wrapper?.classList.add('is-playing'))
       video.addEventListener('pause', () => wrapper?.classList.remove('is-playing'))
@@ -710,10 +743,25 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
       || video.querySelector('[data-bd-deferred-src]')?.getAttribute('data-bd-deferred-src')
 
     if (!video.src && deferredSrc && wrapper) {
+      const isJsdom = typeof navigator !== 'undefined' && navigator.userAgent.includes('jsdom')
       const startFetch = () => {
         if (video.dataset.bdMediaFetchStarted || video.src) return
         video.dataset.bdMediaFetchStarted = 'true'
         wrapper.classList.add('is-media-loading')
+        wrapper.classList.remove('is-media-error')
+        wrapper.querySelector('.bd-video-error-badge')?.remove()
+
+        if (video.hasAttribute('controls')) {
+          video.removeAttribute('controls')
+          video.controls = false
+        }
+
+        const playBtn = wrapper.querySelector('.bd-video-play-btn') as HTMLElement | null
+        if (playBtn) {
+          playBtn.style.setProperty('display', 'none', 'important')
+          playBtn.setAttribute('aria-hidden', 'true')
+        }
+
         let spinner = wrapper.querySelector('.bd-video-spinner')
         if (!spinner) {
           spinner = doc.createElement('div')
@@ -740,11 +788,57 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
               }
               video.src = blobUrl
               video.removeAttribute('data-bd-deferred-src')
-              wrapper?.classList.remove('is-media-loading')
-              spinner?.remove()
-              if (video.dataset.bdMediaPlayIntent) {
-                delete video.dataset.bdMediaPlayIntent
-                void video.play().catch(() => {})
+              wrapper?.classList.remove('is-empty-placeholder')
+
+              const finishLoading = (immediate = false) => {
+                if (!video.isConnected) return
+                if (!video.hasAttribute('controls')) {
+                  video.setAttribute('controls', '')
+                  video.controls = true
+                }
+                const restorePlayBtn = () => {
+                  wrapper?.classList.remove('is-media-loading')
+                  const btn = wrapper?.querySelector('.bd-video-play-btn') as HTMLElement | null
+                  if (btn) {
+                    btn.style.removeProperty('display')
+                    btn.removeAttribute('aria-hidden')
+                  }
+                }
+
+                if (immediate || isJsdom) {
+                  spinner?.remove()
+                  restorePlayBtn()
+                } else if (spinner) {
+                  spinner.classList.add('is-fade-out')
+                  setTimeout(() => {
+                    spinner?.remove()
+                    restorePlayBtn()
+                  }, 250)
+                } else {
+                  restorePlayBtn()
+                }
+
+                if (video.dataset.bdMediaPlayIntent) {
+                  delete video.dataset.bdMediaPlayIntent
+                  void video.play().catch(() => {})
+                }
+              }
+
+              if (video.readyState >= 2 || isJsdom) {
+                finishLoading(true)
+              } else {
+                let finished = false
+                const onReady = () => {
+                  if (finished) return
+                  finished = true
+                  video.removeEventListener('loadeddata', onReady)
+                  video.removeEventListener('canplay', onReady)
+                  clearTimeout(timer)
+                  finishLoading()
+                }
+                video.addEventListener('loadeddata', onReady)
+                video.addEventListener('canplay', onReady)
+                const timer = setTimeout(onReady, 1200)
               }
             })
             .catch((_err: unknown) => {
@@ -752,6 +846,39 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
               wrapper?.classList.remove('is-media-loading')
               wrapper?.classList.add('is-media-error')
               spinner?.remove()
+              delete video.dataset.bdMediaFetchStarted
+              delete video.dataset.bdMediaPlayIntent
+
+              const btn = wrapper?.querySelector('.bd-video-play-btn') as HTMLElement | null
+              if (btn) {
+                btn.style.setProperty('display', 'none', 'important')
+                btn.setAttribute('aria-hidden', 'true')
+              }
+
+              let errorBadge = wrapper.querySelector('.bd-video-error-badge') as HTMLButtonElement | null
+              if (!errorBadge) {
+                errorBadge = doc.createElement('button')
+                errorBadge.className = 'bd-video-error-badge'
+                errorBadge.type = 'button'
+                errorBadge.setAttribute('aria-label', 'Retry loading media')
+                const icon = doc.createElement('span')
+                icon.className = 'bd-video-error-icon'
+                icon.textContent = '!'
+                const text = doc.createElement('span')
+                text.className = 'bd-video-error-text'
+                text.textContent = '媒体加载失败，点击重试'
+                errorBadge.appendChild(icon)
+                errorBadge.appendChild(text)
+                errorBadge.addEventListener('click', (e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  errorBadge?.remove()
+                  wrapper.classList.remove('is-media-error')
+                  startFetch()
+                })
+                wrapper.appendChild(errorBadge)
+              }
+
               options?.onMediaError?.({
                 sectionIndex: options.sectionIndex ?? 0,
                 kind: 'video',
@@ -1294,6 +1421,28 @@ export function resolveNavigationSectionIndex(target?: string): number | null {
   return null
 }
 
+export interface ReplacementHitTarget {
+  spineHref: string
+  textOffset: number
+  replacement: string
+}
+
+export function parseReplacementHitTarget(target?: string): ReplacementHitTarget | null {
+  if (!target?.startsWith('replacement-hit:')) return null
+  const parts = target.split(':')
+  const textOffset = Number(parts[2])
+  if (!parts[1] || !Number.isInteger(textOffset) || textOffset < 0) return null
+  try {
+    return {
+      spineHref: decodeURIComponent(parts[1]),
+      textOffset,
+      replacement: decodeURIComponent(parts[3] ?? ''),
+    }
+  } catch {
+    return null
+  }
+}
+
 export function buildAnnotationBuckets(annotations: ReaderAnnotation[]): {
   buckets: Map<string, Set<string>>
   uncategorized: Set<string>
@@ -1406,6 +1555,9 @@ export class FoliateReader implements BookReader {
   private searchMatchTexts = new Map<number, string[]>()
   // Search-highlight annotation values currently handed to the view, per section
   private drawnSearchValues = new Map<number, string[]>()
+  private activeSearchTarget: { index: number; start: number; end: number } | null = null
+  private activeSearchValue: string | null = null
+  private activeSearchClearTimer: ReturnType<typeof setTimeout> | null = null
   private footnoteHandler: any = null
   private footnoteEntries: FootnoteEntry[] = []
   private footnoteEntryId = 0
@@ -1702,6 +1854,8 @@ export class FoliateReader implements BookReader {
         background-color: ${this.theme.bg} !important;
         --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
         --bd-search-highlight: ${searchHighlightColor(this.theme)} !important;
+        --bd-search-active-highlight: ${searchActiveHighlightColor(this.theme)} !important;
+        --bd-search-active-border: ${searchActiveBorderColor(this.theme)} !important;
       }
      body {
        box-sizing: border-box !important;
@@ -2023,6 +2177,19 @@ export class FoliateReader implements BookReader {
         const matches = this.searchMatchOffsets.get(index)
         if (matches?.length) this.drawSearchHighlights(index, matches)
       })
+      view.addEventListener('stabilized', () => {
+        const reapply = new Set<string>()
+        const contents = (this.view?.renderer?.getContents?.() ?? []) as Array<{ index?: number }>
+        for (const content of contents) {
+          if (typeof content.index !== 'number') continue
+          const bucket = this.annotationBuckets.get(sectionSpinePrefix(content.index))
+          if (!bucket) continue
+          for (const value of bucket) {
+            if (this.renderedAnnotations.has(value)) reapply.add(value)
+          }
+        }
+        for (const value of reapply) this.addAnnotationValue(value)
+      })
 
       container.appendChild(view)
       this.resizeObserver = new ResizeObserver(() => {
@@ -2214,6 +2381,7 @@ export class FoliateReader implements BookReader {
       percent: frac != null ? Math.round(frac * 100) : 0,
       fraction: frac ?? undefined,
       chapter: tocItem?.label,
+      chapterHref: typeof tocItem?.href === 'string' ? tocItem.href : undefined,
       chapterIndex,
       chapterFraction,
       page: chapterIndex != null ? chapterIndex + 1 : undefined,
@@ -2245,10 +2413,12 @@ export class FoliateReader implements BookReader {
   // navigation start. fraction is only known for a chapter start/seek landing
   // (byte-boundary model); a CFI's in-chapter position cannot be pre-computed.
   private resolveNavigationTarget(target?: string): NavigationTarget | null {
+    const replacementHit = parseReplacementHitTarget(target)
     let index = resolveNavigationSectionIndex(target)
-    if (index === null && target && this.book) {
-      const resolved = this.book.resolveHref?.(target) ?? this.book.resolveHref?.(decodeURI(target))
-      const viaMap = this.tocHrefToIndex.get(target)
+    const hrefTarget = replacementHit?.spineHref ?? target
+    if (index === null && hrefTarget && this.book) {
+      const resolved = this.book.resolveHref?.(hrefTarget) ?? this.book.resolveHref?.(decodeURI(hrefTarget))
+      const viaMap = this.tocHrefToIndex.get(hrefTarget)
       const hrefIndex = resolved?.index ?? viaMap
       index = typeof hrefIndex === 'number' ? hrefIndex : null
     }
@@ -2347,6 +2517,30 @@ export class FoliateReader implements BookReader {
       return false
     }
 
+    const replacementHit = parseReplacementHitTarget(target)
+    if (replacementHit) {
+      let resolved = this.book?.resolveHref?.(replacementHit.spineHref)
+      if (!resolved) resolved = this.book?.resolveHref?.(decodeURI(replacementHit.spineHref))
+      const index = resolved?.index ?? this.tocHrefToIndex.get(replacementHit.spineHref)
+      if (typeof index !== 'number' || index < 0 || index >= (this.book?.sections?.length ?? Infinity)) return false
+      this.activeSearchTarget = null
+      this.clearActiveSearchHighlight()
+      if (renderer) {
+        return renderer.goTo({
+          index,
+          anchor: (doc: Document) => {
+            const range = textContentRangeNearOffset(doc, replacementHit.replacement, replacementHit.textOffset)
+            if (range) {
+              this.setActiveSearchRange(index, range)
+              this.scheduleActiveSearchHighlightClear(2200)
+            }
+            return range
+          },
+        })
+      }
+      return false
+    }
+
     // search-hit-chapter:{chapterIndex}:{start}:{end} — AI citation target.
     // AI chapter indexes follow the visible TOC corpus, not raw Foliate sections.
     if (target.startsWith('search-hit-chapter:')) {
@@ -2357,7 +2551,17 @@ export class FoliateReader implements BookReader {
       const sectionIndex = this.aiCorpusSectionIndices()[chapterIndex]
       if (![chapterIndex, start, end, sectionIndex].every(Number.isFinite)) return
       if (renderer) {
-        return renderer.goTo({ index: sectionIndex, anchor: (doc: Document) => offsetsToRange(doc, start, end) })
+        return renderer.goTo({
+          index: sectionIndex,
+          anchor: (doc: Document) => {
+            const range = offsetsToRange(doc, start, end)
+            if (range) {
+              this.setActiveSearchRange(sectionIndex, range)
+              this.scheduleActiveSearchHighlightClear(4000)
+            }
+            return range
+          },
+        })
       }
       return
     }
@@ -2372,6 +2576,7 @@ export class FoliateReader implements BookReader {
       const start = Number(parts[2])
       const end = Number(parts[3])
       if (![index, start, end].every(Number.isFinite)) return
+      this.activeSearchTarget = { index, start, end }
       if (renderer) {
         const match = { start, end }
         const matchIndex = this.searchMatchOffsets
@@ -2379,7 +2584,11 @@ export class FoliateReader implements BookReader {
           ?.findIndex((item) => item.start === start && item.end === end)
         return renderer.goTo({
           index,
-          anchor: (doc: Document) => this.resolveSearchMatchRange(doc, index, match, matchIndex),
+          anchor: (doc: Document) => {
+            const range = this.resolveSearchMatchRange(doc, index, match, matchIndex)
+            if (range) this.setActiveSearchRange(index, range)
+            return range
+          },
         })
       }
       return
@@ -2545,6 +2754,8 @@ export class FoliateReader implements BookReader {
     if (!this.view?.renderer) return
     this.view.renderer.style.setProperty('--bd-tts-highlight', ttsHighlightColor(theme))
     this.view.renderer.style.setProperty('--bd-search-highlight', searchHighlightColor(theme))
+    this.view.renderer.style.setProperty('--bd-search-active-highlight', searchActiveHighlightColor(theme))
+    this.view.renderer.style.setProperty('--bd-search-active-border', searchActiveBorderColor(theme))
     this.view.renderer.style.setProperty('background-color', theme.bg)
     if (this.view.isFixedLayout) {
       const contents = this.view.renderer.getContents?.() as Array<{ doc?: Document }> | undefined
@@ -3468,6 +3679,7 @@ export class FoliateReader implements BookReader {
       const values: string[] = []
       const liveText = extractChapterText(content.doc).text
       const liveRanges = mapMatchTextsToOffsets(liveText, this.searchMatchTexts.get(index) ?? [])
+      let activeRange: Range | null = null
       for (const [matchIndex, m] of matches.entries()) {
         const liveMatch = liveRanges[matchIndex]
         const range = liveMatch
@@ -3476,17 +3688,66 @@ export class FoliateReader implements BookReader {
         if (!range) continue
         const cfi = this.view.getCFI(index, range)
         if (cfi) values.push(`${SEARCH_ANNOTATION_PREFIX}${cfi}`)
+        if (
+          this.activeSearchTarget &&
+          this.activeSearchTarget.index === index &&
+          this.activeSearchTarget.start === m.start &&
+          this.activeSearchTarget.end === m.end
+        ) {
+          activeRange = range
+        }
       }
       for (const value of values) {
         Promise.resolve(this.view?.addAnnotation({ value })).catch(() => {})
       }
       this.drawnSearchValues.set(index, values)
+      if (activeRange) {
+        this.setActiveSearchRange(index, activeRange)
+      }
     } catch {
       // highlight drawing is best-effort
     }
   }
 
+  private setActiveSearchRange(index: number, range: Range) {
+    try {
+      if (this.activeSearchValue) {
+        Promise.resolve(this.view?.deleteAnnotation?.({ value: this.activeSearchValue })).catch(() => {})
+        this.activeSearchValue = null
+      }
+      const cfi = this.view.getCFI(index, range)
+      if (cfi) {
+        const activeValue = `${SEARCH_ACTIVE_ANNOTATION_PREFIX}${cfi}`
+        this.activeSearchValue = activeValue
+        Promise.resolve(this.view?.addAnnotation({ value: activeValue })).catch(() => {})
+      }
+    } catch {
+      // highlight drawing is best-effort
+    }
+  }
+
+  private scheduleActiveSearchHighlightClear(delayMs: number) {
+    if (this.activeSearchClearTimer) clearTimeout(this.activeSearchClearTimer)
+    this.activeSearchClearTimer = setTimeout(() => {
+      this.activeSearchClearTimer = null
+      this.clearActiveSearchHighlight()
+    }, delayMs)
+  }
+
+  clearActiveSearchHighlight() {
+    if (this.activeSearchClearTimer) {
+      clearTimeout(this.activeSearchClearTimer)
+      this.activeSearchClearTimer = null
+    }
+    if (this.activeSearchValue) {
+      Promise.resolve(this.view?.deleteAnnotation?.({ value: this.activeSearchValue })).catch(() => {})
+      this.activeSearchValue = null
+    }
+  }
+
   private clearSearchHighlights() {
+    this.clearActiveSearchHighlight()
+    this.activeSearchTarget = null
     for (const values of this.drawnSearchValues.values()) {
       for (const value of values) {
         Promise.resolve(this.view?.deleteAnnotation?.({ value })).catch(() => {})
@@ -3806,6 +4067,10 @@ export class FoliateReader implements BookReader {
     // stop any in-flight search loop at the next chapter boundary; the
     // highlight overlays die with the view, so only the bookkeeping is dropped
     this.searchGen++
+    this.activeSearchTarget = null
+    this.activeSearchValue = null
+    if (this.activeSearchClearTimer) clearTimeout(this.activeSearchClearTimer)
+    this.activeSearchClearTimer = null
     this.drawnSearchValues.clear()
     this.searchMatchOffsets.clear()
     this.searchMatchTexts.clear()
@@ -4189,6 +4454,7 @@ export class FoliateReader implements BookReader {
       .bd-video-wrapper {
         position: relative !important;
         display: inline-block !important;
+        width: fit-content !important;
         max-width: 100% !important;
         margin: 0.8em auto !important;
         line-height: 0 !important;
@@ -4197,7 +4463,9 @@ export class FoliateReader implements BookReader {
         overflow: hidden !important;
         box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.12), 0 2px 6px -1px rgba(0, 0, 0, 0.08) !important;
         outline: 1px solid rgba(128, 128, 128, 0.18) !important;
-        background-color: rgba(0, 0, 0, 0.06) !important;
+        background-color: #0b0f19 !important;
+      }
+      .bd-video-wrapper.is-empty-placeholder {
         min-width: 240px !important;
         min-height: 135px !important;
         aspect-ratio: 16 / 9;
@@ -4212,6 +4480,25 @@ export class FoliateReader implements BookReader {
         accent-color: var(--bd-theme-primary) !important;
         cursor: pointer !important;
       }
+      /* Suppress native browser overlay play buttons in favor of custom .bd-video-play-btn */
+      video::-webkit-media-controls-overlay-play-button,
+      .bd-video-wrapper video::-webkit-media-controls-overlay-play-button {
+        display: none !important;
+        -webkit-appearance: none !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+      video::-webkit-media-controls-start-playback-button,
+      .bd-video-wrapper video::-webkit-media-controls-start-playback-button {
+        display: none !important;
+        -webkit-appearance: none !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+      video::-webkit-media-controls-overlay-enclosure,
+      .bd-video-wrapper video::-webkit-media-controls-overlay-enclosure {
+        display: none !important;
+      }
       .bd-video-play-btn {
         position: absolute !important;
         top: 50% !important;
@@ -4223,10 +4510,10 @@ export class FoliateReader implements BookReader {
         border: none !important;
         padding: 0 !important;
         margin: 0 !important;
-        background: rgba(0, 0, 0, 0.45) !important;
+        background: rgba(0, 0, 0, 0.5) !important;
         backdrop-filter: blur(8px) !important;
         -webkit-backdrop-filter: blur(8px) !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
         cursor: pointer !important;
         display: flex !important;
         align-items: center !important;
@@ -4236,7 +4523,7 @@ export class FoliateReader implements BookReader {
         z-index: 5 !important;
       }
       .bd-video-play-btn:hover {
-        background: rgba(0, 0, 0, 0.65) !important;
+        background: rgba(0, 0, 0, 0.72) !important;
         transform: translate(-50%, -50%) scale(1.08) !important;
       }
       .bd-video-play-btn svg {
@@ -4251,9 +4538,15 @@ export class FoliateReader implements BookReader {
         pointer-events: none !important;
         transform: translate(-50%, -50%) scale(0.85) !important;
       }
-      .bd-video-wrapper.is-media-loading .bd-video-play-btn {
+      .bd-video-wrapper.is-media-loading .bd-video-play-btn,
+      .bd-video-wrapper.is-media-error .bd-video-play-btn,
+      .bd-video-wrapper:has(.bd-video-spinner) .bd-video-play-btn,
+      .bd-video-wrapper:has(.bd-video-error-badge) .bd-video-play-btn {
+        display: none !important;
         opacity: 0 !important;
+        visibility: hidden !important;
         pointer-events: none !important;
+        transition: none !important;
       }
       .bd-video-spinner {
         position: absolute !important;
@@ -4261,29 +4554,109 @@ export class FoliateReader implements BookReader {
         left: 50% !important;
         transform: translate(-50%, -50%) !important;
         display: flex !important;
-        flex-direction: column !important;
+        flex-direction: row !important;
         align-items: center !important;
         justify-content: center !important;
         gap: 8px !important;
         z-index: 6 !important;
         pointer-events: none !important;
+        background: rgba(10, 15, 26, 0.76) !important;
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
+        padding: 8px 16px !important;
+        border-radius: 9999px !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        transition: opacity 0.25s ease !important;
+        box-sizing: border-box !important;
+        line-height: 1 !important;
+      }
+      .bd-video-spinner.is-fade-out {
+        opacity: 0 !important;
       }
       .bd-video-spinner-ring {
-        width: 32px !important;
-        height: 32px !important;
+        box-sizing: border-box !important;
+        width: 16px !important;
+        height: 16px !important;
+        flex-shrink: 0 !important;
         border-radius: 50% !important;
-        border: 3px solid rgba(255, 255, 255, 0.3) !important;
+        border: 2px solid rgba(255, 255, 255, 0.25) !important;
         border-top-color: #ffffff !important;
         animation: bd-media-spin 0.8s linear infinite !important;
-        filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5)) !important;
+        margin: 0 !important;
+        padding: 0 !important;
       }
       .bd-video-spinner-label {
-        font-size: 12px !important;
+        box-sizing: border-box !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        height: 16px !important;
+        font-size: 13px !important;
         line-height: 1 !important;
         color: #ffffff !important;
         font-family: system-ui, -apple-system, sans-serif !important;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8) !important;
+        font-weight: 500 !important;
         letter-spacing: 0.02em !important;
+        white-space: nowrap !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      .bd-video-error-badge {
+        position: absolute !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 8px !important;
+        z-index: 6 !important;
+        pointer-events: auto !important;
+        background: rgba(220, 38, 38, 0.85) !important;
+        backdrop-filter: blur(10px) !important;
+        -webkit-backdrop-filter: blur(10px) !important;
+        padding: 8px 16px !important;
+        border-radius: 9999px !important;
+        border: 1px solid rgba(255, 255, 255, 0.25) !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+        color: #ffffff !important;
+        cursor: pointer !important;
+        transition: background-color 0.2s ease, transform 0.2s ease !important;
+        box-sizing: border-box !important;
+        line-height: 1 !important;
+      }
+      .bd-video-error-badge:hover {
+        background: rgba(185, 28, 28, 0.95) !important;
+        transform: translate(-50%, -50%) scale(1.04) !important;
+      }
+      .bd-video-error-icon {
+        box-sizing: border-box !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 16px !important;
+        height: 16px !important;
+        border-radius: 50% !important;
+        background: rgba(255, 255, 255, 0.2) !important;
+        font-size: 11px !important;
+        font-weight: bold !important;
+        line-height: 1 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      .bd-video-error-text {
+        box-sizing: border-box !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        height: 16px !important;
+        font-size: 12px !important;
+        font-family: system-ui, -apple-system, sans-serif !important;
+        font-weight: 500 !important;
+        line-height: 1 !important;
+        white-space: nowrap !important;
+        margin: 0 !important;
+        padding: 0 !important;
       }
       @keyframes bd-media-spin {
         to { transform: rotate(360deg); }
@@ -4366,6 +4739,8 @@ export class FoliateReader implements BookReader {
         background-color: ${this.theme.bg} !important;
         --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
         --bd-search-highlight: ${searchHighlightColor(this.theme)} !important;
+        --bd-search-active-highlight: ${searchActiveHighlightColor(this.theme)} !important;
+        --bd-search-active-border: ${searchActiveBorderColor(this.theme)} !important;
       }
       pre, code, kbd {
         font-family: var(--bd-monospace, ui-monospace, SFMono-Regular, Consolas, monospace);

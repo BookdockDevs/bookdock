@@ -312,8 +312,8 @@
 42. **`epub.js` / deferred heavy media (video/audio) loading for instant text rendering**
     - 对应版本：Bookdock chapter fast text rendering and async media boundary.
     - 需求：含大型视频或音频的 EPUB 章节必须优先秒开显示正文文本；重媒体的解压不得阻塞章节 XHTML 解析，媒体后台并发载入，前端提供加载态视觉反馈，且排版尺寸完全锁定、零布局抖动。
-    - 实现：`loadReplaced` 中遍历 `[src]` 时识别 `video`、`audio`、`source`、`track`，将待解析地址转存至 `data-bd-deferred-src` 并跳过首屏阻塞解压；宿主 `normalizeEpubDocumentImages` 针对 `data-bd-deferred-src` 注入卡片加载转圈（`.is-media-loading`），并通过 `section.loadHref()` 后台异步解析 Blob 注入 `src`；固定 `16:9` 盒模型确保解析前后排版零变动。
-    - 影响/验证：首屏文本立即渲染，视频/音频异步就绪；单测验证 `loadContent()` 跳过媒体阻塞，DOM 正确标记 deferred-src。
+    - 实现：`loadReplaced` 中遍历 `[src]` 时识别 `video`、`audio`、`source`、`track`，将待解析地址转存至 `data-bd-deferred-src` 并跳过首屏阻塞解压；宿主 `normalizeEpubDocumentImages` 针对 `data-bd-deferred-src` 注入深色高对比毛玻璃胶囊加载指示器（`.bd-video-spinner` 与 `.is-media-loading`），并通过 `section.loadHref()` 后台异步解析 Blob 注入 `src`；卡片容器根据封面海报/视频真实比例自适应排版，去除写死的 `16:9`（仅在空占位时回退），支持播放按钮严格幂等去重；在媒体处于加载态（`.is-media-loading`）、加载失败（`.is-media-error`）以及胶囊淡出期间，播放按钮完全隐藏（`display: none !important; opacity: 0; visibility: hidden`）；全面禁用与屏蔽浏览器内核原生居中覆盖播放键（`video::-webkit-media-controls-overlay-play-button` 等），且在媒体未就绪前不挂载 `controls` 属性，彻底杜绝浏览器原生居中黑色圆形播放按键与加载胶囊发生叠放冲突；加载失败时呈现可点击重试的错误胶囊（`.bd-video-error-badge`）。
+    - 影响/验证：首屏文本立即渲染，视频/音频异步就绪；多比例（超宽屏、正方形）媒体无裁切与留灰；单测验证 `loadContent()` 跳过媒体阻塞，DOM 正确标记 deferred-src、自适应占位类名与重试机制。
 
 43. **`paginator.js` / `getVisibleRange` viewport detection on tall images and replaced elements**
     - 对应版本：Upstream foliate-js `paginator.js` `getVisibleRange` DOM visibility detection.

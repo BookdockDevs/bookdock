@@ -116,6 +116,7 @@ export default function Reader() {
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setCurrentChapter = useReaderState((s) => s.setCurrentChapter)
+  const setCurrentChapterHref = useReaderState((s) => s.setCurrentChapterHref)
   const setCurrentChapterIndex = useReaderState((s) => s.setCurrentChapterIndex)
   const readingMode = useUiStore((s) => s.readingMode)
   const toolbarLocked = useUiStore((s) => s.toolbarLocked)
@@ -657,6 +658,7 @@ export default function Reader() {
       if (e.page !== undefined && e.total !== undefined) {
         setPageInfo({ page: e.page, total: e.total })
       }
+      setCurrentChapterHref(e.chapterHref ?? null)
       if (e.chapter) setCurrentChapter(e.chapter)
       if (e.cfi.startsWith('txt:')) {
         const offset = Number(e.cfi.split(':')[1])

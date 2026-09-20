@@ -778,6 +778,7 @@
     "historyBack": "Back",
     "historyForward": "Forward",
     "noMatches": "No matches found",
+    "searching": "Searching...",
     "searchScopeBook": "Book",
     "searchScopeChapter": "Chapter",
     "searchModeContains": "Contains",

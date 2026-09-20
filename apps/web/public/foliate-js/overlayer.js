@@ -10,6 +10,7 @@ export class Overlayer {
     #clipPath = null
     #clipPathPath = null
     #clipPathId
+    #redrawFrame = null
 
     constructor(doc) {
         this.#doc = doc
@@ -124,6 +125,18 @@ export class Overlayer {
         }
         return rects
     }
+    #queueRedraw(attempt = 0) {
+        if (this.#redrawFrame !== null) return
+        const frameWindow = this.#doc.defaultView
+        const raf = frameWindow?.requestAnimationFrame?.bind(frameWindow)
+            ?? globalThis.requestAnimationFrame?.bind(globalThis)
+        if (!raf) return
+        this.#redrawFrame = raf(() => {
+            this.#redrawFrame = null
+            this.redraw()
+            if (attempt < 2) this.#queueRedraw(attempt + 1)
+        })
+    }
     add(key, range, draw, options) {
         if (this.#map.has(key)) this.remove(key)
         if (typeof range === 'function') range = range(this.#svg.getRootNode())
@@ -131,6 +144,10 @@ export class Overlayer {
         const element = draw(rects, options)
         this.#svg.append(element)
         this.#map.set(key, { range, draw, options, element, rects })
+        // CFI ranges can be resolved before the iframe's first paint. Their
+        // initial client rects are then empty, so repaint across the next few
+        // frames while the iframe finishes its layout.
+        this.#queueRedraw()
     }
     remove(key) {
         if (!this.#map.has(key)) return
@@ -273,6 +290,11 @@ export class Overlayer {
     static highlight(rects, options = {}) {
         const {
             color = 'red',
+            opacity,
+            fillOpacity,
+            stroke,
+            strokeWidth,
+            strokeOpacity,
             padding = 0,
             radius = 4,
             radiusPadding = 2,
@@ -281,7 +303,19 @@ export class Overlayer {
 
         const g = createSVGElement('g')
         g.setAttribute('fill', color)
-        g.style.opacity = 'var(--overlayer-highlight-opacity, .3)'
+        if (fillOpacity != null) {
+            g.setAttribute('fill-opacity', String(fillOpacity))
+        } else {
+            g.style.opacity = opacity != null ? String(opacity) : 'var(--overlayer-highlight-opacity, .3)'
+        }
+        if (stroke) {
+            g.setAttribute('stroke', stroke)
+            g.setAttribute('stroke-width', String(strokeWidth ?? 1.5))
+            g.setAttribute('stroke-linejoin', 'round')
+            if (strokeOpacity != null) {
+                g.setAttribute('stroke-opacity', String(strokeOpacity))
+            }
+        }
         g.style.mixBlendMode = 'var(--overlayer-highlight-blend-mode, normal)'
 
         for (const [index, { left, top, height, width }] of rects.entries()) {

@@ -114,6 +114,27 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
     setPendingDelete(rule)
   }
 
+  const handleJump = useCallback(
+    (spineHref: string, textOffset?: number | null, replacement?: string | null) => {
+      const target = textOffset == null
+        ? spineHref
+        : `replacement-hit:${encodeURIComponent(spineHref)}:${textOffset}:${encodeURIComponent(replacement ?? '')}`
+      void renderer?.display(target)
+      onClose()
+    },
+    [renderer, onClose],
+  )
+
+  const effectiveCount = useMemo(() => {
+    const effectivePoints = sortedPoints.filter(
+      (p) => (p.effectiveEnabled ?? p.enabled) && !invalidIds?.includes(p.id),
+    ).length
+    const effectivePatterns = patternRules.filter(
+      (r) => (r.effectiveEnabled ?? r.enabled),
+    ).length
+    return effectivePoints + effectivePatterns
+  }, [sortedPoints, patternRules, invalidIds])
+
   return (
     // data-settings-toggle: this dialog is portaled to body, so it lives
     // OUTSIDE the SettingsPopover DOM — without the ignore flag the popover's
@@ -122,9 +143,20 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
     // dialog along with it). Same mechanism as the preset context menu.
     <>
       <Modal
-        title={form
-          ? _(form.mode === 'create' ? 'settings.replacementsNew' : 'settings.replacementsEdit')
-          : _('reader.replacements')}
+        title={
+          form ? (
+            _(form.mode === 'create' ? 'settings.replacementsNew' : 'settings.replacementsEdit')
+          ) : (
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span>{_('reader.replacements')}</span>
+              {effectiveCount > 0 && (
+                <span className="inline-flex items-center rounded-full bg-stone-500/10 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-stone-500 dark:text-stone-400">
+                  {effectiveCount}
+                </span>
+              )}
+            </div>
+          )
+        }
         // The X always closes; in form mode that means "back to the list"
         onClose={() => (form ? setForm(null) : onClose())}
         containerProps={{ 'data-settings-toggle': '' }}
@@ -155,6 +187,7 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
             points={sortedPoints}
             chapterOf={chapterOf}
             invalidIds={invalidIds}
+            onJump={handleJump}
             onEdit={(rule) => setForm({ mode: 'edit', rule })}
             onDelete={onDelete}
           />

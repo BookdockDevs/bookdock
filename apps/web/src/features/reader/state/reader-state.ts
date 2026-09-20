@@ -12,6 +12,7 @@ interface ReaderState {
   tocItems: { label: string; href: string; level?: number }[]
   tocBookId: string | null
   currentChapter: string | null
+  currentChapterHref: string | null
   currentChapterIndex: number | null
   selection: SelectionInfo | null
   /** Selection handed off to the AI panel; survives closing the native selection bubble. */
@@ -39,6 +40,7 @@ interface ReaderState {
   setActiveNavTab: (tab: NavTab) => void
   setTocItems: (items: { label: string; href: string }[], bookId?: string) => void
   setCurrentChapter: (chapter: string | null) => void
+  setCurrentChapterHref: (href: string | null) => void
   setCurrentChapterIndex: (index: number | null) => void
   setSelection: (sel: SelectionInfo | null) => void
   setAiContext: (context: SelectionInfo | null) => void
@@ -59,6 +61,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   tocItems: [],
   tocBookId: null,
   currentChapter: null,
+  currentChapterHref: null,
   currentChapterIndex: null,
   selection: null,
   aiContext: null,
@@ -74,6 +77,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   setActiveNavTab: (activeNavTab) => set({ activeNavTab }),
   setTocItems: (tocItems, tocBookId: string | null = null) => set({ tocItems, tocBookId }),
   setCurrentChapter: (currentChapter) => set({ currentChapter }),
+  setCurrentChapterHref: (currentChapterHref) => set({ currentChapterHref }),
   setCurrentChapterIndex: (currentChapterIndex) => set({ currentChapterIndex }),
   setSelection: (selection) => set({ selection }),
   setAiContext: (aiContext) => set({ aiContext }),
@@ -93,6 +97,7 @@ export const useReaderState = create<ReaderState>((set) => ({
     tocItems: [],
     tocBookId: null,
     currentChapter: null,
+    currentChapterHref: null,
     currentChapterIndex: null,
     selection: null,
     aiContext: null,

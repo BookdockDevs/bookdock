@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { applyReplacements, countPatternMatches, textContentOffset, type TextReplacementRule } from '../features/reader/lib/text-replacements'
+import { applyReplacements, countPatternMatches, textContentOffset, textContentRangeNearOffset, type TextReplacementRule } from '../features/reader/lib/text-replacements'
 
 const rule = (overrides: Partial<TextReplacementRule> = {}): TextReplacementRule => ({
   matchType: 'pattern',
@@ -13,6 +13,20 @@ const rule = (overrides: Partial<TextReplacementRule> = {}): TextReplacementRule
 })
 
 const doc = (body: string) => `<html><body>${body}</body></html>`
+
+describe('textContentRangeNearOffset', () => {
+  it('resolves the replacement text using the point-patch coordinate system', () => {
+    const parsed = new DOMParser().parseFromString(doc('<p>前新文<strong></strong>后</p>'), 'text/html')
+    const range = textContentRangeNearOffset(parsed, '新文', 1)
+    expect(range?.toString()).toBe('新文')
+  })
+
+  it('falls back to a visible nearby character for deletion patches', () => {
+    const parsed = new DOMParser().parseFromString(doc('<p>前后</p>'), 'text/html')
+    const range = textContentRangeNearOffset(parsed, '', 1)
+    expect(range?.toString()).toBe('后')
+  })
+})
 
 describe('applyReplacements', () => {
   it('replaces literal matches globally in text nodes', () => {

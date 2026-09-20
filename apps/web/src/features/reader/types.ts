@@ -11,6 +11,8 @@ export interface ReaderLocation {
   /** Book-wide viewport-start position 0-1 from the engine, for seek and read-interval tracking */
   fraction?: number
   chapter?: string
+  /** Stable TOC target used to disambiguate duplicate chapter labels. */
+  chapterHref?: string
   chapterIndex?: number
   /** Position within the current chapter 0-1, when the engine exposes one */
   chapterFraction?: number

@@ -766,6 +766,7 @@
     "historyBack": "后退",
     "historyForward": "前进",
     "noMatches": "未找到匹配",
+    "searching": "正在搜索...",
     "searchScopeBook": "书籍",
     "searchScopeChapter": "章节",
     "searchModeContains": "包含",

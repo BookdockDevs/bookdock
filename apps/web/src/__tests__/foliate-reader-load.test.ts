@@ -14,6 +14,7 @@ import {
   normalizeEpubDocumentImages,
   buildAnnotationBuckets,
   cfiSpinePrefix,
+  parseReplacementHitTarget,
   resolveNavigationSectionIndex,
   sectionSpinePrefix,
   convertTocLabels,
@@ -64,6 +65,20 @@ describe('resolveNavigationSectionIndex', () => {
 
   it('returns null for hrefs (instance-level resolution handles those)', () => {
     expect(resolveNavigationSectionIndex('OEBPS/chapter1.xhtml')).toBeNull()
+  })
+})
+
+describe('parseReplacementHitTarget', () => {
+  it('decodes the section href, offset, and replacement text', () => {
+    expect(parseReplacementHitTarget('replacement-hit:OEBPS%2Fchapter%3A1.xhtml:12:%E6%96%B0%E6%96%87')).toEqual({
+      spineHref: 'OEBPS/chapter:1.xhtml',
+      textOffset: 12,
+      replacement: '新文',
+    })
+  })
+
+  it('rejects malformed targets', () => {
+    expect(parseReplacementHitTarget('replacement-hit:c1:not-an-offset:x')).toBeNull()
   })
 })
 
@@ -368,6 +383,9 @@ describe('FoliateReader book-style overrides', () => {
     expect(css).toContain('.videoplay')
     expect(css).toContain('.bd-video-wrapper')
     expect(css).toContain('.bd-video-play-btn')
+    expect(css).toContain('.bd-video-wrapper.is-media-loading .bd-video-play-btn')
+    expect(css).toContain('.bd-video-wrapper:has(.bd-video-spinner) .bd-video-play-btn')
+    expect(css).toContain('video::-webkit-media-controls-overlay-play-button')
     expect(css).toContain('accent-color: var(--bd-theme-primary)')
     expect(css).toContain('max-height: calc(var(--bd-available-height, 100%) * 1px);')
   })
@@ -675,10 +693,13 @@ describe('normalizeEpubDocumentImages', () => {
     const wrapper = document.querySelector('.bd-video-wrapper') as HTMLElement
     const spinner = wrapper.querySelector('.bd-video-spinner') as HTMLElement
 
-    // Initial state: wrapper has loading state and spinner, audio has loading class
+    // Initial state: wrapper has loading state and spinner, audio has loading class, playBtn hidden
     expect(wrapper.classList.contains('is-media-loading')).toBe(true)
     expect(spinner).not.toBeNull()
     expect(spinner.textContent).toContain('媒体加载中')
+    const playBtn = wrapper.querySelector('.bd-video-play-btn') as HTMLElement
+    expect(playBtn.style.display).toBe('none')
+    expect(video.hasAttribute('controls')).toBe(false)
     expect(audio.classList.contains('bd-audio-loading')).toBe(true)
     expect(video.src).toBe('')
 
@@ -688,10 +709,12 @@ describe('normalizeEpubDocumentImages', () => {
 
     await new Promise((r) => setTimeout(r, 0))
 
-    // Resolved state: sources updated, loading states removed, spinner removed
+    // Resolved state: sources updated, loading states removed, spinner removed, playBtn restored, controls attached
     expect(video.src).toBe('blob:http://localhost/resolved-movie.mp4')
+    expect(video.hasAttribute('controls')).toBe(true)
     expect(wrapper.classList.contains('is-media-loading')).toBe(false)
     expect(wrapper.querySelector('.bd-video-spinner')).toBeNull()
+    expect(playBtn.style.display).not.toBe('none')
 
     expect(audio.src).toBe('blob:http://localhost/resolved-track.mp3')
     expect(audio.classList.contains('bd-audio-loading')).toBe(false)
@@ -779,6 +802,82 @@ describe('normalizeEpubDocumentImages', () => {
     } finally {
       frame.remove()
     }
+  })
+
+  it('marks empty placeholder only when video has no poster or src', () => {
+    const parser = new DOMParser()
+    const docWithPoster = parser.parseFromString(
+      `<div class="videoplay"><video poster="cover.jpg"><source data-bd-deferred-src="v.mp4" /></video></div>`,
+      'text/html',
+    )
+    normalizeEpubDocumentImages(docWithPoster)
+    const wrapperWithPoster = docWithPoster.querySelector('.bd-video-wrapper') as HTMLElement
+    expect(wrapperWithPoster.classList.contains('is-empty-placeholder')).toBe(false)
+
+    const docEmpty = parser.parseFromString(
+      `<div class="videoplay"><video><source data-bd-deferred-src="v.mp4" /></video></div>`,
+      'text/html',
+    )
+    normalizeEpubDocumentImages(docEmpty)
+    const wrapperEmpty = docEmpty.querySelector('.bd-video-wrapper') as HTMLElement
+    expect(wrapperEmpty.classList.contains('is-empty-placeholder')).toBe(true)
+  })
+
+  it('prunes redundant play buttons to guarantee single button idempotency', () => {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(
+      `<div class="bd-video-wrapper">
+        <video src="test.mp4"></video>
+        <button class="bd-video-play-btn" type="button"></button>
+        <button class="bd-video-play-btn" type="button"></button>
+      </div>`,
+      'text/html',
+    )
+    normalizeEpubDocumentImages(doc)
+    expect(doc.querySelectorAll('.bd-video-play-btn').length).toBe(1)
+  })
+
+  it('renders retry error badge on failure and allows retry fetch', async () => {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(
+      `<video><source data-bd-deferred-src="faulty.mp4" type="video/mp4" /></video>`,
+      'text/html',
+    )
+    let shouldFail = true
+    const loadHref = vi.fn(() => {
+      if (shouldFail) return Promise.reject(new Error('Network error'))
+      return Promise.resolve('blob:recovered')
+    })
+    const onMediaError = vi.fn()
+
+    normalizeEpubDocumentImages(doc, {
+      section: { id: 's', loadHref },
+      onMediaError,
+    })
+
+    const wrapper = doc.querySelector('.bd-video-wrapper') as HTMLElement
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(wrapper.classList.contains('is-media-error')).toBe(true)
+    const errorBadge = wrapper.querySelector('.bd-video-error-badge') as HTMLElement
+    expect(errorBadge).not.toBeNull()
+    expect(errorBadge.textContent).toContain('媒体加载失败，点击重试')
+    expect(onMediaError).toHaveBeenCalledWith(expect.objectContaining({ kind: 'video', src: 'faulty.mp4' }))
+    const playBtn = wrapper.querySelector('.bd-video-play-btn') as HTMLElement
+    expect(playBtn.style.display).toBe('none')
+
+    // Click to retry
+    shouldFail = false
+    errorBadge.click()
+    expect(wrapper.classList.contains('is-media-loading')).toBe(true)
+    expect(playBtn.style.display).toBe('none')
+
+    await new Promise((r) => setTimeout(r, 0))
+    expect(wrapper.classList.contains('is-media-error')).toBe(false)
+    expect(wrapper.querySelector('.bd-video-error-badge')).toBeNull()
+    expect(playBtn.style.display).not.toBe('none')
+    const video = doc.querySelector('video') as HTMLVideoElement
+    expect(video.src).toBe('blob:recovered')
   })
 })
 

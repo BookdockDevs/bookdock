@@ -65,6 +65,47 @@ export function textContentOffset(doc: Document, target: Text, localOffset: numb
   return null
 }
 
+/**
+ * Resolve a point-patch replacement to a live range using the same text-node
+ * coordinate system as textOffset. The replacement may appear more than once,
+ * so the occurrence nearest the stored anchor wins.
+ */
+export function textContentRangeNearOffset(doc: Document, text: string, textOffset: number): Range | null {
+  const nodes = collectTextNodes(doc)
+  if (!doc.body || nodes.length === 0 || textOffset < 0) return null
+
+  const runs = nodes.map((node) => ({ text: node.nodeValue ?? '' }))
+  if (text) {
+    const match = findPointMatch(runs, text, textOffset)
+    if (match) {
+      const range = doc.createRange()
+      range.setStart(nodes[match.runIndex]!, match.local)
+      range.setEnd(nodes[match.endRunIndex]!, match.endLocal)
+      return range
+    }
+  }
+
+  const contentLength = runs.reduce((total, run) => total + run.text.length, 0)
+  if (contentLength === 0) return null
+  const startOffset = Math.min(textOffset, contentLength - 1)
+  const endOffset = Math.min(contentLength, startOffset + Math.max(1, Math.min(text.length, 80)))
+  let cursor = 0
+  let start: { node: Text; offset: number } | null = null
+  let end: { node: Text; offset: number } | null = null
+  for (const node of nodes) {
+    const length = node.nodeValue?.length ?? 0
+    if (!start && startOffset < cursor + length) start = { node, offset: startOffset - cursor }
+    if (!end && endOffset <= cursor + length) end = { node, offset: endOffset - cursor }
+    cursor += length
+    if (start && end) break
+  }
+  if (!start || !end) return null
+  const range = doc.createRange()
+  range.setStart(start.node, start.offset)
+  range.setEnd(end.node, end.offset)
+  return range
+}
+
 // Point patches (P2): snapshot-anchored single-spot edits. Run after pattern
 // rules on the same nodes. The shared findPointMatch searches the concatenated
 // runs for the occurrence closest to the recorded textOffset; a match may span

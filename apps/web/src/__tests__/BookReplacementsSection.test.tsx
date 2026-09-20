@@ -259,15 +259,19 @@ describe('BookReplacementsSection', () => {
     expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent?.includes('测试一下啦 → 嘻嘻'))).toBeInTheDocument()
   })
 
-  it('shows a null replacement as a bare pattern — no arrow, no delete label', () => {
+  it('shows a null replacement with line-through and no arrow or delete badge', () => {
     mockRules([rule({ id: 't1', pattern: '广告词', replacement: null })])
     render(<BookReplacementsSection bookId="b1" />)
 
-    const row = screen.getByText((_, el) => el?.tagName === 'P' && el.textContent?.startsWith('广告词'))
-    expect(row.textContent).toBe('广告词')
+    const patternEl = screen.getByText('广告词')
+    expect(patternEl).toHaveClass('line-through')
+    const row = patternEl.closest('p')
+    expect(row?.textContent).toBe('广告词')
+    expect(row?.textContent).not.toContain('→')
+    expect(screen.queryByText('删除')).not.toBeInTheDocument()
   })
 
-  it('shows a null point replacement as a bare snapshot — no arrow', () => {
+  it('shows a null point replacement with line-through on snapshot and no arrow or delete badge', () => {
     render(
       <BookReplacementsSection
         bookId="b1"
@@ -275,8 +279,44 @@ describe('BookReplacementsSection', () => {
       />,
     )
 
-    const row = screen.getByText((_, el) => el?.tagName === 'P' && el.textContent?.includes('我掐灭烟蒂'))
-    expect(row.textContent).toContain('我掐灭烟蒂')
-    expect(row.textContent).not.toContain('→')
+    const snapshotEl = screen.getByText('我掐灭烟蒂')
+    expect(snapshotEl).toHaveClass('line-through')
+    const row = snapshotEl.closest('p')
+    expect(row?.textContent).toBe('我掐灭烟蒂')
+    expect(row?.textContent).not.toContain('→')
+    expect(screen.queryByText('删除')).not.toBeInTheDocument()
+  })
+
+  it('discards rule name for point patches even if present', () => {
+    render(
+      <BookReplacementsSection
+        bookId="b1"
+        points={[point({ name: '定点专属名', originalText: '错别字', replacement: '正字' })]}
+      />,
+    )
+    expect(screen.queryByText('定点专属名')).not.toBeInTheDocument()
+    expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent?.includes('错别字 → 正字'))).toBeInTheDocument()
+  })
+
+  it('calls onJump when clicking chapter link in point row', () => {
+    const onJump = vi.fn()
+    render(
+      <BookReplacementsSection
+        bookId="b1"
+        points={[point({ spineHref: 'ch1.xhtml' })]}
+        chapterOf={() => '第一章'}
+        onJump={onJump}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '第一章' }))
+    expect(onJump).toHaveBeenCalledWith('ch1.xhtml', 3, '测试一处')
+  })
+
+  it('renders named pattern rule with name and secondary pattern/replacement line', () => {
+    mockRules([rule({ id: 't1', name: '去除尾部广告', pattern: '广告词', replacement: '' })])
+    render(<BookReplacementsSection bookId="b1" />)
+
+    expect(screen.getByText('去除尾部广告')).toBeInTheDocument()
+    expect(screen.getByText('广告词')).toBeInTheDocument()
   })
 })

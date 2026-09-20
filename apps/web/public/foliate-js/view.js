@@ -4,6 +4,7 @@ import { Overlayer } from './overlayer.js'
 import { textWalker } from './text-walker.js'
 
 const SEARCH_PREFIX = 'foliate-search:'
+const SEARCH_ACTIVE_PREFIX = 'foliate-search-active:'
 
 const NOTE_PREFIX = 'foliate-note:'
 
@@ -83,7 +84,7 @@ export class UnsupportedTypeError extends Error {}
 // annotation UI and toggles the reading chrome at the same time.
 export function isInteractiveAnnotationHit(overlayer, point) {
     const [value] = overlayer?.hitTest?.(point) ?? []
-    return typeof value === 'string' && !value.startsWith(SEARCH_PREFIX)
+    return typeof value === 'string' && !value.startsWith(SEARCH_PREFIX) && !value.startsWith(SEARCH_ACTIVE_PREFIX)
 }
 
 const fetchFile = async url => {
@@ -280,8 +281,17 @@ export class View extends HTMLElement {
         this.renderer.setAttribute('exportparts', 'head,foot,filter,container')
         this.renderer.addEventListener('load', e => this.#onLoad(e.detail))
         this.renderer.addEventListener('relocate', e => this.#onRelocate(e.detail))
-        this.renderer.addEventListener('create-overlayer', e =>
-            e.detail.attach(this.#createOverlayer(e.detail)))
+        this.renderer.addEventListener('stabilized', () => this.#emit('stabilized'))
+        this.renderer.addEventListener('create-overlayer', e => {
+            const { detail } = e
+            const overlayer = this.#createOverlayer(detail)
+            detail.attach(overlayer)
+            const list = this.#searchResults.get(detail.index)
+            if (list) for (const item of list) this.addAnnotation(item)
+            // Publish only after attach so annotation listeners can resolve
+            // and draw ranges on the newly created overlay.
+            this.#emit('create-overlay', { index: detail.index })
+        })
         this.renderer.open(book)
         this.#root.append(this.renderer)
 
@@ -610,7 +620,28 @@ export class View extends HTMLElement {
                 }
                 const range = doc ? anchor(doc) : anchor
                 if (range) overlayer.add(value, range, Overlayer.highlight, {
-                    color: 'var(--bd-search-highlight, #fbbf2459)',
+                    color: 'var(--bd-search-highlight, #facc15)',
+                    fillOpacity: 0.32,
+                })
+            }
+            return
+        } else if (value.startsWith(SEARCH_ACTIVE_PREFIX)) {
+            const cfi = value.replace(SEARCH_ACTIVE_PREFIX, '')
+            const { index, anchor } = await this.resolveNavigation(cfi)
+            const obj = this.#getOverlayer(index)
+            if (obj) {
+                const { overlayer, doc } = obj
+                if (remove) {
+                    overlayer.remove(value)
+                    return
+                }
+                const range = doc ? anchor(doc) : anchor
+                if (range) overlayer.add(value, range, Overlayer.highlight, {
+                    color: 'var(--bd-search-active-highlight, #fbbf24)',
+                    fillOpacity: 0.4,
+                    stroke: 'var(--bd-search-active-border, #d97706)',
+                    strokeWidth: 1.5,
+                    strokeOpacity: 0.9,
                 })
             }
             return
@@ -660,7 +691,7 @@ export class View extends HTMLElement {
         const overlayer = new Overlayer(doc)
         doc.addEventListener('click', e => {
             const [value, range, rect] = overlayer.hitTest(e)
-            if (value && !value.startsWith(SEARCH_PREFIX)) {
+            if (value && !value.startsWith(SEARCH_PREFIX) && !value.startsWith(SEARCH_ACTIVE_PREFIX)) {
                 this.#emit('show-annotation', { value, index, range, rect })
             }
         }, false)
@@ -675,17 +706,13 @@ export class View extends HTMLElement {
             if (now - lastHitTestTime < THROTTLE_MS) return
             lastHitTestTime = now
             const [value] = overlayer.hitTest(e)
-            if (value && !value.startsWith(SEARCH_PREFIX)) {
+            if (value && !value.startsWith(SEARCH_PREFIX) && !value.startsWith(SEARCH_ACTIVE_PREFIX)) {
                 doc.body.style.cursor = 'pointer'
             } else {
                 doc.body.style.cursor = ''
             }
         })
 
-        const list = this.#searchResults.get(index)
-        if (list) for (const item of list) this.addAnnotation(item)
-
-        this.#emit('create-overlay', { index })
         return overlayer
     }
     async showAnnotation(annotation) {

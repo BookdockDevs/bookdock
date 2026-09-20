@@ -21,6 +21,8 @@ interface BookReplacementsSectionProps {
   chapterOf?: (href: string | null) => string | null
   /** Point patches that failed to apply, marked with a red 失效 badge */
   invalidIds?: string[]
+  /** Jump to the anchored position when chapter is clicked in a point patch */
+  onJump?: (spineHref: string, textOffset?: number | null, replacement?: string | null) => void
   /** When provided, pattern rows get edit/delete buttons (reader dialog) */
   onEdit?: (rule: TextReplacementRes) => void
   onDelete?: (rule: TextReplacementRes) => void
@@ -32,6 +34,7 @@ export default function BookReplacementsSection({
   points,
   chapterOf,
   invalidIds,
+  onJump,
   onEdit,
   onDelete,
 }: BookReplacementsSectionProps) {
@@ -89,6 +92,7 @@ export default function BookReplacementsSection({
                 patch={rule}
                 invalid={!!invalidIds?.includes(rule.id)}
                 chapter={chapterOf?.(rule.spineHref) ?? null}
+                onJump={onJump}
                 onToggle={() => onPointToggle(rule)}
                 onEdit={onEdit ? () => onEdit(rule) : undefined}
                 onDelete={onDelete ? () => onDelete(rule) : undefined}
@@ -136,19 +140,54 @@ function BookScopedRow({
 }) {
   const _ = useTranslation()
   const effective = rule.effectiveEnabled ?? rule.enabled
-  // No arrow when the replacement is empty: a bare pattern means 净化 (the
-  // match is removed), never a literal "delete" text.
-  const replacementSummary = rule.replacement?.trim() ? `→ ${rule.replacement}` : ''
+  const replacement = rule.replacement?.trim() ?? ''
 
   return (
-    <li className="flex items-center gap-3 py-2">
+    <li
+      className={cn(
+        'group flex items-center gap-3 rounded-xl p-2.5 transition-colors hover:bg-stone-50 dark:hover:bg-stone-800/40',
+        !effective && 'opacity-60',
+      )}
+    >
       <div className="min-w-0 flex-1">
-        {rule.name && (
-          <p className={cn('truncate text-sm', !effective && 'text-stone-400 dark:text-stone-500')}>{rule.name}</p>
+        {rule.name ? (
+          <>
+            <p
+              className={cn(
+                'truncate text-sm font-medium',
+                !effective ? 'text-stone-400 dark:text-stone-500' : 'text-stone-800 dark:text-stone-200',
+              )}
+            >
+              {rule.name}
+            </p>
+            <p className="mt-0.5 truncate font-mono text-xs text-stone-400 dark:text-stone-500">
+              <span className={cn(!replacement && 'line-through')}>{rule.pattern}</span>
+              {replacement && (
+                <>
+                  <span> → </span>
+                  <span className={cn(effective && 'text-emerald-600 dark:text-emerald-400')}>{replacement}</span>
+                </>
+              )}
+            </p>
+          </>
+        ) : (
+          <p
+            className={cn(
+              'truncate font-mono text-sm font-medium',
+              !effective ? 'text-stone-400 dark:text-stone-500' : 'text-stone-800 dark:text-stone-200',
+            )}
+          >
+            <span className={cn(!replacement && 'line-through')}>{rule.pattern}</span>
+            {replacement && (
+              <>
+                <span className="font-normal text-stone-400 dark:text-stone-500"> → </span>
+                <span className={cn(effective ? 'text-emerald-600 dark:text-emerald-400' : 'text-stone-400 dark:text-stone-500')}>
+                  {replacement}
+                </span>
+              </>
+            )}
+          </p>
         )}
-        <p className={cn('truncate font-mono text-xs text-stone-400 dark:text-stone-500', rule.name && 'mt-0.5')}>
-          {rule.pattern}{replacementSummary && ` ${replacementSummary}`}
-        </p>
       </div>
       {count !== undefined && <MatchCountBadge count={count} />}
       <StatusBadge effective={effective} bookScoped />
@@ -174,19 +213,54 @@ function BookReplacementRow({
   const _ = useTranslation()
   const effective = rule.effectiveEnabled ?? rule.enabled
   const override = !!rule.hasOverride
-  // No arrow when the replacement is empty: a bare pattern means 净化 (the
-  // match is removed), never a literal "delete" text.
-  const replacementSummary = rule.replacement?.trim() ? `→ ${rule.replacement}` : ''
+  const replacement = rule.replacement?.trim() ?? ''
 
   return (
-    <li className="flex items-center gap-3 py-2">
+    <li
+      className={cn(
+        'group flex items-center gap-3 rounded-xl p-2.5 transition-colors hover:bg-stone-50 dark:hover:bg-stone-800/40',
+        !effective && 'opacity-60',
+      )}
+    >
       <div className="min-w-0 flex-1">
-        {rule.name && (
-          <p className={cn('truncate text-sm', !effective && 'text-stone-400 dark:text-stone-500')}>{rule.name}</p>
+        {rule.name ? (
+          <>
+            <p
+              className={cn(
+                'truncate text-sm font-medium',
+                !effective ? 'text-stone-400 dark:text-stone-500' : 'text-stone-800 dark:text-stone-200',
+              )}
+            >
+              {rule.name}
+            </p>
+            <p className="mt-0.5 truncate font-mono text-xs text-stone-400 dark:text-stone-500">
+              <span className={cn(!replacement && 'line-through')}>{rule.pattern}</span>
+              {replacement && (
+                <>
+                  <span> → </span>
+                  <span className={cn(effective && 'text-emerald-600 dark:text-emerald-400')}>{replacement}</span>
+                </>
+              )}
+            </p>
+          </>
+        ) : (
+          <p
+            className={cn(
+              'truncate font-mono text-sm font-medium',
+              !effective ? 'text-stone-400 dark:text-stone-500' : 'text-stone-800 dark:text-stone-200',
+            )}
+          >
+            <span className={cn(!replacement && 'line-through')}>{rule.pattern}</span>
+            {replacement && (
+              <>
+                <span className="font-normal text-stone-400 dark:text-stone-500"> → </span>
+                <span className={cn(effective ? 'text-emerald-600 dark:text-emerald-400' : 'text-stone-400 dark:text-stone-500')}>
+                  {replacement}
+                </span>
+              </>
+            )}
+          </p>
         )}
-        <p className={cn('truncate font-mono text-xs text-stone-400 dark:text-stone-500', rule.name && 'mt-0.5')}>
-          {rule.pattern}{replacementSummary && ` ${replacementSummary}`}
-        </p>
       </div>
       {count !== undefined && <MatchCountBadge count={count} />}
       <StatusBadge effective={effective} override={override} />
@@ -196,13 +270,14 @@ function BookReplacementRow({
   )
 }
 
-// Point patch (P2): a single spot anchored in one chapter. The snapshot is the
-// row's identity — it appears once, prefixed by its chapter; a name (when set)
-// becomes the title above it.
+// Point patch (P2): a single spot anchored in one chapter. Point patches
+// do not require naming — the original snapshot and replacement form the row's
+// primary content, with chapter navigation below.
 function PointRow({
   patch,
   invalid,
   chapter,
+  onJump,
   onToggle,
   onEdit,
   onDelete,
@@ -210,34 +285,59 @@ function PointRow({
   patch: TextReplacementRes
   invalid: boolean
   chapter: string | null
+  onJump?: (spineHref: string, textOffset?: number | null, replacement?: string | null) => void
   onToggle: () => void
   onEdit?: () => void
   onDelete?: () => void
 }) {
   const _ = useTranslation()
   const snapshot = patch.originalText ?? ''
-  // No arrow when the replacement is empty: a bare snapshot means 净化 (the
-  // text is removed), never a literal "delete" text.
+  // No arrow when the replacement is empty: a bare snapshot with strikethrough
+  // signifies deletion of the text, never a literal "delete" badge.
   const replacement = patch.replacement?.trim() ?? ''
-  const prefix = [chapter, snapshot].filter(Boolean).join(' · ')
+  const effective = patch.enabled && !invalid
 
   return (
-    <li className="flex items-center gap-3 py-2">
+    <li
+      className={cn(
+        'group flex items-center gap-3 rounded-xl p-2.5 transition-colors hover:bg-stone-50 dark:hover:bg-stone-800/40',
+        !effective && 'opacity-60',
+      )}
+    >
       <div className="min-w-0 flex-1">
-        {patch.name && (
-          <p className={cn('truncate text-sm', (!patch.enabled || invalid) && 'text-stone-400 dark:text-stone-500')}>
-            {patch.name}
-          </p>
-        )}
-        <p className="mt-0.5 truncate font-mono text-xs text-stone-400 dark:text-stone-500">
-          {prefix}
+        <p
+          className={cn(
+            'truncate text-sm font-medium',
+            !effective ? 'text-stone-400 dark:text-stone-500' : 'text-stone-800 dark:text-stone-200',
+          )}
+        >
+          <span className={cn(!replacement && 'line-through')}>{snapshot}</span>
           {replacement && (
             <>
-              <span className="text-stone-300 dark:text-stone-600"> → </span>
-              {replacement}
+              <span className="font-normal text-stone-400 dark:text-stone-500"> → </span>
+              <span className={cn(effective ? 'text-emerald-600 dark:text-emerald-400' : 'text-stone-400 dark:text-stone-500')}>
+                {replacement}
+              </span>
             </>
           )}
         </p>
+        {chapter && (
+          <div className="mt-1 flex items-center gap-1.5">
+            {onJump && patch.spineHref ? (
+              <button
+                type="button"
+                onClick={() => onJump(patch.spineHref!, patch.textOffset, patch.replacement)}
+                className="inline-flex max-w-full items-center rounded-full border border-stone-200/80 bg-stone-100/70 px-2 py-0.5 text-[11px] text-stone-500 transition-colors hover:border-stone-300 hover:bg-stone-200/70 dark:border-stone-700/80 dark:bg-stone-800/60 dark:text-stone-400 dark:hover:border-stone-600 dark:hover:bg-stone-800"
+              >
+                <span className="truncate">{chapter}</span>
+              </button>
+            ) : (
+              <span className="inline-flex max-w-full items-center rounded-full border border-stone-200/80 bg-stone-100/70 px-2 py-0.5 text-[11px] text-stone-500 dark:border-stone-700/80 dark:bg-stone-800/60 dark:text-stone-400 truncate">
+                {chapter}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       {invalid && (
         <span className="shrink-0 rounded border border-red-300 px-1.5 py-0.5 text-[11px] text-red-500 dark:border-red-800 dark:text-red-400">

@@ -18,11 +18,15 @@ const XHTML_TAIL = '</body></html>'
 
 describe('extractChapterText', () => {
   it('concatenates text nodes in document order and records their lengths', () => {
-    const doc = parseXhtml(`${XHTML_HEAD}<p>春宵</p><p>一刻<b>值</b>千金</p>${XHTML_TAIL}`)
+    const doc = parseXhtml(`${XHTML_HEAD}<p>春宵</p>\n  <p>一刻<b>值</b>千金</p>${XHTML_TAIL}`)
     const { text, nodeLengths } = extractChapterText(doc)
-    expect(text).toBe('春宵一刻值千金')
+    expect(text).toBe('春宵 一刻值千金')
     expect(nodeLengths).toEqual([2, 2, 1, 2])
-    expect(nodeLengths.reduce((a, b) => a + b, 0)).toBe(text.length)
+  })
+
+  it('keeps inline text contiguous while separating block-level paragraphs', () => {
+    const doc = parseXhtml(`${XHTML_HEAD}<p>上一段<b>加粗</b></p><p>下一段</p>${XHTML_TAIL}`)
+    expect(extractChapterText(doc).text).toBe('上一段加粗 下一段')
   })
 
   it('excludes script and style subtrees', () => {
@@ -58,6 +62,13 @@ describe('findMatches', () => {
       { start: 4, end: 6 },
       { start: 8, end: 10 },
     ])
+  })
+
+  it('matches a query containing the virtual space between paragraphs', () => {
+    const text = extractChapterText(
+      parseXhtml(`${XHTML_HEAD}<p>上一段</p><p>下一段</p>${XHTML_TAIL}`),
+    ).text
+    expect(findMatches(text, '上一段 下一段')).toEqual([{ start: 0, end: text.length }])
   })
 
   it('matches regex patterns and honors matchCase', () => {
@@ -142,9 +153,19 @@ describe('makeExcerpt', () => {
 describe('offsetsToRange', () => {
   it('maps a plain-text span back to a DOM range', () => {
     const doc = parseXhtml(`${XHTML_HEAD}<p>春宵</p><p>一刻<b>值</b>千金</p>${XHTML_TAIL}`)
-    const range = offsetsToRange(doc, 2, 6)
+    const range = offsetsToRange(doc, 3, 7)
     expect(range).not.toBeNull()
     expect(range!.toString()).toBe('一刻值千')
+  })
+
+  it('maps a span across paragraphs while skipping the virtual separator', () => {
+    const doc = parseXhtml(`${XHTML_HEAD}<p>上一段</p><p>下一段</p>${XHTML_TAIL}`)
+    const text = extractChapterText(doc).text
+    const range = offsetsToRange(doc, 0, text.length)
+
+    expect(text).toBe('上一段 下一段')
+    expect(range).not.toBeNull()
+    expect(range!.toString()).toBe('上一段下一段')
   })
 
   it('returns null when the span is out of range', () => {

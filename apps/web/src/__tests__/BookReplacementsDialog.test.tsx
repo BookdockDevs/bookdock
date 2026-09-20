@@ -7,6 +7,7 @@ import { useBookReplacements, useDeleteReplacement } from '@/api/hooks/useReplac
 import i18n from '../i18n/i18n'
 import BookReplacementsDialog from '../features/reader/components/BookReplacementsDialog'
 import { useReaderApi } from '../features/reader/hooks/useReaderApi'
+import { useReaderState } from '../features/reader/state/reader-state'
 
 vi.mock('@/api/hooks/useReplacements', () => ({
   useReplacements: vi.fn(() => ({ data: { data: [] } })),
@@ -104,5 +105,39 @@ describe('BookReplacementsDialog', () => {
     fireEvent.click(confirmButton!)
 
     expect(deleteReplacement.mutate).toHaveBeenCalledWith('p1', expect.objectContaining({ onSuccess: expect.any(Function) }))
+  })
+
+  it('displays effective rules count in title capsule and excludes disabled rules', () => {
+    mockRules([
+      rule({ id: 't1', enabled: true, effectiveEnabled: true }),
+      rule({ id: 't2', enabled: true, effectiveEnabled: false }), // disabled for this book
+      rule({ id: 'p1', matchType: 'point', spineHref: 'c1', originalText: '错字', replacement: '对字', enabled: true }),
+    ])
+    render(<BookReplacementsDialog bookId="b1" onClose={() => {}} />)
+
+    // Only t1 and p1 are effective, t2 is disabled for this book -> count should be 2
+    expect(screen.getByText('2')).toBeInTheDocument()
+    expect(screen.queryByText('3')).not.toBeInTheDocument()
+  })
+
+  it('omits count capsule when no rules are effective', () => {
+    mockRules([
+      rule({ id: 't1', enabled: true, effectiveEnabled: false }),
+    ])
+    render(<BookReplacementsDialog bookId="b1" onClose={() => {}} />)
+
+    expect(screen.queryByText('1')).not.toBeInTheDocument()
+  })
+
+  it('jumps to a point patch position instead of only its chapter', () => {
+    const display = vi.fn()
+    vi.mocked(useReaderApi).mockReturnValue({ renderer: { display } } as unknown as ReturnType<typeof useReaderApi>)
+    useReaderState.setState({ tocItems: [{ label: '第一章', href: 'c1' }] })
+    mockRules([rule({ id: 'p1', bookId: 'b1', matchType: 'point', spineHref: 'c1', textOffset: 12, originalText: '旧文', replacement: '新文' })])
+
+    render(<BookReplacementsDialog bookId="b1" onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: '第一章' }))
+
+    expect(display).toHaveBeenCalledWith('replacement-hit:c1:12:%E6%96%B0%E6%96%87')
   })
 })

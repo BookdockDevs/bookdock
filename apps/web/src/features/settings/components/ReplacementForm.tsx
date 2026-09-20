@@ -160,8 +160,8 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
 
     if (editing) {
       const body: ReplacementUpdateReq = {
-        name: name.trim() || null,
-        group: group.trim() || null,
+        name: isPoint ? null : (name.trim() || null),
+        group: isPoint || scope === 'book' ? null : (group.trim() || null),
         replacement: replacement === '' ? null : replacement,
       }
       if (isPoint) {
@@ -188,8 +188,8 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
         : trimmed
       const common = {
         replacement: replacement === '' ? null : replacement,
-        name: name.trim() || undefined,
-        group: group.trim() || undefined,
+        name: scope === 'point' ? undefined : (name.trim() || undefined),
+        group: scope === 'global' ? (group.trim() || undefined) : undefined,
       }
       const body: ReplacementCreateReq = scope === 'point'
         ? {
@@ -248,20 +248,21 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
-        <SettingsFormField label={_('settings.replacementsName')} className={scope !== 'global' ? 'sm:col-span-2' : undefined}>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            disabled={saving}
-            className={settingsInputClass}
-          />
-        </SettingsFormField>
-        {/* 分组 is a grouping tool for GLOBAL rules only (the settings page
-            groups by it); book-scoped rules and point patches never display it,
-            so the field is hidden and the stored value is cleared. */}
-        {scope === 'global' && (
+      {scope !== 'point' && (
+        <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+          <SettingsFormField label={_('settings.replacementsName')} className={scope !== 'global' ? 'sm:col-span-2' : undefined}>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={saving}
+              className={settingsInputClass}
+            />
+          </SettingsFormField>
+          {/* 分组 is a grouping tool for GLOBAL rules only (the settings page
+              groups by it); book-scoped rules and point patches never display it,
+              so the field is hidden and the stored value is cleared. */}
+          {scope === 'global' && (
           <SettingsFormField label={_('settings.replacementsGroup')}>
             <div ref={groupContainerRef} className="relative">
               <input
@@ -356,6 +357,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
           </SettingsFormField>
         )}
       </div>
+      )}
 
       <div className="min-w-0">
         <SettingsFormField

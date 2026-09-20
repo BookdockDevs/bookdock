@@ -72,17 +72,88 @@ describe('foliate view renderer search contract', () => {
       'foliate-search:epubcfi(/6/2!/4/2)',
       range,
       Overlayer.highlight,
-      { color: 'var(--bd-search-highlight, #fbbf2459)' },
+      { color: 'var(--bd-search-highlight, #facc15)', fillOpacity: 0.32 },
     )
+
+    await view.addAnnotation({ value: 'foliate-search-active:epubcfi(/6/2!/4/2)' })
+
+    expect(overlayer.add).toHaveBeenCalledWith(
+      'foliate-search-active:epubcfi(/6/2!/4/2)',
+      range,
+      Overlayer.highlight,
+      {
+        color: 'var(--bd-search-active-highlight, #fbbf24)',
+        fillOpacity: 0.4,
+        stroke: 'var(--bd-search-active-border, #d97706)',
+        strokeWidth: 1.5,
+        strokeOpacity: 0.9,
+      },
+    )
+  })
+
+  it('emits create-overlay after the overlay is attached', async () => {
+    const doc = document.implementation.createHTMLDocument('overlay-lifecycle')
+    doc.body.innerHTML = '<p>正文</p>'
+    const book = {
+      metadata: { language: 'zh-CN' },
+      rendition: { layout: 'reflowable' },
+      sections: [{ createDocument: async () => doc }],
+      dir: 'ltr',
+    }
+    const view = new View()
+    let attachedOverlayer: unknown
+    const attachedStates: boolean[] = []
+    view.addEventListener('create-overlay', (event) => {
+      const index = (event as CustomEvent).detail?.index
+      attachedStates.push(index === 0 && !!attachedOverlayer)
+    })
+
+    await view.open(book as never)
+    ;(view.renderer as any).getContents = () => [{ index: 0, overlayer: attachedOverlayer }]
+    view.renderer.dispatchEvent(new CustomEvent('create-overlayer', {
+      detail: {
+        doc,
+        index: 0,
+        attach: (overlayer: unknown) => { attachedOverlayer = overlayer },
+      },
+    }))
+
+    expect(attachedStates.length).toBeGreaterThan(0)
+    expect(attachedStates.every(Boolean)).toBe(true)
+    view.close()
+    view.remove()
+  })
+
+  it('forwards renderer stabilization after the initial layout settles', async () => {
+    const doc = document.implementation.createHTMLDocument('stabilized')
+    doc.body.innerHTML = '<p>正文</p>'
+    const book = {
+      metadata: { language: 'zh-CN' },
+      rendition: { layout: 'reflowable' },
+      sections: [{ createDocument: async () => doc }],
+      dir: 'ltr',
+    }
+    const view = new View()
+    const stabilized = vi.fn()
+    view.addEventListener('stabilized', stabilized)
+
+    await view.open(book as never)
+    view.renderer.dispatchEvent(new Event('stabilized'))
+
+    expect(stabilized).toHaveBeenCalledTimes(1)
+    view.close()
+    view.remove()
   })
 
   it('classifies annotation hits as handled by the overlay, not generic content clicks', async () => {
     const { isInteractiveAnnotationHit } = await import('../../public/foliate-js/view.js')
     const overlayer = { hitTest: vi.fn().mockReturnValue(['foliate-note:epubcfi(/6/2)']) }
     const searchOverlayer = { hitTest: vi.fn().mockReturnValue(['foliate-search:epubcfi(/6/2)']) }
+    const activeSearchOverlayer = { hitTest: vi.fn().mockReturnValue(['foliate-search-active:epubcfi(/6/2)']) }
 
     expect(isInteractiveAnnotationHit(overlayer, { x: 10, y: 20 })).toBe(true)
     expect(isInteractiveAnnotationHit(searchOverlayer, { x: 10, y: 20 })).toBe(false)
+    expect(isInteractiveAnnotationHit(activeSearchOverlayer, { x: 10, y: 20 })).toBe(false)
     expect(isInteractiveAnnotationHit(null, { x: 10, y: 20 })).toBe(false)
   })
 

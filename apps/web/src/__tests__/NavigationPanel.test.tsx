@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { act, render, screen, fireEvent } from '@testing-library/react'
 import { createRef } from 'react'
 import { NavigationPanel } from '../features/reader/components/NavigationPanel'
+import { formatCardExcerpt } from '../features/reader/lib/book-search'
 import { useReaderState } from '../features/reader/state/reader-state'
 import { useReaderApi } from '../features/reader/hooks/useReaderApi'
 import { useAnnotations } from '../features/reader/hooks/useAnnotations'
@@ -14,6 +15,10 @@ vi.mock('../features/reader/hooks/useReaderApi', () => ({
 }))
 
 vi.mock('../features/reader/components/AiPanel', () => ({
+  default: () => null,
+}))
+
+vi.mock('../features/reader/components/StatsPanel', () => ({
   default: () => null,
 }))
 
@@ -57,6 +62,7 @@ describe('NavigationPanel', () => {
       tocItems: [],
       tocBookId: null,
       currentChapter: null,
+      currentChapterHref: null,
       selection: null,
     })
   })
@@ -171,6 +177,24 @@ describe('NavigationPanel', () => {
     expect(currentButton).toHaveClass('font-medium')
   })
 
+  it('highlights the matching duplicate chapter by href', () => {
+    useReaderState.setState({
+      tocItems: [
+        { label: '第一章', href: 'chapter-0001.xhtml' },
+        { label: '第二章', href: 'chapter-0002.xhtml' },
+        { label: '第一章', href: 'chapter-0003.xhtml' },
+      ],
+      currentChapter: '第一章',
+      currentChapterHref: 'chapter-0003.xhtml',
+    })
+
+    render(<NavigationPanel bookId="book-1" open />)
+
+    const currentButtons = screen.getAllByRole('button', { name: '第一章' })
+    expect(currentButtons[0]).not.toHaveClass('font-medium')
+    expect(currentButtons[1]).toHaveClass('font-medium')
+  })
+
   it('prefers the TOC label when volume nodes make spine and tree indexes differ', () => {
     useReaderState.setState({
       tocItems: [
@@ -270,6 +294,31 @@ describe('NavigationPanel', () => {
     } finally {
       window.HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect
     }
+  })
+
+  it('restores notes scroll position after switching to another side page and back', async () => {
+    render(<NavigationPanel bookId="book-1" open />)
+
+    await act(() => {
+      useReaderState.setState({ activeNavTab: 'notes' })
+    })
+
+    const listContainer = document.querySelector('.overflow-y-auto') as HTMLDivElement
+    expect(listContainer).toBeTruthy()
+
+    await act(() => {
+      listContainer.scrollTop = 123
+      fireEvent.scroll(listContainer)
+    })
+
+    await act(() => {
+      useReaderState.setState({ activeNavTab: 'stats' })
+    })
+    await act(() => {
+      useReaderState.setState({ activeNavTab: 'notes' })
+    })
+
+    expect(listContainer.scrollTop).toBe(123)
   })
 
   describe('book search overlay', () => {
@@ -468,7 +517,7 @@ describe('NavigationPanel', () => {
       fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
       await new Promise((r) => setTimeout(r, 500))
 
-      expect(screen.getByText('reader.searchResultsPrefix')).toBeInTheDocument()
+      expect(screen.getByTestId('search-nav-capsule')).toBeInTheDocument()
       expect(screen.getByText('1/3')).toBeInTheDocument()
 
       fireEvent.click(screen.getByTitle('reader.next'))
@@ -487,10 +536,10 @@ describe('NavigationPanel', () => {
       fireEvent.click(screen.getByTitle('reader.search'))
       fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
       await new Promise((r) => setTimeout(r, 500))
-      expect(screen.getByText('reader.searchResultsPrefix')).toBeInTheDocument()
+      expect(screen.getByTestId('search-nav-capsule')).toBeInTheDocument()
 
       fireEvent.click(screen.getByTitle('annotation.cancel'))
-      expect(screen.queryByText('reader.searchResultsPrefix')).toBeNull()
+      expect(screen.queryByTestId('search-nav-capsule')).toBeNull()
       expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
     })
   })
@@ -579,6 +628,22 @@ describe('NavigationPanel', () => {
       // Click cancel in selection header exits selection mode
       fireEvent.click(cancelBtn)
       expect(screen.queryByText('annotation.exportSelected')).toBeNull()
+    })
+  })
+  describe('formatCardExcerpt', () => {
+    it('leaves short pre intact', () => {
+      const excerpt = { pre: '一段话前缀', match: '关键词', post: '后续内容' }
+      expect(formatCardExcerpt(excerpt)).toEqual(excerpt)
+    })
+
+    it('caps long pre to keep the keyword near the front and avoid truncation', () => {
+      const longPre = '一二三四五六七八九十一二三四五六七八九十'
+      const excerpt = { pre: longPre, match: '父亲学做生意了', post: '后续很长的句子' }
+      const formatted = formatCardExcerpt(excerpt, 16)
+      expect(formatted.pre.startsWith('…')).toBe(true)
+      expect(formatted.pre).toBe('…五六七八九十一二三四五六七八九十')
+      expect(formatted.match).toBe('父亲学做生意了')
+      expect(formatted.post).toBe('后续很长的句子')
     })
   })
 })

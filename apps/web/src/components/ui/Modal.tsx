@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from '@/hooks/useTranslation'
 
 interface ModalProps {
-  title: string
+  title: ReactNode
   onClose: () => void
   /** Extra header actions between the title and the close button */
   actions?: ReactNode

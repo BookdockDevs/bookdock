@@ -119,6 +119,11 @@ describe('ReplacementForm', () => {
       })
     })
 
+    it('omits the name field when scope is point', () => {
+      render(<ReplacementForm bookId="b1" selection={selection()} onDone={() => {}} />)
+      expect(screen.queryByLabelText(/名称/)).not.toBeInTheDocument()
+    })
+
     it('creates a global pattern rule from "all matches" (no bookId)', () => {
       const createReplacement = mockCreate()
       render(<ReplacementForm bookId="b1" selection={selection()} onDone={() => {}} />)
@@ -272,6 +277,17 @@ describe('ReplacementForm', () => {
       expect(call.body).toMatchObject({ originalText: '新快照' })
       expect(call.body).not.toHaveProperty('pattern')
       expect(call.body).not.toHaveProperty('matchType')
+    })
+
+    it('omits the name field when editing a point patch', () => {
+      render(
+        <ReplacementForm
+          initial={rule({ id: 'p1', pattern: null, matchType: 'point', originalText: '错字', name: '旧命名', bookId: 'bX', scope: 'book' })}
+          bookId="b1"
+          onDone={() => {}}
+        />,
+      )
+      expect(screen.queryByLabelText(/名称/)).not.toBeInTheDocument()
     })
 
     it('converts a point patch into a global rule (snapshot becomes the pattern)', () => {
