@@ -41,7 +41,7 @@ Then open `http://localhost:3000` (the server also serves the built web UI) and 
 
 To use a published registry image instead of building from the checkout, set `BOOKDOCK_IMAGE` to the image tag and run `docker compose pull` followed by `docker compose up -d --no-build`. Docker Hub is only needed for this pull-based workflow; building from the repository does not require Docker Hub.
 
-The repository publishes Docker Hub images when a `v*` tag is pushed. To enable that workflow, add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` as GitHub Actions secrets, create a public Docker Hub repository named `bookdock`, and push a release tag. For example, `v0.3.0` publishes `<dockerhub-username>/bookdock:0.3.0`, `<dockerhub-username>/bookdock:0.3`, and `<dockerhub-username>/bookdock:latest`. Until an image is published, use the source-build command above.
+The repository publishes Docker Hub images when a `v*` tag is pushed. To enable that workflow, add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` as GitHub Actions secrets, create a public Docker Hub repository named `bookdock`, and push a release tag. For example, `v0.3.1` publishes `<dockerhub-username>/bookdock:0.3.1`, `<dockerhub-username>/bookdock:0.3`, and `<dockerhub-username>/bookdock:latest`. Until an image is published, use the source-build command above.
 
 ## Commands
 

@@ -2,7 +2,37 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.3.0] - Unreleased
+## [0.3.1] - Unreleased
+
+### Highlights
+
+- Improved reader startup and resume reliability: EPUB resource loading is more parallel and cache-aware, slow network states are visible without sticking, and invalid saved positions recover safely.
+- Reader annotations, search navigation, and media handling are more stable across reflow, delayed iframe layout, chapter jumps, and deferred media loading.
+- Share cards now adapt typography and layout to excerpt length, while the share editor is a single inline customization surface.
+
+### Added
+
+- Persisted raw EPUB chapter-text cache in browser IndexedDB with versioned namespaces and a bounded per-book LRU budget, plus bounded reader resource caching.
+- Reader recovery controls for failed or slow iframe loading, invalid CFI fallback, retry, and start-over; explicit sidebar tabs and reading state restore safely.
+- Deferred video/audio feedback with adaptive placeholders, readiness-aware controls, and retryable media errors.
+- Active search-result highlighting, exact point-replacement jumps, stable chapter tracking, and improved replacement management UI.
+- Server gzip/Brotli compression for eligible API/static responses while preserving range and binary-reader semantics.
+
+### Changed
+
+- EPUB loading reuses known archive sizes, bounds range reads, parallelizes resource URL resolution, and keeps heavy media off the initial text-rendering path.
+- Annotation and bookmark positioning now preserves element-edge CFI ranges, orders annotations by numeric reading position, and survives iframe/layout stabilization and tab focus changes.
+- Share card typography, CJK wrapping, footer anchoring, templates, and customization controls were redesigned; uncategorized library navigation now exits only when it becomes empty after a mutation.
+- Reader search range mapping recognizes block boundaries and active-result state without treating transient highlights as annotations.
+- Test and fixture data no longer relies on real book titles or private sample metadata.
+
+### Fixed
+
+- Mid-chapter bookmarks and annotations no longer collapse to the chapter start when CFI boundaries use element containers.
+- Search ranges across paragraphs, delayed overlay layout, duplicate media play buttons, native loading controls, and media retry states are handled correctly.
+- Saved reading positions are no longer overwritten by initial start-of-book relocations before restoration settles.
+
+## [0.3.0] - 2026-09-20
 
 ### Highlights
 
@@ -200,7 +230,37 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.3.0] - 待发布
+### [0.3.1] - 待发布
+
+#### 主要更新
+
+- 优化阅读器启动与续读可靠性：EPUB 资源加载更并行、更充分利用缓存，慢网络状态不会黏住，失效的保存位置也能安全恢复。
+- 阅读器标注、搜索跳转与媒体处理在重排、iframe 延迟布局、章节跳转和延迟媒体加载场景下更加稳定。
+- 分享卡片会根据摘录长度自适应排版，分享编辑器改为单一的行内定制界面。
+
+#### 新增
+
+- 使用带版本命名空间的浏览器 IndexedDB 持久化 EPUB 原始章节文本，并按书籍限制 LRU 容量；同时补充有界的阅读器资源缓存。
+- 阅读器初始化失败/缓慢加载、无效 CFI 的恢复提示，以及重试和从头开始控制；侧栏标签和阅读状态恢复也更加可靠。
+- 延迟音视频的自适应占位、按媒体就绪状态显示的控件反馈，以及可重试的媒体错误状态。
+- 当前搜索结果高亮、点替换后的精确跳转、稳定的章节追踪与更完善的替换管理界面。
+- 为符合条件的 API 与静态响应启用 gzip/Brotli 压缩，同时保留 Range 与阅读器二进制资源语义。
+
+#### 变更
+
+- EPUB 加载会复用已知压缩包大小、限制 Range 入口读取、并行解析资源 URL，并将大型媒体移出初始正文渲染路径。
+- 标注与书签定位保留元素边界 CFI，按数值阅读位置排序，并能跨 iframe/布局稳定阶段与标签页焦点切换保持有效。
+- 分享卡片的字体、中文换行、页脚锚定、模板与定制控件全面调整；未分类书库视图仅在最后一本书因操作离开后才自动退出。
+- 阅读器搜索范围映射识别块级边界与当前结果状态，不再把临时搜索高亮误当作标注。
+- 测试与演示夹具不再依赖真实书名或私有样例元数据。
+
+#### 修复
+
+- CFI 边界落在元素容器上时，章节中部书签和标注不再错误折叠到章节开头。
+- 跨段落搜索范围、延迟的覆盖层布局、重复媒体播放按钮、原生加载控件和媒体重试状态处理不再错乱。
+- 保存的阅读位置在续读完成前不再被初始跳转到书首的进度写入覆盖。
+
+### [0.3.0] - 2026-09-20
 
 #### 主要更新
 
