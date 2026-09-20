@@ -3803,33 +3803,59 @@ export class Paginator extends HTMLElement {
             // across writing-mode boundaries. When direction is unknown
             // (not yet cached), keep nearby views; #beforeRender will
             // clean up if the loaded section turns out to differ.
-            if (directionChanged) {
-                this.#destroyAllViews()
-            } else {
-                const keep = new Set([index])
-                if (!this.noContinuousScroll) {
-                    for (const [i] of this.#views) {
-                        if (Math.abs(i - index) <= 2) keep.add(i)
-                    }
-                }
-                this.#clearViewsExcept(keep)
-            }
             const oldIndex = this.#primaryIndex
             const onLoad = detail => {
-                if (oldIndex >= 0 && !this.#views.has(oldIndex))
+                if (oldIndex >= 0 && oldIndex !== detail.index
+                    && this.noContinuousScroll && this.#views.has(oldIndex)) {
+                    this.#destroyView(oldIndex)
+                } else if (oldIndex >= 0 && !this.#views.has(oldIndex)) {
                     this.sections[oldIndex]?.unload?.()
+                }
                 this.setStyles(this.#styles)
                 this.dispatchEvent(new CustomEvent('load', { detail }))
             }
-            await this.#display(Promise.resolve(this.sections[index].load())
-                .then(async src => {
-                    const data = await this.sections[index].loadContent?.()
-                    return { index, src, data, anchor, onLoad, select }
-                }).catch(e => {
-                    console.warn(e)
-                    console.warn(new Error(`Failed to load section ${index}`))
-                    return {}
-                }))
+            const keep = new Set([index])
+            // Keep the previous primary view until the destination is ready.
+            // If the destination fails, the reader can remain usable instead
+            // of revealing an empty container after the old view was cleared.
+            if (oldIndex >= 0 && !directionChanged) keep.add(oldIndex)
+            if (!this.noContinuousScroll) {
+                for (const [i] of this.#views) {
+                    if (Math.abs(i - index) <= 2) keep.add(i)
+                }
+            }
+            if (directionChanged) {
+                this.#destroyAllViews()
+            } else {
+                this.#clearViewsExcept(keep)
+            }
+            try {
+                await this.#display(Promise.resolve(this.sections[index].load())
+                    .then(async src => {
+                        if (typeof src !== 'string' || !src) {
+                            throw new Error(`Section ${index} has no readable source`)
+                        }
+                        const data = await this.sections[index].loadContent?.()
+                        return { index, src, data, anchor, onLoad, select }
+                    }).catch(e => {
+                        console.warn(e)
+                        console.warn(new Error(`Failed to load section ${index}`))
+                        throw e
+                    }))
+            } catch (error) {
+                if (isCurrent()) {
+                    // #display may have assigned the failed target as primary
+                    // before its iframe load rejected. Restore the previous
+                    // view while the caller presents a retry affordance.
+                    if (oldIndex >= 0 && this.#views.has(oldIndex)) {
+                        this.#primaryIndex = oldIndex
+                        this.#syncA11y()
+                    }
+                    this.#container.style.opacity = '1'
+                    this.#stabilizing = false
+                }
+                throw error
+            }
         }
     }
     async goTo(target) {

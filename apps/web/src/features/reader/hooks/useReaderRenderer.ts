@@ -36,6 +36,7 @@ interface UseReaderRendererOptions {
   onTocReady?: (items: { label: string; href: string; level?: number }[]) => void
   onJumpConfirmed?: (e: { cfi: string }) => void
   onNavigatePending?: (e: Parameters<RendererEvents['navigatePending']>[0]) => void
+  onNavigateError?: (e: Parameters<RendererEvents['navigateError']>[0]) => void
   onChromeToggle?: () => void
   onUserJump?: () => void
   onReplacementInvalid?: (e: Parameters<RendererEvents['replacementInvalid']>[0]) => void
@@ -65,6 +66,7 @@ export function useReaderRenderer({
   onTocReady,
   onJumpConfirmed,
   onNavigatePending,
+  onNavigateError,
   onChromeToggle,
   onUserJump,
   onReplacementInvalid,
@@ -142,6 +144,7 @@ export function useReaderRenderer({
   const onTocReadyRef = useRef(onTocReady)
   const onJumpConfirmedRef = useRef(onJumpConfirmed)
   const onNavigatePendingRef = useRef(onNavigatePending)
+  const onNavigateErrorRef = useRef(onNavigateError)
   const onChromeToggleRef = useRef(onChromeToggle)
   const onUserJumpRef = useRef(onUserJump)
   const onReplacementInvalidRef = useRef(onReplacementInvalid)
@@ -181,6 +184,7 @@ export function useReaderRenderer({
   onTocReadyRef.current = onTocReady
   onJumpConfirmedRef.current = onJumpConfirmed
   onNavigatePendingRef.current = onNavigatePending
+  onNavigateErrorRef.current = onNavigateError
   onChromeToggleRef.current = onChromeToggle
   onUserJumpRef.current = onUserJump
   onReplacementInvalidRef.current = onReplacementInvalid
@@ -271,6 +275,7 @@ export function useReaderRenderer({
     const unsubToc = newRenderer.on('tocReady', (items) => { if (isCurrentRenderer()) onTocReadyRef.current?.(items) })
     const unsubJumpConfirmed = newRenderer.on('jumpConfirmed', (e) => { if (isCurrentRenderer()) onJumpConfirmedRef.current?.(e) })
     const unsubNavigatePending = newRenderer.on('navigatePending', (e) => { if (isCurrentRenderer()) onNavigatePendingRef.current?.(e) })
+    const unsubNavigateError = newRenderer.on('navigateError', (e) => { if (isCurrentRenderer()) onNavigateErrorRef.current?.(e) })
     const unsubChromeToggle = newRenderer.on('chromeToggle', () => { if (isCurrentRenderer()) onChromeToggleRef.current?.() })
     const unsubUserJump = newRenderer.on('userJump', () => { if (isCurrentRenderer()) onUserJumpRef.current?.() })
     const unsubReplacementInvalid = newRenderer.on('replacementInvalid', (e) => { if (isCurrentRenderer()) onReplacementInvalidRef.current?.(e) })
@@ -292,6 +297,7 @@ export function useReaderRenderer({
       unsubToc()
       unsubJumpConfirmed()
       unsubNavigatePending()
+      unsubNavigateError()
       unsubChromeToggle()
       unsubUserJump()
       unsubReplacementInvalid()

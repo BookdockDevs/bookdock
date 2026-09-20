@@ -257,6 +257,11 @@ const parseCache = new Map<string, Promise<any>>()
 // the per-chapter cost is amortized by the text memo below.
 export const FULL_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024
 
+// zip.js defaults to 64 KiB. EPUB chapter entries are commonly much larger,
+// and HttpReader fetches each chunk serially, so the default turns one chapter
+// into dozens of local file requests before the iframe can render it.
+export const RANGE_CHUNK_SIZE = 1024 * 1024
+
 // A single stalled Range fetch otherwise hangs chapter navigation forever:
 // the View.load iframe guard cannot help because the hang happens before the
 // navigation starts. Text chapters resolve in <1s, so hitting this budget
@@ -733,12 +738,10 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
       if (!video.paused) wrapper.classList.add('is-playing')
     }
 
-    // Deferred heavy media resolution:
-    // The placeholder card renders immediately, but the full-blob fetch is
-    // deferred until the media nears the viewport or the user presses play.
-    // Background-fetching every deferred blob right after render starves the
-    // 6 same-origin HTTP/1.1 connections a slow server needs for chapter
-    // prefetch and CSS.
+    // Resolve heavy media in the background after the chapter has had one task
+    // boundary to paint its text. A chapter iframe is sized to its full
+    // document, so an IntersectionObserver would effectively eager-load every
+    // media element while still making the behavior depend on iframe layout.
     const deferredSrc = video.dataset.bdDeferredSrc
       || video.querySelector('[data-bd-deferred-src]')?.getAttribute('data-bd-deferred-src')
 
@@ -888,21 +891,9 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
         }
       }
       startDeferredFetch = startFetch
-      // The media lives in the iframe document, so the observer must be
-      // created from that window to intersect against its viewport.
-      const view = (video.ownerDocument as Document | null)?.defaultView
-      if (view && typeof view.IntersectionObserver === 'function') {
-        const io = new view.IntersectionObserver((entries) => {
-          if (entries.some((entry) => entry.isIntersecting)) {
-            io.disconnect()
-            startFetch()
-          }
-        }, { rootMargin: '300px' })
-        io.observe(wrapper)
-      } else {
-        // No IntersectionObserver (e.g. test jsdom): keep the old eager fetch
-        startFetch()
-      }
+      const mediaWindow = (video.ownerDocument as Document | null)?.defaultView ?? view
+      if (mediaWindow) mediaWindow.setTimeout(startFetch, 0)
+      else startFetch()
     } else {
       // Directly bind the first source's blob URL to the video element if unset.
       const firstSource = video.querySelector('source')
@@ -974,22 +965,12 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
             })
           })
       }
-      const view = (audio.ownerDocument as Document | null)?.defaultView
-      if (view && typeof view.IntersectionObserver === 'function') {
-        const io = new view.IntersectionObserver((entries) => {
-          if (entries.some((entry) => entry.isIntersecting)) {
-            io.disconnect()
-            startFetch()
-          }
-        }, { rootMargin: '300px' })
-        io.observe(audio)
-        // best effort: native control clicks may not surface on the element,
-        // but a tap on its box should still start the fetch
-        audio.addEventListener('click', () => { if (!audio.src) startFetch() })
-      } else {
-        // No IntersectionObserver (e.g. test jsdom): keep the old eager fetch
-        startFetch()
-      }
+      const mediaWindow = (audio.ownerDocument as Document | null)?.defaultView ?? view
+      if (mediaWindow) mediaWindow.setTimeout(startFetch, 0)
+      else startFetch()
+      // Native control clicks may not surface on the element, but a tap on its
+      // box should still start the fetch if the scheduled task has not run.
+      audio.addEventListener('click', () => { if (!audio.src) startFetch() })
     } else {
       const firstSource = audio.querySelector('source')
       if (firstSource?.src && !audio.src) {
@@ -1041,7 +1022,7 @@ async function openZipEntryMap(url: string, foliate: any, bookSize?: number) {
     return openZipFromWholeFile(url, foliate)
   }
   try {
-    zipConfigure({ useWebWorkers: false })
+    zipConfigure({ useWebWorkers: false, chunkSize: RANGE_CHUNK_SIZE })
     // The init probe (Range: bytes=0-0) throws ERR_HTTP_RANGE when the server
     // ignores Range, which lands us in the fallback below.
     const reader = new ZipReader(new HttpReader(url, { useRangeHeader: true }))
@@ -1509,6 +1490,7 @@ export class FoliateReader implements BookReader {
   private navigationPending = new NavigationPending((pending) => {
     this.emit('navigatePending', { pending })
   })
+  private navigationIntent = 0
   private lastRange: Range | null = null
   private conversion: ChineseConversion = conversionMode
   // Snapshot of the rules this instance last applied, for change detection —
@@ -2442,7 +2424,9 @@ export class FoliateReader implements BookReader {
     // History back/forward is user-initiated but marks itself internal so it
     // doesn't re-enter the back stack; showPending re-arms the indicator.
     if (!opts?.internal || opts?.showPending) {
-      const gen = this.beginPendingNavigation(this.resolveNavigationTarget(target) ?? undefined)
+      const resolvedTarget = this.resolveNavigationTarget(target) ?? undefined
+      const intent = ++this.navigationIntent
+      const gen = this.beginPendingNavigation(resolvedTarget)
       try {
         await this.navigateTo(target, opts)
       } catch (err) {
@@ -2450,7 +2434,15 @@ export class FoliateReader implements BookReader {
         // handlers. Keep a failed chapter load from becoming an unhandled
         // rejection; initial internal navigation still reaches mount's error
         // path below.
-        console.warn('[FoliateReader] navigation failed:', err)
+        const error = err instanceof Error ? err : new Error(String(err))
+        console.warn('[FoliateReader] navigation failed:', error)
+        if (intent === this.navigationIntent) {
+          this.emit('navigateError', {
+            target,
+            ...(resolvedTarget ? { sectionIndex: resolvedTarget.sectionIndex } : {}),
+            error,
+          })
+        }
         if (opts?.internal && !opts.showPending) throw err
       } finally {
         this.navigationPending.end(gen)
@@ -2636,6 +2628,7 @@ export class FoliateReader implements BookReader {
   // fast to need the spinner (see shouldArmPending).
   async next() {
     if (!this.view) return
+    this.navigationIntent++
     this.emit('userInteraction')
     if (this.readingMode === 'page'
       && !turnsCrossChapter(1, this.view.renderer?.page, this.view.renderer?.pages)) {
@@ -2662,7 +2655,9 @@ export class FoliateReader implements BookReader {
         await this.view?.renderer?.nextSection()
       }
     } catch (err) {
-      console.warn('[FoliateReader] next navigation failed:', err)
+      const error = err instanceof Error ? err : new Error(String(err))
+      console.warn('[FoliateReader] next navigation failed:', error)
+      this.emit('navigateError', { target: `chapter:${nextIndex}`, sectionIndex: nextIndex, error })
     } finally {
       if (pending !== null) this.navigationPending.end(pending)
     }
@@ -2670,6 +2665,7 @@ export class FoliateReader implements BookReader {
 
   async prev() {
     if (!this.view) return
+    this.navigationIntent++
     this.emit('userInteraction')
     if (this.readingMode === 'page'
       && !turnsCrossChapter(-1, this.view.renderer?.page, this.view.renderer?.pages)) {
@@ -2693,7 +2689,9 @@ export class FoliateReader implements BookReader {
         await this.view?.renderer?.prevSection()
       }
     } catch (err) {
-      console.warn('[FoliateReader] previous navigation failed:', err)
+      const error = err instanceof Error ? err : new Error(String(err))
+      console.warn('[FoliateReader] previous navigation failed:', error)
+      this.emit('navigateError', { target: `chapter:${prevIndex}`, sectionIndex: prevIndex, error })
     } finally {
       if (pending !== null) this.navigationPending.end(pending)
     }

@@ -77,6 +77,7 @@ export default function Reader() {
   const mediaErrorCooldownRef = useRef(false)
   // Chapter-switch loading indicator (slow cross-chapter navigation)
   const [navPending, setNavPending] = useState(false)
+  const [navError, setNavError] = useState<{ target?: string; chapter?: string } | null>(null)
   // Changing the initial CFI ref alone cannot trigger the renderer effect.
   // This state records the explicit choice to bypass a failed restore.
   const [progressStartOver, setProgressStartOver] = useState(false)
@@ -648,6 +649,7 @@ export default function Reader() {
       // The destination is now the committed position — drop the pre-update
       navInFlightRef.current = false
       setPendingNavChapter(null)
+      setNavError(null)
       if (e.source !== 'tts' && !keepChromePinnedRef.current) setChromePinned(false)
       setSelection(null)
       if (e.source !== 'tts') pingReadingTimer()
@@ -724,6 +726,7 @@ export default function Reader() {
       // spinner itself is delayed by NavigationPending to avoid fast-jump
       // flashes. A fast relocate may settle before that delayed event exists.
       if (!e.started) setNavPending(e.pending)
+      if (e.started) setNavError(null)
       if (e.target) {
         const { sectionIndex, fraction, isJump } = e.target
         // Same-chapter page turns do not touch the UI, but explicit same-
@@ -739,6 +742,14 @@ export default function Reader() {
         // remains inside the current section. Relocate overwrites it later.
         if (fraction !== undefined) setPercent(Math.round(fraction * 100))
       }
+    },
+    onNavigateError: (e) => {
+      navInFlightRef.current = false
+      setNavPending(false)
+      setNavError({
+        target: e.target,
+        chapter: e.sectionIndex === undefined ? undefined : sectionTocLabels?.[e.sectionIndex],
+      })
     },
     onChromeToggle: () => {
       keepChromePinnedRef.current = false
@@ -1325,6 +1336,28 @@ export default function Reader() {
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="animate-spin text-[var(--bd-read-sub)]">
                     <path d="M21 12a9 9 0 11-6.219-8.56" />
                   </svg>
+                </div>
+              </div>
+            )}
+            {readerReady && navError && (
+              <div className="pointer-events-none absolute inset-x-0 top-1/2 z-30 flex -translate-y-1/2 justify-center px-4">
+                <div className="pointer-events-auto flex max-w-sm flex-col items-center gap-2 rounded-xl border border-red-200 bg-[var(--bd-read-page-bg)]/95 px-4 py-3 text-center text-sm shadow-lg backdrop-blur-sm dark:border-red-900">
+                  <span className="font-medium text-red-500">
+                    {navError.chapter ? `${navError.chapter}：` : ''}{_('reader.navigationLoadFailed')}
+                  </span>
+                  <span className="text-xs text-[var(--bd-read-sub)]">{_('reader.navigationLoadHint')}</span>
+                  {navError.target && (
+                    <button
+                      className="mt-1 rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                      onClick={() => {
+                        const target = navError.target
+                        setNavError(null)
+                        void renderer?.display(target)
+                      }}
+                    >
+                      {_('reader.retry')}
+                    </button>
+                  )}
                 </div>
               </div>
             )}

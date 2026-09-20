@@ -146,6 +146,8 @@ export interface RendererEvents {
    * boundary); chapter-internal position cannot be pre-computed and stays unset.
    */
   navigatePending: (e: { pending: boolean; started?: boolean; target?: { sectionIndex: number; fraction?: number; isJump?: boolean } }) => void
+  /** The latest explicit navigation failed after the previous view was kept visible. */
+  navigateError: (e: { target?: string; sectionIndex?: number; error: Error }) => void
   /**
    * Middle click-area zone tapped (tap-to-reveal the top/bottom chrome; the
    * click-area setting only governs page turning, so this fires in every mode).

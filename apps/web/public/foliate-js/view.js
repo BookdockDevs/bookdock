@@ -396,6 +396,13 @@ export class View extends HTMLElement {
             if (element?.localName === 'source' || element?.localName === 'track')
                 element = element.closest('audio, video')
             if (!['audio', 'video', 'object', 'embed'].includes(element?.localName)) return
+            const hasDeferredSource = element.hasAttribute('data-bd-deferred-src')
+                || !!element.querySelector('[data-bd-deferred-src]')
+            const hasPlayableSource = !!(element.currentSrc
+                || element.getAttribute('src')
+                || element.getAttribute('data')
+                || element.querySelector('source[src]')?.getAttribute('src'))
+            if (hasDeferredSource && !hasPlayableSource) return
             if (element.dataset.bookdockMediaError === '1') return
             element.dataset.bookdockMediaError = '1'
             const src = element.currentSrc

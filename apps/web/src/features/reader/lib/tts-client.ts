@@ -55,11 +55,17 @@ export class SystemSpeechClient implements TtsClient {
   private paused = false
 
   listVoices(): TtsVoice[] {
-    return (globalThis.speechSynthesis?.getVoices?.() ?? []).map((voice) => ({
-      id: voice.voiceURI || voice.name,
-      name: voice.name,
-      lang: voice.lang,
-    }))
+    const synthesis = globalThis.speechSynthesis
+    if (!synthesis || typeof synthesis.getVoices !== 'function') return []
+    try {
+      return synthesis.getVoices().map((voice) => ({
+        id: voice.voiceURI || voice.name,
+        name: voice.name,
+        lang: voice.lang,
+      }))
+    } catch {
+      return []
+    }
   }
 
   speak(segment: TtsSegment, options: TtsSpeakOptions, signal: AbortSignal, events: TtsPlaybackEvents): Promise<void> {
@@ -71,7 +77,12 @@ export class SystemSpeechClient implements TtsClient {
       this.utterance = utterance
       this.paused = false
       utterance.rate = options.rate
-      const voice = globalThis.speechSynthesis.getVoices().find((item) => (item.voiceURI || item.name) === options.voiceId)
+      let voice: SpeechSynthesisVoice | undefined
+      try {
+        voice = globalThis.speechSynthesis.getVoices().find((item) => (item.voiceURI || item.name) === options.voiceId)
+      } catch {
+        voice = undefined
+      }
       if (voice) {
         utterance.voice = voice
         if (voice.lang) utterance.lang = voice.lang

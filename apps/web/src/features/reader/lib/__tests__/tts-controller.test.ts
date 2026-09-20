@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { BookReader, TtsSegment } from '../../types'
 import { TtsController } from '../tts-controller'
+import { SystemSpeechClient } from '../tts-client'
 import type { TtsClient, TtsPlaybackEvents, TtsPreparedAudio, TtsSpeakOptions, TtsVoice } from '../tts-client'
 
 class FakeUtterance {
@@ -102,6 +103,11 @@ describe('TtsController', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('treats unavailable system speech voices as an empty list', () => {
+    vi.stubGlobal('speechSynthesis', undefined)
+    expect(new SystemSpeechClient().listVoices()).toEqual([])
   })
 
   it('highlights a segment only when the speech client starts it', async () => {

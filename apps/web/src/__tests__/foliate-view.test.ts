@@ -203,6 +203,38 @@ describe('foliate view renderer search contract', () => {
     view.close()
   })
 
+  it('ignores errors from deferred media until a playable source is bound', async () => {
+    const doc = document.implementation.createHTMLDocument('deferred-media')
+    doc.body.innerHTML = '<video><source data-bd-deferred-src="movie.mp4"></video>'
+    const book = {
+      metadata: { language: 'zh-CN' },
+      rendition: { layout: 'reflowable' },
+      sections: [{ createDocument: async () => doc }],
+      dir: 'ltr',
+    }
+    const view = new View()
+    await view.open(book as never)
+    view.renderer.dispatchEvent(new CustomEvent('load', { detail: { doc, index: 0 } }))
+
+    const onMediaError = vi.fn()
+    view.addEventListener('media-error', (event) => onMediaError((event as CustomEvent).detail))
+    const video = doc.querySelector('video')!
+    const source = doc.querySelector('source')!
+
+    video.dispatchEvent(new Event('error'))
+    expect(onMediaError).not.toHaveBeenCalled()
+    expect(video.dataset.bookdockMediaError).toBeUndefined()
+
+    source.setAttribute('src', 'blob:http://localhost/movie.mp4')
+    video.dispatchEvent(new Event('error'))
+    expect(onMediaError).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'video',
+      src: 'blob:http://localhost/movie.mp4',
+    }))
+
+    view.close()
+  })
+
   it('emits open-media event when clicking an SVG cover image without throwing NS reference error', async () => {
     const doc = document.implementation.createHTMLDocument('cover')
     doc.body.innerHTML = `

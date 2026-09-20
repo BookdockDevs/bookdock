@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createZipEntryMap,
   FULL_DOWNLOAD_MAX_BYTES,
+  RANGE_CHUNK_SIZE,
   FoliateReader,
   memoizeLoadBlob,
   memoizeLoadText,
@@ -102,6 +103,10 @@ describe('buildAnnotationBuckets', () => {
 })
 
 describe('selectZipLoadStrategy', () => {
+  it('uses a 1 MiB Range chunk for chapter entry reads', () => {
+    expect(RANGE_CHUNK_SIZE).toBe(1024 * 1024)
+  })
+
   it('downloads whole books at or below the threshold', () => {
     expect(selectZipLoadStrategy(1)).toBe('full')
     expect(selectZipLoadStrategy(FULL_DOWNLOAD_MAX_BYTES)).toBe('full')
@@ -220,6 +225,25 @@ describe('transformEpubStylesheet', () => {
 })
 
 describe('FoliateReader book-style overrides', () => {
+  it('reports a failed user navigation without rejecting the caller', async () => {
+    const reader = new FoliateReader('')
+    const onError = vi.fn()
+    reader.on('navigateError', onError)
+    ;(reader as any).view = {
+      renderer: {
+        goTo: vi.fn().mockRejectedValue(new Error('section unavailable')),
+      },
+    }
+    ;(reader as any).book = { sections: [{}, {}, {}, {}, {}] }
+
+    await expect(reader.display('chapter:4')).resolves.toBeUndefined()
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+      target: 'chapter:4',
+      sectionIndex: 4,
+      error: expect.objectContaining({ message: 'section unavailable' }),
+    }))
+  })
+
   it('emits the viewport-start coordinate used by progress seeking', () => {
     const reader = new FoliateReader('')
     const onRelocated = vi.fn()
@@ -693,15 +717,22 @@ describe('normalizeEpubDocumentImages', () => {
     const wrapper = document.querySelector('.bd-video-wrapper') as HTMLElement
     const spinner = wrapper.querySelector('.bd-video-spinner') as HTMLElement
 
-    // Initial state: wrapper has loading state and spinner, audio has loading class, playBtn hidden
-    expect(wrapper.classList.contains('is-media-loading')).toBe(true)
-    expect(spinner).not.toBeNull()
-    expect(spinner.textContent).toContain('媒体加载中')
+    // The media task is scheduled after the current document update so text
+    // can paint first.
+    expect(wrapper.classList.contains('is-media-loading')).toBe(false)
+    expect(spinner).toBeNull()
     const playBtn = wrapper.querySelector('.bd-video-play-btn') as HTMLElement
-    expect(playBtn.style.display).toBe('none')
+    expect(playBtn.style.display).not.toBe('none')
     expect(video.hasAttribute('controls')).toBe(false)
-    expect(audio.classList.contains('bd-audio-loading')).toBe(true)
+    expect(audio.classList.contains('bd-audio-loading')).toBe(false)
     expect(video.src).toBe('')
+
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(wrapper.classList.contains('is-media-loading')).toBe(true)
+    expect(wrapper.querySelector('.bd-video-spinner')).not.toBeNull()
+    expect(audio.classList.contains('bd-audio-loading')).toBe(true)
+    expect(video.hasAttribute('controls')).toBe(false)
 
     // Resolve video and audio
     resolveVideo('blob:http://localhost/resolved-movie.mp4')
@@ -720,36 +751,17 @@ describe('normalizeEpubDocumentImages', () => {
     expect(audio.classList.contains('bd-audio-loading')).toBe(false)
   })
 
-  class FakeIO {
-    static instances: FakeIO[] = []
-    private callback: (entries: { isIntersecting: boolean }[]) => void
-    constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
-      this.callback = cb
-      FakeIO.instances.push(this)
-    }
-    observe() {}
-    disconnect() {}
-    intersect() {
-      this.callback([{ isIntersecting: true }])
-    }
-  }
-
-  // The renderer reads IntersectionObserver off the media document's own
-  // window, so the fixture must be a real iframe (as in production) whose
-  // contentWindow can carry the fake.
   function createMediaFrame() {
-    FakeIO.instances = []
     const frame = document.createElement('iframe')
     document.body.appendChild(frame)
     const doc = frame.contentDocument as Document
     doc.body.innerHTML = `
       <video><source data-bd-deferred-src="movie.mp4" type="video/mp4" /></video>
       <audio data-bd-deferred-src="track.mp3"></audio>`
-    ;(frame.contentWindow as unknown as { IntersectionObserver: unknown }).IntersectionObserver = FakeIO
     return { doc, frame }
   }
 
-  it('defers heavy-media byte fetches until near-viewport, and starts on play click', async () => {
+  it('starts heavy-media byte fetches after the chapter render turn', async () => {
     const { doc, frame } = createMediaFrame()
     try {
       const loadHref = vi.fn(() => Promise.resolve('blob:resolved'))
@@ -759,27 +771,17 @@ describe('normalizeEpubDocumentImages', () => {
       const audio = doc.querySelector('audio') as HTMLAudioElement
       const wrapper = doc.querySelector('.bd-video-wrapper') as HTMLElement
 
-      // render only draws the placeholder card — no bytes requested yet
+      // Render only draws the placeholder card until the current task yields.
       expect(loadHref).not.toHaveBeenCalled()
       expect(wrapper.classList.contains('is-media-loading')).toBe(false)
       expect(audio.classList.contains('bd-audio-loading')).toBe(false)
 
-      // pressing play starts the fetch and records the intent to play
-      const playMock = vi.fn().mockResolvedValue(undefined)
-      video.play = playMock
-      ;(wrapper.querySelector('.bd-video-play-btn') as HTMLButtonElement).click()
-      expect(loadHref).toHaveBeenCalledWith('movie.mp4')
-
-      // near-viewport intersection starts the audio fetch
-      FakeIO.instances[1].intersect()
-      expect(loadHref).toHaveBeenCalledWith('track.mp3')
-      expect(audio.classList.contains('bd-audio-loading')).toBe(true)
-
       await new Promise((r) => setTimeout(r, 0))
+      expect(loadHref).toHaveBeenCalledTimes(2)
+      expect(loadHref).toHaveBeenCalledWith('movie.mp4')
+      expect(loadHref).toHaveBeenCalledWith('track.mp3')
       expect(video.src).toBe('blob:resolved')
       expect(audio.src).toBe('blob:resolved')
-      // deferred play intent fires once playback is possible
-      expect(playMock).toHaveBeenCalledTimes(1)
       expect(wrapper.classList.contains('is-media-loading')).toBe(false)
       expect(audio.classList.contains('bd-audio-loading')).toBe(false)
     } finally {
@@ -787,14 +789,13 @@ describe('normalizeEpubDocumentImages', () => {
     }
   })
 
-  it('starts deferred fetches on near-viewport intersection without user clicks', async () => {
+  it('starts media fetches without waiting for a viewport intersection', async () => {
     const { doc, frame } = createMediaFrame()
     try {
       const loadHref = vi.fn(() => Promise.resolve('blob:resolved'))
       normalizeEpubDocumentImages(doc, { section: { id: 's', loadHref } })
       expect(loadHref).not.toHaveBeenCalled()
 
-      for (const io of FakeIO.instances) io.intersect()
       await new Promise((r) => setTimeout(r, 0))
       expect(loadHref).toHaveBeenCalledTimes(2)
       expect((doc.querySelector('video') as HTMLVideoElement).src).toBe('blob:resolved')
