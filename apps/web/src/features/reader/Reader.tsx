@@ -29,6 +29,7 @@ import { createSegmentTracker, trackPosition, closeSegment } from './stats/readi
 import { createJumpHistory } from './jump-history'
 import { createHistoryAutoHide, type HistoryAutoHide } from './history-auto-hide'
 import { consumeEscFlag } from './lib/esc-consumed'
+import { createRestoreGate, type RestoreGate } from './lib/restore-gate'
 import { cfiRangesIntersect, loadCfiModule } from './lib/cfi-overlap'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
@@ -76,6 +77,16 @@ export default function Reader() {
   const mediaErrorCooldownRef = useRef(false)
   // Chapter-switch loading indicator (slow cross-chapter navigation)
   const [navPending, setNavPending] = useState(false)
+  // Changing the initial CFI ref alone cannot trigger the renderer effect.
+  // This state records the explicit choice to bypass a failed restore.
+  const [progressStartOver, setProgressStartOver] = useState(false)
+  // A jump is in flight (target emitted at navigation start) — position/CFI
+  // are not final until relocate, so e.g. a bookmark must not be taken mid-jump
+  const navInFlightRef = useRef(false)
+  // Destination chapter label shown while a jump is in flight — header display
+  // only; the store's currentChapter stays the committed (relocate) value so
+  // annotations saved mid-flight stay consistent.
+  const [pendingNavChapter, setPendingNavChapter] = useState<string | null>(null)
   // Middle click-area tap reveals the top/bottom bars (mobile: no hover);
   // reading-area interactions hide them again, while footer controls keep them open for consecutive navigation
   const [chromePinned, setChromePinned] = useState(false)
@@ -407,6 +418,8 @@ export default function Reader() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mutateProgressRef = useRef(progressMutation.mutate)
   mutateProgressRef.current = progressMutation.mutate
+  const restoreGateRef = useRef<RestoreGate | null>(null)
+  if (restoreGateRef.current === null) restoreGateRef.current = createRestoreGate()
 
   const segmentTrackerRef = useRef(createSegmentTracker())
   // Reading-speed sampling (P2): a sample is taken only while the reading
@@ -432,48 +445,52 @@ export default function Reader() {
     })
   }
 
+  const flushPendingProgress = useCallback(() => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    // A body buffered while the restore gate is closed must never reach the
+    // server — it holds a book-start position that would erase the saved one
+    if (restoreGateRef.current?.isPending()) return
+    if (pendingProgress.current) {
+      mutateProgressRef.current(pendingProgress.current)
+      pendingProgress.current = null
+    }
+  }, [])
+
+  const openRestoreGate = useCallback(() => {
+    // A body buffered while closed needs no immediate write: the next
+    // relocate re-schedules it, and unmount/beforeunload flushes it
+    restoreGateRef.current?.open()
+  }, [])
+
   const scheduleProgressSave = useCallback(
     (body: ReadingProgressUpdateReq) => {
       pendingProgress.current = body
+      // While a saved position awaits restore, buffer only — openRestoreGate
+      // (rendered / explicit jump) re-arms the timer with the settled body
+      if (restoreGateRef.current?.isPending()) return
       if (saveTimer.current) clearTimeout(saveTimer.current)
-      saveTimer.current = setTimeout(() => {
-        if (pendingProgress.current) {
-          mutateProgressRef.current(pendingProgress.current)
-          pendingProgress.current = null
-        }
-      }, 600)
+      saveTimer.current = setTimeout(flushPendingProgress, 600)
     },
-    []
+    [flushPendingProgress]
   )
 
   useEffect(() => {
-    const flush = () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current)
-      if (pendingProgress.current) {
-        mutateProgressRef.current(pendingProgress.current)
-        pendingProgress.current = null
-      }
-    }
+    const flush = flushPendingProgress
     window.addEventListener('beforeunload', flush)
     return () => {
       window.removeEventListener('beforeunload', flush)
       flush()
     }
-  }, [])
+  }, [flushPendingProgress])
 
   const chaptersQuery = useBookChapters(id)
 
-  const progressErrorShownRef = useRef(false)
+  // Progress load failures get a dedicated in-page prompt (retry / start
+  // over) instead of a toast — the reader must not silently mount anywhere
   const chaptersErrorShownRef = useRef(false)
-  useEffect(() => {
-    if (!progressQuery.isError) {
-      progressErrorShownRef.current = false
-      return
-    }
-    if (progressErrorShownRef.current) return
-    progressErrorShownRef.current = true
-    notify.error({ key: 'reader.progressLoadFailed' })
-  }, [progressQuery.isError])
   useEffect(() => {
     if (!chaptersQuery.isError) {
       chaptersErrorShownRef.current = false
@@ -501,34 +518,47 @@ export default function Reader() {
     initialCfiBookRef.current = id
     initialCfiRef.current = undefined
     initialFractionRef.current = undefined
+    // The previous book's unsaved position must never flush into this one,
+    // and this book's gate starts unarmed until progress latches
+    restoreGateRef.current?.open()
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    pendingProgress.current = null
   }
-  if (initialCfiRef.current === undefined && !progressQuery.isPending) {
+  // Success only: a failed progress fetch must not be latched as "no saved
+  // progress" — the reader shows a retry/start-over prompt until it resolves
+  if (initialCfiRef.current === undefined && progressQuery.isSuccess) {
     const data = progressQuery.data?.data
     initialCfiRef.current = data?.cfi ?? ''
-    // After re-TOC the saved CFI is stale; restore by the book-level percent
-    // instead (content is unchanged, so the fraction still lands on the same
-    // text). The reader re-saves a fresh CFI on the first relocate.
-    initialFractionRef.current = data?.cfi ? undefined : data && data.percent > 0 ? data.percent / 100 : undefined
+    // Book-level fraction fallback: used when no CFI was saved (stale after
+    // a re-TOC) and by the renderer when the saved CFI fails to resolve
+    // (content is unchanged, so the fraction still lands on the same text).
+    initialFractionRef.current = data && data.percent > 0 ? data.fraction ?? data.percent / 100 : undefined
+    if (data && (data.cfi || data.percent > 0)) restoreGateRef.current?.arm()
   }
 
   const [bookReady, setBookReady] = useState(false)
   const [readyContentUrl, setReadyContentUrl] = useState<string | null>(null)
   const readerReady = bookReady && readyContentUrl === contentUrl
-  // kind=timeout: watchdog fired, likely network-related; kind=parse: renderer
-  // onError, the file itself failed to load
-  const [loadError, setLoadError] = useState<{ kind: 'timeout' | 'parse' } | null>(null)
+  // kind=parse: renderer onError, the file itself failed to load
+  const [loadError, setLoadError] = useState<{ kind: 'parse' } | null>(null)
+  // Slow-network hint: the Range path has no global time budget, so a load
+  // past 30s is slow, not failed — say "still loading" instead of the old
+  // false timeout card (which then self-healed when the load arrived late).
+  // Real failures keep coming through the renderer's onError.
+  const [slowLoad, setSlowLoad] = useState(false)
   useEffect(() => {
     setBookReady(false)
     setReadyContentUrl(null)
     setLoadError(null)
+    setSlowLoad(false)
   }, [contentUrl])
 
-  // Timeout: if the reader doesn't render within 30s, show error instead of infinite loading
   useEffect(() => {
     if (readerReady || !contentUrl) return
-    const timer = setTimeout(() => {
-      if (!readerReady) setLoadError({ kind: 'timeout' })
-    }, 30000)
+    const timer = setTimeout(() => setSlowLoad(true), 30000)
     return () => clearTimeout(timer)
   }, [readerReady, contentUrl])
 
@@ -567,11 +597,13 @@ export default function Reader() {
     setImageViewer(null)
     setImageContextMenu(null)
     deepLinkHandled.current = false
+    setProgressStartOver(false)
   }, [id, setReplaceTarget])
 
   const { containerRef, renderer, fontStack, fontCss } = useReaderRenderer({
     url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
     bookId: id,
+    bookSize: bookQuery.data?.data?.size,
     // so it navigates exactly once (to the saved CFI, or to the book start
     // when progress resolved to none)
     initialCfi: initialCfiRef.current,
@@ -582,6 +614,9 @@ export default function Reader() {
       setBookReady(true)
       setReadyContentUrl(contentUrl)
       setLoadError(null)
+      // Initial navigation (saved position, fraction fallback, or book
+      // start) has settled — relocate-driven saves may write back again
+      openRestoreGate()
     },
     onError: () => setLoadError({ kind: 'parse' }),
     onFootnoteOpen: (entry) => {
@@ -609,6 +644,9 @@ export default function Reader() {
       void playbackCoordinator.claim('media')
     },
     onRelocated: (e) => {
+      // The destination is now the committed position — drop the pre-update
+      navInFlightRef.current = false
+      setPendingNavChapter(null)
       if (e.source !== 'tts' && !keepChromePinnedRef.current) setChromePinned(false)
       setSelection(null)
       if (e.source !== 'tts') pingReadingTimer()
@@ -679,7 +717,27 @@ export default function Reader() {
         setChromePinned(true)
       }
     },
-    onNavigatePending: ({ pending }) => setNavPending(pending),
+    onNavigatePending: (e) => {
+      // The start event carries the destination hint immediately, but the
+      // spinner itself is delayed by NavigationPending to avoid fast-jump
+      // flashes. A fast relocate may settle before that delayed event exists.
+      if (!e.started) setNavPending(e.pending)
+      if (e.target) {
+        const { sectionIndex, fraction, isJump } = e.target
+        // Same-chapter page turns do not touch the UI, but explicit same-
+        // section jumps still need the in-flight guard for bookmarks.
+        if (isJump || sectionIndex !== currentChapterIndex) {
+          navInFlightRef.current = true
+        }
+        if (sectionIndex !== currentChapterIndex) {
+          const label = sectionTocLabels?.[sectionIndex]
+          if (label) setPendingNavChapter(label)
+        }
+        // A seek knows its exact book-wide landing fraction, even when it
+        // remains inside the current section. Relocate overwrites it later.
+        if (fraction !== undefined) setPercent(Math.round(fraction * 100))
+      }
+    },
     onChromeToggle: () => {
       keepChromePinnedRef.current = false
       // Tap-to-toggle: anything visible (pinned bars, the settings popover,
@@ -694,7 +752,12 @@ export default function Reader() {
         setChromePinned(true)
       }
     },
-    onUserJump: () => closeSegment(segmentTrackerRef.current),
+    onUserJump: () => {
+      // An explicit jump supersedes the in-flight restore: wherever the
+      // user lands is their intent and may be saved
+      openRestoreGate()
+      closeSegment(segmentTrackerRef.current)
+    },
     onReplacementInvalid: (e) => {
       // The same invalid patch is reported again on every section reload —
       // toast only the freshly discovered ones
@@ -737,6 +800,17 @@ export default function Reader() {
     deepLinkHandled.current = true
     void renderer.display(target)
   }, [annotations?.data, readerReady, deepLinkAnnotation, deepLinkCfi, renderer])
+
+  // A TOC jump clicked during parsing is queued in the store — apply it once
+  // the reader is live (initial navigation has settled)
+  const pendingTocHref = useReaderState((s) => s.pendingTocHref)
+  const setPendingTocHref = useReaderState((s) => s.setPendingTocHref)
+  useEffect(() => {
+    if (!readerReady || !renderer || !pendingTocHref) return
+    const href = pendingTocHref
+    setPendingTocHref(null)
+    void renderer.display(href)
+  }, [pendingTocHref, readerReady, renderer, setPendingTocHref])
 
   // Rule-set changes after mount must invalidate the cached sections: the
   // renderer tears the view down and reopens it (same mechanism as the
@@ -785,7 +859,11 @@ export default function Reader() {
     // with it, unless the user last collapsed it (remembered while locked).
     // Touch devices have no lock, so the sidebar always starts closed.
     const ui = useUiStore.getState()
-    resetForBook(!isTouch && ui.toolbarLocked && ui.sidebarRememberedOpen)
+    resetForBook(
+      !isTouch && ui.toolbarLocked && ui.sidebarRememberedOpen,
+      // A remembered stats tab is dead weight once recording is off
+      ui.readingTimerMode === 'off' && ui.navTabRemembered === 'stats' ? 'toc' : ui.navTabRemembered,
+    )
     // chapterCount starts empty; the effect below syncs it when chapters arrive
     segmentTrackerRef.current = createSegmentTracker()
     lastSegmentStartRef.current = null
@@ -1038,6 +1116,9 @@ export default function Reader() {
       }
       return
     }
+    // Mid-jump the committed chapter/CFI don't belong to the same position
+    // yet — ignore the press until relocate lands the destination
+    if (navInFlightRef.current) return
     try {
       const snippet = rendererRef.current?.getSnippet?.(bookmarkCfi, 80)
       await createAnnotation.mutateAsync({
@@ -1209,7 +1290,7 @@ export default function Reader() {
                 />
               )}
               <ReaderHeader
-                title={currentChapter || book.title}
+                title={pendingNavChapter || currentChapter || book.title}
                 visible
                 pinned={chromePinned}
                 settingsOpen={settingsOpen}
@@ -1250,18 +1331,51 @@ export default function Reader() {
               // white until its theme styles are injected — without this the
               // loading overlay would flash white on every reader open
               <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-[var(--bd-read-page-bg)] text-sm text-[var(--bd-read-sub)]">
-                {loadError ? (
+                {progressQuery.isError && initialCfiRef.current === undefined && !progressStartOver ? (
                   <>
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
                       <circle cx="12" cy="12" r="10" />
                       <line x1="12" y1="8" x2="12" y2="12" />
                       <line x1="12" y1="16" x2="12.01" y2="16" />
                     </svg>
-                    <span className="font-medium text-red-500">{loadError.kind === 'timeout' ? _('reader.bookLoadTimeout') : _('reader.bookLoadParseFailed')}</span>
+                    <span className="font-medium text-red-500">{_('reader.progressLoadFailed')}</span>
+                    <p className="max-w-xs text-center text-xs text-[var(--bd-read-sub)]">{_('reader.progressLoadHint')}</p>
+                    <div className="pointer-events-auto mt-2 flex gap-3">
+                      <Link to="/">
+                        <button className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700">
+                          {_('reader.back')}
+                        </button>
+                      </Link>
+                      {/* Explicit user choice: starting over may overwrite the saved position */}
+                      <button
+                        className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+                        onClick={() => {
+                          initialCfiRef.current = ''
+                          initialFractionRef.current = undefined
+                          restoreGateRef.current?.open()
+                          setProgressStartOver(true)
+                        }}
+                      >
+                        {_('reader.progressStartOver')}
+                      </button>
+                      <button
+                        className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700"
+                        onClick={() => void progressQuery.refetch()}
+                      >
+                        {_('reader.progressRetry')}
+                      </button>
+                    </div>
+                  </>
+                ) : loadError ? (
+                  <>
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <span className="font-medium text-red-500">{_('reader.bookLoadParseFailed')}</span>
                     <p className="max-w-xs text-center text-xs text-[var(--bd-read-sub)]">
-                      {loadError.kind === 'timeout'
-                        ? _('reader.bookLoadNetworkHint')
-                        : _('reader.bookLoadFileHint')}
+                      {_('reader.bookLoadFileHint')}
                     </p>
                     <div className="pointer-events-auto mt-2 flex gap-3">
                       <Link to="/">
@@ -1269,13 +1383,11 @@ export default function Reader() {
                           {_('reader.back')}
                         </button>
                       </Link>
-                      {loadError.kind === 'parse' && (
-                        <Link to="/">
-                          <button className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700">
-                            {_('reader.reupload')}
-                          </button>
-                        </Link>
-                      )}
+                      <Link to="/">
+                        <button className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700">
+                          {_('reader.reupload')}
+                        </button>
+                      </Link>
                       <button
                         className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
                         onClick={() => window.location.reload()}
@@ -1290,6 +1402,9 @@ export default function Reader() {
                       <path d="M21 12a9 9 0 11-6.219-8.56" />
                     </svg>
                     {_('reader.loading')}
+                    {slowLoad && (
+                      <span className="text-xs text-[var(--bd-read-sub)]">{_('reader.bookLoadSlow')}</span>
+                    )}
                   </div>
                 )}
               </div>

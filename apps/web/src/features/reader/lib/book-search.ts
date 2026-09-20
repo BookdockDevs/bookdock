@@ -27,6 +27,29 @@ export interface SearchMatch {
   end: number
 }
 
+export interface TextOffsetRange {
+  start: number
+  end: number
+}
+
+export function mapMatchTextsToOffsets(
+  text: string,
+  matchTexts: string[],
+): Array<TextOffsetRange | null> {
+  let cursor = 0
+
+  return matchTexts.map((matchText) => {
+    if (!matchText) return null
+
+    const start = text.indexOf(matchText, cursor)
+    if (start < 0) return null
+
+    const end = start + matchText.length
+    cursor = start + 1
+    return { start, end }
+  })
+}
+
 export interface SearchMatchOptions {
   mode?: 'contains' | 'regex'
   matchCase?: boolean

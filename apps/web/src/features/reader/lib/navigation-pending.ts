@@ -4,6 +4,15 @@
 // instead of both indicators fighting.
 export const NAVIGATION_ANTI_FLICKER_MS = 200
 
+/** Destination hint of an in-flight navigation, resolvable at navigation start. */
+export interface NavigationTarget {
+  sectionIndex: number
+  /** Book-wide landing estimate (0-1); unset when the in-chapter position is unknown. */
+  fraction?: number
+  /** True for an explicit user jump, including a same-section seek/CFI jump. */
+  isJump?: boolean
+}
+
 export class NavigationPending {
   private gen = 0
   private timer: ReturnType<typeof setTimeout> | null = null

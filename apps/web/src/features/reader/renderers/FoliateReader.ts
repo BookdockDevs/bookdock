@@ -33,13 +33,16 @@ import { FONT_OPTIONS } from '../types'
 import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
 import { MediaOverlaySection, type MediaOverlayCue } from '../lib/media-overlay'
 import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, type TextReplacementRule } from '../lib/text-replacements'
-import { NavigationPending } from '../lib/navigation-pending'
-import { sectionFractionBoundaries } from '../lib/progress-model'
+import { NavigationPending, type NavigationTarget } from '../lib/navigation-pending'
+import { chapterTextNamespaceFromUrl, withTextCache } from '../lib/chapter-text-cache'
+import { chapterIndexAtFraction, sectionFractionBoundaries } from '../lib/progress-model'
 import { applyTitleReplacements } from '@bookdock/shared'
 
 import {
+  extractChapterText,
   findMatches,
   getChapterText,
+  mapMatchTextsToOffsets,
   makeExcerpt,
   offsetsToRange,
   type SearchMatch,
@@ -242,6 +245,13 @@ const parseCache = new Map<string, Promise<any>>()
 // download. Above the threshold, Range loading keeps the first open fast and
 // the per-chapter cost is amortized by the text memo below.
 export const FULL_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024
+
+// A single stalled Range fetch otherwise hangs chapter navigation forever:
+// the View.load iframe guard cannot help because the hang happens before the
+// navigation starts. Text chapters resolve in <1s, so hitting this budget
+// means a dead connection. memoizeLoadText/memoizeLoadBlob do not cache
+// failures, so the next navigation retries with a fresh signal.
+const ENTRY_FETCH_TIMEOUT_MS = 20000
 
 export type ZipLoadStrategy = 'full' | 'range'
 
@@ -637,6 +647,10 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
       video.setAttribute('controlslist', 'nodownload noplaybackrate')
     }
 
+    // Assigned in the deferred-media branch below; the click handlers close
+    // over it and invoke it once the user asks to play.
+    let startDeferredFetch: (() => void) | undefined
+
     // Wrap video in card container with frosted-glass center play button overlay
     let wrapper = video.parentElement?.classList.contains('bd-video-wrapper')
       ? (video.parentElement as HTMLElement)
@@ -666,6 +680,11 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
       playBtn.addEventListener('click', (e) => {
         e.stopPropagation()
         e.preventDefault()
+        if (startDeferredFetch && !video.src) {
+          video.dataset.bdMediaPlayIntent = 'true'
+          startDeferredFetch()
+          return
+        }
         if (video.paused) {
           void video.play().catch(() => {})
         } else {
@@ -682,53 +701,80 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
     }
 
     // Deferred heavy media resolution:
-    // If the video source was deferred during chapter XHTML parsing,
-    // show a spinner in the wrapper and asynchronously fetch its Blob URL in the background.
+    // The placeholder card renders immediately, but the full-blob fetch is
+    // deferred until the media nears the viewport or the user presses play.
+    // Background-fetching every deferred blob right after render starves the
+    // 6 same-origin HTTP/1.1 connections a slow server needs for chapter
+    // prefetch and CSS.
     const deferredSrc = video.dataset.bdDeferredSrc
       || video.querySelector('[data-bd-deferred-src]')?.getAttribute('data-bd-deferred-src')
 
     if (!video.src && deferredSrc && wrapper) {
-      wrapper.classList.add('is-media-loading')
-      let spinner = wrapper.querySelector('.bd-video-spinner')
-      if (!spinner) {
-        spinner = doc.createElement('div')
-        spinner.className = 'bd-video-spinner'
-        spinner.setAttribute('aria-label', 'Loading media')
-        const ring = doc.createElement('div')
-        ring.className = 'bd-video-spinner-ring'
-        const label = doc.createElement('span')
-        label.className = 'bd-video-spinner-label'
-        label.textContent = '媒体加载中...'
-        spinner.appendChild(ring)
-        spinner.appendChild(label)
-        wrapper.appendChild(spinner)
-      }
+      const startFetch = () => {
+        if (video.dataset.bdMediaFetchStarted || video.src) return
+        video.dataset.bdMediaFetchStarted = 'true'
+        wrapper.classList.add('is-media-loading')
+        let spinner = wrapper.querySelector('.bd-video-spinner')
+        if (!spinner) {
+          spinner = doc.createElement('div')
+          spinner.className = 'bd-video-spinner'
+          spinner.setAttribute('aria-label', 'Loading media')
+          const ring = doc.createElement('div')
+          ring.className = 'bd-video-spinner-ring'
+          const label = doc.createElement('span')
+          label.className = 'bd-video-spinner-label'
+          label.textContent = '媒体加载中...'
+          spinner.appendChild(ring)
+          spinner.appendChild(label)
+          wrapper.appendChild(spinner)
+        }
 
-      if (options?.section?.loadHref) {
-        options.section.loadHref(deferredSrc)
-          .then((blobUrl: string) => {
-            if (!video.isConnected) return
-            const firstSource = video.querySelector('source')
-            if (firstSource) {
-              firstSource.src = blobUrl
-              firstSource.removeAttribute('data-bd-deferred-src')
-            }
-            video.src = blobUrl
-            video.removeAttribute('data-bd-deferred-src')
-            wrapper?.classList.remove('is-media-loading')
-            spinner?.remove()
-          })
-          .catch((_err: unknown) => {
-            if (!video.isConnected) return
-            wrapper?.classList.remove('is-media-loading')
-            wrapper?.classList.add('is-media-error')
-            spinner?.remove()
-            options?.onMediaError?.({
-              sectionIndex: options.sectionIndex ?? 0,
-              kind: 'video',
-              src: deferredSrc,
+        if (options?.section?.loadHref) {
+          options.section.loadHref(deferredSrc)
+            .then((blobUrl: string) => {
+              if (!video.isConnected) return
+              const firstSource = video.querySelector('source')
+              if (firstSource) {
+                firstSource.src = blobUrl
+                firstSource.removeAttribute('data-bd-deferred-src')
+              }
+              video.src = blobUrl
+              video.removeAttribute('data-bd-deferred-src')
+              wrapper?.classList.remove('is-media-loading')
+              spinner?.remove()
+              if (video.dataset.bdMediaPlayIntent) {
+                delete video.dataset.bdMediaPlayIntent
+                void video.play().catch(() => {})
+              }
             })
-          })
+            .catch((_err: unknown) => {
+              if (!video.isConnected) return
+              wrapper?.classList.remove('is-media-loading')
+              wrapper?.classList.add('is-media-error')
+              spinner?.remove()
+              options?.onMediaError?.({
+                sectionIndex: options.sectionIndex ?? 0,
+                kind: 'video',
+                src: deferredSrc,
+              })
+            })
+        }
+      }
+      startDeferredFetch = startFetch
+      // The media lives in the iframe document, so the observer must be
+      // created from that window to intersect against its viewport.
+      const view = (video.ownerDocument as Document | null)?.defaultView
+      if (view && typeof view.IntersectionObserver === 'function') {
+        const io = new view.IntersectionObserver((entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) {
+            io.disconnect()
+            startFetch()
+          }
+        }, { rootMargin: '300px' })
+        io.observe(wrapper)
+      } else {
+        // No IntersectionObserver (e.g. test jsdom): keep the old eager fetch
+        startFetch()
       }
     } else {
       // Directly bind the first source's blob URL to the video element if unset.
@@ -748,7 +794,12 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
         if (e.clientY > rect.bottom - 48) return
         e.preventDefault()
         if (video.paused) {
-          void video.play().catch(() => {})
+          if (startDeferredFetch && !video.src) {
+            video.dataset.bdMediaPlayIntent = 'true'
+            startDeferredFetch()
+          } else {
+            void video.play().catch(() => {})
+          }
         } else {
           video.pause()
         }
@@ -769,28 +820,49 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
       || audio.querySelector('[data-bd-deferred-src]')?.getAttribute('data-bd-deferred-src')
 
     if (!audio.src && deferredAudioSrc && options?.section?.loadHref) {
-      audio.classList.add('bd-audio-loading')
-      options.section.loadHref(deferredAudioSrc)
-        .then((blobUrl: string) => {
-          if (!audio.isConnected) return
-          const firstSource = audio.querySelector('source')
-          if (firstSource) {
-            firstSource.src = blobUrl
-            firstSource.removeAttribute('data-bd-deferred-src')
-          }
-          audio.src = blobUrl
-          audio.removeAttribute('data-bd-deferred-src')
-          audio.classList.remove('bd-audio-loading')
-        })
-        .catch((_err: unknown) => {
-          if (!audio.isConnected) return
-          audio.classList.remove('bd-audio-loading')
-          options?.onMediaError?.({
-            sectionIndex: options.sectionIndex ?? 0,
-            kind: 'audio',
-            src: deferredAudioSrc,
+      const loadMediaHref = options.section.loadHref
+      const startFetch = () => {
+        if (audio.dataset.bdMediaFetchStarted || audio.src) return
+        audio.dataset.bdMediaFetchStarted = 'true'
+        audio.classList.add('bd-audio-loading')
+        loadMediaHref(deferredAudioSrc)
+          .then((blobUrl: string) => {
+            if (!audio.isConnected) return
+            const firstSource = audio.querySelector('source')
+            if (firstSource) {
+              firstSource.src = blobUrl
+              firstSource.removeAttribute('data-bd-deferred-src')
+            }
+            audio.src = blobUrl
+            audio.removeAttribute('data-bd-deferred-src')
+            audio.classList.remove('bd-audio-loading')
           })
-        })
+          .catch((_err: unknown) => {
+            if (!audio.isConnected) return
+            audio.classList.remove('bd-audio-loading')
+            options?.onMediaError?.({
+              sectionIndex: options.sectionIndex ?? 0,
+              kind: 'audio',
+              src: deferredAudioSrc,
+            })
+          })
+      }
+      const view = (audio.ownerDocument as Document | null)?.defaultView
+      if (view && typeof view.IntersectionObserver === 'function') {
+        const io = new view.IntersectionObserver((entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) {
+            io.disconnect()
+            startFetch()
+          }
+        }, { rootMargin: '300px' })
+        io.observe(audio)
+        // best effort: native control clicks may not surface on the element,
+        // but a tap on its box should still start the fetch
+        audio.addEventListener('click', () => { if (!audio.src) startFetch() })
+      } else {
+        // No IntersectionObserver (e.g. test jsdom): keep the old eager fetch
+        startFetch()
+      }
     } else {
       const firstSource = audio.querySelector('source')
       if (firstSource?.src && !audio.src) {
@@ -808,6 +880,7 @@ const SEARCH_CACHE_MAX = 20
 interface SearchCacheEntry {
   results: SearchResult[]
   matches: Map<number, SearchMatch[]>
+  matchTexts: Map<number, string[]>
 }
 const searchCache = new Map<string, SearchCacheEntry>()
 
@@ -833,8 +906,11 @@ async function probeFileSize(url: string): Promise<number | null> {
 // bytes of each entry as foliate's loader lazily asks for sections. Small
 // books skip Range entirely and download whole; the whole-file path is also
 // the fallback when the server does not speak Range.
-async function openZipEntryMap(url: string, foliate: any) {
-  if (selectZipLoadStrategy(await probeFileSize(url)) === 'full') {
+async function openZipEntryMap(url: string, foliate: any, bookSize?: number) {
+  // Book.size already rides on the book-detail response, so the HEAD probe is
+  // only paid when it is missing — one less serial RTT before first paint
+  const size = bookSize ?? await probeFileSize(url)
+  if (selectZipLoadStrategy(size) === 'full') {
     return openZipFromWholeFile(url, foliate)
   }
   try {
@@ -1013,7 +1089,7 @@ function attachTextPrefetch(book: any, loadText: (name: string) => Promise<unkno
   }
 }
 
-function getParsedBook(url: string, foliate: any): Promise<any> {
+function getParsedBook(url: string, foliate: any, bookSize?: number): Promise<any> {
   const cached = parseCache.get(url)
   if (cached) {
     // refresh recency
@@ -1023,15 +1099,22 @@ function getParsedBook(url: string, foliate: any): Promise<any> {
   }
   const { EPUB } = foliate
   const promise = (async () => {
-    const { map, entries, TextWriter, BlobWriter } = await openZipEntryMap(url, foliate)
+    const { map, entries, TextWriter, BlobWriter } = await openZipEntryMap(url, foliate, bookSize)
 
     const load = (fn: (entry: any, type?: string) => any) => (name: string) => {
       const entry = map.get(name)
       return entry ? fn(entry) : null
     }
 
-    const loadText = memoizeLoadText(load((entry: any) => entry.getData(new TextWriter())))
-    const loadBlob = memoizeLoadBlob(url, load((entry: any, type?: string) => entry.getData(new BlobWriter(type))))
+    const signal = () => AbortSignal.timeout(ENTRY_FETCH_TIMEOUT_MS)
+    // memo (this mount) → IndexedDB (cross-session, keyed by bookId|updatedAt)
+    // → network. Only reached on a miss, so reopen reloads nothing that was
+    // cached before; TXT books don't go through this path at all.
+    const loadText = memoizeLoadText(withTextCache(
+      load((entry: any) => entry.getData(new TextWriter(), { signal: signal() })),
+      { namespace: chapterTextNamespaceFromUrl(url) },
+    ))
+    const loadBlob = memoizeLoadBlob(url, load((entry: any, type?: string) => entry.getData(new BlobWriter(type), { signal: signal() })))
     const getSize = (name: string) => map.get(name)?.uncompressedSize ?? 0
 
     const book = await new EPUB({ entries, loadText, loadBlob, getSize }).init()
@@ -1189,6 +1272,28 @@ export function sectionSpinePrefix(index: number): string {
   return `/6/${2 * (index + 1)}`
 }
 
+// Destination section index of a navigateTo target, resolvable before the
+// navigation completes (used for the chapter-name/progress pre-update).
+// Mirrors navigateTo's own parsing; returns null when unresolvable.
+export function resolveNavigationSectionIndex(target?: string): number | null {
+  if (!target) return 0
+  if (target.startsWith('chapter:')) {
+    const index = Number(target.split(':')[1])
+    return Number.isNaN(index) ? null : index
+  }
+  // search-hit-chapter: carries an AI-corpus index, not a section index —
+  // the mapping needs instance state, so no pre-update for those targets
+  if (target.startsWith('search-hit:')) {
+    const index = Number(target.split(':')[1])
+    return Number.isFinite(index) ? index : null
+  }
+  if (/^epubcfi\(/.test(target)) {
+    const step = Number(/^epubcfi\(\/6\/(\d+)/.exec(target)?.[1])
+    return Number.isFinite(step) && step % 2 === 0 ? step / 2 - 1 : null
+  }
+  return null
+}
+
 export function buildAnnotationBuckets(annotations: ReaderAnnotation[]): {
   buckets: Map<string, Set<string>>
   uncategorized: Set<string>
@@ -1212,6 +1317,7 @@ export function buildAnnotationBuckets(annotations: ReaderAnnotation[]): {
 export class FoliateReader implements BookReader {
   private url: string
   private bookId: string
+  private bookSize?: number
   private container: HTMLElement | null = null
   private view: any | null = null
   private book: any | null = null
@@ -1248,7 +1354,9 @@ export class FoliateReader implements BookReader {
   // once the position actually changed
   private pendingJumpFrom: string | null = null
   // Chapter-switch loading indicator: shows only for navigations that outlive
-  // the anti-flicker window; the newest navigation always wins
+  // the anti-flicker window; the newest navigation always wins. The target
+  // hint for UI pre-update is emitted separately at navigation start by
+  // beginPendingNavigation, not through this callback.
   private navigationPending = new NavigationPending((pending) => {
     this.emit('navigatePending', { pending })
   })
@@ -1293,6 +1401,9 @@ export class FoliateReader implements BookReader {
   // Latest search's matches per section (plain-text offsets), kept so
   // highlights can be drawn lazily when a section gets rendered
   private searchMatchOffsets = new Map<number, SearchMatch[]>()
+  // The matched strings let live DOM ranges be recovered when rendering has
+  // changed text-node boundaries or whitespace since the search pass.
+  private searchMatchTexts = new Map<number, string[]>()
   // Search-highlight annotation values currently handed to the view, per section
   private drawnSearchValues = new Map<number, string[]>()
   private footnoteHandler: any = null
@@ -1824,9 +1935,10 @@ export class FoliateReader implements BookReader {
 
   private destroyed = false
 
-  constructor(url: string, bookId = '') {
+  constructor(url: string, bookId = '', bookSize?: number) {
     this.url = url
     this.bookId = bookId
+    this.bookSize = bookSize
   }
 
   async mount(container: HTMLElement, initialTarget?: string, initialFraction?: number, onReady?: () => void) {
@@ -1845,7 +1957,7 @@ export class FoliateReader implements BookReader {
       }
       const tMount1 = performance.now()
 
-      const epub = await getParsedBook(this.url, foliate)
+      const epub = await getParsedBook(this.url, foliate, this.bookSize)
       const tMount2 = performance.now()
       // StrictMode mounts twice: the first instance is destroyed while its
       // async mount is still in flight — bail out instead of becoming a
@@ -1941,8 +2053,14 @@ export class FoliateReader implements BookReader {
       // Navigate to saved position before mount completes, so the user never
       // sees the default chapter. Internal: the initial open is not a "jump".
       if (initialTarget) {
-        await this.display(initialTarget, { internal: true })
+        const ok = await this.display(initialTarget, { internal: true })
         if (this.destroyed) return
+        if (ok === false && initialFraction != null && initialFraction > 0) {
+          // Saved position unresolvable against the current book — land on
+          // the book fraction instead of leaving the view at the book start
+          await this.view?.goToFraction(Math.max(0, Math.min(1, initialFraction)))
+          if (this.destroyed) return
+        }
       } else if (initialFraction != null && initialFraction > 0) {
         // Stale CFI after a re-TOC: land on the book fraction instead
         await this.view?.goToFraction(Math.max(0, Math.min(1, initialFraction)))
@@ -2123,20 +2241,69 @@ export class FoliateReader implements BookReader {
     }, 300)
   }
 
+  // Destination hint of a user navigation, resolvable synchronously at
+  // navigation start. fraction is only known for a chapter start/seek landing
+  // (byte-boundary model); a CFI's in-chapter position cannot be pre-computed.
+  private resolveNavigationTarget(target?: string): NavigationTarget | null {
+    let index = resolveNavigationSectionIndex(target)
+    if (index === null && target && this.book) {
+      const resolved = this.book.resolveHref?.(target) ?? this.book.resolveHref?.(decodeURI(target))
+      const viaMap = this.tocHrefToIndex.get(target)
+      const hrefIndex = resolved?.index ?? viaMap
+      index = typeof hrefIndex === 'number' ? hrefIndex : null
+    }
+    if (index === null || index < 0 || index >= (this.book?.sections?.length ?? 0)) return null
+    return { sectionIndex: index, isJump: true }
+  }
+
+  // Arm the loading indicator and publish the destination hint immediately —
+  // the pre-update must not wait for the anti-flicker flip.
+  private beginPendingNavigation(target?: NavigationTarget) {
+    // Keep consumers such as auto-reading blocked immediately, while the
+    // Reader UI waits for NavigationPending's anti-flicker timer. Otherwise a
+    // fast relocate can leave a pre-update spinner with no matching false
+    // event because the visible phase never started.
+    this.emit('navigatePending', { pending: true, started: true, ...(target ? { target } : {}) })
+    return this.navigationPending.begin()
+  }
+
   async display(target?: string, opts?: { internal?: boolean; showPending?: boolean }) {
     if (!this.view) return
     // History back/forward is user-initiated but marks itself internal so it
     // doesn't re-enter the back stack; showPending re-arms the indicator.
     if (!opts?.internal || opts?.showPending) {
-      const gen = this.navigationPending.begin()
+      const gen = this.beginPendingNavigation(this.resolveNavigationTarget(target) ?? undefined)
       try {
         await this.navigateTo(target, opts)
+      } catch (err) {
+        // User-triggered navigation is commonly fire-and-forget from React
+        // handlers. Keep a failed chapter load from becoming an unhandled
+        // rejection; initial internal navigation still reaches mount's error
+        // path below.
+        console.warn('[FoliateReader] navigation failed:', err)
+        if (opts?.internal && !opts.showPending) throw err
       } finally {
         this.navigationPending.end(gen)
       }
       return
     }
     return this.navigateTo(target, opts)
+  }
+
+  private resolveSearchMatchRange(
+    doc: Document,
+    index: number,
+    match: SearchMatch,
+    matchIndex?: number,
+  ): Range | null {
+    const matchTexts = this.searchMatchTexts.get(index)
+    if (matchIndex !== undefined && matchIndex >= 0 && matchTexts?.length) {
+      const liveText = extractChapterText(doc).text
+      const liveRanges = mapMatchTextsToOffsets(liveText, matchTexts.slice(0, matchIndex + 1))
+      const liveMatch = liveRanges[matchIndex]
+      if (liveMatch) return offsetsToRange(doc, liveMatch.start, liveMatch.end)
+    }
+    return offsetsToRange(doc, match.start, match.end)
   }
 
   private async navigateTo(target?: string, opts?: { internal?: boolean; showPending?: boolean }) {
@@ -2159,14 +2326,25 @@ export class FoliateReader implements BookReader {
     if (target.startsWith('chapter:')) {
       const parts = target.split(':')
       const index = Number(parts[1])
-      if (Number.isNaN(index)) return
+      // Out-of-range section (e.g. after a re-conversion): report failure so
+      // the caller can fall back — foliate's own clamp would silently land
+      // the view somewhere else and the first relocate would overwrite the
+      // saved position with it
+      if (Number.isNaN(index) || index >= (this.book?.sections?.length ?? Infinity)) return false
       // chapter:{index}:{scrollFrac} — restore exact scroll proportion
       if (parts[2] !== undefined) {
         const anchor = Number(parts[2])
-        if (!Number.isNaN(anchor) && renderer) return renderer.goTo({ index, anchor })
+        if (!Number.isNaN(anchor) && renderer) {
+          await renderer.goTo({ index, anchor })
+          return true
+        }
       }
       // chapter:{index} — navigate to section start (backward compat)
-      if (renderer) return renderer.goTo({ index })
+      if (renderer) {
+        await renderer.goTo({ index })
+        return true
+      }
+      return false
     }
 
     // search-hit-chapter:{chapterIndex}:{start}:{end} — AI citation target.
@@ -2195,7 +2373,14 @@ export class FoliateReader implements BookReader {
       const end = Number(parts[3])
       if (![index, start, end].every(Number.isFinite)) return
       if (renderer) {
-        return renderer.goTo({ index, anchor: (doc: Document) => offsetsToRange(doc, start, end) })
+        const match = { start, end }
+        const matchIndex = this.searchMatchOffsets
+          .get(index)
+          ?.findIndex((item) => item.start === start && item.end === end)
+        return renderer.goTo({
+          index,
+          anchor: (doc: Document) => this.resolveSearchMatchRange(doc, index, match, matchIndex),
+        })
       }
       return
     }
@@ -2205,11 +2390,15 @@ export class FoliateReader implements BookReader {
     if (/^epubcfi\(/.test(target)) {
       try {
         const resolved = await this.view.goTo(target)
-        if (!resolved) console.warn('[FoliateReader] CFI navigation returned nothing:', target)
+        if (!resolved) {
+          console.warn('[FoliateReader] CFI navigation returned nothing:', target)
+          return false
+        }
+        return true
       } catch (err) {
         console.error('[FoliateReader] CFI navigation failed:', target, err)
+        return false
       }
-      return
     }
 
     // Try EPUB's built-in href resolver (handles path normalization)
@@ -2241,15 +2430,21 @@ export class FoliateReader implements BookReader {
     this.emit('userInteraction')
     if (this.readingMode === 'page'
       && !turnsCrossChapter(1, this.view.renderer?.page, this.view.renderer?.pages)) {
-      await this.view.next()
+      try {
+        await this.view.next()
+      } catch (err) {
+        console.warn('[FoliateReader] next-page navigation failed:', err)
+      }
       return
     }
     // scroll-mode chapter switch skips the current chapter's tail — an explicit
     // jump, so close the reading segment; a page-mode turn merely crossing the
     // boundary is continuous reading (that page was read) and must not close
     if (this.readingMode === 'scroll') this.emit('userJump')
-    const pending = shouldArmPending(1, this.book, this.currentSectionIndex)
-      ? this.navigationPending.begin()
+    const nextIndex = this.currentSectionIndex + 1
+    const armTarget = nextIndex < (this.book?.sections?.length ?? 0) ? { sectionIndex: nextIndex } : undefined
+    const pending = shouldArmPending(1, this.book, this.currentSectionIndex) || armTarget
+      ? this.beginPendingNavigation(armTarget)
       : null
     try {
       if (this.readingMode === 'page') {
@@ -2257,6 +2452,8 @@ export class FoliateReader implements BookReader {
       } else {
         await this.view?.renderer?.nextSection()
       }
+    } catch (err) {
+      console.warn('[FoliateReader] next navigation failed:', err)
     } finally {
       if (pending !== null) this.navigationPending.end(pending)
     }
@@ -2267,12 +2464,18 @@ export class FoliateReader implements BookReader {
     this.emit('userInteraction')
     if (this.readingMode === 'page'
       && !turnsCrossChapter(-1, this.view.renderer?.page, this.view.renderer?.pages)) {
-      await this.view.prev()
+      try {
+        await this.view.prev()
+      } catch (err) {
+        console.warn('[FoliateReader] previous-page navigation failed:', err)
+      }
       return
     }
     if (this.readingMode === 'scroll') this.emit('userJump')
-    const pending = shouldArmPending(-1, this.book, this.currentSectionIndex)
-      ? this.navigationPending.begin()
+    const prevIndex = this.currentSectionIndex - 1
+    const armTarget = prevIndex >= 0 ? { sectionIndex: prevIndex } : undefined
+    const pending = shouldArmPending(-1, this.book, this.currentSectionIndex) || armTarget
+      ? this.beginPendingNavigation(armTarget)
       : null
     try {
       if (this.readingMode === 'page') {
@@ -2280,6 +2483,8 @@ export class FoliateReader implements BookReader {
       } else {
         await this.view?.renderer?.prevSection()
       }
+    } catch (err) {
+      console.warn('[FoliateReader] previous navigation failed:', err)
     } finally {
       if (pending !== null) this.navigationPending.end(pending)
     }
@@ -2481,9 +2686,19 @@ export class FoliateReader implements BookReader {
     this.pendingJumpFrom = this.lastCfi ?? ''
     // …and close the reading segment so the seek stretch never joins the union
     this.emit('userJump')
-    const gen = this.navigationPending.begin()
+    const clamped = Math.max(0, Math.min(1, percent / 100))
+    const boundaries = this.getSectionFractions()
+    const index = chapterIndexAtFraction(boundaries, clamped * 100)
+    const target = index === null ? undefined : {
+      sectionIndex: index,
+      fraction: clamped,
+      isJump: true,
+    }
+    const gen = this.beginPendingNavigation(target)
     try {
-      await this.view?.goToFraction(Math.max(0, Math.min(1, percent / 100)))
+      await this.view?.goToFraction(clamped)
+    } catch (err) {
+      console.warn('[FoliateReader] progress seek failed:', err)
     } finally {
       this.navigationPending.end(gen)
     }
@@ -3155,6 +3370,7 @@ export class FoliateReader implements BookReader {
       searchCache.set(cacheKey, cached)
       for (const [index, matches] of cached.matches) {
         this.searchMatchOffsets.set(index, matches)
+        this.searchMatchTexts.set(index, cached.matchTexts.get(index) ?? [])
         this.drawSearchHighlights(index, matches)
       }
       if (onProgress) onProgress(cached.results, 1)
@@ -3209,6 +3425,10 @@ export class FoliateReader implements BookReader {
               excerpt,
             })
           }
+          this.searchMatchTexts.set(
+            index,
+            matches.map((match) => chapterText.text.slice(match.start, match.end)),
+          )
           this.searchMatchOffsets.set(index, matches)
           this.drawSearchHighlights(index, matches)
         }
@@ -3221,6 +3441,9 @@ export class FoliateReader implements BookReader {
         const entry: SearchCacheEntry = {
           results: results.slice(),
           matches: new Map(this.searchMatchOffsets),
+          matchTexts: new Map(
+            [...this.searchMatchTexts].map(([index, matchTexts]) => [index, [...matchTexts]]),
+          ),
         }
         searchCache.set(cacheKey, entry)
         while (searchCache.size > SEARCH_CACHE_MAX) {
@@ -3243,8 +3466,13 @@ export class FoliateReader implements BookReader {
       const content = contents.find((c) => c.index === index && c.doc)
       if (!content?.doc) return
       const values: string[] = []
-      for (const m of matches) {
-        const range = offsetsToRange(content.doc, m.start, m.end)
+      const liveText = extractChapterText(content.doc).text
+      const liveRanges = mapMatchTextsToOffsets(liveText, this.searchMatchTexts.get(index) ?? [])
+      for (const [matchIndex, m] of matches.entries()) {
+        const liveMatch = liveRanges[matchIndex]
+        const range = liveMatch
+          ? offsetsToRange(content.doc, liveMatch.start, liveMatch.end)
+          : offsetsToRange(content.doc, m.start, m.end)
         if (!range) continue
         const cfi = this.view.getCFI(index, range)
         if (cfi) values.push(`${SEARCH_ANNOTATION_PREFIX}${cfi}`)
@@ -3266,6 +3494,7 @@ export class FoliateReader implements BookReader {
     }
     this.drawnSearchValues.clear()
     this.searchMatchOffsets.clear()
+    this.searchMatchTexts.clear()
   }
 
   clearSearch() {
@@ -3579,6 +3808,7 @@ export class FoliateReader implements BookReader {
     this.searchGen++
     this.drawnSearchValues.clear()
     this.searchMatchOffsets.clear()
+    this.searchMatchTexts.clear()
     this.invalidateFootnoteRequests()
     this.footnoteHandler?.disposeAll?.()
     this.disposeFootnoteEntries()

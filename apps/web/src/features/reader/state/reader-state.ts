@@ -21,6 +21,8 @@ interface ReaderState {
   sidebarOpen: boolean
   /** Set by "search selection" actions; NavigationPanel consumes and clears it */
   pendingSearchQuery: string | null
+  /** TOC jump clicked before the renderer mounted; Reader applies it once ready */
+  pendingTocHref: string | null
   /** cfiRange of the idea currently being composed; draws a dashed underline while the editor is open */
   noteEditorRange: string | null
   /** Excerpt being shared as a card image; non-null opens ShareCardDialog. Ephemeral by design — sharing never persists an annotation.
@@ -43,12 +45,13 @@ interface ReaderState {
   setAiPendingCommand: (command: AiPendingQuickCommand | null) => void
   setSidebarOpen: (open: boolean) => void
   setPendingSearchQuery: (query: string | null) => void
+  setPendingTocHref: (href: string | null) => void
   setNoteEditorRange: (range: string | null) => void
   setShareTarget: (target: { text: string; chapter: string | null; note?: string; createdAt?: number } | null) => void
   addInvalidReplacementIds: (ids: string[]) => void
   addOrphanedAnnotationKeys: (keys: string[]) => void
   setReplaceTarget: (target: SelectionInfo | null) => void
-  resetForBook: (initialSidebarOpen?: boolean) => void
+  resetForBook: (initialSidebarOpen?: boolean, initialNavTab?: NavTab) => void
 }
 
 export const useReaderState = create<ReaderState>((set) => ({
@@ -62,6 +65,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   aiPendingCommand: null,
   sidebarOpen: false,
   pendingSearchQuery: null,
+  pendingTocHref: null,
   noteEditorRange: null,
   shareTarget: null,
   invalidReplacementIds: [],
@@ -76,6 +80,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   setAiPendingCommand: (aiPendingCommand) => set({ aiPendingCommand }),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
+  setPendingTocHref: (pendingTocHref) => set({ pendingTocHref }),
   setNoteEditorRange: (noteEditorRange) => set({ noteEditorRange }),
   setShareTarget: (shareTarget) => set({ shareTarget }),
   addInvalidReplacementIds: (ids) =>
@@ -83,8 +88,8 @@ export const useReaderState = create<ReaderState>((set) => ({
   addOrphanedAnnotationKeys: (keys) =>
     set((s) => ({ orphanedAnnotationKeys: Array.from(new Set([...s.orphanedAnnotationKeys, ...keys])) })),
   setReplaceTarget: (replaceTarget) => set({ replaceTarget }),
-  resetForBook: (initialSidebarOpen = false) => set({
-    activeNavTab: 'toc',
+  resetForBook: (initialSidebarOpen = false, initialNavTab: NavTab = 'toc') => set({
+    activeNavTab: initialNavTab,
     tocItems: [],
     tocBookId: null,
     currentChapter: null,
@@ -94,6 +99,7 @@ export const useReaderState = create<ReaderState>((set) => ({
     aiPendingCommand: null,
     sidebarOpen: initialSidebarOpen,
     pendingSearchQuery: null,
+    pendingTocHref: null,
     noteEditorRange: null,
     shareTarget: null,
     invalidReplacementIds: [],

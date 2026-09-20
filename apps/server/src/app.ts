@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
+import { compress } from 'hono/compress'
 import { errorHandler } from './middleware/error'
 import { requestContext } from './middleware/request-context'
 import { authGuard } from './middleware/auth.guard'
@@ -33,6 +34,11 @@ registerParser(new TxtParser())
 const app = new Hono()
 
 app.onError(errorHandler)
+
+// gzip/br for JSON APIs and static assets. Hono's defaults keep this safe for
+// the reader: 206 Range responses, HEAD, and non-compressible types
+// (application/epub+zip, images) pass through untouched.
+app.use('*', compress())
 
 app.use('/api/v1/*', requestContext())
 app.get('/api/v1/health', (c) => c.json({ data: { ok: true } }))

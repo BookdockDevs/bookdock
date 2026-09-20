@@ -136,10 +136,14 @@ export interface RendererEvents {
    */
   jumpConfirmed: (e: { cfi: string }) => void
   /**
-   * A user-initiated navigation has been slow enough to show the chapter
-   * loading indicator (true), or the latest navigation has settled (false).
+   * Chapter-switch loading indicator: fires at navigation start with the
+   * destination `target` and `started: true` (pending stays true for consumers
+   * that must pause), then emits visible spinner state after the anti-flicker
+   * window and again when the latest navigation settles.
+   * `target.fraction` is the book-wide landing estimate (section start
+   * boundary); chapter-internal position cannot be pre-computed and stays unset.
    */
-  navigatePending: (e: { pending: boolean }) => void
+  navigatePending: (e: { pending: boolean; started?: boolean; target?: { sectionIndex: number; fraction?: number; isJump?: boolean } }) => void
   /**
    * Middle click-area zone tapped (tap-to-reveal the top/bottom chrome; the
    * click-area setting only governs page turning, so this fires in every mode).

@@ -14,6 +14,7 @@ import {
   normalizeEpubDocumentImages,
   buildAnnotationBuckets,
   cfiSpinePrefix,
+  resolveNavigationSectionIndex,
   sectionSpinePrefix,
   convertTocLabels,
 } from '../features/reader/renderers/FoliateReader'
@@ -37,6 +38,32 @@ describe('cfiSpinePrefix / sectionSpinePrefix', () => {
   it('maps a section index to its expected spine prefix', () => {
     expect(sectionSpinePrefix(0)).toBe('/6/2')
     expect(sectionSpinePrefix(11)).toBe('/6/24')
+  })
+})
+
+describe('resolveNavigationSectionIndex', () => {
+  it('treats an empty target as the book start', () => {
+    expect(resolveNavigationSectionIndex(undefined)).toBe(0)
+  })
+
+  it('reads the index from chapter: and search-hit: targets', () => {
+    expect(resolveNavigationSectionIndex('chapter:7')).toBe(7)
+    expect(resolveNavigationSectionIndex('chapter:7:0.42')).toBe(7)
+    expect(resolveNavigationSectionIndex('search-hit:3:10:42')).toBe(3)
+    // AI-corpus chapter indexes are not section indexes — no pre-update
+    expect(resolveNavigationSectionIndex('search-hit-chapter:3:10:42')).toBeNull()
+    expect(resolveNavigationSectionIndex('chapter:abc')).toBeNull()
+  })
+
+  it('converts an even epubcfi spine step to a section index', () => {
+    expect(resolveNavigationSectionIndex('epubcfi(/6/24!/4/2:58)')).toBe(11)
+    expect(resolveNavigationSectionIndex('epubcfi(/6/2!/4/2:0)')).toBe(0)
+    // odd steps are character locations, not spine positions
+    expect(resolveNavigationSectionIndex('epubcfi(/6/23!/4/2:58)')).toBeNull()
+  })
+
+  it('returns null for hrefs (instance-level resolution handles those)', () => {
+    expect(resolveNavigationSectionIndex('OEBPS/chapter1.xhtml')).toBeNull()
   })
 })
 
@@ -668,6 +695,90 @@ describe('normalizeEpubDocumentImages', () => {
 
     expect(audio.src).toBe('blob:http://localhost/resolved-track.mp3')
     expect(audio.classList.contains('bd-audio-loading')).toBe(false)
+  })
+
+  class FakeIO {
+    static instances: FakeIO[] = []
+    private callback: (entries: { isIntersecting: boolean }[]) => void
+    constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
+      this.callback = cb
+      FakeIO.instances.push(this)
+    }
+    observe() {}
+    disconnect() {}
+    intersect() {
+      this.callback([{ isIntersecting: true }])
+    }
+  }
+
+  // The renderer reads IntersectionObserver off the media document's own
+  // window, so the fixture must be a real iframe (as in production) whose
+  // contentWindow can carry the fake.
+  function createMediaFrame() {
+    FakeIO.instances = []
+    const frame = document.createElement('iframe')
+    document.body.appendChild(frame)
+    const doc = frame.contentDocument as Document
+    doc.body.innerHTML = `
+      <video><source data-bd-deferred-src="movie.mp4" type="video/mp4" /></video>
+      <audio data-bd-deferred-src="track.mp3"></audio>`
+    ;(frame.contentWindow as unknown as { IntersectionObserver: unknown }).IntersectionObserver = FakeIO
+    return { doc, frame }
+  }
+
+  it('defers heavy-media byte fetches until near-viewport, and starts on play click', async () => {
+    const { doc, frame } = createMediaFrame()
+    try {
+      const loadHref = vi.fn(() => Promise.resolve('blob:resolved'))
+      normalizeEpubDocumentImages(doc, { section: { id: 's', loadHref } })
+
+      const video = doc.querySelector('video') as HTMLVideoElement
+      const audio = doc.querySelector('audio') as HTMLAudioElement
+      const wrapper = doc.querySelector('.bd-video-wrapper') as HTMLElement
+
+      // render only draws the placeholder card — no bytes requested yet
+      expect(loadHref).not.toHaveBeenCalled()
+      expect(wrapper.classList.contains('is-media-loading')).toBe(false)
+      expect(audio.classList.contains('bd-audio-loading')).toBe(false)
+
+      // pressing play starts the fetch and records the intent to play
+      const playMock = vi.fn().mockResolvedValue(undefined)
+      video.play = playMock
+      ;(wrapper.querySelector('.bd-video-play-btn') as HTMLButtonElement).click()
+      expect(loadHref).toHaveBeenCalledWith('movie.mp4')
+
+      // near-viewport intersection starts the audio fetch
+      FakeIO.instances[1].intersect()
+      expect(loadHref).toHaveBeenCalledWith('track.mp3')
+      expect(audio.classList.contains('bd-audio-loading')).toBe(true)
+
+      await new Promise((r) => setTimeout(r, 0))
+      expect(video.src).toBe('blob:resolved')
+      expect(audio.src).toBe('blob:resolved')
+      // deferred play intent fires once playback is possible
+      expect(playMock).toHaveBeenCalledTimes(1)
+      expect(wrapper.classList.contains('is-media-loading')).toBe(false)
+      expect(audio.classList.contains('bd-audio-loading')).toBe(false)
+    } finally {
+      frame.remove()
+    }
+  })
+
+  it('starts deferred fetches on near-viewport intersection without user clicks', async () => {
+    const { doc, frame } = createMediaFrame()
+    try {
+      const loadHref = vi.fn(() => Promise.resolve('blob:resolved'))
+      normalizeEpubDocumentImages(doc, { section: { id: 's', loadHref } })
+      expect(loadHref).not.toHaveBeenCalled()
+
+      for (const io of FakeIO.instances) io.intersect()
+      await new Promise((r) => setTimeout(r, 0))
+      expect(loadHref).toHaveBeenCalledTimes(2)
+      expect((doc.querySelector('video') as HTMLVideoElement).src).toBe('blob:resolved')
+      expect((doc.querySelector('audio') as HTMLAudioElement).src).toBe('blob:resolved')
+    } finally {
+      frame.remove()
+    }
   })
 })
 

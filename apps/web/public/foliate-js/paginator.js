@@ -671,8 +671,21 @@ class View {
     }
     async load(src, data, afterLoad, beforeRender, observeDynamicResources) {
         if (typeof src !== 'string') throw new Error(`${src} is not string`)
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => {
+            // Iframe `load` can be lost (e.g. the view was inserted into a
+            // detached subtree); without a bound the whole navigation hangs.
+            // Reject so the caller's error/finally paths settle the pending
+            // indicator instead of spinning forever.
+            let settled = false
+            const timer = setTimeout(() => {
+                if (settled) return
+                settled = true
+                reject(new Error('iframe load timed out'))
+            }, 10000)
             this.#iframe.addEventListener('load', async () => {
+                if (settled) return
+                settled = true
+                clearTimeout(timer)
                 const doc = this.document
                 afterLoad?.(doc)
                 this.#disposeDynamicResources?.()
@@ -3391,8 +3404,16 @@ export class Paginator extends HTMLElement {
                     onLoad?.({ doc, index })
                 }
                 const beforeRender = this.#beforeRender.bind(this)
-                await view.load(src, data, afterLoad, beforeRender,
-                    this.sections[index].observeDynamicResources)
+                try {
+                    await view.load(src, data, afterLoad, beforeRender,
+                        this.sections[index].observeDynamicResources)
+                } catch (e) {
+                    // A timed-out iframe must not remain in #views: a later
+                    // retry would otherwise treat the dead view as loaded and
+                    // skip the section fetch entirely.
+                    if (this.#views.get(index) === view) this.#destroyView(index)
+                    throw e
+                }
                 if (!isCurrent()) {
                     if (this.#views.get(index) === view) this.#destroyView(index)
                     return

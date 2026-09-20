@@ -4,6 +4,7 @@ import {
   extractChapterText,
   findMatches,
   getChapterText,
+  mapMatchTextsToOffsets,
   makeExcerpt,
   offsetsToRange,
 } from '../features/reader/lib/book-search'
@@ -84,6 +85,27 @@ describe('findMatches', () => {
   it('returns no results for empty text or query', () => {
     expect(findMatches('', 'q')).toEqual([])
     expect(findMatches('text', '')).toEqual([])
+  })
+})
+
+describe('mapMatchTextsToOffsets', () => {
+  it('maps matches against the live text in result order', () => {
+    expect(mapMatchTextsToOffsets('前缀命中一命中二', ['命中一', '命中二'])).toEqual([
+      { start: 2, end: 5 },
+      { start: 5, end: 8 },
+    ])
+  })
+
+  it('keeps duplicate and overlapping matches aligned', () => {
+    expect(mapMatchTextsToOffsets('aaaa', ['aa', 'aa', 'aa'])).toEqual([
+      { start: 0, end: 2 },
+      { start: 1, end: 3 },
+      { start: 2, end: 4 },
+    ])
+  })
+
+  it('marks a match as unresolved when the live text no longer contains it', () => {
+    expect(mapMatchTextsToOffsets('正文', ['不存在'])).toEqual([null])
   })
 })
 

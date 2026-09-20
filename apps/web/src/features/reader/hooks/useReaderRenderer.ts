@@ -10,9 +10,13 @@ import type { EffectiveViewSettings } from '../lib/view-settings'
 interface UseReaderRendererOptions {
   url: string
   bookId?: string
+  /** Known file size from the book-detail response; lets the renderer pick
+   *  the zip load strategy without a HEAD probe. */
+  bookSize?: number
   initialCfi?: string
-  /** Fallback start position (0-1) when initialCfi is stale (re-TOC): the
-   *  renderer navigates by fraction instead of CFI. */
+  /** Fallback start position (0-1): used when no CFI was saved (stale after
+   *  a re-TOC) and when the saved CFI fails to resolve (renderer falls back
+   *  to fraction navigation instead of leaving the view at the book start). */
   initialFraction?: number
   /** Per-book merged values for the first-batch settings (F1). When omitted,
    *  the global store values are used. */
@@ -31,7 +35,7 @@ interface UseReaderRendererOptions {
   onError?: (err: Error) => void
   onTocReady?: (items: { label: string; href: string; level?: number }[]) => void
   onJumpConfirmed?: (e: { cfi: string }) => void
-  onNavigatePending?: (e: { pending: boolean }) => void
+  onNavigatePending?: (e: Parameters<RendererEvents['navigatePending']>[0]) => void
   onChromeToggle?: () => void
   onUserJump?: () => void
   onReplacementInvalid?: (e: Parameters<RendererEvents['replacementInvalid']>[0]) => void
@@ -43,6 +47,7 @@ interface UseReaderRendererOptions {
 export function useReaderRenderer({
   url,
   bookId,
+  bookSize,
   initialCfi,
   initialFraction,
   settings,
@@ -201,7 +206,7 @@ export function useReaderRenderer({
     fontSize: marginalFontSize,
   }
 
-  const createRenderer = useCallback(() => new FoliateReader(url, bookId), [bookId, url])
+  const createRenderer = useCallback(() => new FoliateReader(url, bookId, bookSize), [bookId, bookSize, url])
 
   useEffect(() => {
     if (!containerRef.current || !url) return

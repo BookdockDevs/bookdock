@@ -29,6 +29,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   const setToolbarLocked = useUiStore((s) => s.setToolbarLocked)
   const sidebarWidth = useUiStore((s) => s.sidebarWidth)
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth)
+  const setNavTabRemembered = useUiStore((s) => s.setNavTabRemembered)
   const statsDisabled = useUiStore((s) => s.readingTimerMode) === 'off'
 
   const SIDEBAR_MIN = 200
@@ -112,8 +113,11 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       panelRef.current?.saveScroll()
       setActiveNavTab(tab)
       setSidebarOpen(true)
+      // Only explicit dock clicks are remembered — programmatic handoffs
+      // (selection → AI) must not become next session's startup tab
+      setNavTabRemembered(tab)
     }
-  }, [sidebarOpen, activeNavTab, setActiveNavTab, setSidebarOpen])
+  }, [sidebarOpen, activeNavTab, setActiveNavTab, setSidebarOpen, setNavTabRemembered])
 
   const handleClosePanel = useCallback(() => {
     setSidebarOpen(false)

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { FontPreferences, TtsEngine } from '@bookdock/shared'
-import type { AutoReadingMode, FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField } from '../features/reader/types'
+import type { AutoReadingMode, FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField, NavTab } from '../features/reader/types'
 import type { CustomReadingTheme } from '../lib/reading-theme'
 import {
   CONFIG_STORAGE_KEY,
@@ -193,9 +193,13 @@ interface UiState {
   /** Last explicit open/closed choice while locked; seeds the sidebar on book
    *  open (locked + open). Device-local like toolbarLocked. */
   sidebarRememberedOpen: boolean
+  /** Last sidebar tab the user picked explicitly; seeds the tab on book open.
+   *  Device-local like toolbarLocked. */
+  navTabRemembered: NavTab
   setToolbarLocked: (v: boolean) => void
   setSidebarWidth: (v: number) => void
   setSidebarRememberedOpen: (v: boolean) => void
+  setNavTabRemembered: (v: NavTab) => void
 
   setUiTheme: (t: UiTheme) => void
   setReadingThemeId: (id: string) => void
@@ -376,6 +380,11 @@ function getInitialRecentlyReadStyle(): RecentlyReadStyle {
   const stored = localStorage.getItem('bd-recently-read-style')
   return stored === 'covers' || stored === 'cards' ? stored : 'off'
 }
+function getInitialNavTab(): NavTab {
+  if (typeof window === 'undefined') return 'toc'
+  const stored = localStorage.getItem('bd-reader-nav-tab')
+  return stored === 'notes' || stored === 'stats' || stored === 'ai' ? stored : 'toc'
+}
 const initialScrollHorizontalPadding = getInitialNumber('bd-horizontal-padding', 0, 0, 120)
 const initialScrollVerticalPadding = getInitialNumber('bd-vertical-padding', 0, 0, 120)
 
@@ -465,6 +474,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   toolbarLocked: getInitialBoolean('bd-reader-toolbar-locked', false),
   sidebarWidth: getInitialNumber('bd-sidebar-width', 288, 200, 640),
   sidebarRememberedOpen: getInitialBoolean('bd-reader-sidebar-open', true),
+  navTabRemembered: getInitialNavTab(),
 
   setCoverText: (coverText) => {
     setStorage('bd-cover-text', String(coverText))
@@ -497,6 +507,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setSidebarRememberedOpen: (sidebarRememberedOpen) => {
     setStorage('bd-reader-sidebar-open', String(sidebarRememberedOpen))
     set({ sidebarRememberedOpen })
+  },
+  setNavTabRemembered: (navTabRemembered) => {
+    setStorage('bd-reader-nav-tab', navTabRemembered)
+    set({ navTabRemembered })
   },
   setSidebarWidth: (sidebarWidth) => {
     setStorage('bd-sidebar-width', String(sidebarWidth))

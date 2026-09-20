@@ -193,6 +193,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const tocBookId = useReaderState((s) => s.tocBookId)
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
+  const setPendingTocHref = useReaderState((s) => s.setPendingTocHref)
   const { renderer } = useReaderApi()
   const annotationsQuery = useAnnotations(bookId)
   const { data: annotations } = annotationsQuery
@@ -480,7 +481,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   }, [currentIndex, tree, open, tab])
 
   function goTo(href: string) {
-    renderer?.display(href)
+    // Clicks land while the book is still mounting — queue the jump for
+    // Reader instead of dropping it
+    if (renderer) void renderer.display(href)
+    else setPendingTocHref(href)
     if (!locked) onClose?.()
   }
 
