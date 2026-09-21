@@ -2,7 +2,33 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.3.1] - Unreleased
+## [0.3.2] - Unreleased
+
+### Highlights
+
+- External clients can use operation-scoped access tokens with explicit permissions, lifecycle management, and safe cross-origin range access.
+- Reader progress, TOC boundaries, annotation identity, and font fallback are more reliable across initial saves, duplicate chapter labels, cancelled chapters, and missing glyphs.
+- Authentication transitions and reader loading now recover cleanly without exposing protected pages or producing duplicate redirects and error notifications.
+
+### Added
+
+- Operation-scoped `bd_` access tokens with hashed storage, expiration, enable/disable and delete operations, permission checks, token CORS, and redacted logging.
+- Persisted annotation `chapterHref` metadata with a database migration so repeated chapter titles remain distinct in notes, exports, and AI ideas.
+- Reader font fallback for CJK and symbol glyphs across system, CDN, and uploaded fonts.
+
+### Changed
+
+- Token authorization is limited to an explicit operation registry; range response headers are exposed for remote EPUB reads without adding credentialed cross-origin access.
+- Reader progress seeding now uses the complete server response, TOC selection uses active chapter boundaries, and annotation grouping/export follows stable chapter hrefs instead of display labels.
+- Web authentication revalidation keeps protected pages hidden, suppresses duplicate 401 redirects, and makes book action notifications identify the affected book.
+
+### Fixed
+
+- Saving the first reading progress no longer leaves the cache at `{ data: null }` when the server has already returned a complete progress record.
+- The active TOC now loads the actual current directory boundaries; the first real chapter remains non-cancellable while later chapters can be cancelled and submitted correctly.
+- Duplicate chapter labels no longer merge annotations, and missing CJK or symbol glyphs now fall back to an available font.
+
+## [0.3.1] - 2026-09-20
 
 ### Highlights
 
@@ -230,7 +256,33 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.3.1] - 待发布
+### [0.3.2] - 待发布
+
+#### 主要更新
+
+- 外部客户端现在可以使用按操作授权的访问令牌，并具备明确的权限、生命周期管理与安全的跨域分段读取能力。
+- 阅读进度、目录边界、标注身份与字体回退在首次保存、重复章节标题、取消章节和特殊字符缺字场景下更加可靠。
+- 认证状态切换与阅读器加载可以更干净地恢复，不再暴露受保护页面，也不会重复跳转或重复提示错误。
+
+#### 新增
+
+- 按操作授权的 `bd_` 访问令牌：哈希存储、过期、启用/禁用与删除、权限校验、令牌 CORS 和日志脱敏。
+- 标注保存目录项的 `chapterHref`，并通过数据库迁移让重复章节标题在笔记、导出和 AI 想法中保持独立。
+- 为系统字体、CDN 字体和上传字体补充 CJK 与符号字形回退。
+
+#### 变更
+
+- 令牌授权仅允许访问明确登记的操作；远程 EPUB 读取所需的 Range 响应头会被暴露，但不会增加带凭证的跨域访问面。
+- 阅读进度缓存使用完整服务端响应，目录选择使用当前实际章节边界，标注分组与导出按稳定的章节 href 而不是显示标题处理。
+- Web 认证重新校验期间隐藏受保护页面，抑制重复的 401 跳转，并让书籍操作提示明确指出受影响的书籍。
+
+#### 修复
+
+- 首次保存阅读进度后，即使原缓存是 `{ data: null }`，也不再丢失服务端已返回的完整进度记录。
+- 当前实际目录会加载正确的章节边界；第一个实际章节仍不可取消，后续章节可以取消并正常提交。
+- 重复章节标题不再合并标注，CJK 或符号缺字时也会回退到可用字体。
+
+### [0.3.1] - 2026-09-20
 
 #### 主要更新
 
