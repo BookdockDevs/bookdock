@@ -92,4 +92,16 @@ describe('annotation export', () => {
     expect(output).toContain('- **书签**：第二章：未完成的告白')
     expect(output).not.toContain('*高亮 ·')
   })
+
+  it('starts a new chapter section for duplicate labels with different hrefs', () => {
+    const duplicateFirst = { ...annotation, id: 'duplicate-first', chapterHref: 'chapter:first-27' }
+    const duplicateSecond = { ...annotation, id: 'duplicate-second', chapterHref: 'chapter:second-27' }
+    const output = buildAnnotationMarkdown(
+      [duplicateFirst, duplicateSecond],
+      book,
+      { includeDetails: false, includeTime: false, includeDeepLink: false },
+      labels,
+    )
+    expect(output.match(/## 第一章/g)).toHaveLength(2)
+  })
 })

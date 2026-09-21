@@ -552,6 +552,7 @@ export interface AiProfileUpdateReq {
 export interface AiContextReq {
   chapterIndex: number
   chapterTitle?: string
+  chapterHref?: string
   cfiRange: string
   selection: string
   before?: string
@@ -1478,6 +1479,7 @@ export type AnnotationCreateReq = {
   text?: string
   note?: string
   chapter?: string
+  chapterHref?: string
 }
 
 export type AnnotationUpdateReq = {
@@ -1498,6 +1500,7 @@ export interface AnnotationRes {
   text: string
   note: string | null
   chapter: string | null
+  chapterHref?: string | null
   createdAt: number
   updatedAt: number
   deletedAt?: number | null

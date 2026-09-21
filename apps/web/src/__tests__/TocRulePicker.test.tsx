@@ -46,6 +46,9 @@ const samplePreview: TocPreviewRes = {
 }
 
 let previewData: TocPreviewRes | undefined = samplePreview
+let activePreviewData: TocPreviewRes | undefined
+let selectedRulePreviewData: TocPreviewRes | undefined
+let useActivePreview = false
 let previewIsFetching = false
 
 vi.mock('@/api/hooks/useTocRules', () => ({
@@ -64,8 +67,11 @@ vi.mock('@/api/hooks/useTocRules', () => ({
     lastPreviewEnabled = enabled
     previewEnabledCalls.push(enabled)
     if (enabled) lastPreviewRequest = req
+    const data = req.tocRuleId === 'rule-1'
+      ? (useActivePreview ? activePreviewData : selectedRulePreviewData)
+      : previewData
     return {
-      data: enabled && previewData ? { data: previewData } : undefined,
+      data: enabled && data ? { data } : undefined,
       isFetching: enabled && previewIsFetching,
     }
   },
@@ -80,6 +86,9 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
     previewEnabledCalls = []
     availableRules = sampleRules
     previewData = samplePreview
+    activePreviewData = undefined
+    selectedRulePreviewData = undefined
+    useActivePreview = false
     previewIsFetching = false
   })
 
@@ -97,9 +106,9 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
     expect(screen.getByText('自动分章')).toBeInTheDocument()
     expect(screen.getByText('中文网文（卷·章·节）')).toBeInTheDocument()
 
-    // The active rule only shows the persisted directory and does not preview again.
+    // The active rule initially falls back to the persisted directory while its raw boundaries load.
     expect(screen.getByText('当前第一章')).toBeInTheDocument()
-    expect(lastPreviewEnabled).toBe(false)
+    expect(lastPreviewEnabled).toBe(true)
 
     // Apply button is disabled when selected target is already the active rule.
     const applyBtn = screen.getByRole('button', { name: '应用' })
@@ -138,7 +147,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
     expect(screen.getByText('当前 2 章 → 预览 2 章')).toBeInTheDocument()
     expect(screen.getByText('第一章 当前目录')).toBeInTheDocument()
     expect(screen.getByText('第二章 当前目录')).toBeInTheDocument()
-    expect(lastPreviewEnabled).toBe(false)
+    expect(lastPreviewEnabled).toBe(true)
 
     fireEvent.click(screen.getByText('自动分章'))
 
@@ -181,7 +190,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
     expect(previewEnabledCalls.every((enabled) => !enabled)).toBe(true)
   })
 
-  it('only previews a different target instead of recalculating the active rule', () => {
+  it('previews the active rule so its chapter boundaries can be edited', () => {
     render(
       <TocRulePicker
         bookId="book-1"
@@ -195,12 +204,49 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
     )
 
     const applyBtn = screen.getByRole('button', { name: '应用' })
-    expect(lastPreviewEnabled).toBe(false)
+    expect(lastPreviewEnabled).toBe(true)
     expect(applyBtn).toBeDisabled()
 
     fireEvent.click(screen.getByText('自动分章'))
     expect(lastPreviewEnabled).toBe(true)
     expect(applyBtn).not.toBeDisabled()
+  })
+
+  it('allows excluding a chapter boundary from the active rule preview', () => {
+    useActivePreview = true
+    activePreviewData = {
+      ...samplePreview,
+      totalChapters: 2,
+      currentTotalChapters: 2,
+      levelCounts: { 1: 2 },
+      chapters: [
+        { id: 'ch-0', title: '第一章 当前目录', level: 1, wordCount: 3500, excluded: false, canExclude: false },
+        { id: 'ch-20', title: '第二章 当前目录', level: 1, wordCount: 2200, excluded: false, canExclude: true },
+      ],
+    }
+
+    render(
+      <TocRulePicker
+        bookId="book-1"
+        currentRuleId="rule-1"
+        currentChapters={[
+          { id: 'ch-0', title: '第一章 当前目录', level: 1, wordCount: 3500 },
+          { id: 'ch-20', title: '第二章 当前目录', level: 1, wordCount: 2200 },
+        ]}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const chapterButton = screen.getByRole('button', { name: /第二章 当前目录/ })
+    expect(chapterButton).not.toBeDisabled()
+    fireEvent.click(chapterButton)
+    expect(chapterButton).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    expect(reTocMutate).toHaveBeenCalledWith(
+      { tocRuleId: 'rule-1', excludedChapterIds: ['ch-20'] },
+      expect.anything(),
+    )
   })
 
   it('supports editing and testing in BookCustomTocEditor', () => {
@@ -250,6 +296,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
   })
 
   it('toggles a cancellable chapter boundary and submits the exclusion', () => {
+    selectedRulePreviewData = samplePreview
     render(
       <TocRulePicker
         bookId="book-1"

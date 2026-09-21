@@ -262,6 +262,7 @@ export const ttsEdgeSpeechSchema = z.object({
 const aiContextSchema = z.object({
   chapterIndex: z.number().int().min(-1).max(1_000_000),
   chapterTitle: z.string().max(500).optional(),
+  chapterHref: z.string().max(2000).optional(),
   cfiRange: z.string().trim().min(1).max(2000),
   selection: z.string().trim().max(AI_MAX_CONTEXT_CHARS),
   before: z.string().max(2000).optional(),
@@ -475,6 +476,7 @@ export const annotationCreateSchema = z.object({
   text: z.string().optional().default(''),
   note: z.string().optional(),
   chapter: z.string().optional(),
+  chapterHref: z.string().max(2000).optional(),
 })
 
 export const annotationUpdateSchema = z.object({

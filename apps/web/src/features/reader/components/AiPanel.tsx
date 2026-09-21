@@ -40,7 +40,7 @@ interface AiMessage {
   citations: AiCitation[]
   events?: AiMessageEventRes[]
   retry?: AiRetryRecipe | null
-  ideaTarget?: { cfiRange: string; text: string; chapter?: string }
+  ideaTarget?: { cfiRange: string; text: string; chapter?: string; chapterHref?: string }
   savedAsIdea: boolean
 }
 
@@ -509,6 +509,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
   const aiPendingCommand = useReaderState((s) => s.aiPendingCommand)
   const setAiPendingCommand = useReaderState((s) => s.setAiPendingCommand)
   const currentChapter = useReaderState((s) => s.currentChapter)
+  const currentChapterHref = useReaderState((s) => s.currentChapterHref)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
   const { renderer } = useReaderApi()
@@ -698,6 +699,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         cfiRange: userMessage.retry.context.cfiRange,
         text: selectedText.slice(0, 500),
         ...(userMessage.retry.context.chapterTitle ? { chapter: userMessage.retry.context.chapterTitle } : {}),
+        ...(userMessage.retry.context.chapterHref ? { chapterHref: userMessage.retry.context.chapterHref } : {}),
       }
       const savedAsIdea = annotations.some((annotation) => annotation.type === 'note'
         && annotation.cfiRange === ideaTarget.cfiRange
@@ -941,6 +943,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
   const selectionPreview = selection.replace(/\s+/g, ' ')
   const currentParagraph = renderer?.getCurrentParagraphText?.()?.trim() ?? ''
   const chapterTitle = aiContext?.chapterTitle ?? activeSelection?.chapterTitle ?? currentChapter
+  const chapterHref = aiContext?.chapterHref ?? currentChapterHref
   const chapterIndex = aiContext?.chapterIndex ?? activeSelection?.chapterIndex ?? currentChapterIndex ?? -1
   const modelReady = Boolean(statusQuery.data?.data.enabled)
   const modelLabel = modelReady ? statusQuery.data?.data.model ?? _('reader.aiCurrentModel') : _('reader.aiSelectModel')
@@ -1356,7 +1359,12 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     const assistantId = messageId()
     const selectedText = request.context.selection.trim()
     const ideaTarget = selectedText && request.context.cfiRange !== 'selection'
-      ? { cfiRange: request.context.cfiRange, text: selectedText.slice(0, 500), ...(request.context.chapterTitle ? { chapter: request.context.chapterTitle } : {}) }
+      ? {
+          cfiRange: request.context.cfiRange,
+          text: selectedText.slice(0, 500),
+          ...(request.context.chapterTitle ? { chapter: request.context.chapterTitle } : {}),
+          ...(request.context.chapterHref ? { chapterHref: request.context.chapterHref } : {}),
+        }
       : undefined
     shouldStickToLatestRef.current = true
     hasPendingLatestRef.current = false
@@ -1496,6 +1504,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
       context: {
         chapterIndex,
         chapterTitle: chapterTitle ?? undefined,
+        ...(chapterHref ? { chapterHref } : {}),
         cfiRange: selectionContext?.cfiRange ?? 'selection',
         selection,
         ...(promptVariables.includes('SELPARA') && selectedParagraph ? { paragraph: selectedParagraph } : {}),
@@ -1577,6 +1586,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
         color: 'yellow',
         text: message.ideaTarget.text,
         ...(message.ideaTarget.chapter ? { chapter: message.ideaTarget.chapter } : {}),
+        ...(message.ideaTarget.chapterHref ? { chapterHref: message.ideaTarget.chapterHref } : {}),
         note: message.content.trim(),
       })
       updateAssistant(message.id, (current) => ({ ...current, savedAsIdea: true }))

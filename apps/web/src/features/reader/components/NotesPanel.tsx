@@ -11,7 +11,7 @@ import { useReaderApi } from '../hooks/useReaderApi'
 import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { kindOf, type NoteSort } from '../hooks/useNotesFilter'
 import { compareCfiPosition } from '../lib/cfi-overlap'
-import { buildChapterOrderLookup } from '../lib/chapter-order'
+import { buildChapterOrderLookup, type ChapterOrderItem } from '../lib/chapter-order'
 import { markEscConsumed } from '../lib/esc-consumed'
 import { useReaderState } from '../state/reader-state'
 import AnnotationExportDialog from './AnnotationExportDialog'
@@ -143,8 +143,8 @@ interface NotesPanelProps {
   sort: NoteSort
   locked?: boolean
   onClose?: () => void
-  /** Chapter titles in book order, used to sort chapter groups and exports */
-  chapterOrder: string[]
+  /** TOC entries in book order, used to sort chapter groups and exports */
+  chapterOrder: ChapterOrderItem[]
   bookId: string
   selectionMode?: boolean
   onExitSelection?: () => void
@@ -259,15 +259,18 @@ export const NotesPanel = memo(function NotesPanel({
   /** Chapter-grouped view, or null when a flat time-sorted list should render */
   const groups = useMemo(() => {
     if (sort !== 'chapter' && sort !== 'chapter-desc') return null
-    const byChapter = new Map<string, AnnotationRes[]>()
+    const byChapter = new Map<string, { chapter: string; chapterHref: string | null; list: AnnotationRes[] }>()
     for (const a of items) {
-      const key = a.chapter || _('reader.uncategorized')
-      if (!byChapter.has(key)) byChapter.set(key, [])
-      byChapter.get(key)!.push(a)
+      const chapter = a.chapter || _('reader.uncategorized')
+      const chapterHref = a.chapterHref ?? null
+      const key = chapterHref ? `href:${chapterHref}` : `label:${chapter}`
+      const group = byChapter.get(key)
+      if (group) group.list.push(a)
+      else byChapter.set(key, { chapter, chapterHref, list: [a] })
     }
     const lookupChapter = buildChapterOrderLookup(chapterOrder)
-    const orderIndex = (name: string) => {
-      const i = lookupChapter(name)
+    const orderIndex = (group: { chapter: string; chapterHref: string | null }) => {
+      const i = lookupChapter(group.chapter, group.chapterHref)
       return i < 0 ? chapterOrder.length : i
     }
     const reverse = sort === 'chapter-desc'
@@ -279,14 +282,14 @@ export const NotesPanel = memo(function NotesPanel({
       || compareCfiPosition(a.cfiRange, b.cfiRange, true)
       || a.createdAt - b.createdAt
       || a.id.localeCompare(b.id)
-    return Array.from(byChapter.entries())
-      .map(([chapter, list]) => ({
-        chapter,
-        list: list.sort((a, b) => (reverse ? -1 : 1) * compareItems(a, b)),
+    return Array.from(byChapter.values())
+      .map((group) => ({
+        ...group,
+        list: group.list.sort((a, b) => (reverse ? -1 : 1) * compareItems(a, b)),
       }))
       .sort((g1, g2) => {
-        const a = orderIndex(g1.chapter)
-        const b = orderIndex(g2.chapter)
+        const a = orderIndex(g1)
+        const b = orderIndex(g2)
         const aUnknown = a === chapterOrder.length
         const bUnknown = b === chapterOrder.length
         if (aUnknown !== bUnknown) return aUnknown ? 1 : -1
@@ -645,7 +648,7 @@ export const NotesPanel = memo(function NotesPanel({
       ) : groups ? (
         <div className="space-y-4">
           {groups.map((g) => (
-            <div key={g.chapter} className="space-y-2">
+            <div key={g.chapterHref ? `href:${g.chapterHref}` : `label:${g.chapter}`} className="space-y-2">
               <div className="group flex items-center justify-between px-1">
                 <button
                   type="button"

@@ -14,7 +14,7 @@ import {
   uploadedFontAlias,
   useFontLoaderStore,
 } from '../features/reader/fonts'
-import { FONT_OPTIONS } from '../features/reader/types'
+import { FONT_OPTIONS, READER_GLYPH_FALLBACK } from '../features/reader/types'
 
 const uploadedFont: FontListItem = {
   id: 'abc123',
@@ -36,6 +36,7 @@ describe('resolveFont', () => {
   it('resolves system stacks by id', () => {
     const resolved = resolveFont('kaiti', [])
     expect(resolved.stack).toBe(FONT_OPTIONS.find((f) => f.id === 'kaiti')!.value)
+    expect(resolved.stack).toContain(READER_GLYPH_FALLBACK)
     expect(resolved.builtin).toBeUndefined()
     expect(resolved.uploaded).toBeUndefined()
   })
@@ -44,13 +45,15 @@ describe('resolveFont', () => {
     const resolved = resolveFont('lxgw-wenkai', [])
     expect(resolved.name).toBe('霞鹜文楷')
     expect(resolved.stack).toBe(BUILTIN_FONTS[0].family)
+    expect(resolved.stack).toContain(READER_GLYPH_FALLBACK)
     expect(resolved.builtin?.cssUrl).toContain('lxgw-wenkai-webfont')
   })
 
   it('resolves uploaded fonts to the aliased family', () => {
     const resolved = resolveFont('abc123', [uploadedFont])
     expect(resolved.name).toBe('My Handwriting')
-    expect(resolved.stack).toBe('"bd-font-abc123", serif')
+    expect(resolved.stack).toBe(`"bd-font-abc123", ${READER_GLYPH_FALLBACK}, serif`)
+    expect(resolved.stack).toContain(READER_GLYPH_FALLBACK)
     expect(resolved.uploaded).toBe(uploadedFont)
   })
 
@@ -152,7 +155,7 @@ describe('buildFontOptions', () => {
       source: 'uploaded',
       status: 'ready',
       name: 'My Handwriting',
-      stack: '"bd-font-abc123", serif',
+      stack: `"bd-font-abc123", ${READER_GLYPH_FALLBACK}, serif`,
     })
   })
 

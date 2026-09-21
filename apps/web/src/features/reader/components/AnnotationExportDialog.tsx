@@ -17,7 +17,7 @@ import {
   type AnnotationExportOptions,
 } from '../lib/annotation-export'
 import { compareCfiPosition } from '../lib/cfi-overlap'
-import { buildChapterOrderLookup } from '../lib/chapter-order'
+import { buildChapterOrderLookup, type ChapterOrderItem } from '../lib/chapter-order'
 import { COLOR_LABEL_KEYS, STYLE_LABEL_KEYS } from './annotation-colors'
 import { CheckIcon, ChevronDownIcon, CopyIcon, DocumentExportIcon } from './annotation-icons'
 
@@ -71,7 +71,7 @@ interface AnnotationExportDialogProps {
   bookId: string
   annotations: AnnotationRes[]
   sort: 'chapter' | 'chapter-desc' | 'time-desc' | 'time-asc'
-  chapterOrder: string[]
+  chapterOrder: ChapterOrderItem[]
   onClose: () => void
   quickExport?: boolean
 }
@@ -105,8 +105,8 @@ export default function AnnotationExportDialog({
     const reverse = sort === 'chapter-desc'
     const lookupChapter = buildChapterOrderLookup(chapterOrder)
     return next.sort((a, b) => {
-      const aIndex = lookupChapter(a.chapter)
-      const bIndex = lookupChapter(b.chapter)
+      const aIndex = lookupChapter(a.chapter, a.chapterHref)
+      const bIndex = lookupChapter(b.chapter, b.chapterHref)
       const aUnknown = aIndex < 0
       const bUnknown = bIndex < 0
       if (aUnknown !== bUnknown) return aUnknown ? 1 : -1

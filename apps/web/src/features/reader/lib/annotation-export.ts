@@ -53,6 +53,10 @@ function annotationUrl(book: AnnotationExportBook, annotation: AnnotationRes): s
   return url.toString()
 }
 
+function annotationChapterKey(annotation: AnnotationRes): string | null {
+  return annotation.chapterHref ?? annotation.chapter
+}
+
 function dateText(timestamp: number): string {
   return new Date(timestamp).toLocaleString()
 }
@@ -68,11 +72,12 @@ export function buildAnnotationMarkdown(
   labels: AnnotationExportLabels,
 ): string {
   const lines = [`# ${book.title}`, book.author ? `\n${labels.author}${labels.separator}${book.author}` : '', '']
-  let chapter: string | null = null
+  let chapterKey: string | null = null
   for (const annotation of annotations) {
-    if (options.groupByChapter !== false && annotation.chapter !== chapter) {
-      chapter = annotation.chapter
-      if (chapter) lines.push(`## ${chapter}`, '')
+    const nextChapterKey = annotationChapterKey(annotation)
+    if (options.groupByChapter !== false && nextChapterKey !== chapterKey) {
+      chapterKey = nextChapterKey
+      if (annotation.chapter) lines.push(`## ${annotation.chapter}`, '')
     }
     if (annotation.type === 'bookmark') {
       const bookmarkText = annotation.text || labels.unnamedBookmark
@@ -98,11 +103,12 @@ export function buildAnnotationText(
   labels: AnnotationExportLabels,
 ): string {
   const lines = [book.title, book.author ? `${labels.author}${labels.separator}${book.author}` : '', '']
-  let chapter: string | null = null
+  let chapterKey: string | null = null
   for (const annotation of annotations) {
-    if (options.groupByChapter !== false && annotation.chapter !== chapter) {
-      chapter = annotation.chapter
-      if (chapter) lines.push(chapter, '')
+    const nextChapterKey = annotationChapterKey(annotation)
+    if (options.groupByChapter !== false && nextChapterKey !== chapterKey) {
+      chapterKey = nextChapterKey
+      if (annotation.chapter) lines.push(annotation.chapter, '')
     }
     const prefix = options.includeDetails ? `[${detailLabel(annotation, labels)}] ` : ''
     lines.push(`${prefix}${annotation.text}`)

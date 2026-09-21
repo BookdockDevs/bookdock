@@ -37,6 +37,7 @@ export function useCreateAnnotation(bookId: string) {
         text: body.text ?? '',
         note: body.note ?? null,
         chapter: body.chapter ?? null,
+        chapterHref: body.chapterHref ?? null,
         createdAt: now,
         updatedAt: now,
       }

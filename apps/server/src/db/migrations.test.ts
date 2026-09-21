@@ -16,6 +16,7 @@ const replacementMigrationFile = path.join(migrationsDir, '0002_text_replacement
 const replacementScopeMigrationFile = path.join(migrationsDir, '0003_text_replacement_scope.sql')
 const legadoAccessKeyMigrationFile = path.join(migrationsDir, '0004_legado_access_keys.sql')
 const accessTokenMigrationFile = path.join(migrationsDir, '0005_access_tokens.sql')
+const annotationChapterHrefMigrationFile = path.join(migrationsDir, '0006_annotation_chapter_href.sql')
 
 function applyBaseline(sqlite: Database.Database) {
   const sql = fs.readFileSync(baselineFile, 'utf8')
@@ -54,6 +55,13 @@ function applyLegadoAccessKeyMigration(sqlite: Database.Database) {
 
 function applyAccessTokenMigration(sqlite: Database.Database) {
   const sql = fs.readFileSync(accessTokenMigrationFile, 'utf8')
+  for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
+    sqlite.exec(statement)
+  }
+}
+
+function applyAnnotationChapterHrefMigration(sqlite: Database.Database) {
+  const sql = fs.readFileSync(annotationChapterHrefMigrationFile, 'utf8')
   for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
     sqlite.exec(statement)
   }
@@ -133,6 +141,21 @@ describe('database release migration', () => {
   })
 })
 
+describe('annotation chapter identity migration', () => {
+  it('adds the TOC href column without changing existing annotations', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+
+    applyBaseline(sqlite)
+    applyAnnotationChapterHrefMigration(sqlite)
+
+    expect(sqlite.prepare('PRAGMA table_info(annotations)').all())
+      .toEqual(expect.arrayContaining([expect.objectContaining({ name: 'chapter_href' })]))
+
+    sqlite.close()
+  })
+})
+
 describe('text replacement migration', () => {
   it('renames replacement tables and preserves existing rules and overrides', () => {
     const sqlite = new Database(':memory:')
@@ -190,6 +213,7 @@ describe('text replacement migration', () => {
     applyReplacementScopeMigration(sqlite)
     applyLegadoAccessKeyMigration(sqlite)
     applyAccessTokenMigration(sqlite)
+    applyAnnotationChapterHrefMigration(sqlite)
     sqlite.exec(`
       CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, created_at NUMERIC);
       INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('future-development-migration', 9999999999999);
@@ -204,7 +228,7 @@ describe('text replacement migration', () => {
     expect(sqlite.prepare('SELECT replacement_id, enabled FROM text_replacement_overrides WHERE id = ?').get('o1'))
       .toEqual({ replacement_id: 'r1', enabled: 0 })
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
-      .toEqual({ count: 6 })
+      .toEqual({ count: 7 })
 
     sqlite.close()
   })

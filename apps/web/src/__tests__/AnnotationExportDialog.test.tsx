@@ -73,7 +73,7 @@ describe('AnnotationExportDialog', () => {
         bookId="book-123"
         annotations={sampleAnnotations}
         sort="chapter"
-        chapterOrder={['第一章']}
+        chapterOrder={[{ label: '第一章', href: 'chapter:1' }]}
         onClose={vi.fn()}
       />,
     )
@@ -91,7 +91,7 @@ describe('AnnotationExportDialog', () => {
         bookId="book-123"
         annotations={sampleAnnotations}
         sort="chapter"
-        chapterOrder={['第一章']}
+        chapterOrder={[{ label: '第一章', href: 'chapter:1' }]}
         onClose={vi.fn()}
       />,
     )
@@ -118,7 +118,7 @@ describe('AnnotationExportDialog', () => {
         bookId="book-123"
         annotations={sampleAnnotations}
         sort="chapter"
-        chapterOrder={['第一章']}
+        chapterOrder={[{ label: '第一章', href: 'chapter:1' }]}
         onClose={vi.fn()}
       />,
     )
@@ -149,7 +149,7 @@ describe('AnnotationExportDialog', () => {
         bookId="book-123"
         annotations={sampleAnnotations}
         sort="chapter"
-        chapterOrder={['第一章']}
+        chapterOrder={[{ label: '第一章', href: 'chapter:1' }]}
         onClose={vi.fn()}
       />,
     )
@@ -177,7 +177,7 @@ describe('AnnotationExportDialog', () => {
         bookId="book-123"
         annotations={sampleAnnotations}
         sort="chapter"
-        chapterOrder={['第一章']}
+        chapterOrder={[{ label: '第一章', href: 'chapter:1' }]}
         onClose={vi.fn()}
       />,
     )

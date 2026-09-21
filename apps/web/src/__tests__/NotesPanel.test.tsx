@@ -37,6 +37,7 @@ function makeAnnotation(overrides: Partial<AnnotationRes>): AnnotationRes {
     text: '',
     note: null,
     chapter: null,
+    chapterHref: null,
     createdAt: 0,
     updatedAt: 0,
     ...overrides,
@@ -53,7 +54,7 @@ const ANNOTATIONS: AnnotationRes[] = [
 
 function renderPanel(onClose = vi.fn(), sort: 'chapter' | 'chapter-desc' | 'time-desc' | 'time-asc' = 'chapter') {
   return render(
-    <NotesPanel items={ANNOTATIONS} total={ANNOTATIONS.length} sort={sort} onClose={onClose} chapterOrder={['第一章', '第二章']} bookId="book-1" />,
+    <NotesPanel items={ANNOTATIONS} total={ANNOTATIONS.length} sort={sort} onClose={onClose} chapterOrder={[{ label: '第一章', href: 'chapter:1' }, { label: '第二章', href: 'chapter:2' }]} bookId="book-1" />,
   )
 }
 
@@ -94,6 +95,23 @@ describe('NotesPanel', () => {
   it('shows the empty hint when there are no items', () => {
     render(<NotesPanel items={[]} total={0} sort="chapter" chapterOrder={[]} bookId="book-1" />)
     expect(screen.getByText('reader.noNotes')).toBeInTheDocument()
+  })
+
+  it('keeps duplicate chapter labels in separate groups when hrefs differ', () => {
+    const first = makeAnnotation({ id: 'duplicate-1', cfiRange: 'cfi:27-1', text: '第一次同名章节', chapter: '第二十七章', chapterHref: 'chapter:first-27' })
+    const second = makeAnnotation({ id: 'duplicate-2', cfiRange: 'cfi:27-2', text: '第二次同名章节', chapter: '第二十七章', chapterHref: 'chapter:second-27' })
+    render(
+      <NotesPanel
+        items={[first, second]}
+        total={2}
+        sort="chapter"
+        chapterOrder={[{ label: '第二十七章', href: 'chapter:first-27' }, { label: '第二十七章', href: 'chapter:second-27' }]}
+        bookId="book-1"
+      />,
+    )
+    expect(screen.getAllByRole('button', { name: '第二十七章' })).toHaveLength(2)
+    expect(screen.getByText('第一次同名章节')).toBeInTheDocument()
+    expect(screen.getByText('第二次同名章节')).toBeInTheDocument()
   })
 
   it('renders the panel normally without an inline export action', () => {

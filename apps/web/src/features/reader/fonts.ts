@@ -4,7 +4,7 @@ import type { FontListItem, FontPreferences } from '@bookdock/shared'
 
 import { BASE_URL } from '@/api/client'
 
-import { FONT_OPTIONS } from './types'
+import { FONT_OPTIONS, READER_GLYPH_FALLBACK } from './types'
 
 export interface BuiltinFont {
   id: string
@@ -19,7 +19,7 @@ export const BUILTIN_FONTS: BuiltinFont[] = [
   {
     id: 'lxgw-wenkai',
     name: '霞鹜文楷',
-    family: '"LXGW WenKai", serif',
+    family: `"LXGW WenKai", ${READER_GLYPH_FALLBACK}, serif`,
     cssUrl: 'https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css',
     license: { name: 'OFL-1.1', url: 'https://github.com/lxgw/LxgwWenKai/blob/main/LICENSE' },
   },
@@ -28,14 +28,14 @@ export const BUILTIN_FONTS: BuiltinFont[] = [
     name: '思源宋体',
     // Variable package: fontsource's static index.css ships weight 400 only,
     // so the reader's fontWeight would synthesize faux bold
-    family: '"Noto Serif SC Variable", serif',
+    family: `"Noto Serif SC Variable", ${READER_GLYPH_FALLBACK}, serif`,
     cssUrl: 'https://cdn.jsdelivr.net/npm/@fontsource-variable/noto-serif-sc@5.3.0/index.css',
     license: { name: 'OFL-1.1', url: 'https://fonts.google.com/noto/specimen/Noto+Serif+SC/license' },
   },
   {
     id: 'noto-sans-sc',
     name: '思源黑体',
-    family: '"Noto Sans SC Variable", sans-serif',
+    family: `"Noto Sans SC Variable", ${READER_GLYPH_FALLBACK}, sans-serif`,
     cssUrl: 'https://cdn.jsdelivr.net/npm/@fontsource-variable/noto-sans-sc@5.3.0/index.css',
     license: { name: 'OFL-1.1', url: 'https://fonts.google.com/noto/specimen/Noto+Sans+SC/license' },
   },
@@ -287,7 +287,7 @@ export function buildFontOptions(
     ...uploaded.map((f) => ({
       id: f.id,
       ...fontPresentation(f.id, f.family, preferences),
-      stack: `"${uploadedFontAlias(f.id)}", serif`,
+      stack: `"${uploadedFontAlias(f.id)}", ${READER_GLYPH_FALLBACK}, serif`,
       source: 'uploaded' as const,
       status: 'ready' as const,
       uploaded: f,

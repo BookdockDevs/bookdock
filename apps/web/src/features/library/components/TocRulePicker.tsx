@@ -75,7 +75,7 @@ export default function TocRulePicker({
     return { tocRuleId: selectedTarget, excludedChapterIds: previewExcludedIds, limit: 1000, offset: 0 }
   }, [activeTarget, customPatterns, excludedChapterIds, selectedTarget])
 
-  const shouldPreview = selectionReadyTarget === activeTarget && selectedTarget !== activeTarget
+  const shouldPreview = Boolean(currentChapters?.length) && selectionReadyTarget === activeTarget
   const previewQuery = useTocPreview(bookId, previewReq, { enabled: Boolean(bookId) && shouldPreview })
   const preview = previewQuery.data?.data
 

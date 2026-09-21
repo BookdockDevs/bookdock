@@ -354,7 +354,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   }, [bookId, chaptersQuery.data, tocBookId, tocItems])
 
   const tree = useMemo(() => buildTocTree(tocChapters), [tocChapters])
-  const chapterOrder = useMemo(() => tocChapters.map((c) => c.label), [tocChapters])
+  const chapterOrder = useMemo(() => tocChapters.map((c) => ({ label: c.label, href: c.href })), [tocChapters])
   const rootNodes = useMemo(() => tree.filter((n) => n.parent === null), [tree])
 
   const currentIndex = useMemo(() => {

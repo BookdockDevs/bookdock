@@ -172,6 +172,7 @@ export interface Annotation {
   text: string
   note: string | null
   chapter: string | null
+  chapterHref?: string | null
   createdAt: number
   updatedAt: number
 }

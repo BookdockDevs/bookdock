@@ -49,6 +49,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   const setAiContext = useReaderState((s) => s.setAiContext)
   const setAiPendingCommand = useReaderState((s) => s.setAiPendingCommand)
   const currentChapter = useReaderState((s) => s.currentChapter)
+  const currentChapterHref = useReaderState((s) => s.currentChapterHref)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
@@ -155,6 +156,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         // and would squash the quote into one paragraph on the idea/share cards
         text: (selection.rawText ?? selection.text).slice(0, 800),
         chapter: currentChapter ?? undefined,
+        ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
       })
       // The optimistic cache entry (inserted by the mutation's onMutate) is
       // what renders the highlight, so the native selection can go away
@@ -224,6 +226,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           style: last.style,
           text: (selection.rawText ?? selection.text).slice(0, 800),
           chapter: currentChapter ?? undefined,
+          ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
           note: note || undefined,
         })
       } else if (target) {
@@ -294,6 +297,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       ...selection,
       chapterIndex: selection.chapterIndex ?? currentChapterIndex ?? undefined,
       chapterTitle: selection.chapterTitle ?? currentChapter ?? undefined,
+      ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
     })
     setAiPendingCommand(command)
     renderer?.deselect()
@@ -310,6 +314,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       ...selection,
       chapterIndex: selection.chapterIndex ?? currentChapterIndex ?? undefined,
       chapterTitle: selection.chapterTitle ?? currentChapter ?? undefined,
+      ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
     })
     setAiPendingCommand(null)
     renderer?.deselect()

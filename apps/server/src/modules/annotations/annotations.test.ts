@@ -165,4 +165,15 @@ describe('annotations service', () => {
     expect(notes[0]?.text).toBe('保留的正文 %')
     expect(await searchAnnotations(otherId, bookId, '正文')).toEqual([])
   })
+
+  it('persists the TOC href for duplicate chapter labels', async () => {
+    const saved = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/8)',
+      type: 'bookmark',
+      chapter: '第二十七章',
+      chapterHref: 'chapter:second-27',
+    })
+    expect(saved.chapter).toBe('第二十七章')
+    expect(saved.chapterHref).toBe('chapter:second-27')
+  })
 })

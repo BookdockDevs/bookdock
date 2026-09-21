@@ -265,6 +265,7 @@ export const annotations = sqliteTable('annotations', {
   text: text('text').notNull().default(''),
   note: text('note'),
   chapter: text('chapter'),
+  chapterHref: text('chapter_href'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
   deletedAt: integer('deleted_at'),

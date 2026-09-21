@@ -31,6 +31,7 @@ import { createHistoryAutoHide, type HistoryAutoHide } from './history-auto-hide
 import { consumeEscFlag } from './lib/esc-consumed'
 import { createRestoreGate, type RestoreGate } from './lib/restore-gate'
 import { cfiRangesIntersect, loadCfiModule } from './lib/cfi-overlap'
+import { mergeProgressSaveCache } from './lib/progress-cache'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
 import { ReaderSidebar } from './components/ReaderSidebar'
@@ -115,6 +116,7 @@ export default function Reader() {
   const mobileDockVisible = isTouch && (chromePinned || sidebarOpen)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
   const currentChapter = useReaderState((s) => s.currentChapter)
+  const currentChapterHref = useReaderState((s) => s.currentChapterHref)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setCurrentChapter = useReaderState((s) => s.setCurrentChapter)
   const setCurrentChapterHref = useReaderState((s) => s.setCurrentChapterHref)
@@ -390,26 +392,17 @@ export default function Reader() {
     mutationFn: async (body: ReadingProgressUpdateReq) => {
       return apiPut<{ data: ReadingProgressRes | null }>(`/progress/${id}`, body)
     },
-    onSuccess: (_result, body) => {
+    onSuccess: (result) => {
       // The next reader entry latches initialCfi from this cache. If it holds
       // a stale position while the server holds a newer one, the mount saves
       // the stale position back and the background refetch flips the cache —
       // the two positions then alternate on every exit/re-enter. Keep the
-      // cache in sync with what we just wrote; invalidate (no refetch) so the
-      // next mount still revalidates in the background.
+      // cache in sync with the complete server response, including when the
+      // previous cache was { data: null } for a book's first reading session.
+      // Invalidate (without refetching) so the next mount still revalidates in
+      // the background.
       queryClient.setQueryData(['progress', id], (old: { data: ReadingProgressRes | null } | undefined) =>
-        old?.data
-          ? {
-              data: {
-                ...old.data,
-                cfi: body.cfi ?? old.data.cfi,
-                chapter: body.chapter ?? old.data.chapter,
-                chapterIndex: body.chapterIndex ?? old.data.chapterIndex,
-                percent: body.percent,
-                fraction: body.fraction ?? old.data.fraction,
-              },
-            }
-          : old,
+        mergeProgressSaveCache(old, result),
       )
       void queryClient.invalidateQueries({ queryKey: ['progress', id], refetchType: 'none' })
     },
@@ -796,6 +789,7 @@ export default function Reader() {
         color: lastStyle.color,
         style: lastStyle.style,
         chapter: currentChapter ?? undefined,
+        ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
       })
       // "选中即划" keeps the toolbar open so the fresh highlight can be restyled
       if (!e.keepSelection) setSelection(null)
@@ -1141,12 +1135,13 @@ export default function Reader() {
         type: 'bookmark',
         text: snippet?.trim() || currentChapter || _('reader.bookmark'),
         chapter: currentChapter ?? undefined,
+        ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
       })
       notify.success({ key: 'reader.bookmarkAdded' })
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'reader.bookmarkFailed'))
     }
-  }, [currentBookmark, currentChapter, currentContentCfi, createAnnotation, deleteAnnotation, _])
+  }, [currentBookmark, currentChapter, currentChapterHref, currentContentCfi, createAnnotation, deleteAnnotation, _])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

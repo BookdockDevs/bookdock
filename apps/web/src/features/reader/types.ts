@@ -76,6 +76,7 @@ export interface SelectionInfo {
   /** Captured reader location when the selection is handed to AI. */
   chapterIndex?: number
   chapterTitle?: string
+  chapterHref?: string
   /** Visible text immediately before the selection, captured for opt-in AI context. */
   beforeText?: string
   /** Visible paragraph containing the selection, used by AI quick-command templates. */
@@ -316,11 +317,18 @@ export type PageWidth = number
 // uploaded font ids — the registry resolves any id to a concrete stack
 export type FontFamily = string
 
+/**
+ * Keep rare CJK and enclosed/symbol characters visible when the selected
+ * reading font does not contain them. The first family in a reader stack
+ * remains authoritative; these are only consulted for missing glyphs.
+ */
+export const READER_GLYPH_FALLBACK = '"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI Symbol", "Noto Sans Symbols 2", "Noto Sans Symbols", "Arial Unicode MS"'
+
 export const FONT_OPTIONS: { id: FontFamily; name: string; value: string }[] = [
-  { id: 'serif', name: '宋体', value: '"Noto Serif SC", "Source Han Serif SC", "Source Han Serif", "Songti SC", "SimSun", serif' },
-  { id: 'sans-serif', name: '黑体', value: '"Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif' },
-  { id: 'kaiti', name: '楷体', value: '"KaiTi", "KaiTi_GB2312", "STKaiti", "BiauKai", serif' },
-  { id: 'fangsong', name: '仿宋', value: '"FangSong", "FangSong_GB2312", "STFangsong", serif' },
+  { id: 'serif', name: '宋体', value: `"Noto Serif SC", "Source Han Serif SC", "Source Han Serif", "Songti SC", "SimSun", ${READER_GLYPH_FALLBACK}, serif` },
+  { id: 'sans-serif', name: '黑体', value: `"Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", ${READER_GLYPH_FALLBACK}, sans-serif` },
+  { id: 'kaiti', name: '楷体', value: `"KaiTi", "KaiTi_GB2312", "STKaiti", "BiauKai", ${READER_GLYPH_FALLBACK}, serif` },
+  { id: 'fangsong', name: '仿宋', value: `"FangSong", "FangSong_GB2312", "STFangsong", ${READER_GLYPH_FALLBACK}, serif` },
 ]
 
 export interface FontConfig {

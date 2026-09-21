@@ -43,6 +43,13 @@
       "when": 1789919500000,
       "tag": "0005_access_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790020113806,
+      "tag": "0006_annotation_chapter_href",
+      "breakpoints": true
     }
   ]
 }

@@ -49,6 +49,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
     text: data.text ?? '',
     note: data.note ?? null,
     chapter: data.chapter ?? null,
+    chapterHref: data.chapterHref ?? null,
     createdAt: now,
     updatedAt: now,
   }
