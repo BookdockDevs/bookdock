@@ -28,6 +28,10 @@ const ERROR_KEYS: Record<string, string> = {
   VALIDATION_ERROR: 'errors.invalidInput',
   UPLOAD_TOO_LARGE: 'errors.uploadTooLarge',
   UNSUPPORTED_FORMAT: 'errors.unsupportedFormat',
+  UPDATE_IN_PROGRESS: 'errors.updateInProgress',
+  UPDATE_NOT_AVAILABLE: 'errors.updateNotAvailable',
+  UPDATE_NOT_LAUNCHED: 'errors.updateNotLaunched',
+  UPDATE_FAILED: 'errors.updateFailed',
   INTERNAL_ERROR: 'errors.operationFailed',
 }
 

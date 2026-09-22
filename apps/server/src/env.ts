@@ -23,6 +23,9 @@ const envSchema = z.object({
   FONT_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
   AVATAR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(2097152),
   AUTH_RPM: z.coerce.number().int().min(1).max(120).default(5),
+  // Set by the container launcher for one boot; absent in dev, which disables
+  // the internal version route.
+  BOOKDOCK_LAUNCHER_NONCE: z.string().min(8).optional(),
   STORAGE_DRIVER: z.enum(['localfs']).default('localfs'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   AI_PROVIDER: aiProviderSchema.default('openai'),

@@ -1,6 +1,7 @@
 export type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, SortField, ReadStatus } from './constants'
 export { BOOKDOCK_BUILD_INFO } from './build-info'
-export { AI_CORE_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, BOOK_FORMATS, COVER_PALETTE_IDS, normalizeAiToolName, normalizeUsername, READ_STATUSES, PAGINATION, sanitizeUsername, SORT_FIELDS } from './constants'
+export { AI_CORE_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, BOOK_FORMATS, COVER_PALETTE_IDS, compareReleaseVersions, normalizeAiToolName, normalizeUsername, parseReleaseVersion, READ_STATUSES, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername, SORT_FIELDS } from './constants'
+export { UPDATE_PHASES } from './contract'
 export { normalizeAiCitationMarkers, sanitizeAiCitationMarkers } from './ai-citations'
 export { expandAiPrompt, getAiPromptVariables } from './ai-prompts'
 export type { AiPromptValues, AiPromptVariable } from './ai-prompts'
@@ -53,6 +54,12 @@ export type {
   HealthCheckRes,
   SystemInfoRes,
   SystemUpdateCheckRes,
+  SnapshotRes,
+  SnapshotListRes,
+  InternalVersionRes,
+  UpdatePhase,
+  UpdateStartReq,
+  UpdateStatusRes,
   LoginReq,
   LoginRes,
   SetupReq,
@@ -275,6 +282,7 @@ export {
   bookMetadataSchema,
   viewSettingsSchema,
   bookUpdateSchema,
+  systemUpdateStartSchema,
 } from './schema'
 
 export { ErrorCode, ErrorHttpStatus } from './errors'

@@ -12,6 +12,28 @@ export const PAGINATION = {
   MAX_PAGE_SIZE: 100,
 } as const
 
+/**
+ * Release version shape: `x.y.z` plus an optional prerelease tag, which is what
+ * the release workflow allows (`v0.4.0-beta.1`). Anchored, so it doubles as the
+ * path-traversal guard wherever a version becomes a directory name (ADR-25).
+ * The container launcher keeps its own copy because it must stay dependency-free.
+ */
+export const RELEASE_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$/
+
+/** Numeric core of a release version; prerelease tags never order releases. */
+export function parseReleaseVersion(value: unknown): [number, number, number] | null {
+  if (typeof value !== 'string') return null
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$/.exec(value.trim())
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null
+}
+
+export function compareReleaseVersions(left: [number, number, number], right: [number, number, number]): -1 | 0 | 1 {
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] > right[index] ? 1 : -1
+  }
+  return 0
+}
+
 export const AUTH_PASSWORD_MIN_LENGTH = 8
 export const AUTH_PASSWORD_MAX_LENGTH = 256
 export const AUTH_USERNAME_MAX_LENGTH = 100

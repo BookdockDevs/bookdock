@@ -147,6 +147,33 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      # Second artifact line: the same app root as a zip the panel can download
+      # and stage into DATA_DIR/releases (ADR-25). Built from the `bundle`
+      # stage, so image and artifact cannot drift apart.
+      - name: Export runtime bundle
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: bundle
+          outputs: type=local,dest=${{ runner.temp }}/bundle
+
+      - name: Package updater artifacts
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          BUNDLE_DIR: ${{ runner.temp }}/bundle
+          ARTIFACT_DIR: ${{ runner.temp }}/artifacts
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          archive="bookdock-${version}-linux-x64-musl.zip"
+          mkdir -p "$ARTIFACT_DIR"
+          # zip (not tar) because the extracting side is the running server, which
+          # already depends on jszip; symlinks are dereferenced by default.
+          (cd "$BUNDLE_DIR" && zip -qrX "$ARTIFACT_DIR/$archive" apps release.json)
+          (cd "$ARTIFACT_DIR" && sha256sum "$archive" > "$archive.sha256")
+          cp "$BUNDLE_DIR/release.json" "$ARTIFACT_DIR/release.json"
+          cat "$ARTIFACT_DIR/$archive.sha256"
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -170,3 +197,18 @@ jobs:
             release_args+=(--prerelease)
           fi
           gh "${release_args[@]}"
+
+      # The updater resolves these by tag, so they must exist before a panel
+      # can see the release.
+      - name: Upload updater artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          ARTIFACT_DIR: ${{ runner.temp }}/artifacts
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            "$ARTIFACT_DIR/release.json" \
+            "$ARTIFACT_DIR"/bookdock-*.zip \
+            "$ARTIFACT_DIR"/bookdock-*.zip.sha256 \
+            --clobber

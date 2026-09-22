@@ -104,8 +104,56 @@ export interface SystemUpdateCheckRes {
   status: 'up-to-date' | 'update-available' | 'unavailable'
   currentVersion: string
   latestVersion?: string
+  /** Release tag as published (`v0.4.0`), kept because artifact URLs are keyed by tag. */
+  latestTag?: string
   publishedAt?: string
   releaseUrl?: string
+}
+
+export interface SnapshotRes {
+  /** Snapshot directory name under `DATA_DIR/snapshots`, used as the API id: `<appVersion>-<createdAt ms>` */
+  id: string
+  appVersion: string
+  createdAt: number
+  sizeBytes: number
+  /** `instance_settings` rows captured with the database; absent when the manifest could not be read */
+  instanceSettings?: Record<string, string>
+}
+
+export interface SnapshotListRes {
+  snapshots: SnapshotRes[]
+}
+
+/** Reply of the launcher-only version probe; see ADR-25 health gate. */
+export interface InternalVersionRes {
+  version: string
+}
+
+/** Body of `POST /api/v1/system/update`; `targetVersion` is re-validated server-side. */
+export interface UpdateStartReq {
+  targetVersion: string
+  /** Client-generated id: a retried POST with the same id never starts a second update. */
+  progressId: string
+}
+
+/** Phases of the in-panel update; `restarting` means the launcher owns the outcome. */
+export const UPDATE_PHASES = ['idle', 'snapshot', 'download', 'verify', 'extract', 'promote', 'restarting', 'failed'] as const
+export type UpdatePhase = (typeof UPDATE_PHASES)[number]
+
+/**
+ * Progress of the single in-flight update. Read from disk wherever possible so
+ * one poller survives the restart it is watching: while `releases/pending`
+ * exists the answer is `restarting`, and after the launcher commits or reverts
+ * the answer is `idle` plus the version the responding process actually is.
+ */
+export interface UpdateStatusRes {
+  phase: UpdatePhase
+  /** Version of the process answering; equals `targetVersion` once committed. */
+  currentVersion: string
+  targetVersion?: string
+  /** Release promoted but not yet health-gated, read from `releases/pending`. */
+  pendingTarget?: string
+  error?: { code: ErrorCode; message: string }
 }
 
 export interface LoginReq {

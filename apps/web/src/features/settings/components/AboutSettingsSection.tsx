@@ -1,7 +1,12 @@
-import { useSystemInfo, useSystemUpdateCheck } from '@/api/hooks/useSystem'
+import { useState } from 'react'
+
+import { useStartSystemUpdate, useSystemInfo, useSystemUpdateCheck, useSystemUpdateStatus } from '@/api/hooks/useSystem'
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
+
+import SystemUpdateDialog from './SystemUpdateDialog'
 
 function BookdockBrandIcon({ className }: { className?: string }) {
   return (
@@ -56,10 +61,42 @@ export default function AboutSettingsSection() {
   const { data, isPending, isError, isFetching, refetch } = useSystemInfo()
   const updateCheck = useSystemUpdateCheck()
   const user = useAuthStore((s) => s.user)
+  const [updateTarget, setUpdateTarget] = useState<string | null>(null)
+  const [updateStartedAt, setUpdateStartedAt] = useState(0)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const updateStatus = useSystemUpdateStatus(updateTarget !== null)
+  const startUpdate = useStartSystemUpdate()
 
   const info = data?.data
   const update = updateCheck.data?.data
   const appName = _('app.name')
+
+  const status = updateStatus.data?.data
+  const startError = startUpdate.isError ? getUserErrorNotification(startUpdate.error) : null
+
+  const handleOpenUpdateDialog = () => {
+    startUpdate.reset()
+    setIsModalOpen(true)
+  }
+
+  const handleStartUpdate = () => {
+    const target = updateTarget ?? update?.latestVersion
+    if (!target) return
+    startUpdate.mutate(
+      { targetVersion: target, progressId: `update-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` },
+      {
+        onSuccess: () => {
+          setUpdateTarget(target)
+          setUpdateStartedAt(Date.now())
+        },
+      },
+    )
+  }
+
+  const handleRetryUpdate = () => {
+    startUpdate.reset()
+    handleStartUpdate()
+  }
 
   const handleCopyVersion = async () => {
     if (!info?.version) return
@@ -134,7 +171,7 @@ export default function AboutSettingsSection() {
                 title={_('settings.aboutCopyVersion')}
                 className="inline-flex items-center rounded-full border border-stone-200/90 bg-stone-50/90 px-3 py-1 font-mono text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-stone-100 active:scale-95 dark:border-stone-700/80 dark:bg-stone-800/90 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-750"
               >
-                v{info.version}
+                v{info.version.replace(/^v/, '')}
               </button>
 
               <button
@@ -164,42 +201,70 @@ export default function AboutSettingsSection() {
             {update && (
               <div className="mt-4 flex justify-center">
                 {update.status === 'up-to-date' && (
-                  <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-600/20 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-500/20">
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-stone-100/80 px-3 py-1 text-xs font-medium text-stone-600 ring-1 ring-stone-200/60 dark:bg-stone-800/80 dark:text-stone-300 dark:ring-stone-700/60">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                     <span>{_('settings.aboutUpToDate')}</span>
                   </div>
                 )}
                 {update.status === 'unavailable' && (
-                  <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-600/20 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-500/20">
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50/80 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-600/20 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-500/20">
                     <span>{_('settings.aboutUpdateUnavailable')}</span>
                   </div>
                 )}
                 {update.status === 'update-available' && (
-                  <div className="flex w-full max-w-md flex-col items-center justify-between gap-2.5 rounded-xl border border-blue-200/80 bg-blue-50/70 p-3 text-xs text-blue-900 sm:flex-row dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
-                      <span className="font-medium">
-                        {_('settings.aboutUpdateAvailable', { version: update.latestVersion ?? '' })}
-                        {update.publishedAt && (
-                          <span className="ml-1 text-[11px] font-normal text-stone-500 dark:text-stone-400">
-                            ({new Date(update.publishedAt).toLocaleDateString()})
-                          </span>
+                  <div className="flex w-full max-w-md flex-col items-center gap-2.5 rounded-2xl border border-stone-200/90 bg-stone-50/80 p-3.5 text-xs text-stone-800 shadow-2xs dark:border-stone-800 dark:bg-stone-850/60 dark:text-stone-200">
+                    <div className="flex w-full flex-col items-center justify-between gap-2.5 sm:flex-row">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="relative flex h-2 w-2 shrink-0">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                        </span>
+                        <div className="min-w-0 text-left">
+                          <div className="flex items-center gap-1 font-medium text-stone-900 dark:text-stone-100">
+                            <span>{_('settings.aboutUpdateAvailable', { version: (update.latestVersion ?? '').replace(/^v/, '') })}</span>
+                          </div>
+                          {update.publishedAt && (
+                            <p className="text-[11px] text-stone-400 dark:text-stone-500">
+                              {new Date(update.publishedAt).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {updateTarget === null ? (
+                          <button
+                            type="button"
+                            onClick={handleOpenUpdateDialog}
+                            disabled={startUpdate.isPending}
+                            className="inline-flex items-center rounded-lg bg-stone-900 px-3 py-1.5 font-medium text-white shadow-2xs transition-all hover:bg-stone-800 active:scale-95 disabled:opacity-60 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+                          >
+                            <span>{startUpdate.isPending ? _('settings.aboutUpdateStarting') : _('settings.aboutUpdateNow')}</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setIsModalOpen(true)}
+                            className="inline-flex items-center rounded-lg border border-stone-200/90 bg-white px-3 py-1.5 font-medium text-stone-700 shadow-2xs transition-all hover:bg-stone-50 active:scale-95 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200"
+                          >
+                            <span>{_('settings.aboutUpdateViewProgress')}</span>
+                          </button>
                         )}
-                      </span>
+                        {update.releaseUrl && (
+                          <a
+                            href={update.releaseUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded-lg border border-stone-200/90 bg-white px-2.5 py-1.5 font-medium text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:border-stone-700/80 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-750 dark:hover:text-stone-100"
+                          >
+                            <span>{_('settings.aboutOpenRelease')}</span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                              <path d="M7 17l9.2-9.2M17 17V7H7" />
+                            </svg>
+                          </a>
+                        )}
+                      </div>
                     </div>
-                    {update.releaseUrl && (
-                      <a
-                        href={update.releaseUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
-                      >
-                        <span>{_('settings.aboutOpenRelease')}</span>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-                          <path d="M7 17l9.2-9.2M17 17V7H7" />
-                        </svg>
-                      </a>
-                    )}
                   </div>
                 )}
               </div>
@@ -278,9 +343,22 @@ export default function AboutSettingsSection() {
               <span>{_('settings.aboutCopyDiagnostics')}</span>
             </button>
           </div>
+
+          <SystemUpdateDialog
+            isOpen={isModalOpen}
+            onClose={() => setIsModalOpen(false)}
+            currentVersion={info.version}
+            targetVersion={updateTarget ?? update?.latestVersion ?? ''}
+            publishedAt={update?.publishedAt}
+            status={updateTarget !== null && !startUpdate.isPending && !startUpdate.isError ? status : undefined}
+            isStarting={startUpdate.isPending}
+            startErrorKey={startError?.key}
+            updateStartedAt={updateStartedAt}
+            onStartUpdate={handleStartUpdate}
+            onRetry={handleRetryUpdate}
+          />
         </>
       )}
     </section>
   )
 }
-

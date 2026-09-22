@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERMISSIONS } from './access-tokens'
-import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, sanitizeUsername } from './constants'
+import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
@@ -718,6 +718,13 @@ export const viewSettingsSchema = z.object({
   pagePageWidth: z.number().min(0).max(1800).optional(),
   pageHorizontalPadding: z.number().min(0).max(120).optional(),
   pageVerticalPadding: z.number().min(0).max(120).optional(),
+})
+
+export const systemUpdateStartSchema = z.object({
+  // Must equal what the server's own update check reported; the client cannot
+  // pick an arbitrary version to download.
+  targetVersion: z.string().regex(RELEASE_VERSION_PATTERN),
+  progressId: z.string().trim().min(1).max(100),
 })
 
 export const bookUpdateSchema = z.object({

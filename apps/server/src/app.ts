@@ -30,6 +30,7 @@ import tocRuleRoutes from './modules/toc-rules/toc-rules.routes'
 import ttsRoutes from './modules/tts/tts.routes'
 import aiRoutes from './modules/ai/ai.routes'
 import systemRoutes from './modules/system/system.routes'
+import internalRoutes from './modules/system/internal.routes'
 
 registerParser(new EpubParser())
 registerParser(new TxtParser())
@@ -48,6 +49,8 @@ app.use('/api/v1/*', requestContext())
 // without one. Emits nothing unless the request is a token request.
 app.use('/api/v1/*', tokenCors())
 app.get('/api/v1/health', (c) => c.json({ data: { ok: true } }))
+// Launcher health gate; must stay above the guard, see modules/system/internal.routes.ts
+app.route('/api/v1/internal', internalRoutes)
 
 app.use('/api/v1/*', authGuard())
 
