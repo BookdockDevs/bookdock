@@ -94,6 +94,20 @@ export interface HealthCheckRes {
   ok: true
 }
 
+export interface SystemInfoRes {
+  version: string
+  repositoryUrl: string
+  releasesUrl: string
+}
+
+export interface SystemUpdateCheckRes {
+  status: 'up-to-date' | 'update-available' | 'unavailable'
+  currentVersion: string
+  latestVersion?: string
+  publishedAt?: string
+  releaseUrl?: string
+}
+
 export interface LoginReq {
   username: string
   password: string

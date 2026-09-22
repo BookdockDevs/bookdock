@@ -16,8 +16,20 @@ import { cn } from '@/lib/utils'
 
 import EditModeButton from './EditModeButton'
 import ReplacementForm from './ReplacementForm'
+import SettingsCard from './SettingsCard'
 
 type FormState = { mode: 'create' } | { mode: 'edit'; rule: TextReplacementRes } | null
+ 
+function ReplaceIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m14 4 4 4-4 4" />
+      <path d="M4 8h14" />
+      <path d="m10 20-4-4 4-4" />
+      <path d="M20 16H6" />
+    </svg>
+  )
+}
 
 export default function ReplacementsSettingsSection() {
   const _ = useTranslation()
@@ -91,30 +103,43 @@ export default function ReplacementsSettingsSection() {
   }
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="min-w-0">
-          <h2 className="flex items-baseline gap-1 text-sm font-medium">
+    <>
+      <SettingsCard
+        icon={<ReplaceIcon className="h-5 w-5" />}
+        iconBgClass="bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
+        title={
+          <span className="flex items-baseline gap-1.5">
             <span>{_('settings.replacements')}</span>
-            {rules.length > 0 && <span className="text-xs font-normal tabular-nums text-stone-400 dark:text-stone-500">· {rules.length}</span>}
-          </h2>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <EditModeButton active={editing} activeLabel={_('settings.replacementsEditModeExit')} disabled={busy || (!editing && rules.length === 0)} onClick={toggleEditing} />
-          <button
-            type="button"
-            disabled={busy || editing}
-            onClick={() => setForm({ mode: 'create' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-            aria-label={_('settings.replacementsNew')}
-            title={_('settings.replacementsNew')}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
-        </div>
-      </div>
+            {rules.length > 0 && (
+              <span className="text-xs font-normal tabular-nums text-stone-400 dark:text-stone-500">
+                · {rules.length}
+              </span>
+            )}
+          </span>
+        }
+        action={
+          <div className="flex shrink-0 items-center gap-1">
+            <EditModeButton
+              active={editing}
+              activeLabel={_('settings.replacementsEditModeExit')}
+              disabled={busy || (!editing && rules.length === 0)}
+              onClick={toggleEditing}
+            />
+            <button
+              type="button"
+              disabled={busy || editing}
+              onClick={() => setForm({ mode: 'create' })}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+              aria-label={_('settings.replacementsNew')}
+              title={_('settings.replacementsNew')}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
+        }
+      >
 
       {replacementsQuery.isError ? (
         <QueryErrorState isRetrying={replacementsQuery.isFetching} onRetry={replacementsQuery.refetch} />
@@ -226,6 +251,7 @@ export default function ReplacementsSettingsSection() {
           })}
         </div>
       )}
+      </SettingsCard>
 
       {pendingDelete && (
         <ConfirmDialog
@@ -265,7 +291,7 @@ export default function ReplacementsSettingsSection() {
           />
         </Modal>
       )}
-    </section>
+    </>
   )
 }
 

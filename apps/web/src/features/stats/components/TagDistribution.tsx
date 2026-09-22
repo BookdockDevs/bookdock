@@ -64,10 +64,10 @@ export default function TagDistribution({ date, period, range }: TagDistribution
   const isTagsLoading = tagsQuery.isLoading && !data
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <h2 className="mb-4 text-sm font-medium">
+    <section className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-xs sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+      <h2 className="mb-4 text-sm font-semibold text-stone-900 dark:text-stone-100">
         <span>{_('stats.tagDistribution')}</span>
-        <span className="tabular-nums text-stone-500 dark:text-stone-400"> · {scopeLabel}</span>
+        <span className="font-normal tabular-nums text-stone-400 dark:text-stone-500"> · {scopeLabel}</span>
       </h2>
       {isTagsLoading ? (
         <div className="flex flex-col items-center gap-6 sm:flex-row">

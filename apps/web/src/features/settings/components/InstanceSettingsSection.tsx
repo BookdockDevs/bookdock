@@ -3,6 +3,15 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { useInstanceInfo, useUpdateInstance } from '@/features/auth/hooks'
+import SettingsCard from './SettingsCard'
+
+function ShieldIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+    </svg>
+  )
+}
 
 export default function InstanceSettingsSection() {
   const _ = useTranslation()
@@ -12,10 +21,13 @@ export default function InstanceSettingsSection() {
   const instance = instanceQuery.data?.data
   if (instanceQuery.isError) {
     return (
-      <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-        <h2 className="mb-4 text-sm font-medium">{_('admin.instanceSettings')}</h2>
+      <SettingsCard
+        icon={<ShieldIcon className="h-5 w-5" />}
+        iconBgClass="bg-slate-500/10 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400"
+        title={_('admin.instanceSettings')}
+      >
         <QueryErrorState className="py-4" isRetrying={instanceQuery.isFetching} onRetry={instanceQuery.refetch} />
-      </section>
+      </SettingsCard>
     )
   }
   if (!instance) return null
@@ -28,23 +40,25 @@ export default function InstanceSettingsSection() {
   }
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <h2 className="mb-2 text-sm font-medium">{_('admin.instanceSettings')}</h2>
-      <div className="divide-y divide-stone-100 dark:divide-stone-800/80">
-        <ToggleRow
-          label={_('admin.allowRegistration')}
-          hint={_('admin.allowRegistrationHint')}
-          checked={instance.allowRegistration}
-          onChange={(v) => toggle('allowRegistration', v)}
-        />
-        <ToggleRow
-          label={_('admin.allowGuestAccess')}
-          hint={_('admin.allowGuestAccessHint')}
-          checked={instance.allowGuestAccess}
-          onChange={(v) => toggle('allowGuestAccess', v)}
-        />
-      </div>
-    </section>
+    <SettingsCard
+      icon={<ShieldIcon className="h-5 w-5" />}
+      iconBgClass="bg-slate-500/10 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400"
+      title={_('admin.instanceSettings')}
+      bodyClassName="divide-y divide-stone-100 dark:divide-stone-800/80"
+    >
+      <ToggleRow
+        label={_('admin.allowRegistration')}
+        hint={_('admin.allowRegistrationHint')}
+        checked={instance.allowRegistration}
+        onChange={(v) => toggle('allowRegistration', v)}
+      />
+      <ToggleRow
+        label={_('admin.allowGuestAccess')}
+        hint={_('admin.allowGuestAccessHint')}
+        checked={instance.allowGuestAccess}
+        onChange={(v) => toggle('allowGuestAccess', v)}
+      />
+    </SettingsCard>
   )
 }
 

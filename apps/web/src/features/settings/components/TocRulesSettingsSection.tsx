@@ -16,6 +16,7 @@ import { notify } from '@/lib/notifications'
 import EditModeButton from './EditModeButton'
 import TocRuleEditor from './TocRuleEditor'
 import TocRuleRow from './TocRuleRow'
+import SettingsCard from './SettingsCard'
 
 const EMPTY_RULES: TocRuleRes[] = []
 
@@ -99,43 +100,48 @@ export default function TocRulesSettingsSection() {
   }
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="min-w-0">
-          <h2 className="flex items-baseline gap-1 text-sm font-medium">
+    <>
+      <SettingsCard
+        icon={<BookmarkIcon className="h-5 w-5" />}
+        iconBgClass="bg-teal-500/10 text-teal-600 dark:bg-teal-500/20 dark:text-teal-400"
+        title={
+          <span className="flex items-baseline gap-1.5">
             <span>{_('settings.tocRules')}</span>
             {rules.length > 0 && <span className="text-xs font-normal tabular-nums text-stone-400 dark:text-stone-500">· {rules.length}</span>}
-          </h2>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <EditModeButton active={sorting} disabled={busy || (!sorting && rules.length === 0)} onClick={toggleSorting} />
-          <button
-            type="button"
-            disabled={busy || sorting}
-            onClick={() => seedRules.mutate(undefined, { onSuccess: () => notify.success({ key: 'toast.tocRulesRestored' }), onError: showError })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-            aria-label={_('settings.tocRulesRestore')}
-            title={_('settings.tocRulesRestore')}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="m9 14-5-5 5-5" />
-              <path d="M4 9h10.5A5.5 5.5 0 1 1 9 19H8" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            disabled={busy || sorting}
-            onClick={() => setEditor({ open: true, initial: null })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-            aria-label={_('settings.tocRulesNew')}
-            title={_('settings.tocRulesNew')}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
-        </div>
-      </div>
+          </span>
+        }
+        action={
+          <div className="flex shrink-0 items-center gap-1">
+            <EditModeButton active={sorting} disabled={busy || (!sorting && rules.length === 0)} onClick={toggleSorting} />
+            <button
+              type="button"
+              disabled={busy || sorting}
+              onClick={() => seedRules.mutate(undefined, { onSuccess: () => notify.success({ key: 'toast.tocRulesRestored' }), onError: showError })}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+              aria-label={_('settings.tocRulesRestore')}
+              title={_('settings.tocRulesRestore')}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m9 14-5-5 5-5" />
+                <path d="M4 9h10.5A5.5 5.5 0 1 1 9 19H8" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              disabled={busy || sorting}
+              onClick={() => setEditor({ open: true, initial: null })}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+              aria-label={_('settings.tocRulesNew')}
+              title={_('settings.tocRulesNew')}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
+        }
+        bodyClassName="pt-3"
+      >
 
       {rulesQuery.isError ? (
         <QueryErrorState isRetrying={rulesQuery.isFetching} onRetry={rulesQuery.refetch} />
@@ -172,6 +178,7 @@ export default function TocRulesSettingsSection() {
           </SortableContext>
         </DndContext>
       )}
+      </SettingsCard>
 
       {pendingDelete && (
         <ConfirmDialog
@@ -184,6 +191,14 @@ export default function TocRulesSettingsSection() {
       )}
 
       {editor.open && <TocRuleEditor initial={editor.initial} onClose={() => setEditor({ open: false, initial: null })} />}
-    </section>
+    </>
+  )
+}
+
+function BookmarkIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" />
+    </svg>
   )
 }

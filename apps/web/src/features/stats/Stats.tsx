@@ -10,6 +10,7 @@ import BookTimeList from './components/BookTimeList'
 import HourDistribution from './components/HourDistribution'
 import PeriodBarChart from './components/PeriodBarChart'
 import SummaryCards from './components/SummaryCards'
+import StatsSettingsButton from './components/StatsSettingsButton'
 import TagDistribution from './components/TagDistribution'
 import YearHeatmap from './components/YearHeatmap'
 import { periodRange, shiftPeriod } from './date-utils'
@@ -61,6 +62,7 @@ export default function Stats() {
           </svg>
         </Link>
         <h1 className="text-2xl font-bold">{_('stats.title')}</h1>
+        <StatsSettingsButton />
       </div>
 
       <SummaryCards />

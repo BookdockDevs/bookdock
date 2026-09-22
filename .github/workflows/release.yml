@@ -46,6 +46,7 @@ jobs:
 
           const expectedVersion = tag.slice(1)
           const packageFiles = [
+            'package.json',
             'apps/server/package.json',
             'apps/web/package.json',
             'packages/shared/package.json',
@@ -60,6 +61,9 @@ jobs:
             throw new Error(`Package versions must all match ${expectedVersion}`)
           }
           NODE
+
+      - name: Verify generated version info
+        run: node scripts/sync-version.mjs --check
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

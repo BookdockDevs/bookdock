@@ -1,13 +1,15 @@
 {
   "name": "bookdock",
   "private": true,
+  "version": "0.3.2",
   "scripts": {
-    "dev": "node scripts/dev.mjs",
-    "build": "pnpm --recursive run build",
+    "dev": "node scripts/sync-version.mjs && node scripts/dev.mjs",
+    "build": "node scripts/sync-version.mjs && pnpm --recursive run build",
     "test": "pnpm --recursive --filter @bookdock/server --filter @bookdock/web run test",
     "test:watch": "vitest",
     "lint": "oxlint --deny-warnings",
-    "typecheck": "pnpm --recursive run typecheck"
+    "typecheck": "pnpm --recursive run typecheck",
+    "version:sync": "node scripts/sync-version.mjs"
   },
   "packageManager": "pnpm@11.13.1",
   "engines": {

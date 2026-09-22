@@ -94,7 +94,7 @@ export default function PeriodBarChart({
   const isChartLoading = dailyQuery.isLoading && !data
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-xs sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
           {PERIODS.map((p) => (
@@ -105,7 +105,7 @@ export default function PeriodBarChart({
               className={cn(
                 'rounded-md px-3 py-1 text-xs transition-all',
                 period === p
-                  ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-950 dark:text-stone-50'
+                  ? 'bg-white font-medium text-stone-900 shadow-xs dark:bg-stone-950 dark:text-stone-50'
                   : 'text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100',
               )}
             >
@@ -120,7 +120,7 @@ export default function PeriodBarChart({
               <path d="m15 18-6-6 6-6" />
             </svg>
           </button>
-          <span className="min-w-28 text-center text-sm tabular-nums text-stone-600 dark:text-stone-300">
+          <span className="min-w-28 text-center text-sm font-medium tabular-nums text-stone-700 dark:text-stone-200">
             {formatPeriodLabel(period, range)}
           </span>
           <button type="button" aria-label={_('stats.nextPeriod')} onClick={() => onShift(1)} className={arrowClass}>
@@ -132,11 +132,11 @@ export default function PeriodBarChart({
       </div>
 
       {isChartLoading ? (
-        <div className="flex h-28 items-end gap-1">
+        <div className="flex h-32 items-end gap-1.5 sm:h-36">
           {Array.from({ length: period === 'week' ? 7 : period === 'month' ? 30 : 12 }).map((_, i) => (
             <div key={i} className="flex h-full min-w-0 flex-1 items-end">
               <div
-                className="w-full animate-pulse rounded-t-sm bg-stone-200/60 dark:bg-stone-800"
+                className="w-full animate-pulse rounded-t-md bg-stone-200/60 dark:bg-stone-800"
                 style={{
                   height: `${[35, 60, 25, 75, 45, 80, 50, 65, 40, 70, 30, 55][i % 12]}%`,
                   animationDelay: `${i * 40}ms`,
@@ -146,7 +146,7 @@ export default function PeriodBarChart({
           ))}
         </div>
       ) : (
-        <div className="flex h-28 items-end gap-1">
+        <div className="flex h-32 items-end gap-1 sm:h-36">
           {bars.map((b) => (
             <button
               key={b.key}
@@ -154,26 +154,37 @@ export default function PeriodBarChart({
               data-testid={b.testId}
               title={`${b.key.startsWith('month-') ? b.testId.slice(10) : b.key}: ${formatDuration(b.seconds, _)}`}
               onClick={b.onClick}
-              className="flex h-full min-w-0 flex-1 items-end"
+              className="group relative flex h-full min-w-0 flex-1 items-end justify-center rounded-lg p-0.5 transition-colors hover:bg-stone-50 dark:hover:bg-stone-800/40"
             >
-              <div
-                className={cn(
-                  'w-full rounded-t-sm transition-colors',
-                  b.seconds > 0
-                    ? b.selected
-                      ? 'bg-amber-500 dark:bg-amber-400'
-                      : 'bg-stone-700/80 hover:bg-stone-700 dark:bg-stone-300/80 dark:hover:bg-stone-300'
-                    : 'bg-stone-200/70 dark:bg-stone-800',
-                )}
-                style={{ height: b.seconds > 0 && max > 0 ? `${Math.max(4, (b.seconds / max) * 100)}%` : '2px' }}
-              />
+              {/* Background base track line */}
+              <div className="absolute inset-x-0 bottom-0.5 h-1 rounded-full bg-stone-200/60 dark:bg-stone-800" />
+              {/* Filled bar */}
+              {b.seconds > 0 && (
+                <div
+                  className={cn(
+                    'relative z-10 w-full rounded-t-md transition-all',
+                    b.selected
+                      ? 'bg-amber-500 shadow-xs dark:bg-amber-400'
+                      : 'bg-stone-700 group-hover:bg-stone-900 dark:bg-stone-300 dark:group-hover:bg-stone-100',
+                  )}
+                  style={{ height: max > 0 ? `${Math.max(6, (b.seconds / max) * 100)}%` : '0%' }}
+                />
+              )}
             </button>
           ))}
         </div>
       )}
-      <div className="mt-1 flex gap-1">
+      <div className="mt-2 flex gap-1">
         {bars.map((b) => (
-          <span key={b.key} className="min-w-0 flex-1 truncate text-center text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
+          <span
+            key={b.key}
+            className={cn(
+              'min-w-0 flex-1 truncate text-center text-[10px] tabular-nums transition-colors',
+              b.selected
+                ? 'font-semibold text-amber-600 dark:text-amber-400'
+                : 'text-stone-400 dark:text-stone-500',
+            )}
+          >
             {b.tick}
           </span>
         ))}

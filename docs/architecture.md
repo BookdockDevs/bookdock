@@ -315,6 +315,7 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | Prefix | Module | Key endpoints |
 |---|---|---|
 | `/api/v1/health` | — | `GET /` |
+| `/api/v1/system` | system | `GET /info` `GET /update-check` (behind the auth guard; build/version links plus a cached GitHub latest-release check) |
 | `/api/v1/auth` | auth | `GET /instance` `PATCH /instance`(owner) `POST /login` `POST /logout` `POST /setup` `GET /setup-required` `POST /register` `POST /password` `POST /username` `GET /me` |
 | `/api/v1/legado` | books / Legado adapter | `GET /source.json` and `GET /login` (public source definition/login bridge); `POST /access-key` (authenticated generation/rotation); `GET /search` `GET /explore/config` `GET /explore/all` `GET /explore/shelves/:id` `GET /explore/tags/:id` `GET /books/:id` `GET /books/:id/cover` `GET /books/:id/resource` `GET /books/:id/chapters` `GET /books/:id/chapters/:index` (authenticated or scoped-key, read-only projections for Reading/Legado) |
 | `/api/v1/users` | users | `GET /`(owner) `PATCH /:id`(owner) |

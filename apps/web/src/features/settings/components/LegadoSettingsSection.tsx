@@ -14,6 +14,8 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
+import SettingsCard from './SettingsCard'
+
 export default function LegadoSettingsSection() {
   const _ = useTranslation()
   const queryClient = useQueryClient()
@@ -77,19 +79,6 @@ export default function LegadoSettingsSection() {
     }
   }, [sourceUrl, qrModalOpen])
 
-  if (settingsQuery.isError) {
-    return <QueryErrorState className="py-4" isRetrying={settingsQuery.isFetching} onRetry={settingsQuery.refetch} />
-  }
-
-  if (settingsQuery.isLoading) {
-    return (
-      <div className="flex animate-pulse flex-col gap-3 py-4" aria-busy="true">
-        <div className="h-5 w-40 rounded bg-stone-200/80 dark:bg-stone-800" />
-        <div className="h-4 w-72 rounded bg-stone-100 dark:bg-stone-800/60" />
-      </div>
-    )
-  }
-
   async function handleCopy() {
     if (!sourceUrl) return
     try {
@@ -105,27 +94,35 @@ export default function LegadoSettingsSection() {
   return (
     <div className="flex flex-col gap-6">
       {/* Legado Service Card */}
-      <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#568FCC]/12 text-[#4478b2] dark:bg-[#568FCC]/20 dark:text-[#7eafe9]">
-              <LegadoAppIcon className="h-6 w-6" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-stone-900 dark:text-stone-100">{_('settings.legado')}</h2>
-              <p className="mt-1 text-xs leading-relaxed text-stone-500 text-pretty dark:text-stone-400">{_('settings.legadoDesc')}</p>
-            </div>
+      <SettingsCard
+        icon={<LegadoAppIcon className="h-6 w-6" />}
+        iconBgClass="bg-[#568FCC]/12 text-[#4478b2] dark:bg-[#568FCC]/20 dark:text-[#7eafe9]"
+        title={_('settings.legado')}
+        description={_('settings.legadoDesc')}
+        action={
+          settingsQuery.isLoading ? (
+            <div className="h-6 w-11 rounded-full bg-stone-100 animate-pulse dark:bg-stone-800/60" />
+          ) : (
+            <Toggle
+              checked={enabled}
+              disabled={mutation.isPending || rotateMutation.isPending || settingsQuery.isError}
+              ariaLabel={_('settings.legadoEnabled')}
+              onChange={(v) => mutation.mutate({ legado: { enabled: v } })}
+            />
+          )
+        }
+        bodyClassName={settingsQuery.isError || settingsQuery.isLoading ? undefined : 'mt-2.5 space-y-3.5 pt-2.5'}
+      >
+        {settingsQuery.isError ? (
+          <QueryErrorState className="py-4" isRetrying={settingsQuery.isFetching} onRetry={settingsQuery.refetch} />
+        ) : settingsQuery.isLoading ? (
+          <div className="flex animate-pulse flex-col gap-3 py-4" aria-busy="true">
+            <div className="h-5 w-40 rounded bg-stone-200/80 dark:bg-stone-800" />
+            <div className="h-4 w-72 rounded bg-stone-100 dark:bg-stone-800/60" />
           </div>
-          <Toggle
-            checked={enabled}
-            disabled={mutation.isPending || rotateMutation.isPending}
-            ariaLabel={_('settings.legadoEnabled')}
-            onChange={(v) => mutation.mutate({ legado: { enabled: v } })}
-          />
-        </div>
-
-        {enabled && (
-          <div className="mt-2.5 space-y-3.5 border-t border-stone-100 pt-2.5 dark:border-stone-800">
+        ) : (
+          enabled && (
+          <>
             {/* Source URL Box & Action Buttons */}
             <div className="space-y-2.5">
               <label htmlFor="legado-source-url" className="text-xs font-medium text-stone-500 dark:text-stone-400">
@@ -301,9 +298,10 @@ export default function LegadoSettingsSection() {
                 />
               </div>
             </div>
-          </div>
+          </>
+          )
         )}
-      </section>
+      </SettingsCard>
 
       {/* Confirm Regenerate Dialog */}
       {confirmRotateOpen && (

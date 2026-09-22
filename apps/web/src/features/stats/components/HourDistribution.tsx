@@ -46,10 +46,10 @@ export default function HourDistribution({ date, period, range }: HourDistributi
   const isHourlyLoading = hourlyQuery.isLoading && !data
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <h2 className="mb-4 text-sm font-medium">
+    <section className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-xs sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+      <h2 className="mb-4 text-sm font-semibold text-stone-900 dark:text-stone-100">
         <span>{_('stats.hourDistribution')}</span>
-        <span className="tabular-nums text-stone-500 dark:text-stone-400">
+        <span className="font-normal tabular-nums text-stone-400 dark:text-stone-500">
           {' · '}{selectedBar ? `${String(selectedBar.hour).padStart(2, '0')}:00 · ${formatDuration(selectedBar.seconds, _)}` : scopeLabel}
         </span>
       </h2>

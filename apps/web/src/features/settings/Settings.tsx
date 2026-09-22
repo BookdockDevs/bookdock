@@ -16,7 +16,6 @@ import LanguageSwitcher from './components/LanguageSwitcher'
 import TrashSettingsRow from './components/TrashSettingsRow'
 import TitleSettingsRow from './components/TitleSettingsRow'
 import UploadSettingsSection from './components/UploadSettingsSection'
-import ReadingDataSettingsSection from './components/ReadingDataSettingsSection'
 import FontsSettingsSection from './components/FontsSettingsSection'
 import ReplacementsSettingsSection from './components/ReplacementsSettingsSection'
 import TocRulesSettingsSection from './components/TocRulesSettingsSection'
@@ -24,8 +23,10 @@ import TtsSettingsSection from './components/TtsSettingsSection'
 import AiSettingsSection from './components/AiSettingsSection'
 import LegadoSettingsSection from './components/LegadoSettingsSection'
 import AccessTokensSection from './components/AccessTokensSection'
+import AboutSettingsSection from './components/AboutSettingsSection'
+import SettingsCard from './components/SettingsCard'
 
-type SectionId = 'general' | 'reading' | 'library' | 'integrations' | 'admin'
+type SectionId = 'general' | 'reading' | 'library' | 'integrations' | 'about' | 'admin'
 
 export default function Settings() {
   const _ = useTranslation()
@@ -125,6 +126,22 @@ export default function Settings() {
           },
         ]
       : []),
+    // Guests share one anonymous identity; version and release info is admin-facing.
+    ...(isGuest
+      ? []
+      : [
+          {
+            id: 'about' as const,
+            label: _('settings.about'),
+            icon: (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 11v5" />
+                <path d="M12 8h.01" />
+              </svg>
+            ),
+          },
+        ]),
   ]
 
   return (
@@ -172,11 +189,13 @@ export default function Settings() {
         <div className="min-w-0 flex-1">
           {visitedSections.has('general') && (
             <div className={active === 'general' ? 'flex flex-col gap-6' : 'hidden'}>
-              <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-                <h2 className="mb-4 text-sm font-medium">{_('settings.general')}</h2>
+              <SettingsCard
+                icon={<LayoutIcon className="h-5 w-5" />}
+                iconBgClass="bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
+                title={_('settings.interface')}
+              >
                 <LanguageSwitcher />
-              </section>
-              {!isGuest && <ReadingDataSettingsSection />}
+              </SettingsCard>
             </div>
           )}
           {visitedSections.has('reading') && (
@@ -198,15 +217,15 @@ export default function Settings() {
                 />
               ) : (
                 <>
-                  <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-                    <h2 className="mb-4 text-sm font-medium">{_('settings.trash')}</h2>
-                    <TrashSettingsRow />
-                  </section>
-                  <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-                    <h2 className="mb-2 text-sm font-medium">{_('settings.upload')}</h2>
+                  <SettingsCard
+                    icon={<UploadBoxIcon className="h-5 w-5" />}
+                    iconBgClass="bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
+                    title={_('settings.upload')}
+                  >
                     <TitleSettingsRow />
                     {isOwner && <UploadSettingsSection />}
-                  </section>
+                  </SettingsCard>
+                  <TrashSettingsRow />
                 </>
               )}
             </div>
@@ -225,6 +244,11 @@ export default function Settings() {
                   <LegadoSettingsSection />
                 </>
               )}
+            </div>
+          )}
+          {!isGuest && visitedSections.has('about') && (
+            <div className={active === 'about' ? 'flex flex-col gap-6' : 'hidden'}>
+              <AboutSettingsSection />
             </div>
           )}
           {isOwner && visitedSections.has('admin') && (
@@ -308,6 +332,26 @@ function IntegrationIcon({ className = 'h-6 w-6' }: { className?: string }) {
       <circle cx="18" cy="19" r="3" />
       <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
       <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+    </svg>
+  )
+}
+
+function UploadBoxIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  )
+}
+
+function LayoutIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+      <line x1="12" y1="17" x2="12" y2="21" />
     </svg>
   )
 }

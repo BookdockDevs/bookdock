@@ -18,6 +18,7 @@ import AccessTokenCreateDialog from './AccessTokenCreateDialog'
 import AccessTokenCreatedDialog from './AccessTokenCreatedDialog'
 import AccessTokenEditDialog from './AccessTokenEditDialog'
 import { ACCESS_TOKEN_PERMISSION_LABEL_KEYS } from './access-token-permissions'
+import SettingsCard from './SettingsCard'
 
 export default function AccessTokensSection() {
   const _ = useTranslation()
@@ -51,17 +52,13 @@ export default function AccessTokensSection() {
   const tokens = tokensQuery.data?.data.tokens ?? []
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400">
-            <AccessTokenIcon className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold text-stone-900 dark:text-stone-100">{_('settings.tokens')}</h2>
-            <p className="mt-1 text-xs leading-relaxed text-stone-500 text-pretty dark:text-stone-400">{_('settings.tokensDesc')}</p>
-          </div>
-        </div>
+    <>
+      <SettingsCard
+        icon={<AccessTokenIcon className="h-5 w-5" />}
+        iconBgClass="bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
+        title={_('settings.tokens')}
+        description={_('settings.tokensDesc')}
+      action={
         <Button
           size="sm"
           variant="secondary"
@@ -71,9 +68,9 @@ export default function AccessTokensSection() {
           <PlusIcon className="h-3.5 w-3.5" />
           {_('settings.tokensCreate')}
         </Button>
-      </div>
-
-      <div className="mt-3.5 border-t border-stone-100 pt-3 dark:border-stone-800">
+      }
+      bodyClassName="pt-3"
+    >
         {tokensQuery.isError ? (
           <QueryErrorState className="py-4" isRetrying={tokensQuery.isFetching} onRetry={tokensQuery.refetch} />
         ) : tokensQuery.isLoading ? (
@@ -211,7 +208,7 @@ export default function AccessTokensSection() {
             })}
           </div>
         )}
-      </div>
+      </SettingsCard>
 
       {createOpen && (
         <AccessTokenCreateDialog
@@ -251,7 +248,7 @@ export default function AccessTokensSection() {
           onClose={() => setPendingDelete(null)}
         />
       )}
-    </section>
+    </>
   )
 }
 

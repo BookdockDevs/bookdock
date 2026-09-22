@@ -29,6 +29,7 @@ import replacementRoutes from './modules/replacements/replacements.routes'
 import tocRuleRoutes from './modules/toc-rules/toc-rules.routes'
 import ttsRoutes from './modules/tts/tts.routes'
 import aiRoutes from './modules/ai/ai.routes'
+import systemRoutes from './modules/system/system.routes'
 
 registerParser(new EpubParser())
 registerParser(new TxtParser())
@@ -49,6 +50,8 @@ app.use('/api/v1/*', tokenCors())
 app.get('/api/v1/health', (c) => c.json({ data: { ok: true } }))
 
 app.use('/api/v1/*', authGuard())
+
+app.route('/api/v1/system', systemRoutes)
 
 app.route('/api/v1/auth', authRoutes)
 app.route('/api/v1/users', usersRoutes)

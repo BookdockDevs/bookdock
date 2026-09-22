@@ -16,6 +16,7 @@ import { useUiStore } from '@/stores/ui.store'
 import EditModeButton from './EditModeButton'
 import FontEditor from './FontEditor'
 import FontRow from './FontRow'
+import SettingsCard from './SettingsCard'
 
 function PlusIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
@@ -118,40 +119,45 @@ export default function FontsSettingsSection() {
   }
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="flex items-baseline gap-1 text-sm font-medium">
+    <>
+      <SettingsCard
+        icon={<FontIcon className="h-5 w-5" />}
+        iconBgClass="bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400"
+        title={
+          <span className="flex items-baseline gap-1.5">
             <span>{_('settings.fonts')}</span>
             {fonts.length > 0 && <span className="text-xs font-normal tabular-nums text-stone-400 dark:text-stone-500">· {fonts.length}</span>}
-          </h2>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <EditModeButton active={sorting} disabled={deleteFont.isPending || uploadFont.isPending} onClick={toggleSorting} />
-          {!isGuest && (
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".ttf,.otf,.woff,.woff2"
-                multiple
-                className="hidden"
-                onChange={(event) => void onFilesSelected(event.target.files)}
-              />
-              <button
-                type="button"
-                disabled={sorting || uploadFont.isPending}
-                onClick={() => fileInputRef.current?.click()}
-                aria-label={_('settings.fontsUpload')}
-                title={_('settings.fontsUpload')}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-              >
-                <PlusIcon />
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+          </span>
+        }
+        action={
+          <div className="flex shrink-0 items-center gap-1">
+            <EditModeButton active={sorting} disabled={deleteFont.isPending || uploadFont.isPending} onClick={toggleSorting} />
+            {!isGuest && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".ttf,.otf,.woff,.woff2"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => void onFilesSelected(event.target.files)}
+                />
+                <button
+                  type="button"
+                  disabled={sorting || uploadFont.isPending}
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label={_('settings.fontsUpload')}
+                  title={_('settings.fontsUpload')}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                >
+                  <PlusIcon />
+                </button>
+              </>
+            )}
+          </div>
+        }
+        bodyClassName="pt-3"
+      >
 
       {fontsQuery.isError ? (
         <QueryErrorState className="py-4" isRetrying={fontsQuery.isFetching} onRetry={fontsQuery.refetch} />
@@ -176,6 +182,7 @@ export default function FontsSettingsSection() {
           </SortableContext>
         </DndContext>
       )}
+      </SettingsCard>
 
       {pendingDelete?.uploaded && (
         <ConfirmDialog
@@ -187,6 +194,16 @@ export default function FontsSettingsSection() {
         />
       )}
       {editingFont && <FontEditor font={editingFont} isOwner={isOwner} onClose={() => setEditingFont(null)} />}
-    </section>
+    </>
+  )
+}
+
+function FontIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <polyline points="4 7 4 4 20 4 20 7" />
+      <line x1="9" x2="15" y1="20" y2="20" />
+      <line x1="12" x2="12" y1="4" y2="20" />
+    </svg>
   )
 }

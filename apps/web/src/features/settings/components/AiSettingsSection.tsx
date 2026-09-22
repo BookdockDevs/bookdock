@@ -23,6 +23,7 @@ import AiModelIcon from './AiModelIcon'
 import AiModelPicker from './AiModelPicker'
 import AiPromptRow from './AiPromptRow'
 import EditModeButton from './EditModeButton'
+import SettingsCard from './SettingsCard'
 import SettingsFormActions from './SettingsFormActions'
 import SettingsFormField from './SettingsFormField'
 import { settingsFormClass, settingsInputClass, settingsTextareaClass } from './settingsForm'
@@ -104,6 +105,14 @@ function TrashIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+    </svg>
+  )
+}
+
+function SparklesIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z" />
     </svg>
   )
 }
@@ -317,95 +326,130 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   }
 
   return (
-    <section id={id} className="scroll-mt-6 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="text-sm font-medium">{_('settings.ai')}</h2>
-        </div>
-        {!isGuest && <div ref={providerMenuRef} className="relative shrink-0">
-          <button type="button" onClick={() => setProviderMenuOpen((value) => !value)} className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-200 dark:hover:bg-stone-800">
-            <span>{_('settings.aiAdd')}</span>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-          </button>
-          {providerMenuOpen && <div className="absolute right-0 z-10 mt-2 w-max min-w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg dark:border-stone-700 dark:bg-stone-900">
-            {selectableProviders.map((provider) => <button key={provider.id} type="button" onClick={() => openCreate(provider.id)} className="flex w-full items-center gap-2 truncate whitespace-nowrap px-3 py-2 text-left text-xs text-stone-700 hover:bg-stone-50 dark:text-stone-200 dark:hover:bg-stone-800" title={provider.name}><AiBrandIcon provider={provider} className="h-5 w-5" /><span className="truncate">{provider.name}</span></button>)}
-          </div>}
-        </div>}
-      </div>
-
-      {isGuest ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-100/80 px-3.5 py-2.5 text-xs text-stone-500 dark:bg-stone-800/80 dark:text-stone-400">
-          <span className="min-w-0 flex-1">{_('settings.aiGuestHint')}</span>
-          <button
-            type="button"
-            onClick={() => void navigate({ to: '/login' })}
-            className="shrink-0 font-medium text-stone-700 underline-offset-2 hover:underline dark:text-stone-300 dark:hover:text-stone-100"
-          >
-            {_('auth.signIn')} →
-          </button>
-        </div>
-      ) : isError ? (
-        <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
-      ) : isLoading || !config ? (
-        <div className="space-y-3 py-1">
-          {[1, 2].map((i) => (
-            <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
-              <div className="space-y-1.5">
-                <div className="h-4 w-32 rounded bg-stone-200/80 dark:bg-stone-800" />
-                <div className="h-3 w-48 rounded bg-stone-100 dark:bg-stone-800/60" />
-              </div>
-              <div className="h-5 w-9 rounded-full bg-stone-200/80 dark:bg-stone-800" />
-            </div>
-          ))}
-        </div>
-      ) : profiles.length === 0 ? (
-        <SettingsEmptyState>{_('settings.aiEmpty')}</SettingsEmptyState>
-      ) : (
-        <div className="divide-y divide-stone-100 dark:divide-stone-800">
-          {profiles.map((profile) => (
-            <div key={profile.id} className="flex items-center gap-3 py-3">
-              <AiBrandIcon provider={providers.find((item) => item.id === profile.provider) ?? profile.provider} className="h-8 w-8" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="truncate text-sm text-stone-800 dark:text-stone-100">{profile.name || providers.find((item) => item.id === profile.provider)?.name || profile.provider}</p>
-                  {config.activeProfileId === profile.id && <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiActive')}</span>}
+    <>
+      <SettingsCard
+        id={id}
+        className="scroll-mt-6"
+        icon={<SparklesIcon className="h-5 w-5" />}
+        iconBgClass="bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400"
+        title={_('settings.ai')}
+        action={
+          !isGuest ? (
+            <div ref={providerMenuRef} className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setProviderMenuOpen((value) => !value)}
+                className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-200 dark:hover:bg-stone-800"
+              >
+                <span>{_('settings.aiAdd')}</span>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+              {providerMenuOpen && (
+                <div className="absolute right-0 z-10 mt-2 w-max min-w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg dark:border-stone-700 dark:bg-stone-900">
+                  {selectableProviders.map((provider) => (
+                    <button
+                      key={provider.id}
+                      type="button"
+                      onClick={() => openCreate(provider.id)}
+                      className="flex w-full items-center gap-2 truncate whitespace-nowrap px-3 py-2 text-left text-xs text-stone-700 hover:bg-stone-50 dark:text-stone-200 dark:hover:bg-stone-800"
+                      title={provider.name}
+                    >
+                      <AiBrandIcon provider={provider} className="h-5 w-5" />
+                      <span className="truncate">{provider.name}</span>
+                    </button>
+                  ))}
                 </div>
-                <p className="mt-0.5 truncate text-xs text-stone-400">{providers.find((item) => item.id === profile.provider)?.name ?? profile.provider}{profile.model ? ` · ${profile.model}` : ''}</p>
+              )}
+            </div>
+          ) : undefined
+        }
+      >
+        {isGuest ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-100/80 px-3.5 py-2.5 text-xs text-stone-500 dark:bg-stone-800/80 dark:text-stone-400">
+            <span className="min-w-0 flex-1">{_('settings.aiGuestHint')}</span>
+            <button
+              type="button"
+              onClick={() => void navigate({ to: '/login' })}
+              className="shrink-0 font-medium text-stone-700 underline-offset-2 hover:underline dark:text-stone-300 dark:hover:text-stone-100"
+            >
+              {_('auth.signIn')} →
+            </button>
+          </div>
+        ) : isError ? (
+          <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
+        ) : isLoading || !config ? (
+          <div className="space-y-3 py-1">
+            {[1, 2].map((i) => (
+              <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
+                <div className="space-y-1.5">
+                  <div className="h-4 w-32 rounded bg-stone-200/80 dark:bg-stone-800" />
+                  <div className="h-3 w-48 rounded bg-stone-100 dark:bg-stone-800/60" />
+                </div>
+                <div className="h-5 w-9 rounded-full bg-stone-200/80 dark:bg-stone-800" />
               </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <button type="button" onClick={() => openEdit(profile)} aria-label={_('settings.aiEdit')} title={_('settings.aiEdit')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"><EditIcon /></button>
-                {config.activeProfileId !== profile.id && <button type="button" onClick={() => activate.mutate(profile.id, { onError: (error) => showError(error) })} className="rounded-lg px-2 py-1 text-[11px] text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200">{_('settings.aiUse')}</button>}
-                <button type="button" onClick={() => setPendingDelete(profile)} aria-label={_('settings.aiDelete')} title={_('settings.aiDelete')} className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"><TrashIcon /></button>
+            ))}
+          </div>
+        ) : profiles.length === 0 ? (
+          <SettingsEmptyState>{_('settings.aiEmpty')}</SettingsEmptyState>
+        ) : (
+          <div className="divide-y divide-stone-100 dark:divide-stone-800">
+            {profiles.map((profile) => (
+              <div key={profile.id} className="flex items-center gap-3 py-3">
+                <AiBrandIcon provider={providers.find((item) => item.id === profile.provider) ?? profile.provider} className="h-8 w-8" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm text-stone-800 dark:text-stone-100">{profile.name || providers.find((item) => item.id === profile.provider)?.name || profile.provider}</p>
+                    {config.activeProfileId === profile.id && <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiActive')}</span>}
+                  </div>
+                  <p className="mt-0.5 truncate text-xs text-stone-400">{providers.find((item) => item.id === profile.provider)?.name ?? profile.provider}{profile.model ? ` · ${profile.model}` : ''}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button type="button" onClick={() => openEdit(profile)} aria-label={_('settings.aiEdit')} title={_('settings.aiEdit')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"><EditIcon /></button>
+                  {config.activeProfileId !== profile.id && <button type="button" onClick={() => activate.mutate(profile.id, { onError: (error) => showError(error) })} className="rounded-lg px-2 py-1 text-[11px] text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200">{_('settings.aiUse')}</button>}
+                  <button type="button" onClick={() => setPendingDelete(profile)} aria-label={_('settings.aiDelete')} title={_('settings.aiDelete')} className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"><TrashIcon /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!isGuest && config && profiles.length > 0 && (
+          <div className="mt-5 border-t border-stone-100 pt-5 dark:border-stone-800">
+            <div className="flex flex-col gap-2 text-xs text-stone-600 dark:text-stone-300">
+              <span id="ai-retrieval-mode-label">{_('settings.aiRetrievalMode')}</span>
+              <div role="radiogroup" aria-labelledby="ai-retrieval-mode-label" className="flex rounded-xl border border-stone-200 bg-stone-50 p-1 dark:border-stone-700 dark:bg-stone-800/60">
+                <button type="button" role="radio" aria-checked={embeddingMode === 'lexical'} onClick={() => changeEmbeddingMode('lexical')} disabled={updateConfig.isPending} className={`min-w-0 flex-1 rounded-lg px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${embeddingMode === 'lexical' ? 'bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900' : 'text-stone-500 hover:bg-white hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-100'}`}>{_('settings.aiLexicalRetrieval')}</button>
+                <button type="button" role="radio" aria-checked={embeddingMode === 'semantic'} onClick={() => changeEmbeddingMode('semantic')} disabled={updateConfig.isPending} className={`min-w-0 flex-1 rounded-lg px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${embeddingMode === 'semantic' ? 'bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900' : 'text-stone-500 hover:bg-white hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-100'}`}>{_('settings.aiSemanticRetrieval')}</button>
               </div>
             </div>
-          ))}
-        </div>
-      )}
-
-      {!isGuest && config && profiles.length > 0 && <div className="mt-5 border-t border-stone-100 pt-5 dark:border-stone-800">
-        <div className="flex flex-col gap-2 text-xs text-stone-600 dark:text-stone-300">
-          <span id="ai-retrieval-mode-label">{_('settings.aiRetrievalMode')}</span>
-          <div role="radiogroup" aria-labelledby="ai-retrieval-mode-label" className="flex rounded-xl border border-stone-200 bg-stone-50 p-1 dark:border-stone-700 dark:bg-stone-800/60">
-            <button type="button" role="radio" aria-checked={embeddingMode === 'lexical'} onClick={() => changeEmbeddingMode('lexical')} disabled={updateConfig.isPending} className={`min-w-0 flex-1 rounded-lg px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${embeddingMode === 'lexical' ? 'bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900' : 'text-stone-500 hover:bg-white hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-100'}`}>{_('settings.aiLexicalRetrieval')}</button>
-            <button type="button" role="radio" aria-checked={embeddingMode === 'semantic'} onClick={() => changeEmbeddingMode('semantic')} disabled={updateConfig.isPending} className={`min-w-0 flex-1 rounded-lg px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${embeddingMode === 'semantic' ? 'bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900' : 'text-stone-500 hover:bg-white hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-100'}`}>{_('settings.aiSemanticRetrieval')}</button>
+            {embeddingMode === 'semantic' && (
+              <label className="mt-3 flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+                <span>{_('settings.aiEmbeddingModel')}</span>
+                <select aria-label={_('settings.aiEmbeddingModel')} value={embeddingSelectionKey} onChange={(event) => selectEmbeddingModel(event.target.value)} disabled={updateConfig.isPending || embeddingOptions.length === 0} className="h-9 rounded-lg border border-stone-200 bg-transparent px-3 text-sm outline-none focus:border-blue-500 disabled:opacity-50 dark:border-stone-700">
+                  <option value="">{embeddingOptions.length ? _('settings.aiEmbeddingSelectModel') : _('settings.aiEmbeddingNoModels')}</option>
+                  {profiles.map((profile) => {
+                    const options = embeddingOptions.filter((item) => item.profileId === profile.id)
+                    if (!options.length) return null
+                    return (
+                      <optgroup key={profile.id} label={options[0]!.profileName}>
+                        {options.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.model.name}{option.model.name !== option.model.id ? ` · ${option.model.id}` : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )
+                  })}
+                </select>
+              </label>
+            )}
           </div>
-        </div>
-        {embeddingMode === 'semantic' && <label className="mt-3 flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
-          <span>{_('settings.aiEmbeddingModel')}</span>
-          <select aria-label={_('settings.aiEmbeddingModel')} value={embeddingSelectionKey} onChange={(event) => selectEmbeddingModel(event.target.value)} disabled={updateConfig.isPending || embeddingOptions.length === 0} className="h-9 rounded-lg border border-stone-200 bg-transparent px-3 text-sm outline-none focus:border-blue-500 disabled:opacity-50 dark:border-stone-700">
-            <option value="">{embeddingOptions.length ? _('settings.aiEmbeddingSelectModel') : _('settings.aiEmbeddingNoModels')}</option>
-            {profiles.map((profile) => {
-              const options = embeddingOptions.filter((item) => item.profileId === profile.id)
-              if (!options.length) return null
-              return <optgroup key={profile.id} label={options[0]!.profileName}>
-                {options.map((option) => <option key={option.key} value={option.key}>{option.model.name}{option.model.name !== option.model.id ? ` · ${option.model.id}` : ''}</option>)}
-              </optgroup>
-            })}
-          </select>
-        </label>}
-      </div>}
+        )}
 
-      {!isGuest && config && <AiPromptTemplates prompts={config.prompts ?? defaultPrompts} update={updateConfig} />}
+        {!isGuest && config && <AiPromptTemplates prompts={config.prompts ?? defaultPrompts} update={updateConfig} />}
+      </SettingsCard>
 
       {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.aiDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
 
@@ -479,7 +523,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         onRemove={removeModel}
         onClose={() => setModelPickerOpen(false)}
       />}
-    </section>
+    </>
   )
 }
 

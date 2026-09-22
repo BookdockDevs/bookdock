@@ -12,6 +12,8 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { cn } from '@/lib/utils'
 import { notify } from '@/lib/notifications'
 
+import SettingsCard from './SettingsCard'
+
 const AUTO_CLEAN_DAYS = [0, 7, 30] as const
 
 const LABEL_KEYS: Record<TrashSettings['autoCleanDays'], string> = {
@@ -46,20 +48,6 @@ export default function TrashSettingsRow() {
     },
     onError: (error) => notify.error(getUserErrorNotification(error, 'settings.trashSettingsUpdateFailed')),
   })
-  if (settingsQuery.isError) {
-    return <QueryErrorState className="py-4" isRetrying={settingsQuery.isFetching} onRetry={settingsQuery.refetch} />
-  }
-  if (settingsQuery.isLoading) {
-    return (
-      <div className="flex animate-pulse flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between" aria-busy="true">
-        <div className="space-y-1.5">
-          <div className="h-4 w-28 rounded bg-stone-200/80 dark:bg-stone-800" />
-          <div className="h-3 w-48 rounded bg-stone-100 dark:bg-stone-800/60" />
-        </div>
-        <div className="h-7 w-40 rounded-lg bg-stone-100 dark:bg-stone-800/60" />
-      </div>
-    )
-  }
 
   const trashSettings = settingsQuery.data?.data.trash
   const enabled = trashSettings?.enabled !== false
@@ -67,76 +55,96 @@ export default function TrashSettingsRow() {
   const currentCap = trashSettings?.maxTrashBytes ?? 0
 
   return (
-    <div className="flex flex-col divide-y divide-stone-100 dark:divide-stone-800/80">
-      <div className="flex items-center justify-between gap-4 py-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trashEnabled')}</p>
-          <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashEnabledHint')}</p>
-        </div>
-        <Toggle
-          checked={enabled}
-          disabled={mutation.isPending}
-          ariaLabel={_('settings.trashEnabled')}
-          onChange={(v) => {
-            if (!v) setDisableOpen(true)
-            else mutation.mutate({ enabled: true })
-          }}
-        />
-      </div>
-      {enabled && (
-        <>
-          <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trashAutoClean')}</p>
-              <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashAutoCleanHint')}</p>
+    <>
+      <SettingsCard
+        icon={<TrashCanIcon className="h-5 w-5" />}
+        iconBgClass="bg-rose-500/10 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400"
+        title={_('settings.trash')}
+        action={
+          settingsQuery.isLoading ? (
+            <div className="h-6 w-11 rounded-full bg-stone-100 animate-pulse dark:bg-stone-800/60" />
+          ) : (
+            <Toggle
+              checked={enabled}
+              disabled={mutation.isPending || settingsQuery.isError}
+              ariaLabel={_('settings.trashEnabled')}
+              onChange={(v) => {
+                if (!v) setDisableOpen(true)
+                else mutation.mutate({ enabled: true })
+              }}
+            />
+          )
+        }
+        bodyClassName={settingsQuery.isError || settingsQuery.isLoading ? undefined : 'divide-y divide-stone-100 dark:divide-stone-800'}
+      >
+        {settingsQuery.isError ? (
+          <QueryErrorState className="py-4" isRetrying={settingsQuery.isFetching} onRetry={settingsQuery.refetch} />
+        ) : settingsQuery.isLoading ? (
+          <div className="flex animate-pulse items-center justify-between py-3" aria-busy="true">
+            <div className="space-y-1.5">
+              <div className="h-4 w-28 rounded bg-stone-200/80 dark:bg-stone-800" />
+              <div className="h-3 w-44 rounded bg-stone-100 dark:bg-stone-800/60" />
             </div>
-            <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.trashAutoClean')}>
-              {AUTO_CLEAN_DAYS.map((days) => (
-                <button
-                  key={days}
-                  type="button"
-                  aria-pressed={current === days}
-                  disabled={mutation.isPending}
-                  onClick={() => mutation.mutate({ autoCleanDays: days })}
-                  className={cn(
-                    'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
-                    current === days
-                      ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                      : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-                  )}
-                >
-                  {_(LABEL_KEYS[days])}
-                </button>
-              ))}
-            </div>
+            <div className="h-7 w-32 rounded-lg bg-stone-100 dark:bg-stone-800/60" />
           </div>
-          <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trashCap')}</p>
-              <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashCapHint')}</p>
+        ) : (
+          enabled && (
+          <>
+            <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trashAutoClean')}</p>
+                <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashAutoCleanHint')}</p>
+              </div>
+              <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.trashAutoClean')}>
+                {AUTO_CLEAN_DAYS.map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    aria-pressed={current === days}
+                    disabled={mutation.isPending}
+                    onClick={() => mutation.mutate({ autoCleanDays: days })}
+                    className={cn(
+                      'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
+                      current === days
+                        ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                        : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
+                    )}
+                  >
+                    {_(LABEL_KEYS[days])}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.trashCap')}>
-              {TRASH_CAPS.map((cap) => (
-                <button
-                  key={cap}
-                  type="button"
-                  aria-pressed={currentCap === cap}
-                  disabled={mutation.isPending}
-                  onClick={() => mutation.mutate({ maxTrashBytes: cap })}
-                  className={cn(
-                    'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
-                    currentCap === cap
-                      ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                      : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-                  )}
-                >
-                  {_(CAP_LABEL_KEYS[cap])}
-                </button>
-              ))}
+            <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trashCap')}</p>
+                <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashCapHint')}</p>
+              </div>
+              <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.trashCap')}>
+                {TRASH_CAPS.map((cap) => (
+                  <button
+                    key={cap}
+                    type="button"
+                    aria-pressed={currentCap === cap}
+                    disabled={mutation.isPending}
+                    onClick={() => mutation.mutate({ maxTrashBytes: cap })}
+                    className={cn(
+                      'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
+                      currentCap === cap
+                        ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                        : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
+                    )}
+                  >
+                    {_(CAP_LABEL_KEYS[cap])}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        </>
-      )}
+          </>
+          )
+        )}
+      </SettingsCard>
+
       {disableOpen && (
         <ConfirmDialog
           title={_('settings.trashDisable')}
@@ -149,6 +157,18 @@ export default function TrashSettingsRow() {
           onClose={() => setDisableOpen(false)}
         />
       )}
-    </div>
+    </>
+  )
+}
+
+function TrashCanIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
+    </svg>
   )
 }

@@ -14,6 +14,7 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
 
+import SettingsCard from './SettingsCard'
 import TtsProviderIcon from './TtsProviderIcon'
 
 interface TtsFormState {
@@ -60,6 +61,14 @@ function TrashIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+    </svg>
+  )
+}
+
+function HeadphonesIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3" />
     </svg>
   )
 }
@@ -154,85 +163,133 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
   }
 
   return (
-    <section id={id} className="scroll-mt-6 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="text-sm font-medium">{_('settings.tts')}</h2>
-        </div>
-        {!isGuest && <div ref={providerMenuRef} className="relative shrink-0">
-          <button type="button" onClick={() => setProviderMenuOpen((value) => !value)} className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-200 dark:hover:bg-stone-800">
-            <span>{_('settings.ttsAdd')}</span>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-          </button>
-          {providerMenuOpen && <div className="absolute right-0 z-10 mt-2 w-max min-w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg dark:border-stone-700 dark:bg-stone-900">
-            {providers.map((provider) => <button key={provider.id} type="button" onClick={() => openCreate(provider.id)} className="flex w-full items-center gap-2 truncate whitespace-nowrap px-3 py-2 text-left text-xs text-stone-700 hover:bg-stone-50 dark:text-stone-200 dark:hover:bg-stone-800" title={PROVIDER_NAMES[provider.id]}><TtsProviderIcon provider={provider.id} className="h-5 w-5" /><span className="truncate">{PROVIDER_NAMES[provider.id]}</span></button>)}
-          </div>}
-        </div>}
-      </div>
+    <>
+      <SettingsCard
+        id={id}
+        className="scroll-mt-6"
+        icon={<HeadphonesIcon className="h-5 w-5" />}
+        iconBgClass="bg-sky-500/10 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400"
+        title={_('settings.tts')}
+        action={
+          !isGuest ? (
+            <div ref={providerMenuRef} className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setProviderMenuOpen((value) => !value)}
+                className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-200 dark:hover:bg-stone-800"
+              >
+                <span>{_('settings.ttsAdd')}</span>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+              {providerMenuOpen && (
+                <div className="absolute right-0 z-10 mt-2 w-max min-w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg dark:border-stone-700 dark:bg-stone-900">
+                  {providers.map((provider) => (
+                    <button
+                      key={provider.id}
+                      type="button"
+                      onClick={() => openCreate(provider.id)}
+                      className="flex w-full items-center gap-2 truncate whitespace-nowrap px-3 py-2 text-left text-xs text-stone-700 hover:bg-stone-50 dark:text-stone-200 dark:hover:bg-stone-800"
+                      title={PROVIDER_NAMES[provider.id]}
+                    >
+                      <TtsProviderIcon provider={provider.id} className="h-5 w-5" />
+                      <span className="truncate">{PROVIDER_NAMES[provider.id]}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : undefined
+        }
+      >
+        {isGuest ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-100/80 px-3.5 py-2.5 text-xs text-stone-500 dark:bg-stone-800/80 dark:text-stone-400">
+            <span className="min-w-0 flex-1">{_('settings.ttsGuestHint')}</span>
+            <button
+              type="button"
+              onClick={() => void navigate({ to: '/login' })}
+              className="shrink-0 font-medium text-stone-700 underline-offset-2 hover:underline dark:text-stone-300 dark:hover:text-stone-100"
+            >
+              {_('auth.signIn')} →
+            </button>
+          </div>
+        ) : servicesQuery.isError ? (
+          <QueryErrorState isRetrying={servicesQuery.isFetching} onRetry={servicesQuery.refetch} />
+        ) : servicesQuery.isPending && !servicesQuery.data ? (
+          <div className="space-y-3 py-1">
+            {[1, 2].map((i) => (
+              <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
+                <div className="space-y-1.5">
+                  <div className="h-4 w-28 rounded bg-stone-200/80 dark:bg-stone-800" />
+                  <div className="h-3 w-44 rounded bg-stone-100 dark:bg-stone-800/60" />
+                </div>
+                <div className="h-5 w-9 rounded-full bg-stone-200/80 dark:bg-stone-800" />
+              </div>
+            ))}
+          </div>
+        ) : services.length === 0 ? (
+          <SettingsEmptyState>{_('settings.ttsEmpty')}</SettingsEmptyState>
+        ) : (
+          <div className="divide-y divide-stone-100 dark:divide-stone-800">
+            {services.map((service) => (
+              <div key={service.id} className="flex items-center gap-3 py-3">
+                <TtsProviderIcon provider={service.provider} className="h-8 w-8" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-stone-800 dark:text-stone-100">{service.name}</p>
+                  <p className="mt-0.5 truncate text-xs text-stone-400">
+                    {PROVIDER_NAMES[service.provider]}
+                    {service.model ? ` · ${service.model}` : ''}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => openEdit(service)}
+                    aria-label={_('library.edit')}
+                    title={_('library.edit')}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  >
+                    <EditIcon />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDelete(service)}
+                    aria-label={_('settings.fontsDelete')}
+                    title={_('settings.fontsDelete')}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SettingsCard>
 
-      {isGuest ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-100/80 px-3.5 py-2.5 text-xs text-stone-500 dark:bg-stone-800/80 dark:text-stone-400">
-          <span className="min-w-0 flex-1">{_('settings.ttsGuestHint')}</span>
-          <button
-            type="button"
-            onClick={() => void navigate({ to: '/login' })}
-            className="shrink-0 font-medium text-stone-700 underline-offset-2 hover:underline dark:text-stone-300 dark:hover:text-stone-100"
-          >
-            {_('auth.signIn')} →
-          </button>
-        </div>
-      ) : servicesQuery.isError ? (
-        <QueryErrorState isRetrying={servicesQuery.isFetching} onRetry={servicesQuery.refetch} />
-      ) : servicesQuery.isPending && !servicesQuery.data ? (
-        <div className="space-y-3 py-1">
-          {[1, 2].map((i) => (
-            <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
-              <div className="space-y-1.5">
-                <div className="h-4 w-28 rounded bg-stone-200/80 dark:bg-stone-800" />
-                <div className="h-3 w-44 rounded bg-stone-100 dark:bg-stone-800/60" />
-              </div>
-              <div className="h-5 w-9 rounded-full bg-stone-200/80 dark:bg-stone-800" />
-            </div>
-          ))}
-        </div>
-      ) : services.length === 0 ? (
-        <SettingsEmptyState>{_('settings.ttsEmpty')}</SettingsEmptyState>
-      ) : (
-        <div className="divide-y divide-stone-100 dark:divide-stone-800">
-          {services.map((service) => (
-            <div key={service.id} className="flex items-center gap-3 py-3">
-              <TtsProviderIcon provider={service.provider} className="h-8 w-8" />
-              <div className="min-w-0 flex-1"><p className="truncate text-sm text-stone-800 dark:text-stone-100">{service.name}</p><p className="mt-0.5 truncate text-xs text-stone-400">{PROVIDER_NAMES[service.provider]}{service.model ? ` · ${service.model}` : ''}</p></div>
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => openEdit(service)}
-                  aria-label={_('library.edit')}
-                  title={_('library.edit')}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                >
-                  <EditIcon />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPendingDelete(service)}
-                  aria-label={_('settings.fontsDelete')}
-                  title={_('settings.fontsDelete')}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"
-                >
-                  <TrashIcon />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+      {pendingDelete && (
+        <ConfirmDialog
+          title={_('settings.confirmDeleteTitle')}
+          message={_('settings.ttsDeleteConfirm', { name: pendingDelete.name })}
+          confirmLabel={_('settings.confirmDeleteAction')}
+          onConfirm={confirmDelete}
+          onClose={() => setPendingDelete(null)}
+        />
       )}
-
-      {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.ttsDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
-      {form && <Modal title={_(form.id ? 'settings.ttsEdit' : 'settings.ttsAdd')} onClose={() => setForm(null)}>
-        <TtsServiceForm form={form} setForm={setForm} onSave={save} onTest={testCurrent} saving={create.isPending || update.isPending} testing={test.isPending || testDraft.isPending} />
-      </Modal>}
-    </section>
+      {form && (
+        <Modal title={_(form.id ? 'settings.ttsEdit' : 'settings.ttsAdd')} onClose={() => setForm(null)}>
+          <TtsServiceForm
+            form={form}
+            setForm={setForm}
+            onSave={save}
+            onTest={testCurrent}
+            saving={create.isPending || update.isPending}
+            testing={test.isPending || testDraft.isPending}
+          />
+        </Modal>
+      )}
+    </>
   )
 }
 

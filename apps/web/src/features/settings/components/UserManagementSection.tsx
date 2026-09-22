@@ -15,6 +15,19 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
 
+import SettingsCard from './SettingsCard'
+
+function UsersIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  )
+}
+
 interface PendingAction {
   user: AdminUserRes
   req: UpdateUserReq
@@ -40,49 +53,57 @@ export default function UserManagementSection() {
   }
 
   return (
-    <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-      <h2 className="mb-4 text-sm font-medium">{_('admin.userManagement')}</h2>
-      {isLoading ? (
-        <div className="space-y-3 py-1">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
-              <div className="space-y-1.5">
-                <div className="h-4 w-28 rounded bg-stone-200/80 dark:bg-stone-800" />
-                <div className="h-3 w-40 rounded bg-stone-100 dark:bg-stone-800/60" />
+    <>
+      <SettingsCard
+        icon={<UsersIcon className="h-5 w-5" />}
+        iconBgClass="bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
+        title={_('admin.userManagement')}
+        bodyClassName="-mx-4 -mb-4 sm:-mx-6 sm:-mb-6 mt-4 overflow-hidden rounded-b-2xl"
+      >
+        {isLoading ? (
+          <div className="space-y-3 p-4 sm:p-6">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
+                <div className="space-y-1.5">
+                  <div className="h-4 w-28 rounded bg-stone-200/80 dark:bg-stone-800" />
+                  <div className="h-3 w-40 rounded bg-stone-100 dark:bg-stone-800/60" />
+                </div>
+                <div className="h-6 w-16 rounded-md bg-stone-200/80 dark:bg-stone-800" />
               </div>
-              <div className="h-6 w-16 rounded-md bg-stone-200/80 dark:bg-stone-800" />
-            </div>
-          ))}
-        </div>
-      ) : isError ? (
-        <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
-      ) : (
-        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-          <table className="w-full min-w-[28rem] text-left text-sm sm:min-w-full">
-          <thead>
-            <tr className="border-b border-stone-100 text-xs text-stone-400 dark:border-stone-800">
-              <th className="pb-2.5 font-medium">{_('auth.username')}</th>
-              <th className="pb-2.5 font-medium">{_('admin.role')}</th>
-              <th className="pb-2.5 font-medium">{_('admin.bookCount')}</th>
-              <th className="pb-2.5 font-medium">{_('admin.status')}</th>
-              <th className="pb-2.5 whitespace-nowrap font-medium">{_('admin.createdAt')}</th>
-              <th className="pb-2.5 w-8" />
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => (
-              <UserRow
-                key={user.id}
-                user={user}
-                isSelf={user.id === currentUser?.id}
-                onAction={setPendingAction}
-                onResetPassword={setResetTarget}
-              />
             ))}
-          </tbody>
-          </table>
-        </div>
-      )}
+          </div>
+        ) : isError ? (
+          <div className="p-4 sm:p-6">
+            <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[28rem] text-left text-sm sm:min-w-full">
+              <thead>
+                <tr className="border-b border-stone-100 bg-stone-50/50 text-xs text-stone-400 dark:border-stone-800 dark:bg-stone-800/40">
+                  <th className="w-[30%] py-2.5 pl-4 pr-3 font-medium sm:pl-6">{_('auth.username')}</th>
+                  <th className="w-[18%] py-2.5 px-3 font-medium">{_('admin.role')}</th>
+                  <th className="w-[14%] py-2.5 px-3 font-medium">{_('admin.bookCount')}</th>
+                  <th className="w-[14%] py-2.5 px-3 font-medium">{_('admin.status')}</th>
+                  <th className="w-[20%] py-2.5 px-3 whitespace-nowrap font-medium">{_('admin.createdAt')}</th>
+                  <th className="w-10 py-2.5 pl-3 pr-4 text-right sm:pr-6" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100/70 dark:divide-stone-800/50">
+                {users.map((user) => (
+                  <UserRow
+                    key={user.id}
+                    user={user}
+                    isSelf={user.id === currentUser?.id}
+                    onAction={setPendingAction}
+                    onResetPassword={setResetTarget}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SettingsCard>
 
       {pendingAction && (
         <ConfirmDialog
@@ -108,7 +129,7 @@ export default function UserManagementSection() {
           if (target) runUpdate(target.id, { newPassword: password })
         }}
       />
-    </section>
+    </>
   )
 }
 
@@ -124,14 +145,14 @@ function UserRow({ user, isSelf, onAction, onResetPassword }: {
   const roleLabel = user.role === 'owner' ? _('auth.roleOwner') : user.role === 'guest' ? _('auth.guest') : _('auth.roleMember')
 
   return (
-    <tr className="border-b border-stone-100/70 transition-colors last:border-0 hover:bg-stone-50/50 dark:border-stone-800/50 dark:hover:bg-stone-800/30">
-      <td className="py-2.5 pr-2">
+    <tr className="transition-colors hover:bg-stone-50/50 dark:hover:bg-stone-800/30">
+      <td className="py-3 pl-4 pr-3 sm:pl-6">
         <span className="font-medium text-stone-800 dark:text-stone-100">{user.username}</span>
         {isSelf && <span className="ml-1.5 rounded bg-stone-100 px-1 py-0.5 text-[11px] text-stone-400 dark:bg-stone-800">{_('admin.self')}</span>}
       </td>
-      <td className="py-2.5 pr-2 text-stone-500 dark:text-stone-400">{roleLabel}</td>
-      <td className="py-2.5 pr-2 tabular-nums text-stone-500 dark:text-stone-400">{user.bookCount}</td>
-      <td className="py-2.5 pr-2">
+      <td className="py-3 px-3 text-stone-500 dark:text-stone-400">{roleLabel}</td>
+      <td className="py-3 px-3 tabular-nums text-stone-500 dark:text-stone-400">{user.bookCount}</td>
+      <td className="py-3 px-3">
         <span
           className={cn(
             'inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium',
@@ -143,8 +164,8 @@ function UserRow({ user, isSelf, onAction, onResetPassword }: {
           {user.disabled ? _('admin.statusDisabled') : _('admin.statusActive')}
         </span>
       </td>
-      <td className="py-2.5 pr-2 whitespace-nowrap text-xs text-stone-400">{new Date(user.createdAt).toLocaleDateString()}</td>
-      <td className="py-2.5 text-right">
+      <td className="py-3 px-3 whitespace-nowrap text-xs text-stone-400">{new Date(user.createdAt).toLocaleDateString()}</td>
+      <td className="py-3 pl-3 pr-4 text-right sm:pr-6">
         <button
           ref={menu.btnRef}
           type="button"
