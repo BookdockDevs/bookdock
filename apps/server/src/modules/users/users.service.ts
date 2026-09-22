@@ -21,6 +21,10 @@ export function listUsers(): AdminUserRes[] {
     })
     .from(users)
     .leftJoin(books, and(eq(books.userId, users.id), isNull(books.deletedAt)))
+    // The shared guest account is managed via the allowGuestAccess instance
+    // switch, has no server-side data, and carries no owner actions —
+    // listing it only confuses user management.
+    .where(ne(users.role, 'guest'))
     .groupBy(users.id)
     .all()
   return rows.map((r) => ({ ...r, disabled: r.disabled === 1 }))
@@ -37,10 +41,11 @@ export async function updateUser(actorId: string, targetId: string, patch: Updat
     throw new AppError('CANNOT_MODIFY_SELF', 'Cannot change own role or disable own account')
   }
 
-  // The guest account is anonymous by design: a password would make it a
-  // login-capable account while its role stays 'guest' — broken semantics
-  if (target.role === 'guest' && patch.newPassword !== undefined) {
-    throw new AppError('CANNOT_MODIFY_GUEST', 'Guest is anonymous and cannot have a password')
+  // The guest account is anonymous and managed by the allowGuestAccess
+  // instance switch; per-account patches (role, disable, password) would
+  // create state that contradicts the switch.
+  if (target.role === 'guest') {
+    throw new AppError('CANNOT_MODIFY_GUEST', 'Guest account is managed via instance settings')
   }
 
   const newRole = patch.role ?? target.role

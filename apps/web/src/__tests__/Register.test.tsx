@@ -21,7 +21,7 @@ describe('Register', () => {
     ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
   })
 
-  function fillForm(username = 'newuser', password = 'secret1', confirm = password) {
+  function fillForm(username = 'newuser', password = 'secret12', confirm = password) {
     fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: username } })
     fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: password } })
     fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: confirm } })
@@ -36,7 +36,7 @@ describe('Register', () => {
     fireEvent.click(screen.getByText('auth.register'))
 
     await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith({ username: 'newuser', password: 'secret1' })
+      expect(mutateAsync).toHaveBeenCalledWith({ username: 'newuser', password: 'secret12' })
     })
     expect(navigateMock).toHaveBeenCalledWith({ to: '/' })
   })
@@ -50,7 +50,7 @@ describe('Register', () => {
     fireEvent.click(screen.getByText('auth.register'))
 
     await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith({ username: 'newuser', password: 'secret1' })
+      expect(mutateAsync).toHaveBeenCalledWith({ username: 'newuser', password: 'secret12' })
     })
   })
 
@@ -90,7 +90,7 @@ describe('Register', () => {
     ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
 
     render(<Register />)
-    fillForm('newuser', 'secret1', 'different')
+    fillForm('newuser', 'secret12', 'different')
     fireEvent.click(screen.getByText('auth.register'))
 
     await waitFor(() => {

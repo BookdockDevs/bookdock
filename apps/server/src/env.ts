@@ -19,7 +19,6 @@ const envSchema = z.object({
   DATA_DIR: z.string().default(path.join(projectRoot, 'data')),
   DB_PATH: z.string().optional(),
   JWT_SECRET: z.string().optional(),
-  DEFAULT_USERNAME: z.string().default('admin'),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(104857600),
   FONT_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
   AVATAR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(2097152),

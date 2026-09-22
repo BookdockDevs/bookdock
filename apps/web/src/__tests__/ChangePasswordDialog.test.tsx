@@ -49,12 +49,12 @@ describe('ChangePasswordDialog', () => {
 
     render(<ChangePasswordDialog open onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('auth.oldPassword'), { target: { value: 'oldpass' } })
-    fireEvent.change(screen.getByLabelText('auth.newPassword'), { target: { value: 'newpass' } })
-    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'newpass' } })
+    fireEvent.change(screen.getByLabelText('auth.newPassword'), { target: { value: 'newpass12' } })
+    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'newpass12' } })
     fireEvent.click(screen.getByText('library.save'))
 
     await vi.waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith({ oldPassword: 'oldpass', newPassword: 'newpass' })
+      expect(mutateAsync).toHaveBeenCalledWith({ oldPassword: 'oldpass', newPassword: 'newpass12' })
     })
   })
 })

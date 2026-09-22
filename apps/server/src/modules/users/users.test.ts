@@ -85,9 +85,10 @@ describe('users module', () => {
     resetAuthCaches()
   })
 
-  it('lists users with book counts (excluding trashed books)', async () => {
+  it('lists users with book counts (excluding trashed books and the guest account)', async () => {
     await insertUser(db, { username: 'own', role: 'owner' })
     const memberId = await insertUser(db, { username: 'mem' })
+    await insertUser(db, { username: 'guest', role: 'guest' })
     insertBook(db, memberId)
     insertBook(db, memberId)
     insertBook(db, memberId, Date.now())
@@ -124,14 +125,15 @@ describe('users module', () => {
     expect(await verifyPassword('newpass6', row!.passwordHash!)).toBe(true)
   })
 
-  it('rejects setting a password on the guest account', async () => {
+  it('rejects all updates to the guest account', async () => {
     const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
     const guestId = await insertUser(db, { username: 'guest', role: 'guest' })
     await expect(updateUser(ownerId, guestId, { newPassword: 'hack123' }))
       .rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
-    // non-password updates on the guest still work
-    const disabled = await updateUser(ownerId, guestId, { disabled: true })
-    expect(disabled.disabled).toBe(true)
+    await expect(updateUser(ownerId, guestId, { disabled: true }))
+      .rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
+    await expect(updateUser(ownerId, guestId, { role: 'member' }))
+      .rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
   })
 
   it('rejects disabling or demoting oneself', async () => {

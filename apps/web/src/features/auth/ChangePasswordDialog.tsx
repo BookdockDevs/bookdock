@@ -41,7 +41,7 @@ export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDi
       return
     }
     if (newPassword.length < AUTH_PASSWORD_MIN_LENGTH) {
-      setError(_('auth.passwordTooShort'))
+      setError(_('auth.passwordTooShort', { min: AUTH_PASSWORD_MIN_LENGTH }))
       return
     }
     if (newPassword.length > AUTH_PASSWORD_MAX_LENGTH) {

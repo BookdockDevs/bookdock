@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { AUTH_PASSWORD_MIN_LENGTH } from '@bookdock/shared'
 import type { AdminUserRes, UpdateUserReq } from '@bookdock/shared'
 
 import { cn } from '@/lib/utils'
@@ -232,8 +233,8 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (password.length < 6) {
-            setError(_('auth.passwordTooShort'))
+          if (password.length < AUTH_PASSWORD_MIN_LENGTH) {
+            setError(_('auth.passwordTooShort', { min: AUTH_PASSWORD_MIN_LENGTH }))
             return
           }
           onSubmit(password)

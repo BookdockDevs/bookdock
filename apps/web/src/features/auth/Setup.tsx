@@ -41,7 +41,7 @@ export default function Setup() {
       return
     }
     if (password.length < AUTH_PASSWORD_MIN_LENGTH) {
-      setError(_('auth.passwordTooShort'))
+      setError(_('auth.passwordTooShort', { min: AUTH_PASSWORD_MIN_LENGTH }))
       return
     }
     if (password.length > AUTH_PASSWORD_MAX_LENGTH) {

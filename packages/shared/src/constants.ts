@@ -12,10 +12,25 @@ export const PAGINATION = {
   MAX_PAGE_SIZE: 100,
 } as const
 
-export const AUTH_PASSWORD_MIN_LENGTH = 6
+export const AUTH_PASSWORD_MIN_LENGTH = 8
 export const AUTH_PASSWORD_MAX_LENGTH = 256
 export const AUTH_USERNAME_MAX_LENGTH = 100
 export const AUTH_REGISTER_USERNAME_MAX_LENGTH = 30
+
+// Zero-width, bidi-control and C0/C1 characters have no legitimate use in a
+// username — they only enable display spoofing (e.g. RTL "trojan source").
+// eslint-disable-next-line no-control-regex, no-misleading-character-class
+const INVISIBLE_USERNAME_CHARS = /[\u0000-\u001F\u007F-\u009F\u200B\u200C\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g
+
+/** Strip invisible characters and trim; applied at validation time so stored usernames are display-safe. */
+export function sanitizeUsername(username: string): string {
+  return username.replace(INVISIBLE_USERNAME_CHARS, '').trim()
+}
+
+/** Comparison key for username uniqueness: sanitized + NFKC + lowercase, so `Admin`/`admin`/`Ａdmin` collide. */
+export function normalizeUsername(username: string): string {
+  return sanitizeUsername(username).normalize('NFKC').toLowerCase()
+}
 
 export const SORT_FIELDS = ['title', 'author', 'createdAt', 'updatedAt', 'lastReadAt', 'size'] as const
 export type SortField = (typeof SORT_FIELDS)[number]

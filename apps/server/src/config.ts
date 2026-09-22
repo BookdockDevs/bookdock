@@ -7,7 +7,6 @@ export const config = Object.freeze({
   dataDir: env.DATA_DIR,
   dbPath: env.DB_PATH ?? `${env.DATA_DIR}/bookdock.db`,
   jwtSecret: env.JWT_SECRET ?? '',
-  defaultUsername: env.DEFAULT_USERNAME,
   uploadMaxBytes: env.UPLOAD_MAX_BYTES,
   fontsMaxBytes: env.FONT_UPLOAD_MAX_BYTES,
   avatarMaxBytes: env.AVATAR_UPLOAD_MAX_BYTES,

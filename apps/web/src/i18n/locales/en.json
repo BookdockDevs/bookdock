@@ -10,7 +10,7 @@
     "confirmPassword": "Confirm Password",
     "completeSetup": "Complete Setup",
     "passwordMismatch": "Passwords do not match",
-    "passwordTooShort": "Password must be at least 6 characters",
+    "passwordTooShort": "Password must be at least {{min}} characters",
     "setupFailed": "Setup failed, please try again",
     "registerTitle": "Create Account",
     "register": "Register",

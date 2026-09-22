@@ -121,6 +121,27 @@ describe('auth module', () => {
       await expect(register('alice', 'other6')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
     })
 
+    it('rejects case, NFKC, and invisible-char near-duplicates', async () => {
+      seedInstanceSettings(db, true, false)
+      await register('alice', 'secret6')
+      await expect(register('Alice', 'other6')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
+      await expect(register('Ａlice', 'other6')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
+      await expect(register('ali\u200Bce', 'other6')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
+    })
+
+    it('rejects a password below the minimum length at the route layer', async () => {
+      seedInstanceSettings(db, true, false)
+      const app = createAuthApp(null)
+      const res = await app.request('/api/v1/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'shortpass', password: 'secret6' }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error.code).toBe('VALIDATION_ERROR')
+    })
+
     it('maps a concurrent duplicate username write to USERNAME_TAKEN', async () => {
       seedInstanceSettings(db, true, false)
       const results = await Promise.allSettled([
@@ -422,6 +443,33 @@ describe('auth module', () => {
       expect(body.error.code).toBe('USERNAME_TAKEN')
     })
 
+    it('rejects a case-variant near-duplicate with 409', async () => {
+      await insertUser(db, { username: 'grace', password: 'secret6' })
+      const id = await insertUser(db, { username: 'heidi', password: 'secret6' })
+      const app = createAuthApp({ id, username: 'heidi', role: 'member' })
+      const res = await app.request('/api/v1/auth/username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'GRACE' }),
+      })
+      expect(res.status).toBe(409)
+      const body = await res.json()
+      expect(body.error.code).toBe('USERNAME_TAKEN')
+    })
+
+    it('stores the sanitized username, stripping invisible characters', async () => {
+      const id = await insertUser(db, { username: 'ivan', password: 'secret6' })
+      const app = createAuthApp({ id, username: 'ivan', role: 'member' })
+      const res = await app.request('/api/v1/auth/username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: ' i\u200Bvan\uFEFF ' }),
+      })
+      expect(res.status).toBe(200)
+      const row = db.select().from(schema.users).where(eq(schema.users.id, id)).get()
+      expect(row?.username).toBe('ivan')
+    })
+
     it('keeps the current username when unchanged', async () => {
       const id = await insertUser(db, { username: 'ivan', password: 'secret6' })
       const app = createAuthApp({ id, username: 'ivan', role: 'member' })
@@ -504,7 +552,7 @@ describe('auth module', () => {
       const res = await app.request('/api/v1/protected')
       expect(res.status).toBe(200)
       const body = await res.json()
-      expect(body.data.username).toBe('admin')
+      expect(body.data.username).toMatch(/^user_/)
       expect(body.data.role).toBe('guest')
     })
 
@@ -532,8 +580,19 @@ describe('auth module', () => {
       seedInstanceSettings(db, false, true)
       const user = await getDefaultUser()
       expect(user.role).toBe('guest')
-      const row = db.select().from(schema.users).where(eq(schema.users.username, 'admin')).get()
+      expect(user.username).toBe(user.id)
+      const row = db.select().from(schema.users).where(eq(schema.users.id, user.id)).get()
       expect(row?.role).toBe('guest')
+    })
+
+    it('reuses a legacy guest row as-is, without renaming or duplicating', async () => {
+      seedInstanceSettings(db, false, true)
+      const legacyId = await insertUser(db, { username: 'admin', role: 'guest' })
+      const user = await getDefaultUser()
+      expect(user.id).toBe(legacyId)
+      expect(user.username).toBe('admin')
+      const rows = db.select().from(schema.users).all()
+      expect(rows).toHaveLength(1)
     })
 
     it('accepts a valid token from the cookie', async () => {

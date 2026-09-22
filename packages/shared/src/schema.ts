@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERMISSIONS } from './access-tokens'
-import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION } from './constants'
+import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, sanitizeUsername } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
@@ -13,7 +13,7 @@ export const marginalFieldSchema = z.enum(['none', 'bookTitle', 'chapter', 'chap
 export const clickAreaModeSchema = z.enum(['standard', 'fullscreen', 'swap', 'none'])
 
 export const loginSchema = z.object({
-  username: z.string().trim().min(1).max(AUTH_USERNAME_MAX_LENGTH),
+  username: z.string().transform(sanitizeUsername).pipe(z.string().min(1).max(AUTH_USERNAME_MAX_LENGTH)),
   password: z.string().min(1).max(AUTH_PASSWORD_MAX_LENGTH),
 })
 
@@ -628,7 +628,7 @@ export const appendContentSchema = z.object({
 })
 
 export const setupSchema = z.object({
-  username: z.string().trim().min(1).max(AUTH_USERNAME_MAX_LENGTH),
+  username: z.string().transform(sanitizeUsername).pipe(z.string().min(1).max(AUTH_USERNAME_MAX_LENGTH)),
   password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH),
 })
 
@@ -637,7 +637,7 @@ export const setupRequiredSchema = z.object({
 })
 
 export const registerSchema = z.object({
-  username: z.string().trim().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH),
+  username: z.string().transform(sanitizeUsername).pipe(z.string().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH)),
   password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH),
 })
 
@@ -647,7 +647,7 @@ export const changePasswordSchema = z.object({
 })
 
 export const updateUsernameSchema = z.object({
-  username: z.string().trim().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH),
+  username: z.string().transform(sanitizeUsername).pipe(z.string().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH)),
 })
 
 export const updateInstanceSchema = z.object({
@@ -661,7 +661,7 @@ export const updateInstanceSchema = z.object({
 export const updateUserSchema = z.object({
   role: z.enum(['owner', 'member']).optional(),
   disabled: z.boolean().optional(),
-  newPassword: z.string().min(6).max(256).optional(),
+  newPassword: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH).optional(),
 })
 
 export const shelfCreateSchema = z.object({ name: z.string().trim().min(1).max(100) })
