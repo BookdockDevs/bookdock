@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react'
 import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
 import { resolveReadingTheme } from '@/lib/reading-theme'
-import { useUiStore } from '@/stores/ui.store'
+import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
 
 import { useAutoReadingSession } from '../hooks/useAutoReadingSession'
 import type { AutoReadingMode, ReadingMode } from '../types'
@@ -77,7 +77,7 @@ export default function AutoReadingPanel({ readingMode, onClose }: AutoReadingPa
   const setAutoReadingSpeed = useUiStore((s) => s.setAutoReadingSpeed)
   const autoReadingProgressBar = useUiStore((s) => s.autoReadingProgressBar)
   const setAutoReadingProgressBar = useUiStore((s) => s.setAutoReadingProgressBar)
-  const readingThemeId = useUiStore((s) => s.readingThemeId)
+  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
   const currentTheme = resolveReadingTheme(readingThemeId, customThemes)
   const sliderVars = {

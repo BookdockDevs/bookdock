@@ -5,7 +5,7 @@ import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
 import { resolveReadingTheme, PRESET_READING_THEMES, type CustomReadingTheme } from '@/lib/reading-theme'
-import { useUiStore } from '@/stores/ui.store'
+import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { useViewSettings } from '../view-settings-context'
@@ -314,7 +314,6 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
     setLetterSpacing,
     indent,
     setIndent,
-    readingThemeId,
     setReadingThemeId,
     customThemes,
     saveCustomTheme,
@@ -366,6 +365,8 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
     pageAnimation,
     setPageAnimation,
   } = useUiStore()
+
+  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
 
   const fontOptions = useMemo(
     () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds }, fontPreferences, fontOrder),

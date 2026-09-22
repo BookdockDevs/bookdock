@@ -1,7 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
-import { useUiStore, getEffectiveTheme } from '../stores/ui.store'
+import { selectEffectiveReadingThemeId, useUiStore } from '../stores/ui.store'
 import { resolveReadingTheme } from '../lib/reading-theme'
 import { queryClient } from '../lib/query-client'
 import '@/i18n/i18n'
@@ -10,14 +10,16 @@ import { router } from '../router'
 import { SettingsSync } from './SettingsSync'
 
 export default function AppProviders({ children }: { children?: ReactNode }) {
-  const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>(() => getEffectiveTheme())
+  const effectiveTheme = useUiStore((s) => s.systemTheme)
+  const setSystemTheme = useUiStore((s) => s.setSystemTheme)
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = (e: MediaQueryListEvent) => setEffectiveTheme(e.matches ? 'dark' : 'light')
+    setSystemTheme(media.matches ? 'dark' : 'light')
+    const handler = (e: MediaQueryListEvent) => setSystemTheme(e.matches ? 'dark' : 'light')
     media.addEventListener('change', handler)
     return () => media.removeEventListener('change', handler)
-  }, [])
+  }, [setSystemTheme])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', effectiveTheme === 'dark')
@@ -46,7 +48,7 @@ export default function AppProviders({ children }: { children?: ReactNode }) {
 }
 
 function ThemeStyleInjector() {
-  const readingThemeId = useUiStore((s) => s.readingThemeId)
+  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
   const fontSize = useUiStore((s) => s.fontSize)
   const lineHeight = useUiStore((s) => s.lineHeight)

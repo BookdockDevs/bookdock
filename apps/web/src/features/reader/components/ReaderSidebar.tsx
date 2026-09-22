@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 
+import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 
@@ -18,14 +19,14 @@ interface ReaderSidebarProps {
 }
 
 export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen, chromePinned, guestReadOnly }: ReaderSidebarProps) {
+  const _ = useTranslation()
   const isTouch = useIsTouch()
   const activeNavTab = useReaderState((s) => s.activeNavTab)
   const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
   const sidebarOpen = useReaderState((s) => s.sidebarOpen)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
-  const readingThemeId = useUiStore((s) => s.readingThemeId)
-  const lightReadingThemeId = useUiStore((s) => s.lightReadingThemeId)
-  const setReadingThemeId = useUiStore((s) => s.setReadingThemeId)
+  const readingThemeMode = useUiStore((s) => s.readingThemeMode)
+  const cycleReadingThemeMode = useUiStore((s) => s.cycleReadingThemeMode)
   const toolbarLocked = useUiStore((s) => s.toolbarLocked)
   const setToolbarLocked = useUiStore((s) => s.setToolbarLocked)
   const sidebarWidth = useUiStore((s) => s.sidebarWidth)
@@ -157,8 +158,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   }, [])
 
   function toggleTheme() {
-    setReadingThemeId(readingThemeId === 'night' ? lightReadingThemeId : 'night')
+    cycleReadingThemeMode()
   }
+
+  const themeModeTitle = _('reader.themeModeTitle', { mode: _(`theme.${readingThemeMode}`) })
 
   const collapsed = !toolbarVisible
   const panelLocked = isTouch ? false : locked
@@ -196,13 +199,16 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       <div className={isTouch ? 'hidden' : 'flex-1'} />
       <button
         onClick={toggleTheme}
-        title={readingThemeId === 'night' ? '切换为日间' : '切换为夜间'}
+        title={themeModeTitle}
+        aria-label={themeModeTitle}
         className={cn(
           'flex shrink-0 items-center justify-center rounded-xl text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current',
           isTouch ? 'h-12 min-w-12 [&_svg]:h-5 [&_svg]:w-5' : 'h-10 w-10',
         )}
       >
-        {readingThemeId === 'night' ? (
+        {readingThemeMode === 'system' ? (
+          <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="13" rx="1.5" /><path d="M8 21h8M12 17v4" /></svg>
+        ) : readingThemeMode === 'dark' ? (
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
         ) : (
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>

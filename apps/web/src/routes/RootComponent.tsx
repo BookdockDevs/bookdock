@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 
 import { AppShell } from '@/components/layout/AppShell'
@@ -16,8 +16,10 @@ export function RootComponent() {
   const _ = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
+  const queryClient = useQueryClient()
   const setAuth = useAuthStore((s) => s.setAuth)
   const clearAuth = useAuthStore((s) => s.clearAuth)
+  const recoveringUnauthorizedSession = useRef(false)
   const pathname = location.pathname
   const isLegadoLogin = pathname === '/login' && new URLSearchParams(window.location.search).get('legado') === '1'
   const isPublic = PUBLIC_PATHS.includes(pathname)
@@ -40,13 +42,16 @@ export function RootComponent() {
 
   useEffect(() => {
     const onUnauthorized = () => {
-      if (!PUBLIC_PATHS.includes(window.location.pathname)) {
-        navigate({ to: '/login' })
-      }
+      if (PUBLIC_PATHS.includes(window.location.pathname) || recoveringUnauthorizedSession.current) return
+      // Several requests can fail together; only the fresh session probe may finish recovery.
+      recoveringUnauthorizedSession.current = true
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== 'auth' })
+      void queryClient.resetQueries({ queryKey: ME_QUERY_KEY, exact: true })
+      navigate({ to: '/login', replace: true })
     }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-  }, [navigate])
+  }, [navigate, queryClient])
 
   useEffect(() => {
     if (!instance) return
@@ -67,6 +72,7 @@ export function RootComponent() {
     if (pathname === '/login') {
       if (meQuery.isPending || meQuery.isFetching) return
       const me = meQuery.isError ? undefined : meQuery.data?.data
+      if (me) recoveringUnauthorizedSession.current = false
       if (me && me.guest !== true) {
         setAuth(me)
         if (isLegadoLogin) {
@@ -81,6 +87,7 @@ export function RootComponent() {
     if (meQuery.isPending || meQuery.isFetching) return
     const me = meQuery.isError ? undefined : meQuery.data?.data
     if (me) {
+      recoveringUnauthorizedSession.current = false
       // Guest-injected sessions carry me.guest; the store keeps the user so
       // settings sync keeps working, and UI branches on the flag.
       setAuth(me)

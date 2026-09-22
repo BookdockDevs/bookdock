@@ -415,7 +415,7 @@ describe('SelectionToolbar', () => {
   })
 
   it('renders with light theme styling in paper/cream themes and adapts to dark theme in night mode', () => {
-    act(() => useUiStore.setState({ readingThemeId: 'paper' }))
+    act(() => useUiStore.setState({ readingThemeId: 'paper', readingThemeMode: 'light', lightReadingThemeId: 'paper' }))
     setSelection()
     const { rerender } = render(<SelectionToolbar bookId="b1" />)
     const copyButton = screen.getByTitle('annotation.copy')
@@ -428,7 +428,7 @@ describe('SelectionToolbar', () => {
     expect(caret.className).toContain('bg-white/95')
     expect(caret.className).toContain('border-stone-200/90')
 
-    act(() => useUiStore.setState({ readingThemeId: 'night' }))
+    act(() => useUiStore.setState({ readingThemeId: 'night', readingThemeMode: 'dark' }))
     rerender(<SelectionToolbar bookId="b1" />)
     expect(mainBar.className).toContain('bg-stone-900/95')
     expect(mainBar.className).toContain('text-stone-200')

@@ -25,8 +25,9 @@ function configWith(preset: ReadingPreset): ReadingConfig {
 }
 
 describe('reading profiles', () => {
-  it('covers every reading-menu setting (40 keys)', () => {
-    expect(READING_PROFILE_KEYS).toHaveLength(40)
+  it('covers every reading-menu setting (41 keys)', () => {
+    expect(READING_PROFILE_KEYS).toHaveLength(41)
+    expect(READING_PROFILE_KEYS).toContain('readingThemeMode')
     expect(READING_PROFILE_KEYS).toContain('fontSize')
     expect(READING_PROFILE_KEYS).toContain('scrollPageWidth')
     expect(READING_PROFILE_KEYS).toContain('clickAreaMode')

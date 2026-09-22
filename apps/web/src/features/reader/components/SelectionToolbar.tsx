@@ -8,7 +8,7 @@ import { notify } from '@/lib/notifications'
 import { resolveReadingTheme } from '@/lib/reading-theme'
 import { cn } from '@/lib/utils'
 import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
-import { useUiStore } from '@/stores/ui.store'
+import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
 import { useReaderState } from '../state/reader-state'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useAiQuickCommands, type AiQuickCommand } from '../hooks/useAiQuickCommands'
@@ -76,7 +76,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   const user = useAuthStore((s) => s.user)
   const authorName = getUserDisplayName(user, _('auth.guest'))
   const avatarKey = useAuthStore((s) => s.user?.avatarKey)
-  const readingThemeId = useUiStore((s) => s.readingThemeId)
+  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
   const isDarkTheme = useMemo(() => {
     const theme = resolveReadingTheme(readingThemeId, customThemes)

@@ -9,11 +9,10 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { useUiStore, getEffectiveTheme } from '@/stores/ui.store'
+import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 
 import { cn } from '@/lib/utils'
-import { isPresetThemeId } from '@/lib/reading-theme'
 import ErrorBoundary from '@/components/ui/ErrorBoundary'
 import Modal from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -170,25 +169,10 @@ export default function Reader() {
     [bookmarks, currentBookmarkId],
   )
 
-  const readingThemeId = useUiStore((s) => s.readingThemeId)
-  const lightReadingThemeId = useUiStore((s) => s.lightReadingThemeId)
-  const setReadingThemeId = useUiStore((s) => s.setReadingThemeId)
   const autoMarkSelection = useUiStore((s) => s.autoMarkSelection)
   useEffect(() => {
     setAutoMarkSelectionMode(autoMarkSelection)
   }, [autoMarkSelection])
-  const syncedTheme = useRef(false)
-  useEffect(() => {
-    if (syncedTheme.current) return
-    syncedTheme.current = true
-    // only auto-switch presets — never yank a custom theme to 'night'
-    if (!isPresetThemeId(readingThemeId)) return
-    if (getEffectiveTheme() === 'dark') {
-      if (readingThemeId !== 'night') setReadingThemeId('night')
-    } else {
-      if (readingThemeId === 'night') setReadingThemeId(lightReadingThemeId)
-    }
-  }, [readingThemeId, lightReadingThemeId, setReadingThemeId])
 
   const bookQuery = useQuery({
     queryKey: ['book', id],

@@ -7,7 +7,7 @@ import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
 import { resolveReadingTheme } from '@/lib/reading-theme'
-import { useUiStore } from '@/stores/ui.store'
+import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
 
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useTtsSession } from '../hooks/useTtsSession'
@@ -184,7 +184,7 @@ export default function TtsPanel() {
   const ttsAutoNext = useUiStore((s) => s.ttsAutoNext)
   const setTtsAutoNext = useUiStore((s) => s.setTtsAutoNext)
   const setTtsFollow = useUiStore((s) => s.setTtsFollow)
-  const readingThemeId = useUiStore((s) => s.readingThemeId)
+  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
   const active = state.status === 'playing' || state.status === 'starting' || state.status === 'paused'
   const selectedEngine = ttsEngine === 'service' && ttsServiceId && services.some((service) => service.id === ttsServiceId)

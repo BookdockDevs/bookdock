@@ -1,7 +1,13 @@
 import { create } from 'zustand'
 import type { FontPreferences, TtsEngine } from '@bookdock/shared'
 import type { AutoReadingMode, FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField, NavTab } from '../features/reader/types'
-import type { CustomReadingTheme } from '../lib/reading-theme'
+import {
+  isReadingThemeMode,
+  resolveEffectiveReadingThemeId,
+  type CustomReadingTheme,
+  type ReadingThemeMode,
+  type SystemTheme,
+} from '../lib/reading-theme'
 import {
   CONFIG_STORAGE_KEY,
   READING_PROFILE_KEYS,
@@ -32,6 +38,8 @@ export type ListInfoItem = 'progress' | 'size' | 'lastRead' | 'shelf' | 'tags' |
 export const LIST_INFO_ITEMS: ListInfoItem[] = ['progress', 'size', 'lastRead', 'shelf', 'tags', 'createdAt']
 
 const CUSTOM_THEMES_KEY = 'bd-read-custom-themes'
+const READING_THEME_MODE_KEY = 'bd-read-theme-mode'
+const READING_THEME_MODE_ORDER: readonly ReadingThemeMode[] = ['system', 'light', 'dark']
 
 function getInitialCustomThemes(): CustomReadingTheme[] {
   if (typeof window === 'undefined') return []
@@ -59,6 +67,8 @@ function persistCustomThemes(themes: CustomReadingTheme[]) {
 
 interface UiState {
   uiTheme: UiTheme
+  systemTheme: SystemTheme
+  readingThemeMode: ReadingThemeMode
   readingThemeId: string
   lightReadingThemeId: string
   customThemes: CustomReadingTheme[]
@@ -202,6 +212,9 @@ interface UiState {
   setNavTabRemembered: (v: NavTab) => void
 
   setUiTheme: (t: UiTheme) => void
+  setSystemTheme: (t: SystemTheme) => void
+  setReadingThemeMode: (mode: ReadingThemeMode) => void
+  cycleReadingThemeMode: () => void
   setReadingThemeId: (id: string) => void
   saveCustomTheme: (theme: CustomReadingTheme) => void
   deleteCustomTheme: (id: string) => void
@@ -239,6 +252,10 @@ export function getEffectiveTheme(): 'light' | 'dark' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
+export function selectEffectiveReadingThemeId(state: UiState): string {
+  return resolveEffectiveReadingThemeId(state.readingThemeMode, state.systemTheme, state.lightReadingThemeId)
+}
+
 function getInitialNumber(key: string, fallback: number, min?: number, max?: number): number {
   if (typeof window === 'undefined') return fallback
   const raw = localStorage.getItem(key)
@@ -260,6 +277,19 @@ function getInitialUiTheme(): UiTheme {
   if (typeof window === 'undefined') return 'system'
   const stored = localStorage.getItem('bd-ui-theme')
   if (stored === 'system' || stored === 'dark' || stored === 'light') return stored
+  return 'system'
+}
+
+function getInitialReadingThemeMode(): ReadingThemeMode {
+  if (typeof window === 'undefined') return 'system'
+  const stored = localStorage.getItem(READING_THEME_MODE_KEY)
+  if (isReadingThemeMode(stored)) return stored
+
+  // Preserve the old two-state appearance when upgrading a device that has
+  // already stored a concrete reading theme. New devices start in system mode.
+  const legacyTheme = localStorage.getItem('bd-read-theme')
+  if (legacyTheme === 'night') return 'dark'
+  if (legacyTheme) return 'light'
   return 'system'
 }
 
@@ -400,6 +430,8 @@ const initialVerticalPadding = initialReadingMode === 'page' ? initialPageVertic
 
 export const useUiStore = create<UiState>((set, get) => ({
   uiTheme: getInitialUiTheme(),
+  systemTheme: getEffectiveTheme(),
+  readingThemeMode: getInitialReadingThemeMode(),
   readingThemeId: getInitial<string>('bd-read-theme', 'paper'),
   lightReadingThemeId: getInitial<string>('bd-read-theme-light', 'paper'),
   customThemes: getInitialCustomThemes(),
@@ -610,13 +642,36 @@ export const useUiStore = create<UiState>((set, get) => ({
     setStorage('bd-ui-theme', uiTheme)
     set({ uiTheme })
   },
+  setSystemTheme: (systemTheme) => {
+    set({ systemTheme })
+  },
+  setReadingThemeMode: (readingThemeMode) => {
+    setStorage(READING_THEME_MODE_KEY, readingThemeMode)
+    if (readingThemeMode === 'light') {
+      const lightReadingThemeId = get().lightReadingThemeId
+      setStorage('bd-read-theme', lightReadingThemeId)
+      set({ readingThemeMode, readingThemeId: lightReadingThemeId })
+    } else if (readingThemeMode === 'dark') {
+      setStorage('bd-read-theme', 'night')
+      set({ readingThemeMode, readingThemeId: 'night' })
+    } else {
+      set({ readingThemeMode })
+    }
+  },
+  cycleReadingThemeMode: () => {
+    const currentIndex = READING_THEME_MODE_ORDER.indexOf(get().readingThemeMode)
+    const nextMode = READING_THEME_MODE_ORDER[(currentIndex + 1) % READING_THEME_MODE_ORDER.length]
+    get().setReadingThemeMode(nextMode)
+  },
   setReadingThemeId: (readingThemeId) => {
     setStorage('bd-read-theme', readingThemeId)
     if (readingThemeId !== 'night') {
       setStorage('bd-read-theme-light', readingThemeId)
-      set({ readingThemeId, lightReadingThemeId: readingThemeId })
+      setStorage(READING_THEME_MODE_KEY, 'light')
+      set({ readingThemeId, readingThemeMode: 'light', lightReadingThemeId: readingThemeId })
     } else {
-      set({ readingThemeId })
+      setStorage(READING_THEME_MODE_KEY, 'dark')
+      set({ readingThemeId, readingThemeMode: 'dark' })
     }
   },
   saveCustomTheme: (theme) => {
@@ -632,7 +687,14 @@ export const useUiStore = create<UiState>((set, get) => ({
     const next = get().customThemes.filter((t) => t.id !== id)
     persistCustomThemes(next)
     set({ customThemes: next })
-    if (get().readingThemeId === id) get().setReadingThemeId('paper')
+    const state = get()
+    const patch: Partial<UiState> = {}
+    if (state.readingThemeId === id) patch.readingThemeId = 'paper'
+    if (state.lightReadingThemeId === id) {
+      patch.lightReadingThemeId = 'paper'
+      setStorage('bd-read-theme-light', 'paper')
+    }
+    if (Object.keys(patch).length > 0) set(patch)
   },
   setCustomThemes: (themes) => {
     persistCustomThemes(themes)
@@ -869,7 +931,10 @@ function applyResolutionFlat() {
   const snapshot = resolveSnapshot(cfg, resolvedTargetId(cfg, state))
   const flat: Record<string, unknown> = {}
   for (const key of READING_PROFILE_KEYS) {
-    if (state[key] !== snapshot[key]) flat[key] = snapshot[key]
+    const value = key === 'readingThemeMode' && !isReadingThemeMode(snapshot[key])
+      ? state.readingThemeMode
+      : snapshot[key]
+    if (state[key] !== value) flat[key] = value
   }
   if (Object.keys(flat).length > 0) useUiStore.setState(flat)
 }

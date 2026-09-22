@@ -80,6 +80,14 @@ media, fixed-width legacy content, and unsupported pagination remain
 renderer-controlled in both modes. Font family remains independently
 controlled by `overrideBookFont`.
 
+Reader theme selection separates the user's mode intent from the effective
+palette. The mode is `system`, `light`, or `dark`; `system` uses the user's
+remembered non-night palette when the OS is light and the built-in night
+palette when the OS is dark. A system-theme change updates the effective
+palette in an open reader without persisting that derived palette as a manual
+choice. Custom palettes remain valid as the remembered non-night palette and
+are never replaced by the system listener.
+
 ---
 
 ## 3. `@bookdock/server` Module Structure

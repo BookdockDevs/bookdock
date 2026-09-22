@@ -650,6 +650,7 @@
     "themeDark": "深色",
     "themeSepia": "护眼",
     "themeCream": "米黄",
+    "themeModeTitle": "当前主题：{{mode}}",
     "readingMode": "阅读模式",
     "readingModeScroll": "滚动",
     "readingModePage": "翻页",

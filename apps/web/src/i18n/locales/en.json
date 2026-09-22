@@ -656,6 +656,7 @@
     "themeDark": "Dark",
     "themeSepia": "Sepia",
     "themeCream": "Cream",
+    "themeModeTitle": "Current theme: {{mode}}",
     "readingMode": "Reading Mode",
     "readingModeScroll": "Scroll",
     "readingModePage": "Pagination",

@@ -21,6 +21,23 @@ export interface CustomReadingTheme {
   colors: BaseThemeColors
 }
 
+export type ReadingThemeMode = 'system' | 'light' | 'dark'
+export type SystemTheme = 'light' | 'dark'
+
+export function isReadingThemeMode(value: unknown): value is ReadingThemeMode {
+  return value === 'system' || value === 'light' || value === 'dark'
+}
+
+export function resolveEffectiveReadingThemeId(
+  mode: ReadingThemeMode,
+  systemTheme: SystemTheme,
+  lightReadingThemeId: string,
+): string {
+  return mode === 'dark' || (mode === 'system' && systemTheme === 'dark')
+    ? 'night'
+    : lightReadingThemeId
+}
+
 // A theme is a base {bg, fg, primary} triple; every other UI color is derived.
 export function deriveReadingTheme(base: BaseThemeColors): ReadingTheme {
   return {

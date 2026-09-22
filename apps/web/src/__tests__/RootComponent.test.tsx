@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { RootComponent } from '../routes/RootComponent'
 import { apiGet } from '@/api/client'
 import { INSTANCE_QUERY_KEY, ME_QUERY_KEY } from '@/features/auth/hooks'
@@ -128,6 +128,41 @@ describe('RootComponent guard', () => {
     await waitFor(() => {
       expect(screen.getByTestId('outlet')).toBeInTheDocument()
     })
+  })
+
+  it('clears stale session and user query caches after concurrent unauthorized responses', async () => {
+    const me = { id: 'u1', username: 'admin', role: 'owner' }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(INSTANCE_QUERY_KEY, { data: INITIALIZED })
+    queryClient.setQueryData(ME_QUERY_KEY, { data: me })
+    const view = renderRoot(queryClient)
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/auth/me'))
+    await waitFor(() => expect(useAuthStore.getState().user).toEqual(me))
+    queryClient.setQueryData(['books', 'infinite'], { pages: [], pageParams: [] })
+    ;(apiGet as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('unauthorized'))
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('bd:unauthorized'))
+      window.dispatchEvent(new CustomEvent('bd:unauthorized'))
+    })
+
+    await waitFor(() => expect(queryClient.getQueryState(ME_QUERY_KEY)?.status).toBe('error'))
+    expect(apiGet).toHaveBeenCalledTimes(2)
+    expect(queryClient.getQueryData(ME_QUERY_KEY)).toBeUndefined()
+    expect(queryClient.getQueryData(['books', 'infinite'])).toBeUndefined()
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/login', replace: true })
+    expect(screen.queryByTestId('outlet')).not.toBeInTheDocument()
+
+    currentPath = '/login'
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <RootComponent />
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('outlet')).toBeInTheDocument())
+    expect(navigateMock).not.toHaveBeenCalledWith({ to: '/', replace: true })
   })
 
   it('redirects an already authenticated client away from the login page', async () => {

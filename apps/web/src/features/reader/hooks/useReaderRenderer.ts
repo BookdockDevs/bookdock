@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from 'react'
-import { useUiStore } from '@/stores/ui.store'
+import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { resolveReadingTheme } from '@/lib/reading-theme'
 import { FoliateReader } from '../renderers/FoliateReader'
@@ -78,7 +78,7 @@ export function useReaderRenderer({
   const rendererRef = useRef<BookReader | null>(null)
   const [renderer, setRenderer] = useState<BookReader | null>(null)
 
-  const readingThemeId = useUiStore((s) => s.readingThemeId)
+  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
   const fontFamily = useUiStore((s) => s.fontFamily)
   const fontPreferences = useUiStore((s) => s.fontPreferences)

@@ -14,6 +14,7 @@
 // behavior and theme references. Resource collections (custom themes, fonts)
 // are referenced by id, never snapshotted.
 export const READING_PROFILE_KEYS = [
+  'readingThemeMode',
   'readingThemeId',
   'lightReadingThemeId',
   'fontFamily',

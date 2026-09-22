@@ -24,7 +24,7 @@ function dockEl(container: HTMLElement) {
 }
 
 function renderSidebar(chromePinned = false) {
-  return render(<ReaderSidebar bookId="b1" onStatsTabOpen={vi.fn()} chromePinned={chromePinned} />)
+  return render(<ReaderSidebar bookId="b1" onStatsTabOpen={vi.fn()} chromePinned={chromePinned} guestReadOnly={false} />)
 }
 
 beforeEach(() => {
@@ -42,7 +42,13 @@ beforeEach(() => {
   })) as unknown as typeof window.matchMedia
   act(() => {
     useReaderState.setState({ sidebarOpen: false, activeNavTab: 'toc' })
-    useUiStore.setState({ toolbarLocked: false })
+    useUiStore.setState({
+      toolbarLocked: false,
+      readingThemeMode: 'system',
+      systemTheme: 'light',
+      readingThemeId: 'paper',
+      lightReadingThemeId: 'paper',
+    })
   })
 })
 
@@ -128,6 +134,18 @@ describe('ReaderSidebar on pointer devices', () => {
     expect(screen.getByTitle('锁定工具栏')).toBeInTheDocument()
     expect(screen.getByTestId('reader-sidebar-resize-handle')).toHaveClass('reader-resize-cursor')
     expect(screen.queryByTestId('sidebar-backdrop')).toBeNull()
+  })
+
+  it('cycles the reading theme through system, light, and dark modes', () => {
+    renderSidebar(false)
+
+    const themeButton = screen.getByTitle('reader.themeModeTitle')
+    fireEvent.click(themeButton)
+    expect(useUiStore.getState().readingThemeMode).toBe('light')
+    fireEvent.click(screen.getByTitle('reader.themeModeTitle'))
+    expect(useUiStore.getState().readingThemeMode).toBe('dark')
+    fireEvent.click(screen.getByTitle('reader.themeModeTitle'))
+    expect(useUiStore.getState().readingThemeMode).toBe('system')
   })
 
   it('keeps the resize handle outside the navigation panel scrollbar', () => {
