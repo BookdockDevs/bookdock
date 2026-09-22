@@ -673,7 +673,7 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
 
   return {
     meta: {
-      title: title || 'Untitled',
+      title: title || '',
       author,
       cover,
       bookmeta: Object.keys(bookmeta).length > 0 ? bookmeta : undefined,

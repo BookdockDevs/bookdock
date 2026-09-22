@@ -41,9 +41,10 @@ interface LibrarySidebarProps {
   tagOrderOverride?: string[] | null
   /** Tag row that was just released; its transform reset glides into place. */
   settleTagId?: string | null
+  /** Guest sessions may browse but cannot mutate library organization. */
+  readOnly?: boolean
 }
-
-const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavigation, shelfId, tagId, author, series, trash, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavigation, shelfId, tagId, author, series, trash, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const { data: shelvesData, isLoading: shelvesLoading } = useShelves()
@@ -57,7 +58,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
     () => applyTagOrder(tagsData?.data ?? [], tagOrderOverride),
     [tagsData, tagOrderOverride],
   )
-  const trashEnabled = useTrashEnabled()
+  const trashEnabled = useTrashEnabled({ enabled: !readOnly })
   const { data: trashData } = useBooks({
     page: 1,
     pageSize: 1,
@@ -152,7 +153,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
           : 'hidden md:flex',
       )}>
       <div className="mb-8 flex items-center gap-2.5 px-2">
-        <img src="/favicon.svg?v=5" alt="" aria-hidden="true" className="h-8 w-8 shrink-0 dark:invert" />
+        <BookdockLogo className="h-8 w-8 shrink-0 text-stone-900 dark:text-stone-50" />
         <span className="font-serif text-base font-semibold tracking-wide text-stone-900 dark:text-stone-50">{_('app.name')}</span>
       </div>
 
@@ -183,101 +184,115 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
           onClick={() => selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })}
           onPointerEnter={() => onPrefetchNavigation?.({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })}
         />
-        <div className="mb-1 mt-6 flex items-center justify-between px-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
-            {_('library.shelves')}
-          </span>
-          <button
-            type="button"
-            onClick={() => setShelfDialog({})}
-            className="-mr-[3px] flex h-5 w-5 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-            title={_('library.newShelf')}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
-        </div>
-        {isShelvesLoading ? (
-          <div className="space-y-1 py-1" aria-busy="true">
-            <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
-              <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
-              <div className="h-3 w-20 rounded bg-stone-200/60 dark:bg-stone-800/60" />
-            </div>
-            <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
-              <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
-              <div className="h-3 w-14 rounded bg-stone-200/60 dark:bg-stone-800/60" />
-            </div>
-          </div>
-        ) : (
+        {(!readOnly || isShelvesLoading || shelves.length > 0) && (
           <>
-            <UncategorizedDropTarget
-              count={uncategorizedCount}
-              active={isUncategorizedActive}
-              onClick={() => selectNavigation({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
-              onPointerEnter={() => onPrefetchNavigation?.({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
-            />
-            {shelves.length > 0 ? (
-              <SortableContext items={shelves.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-                {shelves.map((shelf) => (
-                  <ShelfItem
-                    key={shelf.id}
-                    shelf={shelf}
-                    active={!trash && shelfId === shelf.id}
-                    settling={settleShelfId === shelf.id}
-                    onClick={() => selectNavigation({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
-                    onPointerEnter={() => onPrefetchNavigation?.({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
-                    onRename={() => setShelfDialog({ shelfId: shelf.id, initialName: shelf.name })}
-                    onDelete={() => setDeleteShelfTarget(shelf)}
-                  />
-                ))}
-              </SortableContext>
-            ) : null}
+            <div className="mb-1 mt-6 flex items-center justify-between px-3">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
+                {_('library.shelves')}
+              </span>
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={() => setShelfDialog({})}
+                  className="-mr-[3px] flex h-5 w-5 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  title={_('library.newShelf')}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {isShelvesLoading ? (
+              <div className="space-y-1 py-1" aria-busy="true">
+                <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
+                  <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
+                  <div className="h-3 w-20 rounded bg-stone-200/60 dark:bg-stone-800/60" />
+                </div>
+                <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
+                  <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
+                  <div className="h-3 w-14 rounded bg-stone-200/60 dark:bg-stone-800/60" />
+                </div>
+              </div>
+            ) : (
+              <>
+                <UncategorizedDropTarget
+                  count={uncategorizedCount}
+                  active={isUncategorizedActive}
+                  onClick={() => selectNavigation({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
+                  onPointerEnter={() => onPrefetchNavigation?.({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })}
+                />
+                {shelves.length > 0 ? (
+                  <SortableContext items={shelves.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+                    {shelves.map((shelf) => (
+                      <ShelfItem
+                        key={shelf.id}
+                        shelf={shelf}
+                        active={!trash && shelfId === shelf.id}
+                        settling={settleShelfId === shelf.id}
+                        readOnly={readOnly}
+                        onClick={() => selectNavigation({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
+                        onPointerEnter={() => onPrefetchNavigation?.({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
+                        onRename={() => setShelfDialog({ shelfId: shelf.id, initialName: shelf.name })}
+                        onDelete={() => setDeleteShelfTarget(shelf)}
+                      />
+                    ))}
+                  </SortableContext>
+                ) : null}
+              </>
+            )}
           </>
         )}
 
-        <div className="mb-1 mt-6 flex items-center justify-between px-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
-            {_('library.tags')}
-          </span>
-          <button
-            type="button"
-            onClick={() => setTagDialog({})}
-            className="-mr-[3px] flex h-5 w-5 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-            title={_('library.newTag')}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
-        </div>
-        {tagsLoading ? (
-          <div className="space-y-1 py-1" aria-busy="true">
-            <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
-              <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
-              <div className="h-3 w-16 rounded bg-stone-200/60 dark:bg-stone-800/60" />
+        {(!readOnly || tagsLoading || tags.length > 0) && (
+          <>
+            <div className="mb-1 mt-6 flex items-center justify-between px-3">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
+                {_('library.tags')}
+              </span>
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={() => setTagDialog({})}
+                  className="-mr-[3px] flex h-5 w-5 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  title={_('library.newTag')}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </button>
+              )}
             </div>
-          </div>
-        ) : tags.length === 0 ? (
-          <div className="px-3 py-1 text-xs text-stone-400">{_('library.noTags')}</div>
-        ) : (
-          <SortableContext items={tags.map((tag) => tag.id)} strategy={verticalListSortingStrategy}>
-            {tags.map((tag) => (
-              <TagItem
-                key={tag.id}
-                tag={tag}
-                settling={settleTagId === tag.id}
-                active={!trash && tagId === tag.id}
-                onClick={() => selectNavigation({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
-                onPointerEnter={() => onPrefetchNavigation?.({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
-                onRename={() => setTagDialog({ tagId: tag.id, initialName: tag.name })}
-                onDelete={() => setDeleteTagTarget(tag)}
-              />
-            ))}
-          </SortableContext>
+            {tagsLoading ? (
+              <div className="space-y-1 py-1" aria-busy="true">
+                <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
+                  <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
+                  <div className="h-3 w-16 rounded bg-stone-200/60 dark:bg-stone-800/60" />
+                </div>
+              </div>
+            ) : tags.length === 0 ? (
+              <div className="px-3 py-1 text-xs text-stone-400">{_('library.noTags')}</div>
+            ) : (
+              <SortableContext items={tags.map((tag) => tag.id)} strategy={verticalListSortingStrategy}>
+                {tags.map((tag) => (
+                  <TagItem
+                    key={tag.id}
+                    tag={tag}
+                    settling={settleTagId === tag.id}
+                    readOnly={readOnly}
+                    active={!trash && tagId === tag.id}
+                    onClick={() => selectNavigation({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
+                    onPointerEnter={() => onPrefetchNavigation?.({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
+                    onRename={() => setTagDialog({ tagId: tag.id, initialName: tag.name })}
+                    onDelete={() => setDeleteTagTarget(tag)}
+                  />
+                ))}
+              </SortableContext>
+            )}
+          </>
         )}
 
-        {trashEnabled && (
+        {trashEnabled && !readOnly && (
           <div className="mt-6 border-t border-stone-200/60 pt-4 dark:border-stone-800/50">
             <NavItem
               label={_('library.trash')}
@@ -306,7 +321,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
     </div>
 
       <div className="mt-auto px-2 pt-6">
-        <NavItem
+        {!readOnly && <NavItem
           label={_('stats.title')}
           icon={
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -323,7 +338,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
           onPointerEnter={() => {
             void import('@/features/stats/Stats')
           }}
-        />
+        />}
         <NavItem
           label={_('settings.title')}
           icon={
@@ -507,6 +522,7 @@ function ShelfItem({
   onPointerEnter,
   onRename,
   onDelete,
+  readOnly = false,
 }: {
   shelf: ShelfListItem
   active: boolean
@@ -515,6 +531,7 @@ function ShelfItem({
   onPointerEnter?: () => void
   onRename: () => void
   onDelete: () => void
+  readOnly?: boolean
 }) {
   const _ = useTranslation()
   const menu = useContextMenu()
@@ -525,6 +542,7 @@ function ShelfItem({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: shelf.id,
     data: { type: 'shelf' },
+    disabled: readOnly,
     animateLayoutChanges: () => false,
   })
   const { active: dragActive, over } = useDndContext()
@@ -540,17 +558,17 @@ function ShelfItem({
       className={cn('group relative', isDragging && 'z-10 opacity-60')}
       {...attributes}
       {...listeners}
-      onContextMenu={(e) => {
+      onContextMenu={!readOnly ? (e) => {
         e.preventDefault()
         e.stopPropagation()
         menu.openFromEvent(e)
-      }}
+      } : undefined}
     >
       <NavItem
         label={shelf.name}
         count={shelf.bookCount}
-        countHidden={menu.open}
-        hasMenu
+        countHidden={!readOnly && menu.open}
+        hasMenu={!readOnly}
         active={active || dropHint}
         icon={
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -560,7 +578,7 @@ function ShelfItem({
         onClick={onClick}
         onPointerEnter={onPointerEnter}
       />
-      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+      {!readOnly && <div className="absolute right-2 top-1/2 -translate-y-1/2">
         <button
           ref={menu.btnRef}
           type="button"
@@ -580,8 +598,8 @@ function ShelfItem({
             <circle cx="19" cy="12" r="1.6" />
           </svg>
         </button>
-      </div>
-      <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, 148)} onClose={menu.close} width={152}>
+      </div>}
+      {!readOnly && <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, 148)} onClose={menu.close} width={152}>
         <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
           <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{shelf.name}</p>
           <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">
@@ -615,7 +633,7 @@ function ShelfItem({
           </svg>
           {_('library.delete')}
         </button>
-      </SmartMenu>
+      </SmartMenu>}
     </div>
   )
 }
@@ -630,6 +648,7 @@ function TagItem({
   onPointerEnter,
   onRename,
   onDelete,
+  readOnly = false,
 }: {
   tag: TagListItem
   settling: boolean
@@ -638,12 +657,14 @@ function TagItem({
   onPointerEnter?: () => void
   onRename: () => void
   onDelete: () => void
+  readOnly?: boolean
 }) {
   const _ = useTranslation()
   const menu = useContextMenu()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: tag.id,
     data: { type: 'tag' },
+    disabled: readOnly,
     animateLayoutChanges: () => false,
   })
 
@@ -657,17 +678,17 @@ function TagItem({
       className={cn('group relative', isDragging && 'z-10 opacity-60')}
       {...attributes}
       {...listeners}
-      onContextMenu={(e) => {
+      onContextMenu={!readOnly ? (e) => {
         e.preventDefault()
         e.stopPropagation()
         menu.openFromEvent(e)
-      }}
+      } : undefined}
     >
       <NavItem
         label={tag.name}
         count={tag.bookCount}
-        countHidden={menu.open}
-        hasMenu
+        countHidden={!readOnly && menu.open}
+        hasMenu={!readOnly}
         active={active}
         icon={
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -678,7 +699,7 @@ function TagItem({
         onClick={onClick}
         onPointerEnter={onPointerEnter}
       />
-      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+      {!readOnly && <div className="absolute right-2 top-1/2 -translate-y-1/2">
         <button
           ref={menu.btnRef}
           type="button"
@@ -698,8 +719,8 @@ function TagItem({
             <circle cx="19" cy="12" r="1.6" />
           </svg>
         </button>
-      </div>
-      <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, 148)} onClose={menu.close} width={152}>
+      </div>}
+      {!readOnly && <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, 148)} onClose={menu.close} width={152}>
         <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
           <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{tag.name}</p>
           <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">
@@ -733,7 +754,16 @@ function TagItem({
           </svg>
           {_('library.delete')}
         </button>
-      </SmartMenu>
+      </SmartMenu>}
     </div>
+  )
+}
+
+function BookdockLogo({ className = 'h-8 w-8' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z" />
+      <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
+    </svg>
   )
 }

@@ -794,7 +794,7 @@ describe('library settings (routes)', () => {
   })
 })
 
-describe('uploadBook title normalization', () => {
+describe('uploadBook metadata normalization', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
 
@@ -1230,11 +1230,12 @@ describe('GET /api/v1/books/:id/file range requests', () => {
   // 100 bytes, byte value = offset, so range slices are easy to assert
   const blob = Buffer.from(Array.from({ length: 100 }, (_, i) => i))
 
-  function createFileApp() {
+  function createFileApp(role: 'owner' | 'guest' = 'owner', guest = false) {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('/api/v1/books/*', async (c, next) => {
-      c.set('user', { id: userId, username: 'owner', role: 'owner', avatarKey: null })
+      c.set('user', { id: userId, username: role, role, avatarKey: null })
+      if (guest) c.set('guest', true)
       return next()
     })
     app.route('/api/v1/books', booksRoutes)
@@ -1330,6 +1331,13 @@ describe('GET /api/v1/books/:id/file range requests', () => {
     expect(res.headers.get('Content-Range')).toBe('bytes 0-9/100')
     expect(res.headers.get('Content-Length')).toBe('10')
     expect(Buffer.from(await res.arrayBuffer()).length).toBe(0)
+  })
+
+  it('rejects the full TXT content endpoint for guests', async () => {
+    const res = await createFileApp('guest', true).request(`/api/v1/books/${book.id}/content`)
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ error: { code: 'FORBIDDEN' } })
   })
 })
 

@@ -67,16 +67,14 @@ export function RootComponent() {
     if (pathname === '/login') {
       if (meQuery.isPending || meQuery.isFetching) return
       const me = meQuery.isError ? undefined : meQuery.data?.data
-      if (me) {
+      if (me && me.guest !== true) {
         setAuth(me)
         if (isLegadoLogin) {
           window.location.assign('/')
         } else {
           navigate({ to: '/', replace: true })
         }
-      } else {
-        clearAuth()
-      }
+      } else clearAuth()
       return
     }
     if (isPublic) return
@@ -111,7 +109,7 @@ export function RootComponent() {
     } else if (isPublic) {
       ready = pathname !== '/setup'
         && !(pathname === '/register' && !instance.allowRegistration)
-        && !(pathname === '/login' && (meQuery.isPending || meQuery.isFetching || meQuery.data))
+        && !(pathname === '/login' && (meQuery.isPending || meQuery.isFetching || (meQuery.data && meQuery.data.data.guest !== true)))
     } else if (meQuery.isPending || meQuery.isFetching) {
       ready = false
     } else if (meQuery.data && !meQuery.isError) {

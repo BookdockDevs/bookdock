@@ -23,7 +23,9 @@ function PlusIcon() {
 
 export default function FontsSettingsSection() {
   const _ = useTranslation()
-  const isOwner = useAuthStore((state) => state.user?.role === 'owner' && state.user.guest !== true)
+  const user = useAuthStore((state) => state.user)
+  const isGuest = user?.guest === true || user?.role === 'guest'
+  const isOwner = user?.role === 'owner' && user.guest !== true
   const fontsQuery = useFonts()
   const uploadedFonts = useMemo(() => fontsQuery.data?.data ?? [], [fontsQuery.data])
   const fontPreferences = useUiStore((state) => state.fontPreferences)
@@ -126,24 +128,28 @@ export default function FontsSettingsSection() {
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <EditModeButton active={sorting} disabled={deleteFont.isPending || uploadFont.isPending} onClick={toggleSorting} />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".ttf,.otf,.woff,.woff2"
-            multiple
-            className="hidden"
-            onChange={(event) => void onFilesSelected(event.target.files)}
-          />
-          <button
-            type="button"
-            disabled={sorting || uploadFont.isPending}
-            onClick={() => fileInputRef.current?.click()}
-            aria-label={_('settings.fontsUpload')}
-            title={_('settings.fontsUpload')}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-          >
-            <PlusIcon />
-          </button>
+          {!isGuest && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".ttf,.otf,.woff,.woff2"
+                multiple
+                className="hidden"
+                onChange={(event) => void onFilesSelected(event.target.files)}
+              />
+              <button
+                type="button"
+                disabled={sorting || uploadFont.isPending}
+                onClick={() => fileInputRef.current?.click()}
+                aria-label={_('settings.fontsUpload')}
+                title={_('settings.fontsUpload')}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+              >
+                <PlusIcon />
+              </button>
+            </>
+          )}
         </div>
       </div>
 

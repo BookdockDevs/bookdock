@@ -81,8 +81,9 @@ function StatusFlyout({ book, onClose }: { book: BookListItem; onClose: () => vo
   )
 }
 
-export function ContextMenuContent({ book, onShowDetails, onDelete, onClose }: {
+export function ContextMenuContent({ book, readOnly = false, onShowDetails, onDelete, onClose }: {
   book: BookListItem
+  readOnly?: boolean
   onShowDetails?: (book: BookListItem) => void
   onDelete?: (book: BookListItem) => void
   onClose: () => void
@@ -117,6 +118,8 @@ export function ContextMenuContent({ book, onShowDetails, onDelete, onClose }: {
         </button>
       )}
 
+      {!readOnly && (
+        <>
       <button
         type="button"
         onClick={(e) => {
@@ -176,6 +179,8 @@ export function ContextMenuContent({ book, onShowDetails, onDelete, onClose }: {
           </MenuIcon>
           {_('library.delete')}
         </button>
+      )}
+        </>
       )}
     </>
   )

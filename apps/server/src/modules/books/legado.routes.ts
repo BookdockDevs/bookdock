@@ -356,6 +356,9 @@ legadoRoutes.use('*', async (c, next) => {
   if (c.req.path.endsWith('/source.json') || c.req.path.endsWith('/login')) {
     return next()
   }
+  if (c.get('guest')) {
+    return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot use Legado integration' } }, 403)
+  }
   const user = c.get('user')
   if (c.get('legadoAccessKey') && c.req.path.endsWith('/access-key')) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Legado access keys require the Bookdock session' } }, 403)

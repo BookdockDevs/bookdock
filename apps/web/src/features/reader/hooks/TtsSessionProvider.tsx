@@ -8,8 +8,8 @@ import type { BookReader } from '../types'
 import { TtsController, type TtsPreferences } from '../lib/tts-controller'
 import { IDLE_TTS_STATE, TtsSessionContext } from './tts-session-context'
 
-export function TtsSessionProvider({ renderer, coordinator, children }: { renderer: BookReader | null; coordinator: ReaderPlaybackCoordinator; children: ReactNode }) {
-  const { data } = useTtsServices()
+export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = false, children }: { renderer: BookReader | null; coordinator: ReaderPlaybackCoordinator; guestReadOnly?: boolean; children: ReactNode }) {
+  const { data } = useTtsServices({ enabled: !guestReadOnly })
   const engine = useUiStore((state) => state.ttsEngine)
   const serviceId = useUiStore((state) => state.ttsServiceId)
   const voiceId = useUiStore((state) => state.ttsVoiceId)

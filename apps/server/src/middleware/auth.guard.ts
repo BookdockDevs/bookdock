@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import type { MiddlewareHandler } from 'hono'
+import type { Context, MiddlewareHandler } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { jwtVerify } from 'jose'
 
@@ -102,6 +102,15 @@ function extractToken(authHeader: string | undefined, cookieToken: string | unde
   return null
 }
 
+function rejectGuestMutation(c: Context): Response | null {
+  const user = c.get('user')
+  const isGuest = c.get('guest') === true || user?.role === 'guest'
+  if (isGuest && !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
+    return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions are read-only' } }, 403)
+  }
+  return null
+}
+
 /**
  * Owner-only gate. Single checkpoint so a future permission/group system
  * replaces the role comparison here instead of across routes.
@@ -142,6 +151,8 @@ export function authGuard(): MiddlewareHandler {
           c.set('legadoAccessKey', true)
           c.set('legadoToken', token)
           c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
+          const blocked = rejectGuestMutation(c)
+          if (blocked) return blocked
           return next()
         }
         if (token.startsWith('bd_src_')) {
@@ -178,6 +189,8 @@ export function authGuard(): MiddlewareHandler {
         c.set('legadoAccessKey', false)
         c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
         c.set('tokenPermissions', access.permissions)
+        const blocked = rejectGuestMutation(c)
+        if (blocked) return blocked
         return next()
       }
       let userId: string
@@ -197,6 +210,8 @@ export function authGuard(): MiddlewareHandler {
       c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
       c.set('legadoAccessKey', false)
       c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
+      const blocked = rejectGuestMutation(c)
+      if (blocked) return blocked
       return next()
     }
 
@@ -211,6 +226,8 @@ export function authGuard(): MiddlewareHandler {
         c.set('guest', true)
         c.set('legadoAccessKey', false)
         c.set('actorRole', 'guest')
+        const blocked = rejectGuestMutation(c)
+        if (blocked) return blocked
         return next()
       }
     }

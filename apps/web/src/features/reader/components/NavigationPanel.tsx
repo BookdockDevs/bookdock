@@ -181,11 +181,12 @@ interface NavigationPanelProps {
   open: boolean
   locked?: boolean
   statsDisabled?: boolean
+  guestReadOnly?: boolean
   onClose?: () => void
 }
 
 export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPanelProps>(function NavigationPanel(
-  { bookId, open, locked, statsDisabled, onClose },
+  { bookId, open, locked, statsDisabled, guestReadOnly = false, onClose },
   ref,
 ) {
   const _ = useTranslation()
@@ -197,10 +198,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setPendingTocHref = useReaderState((s) => s.setPendingTocHref)
   const { renderer } = useReaderApi()
-  const annotationsQuery = useAnnotations(bookId)
+  const annotationsQuery = useAnnotations(bookId, { enabled: !guestReadOnly })
   const { data: annotations } = annotationsQuery
   const chaptersQuery = useBookChapters(bookId)
-  const statsRecordsQuery = useBookReadingRecords(bookId)
+  const statsRecordsQuery = useBookReadingRecords(bookId, { enabled: !guestReadOnly })
   const statsTotalSeconds = statsRecordsQuery.data?.data?.totalSeconds ?? 0
 
   const listRef = useRef<HTMLDivElement>(null)
@@ -1310,13 +1311,13 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
               {renderSubtree(rootNodes.map((n) => n.index))}
             </ul>
           )}
-        {tab === 'notes' && annotationsQuery.isError ? (
+        {tab === 'notes' && !guestReadOnly && annotationsQuery.isError ? (
           <QueryErrorState
             className="py-8 text-[var(--bd-read-sub)]"
             isRetrying={annotationsQuery.isFetching}
             onRetry={annotationsQuery.refetch}
           />
-        ) : tab === 'notes' && (
+        ) : tab === 'notes' && !guestReadOnly && (
           <NotesPanel
             items={notesFilter.filtered}
             allItems={annotationItems}
@@ -1334,9 +1335,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             hideSelectionToolbar={true}
           />
         )}
-        {tab === 'stats' && !statsDisabled && <StatsPanel bookId={bookId} />}
-        <div className={tab === 'ai' ? 'h-full' : 'hidden'}>
-          <AiPanel bookId={bookId} />
+        {tab === 'stats' && !statsDisabled && !guestReadOnly && <StatsPanel bookId={bookId} />}
+        <div className={tab === 'ai' && !guestReadOnly ? 'h-full' : 'hidden'}>
+          {!guestReadOnly && <AiPanel bookId={bookId} />}
         </div>
       </div>
       )}

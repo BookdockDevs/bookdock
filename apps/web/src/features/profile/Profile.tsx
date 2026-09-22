@@ -17,7 +17,7 @@ export default function Profile() {
   usePageTitle(_('profile.title'))
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
-  const isGuest = user?.role === 'guest' || user?.guest === true
+  const isGuest = !user || user.role === 'guest' || user.guest === true
   const [settingsOpen, setSettingsOpen] = useState(false)
   const { showStats, showShowcase } = useProfilePrefs()
   const onBack = useBackNavigation('/')

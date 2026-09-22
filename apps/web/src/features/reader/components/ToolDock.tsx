@@ -37,6 +37,7 @@ interface ToolDockProps {
   sidebarOpen: boolean
   locked: boolean
   statsDisabled?: boolean
+  guestReadOnly?: boolean
   /** Hide the lock action on touch devices, where the dock is transient. */
   hideLock?: boolean
   /** Render the touch toolbar as a labeled horizontal action row. */
@@ -45,7 +46,7 @@ interface ToolDockProps {
   onToggleLock: () => void
 }
 
-export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, hideLock, mobile = false, onNavTab, onToggleLock }: ToolDockProps) {
+export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, guestReadOnly, hideLock, mobile = false, onNavTab, onToggleLock }: ToolDockProps) {
   const icons = [
     {
       id: 'toc' as const,
@@ -56,7 +57,7 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, hid
         </svg>
       ),
     },
-    {
+    ...(!guestReadOnly ? [{
       id: 'notes' as const,
       title: '笔记',
       icon: (
@@ -66,7 +67,7 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, hid
           <path d="M17.5 15H9" />
         </svg>
       ),
-    },
+    }] : []),
     ...(statsDisabled ? [] : [{
       id: 'stats' as const,
       title: '数据',
@@ -79,11 +80,11 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, statsDisabled, hid
         </svg>
       ),
     }] as const),
-    {
+    ...(!guestReadOnly ? [{
       id: 'ai' as const,
       title: 'AI 助手',
       icon: <AiSparkleIcon size={18} strokeWidth={1.6} />,
-    },
+    }] : []),
   ]
 
   return (

@@ -23,6 +23,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatBytes } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
+import { useAuthStore } from '@/stores/auth.store'
 
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import SmartMenu from '@/components/ui/SmartMenu'
@@ -57,15 +58,17 @@ export default function Library() {
   const queryClient = useQueryClient()
 
   const viewPref = useUiStore((s) => s.view)
+  const user = useAuthStore((s) => s.user)
+  const isGuest = !user || user.guest === true || user.role === 'guest'
   const sortByPref = useUiStore((s) => s.sortBy)
   const sortOrderPref = useUiStore((s) => s.sortOrder)
   // URL params win over the persisted preferences (bd-library-view/bd-sort-by/
   // bd-sort-order), so a linked/shared URL still controls its own view
   const view = search.view ?? viewPref
   const query = search.q ?? ''
-  const trash = search.trash ?? false
-  const trashEnabled = useTrashEnabled()
-  const trashCapBytes = useTrashCapBytes()
+  const trash = !isGuest && (search.trash ?? false)
+  const trashEnabled = useTrashEnabled({ enabled: !isGuest })
+  const trashCapBytes = useTrashCapBytes({ enabled: !isGuest })
   // The trash defaults to newest-deleted first; the library sort preference
   // is a separate concern and must not be overwritten by trash-only sorting
   const sortBy = search.sortBy ?? (trash ? 'deletedAt' : sortByPref)
@@ -212,6 +215,7 @@ export default function Library() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   function handleDragStart(event: DragStartEvent) {
+    if (isGuest) return
     const payload = event.active.data.current as unknown
     if (isBookDrag(payload)) {
       setDragBookIds(payload.bookIds)
@@ -232,6 +236,7 @@ export default function Library() {
   }
 
   function handleDragEnd(event: DragEndEvent) {
+    if (isGuest) return
     endDrag()
     const { active, over } = event
     if (!over || active.id === over.id) return
@@ -502,6 +507,7 @@ export default function Library() {
           author={author}
           series={series}
           trash={trash}
+          readOnly={isGuest}
           mobileOpen={mobileNavOpen}
           onMobileClose={() => setMobileNavOpen(false)}
           navRef={sidebarNavRef}
@@ -521,13 +527,13 @@ export default function Library() {
           format={format}
           readStatus={readStatus}
           trash={trash}
-          onUploadClick={() => setUploadOpen(true)}
+          onUploadClick={isGuest ? undefined : () => setUploadOpen(true)}
           trashCount={total}
           bookSize={trash ? totalSize : undefined}
           trashCapBytes={trash ? trashCapBytes : undefined}
-          onEmptyTrash={() => setEmptyTrashOpen(true)}
+          onEmptyTrash={isGuest ? undefined : () => setEmptyTrashOpen(true)}
           selectionActive={selectionActive}
-          onToggleSelectMode={toggleSelectionMode}
+          onToggleSelectMode={isGuest ? undefined : toggleSelectionMode}
           onOpenNavigation={() => setMobileNavOpen(true)}
           title={viewTitle}
           bookCount={total}
@@ -542,8 +548,8 @@ export default function Library() {
           />
         )}
 
-        {recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <ReadingStatsCard />}
-        {recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <RecentlyRead style={recentlyReadStyle} />}
+        {!isGuest && recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <ReadingStatsCard />}
+        {!isGuest && recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <RecentlyRead style={recentlyReadStyle} />}
 
         <div
           ref={containerRef}
@@ -592,7 +598,7 @@ export default function Library() {
                 }
                 if (selectionActive) {
                   return (
-                    <DraggableBookCard book={book} selection={selection} selectionActive>
+                    <DraggableBookCard book={book} selection={selection} selectionActive disabled={isGuest}>
                       <div
                         className={`rounded-xl ${selection.has(book.id) ? 'ring-2 ring-stone-900 ring-offset-2 ring-offset-stone-50 dark:ring-stone-100 dark:ring-offset-stone-950' : ''}`}
                       >
@@ -602,7 +608,8 @@ export default function Library() {
                           selectionActive={true}
                           coverText={coverText}
                           onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
-                          onDelete={setDeleteTarget}
+                          readOnly={isGuest}
+                          onDelete={isGuest ? undefined : setDeleteTarget}
                           onShowDetails={setDetailTarget}
                         />
                       </div>
@@ -610,7 +617,7 @@ export default function Library() {
                   )
                 }
                 return (
-                  <DraggableBookCard book={book} selection={selection} selectionActive={false}>
+                  <DraggableBookCard book={book} selection={selection} selectionActive={false} disabled={isGuest}>
                     <Link
                       to="/books/$id"
                       params={{ id: book.id }}
@@ -633,7 +640,8 @@ export default function Library() {
                         book={book}
                         coverText={coverText}
                         onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
-                        onDelete={setDeleteTarget}
+                        readOnly={isGuest}
+                        onDelete={isGuest ? undefined : setDeleteTarget}
                         onShowDetails={setDetailTarget}
                       />
                     </Link>
@@ -673,7 +681,8 @@ export default function Library() {
                     selectionActive={selectionActive}
                     dragJustEndedRef={dragJustEndedRef}
                     onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
-                    onDelete={setDeleteTarget}
+                    readOnly={isGuest}
+                    onDelete={isGuest ? undefined : setDeleteTarget}
                     onShowDetails={setDetailTarget}
                   />
                 )
@@ -689,19 +698,22 @@ export default function Library() {
         )}
       </main>
 
-      {selection.size > 0 && (
+      {!isGuest && selection.size > 0 && (
         <SelectionBar selectedIds={Array.from(selection)} onClear={clearSelection} onComplete={completeBatchAction} trash={trash} />
       )}
 
-      <UploadSheet
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
-        shelfId={shelfId && shelfId !== 'none' ? shelfId : undefined}
-        tagId={tagId ?? undefined}
-      />
+      {!isGuest && (
+        <UploadSheet
+          open={uploadOpen}
+          onClose={() => setUploadOpen(false)}
+          shelfId={shelfId && shelfId !== 'none' ? shelfId : undefined}
+          tagId={tagId ?? undefined}
+        />
+      )}
 
       <BookDetailDialog
         book={detailTarget}
+        readOnly={isGuest}
         onClose={() => setDetailTarget(null)}
         onDelete={(b) => {
           setDetailTarget(null)
@@ -824,11 +836,13 @@ function DraggableBookCard({
   book,
   selection,
   selectionActive,
+  disabled = false,
   children,
 }: {
   book: BookListItem
   selection: Set<string>
   selectionActive: boolean
+  disabled?: boolean
   children: ReactNode
 }) {
   // Dragging a selected card in selection mode carries the whole selection.
@@ -836,6 +850,7 @@ function DraggableBookCard({
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `book:${book.id}`,
     data: { bookIds } satisfies BookDragPayload,
+    disabled,
   })
   return (
     <div
@@ -991,13 +1006,14 @@ function TrashListRow({ book, selected, selectionActive, onToggleSelect, onResto
   )
 }
 
-export function ListItemWrapper({ book, selection, selectionActive, dragJustEndedRef, onToggleSelect, onDelete, onShowDetails }: {
+export function ListItemWrapper({ book, selection, selectionActive, dragJustEndedRef, onToggleSelect, readOnly, onDelete, onShowDetails }: {
   book: BookListItem
   selection: Set<string>
   selectionActive: boolean
   dragJustEndedRef: React.MutableRefObject<boolean>
+  readOnly: boolean
   onToggleSelect: (id: string, shiftKey?: boolean) => void
-  onDelete: (b: BookListItem) => void
+  onDelete?: (b: BookListItem) => void
   onShowDetails: (b: BookListItem) => void
 }) {
   const _ = useTranslation()
@@ -1010,6 +1026,7 @@ export function ListItemWrapper({ book, selection, selectionActive, dragJustEnde
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `book:${book.id}`,
     data: { bookIds } satisfies BookDragPayload,
+    disabled: readOnly,
   })
 
   function handleContextMenu(e: React.MouseEvent) {
@@ -1106,7 +1123,7 @@ export function ListItemWrapper({ book, selection, selectionActive, dragJustEnde
           width={184}
           onClose={menu.close}
         >
-          <ContextMenuContent book={book} onShowDetails={onShowDetails} onDelete={onDelete} onClose={menu.close} />
+          <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onDelete={onDelete} onClose={menu.close} />
         </SmartMenu>
       )}
     </div>

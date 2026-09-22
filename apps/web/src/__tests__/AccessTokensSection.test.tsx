@@ -51,8 +51,8 @@ describe('AccessTokensSection', () => {
   it('shows an empty state when the user has no tokens', async () => {
     renderSection()
 
-    expect(await screen.findByText('还没有访问令牌')).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /创建令牌/ })[0]).toBeInTheDocument()
+    expect(await screen.findByText('暂无访问令牌')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /创建令牌/ })).toBeInTheDocument()
   })
 
   it('lists name, masked secret, permission labels and expiry', async () => {

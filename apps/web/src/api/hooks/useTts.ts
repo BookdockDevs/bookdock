@@ -7,17 +7,19 @@ import { apiDelete, apiGet, apiPost, apiPut } from '../client'
 export const TTS_PROVIDERS_KEY = ['tts', 'providers'] as const
 export const TTS_SERVICES_KEY = ['tts', 'services'] as const
 
-export function useTtsProviders() {
+export function useTtsProviders(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: TTS_PROVIDERS_KEY,
     queryFn: () => apiGet<{ data: TtsProviderRes[] }>('/tts/providers'),
+    enabled: options.enabled !== false,
   })
 }
 
-export function useTtsServices() {
+export function useTtsServices(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: TTS_SERVICES_KEY,
     queryFn: () => apiGet<{ data: TtsServiceRes[] }>('/tts/services'),
+    enabled: options.enabled !== false,
   })
 }
 

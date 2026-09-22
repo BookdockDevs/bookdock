@@ -1,9 +1,10 @@
-import { useState } from 'react'
-import { Link } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate } from '@tanstack/react-router'
 
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
+import { useAuthStore } from '@/stores/auth.store'
 
 import BookTimeList from './components/BookTimeList'
 import HourDistribution from './components/HourDistribution'
@@ -16,12 +17,21 @@ import type { StatsPeriod } from './date-utils'
 
 export default function Stats() {
   const _ = useTranslation()
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const isGuest = user?.guest === true || user?.role === 'guest'
   usePageTitle(_('stats.title'))
   const onBack = useBackNavigation('/')
   const [period, setPeriod] = useState<StatsPeriod>('week')
   const [anchor, setAnchor] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const range = periodRange(period, anchor)
+
+  useEffect(() => {
+    if (isGuest) void navigate({ to: '/' })
+  }, [isGuest, navigate])
+
+  if (isGuest) return null
 
   const changePeriod = (p: StatsPeriod) => {
     setPeriod(p)

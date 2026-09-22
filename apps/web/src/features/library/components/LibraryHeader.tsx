@@ -16,7 +16,7 @@ interface LibraryHeaderProps {
   sortOrder: string
   format: string | null
   readStatus: string | null
-  onUploadClick: () => void
+  onUploadClick?: () => void
   trash?: boolean
   trashCount?: number
   bookSize?: number
@@ -163,9 +163,9 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
                 </svg>
               </button>
             )
-          ) : (
+          ) : onUploadClick ? (
             <Button onClick={onUploadClick}>{_('library.upload')}</Button>
-          )}
+          ) : null}
         </div>
       </div>
     </header>

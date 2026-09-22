@@ -75,6 +75,13 @@ async function buildEpubFixture(
 }
 
 describe('epub metadata extraction', () => {
+  it('leaves a missing title empty for the upload filename fallback', async () => {
+    const parsed = await parseEpubBuffer(await buildEpub(''))
+
+    expect(parsed.meta.title).toBe('')
+    expect(parsed.meta.author).toBeUndefined()
+  })
+
   it('matches EPUB filenames and MIME parameters case-insensitively', () => {
     const parser = new EpubParser()
 

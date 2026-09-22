@@ -33,11 +33,12 @@ vi.mock('../auth/auth.service', () => ({
   effectiveUploadMaxBytes: vi.fn(() => 104857600),
 }))
 
-function createApp() {
+function createApp(user: { id: string; username: string; role: string } = { id: 'u1', username: 'tester', role: 'owner' }, guest = false) {
   const app = new Hono()
   app.onError(errorHandler)
   app.use('/api/v1/settings/*', async (c, next) => {
-    c.set('user', { id: 'u1', username: 'tester', role: 'owner', avatarKey: null })
+    c.set('user', { ...user, avatarKey: null })
+    if (guest) c.set('guest', true)
     return next()
   })
   app.route('/api/v1/settings', settingsRoutes)
@@ -97,5 +98,17 @@ describe('Settings routes - Integrations', () => {
 
     expect(res.status).toBe(200)
     expect(revokeLegadoAccessKey).toHaveBeenCalledWith('u1')
+  })
+
+  it('rejects persistent settings writes from guests', async () => {
+    const app = createApp({ id: 'guest-1', username: 'admin', role: 'guest' }, true)
+    const res = await app.request('http://test/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uiTheme: 'dark' }),
+    })
+
+    expect(res.status).toBe(403)
+    expect(settingsService.updateSettings).not.toHaveBeenCalled()
   })
 })

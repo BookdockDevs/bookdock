@@ -128,4 +128,16 @@ describe('SettingsSync persistence', () => {
     expect(useUiStore.getState().readingConfig).toContain('护眼')
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
   })
+
+  it('keeps guest preferences local instead of syncing the shared guest account', async () => {
+    useAuthStore.getState().setAuth({ id: 'guest-1', username: 'admin', role: 'guest', guest: true })
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    useUiStore.getState().setFontPreference('serif', { enabled: false })
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalledWith('/api/v1/settings', expect.anything())
+    expect(useUiStore.getState().fontPreferences).toEqual({ serif: { enabled: false } })
+  })
 })

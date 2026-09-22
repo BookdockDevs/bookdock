@@ -11,6 +11,9 @@ const annotationRoutes = new Hono()
 
 annotationRoutes.get('/book/:bookId', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') === true || user.role === 'guest') {
+    return c.json({ data: [] })
+  }
   const bookId = c.req.param('bookId')
   const items = await listAnnotations(user.id, bookId)
   return c.json({ data: items })

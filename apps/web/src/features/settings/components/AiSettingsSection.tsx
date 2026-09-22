@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { useNavigate } from '@tanstack/react-router'
 
 import { getAiModelCapabilityFlags, isAiEmbeddingModel } from '@bookdock/shared'
 import type { AiModelRes, AiProfileRes, AiPromptTemplate, AiPromptTemplateInput, AiProvider, AiProviderRes } from '@bookdock/shared'
@@ -119,8 +120,9 @@ function defaultPromptTemplates(_: (key: string) => string): AiPromptTemplate[] 
 
 export default function AiSettingsSection({ id }: { id?: string }) {
   const _ = useTranslation()
+  const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
-  const isGuest = user?.role === 'guest' || user?.guest === true
+  const isGuest = !user || user.role === 'guest' || user.guest === true
   const { data, isError, isFetching, isLoading, refetch } = useAiConfig({ enabled: !isGuest })
   const { data: providersData } = useAiProviders({ enabled: !isGuest })
   const create = useCreateAiProfile()
@@ -332,7 +334,16 @@ export default function AiSettingsSection({ id }: { id?: string }) {
       </div>
 
       {isGuest ? (
-        <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.aiGuestHint')}</p>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-100/80 px-3.5 py-2.5 text-xs text-stone-500 dark:bg-stone-800/80 dark:text-stone-400">
+          <span className="min-w-0 flex-1">{_('settings.aiGuestHint')}</span>
+          <button
+            type="button"
+            onClick={() => void navigate({ to: '/login' })}
+            className="shrink-0 font-medium text-stone-700 underline-offset-2 hover:underline dark:text-stone-300 dark:hover:text-stone-100"
+          >
+            {_('auth.signIn')} →
+          </button>
+        </div>
       ) : isError ? (
         <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
       ) : isLoading || !config ? (

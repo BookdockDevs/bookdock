@@ -91,6 +91,9 @@ booksRoutes.get('/', async (c) => {
   const format = formatParsed.success ? formatParsed.data : undefined
   const readStatus = query['readStatus']
   const trash = query['trash'] === '1'
+  if (trash && (c.get('guest') === true || user.role === 'guest')) {
+    throw new AppError('FORBIDDEN', 'Guest sessions cannot access trash')
+  }
   // Opening the trash lazily runs both cleanup rules for the current user
   if (trash) {
     if (!isTrashEnabled(user.id)) throw new AppError('TRASH_DISABLED', 'Trash is disabled')
@@ -154,6 +157,9 @@ function parseRangeHeader(header: string | undefined, size: number): { start: nu
 booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
+  if ((c.get('guest') || user.role === 'guest') && c.req.query('reader') !== '1') {
+    throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
+  }
   const book = await getActiveBook(user.id, id)
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) {
@@ -199,6 +205,9 @@ booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
 
 booksRoutes.get('/:id/content', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') {
+    throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
+  }
   const id = c.req.param('id')
   await getActiveBook(user.id, id)
   const content = await getBookContent(user.id, id)
@@ -207,6 +216,9 @@ booksRoutes.get('/:id/content', async (c) => {
 
 booksRoutes.get('/:id/epub', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') {
+    throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
+  }
   const id = c.req.param('id')
   const book = await getActiveBook(user.id, id)
   const storage = getStorage()
@@ -228,6 +240,9 @@ booksRoutes.get('/:id/epub', async (c) => {
 // (the content is identical, the 校订版 label would be dishonest).
 booksRoutes.get('/:id/export.txt', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') {
+    throw new AppError('FORBIDDEN', 'Guest sessions cannot export books')
+  }
   const id = c.req.param('id')
   const plain = c.req.query('plain') === '1'
   const { text, title, edited } = await exportTxtBook(user.id, id, plain)
@@ -246,6 +261,9 @@ booksRoutes.get('/:id/export.txt', async (c) => {
 // rules the filename is the 原文 form (same rule as export.txt above).
 booksRoutes.get('/:id/export.epub', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') {
+    throw new AppError('FORBIDDEN', 'Guest sessions cannot export books')
+  }
   const id = c.req.param('id')
   const plain = c.req.query('plain') === '1'
   const { buffer, title, edited } = await exportEpubBook(user.id, id, plain)

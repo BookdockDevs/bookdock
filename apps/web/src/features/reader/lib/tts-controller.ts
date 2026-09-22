@@ -143,7 +143,7 @@ export class TtsController {
     this.emit()
   }
 
-  refreshVoices() {
+  refreshVoices = () => {
     const voices = this.client.listVoices()
     if (voices.length !== this.state.voices.length || voices.some((voice, index) => voice.id !== this.state.voices[index]?.id)) {
       this.state = { ...this.state, voices }

@@ -18,6 +18,7 @@ interface BookCardProps {
   selected?: boolean
   selectionActive?: boolean
   coverText?: boolean
+  readOnly?: boolean
   onToggleSelect?: (id: string, shiftKey?: boolean) => void
   onDelete?: (book: BookListItem) => void
   onShowDetails?: (book: BookListItem) => void
@@ -28,7 +29,7 @@ interface BookCardProps {
 const MENU_W = 184
 const MENU_H = 250
 
-const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, coverText = true, onToggleSelect, onDelete, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
+const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, coverText = true, readOnly = false, onToggleSelect, onDelete, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
   const trashCard = Boolean(onRestore && onPermanentDelete)
@@ -173,7 +174,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           width={MENU_W}
           onClose={menu.close}
         >
-          <ContextMenuContent book={book} onShowDetails={onShowDetails} onDelete={onDelete} onClose={menu.close} />
+          <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onDelete={onDelete} onClose={menu.close} />
         </SmartMenu>
       )}
     </article>

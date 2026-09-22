@@ -25,6 +25,14 @@ import {
 
 const readingRecordsRoutes = new Hono()
 
+readingRecordsRoutes.use('*', async (c, next) => {
+  const user = c.get('user')
+  if (c.get('guest') === true || user.role === 'guest') {
+    return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot access reading records' } }, 403)
+  }
+  return next()
+})
+
 function serverToday(): string {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`

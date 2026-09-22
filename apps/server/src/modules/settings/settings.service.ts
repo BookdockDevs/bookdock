@@ -66,7 +66,7 @@ export function getLibrarySettings(userId: string): LibrarySettings {
   return getValue<LibrarySettings>(userId, LIBRARY_KEY) ?? {}
 }
 
-/** File-name title normalization is on unless the stored settings disable it. */
+/** File-name metadata normalization is on unless the stored settings disable it. */
 export function isTitleNormalizeEnabled(userId: string): boolean {
   return getLibrarySettings(userId).normalizeTitle !== false
 }

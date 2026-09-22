@@ -268,19 +268,25 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
                   </button>
                 ))}
               </div>
-              <div className="flex items-center justify-between px-2.5 py-1.5">
-                <span className="text-[13px] text-stone-700 dark:text-stone-300">{_('library.columns')}</span>
-                <select
-                  value={gridColumns}
-                  onChange={(e) => setGridColumns(e.target.value)}
-                  className="h-7 rounded-lg border border-stone-200 bg-white px-2 text-xs text-stone-700 outline-none transition-colors hover:border-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:border-stone-600"
-                >
-                  {COLUMN_OPTIONS.map((val) => (
-                    <option key={val} value={val}>
-                      {val === 'auto' ? _('library.columnsAuto') : val}
-                    </option>
-                  ))}
-                </select>
+              <div className="px-2.5 pb-1 pt-1.5 text-[11px] text-stone-400 dark:text-stone-500">{_('library.columns')}</div>
+              <div className="mx-1 mb-0.5 flex gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
+                {COLUMN_OPTIONS.map((val) => (
+                  <button
+                    key={val}
+                    type="button"
+                    aria-pressed={gridColumns === val}
+                    onClick={() => setGridColumns(val)}
+                    className={cn(
+                      'h-7 rounded-md text-xs transition-colors',
+                      val === 'auto' ? 'px-2 shrink-0 font-medium' : 'flex-1 font-mono',
+                      gridColumns === val
+                        ? 'bg-white font-medium text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                        : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-200',
+                    )}
+                  >
+                    {val === 'auto' ? _('library.columnsAuto') : val}
+                  </button>
+                ))}
               </div>
             </>
           )}

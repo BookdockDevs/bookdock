@@ -36,6 +36,9 @@ settingsRoutes.get('/', async (c) => {
 
 settingsRoutes.put('/', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') {
+    return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot persist settings' } }, 403)
+  }
   const body = await c.req.json()
   const parsed = settingsUpdateSchema.safeParse(body)
   if (!parsed.success) {

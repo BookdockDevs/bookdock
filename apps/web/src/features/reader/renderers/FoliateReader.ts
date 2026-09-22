@@ -262,12 +262,19 @@ export const FULL_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024
 // into dozens of local file requests before the iframe can render it.
 export const RANGE_CHUNK_SIZE = 1024 * 1024
 
-// A single stalled Range fetch otherwise hangs chapter navigation forever:
-// the View.load iframe guard cannot help because the hang happens before the
-// navigation starts. Text chapters resolve in <1s, so hitting this budget
-// means a dead connection. memoizeLoadText/memoizeLoadBlob do not cache
-// failures, so the next navigation retries with a fresh signal.
-const ENTRY_FETCH_TIMEOUT_MS = 20000
+// Keep a long safety deadline for a genuinely dead connection, but do not
+// reject slow Range responses at the 20s mark. The entry loader retries one
+// transient timeout/network failure with a fresh signal, and memoized loaders
+// never retain failures.
+const ENTRY_FETCH_TIMEOUT_MS = 120000
+const ENTRY_FETCH_RETRY_COUNT = 1
+
+function isRetryableEntryError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  return error.name === 'AbortError'
+    || error.name === 'TimeoutError'
+    || /failed to fetch|network|timeout/i.test(error.message)
+}
 
 export type ZipLoadStrategy = 'full' | 'range'
 
@@ -1214,15 +1221,28 @@ function getParsedBook(url: string, foliate: any, bookSize?: number): Promise<an
       return entry ? fn(entry) : null
     }
 
-    const signal = () => AbortSignal.timeout(ENTRY_FETCH_TIMEOUT_MS)
+    const loadEntryData = async (entry: any, createWriter: () => any) => {
+      for (let attempt = 0; attempt <= ENTRY_FETCH_RETRY_COUNT; attempt++) {
+        try {
+          return await entry.getData(createWriter(), {
+            signal: AbortSignal.timeout(ENTRY_FETCH_TIMEOUT_MS),
+          })
+        } catch (error) {
+          if (attempt >= ENTRY_FETCH_RETRY_COUNT || !isRetryableEntryError(error)) throw error
+          console.warn(`[FoliateReader] retrying entry load: ${entry.filename}`, error)
+        }
+      }
+      return null
+    }
     // memo (this mount) → IndexedDB (cross-session, keyed by bookId|updatedAt)
     // → network. Only reached on a miss, so reopen reloads nothing that was
     // cached before; TXT books don't go through this path at all.
     const loadText = memoizeLoadText(withTextCache(
-      load((entry: any) => entry.getData(new TextWriter(), { signal: signal() })),
+      load((entry: any) => loadEntryData(entry, () => new TextWriter())),
       { namespace: chapterTextNamespaceFromUrl(url) },
     ))
-    const loadBlob = memoizeLoadBlob(url, load((entry: any, type?: string) => entry.getData(new BlobWriter(type), { signal: signal() })))
+    const loadBlob = memoizeLoadBlob(url, load((entry: any, type?: string) =>
+      loadEntryData(entry, () => new BlobWriter(type))))
     const getSize = (name: string) => map.get(name)?.uncompressedSize ?? 0
 
     const book = await new EPUB({ entries, loadText, loadBlob, getSize }).init()

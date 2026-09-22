@@ -46,6 +46,7 @@ function formatLanguage(lang: string, locale: string): string {
 
 interface BookDetailViewProps {
   book: BookListItem
+  readOnly?: boolean
   detail?: BookDetailRes
   shelfName?: string
   currentShelfId: string | null
@@ -58,6 +59,7 @@ interface BookDetailViewProps {
 
 export default function BookDetailView({
   book,
+  readOnly = false,
   detail,
   shelfName,
   currentShelfId,
@@ -236,11 +238,11 @@ export default function BookDetailView({
               {hasProgress ? _('library.continueReading') : _('library.startReading')}
             </Button>
             <div className="flex flex-1 items-center gap-1.5">
-              <ActionIcon secondary label={_('library.edit')} onClick={onEdit}>
+              {!readOnly && <ActionIcon secondary label={_('library.edit')} onClick={onEdit}>
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </ActionIcon>
-              <div ref={downloadAnchorRef} className="relative">
+              </ActionIcon>}
+              {!readOnly && <div ref={downloadAnchorRef} className="relative">
                 <ActionIcon
                   secondary
                   label={_('library.download')}
@@ -311,12 +313,12 @@ export default function BookDetailView({
                     </MenuFlyout>
                   </SmartMenu>
                 )}
-              </div>
-              <div className="ml-auto">
+              </div>}
+              {!readOnly && <div className="ml-auto">
                 <ActionIcon label={_('library.delete')} danger onClick={() => onDelete(book)}>
                   <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
                 </ActionIcon>
-              </div>
+              </div>}
             </div>
           </div>
         </div>

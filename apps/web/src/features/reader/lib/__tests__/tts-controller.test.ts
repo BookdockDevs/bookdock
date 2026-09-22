@@ -110,6 +110,15 @@ describe('TtsController', () => {
     expect(new SystemSpeechClient().listVoices()).toEqual([])
   })
 
+  it('keeps voice refresh callbacks bound to the controller', () => {
+    const fake = fakeRenderer([{ id: 's1', text: '第一句', cfi: 'epubcfi(/6/2)', chapterIndex: 0 }])
+    const controller = new TtsController(fake.renderer, { engine: 'system', voiceId: '', rate: 1, autoNext: false, highlight: false })
+    const refreshVoices = controller.refreshVoices
+
+    expect(() => refreshVoices()).not.toThrow()
+    controller.dispose()
+  })
+
   it('highlights a segment only when the speech client starts it', async () => {
     const segment = { id: 's1', text: '第一句', cfi: 'epubcfi(/6/2)', chapterIndex: 0 }
     const fake = fakeRenderer([segment])

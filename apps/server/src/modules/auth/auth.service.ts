@@ -192,7 +192,7 @@ export async function setupUser(username: string, password: string) {
     if (existing) {
       try {
         tx.update(users)
-          .set({ username, passwordHash: hash, updatedAt: now })
+          .set({ username, passwordHash: hash, role: 'owner', updatedAt: now })
           .where(eq(users.id, existing.id))
           .run()
       } catch (err) {

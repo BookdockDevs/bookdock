@@ -63,8 +63,27 @@ export default function AccountMenu() {
 
   if (!user && !isGuest) return null
 
+  if (isGuest) {
+    const isUninitialized = !instance?.initialized
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          void navigate({ to: isUninitialized ? '/setup' : '/login' })
+        }}
+        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
+      >
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-200/70 text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+          {isUninitialized ? <KeyIcon /> : <SignInIcon />}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-stone-700 dark:text-stone-200">
+          {isUninitialized ? _('auth.setPassword') : _('auth.signIn')}
+        </span>
+      </button>
+    )
+  }
+
   const username = user?.username ?? _('auth.guest')
-  const menuHeight = isGuest ? 88 : 120
 
   return (
     <>
@@ -72,10 +91,6 @@ export default function AccountMenu() {
         ref={menu.btnRef}
         type="button"
         onClick={() => {
-          if (isGuest) {
-            menu.toggleFromButton()
-            return
-          }
           void navigate({ to: '/profile' })
         }}
         onContextMenu={(e) => {
@@ -94,72 +109,37 @@ export default function AccountMenu() {
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-stone-700 dark:text-stone-200">
           {username}
         </span>
-        {isGuest && (
-          <span className="shrink-0 rounded border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500">
-            {_('auth.guest')}
-          </span>
-        )}
       </button>
 
-      <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(176, menuHeight)} onClose={menu.close}>
+      <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(176, 120)} onClose={menu.close}>
         <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
           <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{username}</p>
           <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">
-            {isGuest ? _('auth.guest') : user?.role === 'owner' ? _('auth.roleOwner') : _('auth.roleMember')}
+            {user?.role === 'owner' ? _('auth.roleOwner') : _('auth.roleMember')}
           </p>
         </div>
-        {isGuest ? (
-          !instance?.initialized ? (
-            <button
-              type="button"
-              onClick={() => {
-                menu.close()
-                navigate({ to: '/setup' })
-              }}
-              className={menuItemClass}
-            >
-              <KeyIcon />
-              {_('auth.setPassword')}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                menu.close()
-                navigate({ to: '/login' })
-              }}
-              className={menuItemClass}
-            >
-              <SignInIcon />
-              {_('auth.signIn')}
-            </button>
-          )
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={() => {
-                menu.close()
-                navigate({ to: '/profile' })
-              }}
-              className={menuItemClass}
-            >
-              <ProfileIcon />
-              {_('profile.open')}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                menu.close()
-                logout.mutate()
-              }}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-            >
-              <SignOutIcon />
-              {_('auth.signOut')}
-            </button>
-          </>
-        )}
+        <button
+          type="button"
+          onClick={() => {
+            menu.close()
+            void navigate({ to: '/profile' })
+          }}
+          className={menuItemClass}
+        >
+          <ProfileIcon />
+          {_('profile.open')}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            menu.close()
+            logout.mutate()
+          }}
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+        >
+          <SignOutIcon />
+          {_('auth.signOut')}
+        </button>
       </SmartMenu>
     </>
   )

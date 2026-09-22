@@ -97,21 +97,9 @@ export default function AccessTokensSection() {
             ))}
           </div>
         ) : tokens.length === 0 ? (
-          <div className="my-2 flex flex-col items-center justify-center rounded-xl border border-dashed border-stone-200/80 bg-stone-50/40 px-4 py-8 text-center dark:border-stone-800 dark:bg-stone-900/30">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-stone-100 text-stone-400 dark:bg-stone-800 dark:text-stone-500">
-              <AccessTokenIcon className="h-5 w-5" />
-            </div>
-            <p className="mt-2.5 text-sm font-medium text-stone-700 dark:text-stone-300">{_('settings.tokensEmpty')}</p>
+          <div className="my-2 flex flex-col items-center justify-center rounded-xl border border-stone-200/60 bg-stone-50/30 px-4 py-6 text-center dark:border-stone-800/60 dark:bg-stone-850/20">
+            <p className="text-sm font-medium text-stone-700 dark:text-stone-300">{_('settings.tokensEmpty')}</p>
             <p className="mt-1 max-w-sm text-xs text-stone-400 dark:text-stone-500">{_('settings.tokensEmptyDesc')}</p>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-3.5 shrink-0 whitespace-nowrap gap-1"
-              onClick={() => setCreateOpen(true)}
-            >
-              <PlusIcon className="h-3.5 w-3.5" />
-              {_('settings.tokensEmptyAction')}
-            </Button>
           </div>
         ) : (
           <div className="flex flex-col gap-3 pt-1">

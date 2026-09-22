@@ -66,6 +66,7 @@ function createGuardApp() {
   app.onError(errorHandler)
   app.use('/api/v1/*', authGuard())
   app.get('/api/v1/protected', (c) => c.json({ data: c.get('user') }))
+  app.post('/api/v1/protected-write', (c) => c.json({ data: c.get('user') }))
   app.get('/api/v1/legado/protected', (c) => c.json({ data: c.get('user') }))
   return app
 }
@@ -366,6 +367,7 @@ describe('auth module', () => {
   describe('setup', () => {
     it('allows setup while guest access is on (no password user yet)', async () => {
       seedInstanceSettings(db, false, true)
+      await getDefaultUser()
       const result = await setupUser('admin', 'secret6')
       expect(result.user.role).toBe('owner')
       expect(getInstanceInfo().initialized).toBe(true)
@@ -504,6 +506,26 @@ describe('auth module', () => {
       const body = await res.json()
       expect(body.data.username).toBe('admin')
       expect(body.data.role).toBe('guest')
+    })
+
+    it('rejects mutations from a guest session before route handling', async () => {
+      seedInstanceSettings(db, false, true)
+      const app = createGuardApp()
+      const res = await app.request('/api/v1/protected-write', { method: 'POST' })
+      expect(res.status).toBe(403)
+      const body = await res.json()
+      expect(body.error).toEqual({ code: 'FORBIDDEN', message: 'Guest sessions are read-only' })
+    })
+
+    it('keeps mutations available to a signed-in owner', async () => {
+      seedInstanceSettings(db, false, false)
+      const id = await insertUser(db, { username: 'owner', role: 'owner', password: 'secret6' })
+      const app = createGuardApp()
+      const res = await app.request('/api/v1/protected-write', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${await signToken(id)}` },
+      })
+      expect(res.status).toBe(200)
     })
 
     it('creates the default user with the guest role, never owner', async () => {

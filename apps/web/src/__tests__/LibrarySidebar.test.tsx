@@ -56,6 +56,26 @@ function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1, trashEnabl
 }
 
 describe('LibrarySidebar', () => {
+  it('hides empty shelf and tag groups for read-only guests', () => {
+    mockHooks({ uncategorizedTotal: 0 })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} readOnly />)
+
+    expect(screen.queryByText('书架')).toBeNull()
+    expect(screen.queryByText('标签')).toBeNull()
+  })
+
+  it('shows populated shelf and tag groups for read-only guests', () => {
+    mockHooks({ shelves: [{ id: 'shelf-1', name: '公开分类', bookCount: 1 }], tags: [{ id: 'tag-1', name: '公开标签', bookCount: 1 }] })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} readOnly />)
+
+    expect(screen.getByText('书架')).toBeInTheDocument()
+    expect(screen.getByText('公开分类')).toBeInTheDocument()
+    expect(screen.getByText('标签')).toBeInTheDocument()
+    expect(screen.getByText('公开标签')).toBeInTheDocument()
+  })
+
   it('renders shelves and trash entry', () => {
     mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] })
 

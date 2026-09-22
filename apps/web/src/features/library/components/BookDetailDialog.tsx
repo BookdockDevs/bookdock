@@ -25,11 +25,12 @@ import TocRulePicker from './TocRulePicker'
 
 interface BookDetailDialogProps {
   book: BookListItem | null
+  readOnly?: boolean
   onClose: () => void
   onDelete: (book: BookListItem) => void
 }
 
-export default function BookDetailDialog({ book, onClose, onDelete }: BookDetailDialogProps) {
+export default function BookDetailDialog({ book, readOnly = false, onClose, onDelete }: BookDetailDialogProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
 
@@ -226,7 +227,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
         closeLabel={_('library.close')}
         size="xl"
         actions={
-          displayBook.format === 'txt' ? (
+          !readOnly && displayBook.format === 'txt' ? (
             <div ref={moreAnchorRef} className="relative">
               <button
                 type="button"
@@ -361,6 +362,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
           ) : (
             <BookDetailView
               book={displayBook}
+              readOnly={readOnly}
               detail={detail}
               shelfName={shelfName}
               currentShelfId={currentShelfId}
@@ -372,7 +374,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
             />
           )}
 
-          {displayBook.format === 'txt' && tocRuleOpen && (
+          {!readOnly && displayBook.format === 'txt' && tocRuleOpen && (
             <TocRulePicker
               bookId={book.id}
               currentRuleId={detail?.meta?.tocRuleId}
@@ -384,7 +386,7 @@ export default function BookDetailDialog({ book, onClose, onDelete }: BookDetail
             />
         )}
       </Modal>
-      {appendContentOpen && <AppendContentModal bookId={book.id} onClose={() => setAppendContentOpen(false)} />}
+      {!readOnly && appendContentOpen && <AppendContentModal bookId={book.id} onClose={() => setAppendContentOpen(false)} />}
     </>
   )
 }

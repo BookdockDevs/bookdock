@@ -129,7 +129,9 @@ export function SettingsSync() {
   // (Re)load settings whenever a session appears: initial mount, login, and
   // guest pass-through all surface as a user id change. Logged-out visitors
   // skip the request entirely so /login never sees a 401.
-  const userId = useAuthStore((s) => s.user?.id ?? null)
+  const user = useAuthStore((s) => s.user)
+  const userId = user?.id ?? null
+  const isGuest = user?.guest === true || user?.role === 'guest'
 
   useEffect(() => {
     if (settingsUserRef.current !== userId) {
@@ -138,7 +140,7 @@ export function SettingsSync() {
       useUiStore.setState({ fontPreferences: {}, fontOrder: [] })
       suppressSyncRef.current = false
     }
-    if (!userId) return
+    if (!userId || isGuest) return
     const pending = getPendingSettings(userId)
     if (pending) {
       // A reload can happen before the debounced PUT completes. Keep the
@@ -155,13 +157,15 @@ export function SettingsSync() {
         applySettings(res.data)
       })
       .catch(() => undefined)
-  }, [queryClient, userId])
+  }, [isGuest, queryClient, userId])
 
   useEffect(() => {
     const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(SYNC_CHANNEL) : null
     if (channel) {
       channel.onmessage = (event) => {
         if (event.data?.sessionId === SESSION_ID) return
+        const currentUser = useAuthStore.getState().user
+        if (!currentUser || currentUser.guest === true || currentUser.role === 'guest') return
         const data = event.data?.settings as Partial<Record<string, unknown>> | undefined
         if (!data) return
         applySettings(data as Partial<SettingsRes>)
@@ -192,7 +196,8 @@ export function SettingsSync() {
       const settingsTouched = settingsChanged(state, prevState)
       const activeTouched = state.activePresetId !== prevState.activePresetId
       if (!settingsTouched && !activeTouched) return
-      if (!useAuthStore.getState().user) return
+      const user = useAuthStore.getState().user
+      if (!user || user.guest === true || user.role === 'guest') return
       if (settingsTouched) {
         const userId = useAuthStore.getState().user?.id
         if (userId) persistPendingSettings(userId, pickSettings(state))

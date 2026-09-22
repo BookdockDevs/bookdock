@@ -314,12 +314,12 @@ export async function uploadBook(
 
   let title = parsed.meta.title
   let author = parsed.meta.author ?? ''
+  const derived = opts?.normalizeTitle ? normalizeBookTitle(fileName) : undefined
   if (!title) {
-    const derived = opts?.normalizeTitle ? normalizeBookTitle(fileName) : undefined
     title = derived?.title || fileName.replace(/\.[^.]+$/, '')
-    // File names of web-novels often carry the author where metadata has none.
-    if (!author && derived?.author) author = derived.author
   }
+  // File names of web-novels often carry the author where metadata has none.
+  if (!author && derived?.author) author = derived.author
 
   let coverKey: string | null = null
   if (parsed.meta.cover) {
@@ -1370,10 +1370,14 @@ export async function resetBookMetadata(userId: string, bookId: string, opts?: {
   let title = parsed.meta.title
   let author = parsed.meta.author ?? ''
   const originalFileName = (book.meta as Record<string, unknown>).fileName
-  if (!title && opts?.normalizeTitle && typeof originalFileName === 'string') {
-    const derived = normalizeBookTitle(originalFileName)
-    if (derived.title) title = derived.title
-    if (!author && derived.author) author = derived.author
+  const derived = opts?.normalizeTitle && typeof originalFileName === 'string'
+    ? normalizeBookTitle(originalFileName)
+    : undefined
+  if (!title && derived?.title) {
+    title = derived.title
+  }
+  if (!author && derived?.author) {
+    author = derived.author
   }
   db.update(books).set({
     title: title || book.title,

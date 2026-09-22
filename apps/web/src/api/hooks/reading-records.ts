@@ -74,11 +74,11 @@ export function useReadingHourly(from?: string, to?: string, bookId?: string) {
   })
 }
 
-export function useBookReadingRecords(bookId: string | undefined) {
+export function useBookReadingRecords(bookId: string | undefined, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: [...READING_RECORDS_KEY, 'book', bookId],
     queryFn: () => apiGet<{ data: ReadingRecordBookDetailRes }>(`/reading-records/book/${bookId}`),
-    enabled: !!bookId,
+    enabled: !!bookId && options.enabled !== false,
   })
 }
 

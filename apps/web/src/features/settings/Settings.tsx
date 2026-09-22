@@ -1,5 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useSearch } from '@tanstack/react-router'
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
+
+import { Button } from '@/components/ui/Button'
+import { useInstanceInfo } from '@/features/auth/hooks'
 
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
@@ -173,35 +176,55 @@ export default function Settings() {
                 <h2 className="mb-4 text-sm font-medium">{_('settings.general')}</h2>
                 <LanguageSwitcher />
               </section>
-              <ReadingDataSettingsSection />
+              {!isGuest && <ReadingDataSettingsSection />}
             </div>
           )}
           {visitedSections.has('reading') && (
             <div className={active === 'reading' ? 'flex flex-col gap-6' : 'hidden'}>
-              <TocRulesSettingsSection />
+              {!isGuest && <TocRulesSettingsSection />}
               <FontsSettingsSection />
               <TtsSettingsSection id="tts-settings" />
               <AiSettingsSection id="ai-settings" />
-              <ReplacementsSettingsSection />
+              {!isGuest && <ReplacementsSettingsSection />}
             </div>
           )}
           {visitedSections.has('library') && (
             <div className={active === 'library' ? 'flex flex-col gap-6' : 'hidden'}>
-              <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-                <h2 className="mb-4 text-sm font-medium">{_('settings.trash')}</h2>
-                <TrashSettingsRow />
-              </section>
-              <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
-                <h2 className="mb-2 text-sm font-medium">{_('settings.upload')}</h2>
-                <TitleSettingsRow />
-                {isOwner && <UploadSettingsSection />}
-              </section>
+              {isGuest ? (
+                <GuestFeatureGateSection
+                  title={_('settings.guestLibraryTitle')}
+                  description={_('settings.guestLibraryDesc')}
+                  icon={<LibraryShelfIcon />}
+                />
+              ) : (
+                <>
+                  <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+                    <h2 className="mb-4 text-sm font-medium">{_('settings.trash')}</h2>
+                    <TrashSettingsRow />
+                  </section>
+                  <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+                    <h2 className="mb-2 text-sm font-medium">{_('settings.upload')}</h2>
+                    <TitleSettingsRow />
+                    {isOwner && <UploadSettingsSection />}
+                  </section>
+                </>
+              )}
             </div>
           )}
           {visitedSections.has('integrations') && (
             <div className={active === 'integrations' ? 'flex flex-col gap-6' : 'hidden'}>
-              {!isGuest && <AccessTokensSection />}
-              <LegadoSettingsSection />
+              {isGuest ? (
+                <GuestFeatureGateSection
+                  title={_('settings.guestIntegrationsTitle')}
+                  description={_('settings.guestIntegrationsDesc')}
+                  icon={<IntegrationIcon />}
+                />
+              ) : (
+                <>
+                  <AccessTokensSection />
+                  <LegadoSettingsSection />
+                </>
+              )}
             </div>
           )}
           {isOwner && visitedSections.has('admin') && (
@@ -227,5 +250,64 @@ export default function Settings() {
         </button>
       )}
     </div>
+  )
+}
+
+interface GuestFeatureGateSectionProps {
+  title: string
+  description: string
+  icon: ReactNode
+}
+
+function GuestFeatureGateSection({ title, description, icon }: GuestFeatureGateSectionProps) {
+  const _ = useTranslation()
+  const navigate = useNavigate()
+  const { data: instanceData } = useInstanceInfo()
+  const isUninitialized = !instanceData?.data?.initialized
+
+  return (
+    <section className="flex flex-col items-center justify-center rounded-2xl border border-stone-200 bg-white p-8 text-center shadow-sm sm:p-12 dark:border-stone-800 dark:bg-stone-900">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400">
+        {icon}
+      </div>
+      <h2 className="mt-4 text-base font-semibold text-stone-900 dark:text-stone-100">{title}</h2>
+      <p className="mt-1.5 max-w-md text-xs leading-relaxed text-stone-500 text-pretty dark:text-stone-400">{description}</p>
+      <Button
+        variant="primary"
+        size="sm"
+        className="mt-5 gap-1.5"
+        onClick={() => void navigate({ to: isUninitialized ? '/setup' : '/login' })}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden="true">
+          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+          <path d="m10 17 5-5-5-5" />
+          <path d="M15 12H3" />
+        </svg>
+        {isUninitialized ? _('auth.setPassword') : _('auth.signIn')}
+      </Button>
+    </section>
+  )
+}
+
+function LibraryShelfIcon({ className = 'h-6 w-6' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="m16 6 4 14" />
+      <path d="M12 6v14" />
+      <path d="M8 8v12" />
+      <path d="M4 4v16" />
+    </svg>
+  )
+}
+
+function IntegrationIcon({ className = 'h-6 w-6' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+      <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+    </svg>
   )
 }

@@ -149,3 +149,30 @@ describe('ViewMenu list info toggles', () => {
     expect(useUiStore.getState().listInfoItems).toEqual(['progress'])
   })
 })
+
+describe('ViewMenu columns segmented control', () => {
+  it('renders auto and 2-8 column options in grid view with current active', () => {
+    useUiStore.setState({ gridColumns: '4' })
+    renderMenu({ view: 'grid' })
+
+    expect(screen.getByRole('button', { name: '自适应' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: '4' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('switches column count in the store when clicked', () => {
+    renderMenu({ view: 'grid' })
+
+    fireEvent.click(screen.getByRole('button', { name: '5' }))
+    expect(useUiStore.getState().gridColumns).toBe('5')
+    expect(screen.getByRole('button', { name: '5' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: '自适应' }))
+    expect(useUiStore.getState().gridColumns).toBe('auto')
+    expect(screen.getByRole('button', { name: '自适应' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('hides column options in list view', () => {
+    renderMenu({ view: 'list' })
+    expect(screen.queryByRole('button', { name: '自适应' })).toBeNull()
+  })
+})

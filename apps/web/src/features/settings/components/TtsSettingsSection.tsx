@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 
 import type { TtsProvider, TtsServiceCreateReq, TtsServiceRes, TtsServiceUpdateReq } from '@bookdock/shared'
 
@@ -80,11 +81,12 @@ function makeForm(provider: TtsProvider, catalog: typeof FALLBACK_PROVIDERS, ser
 
 export default function TtsSettingsSection({ id }: { id?: string }) {
   const _ = useTranslation()
+  const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
-  const isGuest = user?.role === 'guest' || user?.guest === true
-  const servicesQuery = useTtsServices()
+  const isGuest = !user || user.role === 'guest' || user.guest === true
+  const servicesQuery = useTtsServices({ enabled: !isGuest })
   const { data: servicesData } = servicesQuery
-  const { data: providersData } = useTtsProviders()
+  const { data: providersData } = useTtsProviders({ enabled: !isGuest })
   const providers = providersData?.data ?? FALLBACK_PROVIDERS
   const create = useCreateTtsService()
   const update = useUpdateTtsService()
@@ -169,7 +171,16 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
       </div>
 
       {isGuest ? (
-        <p className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-stone-500 dark:bg-stone-800 dark:text-stone-400">{_('settings.ttsGuestHint')}</p>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-100/80 px-3.5 py-2.5 text-xs text-stone-500 dark:bg-stone-800/80 dark:text-stone-400">
+          <span className="min-w-0 flex-1">{_('settings.ttsGuestHint')}</span>
+          <button
+            type="button"
+            onClick={() => void navigate({ to: '/login' })}
+            className="shrink-0 font-medium text-stone-700 underline-offset-2 hover:underline dark:text-stone-300 dark:hover:text-stone-100"
+          >
+            {_('auth.signIn')} →
+          </button>
+        </div>
       ) : servicesQuery.isError ? (
         <QueryErrorState isRetrying={servicesQuery.isFetching} onRetry={servicesQuery.refetch} />
       ) : servicesQuery.isPending && !servicesQuery.data ? (

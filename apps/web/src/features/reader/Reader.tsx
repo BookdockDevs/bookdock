@@ -10,6 +10,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { useUiStore, getEffectiveTheme } from '@/stores/ui.store'
+import { useAuthStore } from '@/stores/auth.store'
 
 import { cn } from '@/lib/utils'
 import { isPresetThemeId } from '@/lib/reading-theme'
@@ -32,6 +33,7 @@ import { consumeEscFlag } from './lib/esc-consumed'
 import { createRestoreGate, type RestoreGate } from './lib/restore-gate'
 import { cfiRangesIntersect, loadCfiModule } from './lib/cfi-overlap'
 import { mergeProgressSaveCache } from './lib/progress-cache'
+import { getGuestProgress, saveGuestProgress } from './lib/guest-progress'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
 import { ReaderSidebar } from './components/ReaderSidebar'
@@ -59,6 +61,8 @@ import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq, ViewS
 export default function Reader() {
   const _ = useTranslation()
   const { id } = useParams({ from: '/books/$id' })
+  const authUser = useAuthStore((s) => s.user)
+  const isGuest = !authUser || authUser.guest === true || authUser.role === 'guest'
   const deepLinkParams = new URLSearchParams(window.location.search)
   const deepLinkAnnotation = deepLinkParams.get('annotation')
   const deepLinkCfi = deepLinkParams.get('cfi')
@@ -125,7 +129,7 @@ export default function Reader() {
   const toolbarLocked = useUiStore((s) => s.toolbarLocked)
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
-  const { data: annotations } = useAnnotations(id)
+  const { data: annotations } = useAnnotations(id, { enabled: !isGuest })
   const deepLinkHandled = useRef(false)
 
   const bookmarks = useMemo(
@@ -383,13 +387,16 @@ export default function Reader() {
   )
 
   const progressQuery = useQuery({
-    queryKey: ['progress', id],
-    queryFn: () => apiGet<{ data: ReadingProgressRes | null }>(`/progress/${id}`),
+    queryKey: ['progress', id, isGuest ? 'guest' : 'user'],
+    queryFn: () => isGuest
+      ? Promise.resolve({ data: getGuestProgress(id) })
+      : apiGet<{ data: ReadingProgressRes | null }>(`/progress/${id}`),
     enabled: !!id,
   })
 
   const progressMutation = useMutation({
     mutationFn: async (body: ReadingProgressUpdateReq) => {
+      if (isGuest) return { data: saveGuestProgress(id, body) }
       return apiPut<{ data: ReadingProgressRes | null }>(`/progress/${id}`, body)
     },
     onSuccess: (result) => {
@@ -401,10 +408,10 @@ export default function Reader() {
       // previous cache was { data: null } for a book's first reading session.
       // Invalidate (without refetching) so the next mount still revalidates in
       // the background.
-      queryClient.setQueryData(['progress', id], (old: { data: ReadingProgressRes | null } | undefined) =>
+      queryClient.setQueryData(['progress', id, isGuest ? 'guest' : 'user'], (old: { data: ReadingProgressRes | null } | undefined) =>
         mergeProgressSaveCache(old, result),
       )
-      void queryClient.invalidateQueries({ queryKey: ['progress', id], refetchType: 'none' })
+      void queryClient.invalidateQueries({ queryKey: ['progress', id, isGuest ? 'guest' : 'user'], refetchType: 'none' })
     },
     onError: (error) => notify.error(getUserErrorNotification(error, 'reader.progressSaveFailed')),
   })
@@ -502,7 +509,7 @@ export default function Reader() {
   // div, which React replaces when bookQuery resolves, leaving the view
   // appended to a detached subtree (iframe never loads -> first-open hang).
   const contentUrl = id && bookQuery.data?.data
-    ? `/api/v1/books/${id}/file?v=${bookQuery.data.data.updatedAt}`
+    ? `/api/v1/books/${id}/file?reader=1&v=${bookQuery.data.data.updatedAt}`
     : ''
 
   // Latch initialCfi at first resolve: later refetches of ['progress'] (e.g.
@@ -562,10 +569,10 @@ export default function Reader() {
   // mode disables auto recording entirely (sessions belong to the pill)
   const readingTimerMode = useUiStore((s) => s.readingTimerMode)
   const { flush: flushReadingTimer, ping: pingReadingTimer } = useReadingTimer(
-    readingTimerMode === 'auto' ? (readerReady ? id : undefined) : undefined,
+    !isGuest && readingTimerMode === 'auto' ? (readerReady ? id : undefined) : undefined,
   )
   // Warm the sidebar stats tab's queries so first open is instant
-  usePrefetchBookReadingStats(readingTimerMode === 'off' ? undefined : id)
+  usePrefetchBookReadingStats(isGuest || readingTimerMode === 'off' ? undefined : id)
 
   // Per-chapter word counts for the info-bar field; must precede useReaderRenderer
   const chapterWordCounts = useMemo(() => {
@@ -722,7 +729,7 @@ export default function Reader() {
       if (!e.started) setNavPending(e.pending)
       if (e.started) setNavError(null)
       if (e.target) {
-        const { sectionIndex, fraction, isJump } = e.target
+        const { sectionIndex, isJump } = e.target
         // Same-chapter page turns do not touch the UI, but explicit same-
         // section jumps still need the in-flight guard for bookmarks.
         if (isJump || sectionIndex !== currentChapterIndex) {
@@ -732,14 +739,17 @@ export default function Reader() {
           const label = sectionTocLabels?.[sectionIndex]
           if (label) setPendingNavChapter(label)
         }
-        // A seek knows its exact book-wide landing fraction, even when it
-        // remains inside the current section. Relocate overwrites it later.
-        if (fraction !== undefined) setPercent(Math.round(fraction * 100))
+        // Keep progress tied to the last committed relocation. Updating it
+        // optimistically would leave the progress bar on the failed target.
       }
     },
     onNavigateError: (e) => {
       navInFlightRef.current = false
       setNavPending(false)
+      // The renderer keeps the last successfully relocated section visible.
+      // Do not leave the failed destination in the header or let its
+      // optimistic progress look committed.
+      setPendingNavChapter(null)
       setNavError({
         target: e.target,
         chapter: e.sectionIndex === undefined ? undefined : sectionTocLabels?.[e.sectionIndex],
@@ -1282,10 +1292,10 @@ export default function Reader() {
       <ViewSettingsContext.Provider value={viewSettingsContextValue}>
       <RendererContext.Provider value={rendererContextValue}>
       <AutoReadingSessionProvider renderer={renderer} coordinator={playbackCoordinator}>
-      <TtsSessionProvider renderer={renderer} coordinator={playbackCoordinator}>
+      <TtsSessionProvider renderer={renderer} coordinator={playbackCoordinator} guestReadOnly={isGuest}>
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div className="flex h-full w-full">
-            <ReaderSidebar bookId={id} onStatsTabOpen={flushReadingTimer} chromePinned={chromePinned} />
+            <ReaderSidebar bookId={id} onStatsTabOpen={flushReadingTimer} chromePinned={chromePinned} guestReadOnly={isGuest} />
           <div className="relative flex flex-1 flex-col">
             {/* Top hover zone: hot strip + header belong to the same group so hover is continuous.
                 Touch: no group/hot strip — pinned (middle tap) is the only reveal. */}
@@ -1308,12 +1318,12 @@ export default function Reader() {
                 readingMode={readingMode}
                 bookId={id}
                 estimatedMinutes={estimatedMinutes}
-                onAddBookmark={onAddBookmark}
+                onAddBookmark={isGuest ? undefined : onAddBookmark}
                 onToggleSettings={onToggleSettings}
-                onToggleTts={onToggleTts}
+                onToggleTts={isGuest ? undefined : onToggleTts}
                 onToggleAutoReading={onToggleAutoReading}
                 onToggleFullscreen={onToggleFullscreen}
-                bookmarkActive={!!currentBookmark}
+                bookmarkActive={!isGuest && !!currentBookmark}
               />
             </div>
             <Ribbon visible={!!currentBookmark} />
@@ -1414,13 +1424,8 @@ export default function Reader() {
                           {_('reader.back')}
                         </button>
                       </Link>
-                      <Link to="/">
-                        <button className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700">
-                          {_('reader.reupload')}
-                        </button>
-                      </Link>
                       <button
-                        className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+                        className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700"
                         onClick={() => window.location.reload()}
                       >
                         {_('reader.refresh')}
@@ -1510,12 +1515,12 @@ export default function Reader() {
                 mobileDockVisible={mobileDockVisible}
                 onPointerEnter={() => setCornerDwell(true)}
                 onPointerLeave={() => setCornerDwell(false)}
-                readingTimerMode={readingTimerMode}
+                readingTimerMode={isGuest ? 'off' : readingTimerMode}
               />
             </div>
           </div>
         </div>
-        <SelectionToolbar bookId={id} fontStack={fontStack} fontCss={fontCss} />
+        {!isGuest && <SelectionToolbar bookId={id} fontStack={fontStack} fontCss={fontCss} />}
         {footnoteEntry && (
           <FootnotePopup
             entry={footnoteEntry}

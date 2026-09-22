@@ -14,9 +14,10 @@ interface ReaderSidebarProps {
   onStatsTabOpen: () => void
   /** Whether the mobile reading controls were summoned by the reader chrome toggle. */
   chromePinned: boolean
+  guestReadOnly: boolean
 }
 
-export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen, chromePinned }: ReaderSidebarProps) {
+export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen, chromePinned, guestReadOnly }: ReaderSidebarProps) {
   const isTouch = useIsTouch()
   const activeNavTab = useReaderState((s) => s.activeNavTab)
   const setActiveNavTab = useReaderState((s) => s.setActiveNavTab)
@@ -30,7 +31,8 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   const sidebarWidth = useUiStore((s) => s.sidebarWidth)
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth)
   const setNavTabRemembered = useUiStore((s) => s.setNavTabRemembered)
-  const statsDisabled = useUiStore((s) => s.readingTimerMode) === 'off'
+  const readingTimerMode = useUiStore((s) => s.readingTimerMode)
+  const statsDisabled = guestReadOnly || readingTimerMode === 'off'
 
   const SIDEBAR_MIN = 200
   const SIDEBAR_MAX = 640
@@ -56,6 +58,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   useEffect(() => {
     setToolbarLocked(locked)
   }, [locked, setToolbarLocked])
+
+  useEffect(() => {
+    if (guestReadOnly && activeNavTab !== 'toc') setActiveNavTab('toc')
+  }, [activeNavTab, guestReadOnly, setActiveNavTab])
 
   useEffect(() => {
     if (resizing) return
@@ -181,6 +187,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
         sidebarOpen={sidebarOpen}
         locked={locked}
         statsDisabled={statsDisabled}
+        guestReadOnly={guestReadOnly}
         hideLock={isTouch}
         mobile={isTouch}
         onNavTab={handleNavTab}
@@ -227,6 +234,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
           open={sidebarOpen}
           locked={panelLocked}
           statsDisabled={statsDisabled}
+          guestReadOnly={guestReadOnly}
           onClose={handleClosePanel}
         />
       </div>

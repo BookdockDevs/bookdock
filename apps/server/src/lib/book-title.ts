@@ -1,5 +1,4 @@
-// Filename-to-title normalization, applied only when a book's title would
-// otherwise fall back to the raw file name (TXT uploads, metadata-less EPUBs).
+// Filename-to-metadata normalization for fields missing from the book file.
 // Deliberately conservative: every rule whitelists known noise so a clean
 // filename passes through untouched.
 

@@ -21,7 +21,7 @@ vi.mock('@/api/client', () => ({
   UNAUTHORIZED_EVENT: 'bd:unauthorized',
 }))
 
-function mockApi({ instance, me }: { instance: InstanceInfoRes; me?: { id: string; username: string; role: string } }) {
+function mockApi({ instance, me }: { instance: InstanceInfoRes; me?: { id: string; username: string; role: string; guest?: boolean } }) {
   ;(apiGet as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
     if (path === '/auth/instance') return Promise.resolve({ data: instance })
     if (path === '/auth/me') {
@@ -140,6 +140,19 @@ describe('RootComponent guard', () => {
       expect(navigateMock).toHaveBeenCalledWith({ to: '/', replace: true })
     })
     expect(useAuthStore.getState().user).toEqual(me)
+  })
+
+  it('keeps the login page reachable from a guest session', async () => {
+    currentPath = '/login'
+    const me = { id: 'u1', username: 'admin', role: 'guest', guest: true }
+    mockApi({ instance: { ...INITIALIZED, allowGuestAccess: true }, me })
+    renderRoot()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('outlet')).toBeInTheDocument()
+    })
+    expect(navigateMock).not.toHaveBeenCalledWith({ to: '/', replace: true })
+    expect(useAuthStore.getState().user).toBeNull()
   })
 
   it('redirects /register to /login when registration is closed', async () => {

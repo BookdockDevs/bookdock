@@ -8,11 +8,11 @@ import { cfiRangesOverlap, loadCfiModule } from '../lib/cfi-overlap'
 
 type AnnotationsCache = { data: AnnotationRes[] }
 
-export function useAnnotations(bookId: string) {
+export function useAnnotations(bookId: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['annotations', bookId],
     queryFn: () => apiGet<AnnotationsCache>(`/annotations/book/${bookId}`),
-    enabled: !!bookId,
+    enabled: !!bookId && options.enabled !== false,
   })
 }
 

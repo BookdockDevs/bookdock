@@ -9,12 +9,14 @@ const tocRuleRoutes = new Hono()
 
 tocRuleRoutes.get('/', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') return c.json({ data: [] })
   const items = listTocRules(user.id)
   return c.json({ data: items })
 })
 
 tocRuleRoutes.post('/', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage TOC rules' } }, 403)
   const body = await c.req.json()
   const parsed = tocRuleCreateSchema.safeParse(body)
   if (!parsed.success) {
@@ -26,6 +28,7 @@ tocRuleRoutes.post('/', async (c) => {
 
 tocRuleRoutes.post('/seed', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage TOC rules' } }, 403)
   restoreTocRuleSeeds(user.id)
   const items = listTocRules(user.id)
   return c.json({ data: items })
@@ -33,6 +36,7 @@ tocRuleRoutes.post('/seed', async (c) => {
 
 tocRuleRoutes.put('/reorder', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage TOC rules' } }, 403)
   const body = await c.req.json()
   const parsed = tocRuleReorderSchema.safeParse(body)
   if (!parsed.success) {
@@ -44,6 +48,7 @@ tocRuleRoutes.put('/reorder', async (c) => {
 
 tocRuleRoutes.put('/:ruleId', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage TOC rules' } }, 403)
   const ruleId = c.req.param('ruleId')
   const body = await c.req.json()
   const parsed = tocRuleUpdateSchema.safeParse(body)
@@ -56,6 +61,7 @@ tocRuleRoutes.put('/:ruleId', async (c) => {
 
 tocRuleRoutes.delete('/:ruleId', async (c) => {
   const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage TOC rules' } }, 403)
   const ruleId = c.req.param('ruleId')
   await deleteTocRule(user.id, ruleId)
   return c.json({ data: null })

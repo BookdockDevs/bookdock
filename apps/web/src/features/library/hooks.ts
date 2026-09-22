@@ -131,19 +131,21 @@ export function useUploadSettings() {
 }
 
 /** Trash feature switch; on while settings load or when stored settings predate the toggle. */
-export function useTrashEnabled(): boolean {
+export function useTrashEnabled(options: { enabled?: boolean } = {}): boolean {
   const { data } = useQuery({
     queryKey: ['settings'],
     queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
+    enabled: options.enabled !== false,
   })
   return data?.data.trash?.enabled !== false
 }
 
 /** Trash size cap in bytes; undefined when unlimited (0 or unset). */
-export function useTrashCapBytes(): number | undefined {
+export function useTrashCapBytes(options: { enabled?: boolean } = {}): number | undefined {
   const { data } = useQuery({
     queryKey: ['settings'],
     queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
+    enabled: options.enabled !== false,
   })
   const cap = data?.data.trash?.maxTrashBytes
   return cap && cap > 0 ? cap : undefined

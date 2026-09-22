@@ -68,17 +68,18 @@ function seedUser(db: ReturnType<typeof createTestDb>, username: string): string
   return id
 }
 
-describe('resetBookMetadata title normalization', () => {
+describe('resetBookMetadata metadata normalization', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
+  let epubMeta: { title: string; author?: string } = { title: '' }
 
   beforeAll(() => {
     registerParser(new TxtParser())
     // Metadata-less EPUB parse: reset then falls back to meta.fileName, the
-    // only shape where title normalization applies on reset.
+    // Keep the parser metadata mutable so reset tests can cover independent fields.
     registerParser({
       match: (fileName) => fileName.toLowerCase().endsWith('.epub'),
-      parse: async () => ({ meta: {}, chapters: [] }),
+      parse: async () => ({ meta: epubMeta, chapters: [] }),
     })
   })
 
@@ -87,6 +88,7 @@ describe('resetBookMetadata title normalization', () => {
     vi.spyOn(client, 'getDb').mockReturnValue(db)
     vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
     ownerId = seedUser(db, 'owner')
+    epubMeta = { title: '' }
   })
 
   function junkFile() {
@@ -108,5 +110,24 @@ describe('resetBookMetadata title normalization', () => {
 
     const reset = await resetBookMetadata(ownerId, book.id, { normalizeTitle: false })
     expect(reset.title).toBe('用户起的名字')
+  })
+
+  it('fills missing EPUB metadata fields independently from the file name', async () => {
+    epubMeta = { title: '内置书名' }
+    const file = new File(['epub content'], '文件名（精校版）作者：作者名.epub', { type: 'application/epub+zip' })
+
+    const { book } = await uploadBook(ownerId, file, undefined, { normalizeTitle: true })
+
+    expect(book.title).toBe('内置书名')
+    expect(book.author).toBe('作者名')
+  })
+
+  it('uses the file name for missing EPUB title and author', async () => {
+    const file = new File(['epub content'], '文件名（精校版）作者：作者名.epub', { type: 'application/epub+zip' })
+
+    const { book } = await uploadBook(ownerId, file, undefined, { normalizeTitle: true })
+
+    expect(book.title).toBe('文件名')
+    expect(book.author).toBe('作者名')
   })
 })
