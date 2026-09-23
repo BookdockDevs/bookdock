@@ -6,9 +6,11 @@ import { useReaderState } from '../features/reader/state/reader-state'
 import { useUiStore } from '../stores/ui.store'
 import { ReaderSidebar } from '../features/reader/components/ReaderSidebar'
 
+const saveScrollMock = vi.hoisted(() => vi.fn())
+
 vi.mock('../features/reader/components/NavigationPanel', () => ({
   NavigationPanel: forwardRef(function NavigationPanelStub(_props: object, ref: React.Ref<unknown>) {
-    useImperativeHandle(ref, () => ({ saveScroll: () => undefined }))
+    useImperativeHandle(ref, () => ({ saveScroll: saveScrollMock }))
     return <div data-testid="navigation-panel" />
   }),
 }))
@@ -29,6 +31,7 @@ function renderSidebar(chromePinned = false) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  saveScrollMock.mockClear()
   window.localStorage.clear()
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: query === '(pointer: coarse)' ? coarsePointer : false,
@@ -134,6 +137,12 @@ describe('ReaderSidebar on pointer devices', () => {
     expect(screen.getByTitle('锁定工具栏')).toBeInTheDocument()
     expect(screen.getByTestId('reader-sidebar-resize-handle')).toHaveClass('reader-resize-cursor')
     expect(screen.queryByTestId('sidebar-backdrop')).toBeNull()
+  })
+
+  it('does not save a hidden panel position when opening the sidebar', () => {
+    renderSidebar(false)
+    fireEvent.click(screen.getByTitle('目录'))
+    expect(saveScrollMock).not.toHaveBeenCalled()
   })
 
   it('cycles the reading theme through system, light, and dark modes', () => {

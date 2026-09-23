@@ -36,7 +36,7 @@ import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, te
 import { NavigationPending, type NavigationTarget } from '../lib/navigation-pending'
 import { chapterTextNamespaceFromUrl, withTextCache } from '../lib/chapter-text-cache'
 import { chapterIndexAtFraction, sectionFractionBoundaries } from '../lib/progress-model'
-import { applyTitleReplacements } from '@bookdock/shared'
+import { applyTitleReplacements, type BookFormat } from '@bookdock/shared'
 
 import {
   extractChapterText,
@@ -400,11 +400,102 @@ function appendCssDeclarations(block: string, declarations: string[]): string {
   return `${content}${separator}${declarations.join(' ')}${trailingWhitespace}`
 }
 
+export interface EpubStylesheetTransformOptions {
+  darkTheme?: boolean
+  verticalWriting?: boolean
+}
+
+function rewriteFixedBackgrounds(css: string): string {
+  const urlTokens: string[] = []
+  let transformed = css.replace(/url\(\s*(?:"[^"]*"|'[^']*'|[^)]*)\s*\)/gi, (url) => {
+    urlTokens.push(url)
+    return `__BD_URL_${urlTokens.length - 1}__`
+  })
+  transformed = transformed.replace(
+    /((?:^|[{;\s])background(?:-attachment)?\s*:)([^;{}]*)/gi,
+    (match, property: string, value: string) => {
+      if (!/\bfixed\b/i.test(value)) return match
+      const functionTokens: string[] = []
+      const masked = value.replace(/[\w-]*\([^)]*\)/g, (fn) => {
+        functionTokens.push(fn)
+        return `__BD_FN_${functionTokens.length - 1}__`
+      })
+      const rewritten = masked.replace(/\bfixed\b/gi, 'scroll')
+      return property + rewritten.replace(/__BD_FN_(\d+)__/g, (_match, index: string) => functionTokens[Number(index)]!)
+    },
+  )
+  return transformed.replace(/__BD_URL_(\d+)__/g, (_match, index: string) => urlTokens[Number(index)]!)
+}
+
+function rewriteNegativeBackgroundMargins(css: string, verticalWriting: boolean): string {
+  if (verticalWriting) return css
+
+  return transformCssRules(css, (_selector, block) => {
+    const backgroundValues = [
+      ...block.matchAll(/(?:^|[^-a-z])background(?:-color|-image)?\s*:\s*([^;!}]+)/gi),
+    ].map((match) => match[1]!.trim())
+    const paintsBackground = backgroundValues.some((value) =>
+      !/^(?:none|transparent)$/i.test(value)
+      && !/^(?:rgba|hsla)\([^)]*[,\s]0(?:\.0+)?\s*\)$/i.test(value),
+    )
+    if (!paintsBackground) return block
+
+    let left = ''
+    let right = ''
+    for (const declaration of block.matchAll(/(?:^|[^-a-z])margin(-left|-right)?\s*:\s*([^;!}]+)/gi)) {
+      const side = declaration[1]
+      const value = declaration[2]!.trim()
+      if (side === '-left') {
+        left = value
+      } else if (side === '-right') {
+        right = value
+      } else {
+        if (value.includes('(')) continue
+        const parts = value.split(/\s+/)
+        if (parts.length < 1 || parts.length > 4) continue
+        const [top, rightValue = top!, , leftValue = rightValue] = parts
+        right = rightValue!
+        left = leftValue
+      }
+    }
+
+    const overrides = `${left.startsWith('-') ? ' margin-left: 0 !important;' : ''}${right.startsWith('-') ? ' margin-right: 0 !important;' : ''}`
+    return overrides ? `${block.replace(/}$/, '')}${overrides} }` : block
+  })
+}
+
+function rewriteViewportMediaQueries(css: string, viewportWidth: number, viewportHeight: number): string {
+  if (viewportWidth <= 0 || viewportHeight <= 0) return css
+
+  const isLandscape = viewportWidth > viewportHeight
+  const always = '(min-width: 0px)'
+  const never = '(min-width: 999999px)'
+  const quoted: string[] = []
+  let transformed = css.replace(/"[^"\n]*"|'[^'\n]*'/g, (value) => {
+    quoted.push(value)
+    return `__BD_MEDIA_STRING_${quoted.length - 1}__`
+  })
+  transformed = transformed.replace(/@media[^{]*/gi, (prelude) => prelude
+    .replace(/\(\s*orientation\s*:\s*(landscape|portrait)\s*\)/gi, (_match, mode: string) =>
+      (mode.toLowerCase() === 'landscape') === isLandscape ? always : never,
+    )
+    .replace(/\(\s*(min|max)-(width|height)\s*:\s*([^)]+?)\s*\)/gi, (feature, bound: string, axis: string, length: string) => {
+      const px = /^(\d*\.?\d+)(?:px)?$/.exec(length)
+      if (!px) return feature
+      const viewport = axis.toLowerCase() === 'width' ? viewportWidth : viewportHeight
+      const bounds = Number.parseFloat(px[1]!)
+      const matches = bound.toLowerCase() === 'min' ? viewport >= bounds : viewport <= bounds
+      return matches ? always : never
+    }))
+  return transformed.replace(/__BD_MEDIA_STRING_(\d+)__/g, (_match, index: string) => quoted[Number(index)]!)
+}
+
 export function transformEpubStylesheet(
   css: string,
   viewportWidth: number,
   viewportHeight = 0,
   fontScale = 1,
+  options: EpubStylesheetTransformOptions = {},
 ): string {
   const transformBlock = (_selector: string, originalBlock: string) => {
     let block = originalBlock
@@ -454,6 +545,9 @@ export function transformEpubStylesheet(
   }
 
   let transformed = css.includes('{') ? transformCssRules(css, transformBlock) : transformBlock('', css)
+  transformed = rewriteFixedBackgrounds(transformed)
+  transformed = rewriteNegativeBackgroundMargins(transformed, options.verticalWriting ?? false)
+  transformed = rewriteViewportMediaQueries(transformed, viewportWidth, viewportHeight)
   const toRem = (value: string, base: number) => Number((Number(value) / base / fontScale).toFixed(4))
   transformed = transformed
     .replace(/font-size\s*:\s*xx-small/gi, 'font-size: 0.6rem')
@@ -466,21 +560,25 @@ export function transformEpubStylesheet(
     .replace(/font-size\s*:\s*xxx-large/gi, 'font-size: 3rem')
     .replace(/font-size\s*:\s*(\d+(?:\.\d+)?)px/gi, (_match, value: string) => `font-size: ${toRem(value, 16)}rem`)
     .replace(/font-size\s*:\s*(\d+(?:\.\d+)?)pt/gi, (_match, value: string) => `font-size: ${toRem(value, 12)}rem`)
-    .replace(/(font-family\s*:[^;]*?)\bsans-serif\b/gi, '$1__BD_SANS_SERIF__')
-    .replace(/(font-family\s*:[^;]*?)\bserif\b(?!-)/gi, '$1var(--bd-serif, serif)')
-    .replace(/(font-family\s*:[^;]*?)\bmonospace\b/gi, '$1var(--bd-monospace, monospace)')
-    .replace(/__BD_SANS_SERIF__/g, 'var(--bd-sans-serif, sans-serif)')
+    .replace(/(font-family\s*:\s*)([^;{}]*)/gi, (_match: string, prefix: string, value: string) => {
+      const important = /\s*!\s*important\s*$/i.exec(value)
+      const families = important ? value.slice(0, important.index) : value
+      const rewritten = families
+        .split(',')
+        .map((family: string) => {
+          const generic = /^(serif|sans-serif|monospace)$/i.exec(family.trim())
+          if (!generic) return family
+          const name = generic[1]!.toLowerCase()
+          return family.replace(generic[1]!, `var(--bd-${name}, ${name})`)
+        })
+        .join(',')
+      return prefix + rewritten + (important ? important[0] : '')
+    })
     .replace(/(^|[\s;{])font-weight\s*:\s*normal/gi, '$1font-weight: var(--bd-font-weight, normal)')
     .replace(/(^|[\s;{])color\s*:\s*black/gi, '$1color: var(--bd-theme-text, black)')
     .replace(/(^|[\s;{])color\s*:\s*#000000/gi, '$1color: var(--bd-theme-text, black)')
     .replace(/(^|[\s;{])color\s*:\s*#000/gi, '$1color: var(--bd-theme-text, black)')
     .replace(/(^|[\s;{])color\s*:\s*rgb\(0,\s*0,\s*0\)/gi, '$1color: var(--bd-theme-text, black)')
-    .replace(/(background(?:-color)?\s*:\s*)([^;!}]+?)(\s*!important)?(?=\s*(?:;|}|$))/gi, (match, prefix: string, value: string, important = '') => {
-      const color = value.trim().split(/\s+/)[0] ?? ''
-      return isLightCssColor(color)
-        ? `${prefix}var(--bd-theme-bg, ${color})${important}`
-        : match
-    })
     .replace(/backdrop-filter\s*:\s*brightness\(100%\)\s*[;]?/gi, '')
     .replace(/(^|[\s;{])-webkit-user-select\s*:\s*none/gi, '$1-webkit-user-select: unset')
     .replace(/(^|[\s;{])-moz-user-select\s*:\s*none/gi, '$1-moz-user-select: unset')
@@ -493,6 +591,14 @@ export function transformEpubStylesheet(
   }
   if (viewportHeight > 0) {
     transformed = transformed.replace(/(\d*\.?\d+)vh/gi, (_match, value: string) => `${Number((Number(value) * viewportHeight / 100).toFixed(4))}px`)
+  }
+  if (options.darkTheme) {
+    transformed = transformed.replace(/(background(?:-color)?\s*:\s*)([^;!}]+?)(\s*!important)?(?=\s*(?:;|}|$))/gi, (match, prefix: string, value: string, important = '') => {
+      const color = value.trim().split(/\s+/)[0] ?? ''
+      return isLightCssColor(color)
+        ? `${prefix}var(--bd-theme-bg, ${color})${important}`
+        : match
+    })
   }
   transformed = transformed.replace(/-epub-/gi, '')
   return transformed
@@ -520,14 +626,20 @@ function isLightCssColor(value: string): boolean {
   return (0.299 * red + 0.587 * green + 0.114 * blue) / 255 > 0.85
 }
 
-export function transformEpubMarkup(markup: string, viewportWidth: number, viewportHeight = 0, fontScale = 1): string {
+export function transformEpubMarkup(
+  markup: string,
+  viewportWidth: number,
+  viewportHeight = 0,
+  fontScale = 1,
+  options: EpubStylesheetTransformOptions = {},
+): string {
   const transformed = markup.replace(
     /(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi,
-    (_match, opening: string, css: string, closing: string) => `${opening}${transformEpubStylesheet(css, viewportWidth, viewportHeight, fontScale)}${closing}`,
+    (_match, opening: string, css: string, closing: string) => `${opening}${transformEpubStylesheet(css, viewportWidth, viewportHeight, fontScale, options)}${closing}`,
   )
   return transformed.replace(
     /(\sstyle\s*=\s*)(["'])([\s\S]*?)\2/gi,
-    (_match, prefix: string, quote: string, style: string) => `${prefix}${quote}${transformEpubStylesheet(style, viewportWidth, viewportHeight, fontScale)}${quote}`,
+    (_match, prefix: string, quote: string, style: string) => `${prefix}${quote}${transformEpubStylesheet(style, viewportWidth, viewportHeight, fontScale, options)}${quote}`,
   )
 }
 
@@ -569,6 +681,26 @@ export function setEpubParagraphWhitespace(doc: Document, normalize: boolean): v
 
 export function normalizeEpubParagraphWhitespace(doc: Document): void {
   setEpubParagraphWhitespace(doc, true)
+}
+
+export function keepEpubTextAlignment(doc: Document): void {
+  const view = doc.defaultView ?? (typeof window === 'undefined' ? null : window)
+  if (!view) return
+
+  const elements = Array.from(doc.querySelectorAll('div, p, blockquote, dd'))
+  const alignmentClasses = elements.map((element) => {
+    const alignment = view.getComputedStyle(element).textAlign
+    if (alignment === 'center') return 'aligned-center'
+    if (alignment === 'left') return 'aligned-left'
+    if (alignment === 'right') return 'aligned-right'
+    if (alignment === 'justify') return 'aligned-justify'
+    return null
+  })
+
+  elements.forEach((element, index) => {
+    const alignmentClass = alignmentClasses[index]
+    if (alignmentClass) element.classList.add(alignmentClass)
+  })
 }
 
 export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEpubDocumentOptions): void {
@@ -1365,14 +1497,22 @@ function attachBookDataTransform(book: any) {
     const fontScale = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent)
       ? 1.25
       : 1
+    const themeBg = typeof document === 'undefined'
+      ? ''
+      : getComputedStyle(document.documentElement).getPropertyValue('--bd-read-bg').trim()
+    const darkTheme = themeBg !== '' && !isLightCssColor(themeBg)
     // detail.data may be a promise; the Loader awaits it either way.
     detail.data = Promise.resolve(detail.data).then(async (data: unknown) => {
       if (typeof data !== 'string') return data
       let transformed = data
       if (applyBookStyleTransform) {
+        const transformOptions: EpubStylesheetTransformOptions = {
+          darkTheme,
+          verticalWriting: /(?:-epub-)?writing-mode\s*:\s*vertical-(?:rl|lr)\b/i.test(data),
+        }
         transformed = isStylesheet
-          ? transformEpubStylesheet(transformed, viewportWidth, viewportHeight, fontScale)
-          : transformEpubMarkup(transformed, viewportWidth, viewportHeight, fontScale)
+          ? transformEpubStylesheet(transformed, viewportWidth, viewportHeight, fontScale, transformOptions)
+          : transformEpubMarkup(transformed, viewportWidth, viewportHeight, fontScale, transformOptions)
       }
       if (isMarkup) {
         // Text replacements run after book CSS normalization, and only markup
@@ -1468,6 +1608,7 @@ export class FoliateReader implements BookReader {
   private url: string
   private bookId: string
   private bookSize?: number
+  private bookFormat: BookFormat
   private container: HTMLElement | null = null
   private view: any | null = null
   private book: any | null = null
@@ -2091,10 +2232,11 @@ export class FoliateReader implements BookReader {
 
   private destroyed = false
 
-  constructor(url: string, bookId = '', bookSize?: number) {
+  constructor(url: string, bookId = '', bookSize?: number, bookFormat: BookFormat = 'epub') {
     this.url = url
     this.bookId = bookId
     this.bookSize = bookSize
+    this.bookFormat = bookFormat
   }
 
   async mount(container: HTMLElement, initialTarget?: string, initialFraction?: number, onReady?: () => void) {
@@ -2794,9 +2936,13 @@ export class FoliateReader implements BookReader {
   applyParagraphStyle(cfg: ParagraphStyle) {
     this.paragraph = cfg
     this.emit('readingSettingsChanged')
-    for (const doc of this.activeDocs) setEpubParagraphWhitespace(doc, cfg.overrideBookLayout)
+    for (const doc of this.activeDocs) setEpubParagraphWhitespace(doc, this.shouldForceBookLayout())
     this.applyStyles()
     this.updateLayout()
+  }
+
+  private shouldForceBookLayout(): boolean {
+    return this.bookFormat === 'txt' || this.paragraph.overrideBookLayout
   }
 
   applyPageWidth(width: number) {
@@ -4002,7 +4148,8 @@ export class FoliateReader implements BookReader {
       for (const { doc, index } of contents) {
         if (!doc || this.activeDocs.has(doc)) continue
         this.applyFixedLayoutDocumentStyles(doc)
-        setEpubParagraphWhitespace(doc, this.paragraph.overrideBookLayout)
+        keepEpubTextAlignment(doc)
+        setEpubParagraphWhitespace(doc, this.shouldForceBookLayout())
         normalizeEpubDocumentImages(doc, {
           section: this.book?.sections?.[index],
           onMediaError: (detail) => this.emit('mediaError', detail),
@@ -4167,7 +4314,7 @@ export class FoliateReader implements BookReader {
     const fontCss = this.font.fontCss ?? ''
     const isDarkTheme = !isLightCssColor(this.theme.bg)
     const forceBookdockFont = this.font.overrideBookFont
-    const forceBookdockLayout = this.paragraph.overrideBookLayout
+    const forceBookdockLayout = this.shouldForceBookLayout()
     const fontDeclarations = `
         font-size: ${this.font.size}px !important;
         font-weight: ${this.font.fontWeight};
@@ -4178,6 +4325,12 @@ export class FoliateReader implements BookReader {
       ? `
       body *:not(pre, code, kbd, .code):not(pre *, code *, kbd *, .code *) {
         font-family: ${fontStack} !important;
+      }`
+      : ''
+    const fontBodySizeStyles = forceBookdockFont
+      ? `
+      p, li, div, pre, dd {
+        font-size: max(1rem, var(--bd-min-font-size, 8px)) !important;
       }`
       : ''
     const fontLegacySizeStyles = `
@@ -4289,10 +4442,10 @@ export class FoliateReader implements BookReader {
         page-break-inside: avoid;
         box-sizing: border-box;
       }
-      img:not([width]), svg:not([width]) {
+      img:where(:not([width])), svg:where(:not([width])) {
         width: auto;
       }
-      img:not([height]), svg:not([height]) {
+      img:where(:not([height])), svg:where(:not([height])) {
         height: auto;
       }
       video {
@@ -4746,9 +4899,13 @@ export class FoliateReader implements BookReader {
     const css = `
       ${fontCss}
       ${fontVariables}
-      html {
+      ${forceBookdockFont
+        ? `html body {
+        font-family: ${fontStack} !important;
+      }`
+        : `:where(html) {
         font-family: ${fontStack};
-      }
+      }`}
       html, body {
         ${fontDeclarations}
         ${layoutDeclarations}
@@ -4760,8 +4917,8 @@ export class FoliateReader implements BookReader {
         --bd-search-active-highlight: ${searchActiveHighlightColor(this.theme)} !important;
         --bd-search-active-border: ${searchActiveBorderColor(this.theme)} !important;
       }
-      pre, code, kbd {
-        font-family: var(--bd-monospace, ui-monospace, SFMono-Regular, Consolas, monospace);
+      ${forceBookdockFont ? 'html body :is(pre, code, kbd)' : ':where(pre, code, kbd)'} {
+        font-family: var(--bd-monospace, ui-monospace, SFMono-Regular, Consolas, monospace)${forceBookdockFont ? ' !important' : ''};
         font-variant-ligatures: none;
       }
       ::selection {
@@ -4769,6 +4926,7 @@ export class FoliateReader implements BookReader {
         color: inherit !important;
       }
       ${fontDescendantStyles}
+      ${fontBodySizeStyles}
       ${fontLegacySizeStyles}
       ${inlineThemeStyles}
       ${paragraphStyles}

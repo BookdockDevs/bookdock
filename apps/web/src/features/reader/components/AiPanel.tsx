@@ -493,7 +493,14 @@ function StreamingMarkdownText({ store, messageId, citations, onCitationClick, c
   return <MarkdownText content={content} citations={citations} onCitationClick={onCitationClick} citationLabel={citationLabel} streaming={streaming} />
 }
 
-export default function AiPanel({ bookId }: { bookId: string }) {
+interface AiPanelProps {
+  bookId: string
+  initialScrollTop?: number
+  open?: boolean
+  onScrollPositionChange?: (top: number) => void
+}
+
+export default function AiPanel({ bookId, initialScrollTop, open = true, onScrollPositionChange }: AiPanelProps) {
   const _ = useTranslation()
   const user = useAuthStore((s) => s.user)
   const memoryUserId = user?.id ?? 'anonymous'
@@ -575,6 +582,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const messagesContentRef = useRef<HTMLDivElement>(null)
+  const initialScrollRestoredRef = useRef(false)
   const shouldStickToLatestRef = useRef(true)
   const hasPendingLatestRef = useRef(false)
   const [isAtLatest, setIsAtLatest] = useState(true)
@@ -918,7 +926,13 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     const container = messagesContainerRef.current
     const content = messagesContentRef.current
     if (!container || !content) return
-    if (shouldStickToLatestRef.current) container.scrollTop = container.scrollHeight
+    if (!initialScrollRestoredRef.current && initialScrollTop !== undefined) {
+      container.scrollTop = initialScrollTop
+      const nearLatest = container.scrollHeight - container.scrollTop - container.clientHeight <= 64
+      shouldStickToLatestRef.current = nearLatest
+      setIsAtLatest(nearLatest)
+      initialScrollRestoredRef.current = true
+    } else if (shouldStickToLatestRef.current) container.scrollTop = container.scrollHeight
     const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver((entries) => {
       if (shouldStickToLatestRef.current) {
         container.scrollTop = container.scrollHeight
@@ -933,7 +947,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
     resizeObserver?.observe(container)
     resizeObserver?.observe(content)
     return () => resizeObserver?.disconnect()
-  }, [messages, streaming, threadId])
+  }, [initialScrollTop, messages, streaming, threadId])
   useEffect(() => () => {
     if (copiedMessageTimerRef.current !== null) window.clearTimeout(copiedMessageTimerRef.current)
   }, [])
@@ -1067,6 +1081,7 @@ export default function AiPanel({ bookId }: { bookId: string }) {
   function handleMessagesScroll() {
     const container = messagesContainerRef.current
     if (!container) return
+    if (open) onScrollPositionChange?.(container.scrollTop)
     const nearLatest = container.scrollHeight - container.scrollTop - container.clientHeight <= 64
     shouldStickToLatestRef.current = nearLatest
     setIsAtLatest((current) => current === nearLatest ? current : nearLatest)

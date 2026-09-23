@@ -4,7 +4,8 @@ import { useReaderState } from '../features/reader/state/reader-state'
 
 describe('reader-state resetForBook', () => {
   beforeEach(() => {
-    useReaderState.setState({ sidebarOpen: true, activeNavTab: 'notes', selection: null })
+    localStorage.clear()
+    useReaderState.setState({ sidebarOpen: true, activeNavTab: 'notes', selection: null, sidebarScrollPositions: {} })
   })
 
   it('collapses the sidebar by default', () => {
@@ -27,5 +28,22 @@ describe('reader-state resetForBook', () => {
   it('falls back to the TOC when no initial tab is given', () => {
     useReaderState.getState().resetForBook(true)
     expect(useReaderState.getState().activeNavTab).toBe('toc')
+  })
+
+  it('keeps sidebar positions available when resetting the reader for a book', () => {
+    useReaderState.getState().setSidebarScrollPosition('book-1', 'toc', { top: 123, currentIndex: 14 })
+    useReaderState.getState().setSidebarScrollPosition('book-1', 'notes', { top: 456 })
+    useReaderState.getState().resetForBook()
+    expect(useReaderState.getState().sidebarScrollPositions['book-1']).toEqual({
+      toc: { top: 123, currentIndex: 14 },
+      notes: { top: 456 },
+    })
+  })
+
+  it('persists sidebar positions for a fresh reader load', () => {
+    useReaderState.getState().setSidebarScrollPosition('book-1', 'stats', { top: 789 })
+    expect(JSON.parse(localStorage.getItem('bd-reader-sidebar-scroll-v1') ?? '{}')).toEqual({
+      'book-1': { stats: { top: 789 } },
+    })
   })
 })

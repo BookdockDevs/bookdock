@@ -115,9 +115,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
 
   const handleNavTab = useCallback((tab: NavTab) => {
     if (sidebarOpen && activeNavTab === tab) {
+      panelRef.current?.saveScroll()
       setSidebarOpen(false)
     } else {
-      panelRef.current?.saveScroll()
+      if (sidebarOpen) panelRef.current?.saveScroll()
       setActiveNavTab(tab)
       setSidebarOpen(true)
       // Only explicit dock clicks are remembered — programmatic handoffs
@@ -127,6 +128,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   }, [sidebarOpen, activeNavTab, setActiveNavTab, setSidebarOpen, setNavTabRemembered])
 
   const handleClosePanel = useCallback(() => {
+    panelRef.current?.saveScroll()
     setSidebarOpen(false)
   }, [setSidebarOpen])
 
@@ -254,7 +256,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
           <div
             data-testid="sidebar-backdrop"
             className="fixed inset-0 z-40 bg-black/40"
-            onClick={() => setSidebarOpen(false)}
+            onClick={handleClosePanel}
           />
         )}
         <div

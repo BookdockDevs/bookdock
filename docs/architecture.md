@@ -68,17 +68,23 @@ Reading position fields live in the `books` row; progress history and interval d
 
 ### Reader book-style boundary
 
-The reader separates book-native text layout from renderer safety rules. When
-`overrideBookLayout` is off, the EPUB/TXT document remains authoritative for
-text-level properties such as line height, paragraph spacing, indentation,
-letter spacing, and alignment; the reader does not inject paragraph-level
-`!important` declarations or remove leading paragraph whitespace. When it is
-on, those properties and the reader's extended compatibility rules are
-applied. Page geometry (content width, gutters, columns, and viewport
-padding), theme synchronization, and safety compatibility for overflowing
-media, fixed-width legacy content, and unsupported pagination remain
-renderer-controlled in both modes. Font family remains independently
-controlled by `overrideBookFont`.
+The reader separates format-specific book layout semantics from renderer safety
+rules. TXT books are generated from plain text by Bookdock and have no authored
+layout to preserve, so reader text settings (line height, paragraph spacing,
+indentation, letter spacing, and alignment) are always applied to TXT content;
+`overrideBookLayout` does not change that result. For EPUB books,
+`overrideBookLayout` is the explicit boundary: when it is off, authored text
+layout remains authoritative; when it is on, the reader's text settings and
+extended compatibility rules are forced over authored layout. The settings
+control remains shared and visible for stable UI behavior, even though it has
+no additional effect on TXT.
+
+Page geometry (content width, gutters, columns, and viewport padding), theme
+synchronization, and safety compatibility for overflowing media, fixed-width
+legacy content, and unsupported pagination remain renderer-controlled in both
+modes. Font family remains independently controlled by `overrideBookFont`,
+with TXT using the reader fallback because generated TXT content has no
+authored font family.
 
 Reader theme selection separates the user's mode intent from the effective
 palette. The mode is `system`, `light`, or `dark`; `system` uses the user's

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from 'react'
+import type { BookFormat } from '@bookdock/shared'
+
 import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { resolveReadingTheme } from '@/lib/reading-theme'
@@ -10,6 +12,7 @@ import type { EffectiveViewSettings } from '../lib/view-settings'
 interface UseReaderRendererOptions {
   url: string
   bookId?: string
+  format?: BookFormat
   /** Known file size from the book-detail response; lets the renderer pick
    *  the zip load strategy without a HEAD probe. */
   bookSize?: number
@@ -48,6 +51,7 @@ interface UseReaderRendererOptions {
 export function useReaderRenderer({
   url,
   bookId,
+  format,
   bookSize,
   initialCfi,
   initialFraction,
@@ -210,7 +214,7 @@ export function useReaderRenderer({
     fontSize: marginalFontSize,
   }
 
-  const createRenderer = useCallback(() => new FoliateReader(url, bookId, bookSize), [bookId, bookSize, url])
+  const createRenderer = useCallback(() => new FoliateReader(url, bookId, bookSize, format), [bookId, bookSize, format, url])
 
   useEffect(() => {
     if (!containerRef.current || !url) return

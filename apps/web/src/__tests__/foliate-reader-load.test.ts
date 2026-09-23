@@ -195,11 +195,79 @@ describe('transformEpubStylesheet', () => {
     expect(transformEpubStylesheet('-epub-hyphens: auto;', 900)).toBe('hyphens: auto;')
  })
 
-  it('rewrites light backgrounds and keeps the minimum font size after unit conversion', () => {
+  it('keeps authored light backgrounds in non-dark mode and keeps the minimum font size after unit conversion', () => {
     const transformed = transformEpubStylesheet('.callout { background-color: #f5f5f5; font-size: 6px; }', 900)
 
-    expect(transformed).toContain('background-color: var(--bd-theme-bg, #f5f5f5);')
+    expect(transformed).toContain('background-color: #f5f5f5;')
     expect(transformed).toContain('font-size: max(0.375rem, var(--bd-min-font-size, 8px));')
+  })
+
+  it('rewrites light backgrounds only when dark-theme normalization is enabled', () => {
+    const transformed = transformEpubStylesheet(
+      '.callout { background-color: #f5f5f5; }',
+      900,
+      0,
+      1,
+      { darkTheme: true },
+    )
+
+    expect(transformed).toContain('background-color: var(--bd-theme-bg, #f5f5f5);')
+  })
+
+  it('rewrites fixed backgrounds and preserves fixed words inside URLs and functions', () => {
+    const transformed = transformEpubStylesheet(`
+      .cover { background: url(images/fixed.png) no-repeat fixed top left; }
+      .safe { background-attachment: var(--fixed, fixed); }
+    `, 900)
+
+    expect(transformed).toContain('url(images/fixed.png) no-repeat scroll top left')
+    expect(transformed).toContain('background-attachment: var(--fixed, fixed);')
+    expect(transformed).not.toContain('position: scroll')
+  })
+
+  it('removes negative horizontal margins from painted background bands', () => {
+    const transformed = transformEpubStylesheet(
+      '.band { background-color: #0069b7; margin: -2em -2em 1em -2em; }',
+      900,
+    )
+
+    expect(transformed).toContain('margin-left: 0 !important; margin-right: 0 !important;')
+  })
+
+  it('leaves negative background margins intact for vertical writing', () => {
+    const css = '.band { background-color: #0069b7; margin: -2em -2em 1em -2em; }'
+
+    expect(transformEpubStylesheet(css, 900, 0, 1, { verticalWriting: true })).not.toContain('margin-left: 0 !important;')
+  })
+
+  it('resolves orientation and pixel media queries against the reader viewport', () => {
+    const css = `
+      @media screen and (orientation: landscape) { div { column-count: 2; } }
+      @media screen and (max-width: 480px) { p { margin: 0; } }
+      @media screen and (min-height: 500px) { h1 { margin: 0; } }
+    `
+    const transformed = transformEpubStylesheet(css, 1000, 800)
+
+    expect(transformed).toContain('@media screen and (min-width: 0px)')
+    expect(transformed).toContain('@media screen and (min-width: 999999px)')
+    expect(transformed).not.toContain('orientation')
+    expect(transformed).not.toContain('(max-width: 480px)')
+    expect(transformed).toContain('div { column-count: 2; }')
+  })
+
+  it('rewrites only bare generic font families and remains idempotent', () => {
+    const css = `
+      @font-face { font-family: "Source Han Serif CN"; src: url(font.woff2); }
+      .body { font-family: Source Han Serif CN, serif !important; }
+      .code { font-family: monospace; }
+    `
+
+    const transformed = transformEpubStylesheet(css, 900)
+
+    expect(transformed).toContain('font-family: "Source Han Serif CN";')
+    expect(transformed).toContain('font-family: Source Han Serif CN, var(--bd-serif, serif) !important;')
+    expect(transformed).toContain('font-family: var(--bd-monospace, monospace);')
+    expect(transformEpubStylesheet(transformed, 900)).toBe(transformed)
   })
 
   it('still clips nowrap when the viewport width is unknown', () => {
@@ -341,6 +409,20 @@ describe('FoliateReader book-style overrides', () => {
     expect(css).toContain('-webkit-touch-callout: none;')
   })
 
+  it('keeps default media sizing rules lower specificity than EPUB styles', () => {
+    const reader = new FoliateReader('')
+    const setStyles = vi.fn()
+    ;(reader as any).view = { renderer: { setStyles } }
+
+    ;(reader as any).applyStyles()
+
+    const css = String(setStyles.mock.calls[0]?.[0] ?? '')
+    expect(css).toContain('img:where(:not([width])), svg:where(:not([width]))')
+    expect(css).toContain('img:where(:not([height])), svg:where(:not([height]))')
+    expect(css).not.toContain('img:not([width]), svg:not([width])')
+    expect(css).not.toContain('img:not([height]), svg:not([height])')
+  })
+
   it('leaves book text layout rules untouched when book-style overrides are disabled', () => {
     const reader = new FoliateReader('')
     const setStyles = vi.fn()
@@ -368,7 +450,7 @@ describe('FoliateReader book-style overrides', () => {
     ;(reader as any).applyStyles()
 
     const css = String(setStyles.mock.calls[0]?.[0] ?? '')
-    expect(css).toContain('html {\n        font-family: Test Font;\n      }')
+    expect(css).toContain(':where(html) {\n        font-family: Test Font;\n      }')
     expect(css).not.toContain('font-family: Test Font !important;')
     expect(css).not.toContain('body *:not(pre, code, kbd, .code)')
   })

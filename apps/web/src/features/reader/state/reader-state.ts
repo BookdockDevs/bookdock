@@ -7,6 +7,51 @@ export interface AiPendingQuickCommand {
   prompt: string
 }
 
+export interface SidebarScrollPosition {
+  top: number
+  currentIndex?: number
+}
+
+type SidebarScrollPositions = Record<string, Partial<Record<NavTab, SidebarScrollPosition>>>
+
+const SIDEBAR_SCROLL_STORAGE_KEY = 'bd-reader-sidebar-scroll-v1'
+
+function loadSidebarScrollPositions(): SidebarScrollPositions {
+  if (typeof window === 'undefined') return {}
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(SIDEBAR_SCROLL_STORAGE_KEY) ?? '{}')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const positions: SidebarScrollPositions = {}
+    for (const [bookId, rawTabs] of Object.entries(parsed)) {
+      if (!rawTabs || typeof rawTabs !== 'object' || Array.isArray(rawTabs)) continue
+      const tabs: Partial<Record<NavTab, SidebarScrollPosition>> = {}
+      for (const tab of ['toc', 'notes', 'stats', 'ai'] as NavTab[]) {
+        const rawPosition = (rawTabs as Record<string, unknown>)[tab]
+        if (!rawPosition || typeof rawPosition !== 'object' || Array.isArray(rawPosition)) continue
+        const top = (rawPosition as Record<string, unknown>).top
+        if (typeof top !== 'number' || !Number.isFinite(top) || top < 0) continue
+        const currentIndex = (rawPosition as Record<string, unknown>).currentIndex
+        tabs[tab] = {
+          top,
+          ...(typeof currentIndex === 'number' && Number.isInteger(currentIndex) && currentIndex >= 0 ? { currentIndex } : {}),
+        }
+      }
+      if (Object.keys(tabs).length > 0) positions[bookId] = tabs
+    }
+    return positions
+  } catch {
+    return {}
+  }
+}
+
+function persistSidebarScrollPositions(positions: SidebarScrollPositions) {
+  try {
+    window.localStorage.setItem(SIDEBAR_SCROLL_STORAGE_KEY, JSON.stringify(positions))
+  } catch {
+    // Ignore storage quota and private-mode errors; the in-memory state remains useful.
+  }
+}
+
 interface ReaderState {
   activeNavTab: NavTab
   tocItems: { label: string; href: string; level?: number }[]
@@ -14,6 +59,7 @@ interface ReaderState {
   currentChapter: string | null
   currentChapterHref: string | null
   currentChapterIndex: number | null
+  sidebarScrollPositions: SidebarScrollPositions
   selection: SelectionInfo | null
   /** Selection handed off to the AI panel; survives closing the native selection bubble. */
   aiContext: SelectionInfo | null
@@ -42,6 +88,7 @@ interface ReaderState {
   setCurrentChapter: (chapter: string | null) => void
   setCurrentChapterHref: (href: string | null) => void
   setCurrentChapterIndex: (index: number | null) => void
+  setSidebarScrollPosition: (bookId: string, tab: NavTab, position: SidebarScrollPosition) => void
   setSelection: (sel: SelectionInfo | null) => void
   setAiContext: (context: SelectionInfo | null) => void
   setAiPendingCommand: (command: AiPendingQuickCommand | null) => void
@@ -63,6 +110,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   currentChapter: null,
   currentChapterHref: null,
   currentChapterIndex: null,
+  sidebarScrollPositions: loadSidebarScrollPositions(),
   selection: null,
   aiContext: null,
   aiPendingCommand: null,
@@ -79,6 +127,19 @@ export const useReaderState = create<ReaderState>((set) => ({
   setCurrentChapter: (currentChapter) => set({ currentChapter }),
   setCurrentChapterHref: (currentChapterHref) => set({ currentChapterHref }),
   setCurrentChapterIndex: (currentChapterIndex) => set({ currentChapterIndex }),
+  setSidebarScrollPosition: (bookId, tab, position) => set((state) => {
+    if (state.sidebarScrollPositions[bookId]?.[tab]?.top === position.top
+      && state.sidebarScrollPositions[bookId]?.[tab]?.currentIndex === position.currentIndex) return state
+    const sidebarScrollPositions = {
+      ...state.sidebarScrollPositions,
+      [bookId]: {
+        ...state.sidebarScrollPositions[bookId],
+        [tab]: position,
+      },
+    }
+    persistSidebarScrollPositions(sidebarScrollPositions)
+    return { sidebarScrollPositions }
+  }),
   setSelection: (selection) => set({ selection }),
   setAiContext: (aiContext) => set({ aiContext }),
   setAiPendingCommand: (aiPendingCommand) => set({ aiPendingCommand }),

@@ -63,6 +63,7 @@ describe('NavigationPanel', () => {
       tocBookId: null,
       currentChapter: null,
       currentChapterHref: null,
+      sidebarScrollPositions: {},
       selection: null,
     })
   })
@@ -294,6 +295,51 @@ describe('NavigationPanel', () => {
     } finally {
       window.HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect
     }
+  })
+
+  it('restores the remembered TOC position after the panel remounts', async () => {
+    useReaderState.setState({
+      tocItems: Array.from({ length: 30 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
+      currentChapter: '第15章',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 123, currentIndex: 14 } } },
+    })
+
+    const first = render(<NavigationPanel bookId="book-1" open />)
+    const firstList = first.container.querySelector('.overflow-y-auto') as HTMLDivElement
+    expect(firstList.scrollTop).toBe(123)
+    first.unmount()
+
+    const second = render(<NavigationPanel bookId="book-1" open />)
+    const secondList = second.container.querySelector('.overflow-y-auto') as HTMLDivElement
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 350))
+    })
+
+    expect(secondList.scrollTop).toBe(123)
+  })
+
+  it('does not replace the remembered TOC position when a closed panel resets its scrollTop', async () => {
+    useReaderState.setState({
+      tocItems: Array.from({ length: 30 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
+      currentChapter: '第15章',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 123, currentIndex: 14 } } },
+    })
+
+    const view = render(<NavigationPanel bookId="book-1" open />)
+    const list = view.container.querySelector('.overflow-y-auto') as HTMLDivElement
+    expect(list.scrollTop).toBe(123)
+
+    view.rerender(<NavigationPanel bookId="book-1" open={false} />)
+    list.scrollTop = 0
+    fireEvent.scroll(list)
+
+    expect(useReaderState.getState().sidebarScrollPositions['book-1']).toEqual({ toc: { top: 123, currentIndex: 14 } })
+
+    view.rerender(<NavigationPanel bookId="book-1" open />)
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(list.scrollTop).toBe(123)
   })
 
   it('restores notes scroll position after switching to another side page and back', async () => {
@@ -553,7 +599,14 @@ describe('NavigationPanel', () => {
 
     beforeEach(() => {
       vi.mocked(useAnnotations).mockReturnValue({ data: { data: notesAnnotations } } as unknown as ReturnType<typeof useAnnotations>)
-      useReaderState.setState({ activeNavTab: 'notes' })
+      useReaderState.setState({
+        activeNavTab: 'notes',
+        tocBookId: 'book-1',
+        tocItems: [
+          { label: '第一章', href: 'chapter:1' },
+          { label: '第二章', href: 'chapter:2' },
+        ],
+      })
     })
 
     it('expands the search bar from the header icon and filters the list', () => {

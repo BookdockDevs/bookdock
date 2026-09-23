@@ -97,6 +97,21 @@ describe('NotesPanel', () => {
     expect(screen.getByText('reader.noNotes')).toBeInTheDocument()
   })
 
+  it('waits for chapter order before showing chapter-grouped notes', () => {
+    render(
+      <NotesPanel
+        items={ANNOTATIONS}
+        total={ANNOTATIONS.length}
+        sort="chapter"
+        chapterOrder={[]}
+        chapterOrderReady={false}
+        bookId="book-1"
+      />,
+    )
+    expect(screen.getByText('reader.loading')).toBeInTheDocument()
+    expect(screen.queryByText('直线划线甲')).toBeNull()
+  })
+
   it('keeps duplicate chapter labels in separate groups when hrefs differ', () => {
     const first = makeAnnotation({ id: 'duplicate-1', cfiRange: 'cfi:27-1', text: '第一次同名章节', chapter: '第二十七章', chapterHref: 'chapter:first-27' })
     const second = makeAnnotation({ id: 'duplicate-2', cfiRange: 'cfi:27-2', text: '第二次同名章节', chapter: '第二十七章', chapterHref: 'chapter:second-27' })

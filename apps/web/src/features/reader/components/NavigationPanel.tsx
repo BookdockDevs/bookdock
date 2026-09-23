@@ -197,6 +197,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const currentChapterHref = useReaderState((s) => s.currentChapterHref)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
   const setPendingTocHref = useReaderState((s) => s.setPendingTocHref)
+  const setSidebarScrollPosition = useReaderState((s) => s.setSidebarScrollPosition)
   const { renderer } = useReaderApi()
   const annotationsQuery = useAnnotations(bookId, { enabled: !guestReadOnly })
   const { data: annotations } = annotationsQuery
@@ -208,17 +209,22 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map())
   const volumeLiRefs = useRef<Map<number, HTMLLIElement>>(new Map())
   const [stuckVolumeIndex, setStuckVolumeIndex] = useState<number | null>(null)
-  const savedScrollTop = useRef<Partial<Record<NavTab, number>>>({})
-  const lastScrolledIndex = useRef<number | null>(null)
+  const rememberedScrollPositions = useReaderState.getState().sidebarScrollPositions[bookId] ?? {}
+  const savedScrollTop = useRef<Partial<Record<NavTab, number>>>({
+    toc: rememberedScrollPositions.toc?.top,
+    notes: rememberedScrollPositions.notes?.top,
+    stats: rememberedScrollPositions.stats?.top,
+    ai: rememberedScrollPositions.ai?.top,
+  })
+  const lastScrolledIndex = useRef<number | null>(rememberedScrollPositions.toc?.currentIndex ?? null)
 
-  useImperativeHandle(ref, () => ({
-    saveScroll: () => {
-      const container = listRef.current
-      if (container && tab !== 'ai') {
-        savedScrollTop.current[tab] = container.scrollTop
-      }
-    },
-  }))
+  const rememberSidebarScroll = useCallback((tabToRemember: NavTab, top: number, index?: number) => {
+    savedScrollTop.current[tabToRemember] = top
+    setSidebarScrollPosition(bookId, tabToRemember, {
+      top,
+      ...(tabToRemember === 'toc' && index !== undefined && index >= 0 ? { currentIndex: index } : {}),
+    })
+  }, [bookId, setSidebarScrollPosition])
 
   const annotationItems = useMemo(() => annotations?.data ?? [], [annotations?.data])
   const [displayTypes, setDisplayTypes] = useState<Set<ItemKind>>(loadDisplayTypes)
@@ -356,6 +362,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
 
   const tree = useMemo(() => buildTocTree(tocChapters), [tocChapters])
   const chapterOrder = useMemo(() => tocChapters.map((c) => ({ label: c.label, href: c.href })), [tocChapters])
+  const chapterOrderReady = tocBookId === bookId && chapterOrder.length > 0
   const rootNodes = useMemo(() => tree.filter((n) => n.parent === null), [tree])
 
   const currentIndex = useMemo(() => {
@@ -381,6 +388,16 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       ? currentChapterIndex
       : -1
   }, [currentChapter, currentChapterHref, currentChapterIndex, tree])
+
+  useImperativeHandle(ref, () => ({
+    saveScroll: () => {
+      const container = listRef.current
+      if (container && tab !== 'ai') {
+        savedScrollTop.current[tab] = container.scrollTop
+        rememberSidebarScroll(tab, container.scrollTop, tab === 'toc' ? currentIndex : undefined)
+      }
+    },
+  }), [currentIndex, rememberSidebarScroll, tab])
 
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
 
@@ -438,7 +455,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       item.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }
     lastScrolledIndex.current = currentIndex
-    savedScrollTop.current.toc = target
+    rememberSidebarScroll('toc', target, currentIndex)
 
     // Trigger pulse/flash highlight on the located chapter
     setFlashChapterIndex(currentIndex)
@@ -446,7 +463,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     flashTimerRef.current = setTimeout(() => {
       setFlashChapterIndex(null)
     }, 1200)
-  }, [currentIndex])
+  }, [currentIndex, rememberSidebarScroll])
 
   // Collapsing only hides the bar — query and results survive the round trip,
   // so reopening restores the search instantly instead of re-running it.
@@ -562,8 +579,8 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   // move the user to a different position when they return.
   function handleScroll() {
     const container = listRef.current
-    if (container && tab !== 'ai' && !(tab === 'toc' && searchExpanded)) {
-      savedScrollTop.current[tab] = container.scrollTop
+    if (container && open && tab !== 'ai' && !(tab === 'toc' && searchExpanded)) {
+      rememberSidebarScroll(tab, container.scrollTop, tab === 'toc' ? currentIndex : undefined)
       if (tab === 'toc') updateStuckVolume()
     }
   }
@@ -588,7 +605,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       return
     }
     container.scrollTop = saved ?? 0
-  }, [open, tab, currentIndex, searchExpanded])
+  }, [annotationItems.length, currentIndex, open, searchExpanded, statsTotalSeconds, tab, tocItems.length])
 
   // Scroll the current chapter into view when the panel opens or current chapter changes.
   // Position the current item at roughly the top 1/4 of the panel viewport for better context.
@@ -1326,6 +1343,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             locked={locked}
             onClose={onClose}
             chapterOrder={chapterOrder}
+            chapterOrderReady={chapterOrderReady}
             bookId={bookId}
             selectionMode={notesSelectionMode}
             onExitSelection={exitNotesSelectionMode}
@@ -1337,7 +1355,14 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         )}
         {tab === 'stats' && !statsDisabled && !guestReadOnly && <StatsPanel bookId={bookId} />}
         <div className={tab === 'ai' && !guestReadOnly ? 'h-full' : 'hidden'}>
-          {!guestReadOnly && <AiPanel bookId={bookId} />}
+          {!guestReadOnly && (
+            <AiPanel
+              bookId={bookId}
+              initialScrollTop={savedScrollTop.current.ai}
+              open={open}
+              onScrollPositionChange={(top) => rememberSidebarScroll('ai', top)}
+            />
+          )}
         </div>
       </div>
       )}

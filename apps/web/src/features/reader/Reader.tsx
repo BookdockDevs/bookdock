@@ -590,6 +590,7 @@ export default function Reader() {
   const { containerRef, renderer, fontStack, fontCss } = useReaderRenderer({
     url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
     bookId: id,
+    format: bookQuery.data?.data?.format,
     bookSize: bookQuery.data?.data?.size,
     // so it navigates exactly once (to the saved CFI, or to the book start
     // when progress resolved to none)

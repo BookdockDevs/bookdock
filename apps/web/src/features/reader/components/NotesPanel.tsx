@@ -145,6 +145,8 @@ interface NotesPanelProps {
   onClose?: () => void
   /** TOC entries in book order, used to sort chapter groups and exports */
   chapterOrder: ChapterOrderItem[]
+  /** Chapter grouping must wait for the book order to avoid showing API arrival order. */
+  chapterOrderReady?: boolean
   bookId: string
   selectionMode?: boolean
   onExitSelection?: () => void
@@ -162,6 +164,7 @@ export const NotesPanel = memo(function NotesPanel({
   locked,
   onClose,
   chapterOrder,
+  chapterOrderReady = true,
   bookId,
   selectionMode = false,
   onExitSelection,
@@ -644,6 +647,10 @@ export const NotesPanel = memo(function NotesPanel({
           <p className="mt-1.5 text-xs text-[var(--bd-read-sub)] max-w-64 leading-relaxed">
             {_('reader.noNotesHint')}
           </p>
+        </div>
+      ) : groups && !chapterOrderReady ? (
+        <div className="flex flex-1 items-center justify-center py-12 text-xs text-[var(--bd-read-sub)]">
+          {_('reader.loading')}
         </div>
       ) : groups ? (
         <div className="space-y-4">
