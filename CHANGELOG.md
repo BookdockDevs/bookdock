@@ -2,7 +2,39 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.3.2] - Unreleased
+## [0.3.3] - Unreleased
+
+### Highlights
+
+- Owners can check and install releases from the About section, with automatic snapshots, health-gated restarts, and rollback when an update fails.
+- Shelf and tag sidebars now support selectable sorting and pin-to-top, while library view defaults can be saved per user.
+- Guest access is enforced as server-side read-only access, and reader themes and expired-session recovery now stay synchronized and recover cleanly.
+
+### Added
+
+- In-app release updates with release metadata, checksum verification, automatic database snapshots, launcher health checks, and rollback to the previous release.
+- Five shelf/tag sidebar sort modes: manual, name, book count, recently added, and recently updated, with per-user direction preferences.
+- About settings with runtime version information, release links, manual update checks, and copyable diagnostics.
+- System, light, and dark reader theme modes, including live operating-system theme synchronization.
+
+### Changed
+
+- Shelf and tag membership timestamps are maintained by SQLite triggers, and pinned shelves/tags lead every sort mode without changing their membership timestamp.
+- Book-list sort and grid/list defaults are now stored per user; explicit URL settings take precedence, followed by server settings, legacy local storage, and built-in defaults.
+- Guest sessions are temporary and read-only: guest progress stays in the browser, unavailable actions are hidden or rejected server-side, and full TXT downloads are blocked.
+- Username input is sanitized and uniqueness checks use normalized case- and width-insensitive values; password-setting endpoints now require at least eight characters while login remains non-empty-only.
+- Settings were reorganized around shared cards, reading-timer controls moved to the statistics page, and the release workflow now runs the in-container update/rollback verification.
+
+### Fixed
+
+- Expired sessions now clear stale user caches and deduplicate concurrent recovery instead of exposing protected pages or producing duplicate redirects and error notifications.
+- EPUB range loading retries recoverable failures, missing book title/author fields can be filled from filenames, and reader/TTS state transitions are safer for guest and authenticated users.
+
+### Upgrade notes
+
+- This is the first release containing the in-container updater. Existing deployments must perform one normal `docker compose pull` upgrade before using in-app updates; keep a complete backup of `DATA_DIR`, including `.jwt-secret`.
+
+## [0.3.2] - 2026-09-22
 
 ### Highlights
 
@@ -256,7 +288,39 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.3.2] - 待发布
+### [0.3.3] - 待发布
+
+#### 主要更新
+
+- 管理员可在「关于」中检查并安装新版本；更新流程会自动创建快照、在重启后执行健康检查，失败时回滚到上一版本。
+- 书架与标签侧栏支持多种排序和置顶，书库视图默认值也可以按用户保存。
+- 访客访问由服务端强制为只读，阅读主题和过期会话恢复可以实时同步并稳定恢复。
+
+#### 新增
+
+- 应用内更新：支持读取发布元数据、校验校验和、创建数据库快照、由启动器执行健康检查，以及更新失败后的回滚。
+- 书架/标签侧栏的五种排序：手动、名称、书籍数量、最近添加、最近更新，并支持按用户保存排序方向。
+- 「关于」设置：显示运行时版本、发布链接、手动检查更新和可复制的诊断信息。
+- 系统、浅色、深色三种阅读主题，并支持跟随操作系统主题实时变化。
+
+#### 变更
+
+- 书架与标签的成员变化时间由 SQLite 触发器维护；置顶项目在所有排序模式中优先显示，但不会改变成员变化时间。
+- 书库排序与列表/网格视图默认值改为按用户保存；优先级为 URL 参数、服务端设置、旧版本地存储、内置默认值。
+- 访客会话改为临时只读：阅读进度保存在浏览器本地，不可用操作会在界面隐藏并由服务端拒绝，访客不能下载完整 TXT 内容。
+- 用户名输入会清理危险控制字符，唯一性检查按规范化后的大小写和全/半角形式处理；设置密码的接口最低要求 8 个字符，而登录仍只要求非空。
+- 设置页统一使用共享卡片，阅读计时器控制移至统计页；发布工作流新增容器内更新/回滚验证。
+
+#### 修复
+
+- 过期会话恢复时会清理旧用户缓存并合并并发恢复请求，不再暴露受保护页面或产生重复跳转和错误提示。
+- EPUB 分段读取会重试可恢复失败；缺失的书名/作者可从文件名补齐；访客和登录用户的阅读器/TTS 状态切换更加安全。
+
+#### 升级说明
+
+- 这是首个包含容器内更新器的版本。已有部署在使用应用内更新前，必须先正常执行一次 `docker compose pull`；请保留包含 `.jwt-secret` 的完整 `DATA_DIR` 备份。
+
+### [0.3.2] - 2026-09-22
 
 #### 主要更新
 

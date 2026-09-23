@@ -8,6 +8,8 @@ import { Hono } from 'hono'
 import { rm } from 'node:fs/promises'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { BOOKDOCK_BUILD_INFO } from '@bookdock/shared'
+
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { config } from '../../config'
@@ -21,6 +23,7 @@ vi.mock('../../config', async () => {
 })
 
 const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'db', 'migrations')
+const CURRENT_VERSION = BOOKDOCK_BUILD_INFO.version
 
 function createApp(role: 'owner' | 'member', guest = false) {
   const app = new Hono()
@@ -50,7 +53,7 @@ describe('snapshot routes', () => {
     const created = await owner.request('/api/v1/system/snapshots', { method: 'POST' })
     expect(created.status).toBe(201)
     const { data: snapshot } = await created.json()
-    expect(snapshot).toMatchObject({ appVersion: '0.3.2', sizeBytes: expect.any(Number) })
+    expect(snapshot).toMatchObject({ appVersion: CURRENT_VERSION, sizeBytes: expect.any(Number) })
 
     const listed = await owner.request('/api/v1/system/snapshots')
     expect(listed.status).toBe(200)

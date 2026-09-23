@@ -6,6 +6,8 @@ import path from 'node:path'
 import JSZip from 'jszip'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { BOOKDOCK_BUILD_INFO } from '@bookdock/shared'
+
 import { AppError } from '../../middleware/error'
 import { checkForUpdates } from './system.service'
 import { createSnapshot } from './snapshots.service'
@@ -25,6 +27,8 @@ vi.mock('./system.service', () => ({ checkForUpdates: vi.fn() }))
 vi.mock('./snapshots.service', () => ({ createSnapshot: vi.fn(), releaseSnapshotRetention: vi.fn() }))
 
 const TARGET = '0.4.0'
+const CURRENT_VERSION = BOOKDOCK_BUILD_INFO.version
+const CURRENT_SNAPSHOT_ID = `${CURRENT_VERSION}-1760000000000`
 const TAG = 'v0.4.0'
 const DOWNLOAD_BASE = `https://github.com/BookdockDevs/bookdock/releases/download/${TAG}`
 const PACKAGE_NAME = `bookdock-${TARGET}-linux-x64-musl.zip`
@@ -101,8 +105,8 @@ beforeEach(async () => {
   vi.unstubAllGlobals()
   // Default: every asset URL 404s, so no test can reach the network by accident.
   stubAssets({})
-  vi.mocked(checkForUpdates).mockResolvedValue({ status: 'update-available', currentVersion: '0.3.2', latestVersion: TARGET, latestTag: TAG, releaseUrl: 'https://github.com/x' })
-  vi.mocked(createSnapshot).mockResolvedValue({ id: `0.3.2-${1_760_000_000_000}`, appVersion: '0.3.2', createdAt: 1_760_000_000_000, sizeBytes: 1 })
+  vi.mocked(checkForUpdates).mockResolvedValue({ status: 'update-available', currentVersion: CURRENT_VERSION, latestVersion: TARGET, latestTag: TAG, releaseUrl: 'https://github.com/x' })
+  vi.mocked(createSnapshot).mockResolvedValue({ id: CURRENT_SNAPSHOT_ID, appVersion: CURRENT_VERSION, createdAt: 1_760_000_000_000, sizeBytes: 1 })
   settings.launcherNonce = 'test-nonce'
   await rm(config.dataDir, { recursive: true, force: true })
 })
@@ -127,13 +131,13 @@ describe('update guards', () => {
 
   it('ignores a pending marker that names no launchable release', async () => {
     await writePending({ target: '../escaped', snapshot: 's', progressId: 'p0' })
-    vi.mocked(checkForUpdates).mockResolvedValue({ status: 'up-to-date', currentVersion: '0.3.2' })
+    vi.mocked(checkForUpdates).mockResolvedValue({ status: 'up-to-date', currentVersion: CURRENT_VERSION })
 
     await expect(startUpdate({ targetVersion: TARGET, progressId: 'p1' })).rejects.toMatchObject({ code: 'UPDATE_NOT_AVAILABLE' })
   })
 
   it('refuses a target the update check did not report', async () => {
-    vi.mocked(checkForUpdates).mockResolvedValue({ status: 'up-to-date', currentVersion: '0.3.2' })
+    vi.mocked(checkForUpdates).mockResolvedValue({ status: 'up-to-date', currentVersion: CURRENT_VERSION })
     settings.launcherNonce = 'test-nonce'
 
     await expect(startUpdate({ targetVersion: TARGET, progressId: 'p1' })).rejects.toMatchObject({ code: 'UPDATE_NOT_AVAILABLE' })
@@ -176,10 +180,10 @@ describe('update guards', () => {
     await expect(startUpdate({ targetVersion: TARGET, progressId: 'p2' })).rejects.toMatchObject({ code: 'UPDATE_IN_PROGRESS' })
     expect(checkForUpdates).toHaveBeenCalledTimes(1)
 
-    releaseCheck?.({ status: 'update-available', currentVersion: '0.3.2', latestVersion: TARGET, latestTag: TAG, releaseUrl: 'https://github.com/x' })
+    releaseCheck?.({ status: 'update-available', currentVersion: CURRENT_VERSION, latestVersion: TARGET, latestTag: TAG, releaseUrl: 'https://github.com/x' })
     await expect(Promise.all([first, retry])).resolves.toEqual([
-      { phase: 'snapshot', currentVersion: '0.3.2', targetVersion: TARGET },
-      { phase: 'snapshot', currentVersion: '0.3.2', targetVersion: TARGET },
+      { phase: 'snapshot', currentVersion: CURRENT_VERSION, targetVersion: TARGET },
+      { phase: 'snapshot', currentVersion: CURRENT_VERSION, targetVersion: TARGET },
     ])
     expect(await settled()).toMatchObject({ phase: 'restarting', targetVersion: TARGET })
   })
@@ -200,7 +204,7 @@ describe('update state machine', () => {
 
     expect(restart).toHaveBeenCalledTimes(1)
     expect(await readFile(path.join(RELEASES_DIR, TARGET, 'apps', 'server', 'dist', 'index.js'), 'utf8')).toBe('export {}')
-    expect(await readFile(path.join(RELEASES_DIR, 'pending'), 'utf8')).toContain(`0.3.2-${1_760_000_000_000}`)
+    expect(await readFile(path.join(RELEASES_DIR, 'pending'), 'utf8')).toContain(CURRENT_SNAPSHOT_ID)
     expect((await readdir(path.join(RELEASES_DIR, TARGET))).sort()).toEqual(['apps', 'release.json'])
     expect(await exists(path.join(RELEASES_DIR, `${TARGET}.work`))).toBe(false)
   })
@@ -265,13 +269,13 @@ describe('update state machine', () => {
 
 describe('update status', () => {
   it('is idle with no job and no pending marker', async () => {
-    expect(await getUpdateStatus()).toEqual({ phase: 'idle', currentVersion: '0.3.2' })
+    expect(await getUpdateStatus()).toEqual({ phase: 'idle', currentVersion: CURRENT_VERSION })
   })
 
   it('reports the promoted release after the updating process is gone', async () => {
-    await writePending({ target: TARGET, snapshot: '0.3.2-1760000000000', progressId: 'p1' })
+    await writePending({ target: TARGET, snapshot: CURRENT_SNAPSHOT_ID, progressId: 'p1' })
     clearUpdateJob()
 
-    expect(await getUpdateStatus()).toMatchObject({ phase: 'restarting', currentVersion: '0.3.2', targetVersion: TARGET, pendingTarget: TARGET })
+    expect(await getUpdateStatus()).toMatchObject({ phase: 'restarting', currentVersion: CURRENT_VERSION, targetVersion: TARGET, pendingTarget: TARGET })
   })
 })

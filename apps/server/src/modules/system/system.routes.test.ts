@@ -6,6 +6,10 @@ import { BOOKDOCK_BUILD_INFO } from '@bookdock/shared'
 import systemRoutes from './system.routes'
 import { clearUpdateCheckCache } from './system.service'
 
+const CURRENT_VERSION = BOOKDOCK_BUILD_INFO.version
+const AVAILABLE_VERSION = '0.4.0'
+const AVAILABLE_TAG = `v${AVAILABLE_VERSION}`
+
 beforeEach(() => {
   clearUpdateCheckCache()
   vi.unstubAllGlobals()
@@ -24,9 +28,9 @@ describe('System routes', () => {
 
   it('reports an available stable release', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      tag_name: 'v0.3.3',
+      tag_name: AVAILABLE_TAG,
       published_at: '2026-09-22T10:00:00Z',
-      html_url: 'https://github.com/BookdockDevs/bookdock/releases/tag/v0.3.3',
+      html_url: `https://github.com/BookdockDevs/bookdock/releases/tag/${AVAILABLE_TAG}`,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
     const app = new Hono()
     app.route('/api/v1/system', systemRoutes)
@@ -37,20 +41,20 @@ describe('System routes', () => {
     expect(await response.json()).toEqual({
       data: {
         status: 'update-available',
-        currentVersion: '0.3.2',
-        latestVersion: '0.3.3',
-        latestTag: 'v0.3.3',
+        currentVersion: CURRENT_VERSION,
+        latestVersion: AVAILABLE_VERSION,
+        latestTag: AVAILABLE_TAG,
         publishedAt: '2026-09-22T10:00:00Z',
-        releaseUrl: 'https://github.com/BookdockDevs/bookdock/releases/tag/v0.3.3',
+        releaseUrl: `https://github.com/BookdockDevs/bookdock/releases/tag/${AVAILABLE_TAG}`,
       },
     })
   })
 
   it('reports when the current version is up to date', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      tag_name: 'v0.3.2',
+      tag_name: `v${CURRENT_VERSION}`,
       published_at: '2026-09-22T10:00:00Z',
-      html_url: 'https://github.com/BookdockDevs/bookdock/releases/tag/v0.3.2',
+      html_url: `https://github.com/BookdockDevs/bookdock/releases/tag/v${CURRENT_VERSION}`,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
     const app = new Hono()
     app.route('/api/v1/system', systemRoutes)
@@ -61,11 +65,11 @@ describe('System routes', () => {
     expect(await response.json()).toEqual({
       data: {
         status: 'up-to-date',
-        currentVersion: '0.3.2',
-        latestVersion: '0.3.2',
-        latestTag: 'v0.3.2',
+        currentVersion: CURRENT_VERSION,
+        latestVersion: CURRENT_VERSION,
+        latestTag: `v${CURRENT_VERSION}`,
         publishedAt: '2026-09-22T10:00:00Z',
-        releaseUrl: 'https://github.com/BookdockDevs/bookdock/releases/tag/v0.3.2',
+        releaseUrl: `https://github.com/BookdockDevs/bookdock/releases/tag/v${CURRENT_VERSION}`,
       },
     })
   })
@@ -79,7 +83,7 @@ describe('System routes', () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
-      data: { status: 'unavailable', currentVersion: '0.3.2' },
+      data: { status: 'unavailable', currentVersion: CURRENT_VERSION },
     })
   })
 
@@ -107,6 +111,6 @@ describe('System routes', () => {
 
     const response = await app.request('http://test/api/v1/system/update-check')
 
-    expect(await response.json()).toEqual({ data: { status: 'unavailable', currentVersion: '0.3.2' } })
+    expect(await response.json()).toEqual({ data: { status: 'unavailable', currentVersion: CURRENT_VERSION } })
   })
 })

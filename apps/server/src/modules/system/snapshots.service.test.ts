@@ -7,6 +7,8 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { BOOKDOCK_BUILD_INFO } from '@bookdock/shared'
+
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { config } from '../../config'
@@ -22,6 +24,7 @@ vi.mock('../../config', async () => {
 
 const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'db', 'migrations')
 const snapshotsRoot = path.join(config.dataDir, 'snapshots')
+const CURRENT_VERSION = BOOKDOCK_BUILD_INFO.version
 
 function createTestDb() {
   const sqlite = new Database(':memory:')
@@ -67,8 +70,8 @@ describe('snapshots service', () => {
     const snapshot = await createSnapshot()
 
     expect(snapshot).toMatchObject({
-      id: `0.3.2-1760000000000`,
-      appVersion: '0.3.2',
+      id: `${CURRENT_VERSION}-1760000000000`,
+      appVersion: CURRENT_VERSION,
       createdAt: 1_760_000_000_000,
       instanceSettings: { allowGuestAccess: 'false' },
     })
@@ -81,7 +84,7 @@ describe('snapshots service', () => {
 
     const manifest = JSON.parse(await readFile(path.join(snapshotsRoot, snapshot.id, 'manifest.json'), 'utf8'))
     expect(manifest).toEqual({
-      appVersion: '0.3.2',
+      appVersion: CURRENT_VERSION,
       createdAt: 1_760_000_000_000,
       instanceSettings: { allowGuestAccess: 'false' },
     })
