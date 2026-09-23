@@ -30,12 +30,18 @@ const DOWNLOAD_BASE = `https://github.com/BookdockDevs/bookdock/releases/downloa
 const PACKAGE_NAME = `bookdock-${TARGET}-linux-x64-musl.zip`
 let RELEASES_DIR = path.join(config.dataDir, 'releases')
 
+function currentLibc() {
+  if (process.platform !== 'linux') return process.platform
+  const report = process.report.getReport() as { header?: { glibcVersionRuntime?: unknown } }
+  return typeof report.header?.glibcVersionRuntime === 'string' && report.header.glibcVersionRuntime.length > 0 ? 'glibc' : 'musl'
+}
+
 /** Mirrors what CI writes, without importing the un-typechecked build script. */
 function runtimeManifest(overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
     version: TARGET,
     nodeMajor: Number(process.versions.node.split('.')[0]),
-    libc: process.platform === 'linux' ? 'musl' : process.platform,
+    libc: currentLibc(),
     createdAt: 1_760_000_000_000,
     ...overrides,
   })
