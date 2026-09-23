@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -65,11 +65,8 @@ console.log(JSON.stringify({ status: response.status, ok: response.ok, body, coo
 }
 
 function containerLogs(name) {
-  try {
-    return docker(['logs', name])
-  } catch (error) {
-    return error.message
-  }
+  const result = spawnSync('docker', ['logs', name], { encoding: 'utf8' })
+  return [result.stdout, result.stderr, result.error?.message].filter(Boolean).join('\n').trim()
 }
 
 function startContainer(name, args) {
