@@ -16,13 +16,16 @@ vi.mock('../features/library/hooks', () => ({
   useBooks: vi.fn(),
   useTags: vi.fn(),
   useTrashEnabled: vi.fn(),
+  useLibraryPrefs: () => undefined,
   useCreateShelf: vi.fn(),
   useRenameShelf: vi.fn(),
   useDeleteShelf: vi.fn(),
+  useToggleShelfPin: vi.fn(),
   useReorderShelves: vi.fn(),
   useCreateTag: vi.fn(),
   useRenameTag: vi.fn(),
   useDeleteTag: vi.fn(),
+  useToggleTagPin: vi.fn(),
 }))
 
 vi.mock('@/features/auth/AccountMenu', () => ({
@@ -30,8 +33,8 @@ vi.mock('@/features/auth/AccountMenu', () => ({
 }))
 
 
-interface ShelfItemData { id: string; name: string; bookCount: number }
-interface TagItemData { id: string; name: string; bookCount: number }
+interface ShelfItemData { id: string; name: string; bookCount: number; pinned?: boolean }
+interface TagItemData { id: string; name: string; bookCount: number; pinned?: boolean }
 
 function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1, trashEnabled = true }: { shelves?: ShelfItemData[]; tags?: TagItemData[]; uncategorizedTotal?: number; trashEnabled?: boolean } = {}) {
   ;(libraryHooks.useShelves as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -49,10 +52,12 @@ function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1, trashEnabl
   ;(libraryHooks.useCreateShelf as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useRenameShelf as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useDeleteShelf as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+  ;(libraryHooks.useToggleShelfPin as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useReorderShelves as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useCreateTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useRenameTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useDeleteTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+  ;(libraryHooks.useToggleTagPin as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
 }
 
 describe('LibrarySidebar', () => {
@@ -217,6 +222,27 @@ describe('LibrarySidebar', () => {
     expect(screen.getByText('重命名')).toBeInTheDocument()
     expect(screen.getByText('删除')).toBeInTheDocument()
     expect(screen.getByText('3', { exact: true })).toHaveClass('opacity-0')
+  })
+
+  it('toggles a tag pin from the context menu', () => {
+    const mutate = vi.fn()
+    mockHooks({ tags: [{ id: 'tag-1', name: '小说', bookCount: 3 }] })
+    ;(libraryHooks.useToggleTagPin as ReturnType<typeof vi.fn>).mockReturnValue({ mutate, isPending: false })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+    fireEvent.click(screen.getByText('置顶'))
+
+    expect(mutate).toHaveBeenCalledWith({ id: 'tag-1', pinned: true })
+  })
+
+  it('shows the unpin action for a pinned tag', () => {
+    mockHooks({ tags: [{ id: 'tag-1', name: '小说', bookCount: 3, pinned: true }] })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+
+    expect(screen.getByText('取消置顶')).toBeInTheDocument()
   })
 
   it('confirms before deleting a tag and calls the delete mutation', () => {

@@ -46,6 +46,10 @@ export const shelves = sqliteTable('shelves', {
   name: text('name').notNull(),
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: integer('created_at').notNull(),
+  // Membership-change time, maintained by DB triggers (0007), not service code
+  updatedAt: integer('updated_at').notNull().default(0),
+  // Sidebar pin-to-top flag, orthogonal to every sort mode (0007)
+  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
 })
 
 export const tags = sqliteTable('tags', {
@@ -53,6 +57,10 @@ export const tags = sqliteTable('tags', {
   userId: text('user_id').notNull().references(() => users.id),
   name: text('name').notNull(),
   sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: integer('created_at').notNull().default(0),
+  // Membership-change time, maintained by DB triggers (0007), not service code
+  updatedAt: integer('updated_at').notNull().default(0),
+  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
 })
 
 export const bookTags = sqliteTable('book_tags', {

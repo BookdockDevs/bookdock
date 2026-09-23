@@ -2,6 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import LibraryHeader from '../features/library/components/LibraryHeader'
 
+// The header's ViewMenu persists defaults via a mutation hook; stub it so the
+// test tree needs no QueryClient.
+vi.mock('../features/library/hooks', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../features/library/hooks')>()
+  return { ...actual, useUpdateLibraryPrefs: () => ({ mutate: vi.fn() }) }
+})
+
 const navSearch = vi.fn()
 
 beforeEach(() => {

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERMISSIONS } from './access-tokens'
+import { BOOK_SORT_PREF_FIELDS, LIBRARY_SORT_MODES } from './contract'
 import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 
@@ -188,6 +189,19 @@ export const settingsUpdateSchema = z.object({
   }).optional(),
   library: z.object({
     normalizeTitle: z.boolean().optional(),
+    shelfSort: z.object({
+      mode: z.enum(LIBRARY_SORT_MODES),
+      dir: z.enum(['asc', 'desc']).optional(),
+    }).optional(),
+    tagSort: z.object({
+      mode: z.enum(LIBRARY_SORT_MODES),
+      dir: z.enum(['asc', 'desc']).optional(),
+    }).optional(),
+    bookSort: z.object({
+      field: z.enum(BOOK_SORT_PREF_FIELDS),
+      dir: z.enum(['asc', 'desc']).optional(),
+    }).optional(),
+    view: z.enum(['grid', 'list']).optional(),
   }).optional(),
   integrations: z.object({
     legado: z.object({
@@ -665,10 +679,18 @@ export const updateUserSchema = z.object({
 })
 
 export const shelfCreateSchema = z.object({ name: z.string().trim().min(1).max(100) })
-export const shelfUpdateSchema = z.object({ name: z.string().trim().min(1).max(100) })
+// PUT /shelves/:id accepts a rename, a pin toggle, or both; the route rejects
+// an empty patch.
+export const shelfUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  pinned: z.boolean().optional(),
+})
 export const shelfReorderSchema = z.object({ shelfIds: z.array(z.string().min(1)) })
 export const tagCreateSchema = z.object({ name: z.string().trim().min(1).max(100) })
-export const tagUpdateSchema = z.object({ name: z.string().trim().min(1).max(100) })
+export const tagUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  pinned: z.boolean().optional(),
+})
 export const tagReorderSchema = z.object({ tagIds: z.array(z.string().min(1)) })
 export const bookMembershipSchema = z.object({
   shelfId: z.string().min(1).nullable().optional(),

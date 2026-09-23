@@ -185,6 +185,13 @@
       "size": "Size",
       "progress": "Progress"
     },
+    "sortMode": {
+      "manual": "Manual",
+      "name": "Name",
+      "bookCount": "Count",
+      "recentlyAdded": "Date added",
+      "recentlyUpdated": "Date updated"
+    },
     "readStatusLabel": "Reading Status",
     "readStatusAll": "All",
     "readStatusWishlist": "Want to Read",
@@ -866,6 +873,11 @@
   "settings": {
     "language": "Language",
     "languageHint": "Select your preferred display language for the interface",
+    "prefShelfSort": "Shelf sorting",
+    "prefShelfSortHint": "Default order of the sidebar shelves; dragging a shelf switches to Manual",
+    "prefTagSort": "Tag sorting",
+    "prefTagSortHint": "Default order of the sidebar tags; dragging a tag switches to Manual",
+    "libraryPrefsUpdateFailed": "Failed to save library preferences",
     "back": "Back to library",
     "title": "Settings",
     "general": "General",
@@ -1335,6 +1347,8 @@
     "deleteShelfFailed": "Failed to delete shelf",
     "reorderShelvesFailed": "Failed to save shelf order",
     "reorderTagsFailed": "Failed to save tag order",
+    "pinShelfFailed": "Failed to update shelf pin",
+    "pinTagFailed": "Failed to update tag pin",
     "movedToShelf": "Moved {{count}} book(s) to “{{name}}”",
     "movedOutOfShelf": "Moved {{count}} book(s) out of the shelf",
     "tagCreated": "Tag created",

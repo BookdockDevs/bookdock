@@ -50,6 +50,13 @@
       "when": 1790020113806,
       "tag": "0006_annotation_chapter_href",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790121600000,
+      "tag": "0007_library_sort_timestamps",
+      "breakpoints": true
     }
   ]
 }

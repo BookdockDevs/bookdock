@@ -87,15 +87,28 @@ describe('shelves service', () => {
 
   it('should update a shelf name', async () => {
     const shelf = await createShelf(userId, 'Old Name')
-    const updated = await updateShelf(userId, shelf.id, 'New Name')
+    const updated = await updateShelf(userId, shelf.id, { name: 'New Name' })
     expect(updated.name).toBe('New Name')
+  })
+
+  it('should toggle a shelf pin without touching membership timestamps', async () => {
+    const shelf = await createShelf(userId, 'Shelf A')
+    const pinned = await updateShelf(userId, shelf.id, { pinned: true })
+    expect(pinned.pinned).toBe(true)
+
+    const listed = (await listShelves(userId)).find((s) => s.id === shelf.id)
+    expect(listed?.pinned).toBe(true)
+    expect(listed?.updatedAt).toBe(shelf.updatedAt)
+
+    const unpinned = await updateShelf(userId, shelf.id, { pinned: false })
+    expect(unpinned.pinned).toBe(false)
   })
 
   it('should reject renaming a shelf to another shelf name', async () => {
     const first = await createShelf(userId, 'Shelf A')
     const second = await createShelf(userId, 'Shelf B')
 
-    await expect(updateShelf(userId, second.id, first.name)).rejects.toMatchObject({ code: 'SHELF_NAME_TAKEN' })
+    await expect(updateShelf(userId, second.id, { name: first.name })).rejects.toMatchObject({ code: 'SHELF_NAME_TAKEN' })
   })
 
   it('should move books into and out of a shelf', async () => {

@@ -47,7 +47,8 @@ import TrashInfo from './components/TrashInfo'
 import UploadSheet from './components/UploadSheet'
 import UnpinButton, { PinIcon } from './components/UnpinButton'
 import { applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
-import { useInfiniteBooks, prefetchInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useTrashEnabled, useTrashCapBytes } from './hooks'
+import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
+import { useInfiniteBooks, prefetchInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useUpdateLibraryPrefs } from './hooks'
 
 const PAGE_SIZE = 20
 
@@ -62,17 +63,24 @@ export default function Library() {
   const isGuest = !user || user.guest === true || user.role === 'guest'
   const sortByPref = useUiStore((s) => s.sortBy)
   const sortOrderPref = useUiStore((s) => s.sortOrder)
-  // URL params win over the persisted preferences (bd-library-view/bd-sort-by/
-  // bd-sort-order), so a linked/shared URL still controls its own view
-  const view = search.view ?? viewPref
+  const libraryPrefs = useLibraryPrefs()
+  // Resolution chain: explicit URL > per-user server default (N-06) > device
+  // localStorage (legacy; also the only writable layer for guests). A
+  // linked/shared URL still controls its own view.
+  const serverBookSort = libraryPrefs?.bookSort
+  const defaultSortBy = serverBookSort?.field ?? sortByPref
+  const defaultSortOrder = serverBookSort
+    ? (serverBookSort.dir ?? BOOK_SORT_DEFAULT_DIR[serverBookSort.field])
+    : sortOrderPref
+  const view = search.view ?? libraryPrefs?.view ?? viewPref
   const query = search.q ?? ''
   const trash = !isGuest && (search.trash ?? false)
   const trashEnabled = useTrashEnabled({ enabled: !isGuest })
   const trashCapBytes = useTrashCapBytes({ enabled: !isGuest })
   // The trash defaults to newest-deleted first; the library sort preference
   // is a separate concern and must not be overwritten by trash-only sorting
-  const sortBy = search.sortBy ?? (trash ? 'deletedAt' : sortByPref)
-  const sortOrder = search.sortOrder ?? (trash ? 'desc' : sortOrderPref)
+  const sortBy = search.sortBy ?? (trash ? 'deletedAt' : defaultSortBy)
+  const sortOrder = search.sortOrder ?? (trash ? 'desc' : defaultSortOrder)
   const shelfId = search.shelf ?? null
   const tagId = search.tag ?? null
   const author = search.author ?? null
@@ -88,8 +96,8 @@ export default function Library() {
       const nextStatus = 'status' in patch ? (patch.status ?? null) : readStatus
       // Mirror navSearch's sort reset so the prefetched key matches the fetch
       const crossing = nextTrash !== trash
-      const nextSortBy = crossing ? (nextTrash ? 'deletedAt' : sortByPref) : sortBy
-      const nextSortOrder = crossing ? (nextTrash ? 'desc' : sortOrderPref) : sortOrder
+      const nextSortBy = crossing ? (nextTrash ? 'deletedAt' : defaultSortBy) : sortBy
+      const nextSortOrder = crossing ? (nextTrash ? 'desc' : defaultSortOrder) : sortOrder
       void prefetchInfiniteBooks(queryClient, {
         pageSize: PAGE_SIZE,
         search: query,
@@ -104,7 +112,7 @@ export default function Library() {
         trash: nextTrash,
       })
     },
-    [queryClient, query, trash, sortByPref, sortOrderPref, sortBy, sortOrder, shelfId, tagId, format, readStatus],
+    [queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, tagId, format, readStatus],
   )
 
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -196,6 +204,9 @@ export default function Library() {
   const moveBooksToShelf = useMoveBooksToShelf()
   const reorderShelves = useReorderShelves()
   const reorderTags = useReorderTags()
+  // Drag-to-manual: a row drop materializes the visual order into sortOrder
+  // and switches the default mode to 'manual' in the same gesture.
+  const updateLibraryPrefs = useUpdateLibraryPrefs()
   // Which drag is in flight: drives the manual autoscroll (page for book
   // drags, sidebar nav for shelf/tag drags) and the overlay shape.
   const [dragKind, setDragKind] = useState<'book' | 'shelf' | 'tag' | null>(null)
@@ -267,6 +278,7 @@ export default function Library() {
         setSettleTagId(null)
       }, 160)
       reorderTags.mutate(next)
+      updateLibraryPrefs.mutate({ tagSort: { mode: 'manual' } })
       return
     }
     if (dragType !== 'shelf') return
@@ -285,6 +297,7 @@ export default function Library() {
       setSettleShelfId(null)
     }, 160)
     reorderShelves.mutate(next)
+    updateLibraryPrefs.mutate({ shelfSort: { mode: 'manual' } })
   }
 
   function handleDragCancel() {
@@ -356,13 +369,15 @@ export default function Library() {
   useEffect(() => {
     setTagOrderOverride(null)
   }, [tagsData])
+  // Must mirror LibrarySidebar's memo: handleDragEnd materializes this exact
+  // visual order when a shelf/tag row is dropped.
   const shelves = useMemo(
-    () => applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride),
-    [shelvesData, shelfOrderOverride],
+    () => sortSidebarItems(applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort),
+    [shelvesData, shelfOrderOverride, libraryPrefs?.shelfSort],
   )
   const tags = useMemo(
-    () => applyTagOrder(tagsData?.data ?? [], tagOrderOverride),
-    [tagsData, tagOrderOverride],
+    () => sortSidebarItems(applyTagOrder(tagsData?.data ?? [], tagOrderOverride), libraryPrefs?.tagSort),
+    [tagsData, tagOrderOverride, libraryPrefs?.tagSort],
   )
   const activeShelfName = shelfId ? shelvesData?.data.find((s) => s.id === shelfId)?.name : undefined
   const activeTagName = tagId ? tagsData?.data.find((tag) => tag.id === tagId)?.name : undefined

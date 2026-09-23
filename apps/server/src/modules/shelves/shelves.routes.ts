@@ -55,10 +55,10 @@ shelvesRoutes.put('/:id', async (c) => {
   const shelfId = c.req.param('id')
   const body = await c.req.json()
   const parsed = shelfUpdateSchema.safeParse(body)
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  if (!parsed.success || (parsed.data.name === undefined && parsed.data.pinned === undefined)) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name or pinned is required' : parsed.error.flatten() } }, 400)
   }
-  const shelf = await updateShelf(user.id, shelfId, parsed.data.name)
+  const shelf = await updateShelf(user.id, shelfId, parsed.data)
   return c.json({ data: shelf })
 })
 

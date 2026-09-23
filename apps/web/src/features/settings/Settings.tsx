@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import InstanceSettingsSection from './components/InstanceSettingsSection'
 import UserManagementSection from './components/UserManagementSection'
 import LanguageSwitcher from './components/LanguageSwitcher'
+import LibraryPreferenceRows from './components/LibraryPreferenceRows'
 import TrashSettingsRow from './components/TrashSettingsRow'
 import TitleSettingsRow from './components/TitleSettingsRow'
 import UploadSettingsSection from './components/UploadSettingsSection'
@@ -195,6 +196,7 @@ export default function Settings() {
                 title={_('settings.interface')}
               >
                 <LanguageSwitcher />
+                {!isGuest && <LibraryPreferenceRows />}
               </SettingsCard>
             </div>
           )}

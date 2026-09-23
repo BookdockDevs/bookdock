@@ -179,6 +179,13 @@
       "size": "大小",
       "progress": "进度"
     },
+    "sortMode": {
+      "manual": "手动",
+      "name": "名称",
+      "bookCount": "数量",
+      "recentlyAdded": "添加时间",
+      "recentlyUpdated": "更新时间"
+    },
     "readStatusLabel": "阅读状态",
     "readStatusAll": "全部",
     "readStatusWishlist": "想读",
@@ -859,6 +866,11 @@
   "settings": {
     "language": "语言",
     "languageHint": "选择界面交互与系统文案的显示语言",
+    "prefShelfSort": "书架排序",
+    "prefShelfSortHint": "侧栏书架列表的默认排序，拖拽书架会自动切换为手动",
+    "prefTagSort": "标签排序",
+    "prefTagSortHint": "侧栏标签列表的默认排序，拖拽标签会自动切换为手动",
+    "libraryPrefsUpdateFailed": "书库偏好保存失败",
     "back": "返回书库",
     "title": "设置",
     "general": "通用",
@@ -1328,6 +1340,8 @@
     "deleteShelfFailed": "删除书架失败",
     "reorderShelvesFailed": "书架排序保存失败",
     "reorderTagsFailed": "标签排序保存失败",
+    "pinShelfFailed": "书架置顶操作失败",
+    "pinTagFailed": "标签置顶操作失败",
     "movedToShelf": "已移动到《{{name}}》",
     "movedOutOfShelf": "已移出书架",
     "tagCreated": "标签已创建",

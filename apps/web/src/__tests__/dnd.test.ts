@@ -5,11 +5,11 @@ import type { ShelfListItem, TagListItem } from '@bookdock/shared'
 import { applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, SHELF_NONE_DROPPABLE } from '../features/library/dnd'
 
 function shelf(id: string, name: string): ShelfListItem {
-  return { id, userId: 'u1', name, sortOrder: 0, createdAt: 0, bookCount: 0 }
+  return { id, userId: 'u1', name, sortOrder: 0, createdAt: 0, updatedAt: 0, pinned: false, bookCount: 0 }
 }
 
 function tag(id: string, name: string): TagListItem {
-  return { id, userId: 'u1', name, sortOrder: 0, bookCount: 0 }
+  return { id, userId: 'u1', name, sortOrder: 0, createdAt: 0, updatedAt: 0, pinned: false, bookCount: 0 }
 }
 
 describe('dnd helpers', () => {

@@ -41,8 +41,8 @@ export async function createShelf(userId: string, name: string) {
       .where(eq(shelves.userId, userId))
       .get()
     const sortOrder = (max?.max ?? -1) + 1
-    tx.insert(shelves).values({ id, userId, name, sortOrder, createdAt: now }).run()
-    return { id, userId, name, sortOrder, createdAt: now, bookCount: 0 }
+    tx.insert(shelves).values({ id, userId, name, sortOrder, createdAt: now, updatedAt: now }).run()
+    return { id, userId, name, sortOrder, createdAt: now, updatedAt: now, pinned: false, bookCount: 0 }
   })
 }
 
@@ -66,19 +66,21 @@ export async function reorderShelves(userId: string, shelfIds: string[]) {
   })
 }
 
-export async function updateShelf(userId: string, shelfId: string, name: string) {
+export async function updateShelf(userId: string, shelfId: string, patch: { name?: string; pinned?: boolean }) {
   const db = getDb()
   return db.transaction((tx) => {
     const existing = tx.select().from(shelves).where(and(eq(shelves.id, shelfId), eq(shelves.userId, userId))).get()
     if (!existing) throw new AppError('SHELF_NOT_FOUND')
-    const duplicate = tx
-      .select({ id: shelves.id })
-      .from(shelves)
-      .where(and(eq(shelves.userId, userId), eq(shelves.name, name), ne(shelves.id, shelfId)))
-      .get()
-    if (duplicate) throw new AppError('SHELF_NAME_TAKEN', 'Shelf name is already in use')
-    tx.update(shelves).set({ name }).where(eq(shelves.id, shelfId)).run()
-    return { ...existing, name }
+    if (patch.name !== undefined && patch.name !== existing.name) {
+      const duplicate = tx
+        .select({ id: shelves.id })
+        .from(shelves)
+        .where(and(eq(shelves.userId, userId), eq(shelves.name, patch.name), ne(shelves.id, shelfId)))
+        .get()
+      if (duplicate) throw new AppError('SHELF_NAME_TAKEN', 'Shelf name is already in use')
+    }
+    tx.update(shelves).set(patch).where(eq(shelves.id, shelfId)).run()
+    return { ...existing, ...patch }
   })
 }
 

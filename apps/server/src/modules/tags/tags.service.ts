@@ -33,14 +33,15 @@ export async function createTag(userId: string, name: string) {
     if (existing) throw new AppError('TAG_NAME_TAKEN', 'Tag name is already in use')
 
     const id = createId('tag')
+    const now = Date.now()
     const max = tx
       .select({ max: sql<number>`max(${tags.sortOrder})` })
       .from(tags)
       .where(eq(tags.userId, userId))
       .get()
     const sortOrder = (max?.max ?? -1) + 1
-    tx.insert(tags).values({ id, userId, name, sortOrder }).run()
-    return { id, userId, name, sortOrder, bookCount: 0 }
+    tx.insert(tags).values({ id, userId, name, sortOrder, createdAt: now, updatedAt: now }).run()
+    return { id, userId, name, sortOrder, createdAt: now, updatedAt: now, pinned: false, bookCount: 0 }
   })
 }
 
@@ -62,19 +63,21 @@ export async function reorderTags(userId: string, tagIds: string[]) {
   })
 }
 
-export async function updateTag(userId: string, tagId: string, name: string) {
+export async function updateTag(userId: string, tagId: string, patch: { name?: string; pinned?: boolean }) {
   const db = getDb()
   return db.transaction((tx) => {
     const existing = tx.select().from(tags).where(and(eq(tags.id, tagId), eq(tags.userId, userId))).get()
     if (!existing) throw new AppError('TAG_NOT_FOUND')
-    const duplicate = tx
-      .select({ id: tags.id })
-      .from(tags)
-      .where(and(eq(tags.userId, userId), eq(tags.name, name), ne(tags.id, tagId)))
-      .get()
-    if (duplicate) throw new AppError('TAG_NAME_TAKEN', 'Tag name is already in use')
-    tx.update(tags).set({ name }).where(eq(tags.id, tagId)).run()
-    return { ...existing, name }
+    if (patch.name !== undefined && patch.name !== existing.name) {
+      const duplicate = tx
+        .select({ id: tags.id })
+        .from(tags)
+        .where(and(eq(tags.userId, userId), eq(tags.name, patch.name), ne(tags.id, tagId)))
+        .get()
+      if (duplicate) throw new AppError('TAG_NAME_TAKEN', 'Tag name is already in use')
+    }
+    tx.update(tags).set(patch).where(eq(tags.id, tagId)).run()
+    return { ...existing, ...patch }
   })
 }
 

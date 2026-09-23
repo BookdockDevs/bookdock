@@ -54,6 +54,10 @@ settingsRoutes.put('/', async (c) => {
     const current = getLibrarySettings(user.id)
     const merged: LibrarySettings = {
       normalizeTitle: library.normalizeTitle ?? current.normalizeTitle,
+      shelfSort: library.shelfSort ?? current.shelfSort,
+      tagSort: library.tagSort ?? current.tagSort,
+      bookSort: library.bookSort ?? current.bookSort,
+      view: library.view ?? current.view,
     }
     updateLibrarySettings(user.id, merged)
   }

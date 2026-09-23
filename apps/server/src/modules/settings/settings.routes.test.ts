@@ -112,3 +112,38 @@ describe('Settings routes - Integrations', () => {
     expect(settingsService.updateSettings).not.toHaveBeenCalled()
   })
 })
+
+describe('Settings routes - Library preferences', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('merges library sort settings field-by-field without wiping siblings', async () => {
+    vi.mocked(settingsService.getLibrarySettings).mockReturnValue({
+      normalizeTitle: false,
+      shelfSort: { mode: 'name', dir: 'asc' },
+      view: 'list',
+    })
+
+    const app = createApp()
+    const res = await app.request('http://test/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        library: {
+          tagSort: { mode: 'bookCount', dir: 'desc' },
+          bookSort: { field: 'title', dir: 'asc' },
+        },
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(settingsService.updateLibrarySettings).toHaveBeenCalledWith('u1', {
+      normalizeTitle: false,
+      shelfSort: { mode: 'name', dir: 'asc' },
+      tagSort: { mode: 'bookCount', dir: 'desc' },
+      bookSort: { field: 'title', dir: 'asc' },
+      view: 'list',
+    })
+  })
+})

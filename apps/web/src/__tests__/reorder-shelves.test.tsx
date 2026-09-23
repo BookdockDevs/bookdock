@@ -19,7 +19,7 @@ function wrapper(queryClient: QueryClient) {
 }
 
 function shelf(id: string, name: string): ShelfListItem {
-  return { id, userId: 'u1', name, sortOrder: 0, createdAt: 0, bookCount: 0 }
+  return { id, userId: 'u1', name, sortOrder: 0, createdAt: 0, updatedAt: 0, pinned: false, bookCount: 0 }
 }
 
 describe('useReorderShelves', () => {

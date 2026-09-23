@@ -3,7 +3,13 @@ import { render, screen, fireEvent } from '@testing-library/react'
 
 import i18n from '../i18n/i18n'
 import { useUiStore } from '@/stores/ui.store'
+import { useAuthStore } from '@/stores/auth.store'
 import ViewMenu from '../features/library/components/ViewMenu'
+
+const libraryPrefsMutate = vi.fn()
+vi.mock('../features/library/hooks', () => ({
+  useUpdateLibraryPrefs: () => ({ mutate: libraryPrefsMutate }),
+}))
 
 function renderMenu(props: Partial<Parameters<typeof ViewMenu>[0]> = {}) {
   const navSearch = vi.fn()
@@ -54,6 +60,22 @@ describe('ViewMenu sort chips', () => {
     fireEvent.click(screen.getByRole('button', { name: '书名' }))
     expect(navSearch).toHaveBeenCalledWith({ sortBy: 'title', sortOrder: 'asc' })
     expect(useUiStore.getState().sortBy).toBe('title')
+  })
+
+  it('persists the default sort to server settings for signed-in users', () => {
+    // Signed-in users write the N-06 bookSort preference server-side instead
+    // of the device-local ui.store layer.
+    useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+    try {
+      const navSearch = renderMenu()
+
+      fireEvent.click(screen.getByRole('button', { name: '书名' }))
+      expect(libraryPrefsMutate).toHaveBeenCalledWith({ bookSort: { field: 'title', dir: 'asc' } })
+      expect(navSearch).toHaveBeenCalledWith({ sortBy: 'title', sortOrder: 'asc' })
+      expect(useUiStore.getState().sortBy).toBe('createdAt')
+    } finally {
+      useAuthStore.setState({ user: null })
+    }
   })
 })
 

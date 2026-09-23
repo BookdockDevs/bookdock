@@ -55,10 +55,10 @@ tagsRoutes.put('/:id', async (c) => {
   const tagId = c.req.param('id')
   const body = await c.req.json()
   const parsed = tagUpdateSchema.safeParse(body)
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  if (!parsed.success || (parsed.data.name === undefined && parsed.data.pinned === undefined)) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name or pinned is required' : parsed.error.flatten() } }, 400)
   }
-  const tag = await updateTag(user.id, tagId, parsed.data.name)
+  const tag = await updateTag(user.id, tagId, parsed.data)
   return c.json({ data: tag })
 })
 

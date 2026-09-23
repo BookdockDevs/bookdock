@@ -35,12 +35,19 @@ export interface Shelf {
   name: string
   sortOrder: number
   createdAt: number
+  updatedAt: number
+  /** Sidebar pin-to-top flag, orthogonal to every sort mode. */
+  pinned: boolean
 }
 
 export interface Tag {
   id: string
   userId: string
   name: string
+  sortOrder: number
+  createdAt: number
+  updatedAt: number
+  pinned: boolean
 }
 
 export interface BookTag {

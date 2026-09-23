@@ -265,8 +265,30 @@ export interface TrashSettings {
   maxTrashBytes?: number
 }
 
+/** Sidebar list sort modes; 'manual' is one mode of the same enum, not a parallel system. */
+export const LIBRARY_SORT_MODES = ['manual', 'name', 'bookCount', 'recentlyAdded', 'recentlyUpdated'] as const
+export type LibrarySortMode = (typeof LIBRARY_SORT_MODES)[number]
+
+/**
+ * Default sort preference for the shelf/tag sidebars. `dir` is only
+ * meaningful for auto modes — manual mode never flips (a mirrored manual
+ * view turned into a drag would silently materialize the reversed order).
+ */
+export interface LibrarySortPreference {
+  mode: LibrarySortMode
+  dir?: 'asc' | 'desc'
+}
+
+/** Fields offered as the book-list default sort (mirrors the ViewMenu options). */
+export const BOOK_SORT_PREF_FIELDS = ['createdAt', 'title', 'author', 'size', 'progress', 'lastReadAt'] as const
+export type BookSortPrefField = (typeof BOOK_SORT_PREF_FIELDS)[number]
+
 export interface LibrarySettings {
   normalizeTitle?: boolean
+  shelfSort?: LibrarySortPreference
+  tagSort?: LibrarySortPreference
+  bookSort?: { field: BookSortPrefField; dir?: 'asc' | 'desc' }
+  view?: 'grid' | 'list'
 }
 
 export interface IntegrationsSettings {
@@ -1047,6 +1069,10 @@ export interface ShelfListItem {
   name: string
   sortOrder: number
   createdAt: number
+  /** Membership-change timestamp, maintained by DB triggers (see N-06). */
+  updatedAt: number
+  /** Pin-to-top flag; pinned items lead every sort mode. */
+  pinned: boolean
   bookCount: number
 }
 
@@ -1055,7 +1081,8 @@ export interface ShelfCreateReq {
 }
 
 export interface ShelfUpdateReq {
-  name: string
+  name?: string
+  pinned?: boolean
 }
 
 /** Full ordered shelf id list; the server rewrites each shelf's sortOrder to its index. */
@@ -1068,6 +1095,11 @@ export interface TagListItem {
   userId: string
   name: string
   sortOrder: number
+  createdAt: number
+  /** Membership-change timestamp, maintained by DB triggers (see N-06). */
+  updatedAt: number
+  /** Pin-to-top flag; pinned items lead every sort mode. */
+  pinned: boolean
   bookCount: number
 }
 
@@ -1076,7 +1108,8 @@ export interface TagCreateReq {
 }
 
 export interface TagUpdateReq {
-  name: string
+  name?: string
+  pinned?: boolean
 }
 
 /** Full ordered tag id list; the server rewrites each tag's sortOrder to its index. */

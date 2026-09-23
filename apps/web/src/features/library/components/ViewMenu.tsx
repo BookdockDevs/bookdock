@@ -2,10 +2,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore, LIST_INFO_ITEMS, type CoverFit, type ListInfoItem, type RecentlyReadStyle } from '@/stores/ui.store'
+import { useAuthStore } from '@/stores/auth.store'
 import { cn } from '@/lib/utils'
 
 import type { LibrarySearch } from '@/routes/index'
-import type { BookFormat, ReadStatus } from '@bookdock/shared'
+import type { BookFormat, BookSortPrefField, ReadStatus } from '@bookdock/shared'
+
+import { useUpdateLibraryPrefs } from '../hooks'
 
 interface ViewMenuProps {
   navSearch: (patch: Partial<LibrarySearch>) => void
@@ -86,6 +89,25 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
   const setSortBy = useUiStore((s) => s.setSortBy)
   const setSortOrder = useUiStore((s) => s.setSortOrder)
   const setView = useUiStore((s) => s.setView)
+  const user = useAuthStore((s) => s.user)
+  const isGuest = !user || user.guest === true || user.role === 'guest'
+  const updateLibraryPrefs = useUpdateLibraryPrefs()
+
+  // Non-guest defaults live in per-user server settings (N-06); guests cannot
+  // persist them, so they keep the device-local ui.store layer.
+  function persistSort(field: string, dir: 'asc' | 'desc') {
+    if (isGuest) {
+      setSortBy(field)
+      setSortOrder(dir)
+    } else {
+      updateLibraryPrefs.mutate({ bookSort: { field: field as BookSortPrefField, dir } })
+    }
+  }
+
+  function persistView(v: 'grid' | 'list') {
+    if (isGuest) setView(v)
+    else updateLibraryPrefs.mutate({ view: v })
+  }
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 639px)')
@@ -125,13 +147,10 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
     // Trash sorting is ephemeral: it must not overwrite the library-wide preference
     if (sortBy === field) {
       const next = sortOrder === 'asc' ? 'desc' : 'asc'
-      if (!trash) setSortOrder(next)
+      if (!trash) persistSort(field, next)
       navSearch({ sortOrder: next })
     } else {
-      if (!trash) {
-        setSortBy(field)
-        setSortOrder(defaultOrder)
-      }
+      if (!trash) persistSort(field, defaultOrder)
       navSearch({ sortBy: field, sortOrder: defaultOrder })
     }
   }
@@ -199,7 +218,7 @@ export default function ViewMenu({ navSearch, view, sortBy, sortOrder, format, r
                 key={opt.value}
                 type="button"
                 onClick={() => {
-                  setView(opt.value)
+                  persistView(opt.value)
                   navSearch({ view: opt.value })
                 }}
                 className={cn(

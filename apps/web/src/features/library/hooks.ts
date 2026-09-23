@@ -151,6 +151,45 @@ export function useTrashCapBytes(options: { enabled?: boolean } = {}): number | 
   return cap && cap > 0 ? cap : undefined
 }
 
+/** Per-user library preferences (N-06 default sort modes, view, title normalization). */
+export function useLibraryPrefs(): SettingsRes['library'] {
+  const { data } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
+  })
+  return data?.data.library
+}
+
+/**
+ * Partial update of the library settings blob with an optimistic cache merge,
+ * so sort-mode flips (including the drag-to-manual switch) take effect in the
+ * same frame as the reorder mutation instead of waiting for a refetch.
+ */
+export function useUpdateLibraryPrefs() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (patch: NonNullable<SettingsRes['library']>) => apiPut('/settings', { library: patch }),
+    onMutate: async (patch) => {
+      await queryClient.cancelQueries({ queryKey: ['settings'] })
+      const prev = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+      if (prev) {
+        queryClient.setQueryData(['settings'], {
+          data: { ...prev.data, library: { ...prev.data.library, ...patch } },
+        })
+      }
+      return { prev }
+    },
+    onError: (error, _patch, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['settings'], ctx.prev)
+      notify.error(getUserErrorNotification(error, 'settings.libraryPrefsUpdateFailed'))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+}
+
 export const UPLOAD_ACCEPTED_EXTENSIONS = ['.epub', '.txt']
 
 export function isAcceptedUploadFile(file: File): boolean {
@@ -460,6 +499,21 @@ export function useRenameShelf() {
   })
 }
 
+/** Pin toggle has no success toast — the list reordering is the feedback. */
+export function useToggleShelfPin() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) => apiPut(`/shelves/${id}`, { pinned }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shelves'] })
+    },
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'toast.pinShelfFailed'))
+    },
+  })
+}
+
 export function useDeleteShelf() {
   const queryClient = useQueryClient()
 
@@ -659,6 +713,20 @@ export function useRenameTag() {
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.renameTagFailed'))
+    },
+  })
+}
+
+export function useToggleTagPin() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) => apiPut(`/tags/${id}`, { pinned }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] })
+    },
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'toast.pinTagFailed'))
     },
   })
 }

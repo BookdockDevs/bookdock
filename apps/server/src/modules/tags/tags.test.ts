@@ -83,15 +83,28 @@ describe('tags service', () => {
 
   it('should update a tag name', async () => {
     const tag = await createTag(userId, 'Old Tag')
-    const updated = await updateTag(userId, tag.id, 'New Tag')
+    const updated = await updateTag(userId, tag.id, { name: 'New Tag' })
     expect(updated.name).toBe('New Tag')
+  })
+
+  it('should toggle a tag pin without touching membership timestamps', async () => {
+    const tag = await createTag(userId, 'Tag A')
+    const pinned = await updateTag(userId, tag.id, { pinned: true })
+    expect(pinned.pinned).toBe(true)
+
+    const listed = (await listTags(userId)).find((t) => t.id === tag.id)
+    expect(listed?.pinned).toBe(true)
+    expect(listed?.updatedAt).toBe(tag.updatedAt)
+
+    const unpinned = await updateTag(userId, tag.id, { pinned: false })
+    expect(unpinned.pinned).toBe(false)
   })
 
   it('should reject renaming a tag to another tag name', async () => {
     const first = await createTag(userId, 'Tag A')
     const second = await createTag(userId, 'Tag B')
 
-    await expect(updateTag(userId, second.id, first.name)).rejects.toMatchObject({ code: 'TAG_NAME_TAKEN' })
+    await expect(updateTag(userId, second.id, { name: first.name })).rejects.toMatchObject({ code: 'TAG_NAME_TAKEN' })
   })
 
   it('should add and remove books from a tag', async () => {
