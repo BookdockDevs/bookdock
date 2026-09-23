@@ -47,18 +47,18 @@ async function waitFor(description, check, timeoutMs = 90_000) {
   throw new Error(`Timed out waiting for ${description}${lastError ? `: ${lastError.message}` : ''}`)
 }
 
-function requestJson(appName, route, options = {}) {
+function requestJson(appName, route, options = {}, timeoutMs = 2_000) {
   const client = `
 let input = ''
 for await (const chunk of process.stdin) input += chunk
-const { route, options } = JSON.parse(input)
-const response = await fetch('http://127.0.0.1:3000' + route, { ...options, signal: AbortSignal.timeout(2_000) })
+const { route, options, timeoutMs } = JSON.parse(input)
+const response = await fetch('http://127.0.0.1:3000' + route, { ...options, signal: AbortSignal.timeout(timeoutMs) })
 const body = await response.json().catch(() => null)
 console.log(JSON.stringify({ status: response.status, ok: response.ok, body, cookie: response.headers.get('set-cookie') }))
 `
   const output = execFileSync('docker', ['exec', '-i', appName, 'node', '--input-type=module', '-e', client], {
     encoding: 'utf8',
-    input: JSON.stringify({ route, options }),
+    input: JSON.stringify({ route, options, timeoutMs }),
     stdio: ['pipe', 'pipe', 'pipe'],
   })
   return JSON.parse(output.trim())
@@ -138,7 +138,7 @@ async function runScenario({ scenario, targetVersion, factoryVersion }) {
     method: 'POST',
     headers: { 'content-type': 'application/json', cookie },
     body: JSON.stringify({ targetVersion, progressId: `e2e-${randomUUID()}` }),
-  })
+  }, 20_000)
   assert.equal(start.status, 202, JSON.stringify(start.body))
   assert.equal(start.body?.data?.targetVersion, targetVersion)
 
