@@ -74,6 +74,11 @@ jobs:
           pnpm typecheck
           pnpm test
 
+      - name: Verify in-container update and rollback
+        run: |
+          docker build --tag bookdock:ci .
+          node scripts/test-docker-update.mjs bookdock:ci
+
       - name: Prepare release notes
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
