@@ -287,6 +287,20 @@ describe('BookDetailDialog cover draft', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/books/book-1/cover'))
   })
+
+  it('shows cover copy and download buttons when a cover image exists', () => {
+    render(<BookDetailDialog book={{ ...book, coverKey: 'covers/book-1.jpg' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+
+    expect(screen.getByRole('button', { name: '复制封面' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '下载封面' })).toBeInTheDocument()
+  })
+
+  it('does not show cover copy and download buttons when no cover image exists', () => {
+    render(<BookDetailDialog book={{ ...book, format: 'txt', coverKey: null }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+
+    expect(screen.queryByRole('button', { name: '复制封面' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '下载封面' })).not.toBeInTheDocument()
+  })
 })
 
 describe('BookDetailDialog cover palette', () => {

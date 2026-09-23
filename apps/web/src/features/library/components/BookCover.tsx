@@ -23,6 +23,7 @@ function displayTitle(title: string): string {
 
 export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId }: BookCoverProps) {
   const [error, setError] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   const coverFit = useUiStore((s) => s.coverFit)
   // Hash by id, not title: renaming must not repaint the placeholder cover.
   const palette = getCoverPalette(book.id, coverPaletteId ?? book.coverPaletteId)
@@ -36,6 +37,7 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
 
   useEffect(() => {
     setError(false)
+    setLoaded(false)
   }, [source])
 
   if (hasCover) {
@@ -44,13 +46,22 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
         className={cn(
           'relative overflow-hidden rounded-xl border border-stone-200/80 shadow-xs dark:border-stone-800/70',
           isSm ? 'h-16 w-12 shrink-0' : 'aspect-[2/3] w-full',
+          palette.className,
         )}
       >
         <img
+          ref={(img) => {
+            if (img?.complete && img?.naturalWidth > 0 && !loaded) {
+              setLoaded(true)
+            }
+          }}
           src={source ?? undefined}
           alt={book.title}
+          decoding="async"
+          onLoad={() => setLoaded(true)}
           className={cn(
-            'block h-full w-full',
+            'block h-full w-full transition-opacity duration-300',
+            loaded ? 'opacity-100' : 'opacity-0',
             coverFit === 'full'
               ? 'bg-stone-100 object-contain p-1 dark:bg-stone-800'
               : 'object-cover',

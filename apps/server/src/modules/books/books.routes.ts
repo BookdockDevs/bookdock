@@ -16,7 +16,7 @@ import {
   resetBookMetadata,
   getBookChapters,
   getBookContent,
-  getBookCover,
+  getBookCoverContent,
   setBookShelf,
   setBookTags,
   getBookShelf,
@@ -375,26 +375,23 @@ booksRoutes.delete('/:id/permanent', async (c) => {
 booksRoutes.get('/:id/cover', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
-  const cover = await getBookCover(user.id, id)
+  const size = c.req.query('size') === 'original' ? 'original' : 'thumb'
+  const download = c.req.query('download') === '1' || c.req.query('download') === 'true'
+  const cover = await getBookCoverContent(user.id, id, { size })
   if (!cover) {
     return c.json({ error: { code: 'BOOK_NOT_FOUND', message: 'No cover' } }, 404)
   }
-  const storage = getStorage()
-  if (!(await storage.exists(cover.coverKey))) {
-    return c.json({ error: { code: 'BOOK_NOT_FOUND', message: 'Cover file missing' } }, 404)
+  const headers: Record<string, string> = {
+    'Content-Type': cover.contentType,
+    'Cache-Control': 'private, immutable, max-age=31536000',
   }
-  const body = new Uint8Array(await bufferFromStream(await storage.get(cover.coverKey)))
-  const ext = cover.coverKey.split('.').pop()?.toLowerCase()
-  const contentType = ext === 'png'
-    ? 'image/png'
-    : ext === 'webp'
-      ? 'image/webp'
-      : ext === 'gif'
-        ? 'image/gif'
-        : ext === 'svg'
-          ? 'image/svg+xml'
-          : 'image/jpeg'
-  return c.newResponse(body, 200, { 'Content-Type': contentType, 'Cache-Control': 'private, immutable, max-age=31536000' })
+  if (download) {
+    const book = await getActiveBook(user.id, id)
+    const safeTitle = (book.title || 'cover').replace(/[\\/:*?"<>|]/g, '_').trim()
+    const filename = `${safeTitle}-cover.${cover.ext}`
+    headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`
+  }
+  return c.newResponse(new Uint8Array(cover.data), 200, headers)
 })
 
 booksRoutes.put('/:id/cover', async (c) => {

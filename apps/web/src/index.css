@@ -217,11 +217,13 @@ body.reader-resizing iframe {
 }
 
 .animate-modal-backdrop {
-  animation: modal-backdrop-in 160ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: modal-backdrop-in 220ms ease-out forwards;
+  will-change: opacity;
 }
 
 .animate-modal-panel {
-  animation: modal-panel-in 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: modal-panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
 }
 
 .animate-toast-in {

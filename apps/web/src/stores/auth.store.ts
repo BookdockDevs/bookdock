@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 
+import { clearStoredSettings } from '@/lib/settings-cache'
+
 export interface AuthUser {
   id: string
   username: string
@@ -54,6 +56,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   clearAuth: () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('bd-user')
+      clearStoredSettings()
     }
     set({ user: null })
   },

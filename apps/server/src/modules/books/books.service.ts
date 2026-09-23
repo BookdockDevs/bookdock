@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream'
 
 import { eq, ne, lt, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
 import JSZip from 'jszip'
+import sharp from 'sharp'
 import { getDb } from '../../db/client'
 import { books, annotations, bookTags, shelves, tags, settings, users as usersTable, tocRules } from '../../db/schema'
 import { getStorage } from '../../storage'
@@ -256,6 +257,24 @@ function blobKey(hash: string, ext: string): string {
   return `blobs/${hash.slice(0, 2)}/${hash}${ext}`
 }
 
+export function coverThumbnailKey(coverKey: string): string {
+  return coverKey.replace(/\.cover\.[^.]+$/, '.thumb.webp')
+}
+
+export async function generateCoverThumbnail(buffer: Buffer, ext?: string | null): Promise<Buffer | null> {
+  const actualExt = ext || detectImageExtension(buffer)
+  if (actualExt === 'svg') return buffer
+  try {
+    return await sharp(buffer)
+      .resize({ width: 480, withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer()
+  } catch (err) {
+    log('warn', 'cover_thumbnail_failed', { error: err })
+    return null
+  }
+}
+
 export async function bufferFromStream(stream: Readable): Promise<Buffer> {
   const chunks: Buffer[] = []
   for await (const chunk of stream) {
@@ -326,6 +345,10 @@ export async function uploadBook(
     const ext = detectImageExtension(parsed.meta.cover) || 'jpg'
     coverKey = blobKey(contentHash, `.cover.${ext}`)
     await storage.put(coverKey, parsed.meta.cover)
+    const thumb = await generateCoverThumbnail(parsed.meta.cover, ext)
+    if (thumb) {
+      await storage.put(coverThumbnailKey(coverKey), thumb)
+    }
   }
 
   const meta: Record<string, unknown> = {}
@@ -1319,6 +1342,10 @@ export async function updateBookCover(userId: string, bookId: string, file: File
   const storage = getStorage()
   const coverKey = blobKey(sha256(buffer), `.cover.${ext}`)
   await storage.put(coverKey, buffer)
+  const thumb = await generateCoverThumbnail(buffer, ext)
+  if (thumb) {
+    await storage.put(coverThumbnailKey(coverKey), thumb)
+  }
   const meta = { ...(book.meta as Record<string, unknown>) }
   delete meta.coverSuppressed
   db.update(books).set({ coverKey, meta, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
@@ -1342,11 +1369,65 @@ export async function getBookCover(userId: string, bookId: string): Promise<{ co
     if (!ext) return null
     const coverKey = blobKey(book.contentHash, `.cover.${ext}`)
     await storage.put(coverKey, parsed.meta.cover)
+    const thumb = await generateCoverThumbnail(parsed.meta.cover, ext)
+    if (thumb) {
+      await storage.put(coverThumbnailKey(coverKey), thumb)
+    }
     db.update(books).set({ coverKey, updatedAt: Date.now() }).where(eq(books.id, book.id)).run()
     return { coverKey }
   } catch {
     return null
   }
+}
+
+export async function getBookCoverContent(
+  userId: string,
+  bookId: string,
+  opts?: { size?: 'original' | 'thumb' },
+): Promise<{ data: Buffer; contentType: string; ext: string } | null> {
+  const cover = await getBookCover(userId, bookId)
+  if (!cover) return null
+  const storage = getStorage()
+  if (!(await storage.exists(cover.coverKey))) return null
+
+  const size = opts?.size ?? 'thumb'
+  const ext = cover.coverKey.split('.').pop()?.toLowerCase() || 'jpg'
+
+  if (size === 'original' || ext === 'svg') {
+    const data = await bufferFromStream(await storage.get(cover.coverKey))
+    const contentType = ext === 'png'
+      ? 'image/png'
+      : ext === 'webp'
+        ? 'image/webp'
+        : ext === 'gif'
+          ? 'image/gif'
+          : ext === 'svg'
+            ? 'image/svg+xml'
+            : 'image/jpeg'
+    return { data, contentType, ext }
+  }
+
+  const thumbKey = coverThumbnailKey(cover.coverKey)
+  if (await storage.exists(thumbKey)) {
+    const data = await bufferFromStream(await storage.get(thumbKey))
+    return { data, contentType: 'image/webp', ext: 'webp' }
+  }
+
+  const original = await bufferFromStream(await storage.get(cover.coverKey))
+  const thumb = await generateCoverThumbnail(original, ext)
+  if (thumb) {
+    await storage.put(thumbKey, thumb)
+    return { data: thumb, contentType: 'image/webp', ext: 'webp' }
+  }
+
+  const contentType = ext === 'png'
+    ? 'image/png'
+    : ext === 'webp'
+      ? 'image/webp'
+      : ext === 'gif'
+        ? 'image/gif'
+        : 'image/jpeg'
+  return { data: original, contentType, ext }
 }
 
 export async function removeBookCover(userId: string, bookId: string) {
@@ -1513,6 +1594,10 @@ export async function deleteBook(userId: string, bookId: string) {
       .where(and(eq(books.coverKey, book.coverKey), ne(books.id, bookId))).get()
     if ((coverRefs?.count ?? 0) === 0 && await storage.exists(book.coverKey)) {
       await storage.delete(book.coverKey)
+      const thumbKey = coverThumbnailKey(book.coverKey)
+      if (await storage.exists(thumbKey)) {
+        await storage.delete(thumbKey)
+      }
     }
   }
   db.delete(books).where(eq(books.id, bookId)).run()

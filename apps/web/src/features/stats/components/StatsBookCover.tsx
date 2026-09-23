@@ -16,6 +16,7 @@ export default function StatsBookCover({ item }: StatsBookCoverProps) {
         alt={item.title}
         className="h-14 w-10 shrink-0 rounded-lg border border-stone-200/70 object-cover dark:border-stone-800/60"
         onError={() => setError(true)}
+        decoding="async"
         loading="lazy"
       />
     )

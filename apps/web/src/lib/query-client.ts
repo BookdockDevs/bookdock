@@ -1,6 +1,7 @@
 import { QueryClient } from '@tanstack/react-query'
 
 import { ApiError } from '@/api/client'
+import { fetchSettings, seedSettingsQuery } from '@/lib/settings-cache'
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -11,3 +12,10 @@ export const queryClient = new QueryClient({
     },
   },
 })
+
+queryClient.setQueryDefaults(['settings'], {
+  queryFn: fetchSettings,
+  staleTime: 0,
+})
+
+seedSettingsQuery(queryClient)

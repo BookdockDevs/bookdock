@@ -6,6 +6,7 @@ import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import { getErrorKeyByCode, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { fetchSettings, writeStoredSettings } from '@/lib/settings-cache'
 
 export interface UseBooksParams {
   page: number
@@ -125,28 +126,32 @@ export interface UploadAssignment {
 export function useUploadSettings() {
   const { data } = useQuery({
     queryKey: ['settings'],
-    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
+    queryFn: fetchSettings,
   })
   return { maxBytes: data?.data.uploadMaxBytes }
 }
 
-/** Trash feature switch; on while settings load or when stored settings predate the toggle. */
+/** Trash feature switch; respects user settings, cached settings, and stays disabled while loading without cache. */
 export function useTrashEnabled(options: { enabled?: boolean } = {}): boolean {
+  const isEnabled = options.enabled !== false
   const { data } = useQuery({
     queryKey: ['settings'],
-    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
-    enabled: options.enabled !== false,
+    queryFn: fetchSettings,
+    enabled: isEnabled,
   })
-  return data?.data.trash?.enabled !== false
+  if (!isEnabled || !data?.data) return false
+  return data.data.trash?.enabled !== false
 }
 
-/** Trash size cap in bytes; undefined when unlimited (0 or unset). */
+/** Trash size cap in bytes; undefined when unlimited (0 or unset) or when disabled. */
 export function useTrashCapBytes(options: { enabled?: boolean } = {}): number | undefined {
+  const isEnabled = options.enabled !== false
   const { data } = useQuery({
     queryKey: ['settings'],
-    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
-    enabled: options.enabled !== false,
+    queryFn: fetchSettings,
+    enabled: isEnabled,
   })
+  if (!isEnabled) return undefined
   const cap = data?.data.trash?.maxTrashBytes
   return cap && cap > 0 ? cap : undefined
 }
@@ -155,7 +160,7 @@ export function useTrashCapBytes(options: { enabled?: boolean } = {}): number | 
 export function useLibraryPrefs(): SettingsRes['library'] {
   const { data } = useQuery({
     queryKey: ['settings'],
-    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
+    queryFn: fetchSettings,
   })
   return data?.data.library
 }
@@ -174,14 +179,19 @@ export function useUpdateLibraryPrefs() {
       await queryClient.cancelQueries({ queryKey: ['settings'] })
       const prev = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
       if (prev) {
+        const next = { ...prev.data, library: { ...prev.data.library, ...patch } }
         queryClient.setQueryData(['settings'], {
-          data: { ...prev.data, library: { ...prev.data.library, ...patch } },
+          data: next,
         })
+        writeStoredSettings(next)
       }
       return { prev }
     },
     onError: (error, _patch, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(['settings'], ctx.prev)
+      if (ctx?.prev) {
+        queryClient.setQueryData(['settings'], ctx.prev)
+        writeStoredSettings(ctx.prev.data)
+      }
       notify.error(getUserErrorNotification(error, 'settings.libraryPrefsUpdateFailed'))
     },
     onSuccess: () => {

@@ -3,8 +3,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import type { SettingsRes } from '@bookdock/shared'
 
-import { apiGet, apiPut } from '@/api/client'
+import { apiPut } from '@/api/client'
 import { customThemesFromSync } from '@/lib/reading-theme'
+import { fetchSettings, seedSettingsQuery } from '@/lib/settings-cache'
 import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
 
@@ -139,6 +140,7 @@ export function SettingsSync() {
       suppressSyncRef.current = true
       useUiStore.setState({ fontPreferences: {}, fontOrder: [] })
       suppressSyncRef.current = false
+      seedSettingsQuery(queryClient, userId)
     }
     if (!userId || isGuest) return
     const pending = getPendingSettings(userId)
@@ -150,9 +152,9 @@ export function SettingsSync() {
       mutateRef.current(pending, { onSuccess: () => clearPendingSettings(userId, pending) })
       return
     }
-    apiGet<{ data: SettingsRes }>('/settings')
+    fetchSettings()
       .then((res) => {
-        if (!res.data) return
+        if (!res?.data) return
         queryClient.setQueryData(['settings'], res)
         applySettings(res.data)
       })

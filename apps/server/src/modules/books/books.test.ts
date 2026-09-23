@@ -8,6 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 import JSZip from 'jszip'
+import sharp from 'sharp'
 
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
@@ -44,6 +45,7 @@ import {
   getBookContent,
   getBookChapterContent,
   getBookCover,
+  getBookCoverContent,
   removeBookCover,
 } from './books.service'
 import { createTocRule } from '../toc-rules/toc-rules.service'
@@ -369,6 +371,43 @@ describe('lazy EPUB cover repair', () => {
     await trashBook(userId, book.id)
 
     expect(await getBookCover(userId, book.id)).toEqual({ coverKey })
+  })
+
+  it('serves original and thumbnail content via getBookCoverContent', async () => {
+    const coverKey = 'blobs/co/test.cover.jpg'
+    const book = seedBook(db, userId, { coverKey })
+    const originalBytes = Buffer.from('cover-original-bytes')
+    mem.files.set(coverKey, originalBytes)
+
+    const original = await getBookCoverContent(userId, book.id, { size: 'original' })
+    expect(original?.data).toEqual(originalBytes)
+    expect(original?.contentType).toBe('image/jpeg')
+    expect(original?.ext).toBe('jpg')
+
+    // Thumbnail falls back gracefully to original on stub bytes
+    const thumb = await getBookCoverContent(userId, book.id, { size: 'thumb' })
+    expect(thumb?.data).toEqual(originalBytes)
+    expect(thumb?.contentType).toBe('image/jpeg')
+  })
+
+  it('generates a webp thumbnail for a valid image', async () => {
+    const realJpg = await sharp({
+      create: { width: 800, height: 1200, channels: 3, background: { r: 200, g: 100, b: 50 } },
+    }).jpeg().toBuffer()
+
+    const coverKey = 'blobs/co/real.cover.jpg'
+    const book = seedBook(db, userId, { coverKey })
+    mem.files.set(coverKey, realJpg)
+
+    const thumb = await getBookCoverContent(userId, book.id, { size: 'thumb' })
+    expect(thumb).not.toBeNull()
+    expect(thumb?.contentType).toBe('image/webp')
+    expect(thumb?.ext).toBe('webp')
+
+    const metadata = await sharp(thumb!.data).metadata()
+    expect(metadata.format).toBe('webp')
+    expect(metadata.width).toBe(480)
+    expect(metadata.height).toBe(720)
   })
 })
 describe('POST /api/v1/books upload membership', () => {
@@ -1338,6 +1377,28 @@ describe('GET /api/v1/books/:id/file range requests', () => {
 
     expect(res.status).toBe(403)
     expect(await res.json()).toMatchObject({ error: { code: 'FORBIDDEN' } })
+  })
+
+  it('serves the cover route with thumbnail by default and original for download', async () => {
+    const realJpg = await sharp({
+      create: { width: 600, height: 900, channels: 3, background: { r: 10, g: 20, b: 30 } },
+    }).jpeg().toBuffer()
+    const coverKey = 'blobs/co/cover-test.cover.jpg'
+    mem.files.set(coverKey, realJpg)
+    db.update(schema.books).set({ coverKey }).where(eq(schema.books.id, book.id)).run()
+
+    // Default request returns webp thumbnail
+    const resThumb = await createFileApp().request(`/api/v1/books/${book.id}/cover`)
+    expect(resThumb.status).toBe(200)
+    expect(resThumb.headers.get('Content-Type')).toBe('image/webp')
+    expect(resThumb.headers.get('Cache-Control')).toContain('max-age=31536000')
+
+    // Original with download sets attachment
+    const resDownload = await createFileApp().request(`/api/v1/books/${book.id}/cover?size=original&download=1`)
+    expect(resDownload.status).toBe(200)
+    expect(resDownload.headers.get('Content-Type')).toBe('image/jpeg')
+    expect(resDownload.headers.get('Content-Disposition')).toContain('attachment;')
+    expect(resDownload.headers.get('Content-Disposition')).toContain('-cover.jpg')
   })
 })
 
