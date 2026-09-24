@@ -1,7 +1,6 @@
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { Virtuoso, VirtuosoGrid, type Components, type GridComponents, type GridItemProps, type GridListProps, type ItemProps } from 'react-virtuoso'
 
 import {
   DndContext,
@@ -38,6 +37,7 @@ import { ContextMenuContent } from './components/BookContextMenu'
 import BookDetailDialog from './components/BookDetailDialog'
 import EmptyLibrary from './components/EmptyLibrary'
 import LibraryHeader from './components/LibraryHeader'
+import LibraryPagination from './components/LibraryPagination'
 import LibrarySidebar from './components/LibrarySidebar'
 import ListItemInfo from './components/ListItemInfo'
 import ReadingStatsCard from './components/ReadingStatsCard'
@@ -48,9 +48,8 @@ import UploadSheet from './components/UploadSheet'
 import UnpinButton, { PinIcon } from './components/UnpinButton'
 import { applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
-import { useInfiniteBooks, prefetchInfiniteBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useUpdateLibraryPrefs } from './hooks'
+import { useBooks, prefetchBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useUpdateLibraryPrefs } from './hooks'
 
-const PAGE_SIZE = 20
 
 export default function Library() {
   const _ = useTranslation()
@@ -59,6 +58,8 @@ export default function Library() {
   const queryClient = useQueryClient()
 
   const viewPref = useUiStore((s) => s.view)
+  const libraryPageSize = useUiStore((s) => s.libraryPageSize)
+  const pageSize = libraryPageSize || 24
   const user = useAuthStore((s) => s.user)
   const isGuest = !user || user.guest === true || user.role === 'guest'
   const sortByPref = useUiStore((s) => s.sortBy)
@@ -74,6 +75,7 @@ export default function Library() {
     : sortOrderPref
   const view = search.view ?? libraryPrefs?.view ?? viewPref
   const query = search.q ?? ''
+  const currentPage = search.page ?? 1
   const trash = !isGuest && (search.trash ?? false)
   const trashEnabled = useTrashEnabled({ enabled: !isGuest })
   const trashCapBytes = useTrashCapBytes({ enabled: !isGuest })
@@ -98,8 +100,9 @@ export default function Library() {
       const crossing = nextTrash !== trash
       const nextSortBy = crossing ? (nextTrash ? 'deletedAt' : defaultSortBy) : sortBy
       const nextSortOrder = crossing ? (nextTrash ? 'desc' : defaultSortOrder) : sortOrder
-      void prefetchInfiniteBooks(queryClient, {
-        pageSize: PAGE_SIZE,
+      void prefetchBooks(queryClient, {
+        page: 1,
+        pageSize,
         search: query,
         sortBy: nextSortBy,
         sortOrder: nextSortOrder,
@@ -112,7 +115,7 @@ export default function Library() {
         trash: nextTrash,
       })
     },
-    [queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, tagId, format, readStatus],
+    [queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, tagId, format, readStatus, pageSize],
   )
 
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -330,8 +333,9 @@ export default function Library() {
     return () => window.removeEventListener('pointermove', onPointerMove)
   }, [dragKind])
 
-  const { data, isLoading, isError, isPlaceholderData, isFetching, isFetchingNextPage, isFetchNextPageError, hasNextPage, fetchNextPage, refetch } = useInfiniteBooks({
-    pageSize: PAGE_SIZE,
+  const { data, isLoading, isError, isFetching, refetch } = useBooks({
+    page: currentPage,
+    pageSize,
     search: query,
     sortBy,
     sortOrder,
@@ -346,11 +350,12 @@ export default function Library() {
     // effect below swaps the URL out before the next render settles.
   }, { enabled: !trash || trashEnabled })
 
-  const allBooks = useMemo(() => data?.pages.flatMap((p) => p.data) ?? [], [data])
+  const allBooks = useMemo(() => data?.data ?? [], [data])
   const isEmpty = !isLoading && allBooks.length === 0
 
-  const total = data?.pages[0]?.total ?? 0
-  const totalSize = data?.pages[0]?.totalSize ?? 0
+  const total = data?.total ?? 0
+  const totalSize = data?.totalSize ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const shelvesQuery = useShelves()
   const tagsQuery = useTags()
@@ -451,7 +456,9 @@ export default function Library() {
       // within the list/trash domain they were set in, so drop them on crossing
       const nextTrash = 'trash' in patch ? (patch.trash ?? false) : trash
       const sortPatch = nextTrash !== trash ? { sortBy: undefined, sortOrder: undefined } : null
-      navigate({ to: '/', search: { ...search, ...sortPatch, ...patch }, replace: true })
+      const filterChanged = (['shelf', 'tag', 'q', 'format', 'status', 'trash', 'author', 'series'] as const)
+        .some((key) => key in patch && patch[key] !== search[key])
+      return navigate({ to: '/', search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, replace: true })
     },
     [navigate, search, trash],
   )
@@ -460,9 +467,15 @@ export default function Library() {
   // switched off (e.g. in another tab): bounce back to the plain library.
   useEffect(() => {
     if (trash && !trashEnabled) {
-      navigate({ to: '/', search: { ...search, trash: undefined }, replace: true })
+      navSearch({ trash: undefined })
     }
-  }, [trash, trashEnabled, navigate, search])
+  }, [trash, trashEnabled, navSearch])
+
+  useEffect(() => {
+    if (data && currentPage > totalPages) {
+      navSearch({ page: totalPages === 1 ? undefined : totalPages })
+    }
+  }, [data, currentPage, totalPages, navSearch])
 
   // Uncategorized is a virtual view: staying on it after the last book is
   // moved/deleted away is a dead end, so leave back to all books. A view
@@ -475,14 +488,14 @@ export default function Library() {
       return
     }
     // The placeholder total belongs to the previous view, not this one
-    if (isLoading || isPlaceholderData) return
+    if (isLoading) return
     if (uncategorizedEmptyOnEntryRef.current === null) {
       uncategorizedEmptyOnEntryRef.current = total === 0
     } else if (!uncategorizedEmptyOnEntryRef.current && total === 0) {
       uncategorizedEmptyOnEntryRef.current = null
       navSearch({ shelf: undefined })
     }
-  }, [shelfId, isLoading, isPlaceholderData, total, navSearch])
+  }, [shelfId, isLoading, total, navSearch])
 
   const coverText = useUiStore((s) => s.coverText)
   const gridColumns = useUiStore((s) => s.gridColumns)
@@ -507,9 +520,19 @@ export default function Library() {
 
   const columns = gridColumns === 'auto' ? dynColumns : Number(gridColumns)
 
-  const endReached = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) fetchNextPage()
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
+  useEffect(() => {
+    clearSelection()
+    setSelectionMode(false)
+  }, [currentPage, shelfId, tagId, query, format, readStatus, trash, author, series])
+
+  function goToPage(targetPage: number) {
+    if (targetPage < 1 || targetPage > totalPages || targetPage === currentPage) return
+    void navSearch({ page: targetPage === 1 ? undefined : targetPage }).then(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    })
+  }
+
+
 
   return (
     <DndContext sensors={sensors} collisionDetection={pointerWithin} autoScroll={false} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
@@ -568,7 +591,7 @@ export default function Library() {
 
         <div
           ref={containerRef}
-          className={`min-h-0 flex-1 transition-opacity duration-150 ${isFetching && !isLoading ? 'opacity-65' : ''} ${selection.size > 0 ? 'pb-16' : ''}`}
+          className={`min-h-0 flex-1 transition-opacity duration-150 ${isFetching && !isLoading ? 'opacity-65' : ''} ${totalPages > 1 ? (selectionActive ? 'pb-32 sm:pb-36' : 'pb-20 sm:pb-24') : (selectionActive ? 'pb-20' : 'pb-6')}`}
         >
           {isLoading ? (
             <InitialLoading view={view} columns={columns} />
@@ -581,19 +604,12 @@ export default function Library() {
               <EmptyLibrary />
             )
           ) : view === 'grid' ? (
-            <VirtuosoGrid
-              totalCount={allBooks.length}
-              overscan={200}
-              useWindowScroll
-              components={GRID_COMPONENTS}
-              style={{ ['--library-grid-cols' as string]: String(columns) } as CSSProperties}
-              endReached={endReached}
-              itemContent={(index) => {
-                const book = allBooks[index]
-                if (!book) return null
+            <div key={currentPage} className="grid gap-4 py-2 transition-opacity duration-150 animate-in fade-in" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+              {allBooks.map((book, index) => {
                 if (trash) {
                   return (
                     <div
+                      key={book.id}
                       className={`rounded-xl ${selectionActive && selection.has(book.id) ? 'ring-2 ring-stone-900 ring-offset-2 ring-offset-stone-50 dark:ring-stone-100 dark:ring-offset-stone-950' : ''}`}
                     >
                       <BookCard
@@ -613,7 +629,7 @@ export default function Library() {
                 }
                 if (selectionActive) {
                   return (
-                    <DraggableBookCard book={book} selection={selection} selectionActive disabled={isGuest}>
+                    <DraggableBookCard key={book.id} book={book} selection={selection} selectionActive disabled={isGuest}>
                       <div
                         className={`rounded-xl ${selection.has(book.id) ? 'ring-2 ring-stone-900 ring-offset-2 ring-offset-stone-50 dark:ring-stone-100 dark:ring-offset-stone-950' : ''}`}
                       >
@@ -632,7 +648,7 @@ export default function Library() {
                   )
                 }
                 return (
-                  <DraggableBookCard book={book} selection={selection} selectionActive={false} disabled={isGuest}>
+                  <DraggableBookCard key={book.id} book={book} selection={selection} selectionActive={false} disabled={isGuest}>
                     <Link
                       to="/books/$id"
                       params={{ id: book.id }}
@@ -662,21 +678,15 @@ export default function Library() {
                     </Link>
                   </DraggableBookCard>
                 )
-              }}
-            />
+              })}
+            </div>
           ) : (
-            <Virtuoso
-              totalCount={allBooks.length}
-              overscan={200}
-              useWindowScroll
-              components={LIST_COMPONENTS}
-              endReached={endReached}
-              itemContent={(index) => {
-                const book = allBooks[index]
-                if (!book) return null
+            <div key={currentPage} className="flex flex-col gap-2 py-2 transition-opacity duration-150 animate-in fade-in">
+              {allBooks.map((book, index) => {
                 if (trash) {
                   return (
                     <TrashListRow
+                      key={book.id}
                       book={book}
                       selected={selection.has(book.id)}
                       selectionActive={selectionActive}
@@ -691,6 +701,7 @@ export default function Library() {
                 }
                 return (
                   <ListItemWrapper
+                    key={book.id}
                     book={book}
                     selection={selection}
                     selectionActive={selectionActive}
@@ -701,20 +712,25 @@ export default function Library() {
                     onShowDetails={setDetailTarget}
                   />
                 )
-              }}
-            />
+              })}
+            </div>
           )}
         </div>
 
-        {isFetchNextPageError ? (
-          <QueryErrorState className="py-4" isRetrying={isFetchingNextPage} onRetry={fetchNextPage} />
-        ) : isFetchingNextPage && (
-          <p className="py-4 text-center text-xs text-stone-400">{_('reader.loading')}</p>
+        {!isLoading && !isError && (
+          <LibraryPagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalBooks={total}
+            onPageChange={goToPage}
+            disabled={isFetching}
+            selectionActive={selectionActive}
+          />
         )}
       </main>
 
       {!isGuest && selection.size > 0 && (
-        <SelectionBar selectedIds={Array.from(selection)} onClear={clearSelection} onComplete={completeBatchAction} trash={trash} />
+        <SelectionBar selectedIds={Array.from(selection)} onClear={clearSelection} onComplete={completeBatchAction} trash={trash} elevated={totalPages > 1} />
       )}
 
       {!isGuest && (
@@ -1167,46 +1183,6 @@ function ListItemContent({ book }: { book: BookListItem }) {
     </div>
   )
 }
-
-// Virtuoso components must be referentially stable: inline component types
-// remount the whole virtual list DOM on every render. The dynamic column count
-// reaches the grid List through a CSS variable set on the scroller style.
-const GridList = forwardRef<HTMLDivElement, GridListProps>(function GridList({ style, children, ...props }, ref) {
-  return (
-    <div
-      ref={ref}
-      {...props}
-      style={{
-        ...style,
-        display: 'grid',
-        gridTemplateColumns: 'repeat(var(--library-grid-cols), minmax(0, 1fr))',
-        gap: '20px',
-      }}
-    >
-      {children}
-    </div>
-  )
-})
-
-const GridItem = forwardRef<HTMLDivElement, GridItemProps>(function GridItem({ children, ...props }, ref) {
-  return (
-    <div ref={ref} {...props}>
-      {children}
-    </div>
-  )
-})
-
-const GRID_COMPONENTS: GridComponents = { List: GridList, Item: GridItem }
-
-const ListItem = forwardRef<HTMLDivElement, ItemProps<unknown>>(function ListItem({ children, ...props }, ref) {
-  return (
-    <div ref={ref} {...props} style={{ padding: '4px 0' }}>
-      {children}
-    </div>
-  )
-})
-
-const LIST_COMPONENTS: Components<unknown, unknown> = { Item: ListItem }
 
 function useGlobalDragToggle(setOpen: (open: boolean) => void) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)

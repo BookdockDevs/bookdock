@@ -17,6 +17,7 @@ interface SelectionBarProps {
   onClear: () => void
   onComplete?: () => void
   trash?: boolean
+  elevated?: boolean
 }
 
 const BATCH_STATUS_ACTIONS: { value: ReadStatus; labelKey: string }[] = [
@@ -27,7 +28,7 @@ const BATCH_STATUS_ACTIONS: { value: ReadStatus; labelKey: string }[] = [
   { value: 'abandoned', labelKey: 'library.markAbandoned' },
 ]
 
-export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, trash = false }: SelectionBarProps) {
+export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, trash = false, elevated = false }: SelectionBarProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const [dialog, setDialog] = useState<'classify' | 'delete' | 'permanent' | null>(null)
@@ -107,8 +108,15 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
 
   return (
     <>
-      <div className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-1/2 z-40 -translate-x-1/2 sm:bottom-5">
-        <div className="relative flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] items-center rounded-2xl border border-stone-200/80 bg-white/95 shadow-xl shadow-stone-900/8 backdrop-blur-md animate-selection-bar-in sm:w-auto sm:max-w-none dark:border-stone-700 dark:bg-stone-900/95">
+      <div
+        className={cn(
+          'pointer-events-none fixed inset-x-0 z-40 flex justify-center transition-[bottom] duration-200 select-none md:left-60',
+          elevated
+            ? 'bottom-[calc(3.85rem+env(safe-area-inset-bottom))] sm:bottom-[4.25rem]'
+            : 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))] sm:bottom-5',
+        )}
+      >
+        <div className="pointer-events-auto relative flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] items-center rounded-2xl border border-stone-200/80 bg-white/95 shadow-xl shadow-stone-900/8 backdrop-blur-md animate-selection-bar-in sm:w-auto sm:max-w-none dark:border-stone-700 dark:bg-stone-900/95">
           {/* Left fade shadow */}
           <div
             data-testid="selection-bar-fade-left"

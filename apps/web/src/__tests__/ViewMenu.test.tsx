@@ -81,7 +81,7 @@ describe('ViewMenu sort chips', () => {
 
 describe('ViewMenu recently read segmented control', () => {
   it('renders the three options with the stored one active', () => {
-    renderMenu()
+    renderMenu({ defaultTab: 'viewLayout' })
 
     expect(screen.getByRole('button', { name: '关闭' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: '封面行' })).toHaveAttribute('aria-pressed', 'false')
@@ -89,7 +89,7 @@ describe('ViewMenu recently read segmented control', () => {
   })
 
   it('updates the store and persists the choice', () => {
-    renderMenu()
+    renderMenu({ defaultTab: 'viewLayout' })
 
     fireEvent.click(screen.getByRole('button', { name: '封面行' }))
     expect(useUiStore.getState().recentlyReadStyle).toBe('covers')
@@ -102,14 +102,14 @@ describe('ViewMenu recently read segmented control', () => {
   })
 
   it('stays visible in list view', () => {
-    renderMenu({ view: 'list' })
+    renderMenu({ defaultTab: 'viewLayout', view: 'list' })
     expect(screen.getByRole('button', { name: '封面行' })).toBeInTheDocument()
   })
 })
 
 describe('ViewMenu cover prefs', () => {
   it('renders the card-text toggle and fit options with stored values', () => {
-    renderMenu()
+    renderMenu({ defaultTab: 'viewLayout' })
 
     expect(screen.getByRole('switch', { name: '卡片文字' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('button', { name: '裁切填充' })).toHaveAttribute('aria-pressed', 'true')
@@ -117,7 +117,7 @@ describe('ViewMenu cover prefs', () => {
   })
 
   it('toggles card text in the store and persists it', () => {
-    renderMenu()
+    renderMenu({ defaultTab: 'viewLayout' })
 
     fireEvent.click(screen.getByRole('switch', { name: '卡片文字' }))
     expect(useUiStore.getState().coverText).toBe(false)
@@ -125,7 +125,7 @@ describe('ViewMenu cover prefs', () => {
   })
 
   it('switches cover fit independently of the card-text toggle', () => {
-    renderMenu()
+    renderMenu({ defaultTab: 'viewLayout' })
 
     fireEvent.click(screen.getByRole('switch', { name: '卡片文字' }))
     fireEvent.click(screen.getByRole('button', { name: '完整显示' }))
@@ -136,7 +136,7 @@ describe('ViewMenu cover prefs', () => {
   })
 
   it('hides the cover options in list view', () => {
-    renderMenu({ view: 'list' })
+    renderMenu({ defaultTab: 'viewLayout', view: 'list' })
     expect(screen.queryByRole('switch', { name: '卡片文字' })).toBeNull()
     expect(screen.queryByRole('button', { name: '裁切填充' })).toBeNull()
   })
@@ -144,7 +144,7 @@ describe('ViewMenu cover prefs', () => {
 
 describe('ViewMenu list info toggles', () => {
   it('shows the six toggles only in list view, progress on by default', () => {
-    renderMenu({ view: 'list' })
+    renderMenu({ defaultTab: 'viewLayout', view: 'list' })
     expect(screen.getByText('列表信息')).toBeInTheDocument()
     // 书架/标签 only exist in the list-info group; the other four labels
     // collide with the always-visible sort chips
@@ -154,13 +154,13 @@ describe('ViewMenu list info toggles', () => {
   })
 
   it('hides the toggle group in grid view', () => {
-    renderMenu({ view: 'grid' })
+    renderMenu({ defaultTab: 'viewLayout', view: 'grid' })
     expect(screen.queryByText('列表信息')).toBeNull()
     expect(screen.queryByRole('button', { name: '书架' })).toBeNull()
   })
 
   it('toggles an item in the store and persists it', () => {
-    renderMenu({ view: 'list' })
+    renderMenu({ defaultTab: 'viewLayout', view: 'list' })
 
     fireEvent.click(screen.getByRole('button', { name: '书架' }))
     expect(useUiStore.getState().listInfoItems).toEqual(['progress', 'shelf'])
@@ -175,18 +175,18 @@ describe('ViewMenu list info toggles', () => {
 describe('ViewMenu columns segmented control', () => {
   it('renders auto and 2-8 column options in grid view with current active', () => {
     useUiStore.setState({ gridColumns: '4' })
-    renderMenu({ view: 'grid' })
+    renderMenu({ defaultTab: 'viewLayout', view: 'grid' })
 
     expect(screen.getByRole('button', { name: '自适应' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: '4' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('switches column count in the store when clicked', () => {
-    renderMenu({ view: 'grid' })
+    renderMenu({ defaultTab: 'viewLayout', view: 'grid' })
 
-    fireEvent.click(screen.getByRole('button', { name: '5' }))
-    expect(useUiStore.getState().gridColumns).toBe('5')
-    expect(screen.getByRole('button', { name: '5' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '6' }))
+    expect(useUiStore.getState().gridColumns).toBe('6')
+    expect(screen.getByRole('button', { name: '6' })).toHaveAttribute('aria-pressed', 'true')
 
     fireEvent.click(screen.getByRole('button', { name: '自适应' }))
     expect(useUiStore.getState().gridColumns).toBe('auto')
@@ -194,7 +194,7 @@ describe('ViewMenu columns segmented control', () => {
   })
 
   it('hides column options in list view', () => {
-    renderMenu({ view: 'list' })
+    renderMenu({ defaultTab: 'viewLayout', view: 'list' })
     expect(screen.queryByRole('button', { name: '自适应' })).toBeNull()
   })
 })

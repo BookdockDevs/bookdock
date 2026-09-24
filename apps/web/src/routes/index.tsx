@@ -3,6 +3,7 @@ import { rootRoute } from './__root'
 import Library from '@/features/library/Library'
 
 export interface LibrarySearch {
+  page?: number
   view?: 'grid' | 'list'
   q?: string
   sortBy?: string
@@ -24,18 +25,22 @@ const VALID_STATUSES = new Set(['wishlist', 'reading', 'idle', 'finished', 'aban
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  validateSearch: (input: Record<string, unknown>): LibrarySearch => ({
-    view: typeof input.view === 'string' && VALID_VIEWS.has(input.view) ? (input.view as 'grid' | 'list') : undefined,
-    q: typeof input.q === 'string' && input.q.length > 0 ? input.q : undefined,
-    sortBy: typeof input.sortBy === 'string' && input.sortBy.length > 0 ? input.sortBy : undefined,
-    sortOrder: VALID_ORDERS.has(input.sortOrder as string) ? (input.sortOrder as 'asc' | 'desc') : undefined,
-    shelf: typeof input.shelf === 'string' && input.shelf.length > 0 ? input.shelf : undefined,
-    tag: typeof input.tag === 'string' && input.tag.length > 0 ? input.tag : undefined,
-    author: typeof input.author === 'string' && input.author.length > 0 ? input.author : undefined,
-    series: typeof input.series === 'string' && input.series.length > 0 ? input.series : undefined,
-    format: VALID_FORMATS.has(input.format as string) ? (input.format as 'epub' | 'txt') : undefined,
-    status: VALID_STATUSES.has(input.status as string) ? (input.status as LibrarySearch['status']) : undefined,
-    trash: input.trash === true ? true : undefined,
-  }),
+  validateSearch: (input: Record<string, unknown>): LibrarySearch => {
+    const page = typeof input.page === 'string' && /^\d+$/.test(input.page) ? Number(input.page) : input.page
+    return {
+      page: typeof page === 'number' && Number.isSafeInteger(page) && page > 0 ? page : undefined,
+      view: typeof input.view === 'string' && VALID_VIEWS.has(input.view) ? (input.view as 'grid' | 'list') : undefined,
+      q: typeof input.q === 'string' && input.q.length > 0 ? input.q : undefined,
+      sortBy: typeof input.sortBy === 'string' && input.sortBy.length > 0 ? input.sortBy : undefined,
+      sortOrder: VALID_ORDERS.has(input.sortOrder as string) ? (input.sortOrder as 'asc' | 'desc') : undefined,
+      shelf: typeof input.shelf === 'string' && input.shelf.length > 0 ? input.shelf : undefined,
+      tag: typeof input.tag === 'string' && input.tag.length > 0 ? input.tag : undefined,
+      author: typeof input.author === 'string' && input.author.length > 0 ? input.author : undefined,
+      series: typeof input.series === 'string' && input.series.length > 0 ? input.series : undefined,
+      format: VALID_FORMATS.has(input.format as string) ? (input.format as 'epub' | 'txt') : undefined,
+      status: VALID_STATUSES.has(input.status as string) ? (input.status as LibrarySearch['status']) : undefined,
+      trash: input.trash === true ? true : undefined,
+    }
+  },
   component: Library,
 })

@@ -37,6 +37,9 @@ export type ListInfoItem = 'progress' | 'size' | 'lastRead' | 'shelf' | 'tags' |
 /** Fixed display order: the row renders enabled items in this sequence */
 export const LIST_INFO_ITEMS: ListInfoItem[] = ['progress', 'size', 'lastRead', 'shelf', 'tags', 'createdAt']
 
+export const LIBRARY_PAGE_SIZES = [24, 48, 96] as const
+export type LibraryPageSize = (typeof LIBRARY_PAGE_SIZES)[number]
+
 const CUSTOM_THEMES_KEY = 'bd-read-custom-themes'
 const READING_THEME_MODE_KEY = 'bd-read-theme-mode'
 const READING_THEME_MODE_ORDER: readonly ReadingThemeMode[] = ['system', 'light', 'dark']
@@ -188,6 +191,8 @@ interface UiState {
   sortBy: string
   sortOrder: 'asc' | 'desc'
   view: 'grid' | 'list'
+  libraryPageSize: number
+  setLibraryPageSize: (v: number) => void
   setCoverText: (v: boolean) => void
   setCoverFit: (v: CoverFit) => void
   setGridColumns: (v: string) => void
@@ -399,6 +404,13 @@ function getInitialCoverText(): boolean {
   return stored === null ? true : stored === 'true'
 }
 
+function getInitialLibraryPageSize(): number {
+  if (typeof window === 'undefined') return 24
+  const stored = localStorage.getItem('bd-library-page-size')
+  const num = Number(stored)
+  return [24, 48, 96].includes(num) ? num : 24
+}
+
 function getInitialCoverFit(): CoverFit {
   if (typeof window === 'undefined') return 'crop'
   const stored = localStorage.getItem('bd-cover-fit')
@@ -498,6 +510,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   coverText: getInitialCoverText(),
   coverFit: getInitialCoverFit(),
   gridColumns: getInitial<string>('bd-grid-columns', 'auto'),
+  libraryPageSize: getInitialLibraryPageSize(),
   recentlyReadStyle: getInitialRecentlyReadStyle(),
   listInfoItems: getInitialListInfoItems(),
   sortBy: getInitial<string>('bd-sort-by', 'createdAt'),
@@ -519,6 +532,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setGridColumns: (gridColumns) => {
     setStorage('bd-grid-columns', gridColumns)
     set({ gridColumns })
+  },
+  setLibraryPageSize: (libraryPageSize) => {
+    setStorage('bd-library-page-size', String(libraryPageSize))
+    set({ libraryPageSize })
   },
   setSortBy: (sortBy) => {
     setStorage('bd-sort-by', sortBy)

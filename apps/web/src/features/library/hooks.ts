@@ -49,6 +49,13 @@ export function useBooks(params: UseBooksParams, options?: { enabled?: boolean }
   })
 }
 
+export function prefetchBooks(queryClient: QueryClient, params: UseBooksParams) {
+  return queryClient.prefetchQuery({
+    queryKey: ['books', params],
+    queryFn: () => apiGet<BookListRes>(buildBooksPath(params)),
+  })
+}
+
 export interface UseInfiniteBooksParams {
   pageSize: number
   search: string
