@@ -96,17 +96,65 @@ export default function Reader() {
   // reading-area interactions hide them again, while footer controls keep them open for consecutive navigation
   const [chromePinned, setChromePinned] = useState(false)
   const keepChromePinnedRef = useRef(false)
-  // Footer visibility state machine: the hot strip SUMMONS the footer; the
-  // corner zones (wrapping the capsules) can only SUSTAIN it — they stay
-  // pointer-inert while hidden, so approaching a capsule from the page never
-  // raises the footer and never moves the capsule under the cursor.
+  // Chrome visibility state machine: hot strips SUMMON the header/footer with a 180ms
+  // debounce grace period; corner zones sustain the footer; touch uses chromePinned alone.
+  const [headerSummon, setHeaderSummon] = useState(false)
   const [footerSummon, setFooterSummon] = useState(false)
   const [cornerDwell, setCornerDwell] = useState(false)
+  const headerLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const footerLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const onHeaderEnter = useCallback(() => {
+    if (headerLeaveTimerRef.current) {
+      clearTimeout(headerLeaveTimerRef.current)
+      headerLeaveTimerRef.current = null
+    }
+    setHeaderSummon(true)
+  }, [])
+  const onHeaderLeave = useCallback(() => {
+    if (headerLeaveTimerRef.current) clearTimeout(headerLeaveTimerRef.current)
+    headerLeaveTimerRef.current = setTimeout(() => {
+      setHeaderSummon(false)
+      headerLeaveTimerRef.current = null
+    }, 180)
+  }, [])
+
+  const onFooterEnter = useCallback(() => {
+    if (footerLeaveTimerRef.current) {
+      clearTimeout(footerLeaveTimerRef.current)
+      footerLeaveTimerRef.current = null
+    }
+    setFooterSummon(true)
+  }, [])
+  const onFooterLeave = useCallback(() => {
+    if (footerLeaveTimerRef.current) clearTimeout(footerLeaveTimerRef.current)
+    footerLeaveTimerRef.current = setTimeout(() => {
+      setFooterSummon(false)
+      footerLeaveTimerRef.current = null
+    }, 180)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (headerLeaveTimerRef.current) clearTimeout(headerLeaveTimerRef.current)
+      if (footerLeaveTimerRef.current) clearTimeout(footerLeaveTimerRef.current)
+    }
+  }, [])
+
   // Touch devices have no hover: the chrome hot zones stay inert and the
   // top/bottom controls are driven by the middle-tap chromePinned alone.
   const isTouch = useIsTouch()
+  const [isSelectingText, setIsSelectingText] = useState(false)
+  useEffect(() => {
+    function onPointerUp() {
+      setIsSelectingText(false)
+    }
+    window.addEventListener('pointerup', onPointerUp)
+    return () => window.removeEventListener('pointerup', onPointerUp)
+  }, [])
   const footerVisibleRef = useRef(false)
   const footerVisible = chromePinned || footerSummon || (footerVisibleRef.current && cornerDwell)
+  const headerVisible = chromePinned || headerSummon || settingsOpen || ttsOpen || autoReadingOpen
   useEffect(() => {
     footerVisibleRef.current = footerVisible
   }, [footerVisible])
@@ -700,8 +748,14 @@ export default function Reader() {
       scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, segmentStartFraction, sample })
     },
     onSelected: (e) => {
+      setIsSelectingText(false)
       if (e) setChromePinned(false)
       setSelection(e)
+    },
+    onTextSelectionStart: () => {
+      setIsSelectingText(true)
+      setFooterSummon(false)
+      setHeaderSummon(false)
     },
     onAnnotationClicked: (e) => {
       const current = useReaderState.getState().selection
@@ -1295,36 +1349,53 @@ export default function Reader() {
       <TtsSessionProvider renderer={renderer} coordinator={playbackCoordinator} guestReadOnly={isGuest}>
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div className="flex h-full w-full">
-            <ReaderSidebar bookId={id} onStatsTabOpen={flushReadingTimer} chromePinned={chromePinned} guestReadOnly={isGuest} />
+            <ReaderSidebar
+              bookId={id}
+              onStatsTabOpen={flushReadingTimer}
+              chromePinned={chromePinned}
+              footerVisible={footerVisible}
+              mobileDockVisible={mobileDockVisible}
+              onFooterSummon={onFooterEnter}
+              guestReadOnly={isGuest}
+            />
           <div className="relative flex flex-1 flex-col">
-            {/* Top hover zone: hot strip + header belong to the same group so hover is continuous.
-                Touch: no group/hot strip — pinned (middle tap) is the only reveal. */}
-            <div className={cn('absolute inset-x-0 top-0 z-50 pointer-events-none', !isTouch && 'group')}>
+            {/* Top hover zone: hot strip + header hover with 180ms grace period.
+                Touch: no hot strip — pinned (middle tap) is the only reveal. */}
+            <div className="absolute inset-x-0 top-0 z-50 pointer-events-none">
               {!isTouch && (
                 <div
                   className={cn(
-                    'absolute left-0 top-0 h-12 pointer-events-auto',
+                    'absolute inset-x-0 top-0 h-12',
+                    isSelectingText ? 'pointer-events-none' : 'pointer-events-auto',
                     readingMode === 'scroll' ? 'right-5' : 'right-0',
                   )}
+                  onPointerEnter={isTouch || isSelectingText ? undefined : onHeaderEnter}
+                  onPointerLeave={isTouch ? undefined : onHeaderLeave}
                 />
               )}
-              <ReaderHeader
-                title={pendingNavChapter || currentChapter || book.title}
-                visible
-                pinned={chromePinned}
-                settingsOpen={settingsOpen}
-                ttsOpen={ttsOpen}
-                autoReadingOpen={autoReadingOpen}
-                readingMode={readingMode}
-                bookId={id}
-                estimatedMinutes={estimatedMinutes}
-                onAddBookmark={isGuest ? undefined : onAddBookmark}
-                onToggleSettings={onToggleSettings}
-                onToggleTts={isGuest ? undefined : onToggleTts}
-                onToggleAutoReading={onToggleAutoReading}
-                onToggleFullscreen={onToggleFullscreen}
-                bookmarkActive={!isGuest && !!currentBookmark}
-              />
+              <div
+                className={cn('absolute inset-x-0 top-0', headerVisible ? 'pointer-events-auto' : 'pointer-events-none')}
+                onPointerEnter={isTouch ? undefined : onHeaderEnter}
+                onPointerLeave={isTouch ? undefined : onHeaderLeave}
+              >
+                <ReaderHeader
+                  title={pendingNavChapter || currentChapter || book.title}
+                  visible={headerVisible}
+                  pinned={chromePinned}
+                  settingsOpen={settingsOpen}
+                  ttsOpen={ttsOpen}
+                  autoReadingOpen={autoReadingOpen}
+                  readingMode={readingMode}
+                  bookId={id}
+                  estimatedMinutes={estimatedMinutes}
+                  onAddBookmark={isGuest ? undefined : onAddBookmark}
+                  onToggleSettings={onToggleSettings}
+                  onToggleTts={isGuest ? undefined : onToggleTts}
+                  onToggleAutoReading={onToggleAutoReading}
+                  onToggleFullscreen={onToggleFullscreen}
+                  bookmarkActive={!isGuest && !!currentBookmark}
+                />
+              </div>
             </div>
             <Ribbon visible={!!currentBookmark} />
             <div
@@ -1456,19 +1527,18 @@ export default function Reader() {
             <div className="absolute inset-x-0 bottom-0 z-40 pointer-events-none">
               <div
                 className={cn(
-                  'absolute inset-x-0 bottom-0 h-12',
-                  !isTouch ? 'pointer-events-auto' : 'pointer-events-none',
+                  'absolute bottom-0 left-0 h-12',
+                  readingMode === 'scroll' ? 'right-5' : 'right-0',
+                  !isTouch && !isSelectingText ? 'pointer-events-auto' : 'pointer-events-none',
                 )}
-                onPointerEnter={isTouch ? undefined : () => setFooterSummon(true)}
-                onPointerLeave={isTouch ? undefined : () => setFooterSummon(false)}
+                onPointerEnter={isTouch || isSelectingText ? undefined : onFooterEnter}
+                onPointerLeave={isTouch ? undefined : onFooterLeave}
+              />
+              <div
+                className={cn('absolute inset-x-0 bottom-0', footerVisible && !isSelectingText ? 'pointer-events-auto' : 'pointer-events-none')}
+                onPointerEnter={isTouch || isSelectingText ? undefined : onFooterEnter}
+                onPointerLeave={isTouch ? undefined : onFooterLeave}
               >
-                <div
-                  className={cn(
-                    'pointer-events-auto absolute inset-y-0 right-16',
-                    (historyCaps.canBack || historyCaps.canForward) ? 'left-28' : 'left-0',
-                    isTouch && 'pointer-events-none',
-                  )}
-                />
                 <ProgressStrip
                   percent={percent}
                   pageInfo={pageInfo ?? undefined}
@@ -1493,8 +1563,8 @@ export default function Reader() {
                       ? 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))]'
                       : 'bottom-0',
                     footerVisible
-                      ? '-translate-y-10 pointer-events-auto'
-                      : isTouch ? 'translate-y-full pointer-events-none' : 'pointer-events-none',
+                      ? '-translate-y-12 pointer-events-auto'
+                      : 'translate-y-full pointer-events-none',
                   )}
                   onPointerEnter={isTouch ? undefined : () => setCornerDwell(true)}
                   onPointerLeave={isTouch ? undefined : () => setCornerDwell(false)}

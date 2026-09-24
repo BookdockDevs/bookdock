@@ -39,6 +39,38 @@ interface ShareCardProps {
   ref?: Ref<HTMLDivElement>
 }
 
+/** Collapses excessive blank space between adjacent full-width CJK punctuation marks (e.g. ：“ or 。”)
+ *  by applying a negative letter-spacing to the preceding mark. Single punctuation marks are untouched. */
+function kernCjkPunctuation(text: string): React.ReactNode {
+  const regex = /([：，。；！？、])(?=[“‘（《【])|([。，！？、])(?=[”’）》】])|([”’）》】])(?=[，。；])/g
+  if (!regex.test(text)) return text
+
+  const elements: React.ReactNode[] = []
+  let lastIndex = 0
+  regex.lastIndex = 0
+
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(text)) !== null) {
+    const matchIndex = match.index
+    if (matchIndex > lastIndex) {
+      elements.push(text.slice(lastIndex, matchIndex))
+    }
+    const char = text[matchIndex]
+    elements.push(
+      <span key={matchIndex} style={{ letterSpacing: '-0.38em' }}>
+        {char}
+      </span>,
+    )
+    lastIndex = matchIndex + 1
+  }
+
+  if (lastIndex < text.length) {
+    elements.push(text.slice(lastIndex))
+  }
+
+  return elements
+}
+
 /** Body typography: uses dynamic font size, line-height and letter-spacing with CJK justification,
  *  anti-orphan formatting (text-wrap: pretty), strict punctuation line-breaking and punctuation compression */
 function Body({
@@ -57,13 +89,13 @@ function Body({
   return (
     <div
       style={{ fontSize, lineHeight: lineHeight ?? 1.8, letterSpacing }}
-      className={`[text-wrap:pretty] [overflow-wrap:break-word] [line-break:strict] [font-feature-settings:'halt','chws'] ${
+      className={`[text-wrap:pretty] [overflow-wrap:break-word] [line-break:strict] [font-feature-settings:'chws'] ${
         center ? 'text-center' : 'text-justify'
       }`}
     >
       {paragraphs.map((p, i) => (
         <p key={i} style={i > 0 ? { marginTop: '0.85em' } : undefined}>
-          {p}
+          {kernCjkPunctuation(p)}
         </p>
       ))}
     </div>
@@ -77,7 +109,7 @@ function QuoteBlock({ quote, colors, center }: { quote: string; colors: CardColo
         <QuoteLeftIcon height={22} />
       </span>
       <p className="mt-4 whitespace-pre-wrap text-lg [text-wrap:pretty]" style={{ color: colors.sub, lineHeight: 1.7 }}>
-        {quote}
+        {kernCjkPunctuation(quote)}
       </p>
     </div>
   )
@@ -129,13 +161,23 @@ function Divider({ colors, className = '' }: { colors: CardColors; className?: s
   return <div className={`h-px w-full ${className}`} style={{ background: `${colors.watermark}60` }} />
 }
 
-function BrandMark({ brand, colors, align = 'right' }: { brand: ShareCardBrand; colors: CardColors; align?: 'left' | 'center' | 'right' }) {
+function BrandMark({
+  brand,
+  colors,
+  align = 'right',
+  className,
+}: {
+  brand: ShareCardBrand
+  colors: CardColors
+  align?: 'left' | 'center' | 'right'
+  className?: string
+}) {
   if (brand === 'off') return null
   const alignClass = align === 'center' ? 'text-center' : align === 'left' ? 'text-left' : 'text-right'
   return (
     <p
       translate="no"
-      className={`notranslate mt-6 w-full text-xs font-mono tracking-[0.2em] uppercase opacity-75 ${alignClass}`}
+      className={`notranslate ${className ?? 'mt-2.5'} w-full text-[11px] font-mono tracking-[0.22em] uppercase opacity-60 ${alignClass}`}
       style={{ color: colors.watermark }}
     >
       {brand === 'zh' ? '书坞' : 'Bookdock'}
@@ -282,7 +324,7 @@ export default function ShareCard({
         : template === 'brocade' ? 'px-13 py-14'
         : template === 'ink' ? 'px-10 py-14'
         : template === 'calendar' ? 'px-12 py-16'
-        : 'px-11 py-14'
+        : 'px-11 pt-12 pb-8'
       }`}
     >
       {template === 'classic' && (
@@ -298,8 +340,8 @@ export default function ShareCard({
           </div>
           <div>
             <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} />
-            {isIdea && <Divider colors={colors} className="mt-8" />}
-            <BrandMark brand={brand} colors={colors} />
+            {isIdea && <Divider colors={colors} className="mt-6" />}
+            <BrandMark brand={brand} colors={colors} className={isIdea ? 'mt-4' : 'mt-2.5'} />
           </div>
         </>
       )}

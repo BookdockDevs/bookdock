@@ -39,7 +39,7 @@ describe('NoteEditorPopup', () => {
     const { container } = renderPopup({ rect: { left: 100, top: 120, width: 200, height: 40 } })
     expect(screen.queryByText('annotation.noteTitle')).toBeNull()
     expect(container.querySelector('.rotate-45')).toBeNull()
-    expect(container.querySelector('.bg-stone-700')).not.toBeNull()
+    expect(container.querySelector('.rounded-2xl')).not.toBeNull()
     const root = container.firstElementChild as HTMLElement
     expect(root.style.top).toBe('174px') // rect.bottom + gap
   })

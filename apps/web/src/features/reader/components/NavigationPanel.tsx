@@ -182,11 +182,14 @@ interface NavigationPanelProps {
   locked?: boolean
   statsDisabled?: boolean
   guestReadOnly?: boolean
+  footerVisible?: boolean
+  mobileDockVisible?: boolean
+  onFooterSummon?: (summon: boolean) => void
   onClose?: () => void
 }
 
 export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPanelProps>(function NavigationPanel(
-  { bookId, open, locked, statsDisabled, guestReadOnly = false, onClose },
+  { bookId, open, locked, statsDisabled, guestReadOnly = false, footerVisible = true, mobileDockVisible = false, onFooterSummon, onClose },
   ref,
 ) {
   const _ = useTranslation()
@@ -1377,11 +1380,22 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       {searchActive && searchResults.length > 0 && (
         <div
           data-testid="search-nav-capsule"
-          className="fixed bottom-14 left-1/2 z-[60] flex h-10 -translate-x-1/2 items-center gap-1.5 rounded-full border border-stone-200/80 bg-[var(--bd-read-bg)]/90 pl-3.5 pr-1.5 shadow-lg shadow-black/8 backdrop-blur-md dark:border-stone-800/80 dark:shadow-black/30"
+          className={cn(
+            'fixed left-1/2 z-[60] flex h-10 -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 pl-3.5 pr-1.5 shadow-xl backdrop-blur-md transition-[bottom,transform,opacity] duration-300',
+            mobileDockVisible
+              ? (footerVisible
+                  ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))] translate-y-0 opacity-100 pointer-events-auto'
+                  : 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))] translate-y-full opacity-0 pointer-events-none')
+              : (footerVisible
+                  ? 'bottom-14 translate-y-0 opacity-100 pointer-events-auto'
+                  : 'bottom-0 translate-y-full opacity-0 pointer-events-none'),
+          )}
           style={{ animation: 'note-editor-in 140ms ease-out forwards', '--note-dx': '0px', '--note-dy': '8px' } as CSSProperties}
+          onPointerEnter={() => onFooterSummon?.(true)}
+          onPointerLeave={() => onFooterSummon?.(false)}
         >
           {/* Query & Counter */}
-          <div className="flex min-w-0 items-center gap-1.5 pr-1 text-sm text-current">
+          <div className="flex min-w-0 items-center gap-1.5 pr-1 text-sm text-[var(--bd-read-text)]">
             <svg
               className="h-3.5 w-3.5 shrink-0 text-[var(--bd-read-sub)]"
               viewBox="0 0 24 24"
@@ -1405,7 +1419,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           </div>
 
           {/* Divider */}
-          <div className="h-3.5 w-px shrink-0 bg-stone-300/70 dark:bg-stone-700/70" aria-hidden="true" />
+          <div className="h-3.5 w-px shrink-0 bg-[var(--bd-read-accent)]" aria-hidden="true" />
 
           {/* Navigation Stepper (Prev / Next) */}
           <div className="flex items-center gap-0.5 shrink-0">
@@ -1434,7 +1448,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           </div>
 
           {/* Divider */}
-          <div className="h-3.5 w-px shrink-0 bg-stone-300/70 dark:bg-stone-700/70" aria-hidden="true" />
+          <div className="h-3.5 w-px shrink-0 bg-[var(--bd-read-accent)]" aria-hidden="true" />
 
           {/* Close button */}
           <button

@@ -4,6 +4,7 @@ import type { AnnotationRes } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
+import { cn } from '@/lib/utils'
 
 import { getLastHighlightStyle } from './annotation-colors'
 import { AiSparkleIcon, BulbIcon, ChevronDownIcon, ChevronLeftIcon, CloseIcon, CopyIcon, ExcerptShareIcon, PencilIcon, QuoteLeftIcon, SearchIcon, StyleGlyph, TrashIcon } from './annotation-icons'
@@ -40,11 +41,11 @@ interface IdeaOverlayProps {
   onClose: () => void
 }
 
-const card = 'rounded-2xl bg-stone-700 text-stone-100 shadow-2xl'
+const card = 'rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] text-[var(--bd-read-text)] shadow-2xl'
 const iconBtn =
-  'flex h-10 w-10 items-center justify-center rounded-full text-stone-200 transition-colors hover:bg-white/10 hover:text-white'
+  'flex h-10 w-10 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current'
 const detailActionBtn =
-  'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-white/10 hover:text-stone-200'
+  'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current'
 
 /**
  * Android-WeChat-style floating overlay for ideas: a dimmed backdrop with a
@@ -136,7 +137,7 @@ export function IdeaOverlay({
                   {detailAvatarUrl ? (
                     <img src={detailAvatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
                   ) : (
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-stone-300">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]">
                       <BulbIcon size={16} />
                     </span>
                   )}
@@ -144,14 +145,14 @@ export function IdeaOverlay({
                 </div>
                 <p className="whitespace-pre-wrap pt-4 text-base leading-7">{detail.annotation.note}</p>
                 {quoteText && (
-                  <div className="mt-5 border-t border-white/10 pt-3">
-                    <span className="text-stone-500">
+                  <div className="mt-5 border-t border-[var(--bd-read-accent)]/60 pt-3">
+                    <span className="text-[var(--bd-read-sub)]">
                       <QuoteLeftIcon height={14} />
                     </span>
-                    <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-stone-400">{quoteText}</p>
+                    <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-[var(--bd-read-sub)]">{quoteText}</p>
                   </div>
                 )}
-                <div className="flex items-center gap-2 pt-4 text-xs text-stone-400">
+                <div className="flex items-center gap-2 pt-4 text-xs text-[var(--bd-read-sub)]">
                   <span>
                     {_('annotation.publishedAt')} {formatFullDateTime(_, detail.annotation.createdAt)}
                   </span>
@@ -183,7 +184,7 @@ export function IdeaOverlay({
             <div className="w-full max-w-md">
               <div className={card}>
                 <div className="relative px-5 pt-4">
-                  <span className="text-stone-500">
+                  <span className="text-[var(--bd-read-sub)]">
                     <QuoteLeftIcon height={20} />
                   </span>
                   {quoteClamped && (
@@ -191,7 +192,7 @@ export function IdeaOverlay({
                       onClick={() => setQuoteExpanded((v) => !v)}
                       title={_(quoteExpanded ? 'annotation.collapseQuote' : 'annotation.expandQuote')}
                       aria-expanded={quoteExpanded}
-                      className="absolute right-2 top-3 flex h-8 w-8 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-white/10 hover:text-stone-200"
+                      className="absolute right-2 top-3 flex h-8 w-8 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
                     >
                       <span className={`transition-transform ${quoteExpanded ? 'rotate-180' : ''}`}>
                         <ChevronDownIcon />
@@ -206,7 +207,7 @@ export function IdeaOverlay({
                     {quoteText}
                   </p>
                 </div>
-                <div className="mt-3 flex items-center justify-around border-t border-white/10 px-2 py-1.5">
+                <div className="mt-3 flex items-center justify-around border-t border-[var(--bd-read-accent)]/60 px-2 py-1.5">
                   {quoteActions.map((a) => (
                     <button key={a.key} onClick={a.onClick} title={a.title} className={iconBtn}>
                       {a.icon}
@@ -220,19 +221,22 @@ export function IdeaOverlay({
                   <button
                     key={entry.annotation.id}
                     onClick={() => setDetail(entry)}
-                    className={`${card} mt-3 block w-full p-4 text-left transition-colors hover:bg-stone-600`}
+                    className={cn(
+                      card,
+                      'mt-3 block w-full p-4 text-left transition-all hover:bg-[color-mix(in_srgb,var(--bd-read-bg)_94%,var(--bd-read-text))] active:scale-[0.99]',
+                    )}
                   >
                     <div className="flex items-center gap-2.5">
                       {entryAvatarUrl ? (
                         <img src={entryAvatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
                       ) : (
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-stone-300">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]">
                           <BulbIcon size={16} />
                         </span>
                       )}
                       <span className="truncate text-sm font-medium">{entry.authorName ?? _('annotation.myNote')}</span>
                       {entry.own && (
-                        <span className="ml-auto shrink-0 rounded-full bg-white/10 px-2.5 py-0.5 text-xs text-stone-300">
+                        <span className="ml-auto shrink-0 rounded-full bg-stone-500/10 px-2.5 py-0.5 text-xs text-[var(--bd-read-sub)]">
                           {_('annotation.myNote')}
                         </span>
                       )}

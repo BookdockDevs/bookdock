@@ -76,14 +76,14 @@ export function ImageContextMenu({ image, bookTitle, onView, onClose }: ImageCon
       onContextMenu={(event) => { event.preventDefault(); onClose() }}
     >
       <div
-        className="absolute min-w-44 overflow-hidden rounded-xl border border-stone-200/80 dark:border-stone-700/80 bg-[var(--bd-read-bg)] p-1.5 text-sm text-[var(--bd-read-fg,#333)] shadow-2xl backdrop-blur-md"
+        className="absolute min-w-44 overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1.5 text-sm text-[var(--bd-read-text)] shadow-2xl backdrop-blur-md"
         style={{ left, top }}
         role="menu"
         aria-label={_('reader.imageMenuTitle')}
         onPointerDown={(event) => event.stopPropagation()}
         onContextMenu={(event) => event.preventDefault()}
       >
-        <p className="truncate px-2 py-1 text-xs text-[var(--bd-read-sub)] border-b border-stone-200/50 dark:border-stone-700/50 mb-1" title={description}>
+        <p className="truncate px-2 py-1 text-xs text-[var(--bd-read-sub)] border-b border-[var(--bd-read-accent)] mb-1" title={description}>
           {description}
         </p>
 

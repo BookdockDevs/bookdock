@@ -12,6 +12,20 @@
 4. **Cohesive extractable modules**: the server is organized by domain modules, key capabilities exposed via interfaces (StorageDriver, FormatRegistry); only extract packages (e.g. `@bookdock/db`, `@bookdock/storage`) when the same capability is genuinely needed elsewhere.
 5. **Self-hosted first, privacy first**: data is byte backup-able; default single-process single-binary container; server-held secrets are encrypted at rest and never exposed to the browser.
 
+### UI/UX Design Language & Core Goals
+
+Bookdock's visual and interaction design embodies a **"Restrained, Tactile Minimalism (人文主义数字书房)"**—balancing literary warmth with modern geometric clarity (detailed in `docs/local/dev/design-system.md`).
+
+- **Dual Aesthetic Metaphor**:
+  - *Library (Curated Gallery)*: Orderly, book-first presentation. Covers take center stage with Morandi tone palettes and spine binding details; typography pairs literary serif headings (`Songti` / `Source Han Serif`) with modern geometric sans-serif metadata (`Inter` / `PingFang SC`).
+  - *Reader (Ambient Canvas)*: Absolute reading immersion—the interface dissolves into a pure paper canvas (`--bd-read-bg`). Controls are translucent frosted sheets (`backdrop-blur-md`, 1px hairline borders) that summon quietly on demand and tuck away completely during focused reading.
+- **Visual Tokens**: Low-saturation warm neutral tones (`stone-*`); nested proportional radiuses (`rounded-2xl` containers/islands → `rounded-xl` buttons → `rounded-full` capsules); 1px hairline borders (`border-[var(--bd-read-accent)]/80`) paired with subtle ambient shadows.
+- **Core Design Goals**:
+  1. *Content Sovereignty (零排版干扰)*: Reading flow is sacred. Transient controls (header, footer, capsules, overlay panels) float above content and must NEVER shift, shrink, or reflow book text (CLS = 0). Persistent split views reflow once on explicit user pin and remain stable.
+  2. *Intent Determinism (意图确定性与热区互斥)*: Interaction territories are strictly isolated. Text selection freezes header/footer summons; vertical scrollbar preserves a dedicated right-hand clearance corridor; top, bottom, and side summon zones never compete or accidentally cross-trigger.
+  3. *Companion Lifecycle (随行收纳哲学)*: Ephemeral indicators (reading timer, jump history, audio pill) share a unified lifecycle with the bottom control hub. They vanish when the footer closes to maintain an unblemished page, and elevate in harmony when the footer reveals.
+  4. *Calm Micro-Interactions (从容自然的微交互)*: Smooth cubic transitions without frantic popping. Hover triggers feature generous detection boundaries and a 150–200ms leave grace period to absorb minor pointer drift.
+
 ---
 
 ## 1. Monorepo Overview

@@ -57,7 +57,9 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const previewRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const [{ scale, height }, setMetrics] = useState({ scale: 1, height: 0 })
-  const [exporting, setExporting] = useState(false)
+  const [copying, setCopying] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const exporting = copying || saving
   const [prefs, setPrefs] = useState<ShareCardPrefs>(loadShareCardPrefs)
 
   useEffect(() => {
@@ -189,21 +191,21 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   async function saveImage() {
     const node = cardRef.current
     if (!node) return
-    setExporting(true)
+    setSaving(true)
     try {
       const blob = await getCardBlob(node, renderKey)
       downloadCardBlob(blob, fileName)
     } catch {
       notify.error({ key: 'share.exportFailed' })
     } finally {
-      setExporting(false)
+      setSaving(false)
     }
   }
 
   async function copyImage() {
     const node = cardRef.current
     if (!node) return
-    setExporting(true)
+    setCopying(true)
     try {
       const blob = await getCardBlob(node, renderKey)
       if (await copyCardBlob(blob)) {
@@ -214,7 +216,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     } catch {
       notify.error({ key: 'share.exportFailed' })
     } finally {
-      setExporting(false)
+      setCopying(false)
     }
   }
 
@@ -376,7 +378,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
               disabled={exporting}
               className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-stone-300/80 bg-white py-2.5 px-4 text-xs sm:text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 hover:text-stone-900 disabled:opacity-50 dark:border-stone-700 dark:bg-stone-800/80 dark:text-stone-200 dark:hover:bg-stone-700 dark:hover:text-stone-100"
             >
-              <CopyIcon size={16} />
+              {copying ? <SpinnerIcon size={16} /> : <CopyIcon size={16} />}
               <span>{_('share.copyImage')}</span>
             </button>
             <button
@@ -385,7 +387,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
               disabled={exporting}
               className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-stone-900 py-2.5 px-4 text-xs sm:text-sm font-medium text-white shadow-xs transition-colors hover:bg-stone-800 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
             >
-              {exporting ? <SpinnerIcon size={16} /> : <DownloadIcon size={16} />}
+              {saving ? <SpinnerIcon size={16} /> : <DownloadIcon size={16} />}
               <span>{_('share.saveImage')}</span>
             </button>
           </div>

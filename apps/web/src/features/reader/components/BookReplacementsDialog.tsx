@@ -143,6 +143,7 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
     // dialog along with it). Same mechanism as the preset context menu.
     <>
       <Modal
+        variant="reader"
         title={
           form ? (
             _(form.mode === 'create' ? 'settings.replacementsNew' : 'settings.replacementsEdit')
@@ -166,7 +167,7 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
             onClick={() => setForm({ mode: 'create' })}
             aria-label={_('settings.replacementsNew')}
             title={_('settings.replacementsNew')}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 5v14M5 12h14" />

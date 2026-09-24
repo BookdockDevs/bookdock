@@ -68,8 +68,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
     <header
       className={cn(
         'pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] transition-transform duration-300 sm:px-3',
-        visible ? 'group-hover:translate-y-0' : '',
-        settingsOpen || ttsOpen || autoReadingOpen || pinned ? 'translate-y-0' : '-translate-y-full',
+        visible || settingsOpen || ttsOpen || autoReadingOpen || pinned ? 'translate-y-0 pointer-events-auto' : '-translate-y-full',
         className,
       )}
     >

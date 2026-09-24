@@ -187,7 +187,7 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
       <div className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
         <div
           className={cn(
-            'group flex h-9 items-center rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] shadow-xl',
+            'group flex h-11 items-center rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] shadow-xl',
             expanded ? 'pl-0.5 pr-2.5' : 'px-2.5',
           )}
         >

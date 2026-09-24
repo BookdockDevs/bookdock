@@ -1,14 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { isDark } from '@/lib/color'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { resolveReadingTheme } from '@/lib/reading-theme'
 import { cn } from '@/lib/utils'
 import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
-import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
 import { useReaderState } from '../state/reader-state'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useAiQuickCommands, type AiQuickCommand } from '../hooks/useAiQuickCommands'
@@ -76,26 +73,14 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   const user = useAuthStore((s) => s.user)
   const authorName = getUserDisplayName(user, _('auth.guest'))
   const avatarKey = useAuthStore((s) => s.user?.avatarKey)
-  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
-  const customThemes = useUiStore((s) => s.customThemes)
-  const isDarkTheme = useMemo(() => {
-    const theme = resolveReadingTheme(readingThemeId, customThemes)
-    return isDark(theme.bg)
-  }, [readingThemeId, customThemes])
 
   const iconBtn = (active?: boolean, danger?: boolean) => cn(
-    'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors',
+    'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors active:scale-95',
     danger
-      ? isDarkTheme
-        ? 'text-red-400 hover:bg-white/10 hover:text-red-300'
-        : 'text-red-600 hover:bg-red-50 hover:text-red-700'
+      ? 'text-red-500 hover:bg-red-500/10 hover:text-red-600'
       : active
-        ? isDarkTheme
-          ? 'bg-white/15 text-white'
-          : 'bg-stone-200/80 text-stone-900 font-medium'
-        : isDarkTheme
-          ? 'text-stone-200 hover:bg-white/10 hover:text-white'
-          : 'text-stone-600 hover:bg-stone-100 hover:text-stone-900',
+        ? 'bg-stone-500/20 text-[var(--bd-read-text)] font-medium shadow-xs'
+        : 'text-[var(--bd-read-text)]/75 hover:bg-stone-500/12 hover:text-[var(--bd-read-text)]',
   )
   useEffect(() => {
     setCreatedLocal(null)
@@ -458,12 +443,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     <>
       {target && (
         <div
-          className={cn(
-            'fixed z-50 flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl px-2 shadow-xl backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
-            isDarkTheme
-              ? 'border border-stone-800/80 bg-stone-900/95 text-stone-200'
-              : 'border border-stone-200/90 bg-white/95 text-stone-700',
-          )}
+          className="fixed z-50 flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_6px_rgba(0,0,0,0.06),0_6px_16px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           style={{ left: styleLeft, top: styleTop }}
         >
           {HIGHLIGHT_STYLES.map((s) => (
@@ -480,27 +460,50 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
               />
             </button>
           ))}
-          <span className={cn('mx-1 h-5 w-px', isDarkTheme ? 'bg-white/15' : 'bg-stone-200')} />
-          {HIGHLIGHT_COLORS.map((c) => (
-            <button key={c.name} onClick={() => restyle({ color: c.name })} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform hover:scale-110" title={_(COLOR_LABEL_KEYS[c.name])}>
-              <span className="flex h-4 w-4 items-center justify-center rounded-full" style={{ backgroundColor: c.hex }}>
-                {target.color === c.name && (
-                  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#1c1917" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="m5 13 4 4 10-10" />
-                  </svg>
+          <span className="mx-1 h-5 w-px bg-[var(--bd-read-accent)]/80" />
+          {HIGHLIGHT_COLORS.map((c) => {
+            const isSelected = target.color === c.name
+            const checkmarkStroke = c.name === 'yellow' || c.name === 'green' ? '#1c1917' : '#ffffff'
+            return (
+              <button
+                key={c.name}
+                onClick={() => restyle({ color: c.name })}
+                className={cn(
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform active:scale-90',
+                  isSelected ? 'scale-105' : 'hover:scale-110',
                 )}
-              </span>
-            </button>
-          ))}
+                title={_(COLOR_LABEL_KEYS[c.name])}
+              >
+                <span
+                  className={cn(
+                    'flex h-5 w-5 items-center justify-center rounded-full shadow-[inset_0_0_0_1px_rgba(0,0,0,0.15)] transition-all',
+                    isSelected && 'ring-2 ring-stone-400/80 ring-offset-2 ring-offset-[var(--bd-read-bg)] dark:ring-stone-400',
+                  )}
+                  style={{ backgroundColor: c.hex }}
+                >
+                  {isSelected && (
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="11"
+                      height="11"
+                      fill="none"
+                      stroke={checkmarkStroke}
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m5 13 4 4 10-10" />
+                    </svg>
+                  )}
+                </span>
+              </button>
+            )
+          })}
         </div>
       )}
       <div
-        className={cn(
-          'fixed z-50 flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl px-2 shadow-xl backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
-          isDarkTheme
-            ? 'border border-stone-800/80 bg-stone-900/95 text-stone-200'
-            : 'border border-stone-200/90 bg-white/95 text-stone-700',
-        )}
+        className="fixed z-50 flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_8px_rgba(0,0,0,0.08),0_10px_25px_-5px_rgba(0,0,0,0.18)] backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{ left: bar.left, top: bar.top }}
       >
         {actions.map((a) => (
@@ -517,32 +520,13 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           </button>
         ))}
       </div>
-      <span
-        data-testid="selection-toolbar-caret"
-        className={cn(
-          'fixed z-[49] h-3 w-3 rotate-45 pointer-events-none',
-          isDarkTheme
-            ? 'border-stone-800/80 bg-stone-900/95'
-            : 'border-stone-200/90 bg-white/95',
-          bar.dir === 'above' ? 'border-b border-r' : 'border-t border-l',
-        )}
-        style={{
-          left: bar.left + bar.caretLeft - 6,
-          top: bar.dir === 'above' ? bar.top + BAR_HEIGHT - 6 : bar.top - 6,
-        }}
-      />
       {aiMenuAnchor && (
         <div
           ref={aiMenuRef}
           role="menu"
           data-testid="selection-ai-commands"
           aria-label={_('reader.aiQuickCommands')}
-          className={cn(
-            'fixed z-[51] overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] rounded-xl p-1.5 shadow-2xl backdrop-blur-md',
-            isDarkTheme
-              ? 'border border-stone-800/80 bg-stone-900/95 text-stone-200'
-              : 'border border-stone-200/90 bg-white/95 text-stone-700',
-          )}
+          className="fixed z-[51] overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] rounded-xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 p-1.5 text-[var(--bd-read-text)] shadow-[0_4px_12px_rgba(0,0,0,0.1),0_12px_28px_-6px_rgba(0,0,0,0.2)] backdrop-blur-md"
           style={{
             left: Math.min(
               Math.max(8, aiMenuAnchor.left - 8),
@@ -560,17 +544,12 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
               type="button"
               role="menuitem"
               onClick={() => runAiCommand(command)}
-              className={cn(
-                'flex min-h-9 w-full items-center rounded-lg px-3 text-left text-sm transition-colors',
-                isDarkTheme
-                  ? 'text-stone-200 hover:bg-white/10 hover:text-white focus-visible:bg-white/10'
-                  : 'text-stone-700 hover:bg-stone-100 hover:text-stone-900 focus-visible:bg-stone-100',
-              )}
+              className="flex min-h-9 w-full items-center rounded-lg px-3 text-left text-sm text-[var(--bd-read-text)] transition-colors hover:bg-stone-500/10 focus-visible:bg-stone-500/10"
             >
               <span className="min-w-0 flex-1 truncate">{command.name}</span>
             </button>
           )) : (
-            <p className={cn('px-3 py-3 text-xs', isDarkTheme ? 'text-stone-400' : 'text-stone-500')}>
+            <p className="px-3 py-3 text-xs text-[var(--bd-read-sub)]">
               {_('reader.aiPromptsEmpty')}
             </p>
           )}

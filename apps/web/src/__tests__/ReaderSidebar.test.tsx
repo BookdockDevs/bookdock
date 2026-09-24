@@ -81,7 +81,7 @@ describe('ReaderSidebar on touch devices', () => {
 
   it('hides the lock button', () => {
     renderSidebar(true)
-    expect(screen.queryByTitle('锁定工具栏')).toBeNull()
+    expect(screen.queryByTitle('固定工具栏')).toBeNull()
     expect(screen.getByTitle('目录')).toBeInTheDocument()
   })
 
@@ -129,12 +129,19 @@ describe('ReaderSidebar on pointer devices', () => {
     act(() => useUiStore.setState({ toolbarLocked: true }))
     const { container } = renderSidebar(false)
     expect(dockEl(container)).toHaveClass('opacity-100')
+    expect(outerEl(container)).toHaveClass('relative', 'shrink-0')
+  })
+
+  it('keeps unpinned sidebar in absolute overlay to never affect content layout', () => {
+    const { container } = renderSidebar(false)
+    expect(outerEl(container)).toHaveClass('absolute', 'left-0', 'top-0', 'bottom-0')
+    expect(outerEl(container)).not.toHaveClass('relative', 'shrink-0')
   })
 
   it('shows the lock button and the resize handle, and no backdrop', () => {
     act(() => useReaderState.setState({ sidebarOpen: true }))
     renderSidebar(false)
-    expect(screen.getByTitle('锁定工具栏')).toBeInTheDocument()
+    expect(screen.getByTitle('固定工具栏')).toBeInTheDocument()
     expect(screen.getByTestId('reader-sidebar-resize-handle')).toHaveClass('reader-resize-cursor')
     expect(screen.queryByTestId('sidebar-backdrop')).toBeNull()
   })
@@ -165,24 +172,52 @@ describe('ReaderSidebar on pointer devices', () => {
     expect(handle.closest('[data-testid="navigation-panel"]')).toBeNull()
   })
 
-  it('does not summon toolbar in header zone (clientY < 48) and collapses when moving into header', () => {
-    const originalUserAgent = navigator.userAgent
-    Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', configurable: true })
-    try {
-      const { container } = renderSidebar(false)
-      // Moving in header zone: remains collapsed
-      fireEvent.pointerEnter(outerEl(container), { clientY: 24 })
-      expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
+  it('summons dock when hovering along the floating dock corridor and ignores header zone', () => {
+    const { container } = renderSidebar(false)
+    // Header zone (y < 48): does not summon floating dock to protect header back button
+    fireEvent.pointerEnter(outerEl(container), { clientY: 24 })
+    expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
 
-      // Moving below header: summons dock
-      fireEvent.pointerMove(outerEl(container), { clientY: 100 })
-      expect(dockEl(container)).toHaveClass('opacity-100')
+    // Floating dock corridor where TOC button lives (y = 80): summons dock
+    fireEvent.pointerEnter(outerEl(container), { clientY: 80 })
+    expect(dockEl(container)).toHaveClass('opacity-100')
+    expect(outerEl(container).style.width).toBe('8px')
 
-      // Moving back up into header: collapses dock so back button is never obstructed
-      fireEvent.pointerMove(outerEl(container), { clientY: 24 })
-      expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
-    } finally {
-      Object.defineProperty(navigator, 'userAgent', { value: originalUserAgent, configurable: true })
-    }
+    // Moving down into lower reading zone (y > 380): collapses dock
+    fireEvent.pointerMove(outerEl(container), { clientY: 500 })
+    expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
+
+    // Re-entering floating dock corridor: summons dock
+    fireEvent.pointerMove(outerEl(container), { clientY: 80 })
+    expect(dockEl(container)).toHaveClass('opacity-100')
+
+    // Leaves dock: collapses
+    fireEvent.pointerLeave(outerEl(container))
+    expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
+  })
+
+  it('renders a floating island dock decoupled from top and bottom bars when unlocked', () => {
+    const { container } = renderSidebar(false)
+    fireEvent.pointerEnter(outerEl(container))
+    const dock = dockEl(container)
+    expect(dock).toHaveClass('absolute', 'left-3', 'top-16', 'rounded-2xl', 'backdrop-blur-md')
+    expect(outerEl(container)).toHaveClass('-mr-2')
+  })
+
+  it('does not flash as floating dock when closing unpinned sidebar', () => {
+    act(() => useReaderState.setState({ sidebarOpen: true }))
+    const { container } = renderSidebar(false)
+    const dock = dockEl(container)
+    expect(dock).toHaveClass('order-none', 'h-full', 'w-14')
+    expect(dock).not.toHaveClass('absolute', 'rounded-2xl')
+
+    act(() => useReaderState.setState({ sidebarOpen: false }))
+
+    expect(dockEl(container)).toHaveClass('order-none', 'h-full', 'w-14')
+    expect(dockEl(container)).not.toHaveClass('absolute', 'left-3', 'top-16')
+    expect(outerEl(container)).toHaveClass('overflow-hidden')
+    expect(outerEl(container)).not.toHaveClass('-mr-2')
+    expect(outerEl(container).style.width).toBe('8px')
   })
 })
+

@@ -15,8 +15,8 @@ interface AddRecordDialogProps {
 }
 
 const inputCls =
-  'w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900'
-const labelCls = 'mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400'
+  'w-full rounded-xl border border-[var(--bd-read-accent)] bg-stone-500/5 px-3 py-2 text-sm text-[var(--bd-read-text)] outline-none focus:border-[var(--bd-read-primary)]'
+const labelCls = 'mb-1.5 block text-sm font-medium text-[var(--bd-read-sub)]'
 
 /**
  * Retroactive reading entry ("补录"): required date + duration; optional start
@@ -81,7 +81,7 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
   }
 
   return (
-    <Modal title={_('reader.addRecordTitle')} onClose={handleClose} size="sm">
+    <Modal title={_('reader.addRecordTitle')} onClose={handleClose} size="sm" variant="reader">
       <form onSubmit={handleSubmit}>
         <div className="mb-3">
           <label htmlFor="addRecordDate" className={labelCls}>
@@ -108,7 +108,7 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
               onChange={(e) => setHours(Number(e.target.value))}
               className={inputCls}
             />
-            <span className="shrink-0 text-sm text-stone-600 dark:text-stone-400">{_('reader.addRecordHours')}</span>
+            <span className="shrink-0 text-sm text-[var(--bd-read-sub)]">{_('reader.addRecordHours')}</span>
             <input
               aria-label={_('reader.addRecordMinutes')}
               type="number"
@@ -118,7 +118,7 @@ export default function AddRecordDialog({ bookId, onClose }: AddRecordDialogProp
               onChange={(e) => setMinutes(Number(e.target.value))}
               className={inputCls}
             />
-            <span className="shrink-0 text-sm text-stone-600 dark:text-stone-400">{_('reader.addRecordMinutes')}</span>
+            <span className="shrink-0 text-sm text-[var(--bd-read-sub)]">{_('reader.addRecordMinutes')}</span>
           </div>
         </div>
         <div className="mb-3">

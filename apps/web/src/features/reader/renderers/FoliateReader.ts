@@ -2514,12 +2514,11 @@ export class FoliateReader implements BookReader {
     if (effectiveCfi) this.lastCfi = effectiveCfi
     // Confirm a pending jump only when the position actually moved — a no-op
     // navigation (target resolved to the current location) must not enter the
-    // history. Cleared either way so a failed navigation cannot leak into the
-    // next relocate.
-    if (this.pendingJumpFrom !== null) {
-      if (effectiveCfi && effectiveCfi !== this.pendingJumpFrom) {
-        this.emit('jumpConfirmed', { cfi: this.pendingJumpFrom })
-      }
+    // history. Keep pendingJumpFrom intact if relocate fired for the unchanged
+    // position (e.g. intermediate container resize while async navigation is
+    // still in flight) so the destination arrival can still confirm the jump.
+    if (this.pendingJumpFrom !== null && effectiveCfi && effectiveCfi !== this.pendingJumpFrom) {
+      this.emit('jumpConfirmed', { cfi: this.pendingJumpFrom })
       this.pendingJumpFrom = null
     }
     const location: ReaderLocation = {
@@ -2611,6 +2610,7 @@ export class FoliateReader implements BookReader {
         if (opts?.internal && !opts.showPending) throw err
       } finally {
         this.navigationPending.end(gen)
+        this.pendingJumpFrom = null
       }
       return
     }
@@ -3079,6 +3079,7 @@ export class FoliateReader implements BookReader {
       console.warn('[FoliateReader] progress seek failed:', err)
     } finally {
       this.navigationPending.end(gen)
+      this.pendingJumpFrom = null
     }
   }
 

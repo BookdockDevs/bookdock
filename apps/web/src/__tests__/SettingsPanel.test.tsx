@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import { SettingsPanel } from '../features/reader/components/SettingsPanel'
 import { useFontLoaderStore } from '../features/reader/fonts'
@@ -282,7 +282,7 @@ describe('SettingsPanel', () => {
     expect(useUiStore.getState().clickAreaMode).toBe('swap')
   })
 
-  it('toggles click-area info popover and dismisses on outside click or close button', () => {
+  it('toggles click-area info popover and dismisses on toggle or outside click', () => {
     render(<SettingsPanel />)
 
     fireEvent.click(screen.getByTitle('行为'))
@@ -299,9 +299,8 @@ describe('SettingsPanel', () => {
     expect(screen.getByText(/两侧均翻下一页 · 中间菜单/)).toBeInTheDocument()
     expect(screen.getByText(/左侧下一页 · 右侧上一页 · 中间菜单/)).toBeInTheDocument()
 
-    // close via close button
-    const closeBtn = within(dialog).getByRole('button', { name: '取消' })
-    fireEvent.click(closeBtn)
+    // toggle closed via clicking the hint button again
+    fireEvent.click(hintBtn)
     expect(screen.queryByRole('dialog', { name: '翻页点击区说明' })).not.toBeInTheDocument()
 
     // reopen and close via outside click

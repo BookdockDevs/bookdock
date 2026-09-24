@@ -15,10 +15,13 @@ interface ReaderSidebarProps {
   onStatsTabOpen: () => void
   /** Whether the mobile reading controls were summoned by the reader chrome toggle. */
   chromePinned: boolean
+  footerVisible?: boolean
+  mobileDockVisible?: boolean
+  onFooterSummon?: (summon: boolean) => void
   guestReadOnly: boolean
 }
 
-export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen, chromePinned, guestReadOnly }: ReaderSidebarProps) {
+export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen, chromePinned, footerVisible, mobileDockVisible, onFooterSummon, guestReadOnly }: ReaderSidebarProps) {
   const _ = useTranslation()
   const isTouch = useIsTouch()
   const activeNavTab = useReaderState((s) => s.activeNavTab)
@@ -42,9 +45,6 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   const [hovered, setHovered] = useState(false)
   // Touch uses a bottom control sheet; the desktop dock keeps its hover/lock behavior.
   const mobileControlsVisible = isTouch && (chromePinned || sidebarOpen)
-  const toolbarVisible = isTouch
-    ? mobileControlsVisible
-    : locked || hovered || sidebarOpen
   const panelRef = useRef<NavigationPanelRef>(null)
 
   const [panelWidth, setPanelWidth] = useState(sidebarWidth)
@@ -127,37 +127,76 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
     }
   }, [sidebarOpen, activeNavTab, setActiveNavTab, setSidebarOpen, setNavTabRemembered])
 
+  const [floatingActive, setFloatingActive] = useState(false)
+  const justDismissedRef = useRef(false)
+  const prevOpenRef = useRef(sidebarOpen)
+  const dockRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (prevOpenRef.current && !sidebarOpen) {
+      justDismissedRef.current = true
+      const timer = setTimeout(() => {
+        justDismissedRef.current = false
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+    prevOpenRef.current = sidebarOpen
+  }, [sidebarOpen])
+
   const handleClosePanel = useCallback(() => {
+    justDismissedRef.current = true
     panelRef.current?.saveScroll()
+    setHovered(false)
+    setFloatingActive(false)
     setSidebarOpen(false)
   }, [setSidebarOpen])
 
-  const isHeaderZone = useCallback((e: React.PointerEvent) => {
-    // In simulated testing environments without explicit clientY, allow default pointerEnter
-    if (typeof window !== 'undefined' && 'navigator' in window && /jsdom/i.test(navigator.userAgent) && e.clientY === 0) {
-      return false
-    }
-    return !locked && !sidebarOpen && e.clientY < 48
-  }, [locked, sidebarOpen])
+  // Floating dock corridor: starts below the 48px header and ends around y=380px,
+  // matching the spatial envelope of the floating capsule.
+  // In synthetic unit tests without explicit clientY, clientY is 0 or null.
+  const isWithinFloatingCorridor = useCallback((clientY?: number | null) => {
+    if (clientY == null || clientY === 0) return true
+    return clientY >= 48 && clientY <= 380
+  }, [])
 
   const handleHoverPointerEnter = useCallback((e: React.PointerEvent) => {
-    if (isHeaderZone(e)) return
-    setHovered(true)
-  }, [isHeaderZone])
+    if (locked || sidebarOpen || justDismissedRef.current) return
+    if (!isWithinFloatingCorridor(e.clientY)) return
+    const isLeftEdge = e.clientX == null || e.clientX <= 24
+    if (isLeftEdge) {
+      setHovered(true)
+      setFloatingActive(true)
+    }
+  }, [locked, sidebarOpen, isWithinFloatingCorridor])
 
   const handleHoverPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!locked && !sidebarOpen) {
-      if (isHeaderZone(e)) {
-        if (hovered) setHovered(false)
-        return
-      }
-      if (!hovered) setHovered(true)
+    if (locked || sidebarOpen || justDismissedRef.current) return
+    const inCorridor = isWithinFloatingCorridor(e.clientY)
+    const isLeftEdge = (e.clientX == null || e.clientX <= 24) && inCorridor
+    const isOverDock = Boolean(dockRef.current?.contains(e.target as Node))
+    if (!isLeftEdge && !isOverDock) {
+      if (hovered) setHovered(false)
+      return
     }
-  }, [isHeaderZone, locked, sidebarOpen, hovered])
+    if (!hovered) {
+      setHovered(true)
+      setFloatingActive(true)
+    }
+  }, [locked, sidebarOpen, hovered, isWithinFloatingCorridor])
 
   const handleHoverPointerLeave = useCallback(() => {
     setHovered(false)
   }, [])
+
+  // Once mouse leaves the floating dock, allow fade out before dropping floating state
+  useEffect(() => {
+    if (!hovered && floatingActive && !sidebarOpen) {
+      const timer = setTimeout(() => {
+        setFloatingActive(false)
+      }, 220)
+      return () => clearTimeout(timer)
+    }
+  }, [hovered, floatingActive, sidebarOpen])
 
   function toggleTheme() {
     cycleReadingThemeMode()
@@ -165,57 +204,74 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
 
   const themeModeTitle = _('reader.themeModeTitle', { mode: _(`theme.${readingThemeMode}`) })
 
+  const isFloatingDock = !isTouch && !locked && !sidebarOpen && floatingActive
+
+  const toolbarVisible = isTouch
+    ? mobileControlsVisible
+    : locked || hovered || sidebarOpen
+
   const collapsed = !toolbarVisible
   const panelLocked = isTouch ? false : locked
 
-  const totalWidth = collapsed
-    ? 8
+  const totalWidth = isTouch
+    ? undefined
     : sidebarOpen
       ? 56 + panelWidth
-      : 56
+      : locked
+        ? 56
+        : 8
 
   const toolDock = (
     <div
+      ref={dockRef}
       data-testid="reader-tool-dock"
       className={cn(
         'flex shrink-0 border-[var(--bd-read-accent)]',
         isTouch
           ? 'order-2 h-[calc(3.5rem+env(safe-area-inset-bottom))] w-full items-center border-t px-1 pb-[env(safe-area-inset-bottom)]'
-          : 'order-none h-full w-14 flex-col items-center border-r py-3',
+          : isFloatingDock
+            ? 'absolute left-3 top-16 z-50 h-auto w-12 flex-col items-center gap-1.5 rounded-2xl border border-[var(--bd-read-accent)]/80 p-1 shadow-2xl backdrop-blur-md before:pointer-events-auto before:absolute before:-left-3 before:top-0 before:h-full before:w-3 before:content-[\'\']'
+            : 'order-none h-full w-14 flex-col items-center border-r py-3',
         collapsed ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',
         !resizing && 'transition-all duration-200',
       )}
-      style={{ backgroundColor: 'var(--bd-read-bg)' }}
+      style={isFloatingDock
+        ? { backgroundColor: 'color-mix(in srgb, var(--bd-read-bg) 92%, transparent)' }
+        : { backgroundColor: 'var(--bd-read-bg)' }
+      }
     >
       <ToolDock
         activeNavTab={activeNavTab}
         sidebarOpen={sidebarOpen}
         locked={locked}
+        floating={isFloatingDock}
         statsDisabled={statsDisabled}
         guestReadOnly={guestReadOnly}
         hideLock={isTouch}
         mobile={isTouch}
         onNavTab={handleNavTab}
         onToggleLock={() => setLocked(!locked)}
+        footer={
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={themeModeTitle}
+            aria-label={themeModeTitle}
+            className={cn(
+              'relative z-10 pointer-events-auto flex shrink-0 items-center justify-center rounded-xl text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current',
+              isTouch ? 'h-12 min-w-12 [&_svg]:h-5 [&_svg]:w-5' : 'h-10 w-10',
+            )}
+          >
+            {readingThemeMode === 'system' ? (
+              <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="13" rx="1.5" /><path d="M8 21h8M12 17v4" /></svg>
+            ) : readingThemeMode === 'dark' ? (
+              <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
+            ) : (
+              <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
+            )}
+          </button>
+        }
       />
-      <div className={isTouch ? 'hidden' : 'flex-1'} />
-      <button
-        onClick={toggleTheme}
-        title={themeModeTitle}
-        aria-label={themeModeTitle}
-        className={cn(
-          'flex shrink-0 items-center justify-center rounded-xl text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current',
-          isTouch ? 'h-12 min-w-12 [&_svg]:h-5 [&_svg]:w-5' : 'h-10 w-10',
-        )}
-      >
-        {readingThemeMode === 'system' ? (
-          <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="13" rx="1.5" /><path d="M8 21h8M12 17v4" /></svg>
-        ) : readingThemeMode === 'dark' ? (
-          <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
-        ) : (
-          <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
-        )}
-      </button>
     </div>
   )
 
@@ -243,6 +299,9 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
           locked={panelLocked}
           statsDisabled={statsDisabled}
           guestReadOnly={guestReadOnly}
+          footerVisible={footerVisible}
+          mobileDockVisible={mobileDockVisible}
+          onFooterSummon={onFooterSummon}
           onClose={handleClosePanel}
         />
       </div>
@@ -280,8 +339,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       id="reader-navigation"
       data-testid="reader-sidebar"
       className={cn(
-        'relative flex h-full shrink-0 overflow-visible',
-        sidebarOpen ? 'z-50' : 'z-40',
+        locked ? 'relative flex h-full shrink-0' : 'absolute left-0 top-0 bottom-0 flex',
+        isFloatingDock ? 'overflow-visible -mr-2' : 'overflow-hidden',
+        sidebarOpen || hovered ? 'z-[60]' : 'z-40',
+        !locked && !sidebarOpen && !hovered && 'pointer-events-none',
         !resizing && 'transition-all duration-200',
       )}
       style={{ width: totalWidth }}
@@ -289,6 +350,15 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       onPointerMove={handleHoverPointerMove}
       onPointerLeave={handleHoverPointerLeave}
     >
+      {!isTouch && !locked && !sidebarOpen && (
+        <div
+          data-testid="reader-floating-hover-zone"
+          className={cn(
+            'pointer-events-auto absolute left-0 top-12 z-40',
+            isFloatingDock ? 'h-[340px] w-20' : 'h-[340px] w-3.5',
+          )}
+        />
+      )}
       {toolDock}
       {navigationPanel}
       {sidebarOpen && !isTouch && (

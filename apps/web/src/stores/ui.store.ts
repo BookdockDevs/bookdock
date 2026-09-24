@@ -420,7 +420,7 @@ const initialScrollVerticalPadding = getInitialNumber('bd-vertical-padding', 0, 
 
 const initialPagePageWidth = getInitialNumber('bd-page-page-width', 0, 0, 1800)
 const initialPageHorizontalPadding = getInitialNumber('bd-page-horizontal-padding', 40, 0, 120)
-const initialPageVerticalPadding = getInitialNumber('bd-page-vertical-padding', 0, 0, 120)
+const initialPageVerticalPadding = getInitialNumber('bd-page-vertical-padding', 28, 0, 120)
 const initialPagePageColumns = getInitialNumber('bd-page-columns', 2, 1, 3)
 const initialColumnGapPage = getInitialNumber('bd-column-gap', 5, 0, 15)
 

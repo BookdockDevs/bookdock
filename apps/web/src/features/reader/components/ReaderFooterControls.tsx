@@ -29,13 +29,11 @@ export default function ReaderFooterControls({
   return (
     <div
       className={cn(
-        'absolute right-0 z-[60] flex h-24 w-max max-w-[calc(100vw-1rem)] items-end justify-end gap-2 pb-3 pr-3 transition-[bottom,translate] duration-300',
+        'absolute right-0 z-[60] flex h-24 w-max max-w-[calc(100vw-1rem)] items-end justify-end gap-2 pr-3 pb-3 transition-[bottom,translate] duration-300 pointer-events-none sm:pr-4',
         mobileDockVisible
           ? 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))]'
           : 'bottom-[env(safe-area-inset-bottom)]',
-        isTouch
-          ? footerVisible ? '-translate-y-10 pointer-events-auto' : 'translate-y-full pointer-events-none'
-          : footerVisible ? '-translate-y-10 pointer-events-auto' : 'pointer-events-auto',
+        footerVisible ? '-translate-y-12 pointer-events-auto' : 'translate-y-full pointer-events-none',
       )}
       onPointerEnter={isTouch ? undefined : onPointerEnter}
       onPointerLeave={isTouch ? undefined : onPointerLeave}

@@ -14,7 +14,7 @@ describe('ToolDock', () => {
     expect(screen.getByTitle('目录')).toBeInTheDocument()
     expect(screen.getByTitle('笔记')).toBeInTheDocument()
     expect(screen.getByTitle('AI 助手')).toBeInTheDocument()
-    expect(screen.getByTitle('锁定工具栏')).toBeInTheDocument()
+    expect(screen.getByTitle('固定工具栏')).toBeInTheDocument()
     expect(screen.queryByTitle('搜索')).toBeNull()
     expect(screen.queryByTitle('书签')).toBeNull()
   })
@@ -63,7 +63,7 @@ describe('ToolDock', () => {
       <ToolDock activeNavTab="toc" sidebarOpen={true} locked={false} onNavTab={onNavTab} onToggleLock={onToggleLock} />
     )
 
-    fireEvent.click(screen.getByTitle('锁定工具栏'))
+    fireEvent.click(screen.getByTitle('固定工具栏'))
     expect(onToggleLock).toHaveBeenCalled()
   })
 
@@ -81,5 +81,24 @@ describe('ToolDock', () => {
 
     expect(screen.getByTitle('目录')).toHaveClass('h-12', 'min-w-12')
     expect(screen.getByTitle('目录')).toHaveClass('[&_svg]:h-5', '[&_svg]:w-5')
+  })
+
+  it('renders compact floating island mode with top divider', () => {
+    const { container } = render(
+      <ToolDock
+        activeNavTab="toc"
+        sidebarOpen={false}
+        locked={false}
+        floating={true}
+        onNavTab={vi.fn()}
+        onToggleLock={vi.fn()}
+      />,
+    )
+
+    const root = container.firstElementChild as HTMLElement
+    expect(root).toHaveClass('h-auto', 'w-full', 'flex-col')
+    expect(root).not.toHaveClass('justify-between')
+    const dividerSection = root.children[1] as HTMLElement
+    expect(dividerSection).toHaveClass('border-t')
   })
 })

@@ -246,6 +246,22 @@ function fontChipClass(active: boolean) {
   )
 }
 
+function ClickAreaZoneWireframe({ left, right }: { left: 'prev' | 'next'; right: 'prev' | 'next' }) {
+  return (
+    <div className="flex h-6 w-14 shrink-0 items-stretch overflow-hidden rounded border border-stone-300/80 bg-stone-500/5 text-[11px] text-[var(--bd-read-sub)] select-none dark:border-stone-700/80">
+      <span className="flex flex-1 items-center justify-center font-mono text-[10px]">
+        {left === 'prev' ? '←' : '→'}
+      </span>
+      <span className="flex w-3.5 items-center justify-center border-x border-stone-300/60 dark:border-stone-700/60">
+        <span className="h-2 w-1.5 rounded-[1px] border border-current opacity-70" />
+      </span>
+      <span className="flex flex-1 items-center justify-center font-mono text-[10px]">
+        {right === 'prev' ? '←' : '→'}
+      </span>
+    </div>
+  )
+}
+
 function SectionIcon({
   active,
   onClick,
@@ -760,60 +776,70 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
                     <div
                       role="dialog"
                       aria-label={_('reader.clickAreaHintTitle')}
-                      className="absolute left-0 top-7 z-30 w-72 max-w-[calc(100vw-3rem)] rounded-xl border border-stone-300/90 bg-[var(--bd-read-bg)] p-3 text-xs shadow-xl dark:border-stone-700/90 animate-in fade-in zoom-in-95 duration-100"
+                      className="absolute left-0 top-8 z-30 w-72 max-w-[calc(100vw-3rem)] rounded-xl border border-stone-300/90 bg-[var(--bd-read-bg)] p-3 text-xs shadow-xl dark:border-stone-700/90 animate-in fade-in zoom-in-95 duration-100"
                       style={{
                         boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
                       }}
                     >
-                      <div className="mb-2 flex items-center justify-between border-b border-stone-200/60 pb-1.5 dark:border-stone-800/60">
-                        <span className="font-semibold text-current">
-                          {_('reader.clickAreaHintTitle')}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setShowClickAreaHint(false)}
-                          className="flex h-5 w-5 items-center justify-center rounded text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current active:scale-90"
-                          aria-label={_('annotation.cancel')}
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                            <path d="M18 6L6 18M6 6l12 12" />
-                          </svg>
-                        </button>
+                      <div
+                        className="absolute -top-1.5 left-20 h-3 w-3 -translate-x-1/2 rotate-45 border-l border-t border-stone-300/90 bg-[var(--bd-read-bg)] dark:border-stone-700/90"
+                        aria-hidden="true"
+                      />
+
+                      <div className="flex flex-col gap-2 text-xs">
+                        <div className="flex items-center gap-2.5">
+                          <ClickAreaZoneWireframe left="prev" right="next" />
+                          <div className="flex min-w-0 flex-1 flex-col">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium text-current">{_('reader.clickAreaStandard')}</span>
+                              {clickAreaMode === 'standard' && (
+                                <span className="inline-flex items-center rounded bg-stone-500/15 px-1 text-[10px] text-current">
+                                  {_('reader.clickAreaActiveTag')}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] leading-tight text-[var(--bd-read-sub)] opacity-85">
+                              {_('reader.clickAreaStandardDesc')}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2.5">
+                          <ClickAreaZoneWireframe left="next" right="next" />
+                          <div className="flex min-w-0 flex-1 flex-col">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium text-current">{_('reader.clickAreaFullscreen')}</span>
+                              {clickAreaMode === 'fullscreen' && (
+                                <span className="inline-flex items-center rounded bg-stone-500/15 px-1 text-[10px] text-current">
+                                  {_('reader.clickAreaActiveTag')}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] leading-tight text-[var(--bd-read-sub)] opacity-85">
+                              {_('reader.clickAreaFullscreenDesc')}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2.5">
+                          <ClickAreaZoneWireframe left="next" right="prev" />
+                          <div className="flex min-w-0 flex-1 flex-col">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium text-current">{_('reader.clickAreaSwap')}</span>
+                              {clickAreaMode === 'swap' && (
+                                <span className="inline-flex items-center rounded bg-stone-500/15 px-1 text-[10px] text-current">
+                                  {_('reader.clickAreaActiveTag')}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] leading-tight text-[var(--bd-read-sub)] opacity-85">
+                              {_('reader.clickAreaSwapDesc')}
+                            </span>
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="flex flex-col gap-1 text-xs">
-                        <div
-                          className={cn(
-                            'flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors',
-                            clickAreaMode === 'standard' ? 'bg-stone-500/15 font-medium text-current' : 'text-[var(--bd-read-sub)]',
-                          )}
-                        >
-                          <span className="w-10 shrink-0 font-medium text-current">{_('reader.clickAreaStandard')}</span>
-                          <span className="opacity-90">{_('reader.clickAreaStandardDesc')}</span>
-                        </div>
-
-                        <div
-                          className={cn(
-                            'flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors',
-                            clickAreaMode === 'fullscreen' ? 'bg-stone-500/15 font-medium text-current' : 'text-[var(--bd-read-sub)]',
-                          )}
-                        >
-                          <span className="w-10 shrink-0 font-medium text-current">{_('reader.clickAreaFullscreen')}</span>
-                          <span className="opacity-90">{_('reader.clickAreaFullscreenDesc')}</span>
-                        </div>
-
-                        <div
-                          className={cn(
-                            'flex items-center gap-1.5 rounded-lg px-2 py-1 transition-colors',
-                            clickAreaMode === 'swap' ? 'bg-stone-500/15 font-medium text-current' : 'text-[var(--bd-read-sub)]',
-                          )}
-                        >
-                          <span className="w-10 shrink-0 font-medium text-current">{_('reader.clickAreaSwap')}</span>
-                          <span className="opacity-90">{_('reader.clickAreaSwapDesc')}</span>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 border-t border-stone-200/60 pt-1.5 text-[11px] text-[var(--bd-read-sub)] opacity-80 dark:border-stone-800/60">
+                      <div className="mt-2.5 border-t border-stone-200/60 pt-1.5 text-[11px] text-[var(--bd-read-sub)] opacity-85 dark:border-stone-800/60">
                         {clickAreaMode === 'none'
                           ? _('reader.clickAreaNoneDesc')
                           : _('reader.clickAreaToggleHint')}

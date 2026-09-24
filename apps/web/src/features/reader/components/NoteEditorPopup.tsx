@@ -114,9 +114,7 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
         }
       }}
       placeholder={_('annotation.notePlaceholder')}
-      className={`min-h-0 w-full flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none ${
-        isPage ? 'placeholder:text-[var(--bd-read-sub)]' : 'text-stone-100 placeholder:text-stone-400'
-      }`}
+      className="min-h-0 w-full flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none text-[var(--bd-read-text)] placeholder:text-[var(--bd-read-sub)]"
     />
   )
 
@@ -124,7 +122,7 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
     <button
       onClick={submit}
       disabled={saving || draft.trim() === ''}
-      className="rounded-full bg-blue-500 px-5 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-600 disabled:opacity-60"
+      className="rounded-full bg-[var(--bd-read-primary)] px-5 py-1.5 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
     >
       {_('annotation.publish')}
     </button>
@@ -148,7 +146,7 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
     >
       {showArrow && (
         <span
-          className="absolute rotate-45 shadow-2xl"
+          className="absolute rotate-45 border border-[var(--bd-read-accent)]/80 shadow-2xl"
           style={{
             width: ARROW_SIZE,
             height: ARROW_SIZE,
@@ -159,10 +157,10 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
       )}
       {isPage ? (
         <div
-          className="relative flex h-full flex-col overflow-hidden rounded-2xl shadow-2xl"
+          className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-[var(--bd-read-accent)]/80 shadow-2xl"
           style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)' }}
         >
-          <div className="relative flex h-11 shrink-0 items-center justify-center border-b border-stone-500/10">
+          <div className="relative flex h-11 shrink-0 items-center justify-center border-b border-[var(--bd-read-accent)]/60">
             <span className="text-sm font-medium">{_('annotation.noteTitle')}</span>
             <button
               onClick={onClose}
@@ -181,16 +179,19 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
           <div className="flex shrink-0 items-center justify-end px-4 pb-3.5">{publishButton}</div>
         </div>
       ) : (
-        <div className="relative flex h-full flex-col rounded-2xl bg-stone-700 shadow-2xl">
+        <div
+          className="relative flex h-full flex-col rounded-2xl border border-[var(--bd-read-accent)]/80 shadow-2xl"
+          style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)' }}
+        >
           <button
             onClick={onClose}
             title={_('annotation.cancel')}
-            className="absolute right-3.5 top-3.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-stone-300 transition-colors hover:bg-white/20 hover:text-white"
+            className="absolute right-3.5 top-3.5 z-10 flex h-7 w-7 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
           >
             <CloseIcon />
           </button>
           <div className="flex min-h-0 flex-1 gap-2.5 px-5 pb-3 pt-4 pr-12">
-            <span className="mt-0.5 shrink-0 text-stone-400">
+            <span className="mt-0.5 shrink-0 text-[var(--bd-read-sub)]">
               <BulbIcon />
             </span>
             {textarea}

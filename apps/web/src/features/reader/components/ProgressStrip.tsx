@@ -234,8 +234,14 @@ export const ProgressStrip = memo(function ProgressStrip({
               if (isDragging.current) {
                 isDragging.current = false
                 setDragValue(null)
+                sliderRef.current?.blur()
                 onSeek(sliderValueRef.current)
               }
+            }}
+            onPointerCancel={(e) => {
+              isDragging.current = false
+              setDragValue(null)
+              e.currentTarget.blur()
             }}
             className="pointer-events-auto bd-progress-slider"
             style={{ '--slider-fill': `${sliderValue}%` } as React.CSSProperties}

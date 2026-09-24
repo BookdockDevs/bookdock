@@ -4,7 +4,6 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 
 import type { AnnotationRes } from '@bookdock/shared'
 
-import { useUiStore } from '../stores/ui.store'
 import { useReaderState } from '../features/reader/state/reader-state'
 import { SelectionToolbar } from '../features/reader/components/SelectionToolbar'
 import { popupPosition } from '../features/reader/components/annotation-colors'
@@ -414,27 +413,15 @@ describe('SelectionToolbar', () => {
     await waitFor(() => expect(useReaderState.getState().selection).toBeNull())
   })
 
-  it('renders with light theme styling in paper/cream themes and adapts to dark theme in night mode', () => {
-    act(() => useUiStore.setState({ readingThemeId: 'paper', readingThemeMode: 'light', lightReadingThemeId: 'paper' }))
+  it('renders with reader theme variables for harmonious integration', () => {
     setSelection()
-    const { rerender } = render(<SelectionToolbar bookId="b1" />)
+    render(<SelectionToolbar bookId="b1" />)
     const copyButton = screen.getByTitle('annotation.copy')
     const mainBar = copyButton.parentElement!
-    expect(mainBar.className).toContain('bg-white/95')
-    expect(mainBar.className).toContain('text-stone-700')
-    expect(mainBar.className).toContain('border-stone-200/90')
-
-    const caret = screen.getByTestId('selection-toolbar-caret')
-    expect(caret.className).toContain('bg-white/95')
-    expect(caret.className).toContain('border-stone-200/90')
-
-    act(() => useUiStore.setState({ readingThemeId: 'night', readingThemeMode: 'dark' }))
-    rerender(<SelectionToolbar bookId="b1" />)
-    expect(mainBar.className).toContain('bg-stone-900/95')
-    expect(mainBar.className).toContain('text-stone-200')
-    expect(mainBar.className).toContain('border-stone-800/80')
-    expect(caret.className).toContain('bg-stone-900/95')
-    expect(caret.className).toContain('border-stone-800/80')
+    expect(mainBar.className).toContain('bg-[var(--bd-read-bg)]/95')
+    expect(mainBar.className).toContain('text-[var(--bd-read-text)]')
+    expect(mainBar.className).toContain('border-[var(--bd-read-accent)]')
+    expect(screen.queryByTestId('selection-toolbar-caret')).toBeNull()
   })
 
   it('clamps caret and bar positions within bounds on narrow mobile viewports', () => {

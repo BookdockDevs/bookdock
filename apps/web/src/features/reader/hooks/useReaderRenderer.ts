@@ -30,6 +30,7 @@ interface UseReaderRendererOptions {
   onReady?: () => string | undefined
   onRelocated?: (e: Parameters<RendererEvents['relocated']>[0]) => void
   onSelected?: (e: Parameters<RendererEvents['selected']>[0]) => void
+  onTextSelectionStart?: () => void
   onAnnotationClicked?: (e: Parameters<RendererEvents['annotationClicked']>[0]) => void
   onImageClicked?: (e: Parameters<RendererEvents['imageClicked']>[0]) => void
   onImageContextMenu?: (e: Parameters<RendererEvents['imageContextMenu']>[0]) => void
@@ -62,6 +63,7 @@ export function useReaderRenderer({
   onReady,
   onRelocated,
   onSelected,
+  onTextSelectionStart,
   onAnnotationClicked,
   onImageClicked,
   onImageContextMenu,
@@ -141,6 +143,7 @@ export function useReaderRenderer({
   const onRelocatedRef = useRef(onRelocated)
   const onReadyRef = useRef(onReady)
   const onSelectedRef = useRef(onSelected)
+  const onTextSelectionStartRef = useRef(onTextSelectionStart)
   const onAnnotationClickedRef = useRef(onAnnotationClicked)
   const onImageClickedRef = useRef(onImageClicked)
   const onImageContextMenuRef = useRef(onImageContextMenu)
@@ -182,6 +185,7 @@ export function useReaderRenderer({
   onRelocatedRef.current = onRelocated
   onReadyRef.current = onReady
   onSelectedRef.current = onSelected
+  onTextSelectionStartRef.current = onTextSelectionStart
   onAnnotationClickedRef.current = onAnnotationClicked
   onImageClickedRef.current = onImageClicked
   onImageContextMenuRef.current = onImageContextMenu
@@ -275,6 +279,7 @@ export function useReaderRenderer({
 
     const unsubRelocated = newRenderer.on('relocated', (e) => { if (isCurrentRenderer()) onRelocatedRef.current?.(e) })
     const unsubSelected = newRenderer.on('selected', (e) => { if (isCurrentRenderer()) onSelectedRef.current?.(e) })
+    const unsubTextSelectionStart = newRenderer.on('textSelectionStart', () => { if (isCurrentRenderer()) onTextSelectionStartRef.current?.() })
     const unsubAnnotationClicked = newRenderer.on('annotationClicked', (e) => { if (isCurrentRenderer()) onAnnotationClickedRef.current?.(e) })
     const unsubImageClicked = newRenderer.on('imageClicked', (e) => { if (isCurrentRenderer()) onImageClickedRef.current?.(e) })
     const unsubImageContextMenu = newRenderer.on('imageContextMenu', (e) => { if (isCurrentRenderer()) onImageContextMenuRef.current?.(e) })
@@ -297,6 +302,7 @@ export function useReaderRenderer({
       cancelled = true
       unsubRelocated()
       unsubSelected()
+      unsubTextSelectionStart()
       unsubAnnotationClicked()
       unsubImageClicked()
       unsubImageContextMenu()
