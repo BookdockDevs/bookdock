@@ -63,6 +63,9 @@ describe('NavigationPanel', () => {
       tocBookId: null,
       currentChapter: null,
       currentChapterHref: null,
+      currentChapterIndex: null,
+      pendingTocHref: null,
+      pendingNavigationHref: null,
       sidebarScrollPositions: {},
       selection: null,
     })
@@ -176,6 +179,24 @@ describe('NavigationPanel', () => {
 
     const currentButton = screen.getByRole('button', { name: '第二章 续篇' })
     expect(currentButton).toHaveClass('font-medium')
+  })
+
+  it('highlights the clicked chapter before relocation confirms the destination', () => {
+    useReaderState.setState({
+      tocItems: [
+        { label: '第一章 开篇', href: 'chapter:0' },
+        { label: '第二章 续篇', href: 'chapter:1' },
+      ],
+      currentChapter: '第一章 开篇',
+      currentChapterIndex: 0,
+    })
+
+    render(<NavigationPanel bookId="book-1" open />)
+    fireEvent.click(screen.getByRole('button', { name: '第二章 续篇' }))
+
+    expect(screen.getByRole('button', { name: '第二章 续篇' })).toHaveClass('font-medium')
+    expect(screen.getByRole('button', { name: '第一章 开篇' })).not.toHaveClass('font-medium')
+    expect(useReaderState.getState().pendingNavigationHref).toBe('chapter:1')
   })
 
   it('highlights the matching duplicate chapter by href', () => {

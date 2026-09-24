@@ -26,6 +26,8 @@ interface UseReaderRendererOptions {
   settings?: EffectiveViewSettings
   /** Per-chapter word counts, indexed by chapter (info-bar word count field) */
   chapterWordCounts?: (number | undefined)[]
+  /** Returns a user navigation target queued before the renderer became visible. */
+  onReady?: () => string | undefined
   onRelocated?: (e: Parameters<RendererEvents['relocated']>[0]) => void
   onSelected?: (e: Parameters<RendererEvents['selected']>[0]) => void
   onAnnotationClicked?: (e: Parameters<RendererEvents['annotationClicked']>[0]) => void
@@ -57,6 +59,7 @@ export function useReaderRenderer({
   initialFraction,
   settings,
   chapterWordCounts,
+  onReady,
   onRelocated,
   onSelected,
   onAnnotationClicked,
@@ -136,6 +139,7 @@ export function useReaderRenderer({
   const fontCss = fontCssFor(resolvedFont)
 
   const onRelocatedRef = useRef(onRelocated)
+  const onReadyRef = useRef(onReady)
   const onSelectedRef = useRef(onSelected)
   const onAnnotationClickedRef = useRef(onAnnotationClicked)
   const onImageClickedRef = useRef(onImageClicked)
@@ -176,6 +180,7 @@ export function useReaderRenderer({
   })
 
   onRelocatedRef.current = onRelocated
+  onReadyRef.current = onReady
   onSelectedRef.current = onSelected
   onAnnotationClickedRef.current = onAnnotationClicked
   onImageClickedRef.current = onImageClicked
@@ -237,9 +242,10 @@ export function useReaderRenderer({
     // the same call so the saved-position effect below never re-navigates over
     // a jump the user already made.
     const markReady = () => {
-      if (!isCurrentRenderer()) return
+      if (!isCurrentRenderer()) return undefined
       lastDisplayedCfiRef.current = initialTarget
       setRenderer(newRenderer)
+      return onReadyRef.current?.()
     }
     newRenderer.mount(containerRef.current, initialTarget, initialFraction, markReady).then(async () => {
       // StrictMode double-invokes this effect: the loser must not become the

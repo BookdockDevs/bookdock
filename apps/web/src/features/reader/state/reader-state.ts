@@ -70,6 +70,8 @@ interface ReaderState {
   pendingSearchQuery: string | null
   /** TOC jump clicked before the renderer mounted; Reader applies it once ready */
   pendingTocHref: string | null
+  /** Last TOC target clicked; the directory highlights it before relocation confirms it. */
+  pendingNavigationHref: string | null
   /** cfiRange of the idea currently being composed; draws a dashed underline while the editor is open */
   noteEditorRange: string | null
   /** Excerpt being shared as a card image; non-null opens ShareCardDialog. Ephemeral by design — sharing never persists an annotation.
@@ -95,6 +97,7 @@ interface ReaderState {
   setSidebarOpen: (open: boolean) => void
   setPendingSearchQuery: (query: string | null) => void
   setPendingTocHref: (href: string | null) => void
+  setPendingNavigationHref: (href: string | null) => void
   setNoteEditorRange: (range: string | null) => void
   setShareTarget: (target: { text: string; chapter: string | null; note?: string; createdAt?: number } | null) => void
   addInvalidReplacementIds: (ids: string[]) => void
@@ -117,6 +120,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   sidebarOpen: false,
   pendingSearchQuery: null,
   pendingTocHref: null,
+  pendingNavigationHref: null,
   noteEditorRange: null,
   shareTarget: null,
   invalidReplacementIds: [],
@@ -146,6 +150,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
   setPendingTocHref: (pendingTocHref) => set({ pendingTocHref }),
+  setPendingNavigationHref: (pendingNavigationHref) => set({ pendingNavigationHref }),
   setNoteEditorRange: (noteEditorRange) => set({ noteEditorRange }),
   setShareTarget: (shareTarget) => set({ shareTarget }),
   addInvalidReplacementIds: (ids) =>
@@ -166,6 +171,7 @@ export const useReaderState = create<ReaderState>((set) => ({
     sidebarOpen: initialSidebarOpen,
     pendingSearchQuery: null,
     pendingTocHref: null,
+    pendingNavigationHref: null,
     noteEditorRange: null,
     shareTarget: null,
     invalidReplacementIds: [],

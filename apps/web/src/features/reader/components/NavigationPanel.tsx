@@ -196,7 +196,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterHref = useReaderState((s) => s.currentChapterHref)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
+  const pendingNavigationHref = useReaderState((s) => s.pendingNavigationHref)
   const setPendingTocHref = useReaderState((s) => s.setPendingTocHref)
+  const setPendingNavigationHref = useReaderState((s) => s.setPendingNavigationHref)
   const setSidebarScrollPosition = useReaderState((s) => s.setSidebarScrollPosition)
   const { renderer } = useReaderApi()
   const annotationsQuery = useAnnotations(bookId, { enabled: !guestReadOnly })
@@ -366,6 +368,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const rootNodes = useMemo(() => tree.filter((n) => n.parent === null), [tree])
 
   const currentIndex = useMemo(() => {
+    if (pendingNavigationHref) {
+      const idx = tree.findIndex((n) => n.href === pendingNavigationHref)
+      if (idx >= 0) return idx
+    }
     if (currentChapterHref) {
       const idx = tree.findIndex((n) => n.href === currentChapterHref)
       if (idx >= 0) return idx
@@ -387,7 +393,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     return currentChapterIndex !== null && currentChapterIndex >= 0 && currentChapterIndex < tree.length
       ? currentChapterIndex
       : -1
-  }, [currentChapter, currentChapterHref, currentChapterIndex, tree])
+  }, [currentChapter, currentChapterHref, currentChapterIndex, pendingNavigationHref, tree])
 
   useImperativeHandle(ref, () => ({
     saveScroll: () => {
@@ -505,8 +511,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   }, [currentIndex, tree, open, tab])
 
   function goTo(href: string) {
-    // Clicks land while the book is still mounting — queue the jump for
-    // Reader instead of dropping it
+    setPendingNavigationHref(href)
+    // Clicks can land while the book is still mounting — queue the jump for
+    // Reader instead of dropping it. The directory keeps the clicked item
+    // highlighted independently of when relocation confirms the destination.
     if (renderer) void renderer.display(href)
     else setPendingTocHref(href)
     if (!locked) onClose?.()

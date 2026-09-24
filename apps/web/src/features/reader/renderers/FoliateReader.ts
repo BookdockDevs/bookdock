@@ -2239,7 +2239,7 @@ export class FoliateReader implements BookReader {
     this.bookFormat = bookFormat
   }
 
-  async mount(container: HTMLElement, initialTarget?: string, initialFraction?: number, onReady?: () => void) {
+  async mount(container: HTMLElement, initialTarget?: string, initialFraction?: number, onReady?: () => string | undefined) {
     this.container = container
     // [bd] mount timing: the first open pays the one-time costs below (module
     // load, zip open, parse); re-entries hit the parse cache and only rebuild
@@ -2357,13 +2357,16 @@ export class FoliateReader implements BookReader {
 
       this.applyAllSettings()
       // The view is live (TOC emitted, settings applied). Hand control back to
-      // the host before the initial navigation so directory jumps execute
-      // immediately even while the first chapter is still loading — the
-      // paginator's display-generation bump supersedes the in-flight open.
-      onReady?.()
+      // the host before the initial navigation so a queued directory jump can
+      // replace the startup restore instead of waiting for it to finish.
+      const userTarget = onReady?.()
       // Navigate to saved position before mount completes, so the user never
-      // sees the default chapter. Internal: the initial open is not a "jump".
-      if (initialTarget) {
+      // sees the default chapter. Internal: the initial open is not a "jump";
+      // a queued user target always takes precedence over the startup target.
+      if (userTarget) {
+        await this.display(userTarget)
+        if (this.destroyed) return
+      } else if (initialTarget) {
         const ok = await this.display(initialTarget, { internal: true })
         if (this.destroyed) return
         if (ok === false && initialFraction != null && initialFraction > 0) {

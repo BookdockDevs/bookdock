@@ -118,6 +118,9 @@ export default function Reader() {
   const sidebarOpen = useReaderState((s) => s.sidebarOpen)
   const mobileDockVisible = isTouch && (chromePinned || sidebarOpen)
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
+  const pendingTocHref = useReaderState((s) => s.pendingTocHref)
+  const setPendingTocHref = useReaderState((s) => s.setPendingTocHref)
+  const setPendingNavigationHref = useReaderState((s) => s.setPendingNavigationHref)
   const currentChapter = useReaderState((s) => s.currentChapter)
   const currentChapterHref = useReaderState((s) => s.currentChapterHref)
   const currentChapterIndex = useReaderState((s) => s.currentChapterIndex)
@@ -397,7 +400,6 @@ export default function Reader() {
       )
       void queryClient.invalidateQueries({ queryKey: ['progress', id, isGuest ? 'guest' : 'user'], refetchType: 'none' })
     },
-    onError: (error) => notify.error(getUserErrorNotification(error, 'reader.progressSaveFailed')),
   })
 
   const pendingProgress = useRef<ReadingProgressUpdateReq | null>(null)
@@ -606,6 +608,12 @@ export default function Reader() {
       // start) has settled — relocate-driven saves may write back again
       openRestoreGate()
     },
+    onReady: () => {
+      const pendingHref = useReaderState.getState().pendingTocHref
+      if (!pendingHref) return undefined
+      setPendingTocHref(null)
+      return pendingHref
+    },
     onError: () => setLoadError({ kind: 'parse' }),
     onFootnoteOpen: (entry) => {
       setSelection(null)
@@ -632,6 +640,15 @@ export default function Reader() {
       void playbackCoordinator.claim('media')
     },
     onRelocated: (e) => {
+      const pendingHref = useReaderState.getState().pendingNavigationHref
+      if (pendingHref) {
+        const pendingChapterIndex = pendingHref.startsWith('chapter:')
+          ? Number(pendingHref.split(':')[1])
+          : null
+        if (e.chapterHref === pendingHref || (Number.isInteger(pendingChapterIndex) && e.chapterIndex === pendingChapterIndex)) {
+          setPendingNavigationHref(null)
+        }
+      }
       // The destination is now the committed position — drop the pre-update
       navInFlightRef.current = false
       setPendingNavChapter(null)
@@ -804,16 +821,14 @@ export default function Reader() {
     void renderer.display(target)
   }, [annotations?.data, readerReady, deepLinkAnnotation, deepLinkCfi, renderer])
 
-  // A TOC jump clicked during parsing is queued in the store — apply it once
-  // the reader is live (initial navigation has settled)
-  const pendingTocHref = useReaderState((s) => s.pendingTocHref)
-  const setPendingTocHref = useReaderState((s) => s.setPendingTocHref)
+  // A TOC jump clicked before the renderer became available is queued in the
+  // store — apply it as soon as the live renderer can accept navigation.
   useEffect(() => {
-    if (!readerReady || !renderer || !pendingTocHref) return
+    if (!renderer || !pendingTocHref) return
     const href = pendingTocHref
     setPendingTocHref(null)
     void renderer.display(href)
-  }, [pendingTocHref, readerReady, renderer, setPendingTocHref])
+  }, [pendingTocHref, renderer, setPendingTocHref])
 
   // Rule-set changes after mount must invalidate the cached sections: the
   // renderer tears the view down and reopens it (same mechanism as the
