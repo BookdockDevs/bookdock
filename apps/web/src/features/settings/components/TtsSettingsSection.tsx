@@ -233,7 +233,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
         ) : (
           <div className="divide-y divide-stone-100 dark:divide-stone-800">
             {services.map((service) => (
-              <div key={service.id} className="flex items-center gap-3 py-3">
+              <div key={service.id} className="group flex items-center gap-3 py-3">
                 <TtsProviderIcon provider={service.provider} className="h-8 w-8" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-stone-800 dark:text-stone-100">{service.name}</p>
@@ -242,7 +242,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
                     {service.model ? ` · ${service.model}` : ''}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                   <button
                     type="button"
                     onClick={() => openEdit(service)}
@@ -257,7 +257,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
                     onClick={() => setPendingDelete(service)}
                     aria-label={_('settings.fontsDelete')}
                     title={_('settings.fontsDelete')}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                   >
                     <TrashIcon />
                   </button>

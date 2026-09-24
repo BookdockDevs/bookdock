@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
+import i18n from '@/i18n/i18n'
 import { getErrorKeyByCode, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { fetchSettings, writeStoredSettings } from '@/lib/settings-cache'
@@ -332,7 +333,12 @@ export function useUploadBooks() {
     queryClient.invalidateQueries({ queryKey: ['shelves'] })
     if (failed > 0 || (succeeded > 0 && duplicated > 0)) {
       const showSummary = failed > 0 ? notify.error : notify.warning
-      showSummary({ key: 'library.uploadSummary', params: { succeeded, duplicated, failed } })
+      const summary = [
+        succeeded > 0 && i18n.t('library.uploadSummarySucceeded', { count: succeeded }),
+        duplicated > 0 && i18n.t('library.uploadSummaryDuplicated', { count: duplicated }),
+        failed > 0 && i18n.t('library.uploadSummaryFailed', { count: failed }),
+      ].filter(Boolean).join(i18n.t('library.uploadSummarySeparator'))
+      showSummary(summary)
     } else if (duplicated > 0) {
       notify.warning({ key: 'library.uploadDuplicateOnly', params: { count: duplicated } })
     } else {

@@ -1983,6 +1983,7 @@ export class FoliateReader implements BookReader {
     renderer.removeAttribute('continuous')
     renderer.removeAttribute('show-header')
     renderer.removeAttribute('show-footer')
+    renderer.setAttribute('background-color', this.theme.bg)
     const fontStack = this.font.fontStack ?? FONT_OPTIONS[0].value
     renderer.setStyles?.(`
       ${this.font.fontCss ?? ''}
@@ -1993,8 +1994,6 @@ export class FoliateReader implements BookReader {
         font-weight: ${this.font.fontWeight} !important;
         letter-spacing: ${this.paragraph.letterSpacing}px !important;
         color: ${this.theme.text} !important;
-        background: ${this.theme.bg} !important;
-        background-color: ${this.theme.bg} !important;
         --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
         --bd-search-highlight: ${searchHighlightColor(this.theme)} !important;
         --bd-search-active-highlight: ${searchActiveHighlightColor(this.theme)} !important;
@@ -4914,8 +4913,6 @@ export class FoliateReader implements BookReader {
         ${fontDeclarations}
         ${layoutDeclarations}
         color: ${this.theme.text} !important;
-        background: ${this.theme.bg} !important;
-        background-color: ${this.theme.bg} !important;
         --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
         --bd-search-highlight: ${searchHighlightColor(this.theme)} !important;
         --bd-search-active-highlight: ${searchActiveHighlightColor(this.theme)} !important;
@@ -4933,10 +4930,12 @@ export class FoliateReader implements BookReader {
       ${fontBodySizeStyles}
       ${fontLegacySizeStyles}
       ${inlineThemeStyles}
+      ${this.bookFormat === 'txt' ? 'body { background-color: transparent !important; }' : ''}
       ${paragraphStyles}
       ${contentOverflowStyles}
       ${themeCompatibilityStyles}
       ${templateCompatibilityStyles}
+      html { background-color: transparent !important; }
       body {
         padding-top: ${vPad}px !important;
         padding-bottom: ${vPad}px !important;

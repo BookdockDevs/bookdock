@@ -213,12 +213,14 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   const collapsed = !toolbarVisible
   const panelLocked = isTouch ? false : locked
 
+  const TOOL_DOCK_WIDTH = 56
+
   const totalWidth = isTouch
     ? undefined
     : sidebarOpen
-      ? 56 + panelWidth
+      ? TOOL_DOCK_WIDTH + panelWidth
       : locked
-        ? 56
+        ? TOOL_DOCK_WIDTH
         : 8
 
   const toolDock = (
@@ -231,7 +233,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
           ? 'order-2 h-[calc(3.5rem+env(safe-area-inset-bottom))] w-full items-center border-t px-1 pb-[env(safe-area-inset-bottom)]'
           : isFloatingDock
             ? 'absolute left-3 top-16 z-50 h-auto w-12 flex-col items-center gap-1.5 rounded-2xl border border-[var(--bd-read-accent)]/80 p-1 shadow-2xl backdrop-blur-md before:pointer-events-auto before:absolute before:-left-3 before:top-0 before:h-full before:w-3 before:content-[\'\']'
-            : 'order-none h-full w-14 flex-col items-center border-r py-3',
+            : 'order-none h-full w-[56px] flex-col items-center border-r py-3',
         collapsed ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',
         !resizing && 'transition-all duration-200',
       )}
@@ -340,7 +342,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       data-testid="reader-sidebar"
       className={cn(
         locked ? 'relative flex h-full shrink-0' : 'absolute left-0 top-0 bottom-0 flex',
-        isFloatingDock ? 'overflow-visible -mr-2' : 'overflow-hidden',
+        isFloatingDock ? 'overflow-visible -mr-2' : sidebarOpen ? 'overflow-visible' : 'overflow-hidden',
         sidebarOpen || hovered ? 'z-[60]' : 'z-40',
         !locked && !sidebarOpen && !hovered && 'pointer-events-none',
         !resizing && 'transition-all duration-200',

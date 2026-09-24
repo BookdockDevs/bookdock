@@ -208,12 +208,12 @@ describe('ReaderSidebar on pointer devices', () => {
     act(() => useReaderState.setState({ sidebarOpen: true }))
     const { container } = renderSidebar(false)
     const dock = dockEl(container)
-    expect(dock).toHaveClass('order-none', 'h-full', 'w-14')
+    expect(dock).toHaveClass('order-none', 'h-full', 'w-[56px]')
     expect(dock).not.toHaveClass('absolute', 'rounded-2xl')
 
     act(() => useReaderState.setState({ sidebarOpen: false }))
 
-    expect(dockEl(container)).toHaveClass('order-none', 'h-full', 'w-14')
+    expect(dockEl(container)).toHaveClass('order-none', 'h-full', 'w-[56px]')
     expect(dockEl(container)).not.toHaveClass('absolute', 'left-3', 'top-16')
     expect(outerEl(container)).toHaveClass('overflow-hidden')
     expect(outerEl(container)).not.toHaveClass('-mr-2')

@@ -9,6 +9,15 @@ vi.mock('../features/library/hooks', async (importOriginal) => {
   return { ...actual, useUpdateLibraryPrefs: () => ({ mutate: vi.fn() }) }
 })
 
+vi.mock('@/hooks/useTranslation', () => ({
+  useTranslation: () => (key: string, options?: Record<string, unknown>) => {
+    if (options && typeof options === 'object') {
+      return `${key} ${JSON.stringify(options)}`
+    }
+    return key
+  },
+}))
+
 const navSearch = vi.fn()
 
 beforeEach(() => {

@@ -396,7 +396,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         ) : (
           <div className="divide-y divide-stone-100 dark:divide-stone-800">
             {profiles.map((profile) => (
-              <div key={profile.id} className="flex items-center gap-3 py-3">
+              <div key={profile.id} className="group flex items-center gap-3 py-3">
                 <AiBrandIcon provider={providers.find((item) => item.id === profile.provider) ?? profile.provider} className="h-8 w-8" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -405,10 +405,34 @@ export default function AiSettingsSection({ id }: { id?: string }) {
                   </div>
                   <p className="mt-0.5 truncate text-xs text-stone-400">{providers.find((item) => item.id === profile.provider)?.name ?? profile.provider}{profile.model ? ` · ${profile.model}` : ''}</p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button type="button" onClick={() => openEdit(profile)} aria-label={_('settings.aiEdit')} title={_('settings.aiEdit')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"><EditIcon /></button>
-                  {config.activeProfileId !== profile.id && <button type="button" onClick={() => activate.mutate(profile.id, { onError: (error) => showError(error) })} className="rounded-lg px-2 py-1 text-[11px] text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200">{_('settings.aiUse')}</button>}
-                  <button type="button" onClick={() => setPendingDelete(profile)} aria-label={_('settings.aiDelete')} title={_('settings.aiDelete')} className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400"><TrashIcon /></button>
+                <div className="flex shrink-0 items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                  {config.activeProfileId !== profile.id && (
+                    <button
+                      type="button"
+                      onClick={() => activate.mutate(profile.id, { onError: (error) => showError(error) })}
+                      className="rounded-lg px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                    >
+                      {_('settings.aiUse')}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => openEdit(profile)}
+                    aria-label={_('settings.aiEdit')}
+                    title={_('settings.aiEdit')}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  >
+                    <EditIcon />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDelete(profile)}
+                    aria-label={_('settings.aiDelete')}
+                    title={_('settings.aiDelete')}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                  >
+                    <TrashIcon />
+                  </button>
                 </div>
               </div>
             ))}
@@ -416,7 +440,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         )}
 
         {!isGuest && config && profiles.length > 0 && (
-          <div className="mt-5 border-t border-stone-100 pt-5 dark:border-stone-800">
+          <div className="border-t border-stone-100 pt-4 dark:border-stone-800">
             <div className="flex flex-col gap-2 text-xs text-stone-600 dark:text-stone-300">
               <span id="ai-retrieval-mode-label">{_('settings.aiRetrievalMode')}</span>
               <div role="radiogroup" aria-labelledby="ai-retrieval-mode-label" className="flex rounded-xl border border-stone-200 bg-stone-50 p-1 dark:border-stone-700 dark:bg-stone-800/60">
