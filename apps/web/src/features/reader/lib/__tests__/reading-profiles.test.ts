@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  CHAPTER_TITLE_DEFAULTS,
   READING_PROFILE_KEYS,
   createReadingPreset,
   deleteReadingPreset,
@@ -17,7 +18,7 @@ import {
 } from '../reading-profiles'
 
 function snapshot(overrides: Record<string, unknown> = {}): ReturnType<typeof pickReadingSnapshot> {
-  return pickReadingSnapshot({ fontSize: 18, readingMode: 'scroll', ...overrides })
+  return pickReadingSnapshot({ ...CHAPTER_TITLE_DEFAULTS, fontSize: 18, readingMode: 'scroll', ...overrides })
 }
 
 function configWith(preset: ReadingPreset): ReadingConfig {
@@ -25,12 +26,13 @@ function configWith(preset: ReadingPreset): ReadingConfig {
 }
 
 describe('reading profiles', () => {
-  it('covers every reading-menu setting (41 keys)', () => {
-    expect(READING_PROFILE_KEYS).toHaveLength(41)
+  it('covers every reading-menu setting (45 keys)', () => {
+    expect(READING_PROFILE_KEYS).toHaveLength(45)
     expect(READING_PROFILE_KEYS).toContain('readingThemeMode')
     expect(READING_PROFILE_KEYS).toContain('fontSize')
     expect(READING_PROFILE_KEYS).toContain('scrollPageWidth')
     expect(READING_PROFILE_KEYS).toContain('clickAreaMode')
+    expect(READING_PROFILE_KEYS).toContain('chapterTitleBottomSpacing')
   })
 
   it('parses and round-trips a config', () => {

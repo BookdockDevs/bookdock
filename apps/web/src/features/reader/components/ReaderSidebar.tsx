@@ -283,7 +283,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
         'relative shrink-0 overflow-hidden',
         isTouch
           ? cn('order-1 w-full h-0 transition-[height]', sidebarOpen && (activeNavTab === 'ai' ? 'h-[80dvh] max-h-[720px]' : 'h-[65dvh] max-h-[520px]'))
-          : cn('order-none h-full border-r border-[var(--bd-read-accent)]', !resizing && 'transition-all duration-200', sidebarOpen ? '' : 'w-0 border-r-0'),
+          : cn('order-none h-full', !resizing && 'transition-all duration-200', sidebarOpen ? '' : 'w-0'),
       )}
       style={isTouch
         ? { backgroundColor: 'var(--bd-read-bg)' }
@@ -307,6 +307,12 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
           onClose={handleClosePanel}
         />
       </div>
+      {!isTouch && sidebarOpen && (
+        <div
+          className="pointer-events-none absolute right-0 top-0 bottom-0 z-10 w-px bg-[var(--bd-read-accent)]"
+          aria-hidden="true"
+        />
+      )}
     </div>
   )
 

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { FontPreferences, TtsEngine } from '@bookdock/shared'
-import type { AutoReadingMode, FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField, NavTab } from '../features/reader/types'
+import type { AutoReadingMode, FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField, NavTab, ParagraphStyle } from '../features/reader/types'
 import {
   isReadingThemeMode,
   resolveEffectiveReadingThemeId,
@@ -10,6 +10,7 @@ import {
 } from '../lib/reading-theme'
 import {
   CONFIG_STORAGE_KEY,
+  CHAPTER_TITLE_DEFAULTS,
   READING_PROFILE_KEYS,
   createReadingPreset as createPreset,
   deleteReadingPreset as deletePreset,
@@ -82,6 +83,10 @@ interface UiState {
   fontWeight: number
   lineHeight: number
   paragraphSpacing: number
+  chapterTitleAlign: ParagraphStyle['chapterTitleAlign']
+  chapterTitleSize: number
+  chapterTitleTopSpacing: number
+  chapterTitleBottomSpacing: number
   letterSpacing: number
   indent: number
 
@@ -233,6 +238,10 @@ interface UiState {
   setFontWeight: (n: number) => void
   setLineHeight: (n: number) => void
   setParagraphSpacing: (n: number) => void
+  setChapterTitleAlign: (value: ParagraphStyle['chapterTitleAlign']) => void
+  setChapterTitleSize: (value: number) => void
+  setChapterTitleTopSpacing: (value: number) => void
+  setChapterTitleBottomSpacing: (value: number) => void
   setLetterSpacing: (n: number) => void
   setIndent: (n: number) => void
   setPageWidth: (w: number) => void
@@ -454,6 +463,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   fontWeight: getInitialNumber('bd-font-weight', 400, 100, 900),
   lineHeight: getInitialNumber('bd-line-height', 1.8, 1.2, 2.5),
   paragraphSpacing: getInitialNumber('bd-paragraph-spacing', 0.5, 0, 3),
+  chapterTitleAlign: getInitial<ParagraphStyle['chapterTitleAlign']>('bd-chapter-title-align', CHAPTER_TITLE_DEFAULTS.chapterTitleAlign),
+  chapterTitleSize: getInitialNumber('bd-chapter-title-size', CHAPTER_TITLE_DEFAULTS.chapterTitleSize, 1, 2),
+  chapterTitleTopSpacing: getInitialNumber('bd-chapter-title-top-spacing', CHAPTER_TITLE_DEFAULTS.chapterTitleTopSpacing, 0, 6),
+  chapterTitleBottomSpacing: getInitialNumber('bd-chapter-title-bottom-spacing', CHAPTER_TITLE_DEFAULTS.chapterTitleBottomSpacing, 0, 6),
   letterSpacing: getInitialNumber('bd-letter-spacing', 0, -1, 3),
   indent: getInitialNumber('bd-indent', 2, 0, 4),
 
@@ -749,6 +762,22 @@ export const useUiStore = create<UiState>((set, get) => ({
   setParagraphSpacing: (paragraphSpacing) => {
     setStorage('bd-paragraph-spacing', String(paragraphSpacing))
     set({ paragraphSpacing })
+  },
+  setChapterTitleAlign: (chapterTitleAlign) => {
+    setStorage('bd-chapter-title-align', chapterTitleAlign)
+    set({ chapterTitleAlign })
+  },
+  setChapterTitleSize: (chapterTitleSize) => {
+    setStorage('bd-chapter-title-size', String(chapterTitleSize))
+    set({ chapterTitleSize })
+  },
+  setChapterTitleTopSpacing: (chapterTitleTopSpacing) => {
+    setStorage('bd-chapter-title-top-spacing', String(chapterTitleTopSpacing))
+    set({ chapterTitleTopSpacing })
+  },
+  setChapterTitleBottomSpacing: (chapterTitleBottomSpacing) => {
+    setStorage('bd-chapter-title-bottom-spacing', String(chapterTitleBottomSpacing))
+    set({ chapterTitleBottomSpacing })
   },
   setLetterSpacing: (letterSpacing) => {
     setStorage('bd-letter-spacing', String(letterSpacing))

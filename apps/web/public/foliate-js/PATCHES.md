@@ -147,6 +147,11 @@
    - 不能只放适配层：滚动方向和跨 section 的触发属于 Bookdock 自动阅读与加载状态的组合契约，但 `containerPosition`/`relocate` 是核心唯一能确认的可见位置边界；把它们复制到 React 会产生第二套导航状态。
    - 影响/验证：只影响自动滚动、跨章 pending 和快速进度跳转，不改变手动页面翻页；`FoliateReader.scrollByPixels` 现在委托 paginator public `scrollByPixels`，保留旧 direct-write 仅作兼容 fallback。`foliate-reader-load.test.ts`、`navigation-pending.test.ts`、`click-area.test.ts` 与本轮 continuous/auto-reading 定向测试通过，浏览器 spinner/自动阅读完整确认仍标 `[B]`。
 
+19. **`paginator.js` / 跨章跨页当前位置与非连续滚动模式切换**
+    - 需求：分页仍允许相邻 section 共用跨页，不补空栏；同屏跨章时以阅读顺序较后的可见 section 作为当前位置。切回 `off`/`snap` 滚动时只保留这个 section，不能让分页模式预载的相邻章节短暂混入视口。
+    - 不能只放适配层：相邻 view 的清理和重新锚定发生在 paginator 的私有容器里。
+    - 范围：分页滚动后用跨页末端探针判定 primary view，在 `flow` 切换到非连续滚动时清理其他 view；连续滚动和分页宽度计算保持原有语义。
+
 ### 2.3 EPUB 资源和元数据
 
 16. **`epub.js` / `Resources` 和 `EPUB` metadata/resource loader**

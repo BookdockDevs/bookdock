@@ -134,5 +134,42 @@ describe('FoliateReader computed-style cascade compatibility', () => {
     expect(css).toContain('line-height: 1.8 !important;')
     expect(css).toContain('text-indent: 2em !important;')
     expect(css).toContain('margin-bottom: 0.5em !important;')
+    expect(css).toContain('body > h1:first-child {')
+    expect(css).toContain('padding-top: 1.5rem !important;')
+    expect(css).toContain('margin-bottom: 2.25rem !important;')
+  })
+
+  it('applies title controls to identified EPUB headings only under layout override', () => {
+    const bookCss = appliedReaderStyles()
+    expect(bookCss).not.toContain('[data-bd-chapter-title] {')
+
+    const css = appliedReaderStyles((reader) => {
+      ;(reader as any).paragraph = {
+        ...(reader as any).paragraph,
+        overrideBookLayout: true,
+        chapterTitleAlign: 'end',
+        chapterTitleSize: 1.8,
+        chapterTitleTopSpacing: 2,
+        chapterTitleBottomSpacing: 1,
+      }
+    })
+    expect(css).toContain('[data-bd-chapter-title] {')
+    expect(css).toContain('text-align: end !important;')
+    expect(css).toContain('font-size: 1.8rem !important;')
+    expect(css).toContain('padding-top: 2rem !important;')
+    expect(css).toContain('margin-bottom: 1rem !important;')
+  })
+
+  it('identifies only an EPUB heading that matches the section TOC title', () => {
+    const reader = new FoliateReader('', '', undefined, 'epub')
+    const doc = document.implementation.createHTMLDocument('chapter')
+    doc.body.innerHTML = '<h2>Chapter One</h2><p>Body text</p><h2>Other heading</h2>'
+    ;(reader as any).view = {
+      renderer: { getContents: () => [{ doc, index: 0 }] },
+      getProgressOf: () => ({ tocItem: { label: 'Chapter One' } }),
+    }
+    ;(reader as any).syncDoc()
+    expect(doc.querySelector('h2')?.hasAttribute('data-bd-chapter-title')).toBe(true)
+    expect(doc.querySelectorAll('[data-bd-chapter-title]')).toHaveLength(1)
   })
 })

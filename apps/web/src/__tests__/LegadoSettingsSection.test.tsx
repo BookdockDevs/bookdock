@@ -229,7 +229,7 @@ describe('LegadoSettingsSection', () => {
   it('toggles EPUB media inclusion', async () => {
     renderSection({ legado: { enabled: true, includeEpubMedia: true } })
 
-    const toggle = screen.getByRole('switch', { name: '包含插图与媒体' })
+    const toggle = screen.getByRole('switch', { name: '包含媒体内容' })
     expect(toggle).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(toggle)
 

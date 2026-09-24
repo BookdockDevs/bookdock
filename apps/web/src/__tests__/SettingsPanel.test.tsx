@@ -36,6 +36,10 @@ describe('SettingsPanel', () => {
       fontWeight: 400,
       lineHeight: 1.8,
       paragraphSpacing: 0.5,
+      chapterTitleAlign: 'center',
+      chapterTitleSize: 1.5,
+      chapterTitleTopSpacing: 1.5,
+      chapterTitleBottomSpacing: 2.25,
       letterSpacing: 0,
       indent: 2,
       readingThemeMode: 'light',
@@ -156,6 +160,13 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('上下边距')).toBeInTheDocument()
     expect(screen.getByText('左右边距')).toBeInTheDocument()
     expect(screen.getByText('覆盖书籍布局')).toBeInTheDocument()
+    expect(screen.getByText('章节标题')).toBeInTheDocument()
+    expect(screen.getByText('对齐方式')).toBeInTheDocument()
+    expect(screen.getByText('字号')).toBeInTheDocument()
+    expect(screen.getByText('上边距').parentElement?.parentElement?.querySelector('input[type="range"]')).toHaveAttribute('max', '6')
+    expect(screen.getByText('下边距').parentElement?.parentElement?.querySelector('input[type="range"]')).toHaveAttribute('max', '6')
+    fireEvent.click(screen.getByRole('button', { name: '靠右' }))
+    expect(useUiStore.getState().chapterTitleAlign).toBe('end')
   })
 
   it('switches to display section', () => {
@@ -363,8 +374,8 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(screen.getByTitle('布局'))
 
-    expect(screen.getByText('页面与边距')).toBeInTheDocument()
-    expect(screen.getByText('文本与排版')).toBeInTheDocument()
+    expect(screen.getByText('版面尺寸')).toBeInTheDocument()
+    expect(screen.getByText('文字排版')).toBeInTheDocument()
     expect(screen.getByText('自适应')).toBeInTheDocument()
   })
 

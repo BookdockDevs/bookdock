@@ -1685,6 +1685,11 @@ export class Paginator extends HTMLElement {
                 this.#lastScrollDirection = null
                 this.#backwardEdgePending = false
                 this.#backwardWheelIntent = 0
+                if (this.noContinuousScroll) {
+                    for (const [i] of this.#views) {
+                        if (i !== this.#primaryIndex) this.#destroyView(i)
+                    }
+                }
                 this.render()
                 break
             case 'gap':
@@ -3162,11 +3167,14 @@ export class Paginator extends HTMLElement {
     // Determine which view is primary based on scroll position
     #detectPrimaryView() {
         if (this.#views.size <= 1) return
-        const visibleStart = this.#renderedStart
+        // A paginated spread may contain the end of one section and the start
+        // of the next. Treat the later visible section as current so a TOC
+        // jump to it does not revert to the preceding section on relocation.
+        const visibleStart = this.scrolled ? this.#renderedStart : this.#renderedEnd - 1
         let offset = 0
         for (const [index, view] of this.#sortedViews) {
             const viewSize = view.element.getBoundingClientRect()[this.sideProp]
-            if (visibleStart < offset + viewSize - 1) {
+            if (visibleStart < offset + viewSize - (this.scrolled ? 1 : 0)) {
                 if (index !== this.#primaryIndex) {
                     this.#primaryIndex = index
                     this.#syncA11y()

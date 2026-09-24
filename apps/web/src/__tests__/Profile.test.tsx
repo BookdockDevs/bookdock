@@ -165,14 +165,15 @@ describe('Profile Page', () => {
     expect(settingsBtn).toBeInTheDocument()
 
     // Initially modal is not visible
-    expect(screen.queryByText('主页与偏好设置')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
     // Click settings button
     fireEvent.click(settingsBtn)
-    expect(screen.getByText('主页与偏好设置')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '主页设置' })).toBeInTheDocument()
     expect(screen.getByText('个人资料')).toBeInTheDocument()
     expect(screen.getByText('模块展示')).toBeInTheDocument()
-    expect(screen.getByText('隐私与公开')).toBeInTheDocument()
+    expect(screen.getByText('隐私设置')).toBeInTheDocument()
     expect(screen.getByText('账号安全')).toBeInTheDocument()
 
     // Edit username inside settings dialog

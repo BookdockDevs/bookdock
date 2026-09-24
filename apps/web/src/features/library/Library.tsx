@@ -353,8 +353,24 @@ export default function Library() {
   const allBooks = useMemo(() => data?.data ?? [], [data])
   const isEmpty = !isLoading && allBooks.length === 0
 
-  const total = data?.total ?? 0
-  const totalSize = data?.totalSize ?? 0
+  const filterKey = `${shelfId ?? ''}:${tagId ?? ''}:${query}:${format ?? ''}:${readStatus ?? ''}:${trash}:${author ?? ''}:${series ?? ''}:${sortBy}:${sortOrder}:${pageSize}`
+  const lastFilterKeyRef = useRef(filterKey)
+  const lastTotalRef = useRef(0)
+  const lastTotalSizeRef = useRef(0)
+
+  if (lastFilterKeyRef.current !== filterKey) {
+    lastFilterKeyRef.current = filterKey
+    lastTotalRef.current = 0
+    lastTotalSizeRef.current = 0
+  }
+
+  if (data?.total !== undefined) {
+    lastTotalRef.current = data.total
+    lastTotalSizeRef.current = data.totalSize ?? 0
+  }
+
+  const total = data?.total ?? lastTotalRef.current
+  const totalSize = data?.totalSize ?? lastTotalSizeRef.current
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const shelvesQuery = useShelves()
@@ -717,13 +733,12 @@ export default function Library() {
           )}
         </div>
 
-        {!isLoading && !isError && (
+        {!isError && (totalPages > 1 ? (data !== undefined || lastTotalRef.current > 0) : !isLoading) && (
           <LibraryPagination
             currentPage={currentPage}
             totalPages={totalPages}
             totalBooks={total}
             onPageChange={goToPage}
-            disabled={isFetching}
             selectionActive={selectionActive}
           />
         )}

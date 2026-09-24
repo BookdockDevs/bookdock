@@ -96,6 +96,10 @@ export function useReaderRenderer({
   const fontWeight = useUiStore((s) => s.fontWeight)
   const storeLineHeight = useUiStore((s) => s.lineHeight)
   const paragraphSpacing = useUiStore((s) => s.paragraphSpacing)
+  const chapterTitleAlign = useUiStore((s) => s.chapterTitleAlign)
+  const chapterTitleSize = useUiStore((s) => s.chapterTitleSize)
+  const chapterTitleTopSpacing = useUiStore((s) => s.chapterTitleTopSpacing)
+  const chapterTitleBottomSpacing = useUiStore((s) => s.chapterTitleBottomSpacing)
   const letterSpacing = useUiStore((s) => s.letterSpacing)
   const indent = useUiStore((s) => s.indent)
   const storePageWidth = useUiStore((s) => s.pageWidth)
@@ -165,7 +169,7 @@ export function useReaderRenderer({
   const theme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [readingThemeId, customThemes])
   const themeRef = useRef(theme)
   const fontRef = useRef({ fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
-  const paragraphRef = useRef({ paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout })
+  const paragraphRef = useRef({ paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout })
   const pageWidthRef = useRef(pageWidth)
   const chineseConversionRef = useRef(chineseConversion)
   const continuousScrollRef = useRef(continuousScroll)
@@ -206,7 +210,7 @@ export function useReaderRenderer({
   onFootnoteCloseRef.current = onFootnoteClose
   themeRef.current = theme
   fontRef.current = { fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont }
-  paragraphRef.current = { paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
+  paragraphRef.current = { paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
   pageWidthRef.current = pageWidth
   chineseConversionRef.current = chineseConversion
   continuousScrollRef.current = continuousScroll
@@ -264,7 +268,7 @@ export function useReaderRenderer({
       newRenderer.applyPageAnimation(pageAnimationRef.current)
       newRenderer.applyShowHeader(showHeaderRef.current)
       newRenderer.applyShowFooter(showFooterRef.current)
-      newRenderer.applyReadingTheme({ bg: theme.pageBg, text: theme.text })
+      newRenderer.applyReadingTheme({ bg: theme.pageBg, text: theme.text, primary: theme.primary })
       newRenderer.applyFont(fontRef.current)
       newRenderer.applyParagraphStyle(paragraphRef.current)
       newRenderer.applyPageWidth(pageWidthRef.current)
@@ -341,7 +345,7 @@ export function useReaderRenderer({
   useEffect(() => {
     const current = rendererRef.current
     if (!current) return
-    current.applyReadingTheme({ bg: theme.pageBg, text: theme.text })
+    current.applyReadingTheme({ bg: theme.pageBg, text: theme.text, primary: theme.primary })
   }, [theme])
 
   useEffect(() => {
@@ -353,8 +357,8 @@ export function useReaderRenderer({
   useEffect(() => {
     const current = rendererRef.current
     if (!current) return
-    current.applyParagraphStyle({ paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout })
-  }, [paragraphSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout])
+    current.applyParagraphStyle({ paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout })
+  }, [paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout])
 
   useEffect(() => {
     const current = rendererRef.current

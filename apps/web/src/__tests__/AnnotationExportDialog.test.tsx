@@ -128,13 +128,13 @@ describe('AnnotationExportDialog', () => {
     })
 
     // Toggle include time
-    const timeToggle = screen.getByRole('button', { name: /记录时间/i })
+    const timeToggle = screen.getByRole('button', { name: /时间/i })
     expect(timeToggle).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(timeToggle)
     expect(timeToggle).toHaveAttribute('aria-pressed', 'false')
 
     // Toggle deep link
-    const linkToggle = screen.getByRole('button', { name: /Bookdock 深链/i })
+    const linkToggle = screen.getByRole('button', { name: /深链/i })
     expect(linkToggle).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(linkToggle)
     expect(linkToggle).toHaveAttribute('aria-pressed', 'false')

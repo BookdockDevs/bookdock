@@ -182,4 +182,13 @@ describe('ui.store reading preset routing', () => {
     expect(cfg.presets[0].snapshot.fontSize).toBe(30)
     expect('active' in cfg).toBe(false)
   })
+
+  it('fills title settings in older global and preset snapshots', () => {
+    const config = currentConfig()
+    const global = { ...config.global }
+    delete (global as Partial<typeof global>).chapterTitleSize
+    const legacy = parseReadingConfig(JSON.stringify({ global, presets: [{ id: 'older', name: 'Older', snapshot: global }] }))!
+    expect(legacy.global.chapterTitleSize).toBe(1.5)
+    expect(legacy.presets[0].snapshot.chapterTitleSize).toBe(1.5)
+  })
 })

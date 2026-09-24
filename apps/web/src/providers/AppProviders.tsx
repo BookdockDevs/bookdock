@@ -23,6 +23,7 @@ export default function AppProviders({ children }: { children?: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', effectiveTheme === 'dark')
+    document.documentElement.style.colorScheme = effectiveTheme
     const favicon = document.getElementById('bookdock-favicon') as HTMLLinkElement | null
     if (favicon) favicon.href = effectiveTheme === 'dark' ? '/favicon-dark.svg?v=1' : '/favicon.svg?v=5'
   }, [effectiveTheme])

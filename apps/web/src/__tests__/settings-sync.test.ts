@@ -36,7 +36,14 @@ describe('SettingsSync persistence', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     localStorage.clear()
-    useUiStore.setState({ readingConfig: baseline.readingConfig, activePresetId: null, boundPresetId: null })
+    useUiStore.setState({
+      readingConfig: baseline.readingConfig,
+      fontSize: baseline.fontSize,
+      fontPreferences: baseline.fontPreferences,
+      fontOrder: baseline.fontOrder,
+      activePresetId: null,
+      boundPresetId: null,
+    })
     useAuthStore.getState().setAuth(user)
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: {} }), {
       headers: { 'Content-Type': 'application/json' },

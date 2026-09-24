@@ -326,6 +326,14 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
     setLineHeight,
     paragraphSpacing,
     setParagraphSpacing,
+    chapterTitleAlign,
+    setChapterTitleAlign,
+    chapterTitleSize,
+    setChapterTitleSize,
+    chapterTitleTopSpacing,
+    setChapterTitleTopSpacing,
+    chapterTitleBottomSpacing,
+    setChapterTitleBottomSpacing,
     letterSpacing,
     setLetterSpacing,
     indent,
@@ -616,6 +624,27 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
             <SliderRow label={_('reader.indent')} value={indent} min={0} max={4} step={0.5} suffix="em" onChange={setIndent} />
           </div>
 
+          <div className="border-t border-[var(--bd-read-accent)] pt-3">
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
+              {_('reader.chapterTitleGroup')}
+            </div>
+            <div className="mb-4">
+              <div className="mb-1.5 text-xs text-[var(--bd-read-sub)]">{_('reader.chapterTitleAlign')}</div>
+              <ButtonGroup
+                options={[
+                  { value: 'start', label: _('reader.chapterTitleStart') },
+                  { value: 'center', label: _('reader.chapterTitleCenter') },
+                  { value: 'end', label: _('reader.chapterTitleEnd') },
+                ]}
+                value={chapterTitleAlign}
+                onChange={setChapterTitleAlign}
+              />
+            </div>
+            <SliderRow label={_('reader.chapterTitleSize')} value={chapterTitleSize} min={1} max={2} step={0.1} suffix="×" stepper={{ decAria: _('reader.chapterTitleSizeDec'), incAria: _('reader.chapterTitleSizeInc') }} onChange={setChapterTitleSize} />
+            <SliderRow label={_('reader.chapterTitleTopSpacing')} value={chapterTitleTopSpacing} min={0} max={6} step={0.25} suffix="em" onChange={setChapterTitleTopSpacing} />
+            <SliderRow label={_('reader.chapterTitleBottomSpacing')} value={chapterTitleBottomSpacing} min={0} max={6} step={0.25} suffix="em" onChange={setChapterTitleBottomSpacing} />
+          </div>
+
           <div className="border-t border-[var(--bd-read-accent)] pt-1">
             <ToggleRow
               label={_('reader.overrideBookLayout')}
@@ -706,9 +735,6 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
           </div>
 
           <div className="mb-3 border-t border-[var(--bd-read-accent)] pt-3">
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
-              {_('reader.infoBar')}
-            </div>
             <ToggleRow label={_('reader.header')} checked={showHeader} onChange={setShowHeader} />
             <div
               className={cn(

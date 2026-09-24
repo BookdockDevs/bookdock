@@ -443,7 +443,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     <>
       {target && (
         <div
-          className="fixed z-50 flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_6px_rgba(0,0,0,0.06),0_6px_16px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="fixed z-50 flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_6px_rgba(0,0,0,0.06),0_6px_16px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md dark:border-stone-700/80 dark:shadow-[0_4px_24px_rgba(0,0,0,0.65)] dark:ring-1 dark:ring-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           style={{ left: styleLeft, top: styleTop }}
         >
           {HIGHLIGHT_STYLES.map((s) => (
@@ -503,7 +503,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         </div>
       )}
       <div
-        className="fixed z-50 flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_8px_rgba(0,0,0,0.08),0_10px_25px_-5px_rgba(0,0,0,0.18)] backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="fixed z-50 flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_8px_rgba(0,0,0,0.08),0_10px_25px_-5px_rgba(0,0,0,0.18)] backdrop-blur-md dark:border-stone-700/80 dark:shadow-[0_4px_24px_rgba(0,0,0,0.65)] dark:ring-1 dark:ring-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{ left: bar.left, top: bar.top }}
       >
         {actions.map((a) => (

@@ -1626,6 +1626,10 @@ export class FoliateReader implements BookReader {
   }
   private paragraph: ParagraphStyle = {
     paragraphSpacing: 0.5,
+    chapterTitleAlign: 'center',
+    chapterTitleSize: 1.5,
+    chapterTitleTopSpacing: 1.5,
+    chapterTitleBottomSpacing: 2.25,
     letterSpacing: 0,
     indent: 2,
     verticalPadding: 0,
@@ -2926,7 +2930,23 @@ export class FoliateReader implements BookReader {
       }
     }
     this.view.renderer.setAttribute('background-color', theme.bg)
+    this.syncActiveDocsTheme()
     this.applyStyles()
+  }
+
+  private syncActiveDocsTheme() {
+    const isDarkTheme = !isLightCssColor(this.theme.bg)
+    const scheme = isDarkTheme ? 'dark' : 'light'
+    for (const doc of this.activeDocs) {
+      try {
+        doc.documentElement.style.colorScheme = scheme
+        doc.documentElement.setAttribute('data-theme', scheme)
+        doc.documentElement.classList.toggle('dark', isDarkTheme)
+        doc.body?.classList.toggle('dark', isDarkTheme)
+      } catch {
+        // iframe doc may be detached
+      }
+    }
   }
 
   applyFont(cfg: FontConfig) {
@@ -4151,8 +4171,30 @@ export class FoliateReader implements BookReader {
       for (const { doc, index } of contents) {
         if (!doc || this.activeDocs.has(doc)) continue
         this.applyFixedLayoutDocumentStyles(doc)
+        const isDarkTheme = !isLightCssColor(this.theme.bg)
+        const scheme = isDarkTheme ? 'dark' : 'light'
+        try {
+          doc.documentElement.style.colorScheme = scheme
+          doc.documentElement.setAttribute('data-theme', scheme)
+          doc.documentElement.classList.toggle('dark', isDarkTheme)
+          doc.body?.classList.toggle('dark', isDarkTheme)
+        } catch {
+          // ignore
+        }
         keepEpubTextAlignment(doc)
         setEpubParagraphWhitespace(doc, this.shouldForceBookLayout())
+        if (this.bookFormat === 'epub' && !this.view?.isFixedLayout) {
+          const label = this.view?.getProgressOf?.(index)?.tocItem?.label
+          if (typeof label === 'string') {
+            const expected = label.replace(/\s+/g, ' ').trim()
+            const headings = doc.body?.querySelectorAll('h1, h2, h3, h4, h5, h6, p')
+            for (const heading of Array.from(headings ?? []).slice(0, 6)) {
+              if (heading.textContent?.replace(/\s+/g, ' ').trim() !== expected) continue
+              heading.setAttribute('data-bd-chapter-title', '')
+              break
+            }
+          }
+        }
         normalizeEpubDocumentImages(doc, {
           section: this.book?.sections?.[index],
           onMediaError: (detail) => this.emit('mediaError', detail),
@@ -4318,6 +4360,16 @@ export class FoliateReader implements BookReader {
     const isDarkTheme = !isLightCssColor(this.theme.bg)
     const forceBookdockFont = this.font.overrideBookFont
     const forceBookdockLayout = this.shouldForceBookLayout()
+    const chapterTitleStyles = forceBookdockLayout ? `
+      ${this.bookFormat === 'txt' ? 'body > h1:first-child' : '[data-bd-chapter-title]'} {
+        text-align: ${this.paragraph.chapterTitleAlign} !important;
+        font-size: ${this.paragraph.chapterTitleSize}rem !important;
+        padding-top: ${this.paragraph.chapterTitleTopSpacing}rem !important;
+        margin-top: 0 !important;
+        margin-bottom: ${this.paragraph.chapterTitleBottomSpacing}rem !important;
+        text-indent: 0 !important;
+        break-inside: avoid;
+      }` : ''
     const fontDeclarations = `
         font-size: ${this.font.size}px !important;
         font-weight: ${this.font.fontWeight};
@@ -4923,8 +4975,8 @@ export class FoliateReader implements BookReader {
         font-variant-ligatures: none;
       }
       ::selection {
-        background: ${this.theme.text}19 !important;
-        color: inherit !important;
+        background-color: color-mix(in srgb, var(--bd-theme-primary, ${this.theme.primary ?? this.theme.text}) 30%, transparent);
+        color: inherit;
       }
       ${fontDescendantStyles}
       ${fontBodySizeStyles}
@@ -4932,6 +4984,7 @@ export class FoliateReader implements BookReader {
       ${inlineThemeStyles}
       ${this.bookFormat === 'txt' ? 'body { background-color: transparent !important; }' : ''}
       ${paragraphStyles}
+      ${chapterTitleStyles}
       ${contentOverflowStyles}
       ${themeCompatibilityStyles}
       ${templateCompatibilityStyles}

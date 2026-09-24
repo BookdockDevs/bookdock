@@ -13,6 +13,13 @@
 // typography, layout (incl. per-mode backing), reading mode, chrome, margins,
 // behavior and theme references. Resource collections (custom themes, fonts)
 // are referenced by id, never snapshotted.
+export const CHAPTER_TITLE_DEFAULTS = {
+  chapterTitleAlign: 'center' as const,
+  chapterTitleSize: 1.5,
+  chapterTitleTopSpacing: 1.5,
+  chapterTitleBottomSpacing: 2.25,
+}
+
 export const READING_PROFILE_KEYS = [
   'readingThemeMode',
   'readingThemeId',
@@ -22,6 +29,10 @@ export const READING_PROFILE_KEYS = [
   'fontWeight',
   'lineHeight',
   'paragraphSpacing',
+  'chapterTitleAlign',
+  'chapterTitleSize',
+  'chapterTitleTopSpacing',
+  'chapterTitleBottomSpacing',
   'letterSpacing',
   'indent',
   'textAlignJustify',
@@ -89,10 +100,11 @@ export function parseReadingConfig(raw: string | null | undefined): ReadingConfi
     if (!parsed || typeof parsed !== 'object') return null
     const presets = Array.isArray(parsed.presets)
       ? parsed.presets.filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string' && p.snapshot && typeof p.snapshot === 'object')
+        .map((p) => ({ ...p, snapshot: { ...CHAPTER_TITLE_DEFAULTS, ...p.snapshot } }))
       : []
     const global = parsed.global && typeof parsed.global === 'object' ? parsed.global : null
     if (!global) return null
-    return { global: global as ReadingSnapshot, presets }
+    return { global: { ...CHAPTER_TITLE_DEFAULTS, ...global } as ReadingSnapshot, presets }
   } catch {
     return null
   }

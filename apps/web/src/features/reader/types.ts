@@ -199,7 +199,7 @@ export interface BookReader {
   applyPageColumns(columns: number): void
   applyColumnGap(gapPercent: number): void
   applyPageAnimation(enabled: boolean): void
-  applyReadingTheme(theme: { bg: string; text: string }): void
+  applyReadingTheme(theme: { bg: string; text: string; primary?: string }): void
   applyFont(cfg: FontConfig): void
   applyParagraphStyle(cfg: ParagraphStyle): void
   applyPageWidth(width: number): void
@@ -346,6 +346,10 @@ export interface FontConfig {
 
 export interface ParagraphStyle {
   paragraphSpacing: number
+  chapterTitleAlign: 'start' | 'center' | 'end'
+  chapterTitleSize: number
+  chapterTitleTopSpacing: number
+  chapterTitleBottomSpacing: number
   letterSpacing: number
   indent: number
   verticalPadding: number

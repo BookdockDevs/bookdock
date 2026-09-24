@@ -213,7 +213,7 @@ export default function LibraryPagination({
                 'inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:pointer-events-none disabled:opacity-25',
                 isAwake
                   ? 'text-stone-600 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100'
-                  : 'text-stone-400 hover:bg-stone-100/70 hover:text-stone-700 dark:text-stone-500',
+                  : 'text-stone-400 hover:bg-stone-100/70 hover:text-stone-700 dark:text-stone-500 dark:hover:bg-stone-800/70 dark:hover:text-stone-200',
               )}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -291,8 +291,8 @@ export default function LibraryPagination({
                             ? 'cursor-pointer bg-stone-900 text-white shadow-sm ring-1 ring-stone-900/10 dark:bg-stone-100 dark:text-stone-900'
                             : 'bg-stone-700/80 text-stone-100 dark:bg-stone-300 dark:text-stone-800')
                         : (isAwake
-                            ? 'text-stone-600 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800'
-                            : 'text-stone-400 hover:bg-stone-100/70 hover:text-stone-700 dark:text-stone-500'),
+                            ? 'text-stone-600 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100'
+                            : 'text-stone-400 hover:bg-stone-100/70 hover:text-stone-700 dark:text-stone-500 dark:hover:bg-stone-800/70 dark:hover:text-stone-200'),
                     )}
                   >
                     {page}
@@ -312,7 +312,7 @@ export default function LibraryPagination({
                 'inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:pointer-events-none disabled:opacity-25',
                 isAwake
                   ? 'text-stone-600 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100'
-                  : 'text-stone-400 hover:bg-stone-100/70 hover:text-stone-700 dark:text-stone-500',
+                  : 'text-stone-400 hover:bg-stone-100/70 hover:text-stone-700 dark:text-stone-500 dark:hover:bg-stone-800/70 dark:hover:text-stone-200',
               )}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
