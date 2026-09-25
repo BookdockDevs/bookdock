@@ -14,17 +14,35 @@
   "dependencies": {
     "@bookdock/shared": "workspace:*",
     "@hono/node-server": "^1.13.0",
+    "@img/colour": "^1.1.0",
     "@xmldom/xmldom": "^0.9.10",
     "better-sqlite3": "^11.7.0",
+    "bindings": "^1.5.0",
     "chardet": "^2.2.0",
+    "core-util-is": "~1.0.0",
+    "detect-libc": "^2.1.2",
     "dotenv": "^17.4.2",
     "drizzle-orm": "0.39.3",
+    "file-uri-to-path": "1.0.0",
     "hono": "^4.7.0",
     "iconv-lite": "^0.7.3",
+    "immediate": "~3.0.5",
+    "inherits": "~2.0.3",
+    "isarray": "~1.0.0",
     "jose": "^5.9.0",
     "jszip": "^3.10.1",
+    "lie": "~3.3.0",
     "nanoid": "^5.0.0",
+    "pako": "~1.0.2",
+    "process-nextick-args": "~2.0.0",
+    "readable-stream": "~2.3.6",
+    "safe-buffer": "~5.1.1",
+    "safer-buffer": "^2.1.2",
+    "semver": "^7.8.5",
+    "setimmediate": "^1.0.5",
     "sharp": "^0.35.4",
+    "string_decoder": "~1.1.1",
+    "util-deprecate": "~1.0.1",
     "ws": "^8.21.3",
     "zod": "^3.25.76"
   },
@@ -37,5 +55,9 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.10"
+  },
+  "optionalDependencies": {
+    "@img/sharp-libvips-linuxmusl-x64": "1.3.3",
+    "@img/sharp-linuxmusl-x64": "0.35.4"
   }
 }

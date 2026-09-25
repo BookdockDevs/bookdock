@@ -179,11 +179,30 @@ jobs:
           archive="bookdock-${version}-linux-x64-musl.zip"
           mkdir -p "$ARTIFACT_DIR"
           # zip (not tar) because the extracting side is the running server, which
-          # already depends on jszip; symlinks are dereferenced by default.
+          # already depends on jszip. WARNING: zipping dereferences symlinks,
+          # which breaks pnpm's store layout: flattened packages can no longer
+          # resolve siblings that only exist under node_modules/.pnpm
+          # (sharp 0.35 broke the 0.3.6 panel update this way via @img/colour).
+          # The boot check below guards this; direct dependencies that only
+          # exist to survive flattening are pinned in apps/server/package.json.
           (cd "$BUNDLE_DIR" && zip -qrX "$ARTIFACT_DIR/$archive" apps release.json)
           (cd "$ARTIFACT_DIR" && sha256sum "$archive" > "$archive.sha256")
           cp "$BUNDLE_DIR/release.json" "$ARTIFACT_DIR/release.json"
           cat "$ARTIFACT_DIR/$archive.sha256"
+
+      - name: Boot-check the updater artifact
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          ARTIFACT_DIR: ${{ runner.temp }}/artifacts
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          # The panel zip flattens symlinks, so resolve the production import
+          # closure the way the staged server will (no code is executed: the
+          # musl bundle cannot boot on this runner). Fails the release before
+          # anything is published when a dependency only resolves through
+          # pnpm's symlinked store layout.
+          node scripts/verify-bundle-imports.mjs "$ARTIFACT_DIR/bookdock-${version}-linux-x64-musl.zip"
 
       - name: Create or update GitHub Release
         env:

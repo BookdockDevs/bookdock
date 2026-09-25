@@ -32,6 +32,8 @@ interface ReleaseManifest {
   version: string
   nodeMajor: number
   libc: string
+  /** Build architecture (e.g. x64); absent in pre-0.3.7 manifests. */
+  arch?: string
 }
 
 interface UpdateJob {

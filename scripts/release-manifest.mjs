@@ -24,6 +24,7 @@ const manifest = {
   version,
   nodeMajor: Number(process.versions.node.split('.')[0]),
   libc: detectLibc(),
+  arch: process.arch,
   createdAt: Date.now(),
 }
 
