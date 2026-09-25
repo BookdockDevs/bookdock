@@ -2,7 +2,24 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.3.4] - Unreleased
+## [0.3.5] - Unreleased
+
+### Highlights
+
+- In-panel updates now show real phase progress and actionable, sanitized diagnostics, with task recovery after reopening About or reconnecting.
+- Legado book sources now generate HTTPS URLs correctly behind TLS-terminating reverse proxies.
+
+### Added
+
+- Safe cancellation before an update switches versions, with temporary-file cleanup and a clear result that the old version remains active.
+- A development-only update preview for trying progress, failure, cancellation, and recovery UI scenarios locally.
+
+### Changed
+
+- Update diagnostics now distinguish connection, response, download, extraction, verification, promotion, and startup health-check outcomes without combining them into a synthetic overall percentage.
+- Legado source, login, import, cover, chapter, and EPUB resource links honor an exact `X-Forwarded-Proto: https` value while retaining the request host.
+
+## [0.3.4] - 2026-09-25
 
 ### Highlights
 
@@ -317,7 +334,24 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.3.4] - 待发布
+### [0.3.5] - 待发布
+
+#### 主要更新
+
+- 应用内更新现在显示各阶段的实际进度和可操作的脱敏诊断；重新打开「关于」或浏览器重连后仍可恢复任务状态。
+- Legado 书源在 TLS 终止反向代理后也能正确生成 HTTPS 链接。
+
+#### 新增
+
+- 版本切换前可安全取消更新，服务端会清理临时文件，并明确显示旧版本仍在运行。
+- 新增仅供开发环境使用的更新预览页，可在本地体验进度、失败、取消和页面重开场景。
+
+#### 变更
+
+- 更新诊断分别呈现连接、响应、下载、解压、校验、切换和启动健康检查结果，不再使用合成的总体百分比。
+- Legado 书源、登录、导入、封面、章节和 EPUB 资源链接会识别精确的 `X-Forwarded-Proto: https`，并保留请求 Host。
+
+### [0.3.4] - 2026-09-25
 
 #### 主要更新
 
