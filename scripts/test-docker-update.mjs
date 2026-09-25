@@ -160,7 +160,7 @@ async function runScenario({ scenario, targetVersion, factoryVersion }) {
   await waitFor('launcher snapshot rollback', async () => containerLogs(appName).includes('launcher.update_reverted'))
   await waitFor('factory version after rollback', async () => {
     const response = requestJson(appName, '/api/v1/system/update/status', { headers: { cookie } })
-    return response.ok && response.body?.data?.phase === 'idle' && response.body?.data?.currentVersion === factoryVersion
+    return response.ok && response.body?.data?.outcome === 'rolled-back' && response.body?.data?.currentVersion === factoryVersion
   })
   assert.equal(await readMarker(appName), 'original')
   assert.equal(await readFile(path.join(appData, 'releases', 'pending')).then(() => true).catch(() => false), false)
