@@ -87,10 +87,10 @@ describe('Legado book-source adapter', () => {
       bookSourceGroup: '书坞',
       header: '@js:\nvar cookieHeader = java.getCookie(baseUrl);\nresult = cookieHeader ? JSON.stringify({"Cookie": cookieHeader}) : "{}";',
       loginUrl: 'http://bookdock.test/api/v1/legado/login',
-      lastUpdateTime: 1789776005000,
+      lastUpdateTime: 1790294400000,
       enabledCookieJar: true,
       enabledExplore: true,
-      exploreUrl: '@js:\n/* Bookdock explore 1789776005000 */\nresult = bdExplore(this);',
+      exploreUrl: '@js:\n/* Bookdock explore 1790294400000 */\nresult = bdExplore(this);',
       jsLib: expect.stringContaining('BD_API_ROOT'),
       searchUrl: 'http://bookdock.test/api/v1/legado/search?keyword={{key}}&page={{page}}',
       ruleSearch: {
@@ -115,6 +115,35 @@ describe('Legado book-source adapter', () => {
     expect(() => new Function(source.header.replace(/^@js:\n/, ''))).not.toThrow()
   })
 
+  it('uses the public HTTPS scheme throughout the source behind a TLS-terminating proxy', async () => {
+    const response = await createApp(true).request('http://bookdock.test/api/v1/legado/source.json', {
+      headers: { 'X-Forwarded-Proto': 'https', 'X-Forwarded-Host': 'untrusted.test' },
+    })
+    const [source] = await response.json() as [{ bookSourceUrl: string; loginUrl: string; searchUrl: string; jsLib: string }]
+
+    expect(source.bookSourceUrl).toBe('https://bookdock.test')
+    expect(source.loginUrl).toBe('https://bookdock.test/api/v1/legado/login')
+    expect(source.searchUrl).toBe('https://bookdock.test/api/v1/legado/search?keyword={{key}}&page={{page}}')
+    expect(source.jsLib).toContain('var BD_API_ROOT = "https://bookdock.test/api/v1/legado"')
+    expect(JSON.stringify(source)).not.toContain('untrusted.test')
+  })
+
+  it.each(['https,http', 'javascript', 'http'])('ignores an invalid or non-HTTPS proxy protocol %s', async (protocol) => {
+    const response = await createApp(true).request('http://bookdock.test/api/v1/legado/source.json', {
+      headers: { 'X-Forwarded-Proto': protocol },
+    })
+    const [source] = await response.json() as [{ bookSourceUrl: string }]
+    expect(source.bookSourceUrl).toBe('http://bookdock.test')
+  })
+
+  it('retains native HTTPS even when a proxy reports HTTP', async () => {
+    const response = await createApp(true).request('https://bookdock.test/api/v1/legado/source.json', {
+      headers: { 'X-Forwarded-Proto': 'http' },
+    })
+    const [source] = await response.json() as [{ bookSourceUrl: string }]
+    expect(source.bookSourceUrl).toBe('https://bookdock.test')
+  })
+
   it('restores an existing source cookie before opening the login page', async () => {
     const response = await createApp(true).request('http://bookdock.test/api/v1/legado/login', {
       headers: { Cookie: 'bd_token=existing-token' },
@@ -125,14 +154,23 @@ describe('Legado book-source adapter', () => {
     expect(response.headers.get('set-cookie')).toContain('bd_token=existing-token')
   })
 
+  it('redirects the source login bridge to the public HTTPS site', async () => {
+    const response = await createApp(true).request('http://bookdock.test/api/v1/legado/login', {
+      headers: { 'X-Forwarded-Proto': 'https' },
+    })
+    expect(response.headers.get('location')).toBe('https://bookdock.test/login?legado=1')
+  })
+
   it('builds a key-authenticated source definition without a login bridge', async () => {
     vi.mocked(resolveLegadoAccessKey).mockReturnValue({ id: 'legado-key-1', userId: 'user-1', createdAt: 1, expiresAt: null })
-    const response = await createApp(true).request('http://bookdock.test/api/v1/legado/source.json?key=secret')
+    const response = await createApp(true).request('http://bookdock.test/api/v1/legado/source.json?key=secret', {
+      headers: { 'X-Forwarded-Proto': 'https' },
+    })
     expect(response.status).toBe(200)
 
     const [source] = await response.json() as [{ bookSourceUrl: string; header: string; enabledCookieJar: boolean; loginUrl: string }]
     expect(source).toMatchObject({
-      bookSourceUrl: 'http://bookdock.test/api/v1/legado/source/legado-key-1',
+      bookSourceUrl: 'https://bookdock.test/api/v1/legado/source/legado-key-1',
       header: JSON.stringify({ Authorization: 'Bearer secret' }),
       enabledCookieJar: false,
       loginUrl: '',
@@ -162,6 +200,15 @@ describe('Legado book-source adapter', () => {
         expiresAt: null,
       },
     })
+  })
+
+  it('returns an HTTPS key-based import URL behind a TLS-terminating proxy', async () => {
+    const response = await createApp().request('http://bookdock.test/api/v1/legado/access-key', {
+      headers: { 'X-Forwarded-Proto': 'https' },
+    })
+    const json = await response.json() as { data: { sourceUrl: string; importUrl: string } }
+    expect(json.data.sourceUrl).toBe('https://bookdock.test/api/v1/legado/source.json?key=bd_src_secret')
+    expect(json.data.importUrl).toBe(`legado://import/bookSource?src=${encodeURIComponent(json.data.sourceUrl)}`)
   })
 
   it('rotates and issues an import URL for the current user', async () => {
@@ -437,7 +484,9 @@ describe('Legado book-source adapter', () => {
 
     const app = createApp()
     const detailResponse = await app.request('http://bookdock.test/api/v1/legado/books/book-1')
-    const tocResponse = await app.request('http://bookdock.test/api/v1/legado/books/book-1/chapters')
+    const tocResponse = await app.request('http://bookdock.test/api/v1/legado/books/book-1/chapters', {
+      headers: { 'X-Forwarded-Proto': 'https' },
+    })
     const chapterResponse = await app.request('http://bookdock.test/api/v1/legado/books/book-1/chapters/0')
 
     await expect(detailResponse.json()).resolves.toMatchObject({
@@ -465,7 +514,7 @@ describe('Legado book-source adapter', () => {
           title: '　　Section One',
           level: 2,
           isVolume: false,
-          url: 'http://bookdock.test/api/v1/legado/books/book-1/chapters/1',
+          url: 'https://bookdock.test/api/v1/legado/books/book-1/chapters/1',
         }],
       },
     })
@@ -555,9 +604,11 @@ describe('Legado book-source adapter', () => {
     })
     app.route('/api/v1/legado', legadoRoutes)
 
-    const detailResponse = await app.request('http://bookdock.test/api/v1/legado/books/book-1')
+    const detailResponse = await app.request('http://bookdock.test/api/v1/legado/books/book-1', {
+      headers: { 'X-Forwarded-Proto': 'https' },
+    })
     const json = await detailResponse.json() as { data: { coverUrl: string } }
-    expect(json.data.coverUrl).toBe('http://bookdock.test/api/v1/legado/books/book-1/cover?key=bd_src_token_123')
+    expect(json.data.coverUrl).toBe('https://bookdock.test/api/v1/legado/books/book-1/cover?key=bd_src_token_123')
 
     vi.mocked(getLegadoChapterContent).mockResolvedValueOnce({
       id: 'chapter-1',
@@ -565,7 +616,9 @@ describe('Legado book-source adapter', () => {
       title: 'Chapter 1',
       content: 'Content',
     })
-    await app.request('http://bookdock.test/api/v1/legado/books/book-1/chapters/0')
+    await app.request('http://bookdock.test/api/v1/legado/books/book-1/chapters/0', {
+      headers: { 'X-Forwarded-Proto': 'https' },
+    })
     expect(getLegadoChapterContent).toHaveBeenCalledWith(
       'user-1',
       'book-1',
@@ -573,6 +626,8 @@ describe('Legado book-source adapter', () => {
       expect.any(Function),
       true,
     )
+    const resourceUrl = vi.mocked(getLegadoChapterContent).mock.calls[0]?.[3]
+    expect(resourceUrl?.('OEBPS/Images/cover.png')).toBe('https://bookdock.test/api/v1/legado/books/book-1/resource?path=OEBPS%2FImages%2Fcover.png&key=bd_src_token_123')
   })
 
   it('passes false for includeMedia when disabled in settings', async () => {

@@ -11,7 +11,7 @@ import { BOOKDOCK_BUILD_INFO } from '@bookdock/shared'
 import { AppError } from '../../middleware/error'
 import { checkForUpdates } from './system.service'
 import { createSnapshot } from './snapshots.service'
-import { clearUpdateJob, getUpdateStatus, startUpdate } from './update.service'
+import { cancelUpdate, clearUpdateJob, getUpdateStatus, startUpdate } from './update.service'
 import { config } from '../../config'
 
 const { settings } = vi.hoisted(() => ({ settings: { dataDir: '', launcherNonce: 'test-nonce' as string | undefined } }))
@@ -23,7 +23,10 @@ vi.mock('../../config', async () => {
   return { config: settings }
 })
 
-vi.mock('./system.service', () => ({ checkForUpdates: vi.fn() }))
+vi.mock('./system.service', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./system.service')>(),
+  checkForUpdates: vi.fn(),
+}))
 vi.mock('./snapshots.service', () => ({ createSnapshot: vi.fn(), releaseSnapshotRetention: vi.fn() }))
 
 const TARGET = '0.4.0'
@@ -88,7 +91,7 @@ async function exists(file: string) {
 async function settled() {
   for (let attempt = 0; attempt < 400; attempt += 1) {
     const status = await getUpdateStatus()
-    if (status.phase === 'restarting' || status.phase === 'failed') return status
+    if (status.phase === 'restarting' || status.phase === 'failed' || status.phase === 'cancelled') return status
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
   throw new Error('update job never reached a terminal phase')
@@ -112,6 +115,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.useRealTimers()
   vi.clearAllMocks()
   await rm(config.dataDir, { recursive: true, force: true })
 })
@@ -147,7 +151,8 @@ describe('update guards', () => {
     stubAssets({ [`${DOWNLOAD_BASE}/release.json`]: runtimeManifest({ libc: '_plan9' }) })
 
     await expect(startUpdate({ targetVersion: TARGET, progressId: 'p1' })).rejects.toMatchObject({ code: 'UPDATE_NOT_AVAILABLE' })
-    expect(await exists(RELEASES_DIR)).toBe(false)
+    expect(await exists(path.join(RELEASES_DIR, `${TARGET}.work`))).toBe(false)
+    expect(await exists(path.join(RELEASES_DIR, TARGET))).toBe(false)
   })
 
   it('treats a retried progressId as the same job and a new one as a conflict', async () => {
@@ -182,14 +187,94 @@ describe('update guards', () => {
 
     releaseCheck?.({ status: 'update-available', currentVersion: CURRENT_VERSION, latestVersion: TARGET, latestTag: TAG, releaseUrl: 'https://github.com/x' })
     await expect(Promise.all([first, retry])).resolves.toEqual([
-      { phase: 'snapshot', currentVersion: CURRENT_VERSION, targetVersion: TARGET },
-      { phase: 'snapshot', currentVersion: CURRENT_VERSION, targetVersion: TARGET },
+      expect.objectContaining({ phase: 'snapshot', currentVersion: CURRENT_VERSION, targetVersion: TARGET }),
+      expect.objectContaining({ phase: 'snapshot', currentVersion: CURRENT_VERSION, targetVersion: TARGET }),
     ])
     expect(await settled()).toMatchObject({ phase: 'restarting', targetVersion: TARGET })
   })
 })
 
 describe('update state machine', () => {
+  it('reports a connection failure instead of leaving the panel in download', async () => {
+    stubAssets({
+      ...expectedManifest(),
+      [`${DOWNLOAD_BASE}/${PACKAGE_NAME}`]: new Error('socket closed'),
+    })
+    await startUpdate({ targetVersion: TARGET, progressId: 'p-no-response' }, { restart: vi.fn() })
+    expect(await settled()).toMatchObject({ phase: 'failed', error: { message: 'Package download connection: request failed before an HTTP response. Check container DNS, outbound HTTPS, proxy, and certificate settings.' } })
+  })
+
+  it('reports a safe DNS failure category for package downloads', async () => {
+    const cause = Object.assign(new Error('lookup secret.internal failed'), { code: 'ENOTFOUND' })
+    stubAssets({
+      ...expectedManifest(),
+      [`${DOWNLOAD_BASE}/${PACKAGE_NAME}`]: new TypeError('fetch failed', { cause }),
+    })
+
+    await startUpdate({ targetVersion: TARGET, progressId: 'p-dns-failure' }, { restart: vi.fn() })
+
+    expect(await settled()).toMatchObject({
+      phase: 'failed',
+      diagnostic: { phase: 'download', errorCode: 'UPDATE_FAILED', message: expect.stringContaining('DNS lookup failed (ENOTFOUND)') },
+    })
+    expect((await getUpdateStatus()).error?.message).not.toContain('secret.internal')
+  })
+
+  it('reports received bytes, survives a status-only page reopen, and completes a slow stream', async () => {
+    const archive = await defaultPackage()
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
+    vi.stubGlobal('fetch', async (url: string | URL) => {
+      if (String(url).endsWith('/release.json')) return new Response(runtimeManifest())
+      if (String(url).endsWith(PACKAGE_NAME)) return new Response(new ReadableStream<Uint8Array>({ start(controller) { streamController = controller } }), { headers: { 'content-length': String(archive.length) } })
+      if (String(url).endsWith(`${PACKAGE_NAME}.sha256`)) return new Response(createHash('sha256').update(archive).digest('hex'))
+      return new Response('not found', { status: 404 })
+    })
+
+    await startUpdate({ targetVersion: TARGET, progressId: 'p-slow' }, { restart: vi.fn() })
+    for (let attempt = 0; attempt < 100 && (await getUpdateStatus()).download?.state !== 'receiving'; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(streamController).toBeDefined()
+    streamController?.enqueue(archive.subarray(0, 64))
+    await vi.waitFor(async () => expect((await getUpdateStatus()).download?.receivedBytes).toBe(64))
+
+    clearUpdateJob()
+    expect(await getUpdateStatus()).toMatchObject({ outcome: 'active', phase: 'download', download: { receivedBytes: 64, state: 'receiving' } })
+    streamController?.enqueue(archive.subarray(64))
+    streamController?.close()
+    expect(await settled()).toMatchObject({ phase: 'restarting', outcome: 'active' })
+  })
+
+  it('reports a response with no body bytes and cancels it cleanly', async () => {
+    vi.stubGlobal('fetch', async (url: string | URL) => {
+      if (String(url).endsWith('/release.json')) return new Response(runtimeManifest())
+      if (String(url).endsWith(PACKAGE_NAME)) return new Response(new ReadableStream<Uint8Array>({ start() {} }), { headers: { 'content-length': '100' } })
+      return new Response('not found', { status: 404 })
+    })
+    await startUpdate({ targetVersion: TARGET, progressId: 'p-cancel' }, { restart: vi.fn() })
+    await vi.waitFor(async () => expect(await getUpdateStatus()).toMatchObject({ download: { state: 'receiving', receivedBytes: 0 } }))
+    await cancelUpdate('p-cancel')
+    expect(await settled()).toMatchObject({ phase: 'cancelled', outcome: 'cancelled', error: { message: 'Update cancelled; the current version is still running' } })
+    expect(await exists(path.join(RELEASES_DIR, `${TARGET}.work`))).toBe(false)
+    expect(await exists(path.join(RELEASES_DIR, 'pending'))).toBe(false)
+  })
+
+  it('fails a response that stops sending data until the idle timeout', async () => {
+    vi.stubGlobal('fetch', async (url: string | URL) => {
+      if (String(url).endsWith('/release.json')) return new Response(runtimeManifest())
+      if (String(url).endsWith(PACKAGE_NAME)) return new Response(new ReadableStream<Uint8Array>({ start() {} }), { headers: { 'content-length': '100' } })
+      return new Response('not found', { status: 404 })
+    })
+    await startUpdate({ targetVersion: TARGET, progressId: 'p-timeout' }, { restart: vi.fn() })
+    for (let attempt = 0; attempt < 100 && (await getUpdateStatus()).download?.state !== 'receiving'; attempt += 1) await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setTimeout(resolve, 30_100))
+    let status = await getUpdateStatus()
+    for (let attempt = 0; attempt < 100 && status.phase !== 'failed'; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve))
+      status = await getUpdateStatus()
+    }
+    expect(status).toMatchObject({ phase: 'failed', error: { message: 'Download timed out without receiving data' } })
+    expect(await exists(path.join(RELEASES_DIR, `${TARGET}.work`, 'package.zip'))).toBe(false)
+  }, 35_000)
+
   it('promotes the release, marks it pending and asks the launcher to take over', async () => {
     const archive = await defaultPackage()
     stubAssets({

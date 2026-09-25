@@ -12,11 +12,20 @@ import { isLegadoAccessKeyEnabled, isLegadoEnabled, isLegadoEpubMediaEnabled } f
 
 const legadoRoutes = new Hono()
 // Legado uses this value to decide whether a same-URL source import contains newer rules.
-const LEGADO_SOURCE_UPDATED_AT = 1789776005000
+const LEGADO_SOURCE_UPDATED_AT = 1790294400000
 const LEGADO_SESSION_MAX_AGE = 7 * 24 * 60 * 60
 
+function publicOrigin(c: Context): string {
+  const requestUrl = new URL(c.req.url)
+  // Keep the request host so a forwarded host cannot redirect key-bearing URLs.
+  if (requestUrl.protocol === 'http:' && c.req.header('x-forwarded-proto') === 'https') {
+    requestUrl.protocol = 'https:'
+  }
+  return requestUrl.origin
+}
+
 function absoluteUrl(c: Context, path: string): string {
-  return new URL(path, c.req.url).toString()
+  return new URL(path, publicOrigin(c)).toString()
 }
 
 function coverUrl(c: Context, bookId: string, coverKey: string | null | undefined): string | null {
@@ -289,7 +298,7 @@ function bdExplore(ctx) {
 `
 
 function sourceDefinition(c: Context, access?: { id: string; token: string; createdAt?: number }) {
-  const origin = new URL(c.req.url).origin
+  const origin = publicOrigin(c)
   const apiBase = `${origin}/api/v1/legado`
   const sourceIdentity = access ? `${apiBase}/source/${access.id}` : origin
   return [{
@@ -371,7 +380,7 @@ legadoRoutes.use('*', async (c, next) => {
 legadoRoutes.get('/access-key', (c) => {
   const user = c.get('user')
   const issued = getOrCreateLegadoAccessKey(user.id)
-  const sourceUrl = new URL('/api/v1/legado/source.json', c.req.url)
+  const sourceUrl = new URL('/api/v1/legado/source.json', publicOrigin(c))
   sourceUrl.searchParams.set('key', issued.token)
   const sourceUrlString = sourceUrl.toString()
   const data: LegadoAccessKeyInfo = {
@@ -389,7 +398,7 @@ legadoRoutes.post('/access-key', async (c) => {
   const duration = parsed.success ? parsed.data.duration : 'permanent'
   const user = c.get('user')
   const issued = rotateLegadoAccessKey(user.id, duration)
-  const sourceUrl = new URL('/api/v1/legado/source.json', c.req.url)
+  const sourceUrl = new URL('/api/v1/legado/source.json', publicOrigin(c))
   sourceUrl.searchParams.set('key', issued.token)
   const sourceUrlString = sourceUrl.toString()
   const data: LegadoAccessKeyCreateRes = {
@@ -421,7 +430,7 @@ legadoRoutes.get('/login', (c) => {
       maxAge: LEGADO_SESSION_MAX_AGE,
     })
   }
-  return c.redirect(new URL('/login?legado=1', c.req.url).toString())
+  return c.redirect(absoluteUrl(c, '/login?legado=1'))
 })
 
 async function exploreBooks(c: Context, scope: LegadoExploreScope, id?: string) {

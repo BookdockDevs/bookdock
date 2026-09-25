@@ -83,7 +83,20 @@ describe('System routes', () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
-      data: { status: 'unavailable', currentVersion: CURRENT_VERSION },
+      data: { status: 'unavailable', currentVersion: CURRENT_VERSION, failureReason: 'GitHub release check: request failed before an HTTP response. Check container DNS, outbound HTTPS, proxy, and certificate settings.' },
+    })
+  })
+
+  it('preserves a safe network error class without exposing the failed host', async () => {
+    const cause = Object.assign(new Error('lookup secret.internal failed'), { code: 'ENOTFOUND' })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed', { cause })))
+    const app = new Hono()
+    app.route('/api/v1/system', systemRoutes)
+
+    const response = await app.request('http://test/api/v1/system/update-check')
+
+    expect(await response.json()).toEqual({
+      data: { status: 'unavailable', currentVersion: CURRENT_VERSION, failureReason: 'GitHub release check: DNS lookup failed (ENOTFOUND). Check container DNS, outbound HTTPS, proxy, and certificate settings.' },
     })
   })
 
@@ -111,6 +124,8 @@ describe('System routes', () => {
 
     const response = await app.request('http://test/api/v1/system/update-check')
 
-    expect(await response.json()).toEqual({ data: { status: 'unavailable', currentVersion: CURRENT_VERSION } })
+    expect(await response.json()).toEqual({
+      data: { status: 'unavailable', currentVersion: CURRENT_VERSION, failureReason: 'GitHub returned release metadata that Bookdock could not interpret.' },
+    })
   })
 })

@@ -86,7 +86,7 @@ async function pruneSnapshots() {
   await Promise.all(snapshots.filter((snapshot) => !keep.has(snapshot.id)).map((snapshot) => rm(snapshotDir(snapshot.id).dir, { recursive: true, force: true })))
 }
 
-export async function createSnapshot({ retainForUpdate = false }: { retainForUpdate?: boolean } = {}): Promise<SnapshotRes> {
+export async function createSnapshot({ retainForUpdate = false, onProgress }: { retainForUpdate?: boolean; onProgress?: (progress: { totalPages: number; remainingPages: number }) => void } = {}): Promise<SnapshotRes> {
   const createdAt = Date.now()
   const id = `${BOOKDOCK_BUILD_INFO.version}-${createdAt}`
   const { dir } = snapshotDir(id)
@@ -96,7 +96,10 @@ export async function createSnapshot({ retainForUpdate = false }: { retainForUpd
   await mkdir(dir, { recursive: true })
   if (retainForUpdate) retainedForUpdate.add(id)
   try {
-    await db.$client.backup(path.join(dir, DB_FILE_NAME))
+    await db.$client.backup(path.join(dir, DB_FILE_NAME), { progress: (progress) => {
+      onProgress?.(progress)
+      return 100
+    } })
     const manifest: SnapshotManifest = { appVersion: BOOKDOCK_BUILD_INFO.version, createdAt, instanceSettings: capturedSettings }
     await writeFile(path.join(dir, MANIFEST_FILE_NAME), `${JSON.stringify(manifest, null, 2)}\n`)
   } catch (err) {

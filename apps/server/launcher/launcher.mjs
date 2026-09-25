@@ -166,6 +166,27 @@ export function createLauncher({
     for (const sidecar of ['-wal', '-shm']) rmSync(`${dbPath}${sidecar}`, { force: true })
   }
 
+  function writeUpdateOutcome(pending, outcome, message) {
+    if (!pending?.progressId) return
+    const file = path.join(releasesDir, 'update-state.json')
+    const state = readJson(file)
+    if (state?.progressId !== pending.progressId) return
+    const finishedAt = Date.now()
+    state.outcome = outcome
+    state.phase = outcome === 'succeeded' ? 'restarting' : 'failed'
+    state.action = outcome === 'succeeded' ? 'New version passed the launcher health check' : 'New version failed the launcher health check; the previous version was restored'
+    state.updatedAt = finishedAt
+    state.diagnostic = { requestId: pending.progressId, startedAt: state.startedAt, updatedAt: finishedAt, phaseStartedAt: state.phaseStartedAt, finishedAt, phase: outcome === 'rolled-back' ? 'restarting' : state.phase, ...(outcome === 'rolled-back' ? { errorCode: 'UPDATE_FAILED' } : {}), ...(message ? { message: String(message).replace(/https?:\/\/\S+/gi, '[release URL]').slice(0, 240) } : {}) }
+    const tmp = `${file}.${process.pid}.tmp`
+    try {
+      writeFileSync(tmp, `${JSON.stringify(state)}\n`)
+      renameSync(tmp, file)
+    } catch {
+      rmSync(tmp, { force: true })
+      error('launcher.update_status_write_failed', { target: pending.target })
+    }
+  }
+
   /**
    * Code and data move back together: reverting the code alone would run the old
    * app against an already-migrated database, which is the state ADR-25 exists
@@ -187,6 +208,7 @@ export function createLauncher({
       return false
     }
     rmSync(pointerPath('pending'), { force: true })
+    writeUpdateOutcome(pending, 'rolled-back', reason)
     error('launcher.update_reverted', { target: pending?.target, reason, database: `restored from ${pending.snapshot}` })
     return true
   }
@@ -206,6 +228,7 @@ export function createLauncher({
     if (typeof previous === 'string' && previous !== pending.target) writePointer('previous', { name: previous })
     writePointer('current', { name: pending.target })
     rmSync(pointerPath('pending'), { force: true })
+    writeUpdateOutcome(pending, 'succeeded')
     pruneReleases(new Set([pending.target, readPointer('previous')?.name]))
     log('launcher.update_committed', { version: pending.target })
   }

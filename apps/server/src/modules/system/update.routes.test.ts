@@ -5,11 +5,12 @@ import type { UpdateStartReq } from '@bookdock/shared'
 
 import { AppError, errorHandler } from '../../middleware/error'
 import systemRoutes from './system.routes'
-import { startUpdate } from './update.service'
+import { cancelUpdate, startUpdate } from './update.service'
 
 vi.mock('./update.service', () => ({
   getUpdateStatus: vi.fn(async () => ({ phase: 'idle', currentVersion: '0.3.2' })),
   startUpdate: vi.fn(async () => ({ phase: 'snapshot', currentVersion: '0.3.2', targetVersion: '0.4.0' })),
+  cancelUpdate: vi.fn(async () => ({ phase: 'cancelled', outcome: 'cancelled', currentVersion: '0.3.2' })),
 }))
 
 function createApp(role: 'owner' | 'member', guest = false) {
@@ -43,6 +44,13 @@ describe('update routes', () => {
     expect(startUpdate).toHaveBeenCalledWith(body)
   })
 
+  it('accepts owner cancellation for the matching progress id', async () => {
+    const response = await owner.request('/api/v1/system/update/progress-1', { method: 'DELETE' })
+    expect(response.status).toBe(202)
+    expect(await response.json()).toMatchObject({ data: { phase: 'cancelled', outcome: 'cancelled' } })
+    expect(cancelUpdate).toHaveBeenCalledWith('progress-1')
+  })
+
   it('rejects a malformed or traversal-shaped target before the service runs', async () => {
     for (const payload of [{}, { targetVersion: '0.4.0' }, { targetVersion: '../0.4.0', progressId: 'p' }, 'not json']) {
       const response = await owner.request('/api/v1/system/update', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
@@ -66,9 +74,11 @@ describe('update routes', () => {
     for (const app of [createApp('member'), createApp('owner', true)]) {
       const status = await app.request('/api/v1/system/update/status')
       const start = await app.request('/api/v1/system/update', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const cancel = await app.request('/api/v1/system/update/progress-1', { method: 'DELETE' })
 
       expect(status.status).toBe(403)
       expect(start.status).toBe(403)
+      expect(cancel.status).toBe(403)
     }
   })
 })

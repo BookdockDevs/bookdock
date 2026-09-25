@@ -4,13 +4,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import type { SystemInfoRes, SystemUpdateCheckRes, UpdateStatusRes } from '@bookdock/shared'
 
-import { ApiError, apiGet, apiPost } from '@/api/client'
+import { ApiError, apiDelete, apiGet, apiPost } from '@/api/client'
 import AboutSettingsSection from '@/features/settings/components/AboutSettingsSection'
 import i18n from '@/i18n/i18n'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/api/client')>()
-  return { ...mod, apiGet: vi.fn(), apiPost: vi.fn() }
+  return { ...mod, apiDelete: vi.fn(), apiGet: vi.fn(), apiPost: vi.fn() }
 })
 
 vi.mock('@/lib/notifications', () => ({
@@ -76,12 +76,25 @@ describe('AboutSettingsSection in-app update', () => {
   })
 
   it('shows the extraction phase while the package is unpacking', async () => {
-    renderSection([{ phase: 'extract', currentVersion: CURRENT, targetVersion: TARGET }])
+    renderSection([{ phase: 'extract', outcome: 'active', currentVersion: CURRENT, targetVersion: TARGET, action: 'Unpacking release files', extraction: { files: 2, bytes: 1024, totalFiles: 5 } }])
 
     fireEvent.click(screen.getByRole('button', { name: '立即更新' }))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认更新' }))
 
     expect(await screen.findByText('正在解压新版本…')).toBeInTheDocument()
+    expect(screen.getByText('Unpacking release files')).toBeInTheDocument()
+    expect(screen.getByText('已处理 2 / 5 个文件，1.0 KB')).toBeInTheDocument()
+  })
+
+  it('cancels an active update before version switching', async () => {
+    renderSection([{ phase: 'download', outcome: 'active', currentVersion: CURRENT, targetVersion: TARGET, progressId: 'update-progress', action: 'Receiving package data', download: { state: 'receiving', receivedBytes: 12 } }])
+    vi.mocked(apiDelete).mockResolvedValueOnce({ data: { phase: 'cancelled', outcome: 'cancelled', currentVersion: CURRENT, targetVersion: TARGET } })
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看更新状态' }))
+    fireEvent.click(await screen.findByRole('button', { name: '取消更新' }))
+
+    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/system/update/update-progress'))
+    expect(await screen.findByText('更新已取消，当前仍运行旧版本。')).toBeInTheDocument()
   })
 
   it('surfaces a refused start without tracking a target', async () => {

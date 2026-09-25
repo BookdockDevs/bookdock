@@ -103,6 +103,8 @@ export interface SystemInfoRes {
 export interface SystemUpdateCheckRes {
   status: 'up-to-date' | 'update-available' | 'unavailable'
   currentVersion: string
+  /** Safe diagnostic for why release discovery was unavailable; contains no URL or raw transport error. */
+  failureReason?: string
   latestVersion?: string
   /** Release tag as published (`v0.4.0`), kept because artifact URLs are keyed by tag. */
   latestTag?: string
@@ -137,8 +139,10 @@ export interface UpdateStartReq {
 }
 
 /** Phases of the in-panel update; `restarting` means the launcher owns the outcome. */
-export const UPDATE_PHASES = ['idle', 'snapshot', 'download', 'verify', 'extract', 'promote', 'restarting', 'failed'] as const
+export const UPDATE_PHASES = ['idle', 'check', 'snapshot', 'download', 'verify', 'extract', 'promote', 'restarting', 'failed', 'cancelled'] as const
 export type UpdatePhase = (typeof UPDATE_PHASES)[number]
+
+export type UpdateOutcome = 'active' | 'succeeded' | 'failed' | 'cancelled' | 'rolled-back'
 
 /**
  * Progress of the single in-flight update. Read from disk wherever possible so
@@ -150,7 +154,19 @@ export interface UpdateStatusRes {
   phase: UpdatePhase
   /** Version of the process answering; equals `targetVersion` once committed. */
   currentVersion: string
+  outcome?: UpdateOutcome
   targetVersion?: string
+  progressId?: string
+  action?: string
+  startedAt?: number
+  updatedAt?: number
+  phaseStartedAt?: number
+  previousPhase?: UpdatePhase
+  elapsedMs?: number
+  snapshot?: { pages?: number; totalPages?: number }
+  download?: { state: 'connecting' | 'receiving'; receivedBytes: number; totalBytes?: number; lastDataAt?: number }
+  extraction?: { files: number; bytes: number; totalBytes?: number; totalFiles?: number }
+  diagnostic?: { requestId: string; startedAt: number; updatedAt?: number; phaseStartedAt?: number; previousPhase?: UpdatePhase; finishedAt?: number; phase: UpdatePhase; errorCode?: ErrorCode; message?: string }
   /** Release promoted but not yet health-gated, read from `releases/pending`. */
   pendingTarget?: string
   error?: { code: ErrorCode; message: string }

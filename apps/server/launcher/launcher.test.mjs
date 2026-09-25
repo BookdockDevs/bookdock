@@ -52,6 +52,7 @@ function createWorkspace() {
         writeFileSync(this.dbPath, 'live-database')
       }
       this.writePointer('pending', { target, snapshot, progressId: 'progress-1' })
+      writeFileSync(path.join(releasesDir, 'update-state.json'), JSON.stringify({ progressId: 'progress-1', targetVersion: target, phase: 'restarting', outcome: 'active', startedAt: 1 }))
       return { dir, target, snapshot }
     },
     dispose() {
@@ -197,6 +198,7 @@ describe('launcher update gate', () => {
     expect(launches).toEqual([dir])
     expect(workspace.readPointer('previous')).toEqual({ name: '0.3.5' })
     expect(existsSync(workspace.pointerPath('pending'))).toBe(false)
+    expect(JSON.parse(readFileSync(path.join(path.dirname(workspace.pointerPath('pending')), 'update-state.json'), 'utf8'))).toMatchObject({ outcome: 'succeeded', targetVersion: target })
     // Commit must not touch the data: the snapshot stays as the rollback seat.
     expect(readFileSync(workspace.dbPath, 'utf8')).toBe('live-database')
     expect(existsSync(path.join(workspace.dataDir, 'snapshots', SNAPSHOT_ID))).toBe(true)
@@ -223,6 +225,7 @@ describe('launcher update gate', () => {
     expect(workspace.readPointer('current')).toEqual({ name: '0.3.5' })
     expect(workspace.readPointer('previous')).toEqual({ name: '0.3.0' })
     expect(existsSync(workspace.pointerPath('pending'))).toBe(false)
+    expect(JSON.parse(readFileSync(path.join(path.dirname(workspace.pointerPath('pending')), 'update-state.json'), 'utf8'))).toMatchObject({ outcome: 'rolled-back', phase: 'failed' })
     // After the revert the launcher settles on the restored release.
     await vi.waitFor(() => expect(launches[1]).toBe(previous))
 

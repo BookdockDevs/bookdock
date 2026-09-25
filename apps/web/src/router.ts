@@ -8,6 +8,7 @@ import { setupRoute } from './routes/setup'
 import { readerRoute } from './routes/books.$id'
 import { settingsRoute } from './routes/settings'
 import { statsRoute } from './routes/stats'
+import { updatePreviewRoute } from './routes/update-preview'
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -18,6 +19,7 @@ const routeTree = rootRoute.addChildren([
   readerRoute,
   settingsRoute,
   statsRoute,
+  ...(import.meta.env.DEV ? [updatePreviewRoute] : []),
 ])
 
 export const router = createRouter({ routeTree })

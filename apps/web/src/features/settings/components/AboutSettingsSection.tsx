@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { useStartSystemUpdate, useSystemInfo, useSystemUpdateCheck, useSystemUpdateStatus } from '@/api/hooks/useSystem'
+import { useCancelSystemUpdate, useStartSystemUpdate, useSystemInfo, useSystemUpdateCheck, useSystemUpdateStatus } from '@/api/hooks/useSystem'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -64,14 +64,17 @@ export default function AboutSettingsSection() {
   const [updateTarget, setUpdateTarget] = useState<string | null>(null)
   const [updateStartedAt, setUpdateStartedAt] = useState(0)
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const updateStatus = useSystemUpdateStatus(updateTarget !== null)
+  const updateStatus = useSystemUpdateStatus()
   const startUpdate = useStartSystemUpdate()
+  const cancelUpdate = useCancelSystemUpdate()
 
   const info = data?.data
   const update = updateCheck.data?.data
   const appName = _('app.name')
 
   const status = updateStatus.data?.data
+  const taskTarget = updateTarget ?? status?.targetVersion ?? update?.latestVersion
+  const updateActive = status?.outcome === 'active'
   const startError = startUpdate.isError ? getUserErrorNotification(startUpdate.error) : null
 
   const handleOpenUpdateDialog = () => {
@@ -80,7 +83,7 @@ export default function AboutSettingsSection() {
   }
 
   const handleStartUpdate = () => {
-    const target = updateTarget ?? update?.latestVersion
+    const target = taskTarget
     if (!target) return
     startUpdate.mutate(
       { targetVersion: target, progressId: `update-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` },
@@ -207,8 +210,9 @@ export default function AboutSettingsSection() {
                   </div>
                 )}
                 {update.status === 'unavailable' && (
-                  <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50/80 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-600/20 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-500/20">
+                  <div className="flex max-w-lg flex-col items-start gap-1 rounded-xl bg-amber-50/80 px-3 py-2 text-left text-xs font-medium text-amber-700 ring-1 ring-amber-600/20 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-500/20">
                     <span>{_('settings.aboutUpdateUnavailable')}</span>
+                    {update.failureReason && <span className="text-[11px] font-normal leading-5 opacity-85">{update.failureReason}</span>}
                   </div>
                 )}
                 {update.status === 'update-available' && (
@@ -232,14 +236,14 @@ export default function AboutSettingsSection() {
                       </div>
 
                       <div className="flex shrink-0 items-center gap-1.5">
-                        {updateTarget === null ? (
+                        {!status?.outcome ? (
                           <button
                             type="button"
                             onClick={handleOpenUpdateDialog}
                             disabled={startUpdate.isPending}
                             className="inline-flex items-center rounded-lg bg-stone-900 px-3 py-1.5 font-medium text-white shadow-2xs transition-all hover:bg-stone-800 active:scale-95 disabled:opacity-60 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
                           >
-                            <span>{startUpdate.isPending ? _('settings.aboutUpdateStarting') : _('settings.aboutUpdateNow')}</span>
+                            <span>{startUpdate.isPending ? _('settings.aboutUpdateStarting') : updateActive ? _('settings.aboutUpdateViewProgress') : _('settings.aboutUpdateNow')}</span>
                           </button>
                         ) : (
                           <button
@@ -348,14 +352,19 @@ export default function AboutSettingsSection() {
             isOpen={isModalOpen}
             onClose={() => setIsModalOpen(false)}
             currentVersion={info.version}
-            targetVersion={updateTarget ?? update?.latestVersion ?? ''}
+            targetVersion={taskTarget ?? ''}
             publishedAt={update?.publishedAt}
-            status={updateTarget !== null && !startUpdate.isPending && !startUpdate.isError ? status : undefined}
+            status={status}
+            statusUnavailable={updateStatus.isError}
+            statusRefreshing={updateStatus.isFetching}
+            isCancelling={cancelUpdate.isPending}
+            cancelError={cancelUpdate.isError}
             isStarting={startUpdate.isPending}
             startErrorKey={startError?.key}
             updateStartedAt={updateStartedAt}
             onStartUpdate={handleStartUpdate}
             onRetry={handleRetryUpdate}
+            onCancel={() => status?.progressId && cancelUpdate.mutate(status.progressId)}
           />
         </>
       )}
