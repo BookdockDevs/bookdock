@@ -202,14 +202,16 @@ async function main() {
 
   const factoryVersion = docker(['run', '--rm', '--entrypoint', 'node', image, '-e', "console.log(require('/app/release.json').version)"])
   assert.match(factoryVersion, /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/)
-  runNodeInImage(['/e2e/docker-update-e2e.mjs', 'make-fixtures', factoryVersion, '22'])
+  const { commitVersion, rollbackVersion } = JSON.parse(
+    runNodeInImage(['/e2e/docker-update-e2e.mjs', 'make-fixtures', factoryVersion, '22']),
+  )
 
   docker(['network', 'create', '--internal', network])
   networkCreated = true
 
-  await runScenario({ scenario: 'commit', targetVersion: '0.4.0', factoryVersion })
+  await runScenario({ scenario: 'commit', targetVersion: commitVersion, factoryVersion })
   await removeScenarioContainers()
-  await runScenario({ scenario: 'rollback', targetVersion: '0.5.0', factoryVersion })
+  await runScenario({ scenario: 'rollback', targetVersion: rollbackVersion, factoryVersion })
 }
 
 try {

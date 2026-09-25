@@ -47,9 +47,12 @@ createServer((request, response) => {
 async function makeFixtures(factoryVersion, nodeMajor) {
   const require = createRequire('/app/apps/server/package.json')
   const JSZip = require('jszip')
+  const [major, minor, patch] = factoryVersion.split('-')[0].split('.').map(Number)
+  const commitVersion = `${major}.${minor}.${patch + 1}`
+  const rollbackVersion = `${major}.${minor}.${patch + 2}`
   const scenarios = [
-    { version: '0.4.0', reportedVersion: '0.4.0', mutateDatabase: false },
-    { version: '0.5.0', reportedVersion: factoryVersion, mutateDatabase: true },
+    { version: commitVersion, reportedVersion: commitVersion, mutateDatabase: false },
+    { version: rollbackVersion, reportedVersion: factoryVersion, mutateDatabase: true },
   ]
 
   for (const scenario of scenarios) {
@@ -75,6 +78,8 @@ async function makeFixtures(factoryVersion, nodeMajor) {
     await writeFile(path.join(dir, name), archive)
     await writeFile(path.join(dir, `${name}.sha256`), `${createHash('sha256').update(archive).digest('hex')}  ${name}\n`)
   }
+
+  console.log(JSON.stringify({ commitVersion, rollbackVersion }))
 }
 
 async function serveMockGithub() {

@@ -178,8 +178,12 @@ export default function Library() {
   }
 
   function toggleSelectionMode() {
-    setSelectionMode((v) => !v)
-    clearSelection()
+    if (selectionActive) {
+      setSelectionMode(false)
+      clearSelection()
+    } else {
+      setSelectionMode(true)
+    }
   }
 
   // Reading progress no longer bumps books.updatedAt and global staleTime is
@@ -457,7 +461,16 @@ export default function Library() {
         clearSelection()
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
-        setSelection(new Set(allBooks.map((b) => b.id)))
+        setSelection((prev) => {
+          const allCurrentSelected = allBooks.length > 0 && allBooks.every((b) => prev.has(b.id))
+          const next = new Set(prev)
+          if (allCurrentSelected) {
+            for (const b of allBooks) next.delete(b.id)
+          } else {
+            for (const b of allBooks) next.add(b.id)
+          }
+          return next
+        })
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -539,7 +552,11 @@ export default function Library() {
   useEffect(() => {
     clearSelection()
     setSelectionMode(false)
-  }, [currentPage, shelfId, tagId, query, format, readStatus, trash, author, series])
+  }, [shelfId, tagId, query, format, readStatus, trash, author, series])
+
+  useEffect(() => {
+    lastSelectIndexRef.current = null
+  }, [currentPage])
 
   function goToPage(targetPage: number) {
     if (targetPage < 1 || targetPage > totalPages || targetPage === currentPage) return
@@ -626,7 +643,7 @@ export default function Library() {
                   return (
                     <div
                       key={book.id}
-                      className={`rounded-xl ${selectionActive && selection.has(book.id) ? 'ring-2 ring-stone-900 ring-offset-2 ring-offset-stone-50 dark:ring-stone-100 dark:ring-offset-stone-950' : ''}`}
+                      className="rounded-xl"
                     >
                       <BookCard
                         book={book}
@@ -643,28 +660,8 @@ export default function Library() {
                     </div>
                   )
                 }
-                if (selectionActive) {
-                  return (
-                    <DraggableBookCard key={book.id} book={book} selection={selection} selectionActive disabled={isGuest}>
-                      <div
-                        className={`rounded-xl ${selection.has(book.id) ? 'ring-2 ring-stone-900 ring-offset-2 ring-offset-stone-50 dark:ring-stone-100 dark:ring-offset-stone-950' : ''}`}
-                      >
-                        <BookCard
-                          book={book}
-                          selected={selection.has(book.id)}
-                          selectionActive={true}
-                          coverText={coverText}
-                          onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
-                          readOnly={isGuest}
-                          onDelete={isGuest ? undefined : setDeleteTarget}
-                          onShowDetails={setDetailTarget}
-                        />
-                      </div>
-                    </DraggableBookCard>
-                  )
-                }
                 return (
-                  <DraggableBookCard key={book.id} book={book} selection={selection} selectionActive={false} disabled={isGuest}>
+                  <DraggableBookCard key={book.id} book={book} selection={selection} selectionActive={selectionActive} disabled={isGuest}>
                     <Link
                       to="/books/$id"
                       params={{ id: book.id }}
@@ -676,6 +673,11 @@ export default function Library() {
                           e.preventDefault()
                           return
                         }
+                        if (selectionActive) {
+                          e.preventDefault()
+                          toggleSelect(book.id, index, e.shiftKey)
+                          return
+                        }
                         if (e.ctrlKey || e.metaKey || e.shiftKey) {
                           e.preventDefault()
                           toggleSelect(book.id, index, e.shiftKey)
@@ -685,6 +687,8 @@ export default function Library() {
                     >
                       <BookCard
                         book={book}
+                        selected={selection.has(book.id)}
+                        selectionActive={selectionActive}
                         coverText={coverText}
                         onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
                         readOnly={isGuest}
@@ -1097,16 +1101,32 @@ export function ListItemWrapper({ book, selection, selectionActive, dragJustEnde
       onContextMenu={handleContextMenu}
       className={isDragging ? 'select-none opacity-60' : 'select-none'}
     >
-      {selectionActive ? (
-        <div
-          onClick={(e) => onToggleSelect(book.id, e.shiftKey)}
-          className={`group flex cursor-pointer items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
-        >
-          <div ref={setNodeRef} className="shrink-0">
-            <BookCover book={book} size="sm" />
-          </div>
-          <ListItemContent book={book} />
-          {meta}
+      <Link
+        to="/books/$id"
+        params={{ id: book.id }}
+        onClick={(e) => {
+          if (dragJustEndedRef.current) {
+            e.preventDefault()
+            return
+          }
+          if (selectionActive) {
+            e.preventDefault()
+            onToggleSelect(book.id, e.shiftKey)
+            return
+          }
+          if (e.ctrlKey || e.metaKey || e.shiftKey) {
+            e.preventDefault()
+            onToggleSelect(book.id, e.shiftKey)
+          }
+        }}
+        className={`group flex items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
+      >
+        <div ref={setNodeRef} className="shrink-0">
+          <BookCover book={book} size="sm" />
+        </div>
+        <ListItemContent book={book} />
+        {meta}
+        {selectionActive ? (
           <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
             selected
               ? 'border-stone-900 bg-stone-900 dark:border-stone-100 dark:bg-stone-100'
@@ -1118,28 +1138,7 @@ export function ListItemWrapper({ book, selection, selectionActive, dragJustEnde
               </svg>
             )}
           </div>
-        </div>
-      ) : (
-        <Link
-          to="/books/$id"
-          params={{ id: book.id }}
-          onClick={(e) => {
-            if (dragJustEndedRef.current) {
-              e.preventDefault()
-              return
-            }
-            if (e.ctrlKey || e.metaKey || e.shiftKey) {
-              e.preventDefault()
-              onToggleSelect(book.id, e.shiftKey)
-            }
-          }}
-          className="group flex items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900"
-        >
-          <div ref={setNodeRef} className="shrink-0">
-            <BookCover book={book} size="sm" />
-          </div>
-          <ListItemContent book={book} />
-          {meta}
+        ) : (
           <div className="flex w-7 shrink-0 items-center justify-center opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
             <button
               ref={menu.btnRef}
@@ -1159,8 +1158,8 @@ export function ListItemWrapper({ book, selection, selectionActive, dragJustEnde
               </svg>
             </button>
           </div>
-        </Link>
-      )}
+        )}
+      </Link>
       {menu.open && (
         <SmartMenu
           triggerRef={menu.btnRef}

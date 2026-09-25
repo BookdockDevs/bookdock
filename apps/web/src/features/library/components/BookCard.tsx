@@ -64,7 +64,14 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
       onContextMenu={handleContextMenu}
       className={`group relative flex min-w-0 select-none flex-col gap-1.5 ${selectable ? 'cursor-pointer' : ''}`}
     >
-      <div className="relative rounded-xl transition-all duration-300 ease-out group-hover:-translate-y-1.5 group-hover:shadow-xl group-hover:shadow-stone-900/15 dark:group-hover:shadow-black/50">
+      <div
+        className={cn(
+          'relative rounded-xl transition-all duration-200 ease-out',
+          selectionActive
+            ? ''
+            : 'group-hover:-translate-y-1.5 group-hover:shadow-xl group-hover:shadow-stone-900/15 dark:group-hover:shadow-black/50',
+        )}
+      >
         <div className={cn('rounded-xl', trashCard && 'opacity-80 grayscale-[60%]')}>
           <BookCover book={book} />
         </div>
@@ -80,16 +87,19 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           </div>
         )}
         {selected && (
-          <div className="absolute inset-0 z-10 rounded-xl bg-stone-900/20 ring-2 ring-stone-900 dark:bg-black/40 dark:ring-stone-100" />
+          <div className="pointer-events-none absolute inset-0 z-10 rounded-xl ring-2 ring-inset ring-stone-900 dark:ring-stone-100" />
         )}
         {selectable && selectionActive && (
-          <div className={`absolute left-1.5 top-1.5 z-20 flex h-5 w-5 items-center justify-center rounded-full border-2 transition-colors ${
-            selected
-              ? 'border-stone-900 bg-stone-900 dark:border-stone-100 dark:bg-stone-100'
-              : 'border-white/80 bg-black/25 backdrop-blur-sm'
-          }`}>
+          <div
+            className={cn(
+              'absolute left-2.5 top-2.5 z-20 flex h-6 w-6 items-center justify-center rounded-full shadow-md transition-all',
+              selected
+                ? 'border-2 border-stone-900 bg-stone-900 text-white dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900'
+                : 'border-2 border-white/80 bg-black/30 backdrop-blur-xs group-hover:scale-105 group-hover:border-white group-hover:bg-black/50',
+            )}
+          >
             {selected && (
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="dark:stroke-stone-900">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             )}
@@ -100,7 +110,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
             <div className="h-full rounded-b-xl bg-white/95 transition-all" style={{ width: `${book.progress}%` }} />
           </div>
         )}
-        {showMenu && (
+        {showMenu && !selectionActive && (
           <div className={`absolute right-1.5 top-1.5 z-10 transition-opacity duration-150 ${menu.open ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
             <button
               ref={menu.btnRef}
@@ -117,7 +127,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
             </button>
           </div>
         )}
-        {trashCard && (
+        {trashCard && !selectionActive && (
           <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2.5 rounded-b-xl bg-gradient-to-t from-black/70 via-black/40 to-transparent p-2.5 pt-8 opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
             <button
               type="button"

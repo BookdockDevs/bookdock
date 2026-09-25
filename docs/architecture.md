@@ -1,6 +1,6 @@
 # Bookdock Architecture
 
-> Last updated: 2026-09-23 · This document is the authoritative architecture blueprint; the code follows it. When an architectural decision changes, update this document first, then change the code.
+> Last updated: 2026-09-26 · This document is the authoritative architecture blueprint; the code follows it. When an architectural decision changes, update this document first, then change the code.
 
 ---
 
@@ -516,6 +516,7 @@ The shipped `docker-compose.yml` sets no environment variables: `NODE_ENV` and `
 
 - **Release version source**: the root `package.json` `version` is the only manually maintained application version. `scripts/sync-version.mjs` derives it into the workspace package manifests and `packages/shared/src/build-info.ts`, which is the runtime source consumed by the server and Web About/update surfaces. Root development and production builds run the sync first; CI and release checks fail on drift.
 - **Docker**: multi-stage. The build stage compiles all packages, then deploys the server package alone with production dependencies; the web package is copied as static `dist` output. The final image contains no build toolchain and runs one Node process on one port. The server bundle includes `@bookdock/shared`; `better-sqlite3` is installed in the Linux build stage so its native binary matches the runtime image.
+- **CI and release boundary**: pull requests to `main` and pushes to `main` run lint, typecheck, unit/integration tests, a production Docker build, container health smoke check, and the in-container update/rollback integration test. A `v*` tag selects a release; the release workflow must verify that the exact tagged commit has a successful `main` push CI run before publishing the Docker image and in-panel update artifacts. Release publication checks tag/package version agreement and packages the already-validated source revision; it does not use a source version change as a CI trigger.
 - **docker-compose.yml**: minimal on purpose — image/build reference, port mapping, `./data:/data` mount, `restart: unless-stopped`, no `environment:` block (runtime env comes from image `ENV`s + schema defaults; overrides are added locally). A published registry image uses the same runtime layout and volume contract; Docker Hub is a distribution option, not a runtime dependency.
 - **Health**: `GET /api/v1/health` → `{ data: { ok: true } }`; the image `HEALTHCHECK` probes this endpoint (compose does not duplicate it).
 - **Response compression**: the server negotiates gzip/Brotli for eligible JSON and static responses while preserving `HEAD`, range/206, and non-compressible EPUB/image binary semantics required by the reader.

@@ -50,6 +50,8 @@ jobs:
           done
           docker logs bookdock-ci
           exit 1
+      - name: Verify in-container update and rollback
+        run: node scripts/test-docker-update.mjs bookdock:ci
       - name: Clean up container
         if: always()
         run: docker rm --force bookdock-ci

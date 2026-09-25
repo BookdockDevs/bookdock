@@ -15,6 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
@@ -25,12 +26,31 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - uses: pnpm/action-setup@v6
-
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: pnpm
+
+      - name: Require successful CI for tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          release_sha="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          runs="$(gh run list --workflow CI --branch main --commit "$release_sha" --event push --limit 1 --json headSha,status,conclusion)"
+          node --input-type=module - "$release_sha" "$runs" <<'NODE'
+          const [expectedSha, serializedRuns] = process.argv.slice(2)
+          const runs = JSON.parse(serializedRuns)
+          if (runs.length === 0) {
+            throw new Error(`No main-branch CI run found for ${expectedSha}; push the commit to main and wait for CI before tagging`)
+          }
+
+          const run = runs[0]
+          if (run.headSha !== expectedSha || run.status !== 'completed' || run.conclusion !== 'success') {
+            throw new Error(`CI for ${expectedSha} is not successful (status=${run.status}, conclusion=${run.conclusion ?? 'none'})`)
+          }
+          console.log(`CI passed for tagged commit ${expectedSha}`)
+          NODE
 
       - name: Verify release version
         env:
@@ -64,20 +84,6 @@ jobs:
 
       - name: Verify generated version info
         run: node scripts/sync-version.mjs --check
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run release checks
-        run: |
-          pnpm lint
-          pnpm typecheck
-          pnpm test
-
-      - name: Verify in-container update and rollback
-        run: |
-          docker build --tag bookdock:ci .
-          node scripts/test-docker-update.mjs bookdock:ci
 
       - name: Prepare release notes
         env:
