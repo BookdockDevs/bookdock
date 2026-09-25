@@ -39,9 +39,9 @@ Then open `http://localhost:3000` (the server also serves the built web UI) and 
 - The complete `data/` directory is the persistent state. Stop the container before copying it for a cold backup, and restore the complete directory (including the hidden `.jwt-secret` file) before starting the container again.
 - `docker compose ps` shows the health status (the image ships its own `HEALTHCHECK`). The health endpoint is `http://localhost:3000/api/v1/health`.
 
-To use a published registry image instead of building from the checkout, set `BOOKDOCK_IMAGE` to the image tag and run `docker compose pull` followed by `docker compose up -d --no-build`. Docker Hub is only needed for this pull-based workflow; building from the repository does not require Docker Hub.
+By default, `docker-compose.yml` uses `loofffff/bookdock:latest`, which tracks the latest stable release. Set `BOOKDOCK_IMAGE` to pin a specific version. To use the published registry image, run `docker compose pull` followed by `docker compose up -d --no-build`. Docker Hub is only needed for this pull-based workflow; building from the repository does not require Docker Hub.
 
-The repository publishes Docker Hub images when a `v*` tag is pushed. To enable that workflow, add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` as GitHub Actions secrets, create a public Docker Hub repository named `bookdock`, and push a release tag. For example, `v0.3.5` publishes `<dockerhub-username>/bookdock:0.3.5`, `<dockerhub-username>/bookdock:0.3`, and `<dockerhub-username>/bookdock:latest`. Until an image is published, use the source-build command above.
+The repository publishes Docker Hub images when a `v*` tag is pushed. To enable that workflow, add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` as GitHub Actions secrets, create a public Docker Hub repository named `bookdock`, and push a release tag. A stable `vX.Y.Z` tag publishes `<dockerhub-username>/bookdock:X.Y.Z`, `<dockerhub-username>/bookdock:X.Y`, and updates `latest`; prerelease tags do not update `latest`. Until an image is published, use the source-build command above.
 
 ## Commands
 

@@ -2,7 +2,23 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.3.5] - Unreleased
+## [0.3.6] - Unreleased
+
+### Highlights
+
+- Book selection now behaves consistently in grid and list views, with clearer feedback while selecting books across pages.
+
+### Changed
+
+- Page-wide `Ctrl+A`/`Command+A` now toggles the current page without discarding selections on other pages; shift-selection ranges reset when changing pages.
+- Selection mode suppresses card hover actions that conflict with selecting books.
+
+### Operations
+
+- Pull requests and main-branch CI now exercise the in-container updater commit and rollback flows; release publishing requires successful CI for the exact tagged commit.
+- Docker Compose now defaults to the moving `latest` stable image, with `BOOKDOCK_IMAGE` available to pin a version.
+
+## [0.3.5] - 2026-09-26
 
 ### Highlights
 
@@ -334,7 +350,23 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.3.5] - 待发布
+### [0.3.6] - 待发布
+
+#### 主要更新
+
+- 书库网格和列表视图的批量选择行为保持一致，并提供更清晰的选择状态。
+
+#### 变更
+
+- `Ctrl+A`/`Command+A` 切换当前页的全选状态，同时保留其他页的选择；翻页时重置 Shift 范围选择锚点。
+- 选择模式下隐藏会干扰书籍选择的卡片悬停操作。
+
+#### 运维
+
+- PR 和 main 分支 CI 现在覆盖容器内更新切换与回滚；发布前必须确认 tag 对应的提交已通过 CI。
+- Docker Compose 默认使用随稳定版更新的 `latest` 镜像；需要固定版本时可通过 `BOOKDOCK_IMAGE` 指定。
+
+### [0.3.5] - 2026-09-26
 
 #### 主要更新
 

@@ -1,7 +1,7 @@
 services:
   bookdock:
     container_name: bookdock
-    image: ${BOOKDOCK_IMAGE:-loofffff/bookdock:0.3.5}
+    image: ${BOOKDOCK_IMAGE:-loofffff/bookdock:latest}
     build:
       context: .
     ports:
