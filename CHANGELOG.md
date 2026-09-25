@@ -2,7 +2,36 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.3.3] - Unreleased
+## [0.3.4] - Unreleased
+
+### Highlights
+
+- The library now uses numbered pages with a compact page selector, configurable page sizes, and a reorganized filter and display menu.
+- Reading profiles now control chapter-title alignment, size, and spacing; TXT text layout follows reader settings while EPUB keeps its authored layout unless override is enabled.
+- Book covers load through cached thumbnails, with the original image available to copy or download from book details.
+
+### Added
+
+- A library page selector with direct page entry, keyboard shortcut, and faster navigation across larger page ranges.
+- Chapter-title controls for generated TXT headings and matching EPUB headings when book-layout override is enabled.
+- Cached WebP cover thumbnails, generated for new covers and on demand for older books, plus original-cover copy and download actions.
+
+### Changed
+
+- Library pages load 24, 48, or 96 books at a time instead of extending a virtual list; the selected page is kept in the URL, and filters reset it to the first page.
+- The library view menu separates filters from display options and groups cover appearance controls; reading selection, popovers, sidebar drawer, and floating controls received visual and interaction refinements.
+- A local settings snapshot is restored at startup and synchronized with the query cache to reduce brief library-state changes while settings load.
+- Reader theme colors and active book documents now stay aligned in dark mode, while interface wording and contrast were refined in both supported languages.
+
+### Fixed
+
+- A TOC click during reader startup or chapter loading now takes precedence over saved progress and highlights the selected entry immediately; navigation failures retain the selected entry for retry.
+- Switching away from a two-section spread no longer leaves an adjacent chapter visible in non-continuous scrolling, and the later visible section identifies the current chapter.
+- Reader sidebar panels retain their own scroll positions across switches, remounts, and refreshes; notes wait for the reader TOC before grouping by chapter.
+- EPUB background images are preserved when applying reading themes, and TXT chapters can show the selected theme behind their generated content.
+- Mixed upload results now describe successful, duplicate, and failed books accurately in both supported languages.
+
+## [0.3.3] - 2026-09-23
 
 ### Highlights
 
@@ -288,7 +317,36 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.3.3] - 待发布
+### [0.3.4] - 待发布
+
+#### 主要更新
+
+- 书库改为编号分页，提供紧凑的翻页控件、可选每页数量，以及重新整理的筛选和显示菜单。
+- 阅读预设可调整章节标题的对齐、大小和间距；TXT 始终应用阅读排版设置，EPUB 仅在开启覆盖书籍排版时应用。
+- 书籍封面使用缓存缩略图加载，并可在书籍详情中复制或下载原图。
+
+#### 新增
+
+- 书库分页支持直接输入页码、快捷键和跨较多页面时的快速跳转。
+- 章节标题设置适用于生成的 TXT 标题，以及开启排版覆盖后与目录匹配的 EPUB 标题。
+- 为新封面生成并缓存 WebP 缩略图，旧书封面则按需生成；书籍详情新增原图复制与下载操作。
+
+#### 变更
+
+- 书库以每页 24、48 或 96 本的方式加载，不再持续扩展虚拟列表；当前页保存在 URL 中，切换筛选条件时回到第一页。
+- 书库视图菜单将筛选与显示选项分开，并集中管理封面外观；阅读器选中文本工具栏、提示浮层、侧栏抽屉和悬浮控件优化了外观与交互。
+- 启动时恢复本地设置快照并同步查询缓存，减少设置加载期间书库状态的短暂变化。
+- 深色阅读主题与当前书籍正文同步，界面文案与对比度也在中英文界面中得到调整。
+
+#### 修复
+
+- 阅读器启动或章节加载期间点击目录时，用户选择优先于已保存的进度并立即高亮；跳转失败时保留所选目录项以便重试。
+- 双章节跨页显示时，以靠后的可见章节作为当前章节；切换到非连续滚动后不再残留相邻章节。
+- 阅读器各侧栏面板在切换、重新挂载和刷新后保留各自的滚动位置；笔记按章节分组前会等待目录就绪。
+- 应用阅读主题时保留 EPUB 原有背景图，生成的 TXT 章节可显示所选主题背景。
+- 批量上传包含成功、重复和失败结果时，中英文提示都能准确描述各部分结果。
+
+### [0.3.3] - 2026-09-23
 
 #### 主要更新
 
