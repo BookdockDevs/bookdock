@@ -107,4 +107,30 @@ describe('AboutSettingsSection in-app update', () => {
     expect(await screen.findByText('当前容器未由书坞启动器托管，无法应用内更新。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '立即更新' })).toBeInTheDocument()
   })
+
+  it('copies version number and updates badge to show copied state', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+
+    renderSection([])
+    const versionBtn = screen.getByRole('button', { name: `v${CURRENT}` })
+    fireEvent.click(versionBtn)
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(CURRENT))
+    expect(await screen.findByRole('button', { name: '已复制' })).toBeInTheDocument()
+  })
+
+  it('copies system diagnostic info and updates button to show copied state', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+
+    renderSection([])
+    const diagBtn = screen.getByRole('button', { name: '复制诊断信息' })
+    fireEvent.click(diagBtn)
+
+    await waitFor(() => expect(writeText).toHaveBeenCalled())
+    expect(writeText.mock.calls[0][0]).toContain('### Bookdock System Diagnostic')
+    expect(writeText.mock.calls[0][0]).toContain(`- Version: ${CURRENT}`)
+    expect(await screen.findByRole('button', { name: '已复制' })).toBeInTheDocument()
+  })
 })

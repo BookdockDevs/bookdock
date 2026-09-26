@@ -241,7 +241,7 @@ export default function SystemUpdateDialog({
                     ? 'border-amber-200 bg-amber-50/90 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200'
                     : isApplied
                       ? 'border-emerald-200 bg-emerald-50/90 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
-                      : 'border-stone-200 bg-stone-50 text-stone-700 dark:border-stone-800 dark:bg-stone-850/50 dark:text-stone-300'
+                      : 'border-stone-200 bg-stone-50 text-stone-700 dark:border-stone-800 dark:bg-stone-800/50 dark:text-stone-300'
               }`}
             >
               <div className="flex items-start gap-2.5">
@@ -292,7 +292,7 @@ export default function SystemUpdateDialog({
 
           {/* Active Updating Progress Panel (Unified single status box, replaces previous dual status rows) */}
           {isUpdating && !startErrorKey && (
-            <div className="rounded-xl border border-stone-200/90 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-850/50">
+            <div className="rounded-xl border border-stone-200/90 bg-stone-50/70 p-4 dark:border-stone-800 dark:bg-stone-800/50">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="relative flex h-2 w-2 shrink-0">
@@ -417,12 +417,18 @@ export default function SystemUpdateDialog({
               <button
                 type="button"
                 onClick={() => void handleCopyDiagnostic()}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-750"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700"
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                </svg>
+                {copiedDiagnostic ? (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                )}
                 <span>{copiedDiagnostic ? _('copied') : _('settings.aboutUpdateCopyDiagnostic')}</span>
               </button>
             )}
@@ -440,7 +446,7 @@ export default function SystemUpdateDialog({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-lg border border-stone-200/90 bg-white px-3.5 py-2 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 hover:text-stone-900 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-750"
+                  className="rounded-lg border border-stone-200/90 bg-white px-3.5 py-2 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 hover:text-stone-900 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700"
                 >
                   {_('settings.aboutUpdateLater')}
                 </button>
@@ -563,7 +569,7 @@ function formatBytes(bytes: number) {
 function ProgressBar({ current, total }: { current?: number; total?: number }) {
   const percent = total && total > 0 ? Math.min(100, Math.max(0, Math.floor(((current ?? 0) * 100) / total))) : null
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-750">
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-700">
       <div
         className="h-full rounded-full bg-stone-900 transition-all duration-300 dark:bg-stone-100"
         style={{ width: percent !== null ? `${percent}%` : '100%' }}
@@ -577,7 +583,7 @@ function DownloadProgressBar({ download }: { download: NonNullable<UpdateStatusR
     ? Math.min(100, Math.max(0, Math.floor((download.receivedBytes * 100) / download.totalBytes)))
     : null
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-750">
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-700">
       <div
         className="h-full rounded-full bg-stone-900 transition-all duration-300 dark:bg-stone-100"
         style={{ width: percent !== null ? `${percent}%` : '35%' }}
@@ -593,7 +599,7 @@ function ExtractionProgressBar({ extraction }: { extraction: NonNullable<UpdateS
       ? Math.min(100, Math.max(0, Math.floor((extraction.files * 100) / extraction.totalFiles)))
       : null
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-750">
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-700">
       <div
         className="h-full rounded-full bg-stone-900 transition-all duration-300 dark:bg-stone-100"
         style={{ width: percent !== null ? `${percent}%` : '50%' }}

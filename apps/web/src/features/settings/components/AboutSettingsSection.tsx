@@ -56,6 +56,14 @@ function TagIcon({ className }: { className?: string }) {
   )
 }
 
+function CheckIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
+}
+
 export default function AboutSettingsSection() {
   const _ = useTranslation()
   const { data, isPending, isError, isFetching, refetch } = useSystemInfo()
@@ -64,6 +72,8 @@ export default function AboutSettingsSection() {
   const [updateTarget, setUpdateTarget] = useState<string | null>(null)
   const [updateStartedAt, setUpdateStartedAt] = useState(0)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [copiedVersion, setCopiedVersion] = useState(false)
+  const [copiedDiagnostics, setCopiedDiagnostics] = useState(false)
   const updateStatus = useSystemUpdateStatus()
   const startUpdate = useStartSystemUpdate()
   const cancelUpdate = useCancelSystemUpdate()
@@ -105,6 +115,8 @@ export default function AboutSettingsSection() {
     if (!info?.version) return
     try {
       await navigator.clipboard.writeText(info.version)
+      setCopiedVersion(true)
+      setTimeout(() => setCopiedVersion(false), 2000)
       notify.success(_('settings.aboutVersionCopied'))
     } catch {
       // Fallback silent ignore
@@ -124,6 +136,8 @@ export default function AboutSettingsSection() {
 
     try {
       await navigator.clipboard.writeText(diagnostics)
+      setCopiedDiagnostics(true)
+      setTimeout(() => setCopiedDiagnostics(false), 2000)
       notify.success(_('settings.aboutDiagnosticsCopied'))
     } catch {
       // Fallback silent ignore
@@ -153,8 +167,8 @@ export default function AboutSettingsSection() {
       ) : (
         <>
           {/* Brand Hero Header */}
-          <div className="border-b border-stone-100 bg-gradient-to-b from-stone-50/70 via-white to-white px-6 pt-8 pb-7 text-center dark:border-stone-800/80 dark:from-stone-850/40 dark:via-stone-900 dark:to-stone-900">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-stone-900 to-stone-700 text-white shadow-md shadow-stone-900/10 ring-1 ring-black/5 dark:from-stone-100 dark:to-stone-300 dark:text-stone-900 dark:shadow-stone-950/40 dark:ring-white/10">
+          <div className="border-b border-stone-100 bg-gradient-to-b from-stone-50/70 via-white to-white px-6 pt-8 pb-7 text-center dark:border-stone-800/80 dark:from-stone-800/25 dark:via-stone-900 dark:to-stone-900">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-stone-900 to-stone-700 text-white shadow-md shadow-stone-900/10 ring-1 ring-black/5 dark:from-stone-800 dark:to-stone-900 dark:text-stone-100 dark:shadow-stone-950/50 dark:ring-white/10">
               <BookdockBrandIcon className="h-8 w-8" />
             </div>
 
@@ -172,16 +186,23 @@ export default function AboutSettingsSection() {
                 type="button"
                 onClick={() => void handleCopyVersion()}
                 title={_('settings.aboutCopyVersion')}
-                className="inline-flex items-center rounded-full border border-stone-200/90 bg-stone-50/90 px-3 py-1 font-mono text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-stone-100 active:scale-95 dark:border-stone-700/80 dark:bg-stone-800/90 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-750"
+                className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/90 bg-stone-50/90 px-3 py-1 font-mono text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-stone-100 active:scale-95 dark:border-stone-700/80 dark:bg-stone-800/90 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-700"
               >
-                v{info.version.replace(/^v/, '')}
+                {copiedVersion ? (
+                  <>
+                    <CheckIcon className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                    <span>{_('copied')}</span>
+                  </>
+                ) : (
+                  <span>v{info.version.replace(/^v/, '')}</span>
+                )}
               </button>
 
               <button
                 type="button"
                 onClick={() => void updateCheck.refetch()}
                 disabled={updateCheck.isFetching}
-                className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/80 bg-white px-3 py-1 text-xs font-medium text-stone-600 shadow-2xs transition-all hover:bg-stone-50 hover:text-stone-900 active:scale-95 disabled:cursor-wait disabled:opacity-60 dark:border-stone-700/80 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-750 dark:hover:text-stone-100"
+                className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/80 bg-white px-3 py-1 text-xs font-medium text-stone-600 shadow-2xs transition-all hover:bg-stone-50 hover:text-stone-900 active:scale-95 disabled:cursor-wait disabled:opacity-60 dark:border-stone-700/80 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
               >
                 {updateCheck.isFetching ? (
                   <svg className="h-3 w-3 animate-spin text-stone-500" viewBox="0 0 24 24" fill="none">
@@ -216,7 +237,7 @@ export default function AboutSettingsSection() {
                   </div>
                 )}
                 {update.status === 'update-available' && (
-                  <div className="flex w-full max-w-md flex-col items-center gap-2.5 rounded-2xl border border-stone-200/90 bg-stone-50/80 p-3.5 text-xs text-stone-800 shadow-2xs dark:border-stone-800 dark:bg-stone-850/60 dark:text-stone-200">
+                  <div className="flex w-full max-w-md flex-col items-center gap-2.5 rounded-2xl border border-stone-200/90 bg-stone-50/80 p-3.5 text-xs text-stone-800 shadow-2xs dark:border-stone-800 dark:bg-stone-800/40 dark:text-stone-200">
                     <div className="flex w-full flex-col items-center justify-between gap-2.5 sm:flex-row">
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span className="relative flex h-2 w-2 shrink-0">
@@ -259,7 +280,7 @@ export default function AboutSettingsSection() {
                             href={update.releaseUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1 rounded-lg border border-stone-200/90 bg-white px-2.5 py-1.5 font-medium text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:border-stone-700/80 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-750 dark:hover:text-stone-100"
+                            className="inline-flex items-center gap-1 rounded-lg border border-stone-200/90 bg-white px-2.5 py-1.5 font-medium text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:border-stone-700/80 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
                           >
                             <span>{_('settings.aboutOpenRelease')}</span>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
@@ -281,7 +302,7 @@ export default function AboutSettingsSection() {
               href={info.repositoryUrl}
               target="_blank"
               rel="noreferrer"
-              className="group flex items-center justify-between px-6 py-4 transition-colors hover:bg-stone-50/70 dark:hover:bg-stone-850/40"
+              className="group flex items-center justify-between px-6 py-4 transition-colors hover:bg-stone-50/70 dark:hover:bg-stone-800/50"
             >
               <div className="flex items-center gap-3.5">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-stone-700 transition-colors group-hover:bg-stone-200/70 group-hover:text-stone-900 dark:bg-stone-800 dark:text-stone-300 dark:group-hover:bg-stone-700 dark:group-hover:text-stone-100">
@@ -307,7 +328,7 @@ export default function AboutSettingsSection() {
               href={info.releasesUrl}
               target="_blank"
               rel="noreferrer"
-              className="group flex items-center justify-between px-6 py-4 transition-colors hover:bg-stone-50/70 dark:hover:bg-stone-850/40"
+              className="group flex items-center justify-between px-6 py-4 transition-colors hover:bg-stone-50/70 dark:hover:bg-stone-800/50"
             >
               <div className="flex items-center gap-3.5">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-stone-700 transition-colors group-hover:bg-stone-200/70 group-hover:text-stone-900 dark:bg-stone-800 dark:text-stone-300 dark:group-hover:bg-stone-700 dark:group-hover:text-stone-100">
@@ -338,13 +359,17 @@ export default function AboutSettingsSection() {
             <button
               type="button"
               onClick={() => void handleCopyDiagnostics()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/90 bg-white px-2.5 py-1 text-xs font-medium text-stone-600 shadow-2xs transition-all hover:bg-stone-50 hover:text-stone-900 active:scale-95 dark:border-stone-700/80 dark:bg-stone-850 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200/90 bg-white px-2.5 py-1 text-xs font-medium text-stone-600 shadow-2xs transition-all hover:bg-stone-50 hover:text-stone-900 active:scale-95 dark:border-stone-700/80 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 text-stone-400 dark:text-stone-400">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-              <span>{_('settings.aboutCopyDiagnostics')}</span>
+              {copiedDiagnostics ? (
+                <CheckIcon className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 text-stone-400 dark:text-stone-400">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
+              <span>{copiedDiagnostics ? _('copied') : _('settings.aboutCopyDiagnostics')}</span>
             </button>
           </div>
 
