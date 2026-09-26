@@ -152,6 +152,7 @@ export async function runMigrations(hooks?: RunMigrationsHooks) {
   }
 
   repairLibraryBooksDeletedAt(db)
+  repairBookmarkFields(db)
   await hooks?.beforeRetarget?.()
   retargetBookIdReferences(db)
 
@@ -397,5 +398,36 @@ export function repairLibraryBooksDeletedAt(db: ReturnType<typeof drizzle<typeof
   const columns = db.all(sql.raw('PRAGMA table_info(library_books)')) as Array<{ name: string }>
   if (columns.length > 0 && !columns.some((column) => column.name === 'deleted_at')) {
     db.run(sql.raw('ALTER TABLE "library_books" ADD COLUMN "deleted_at" INTEGER'))
+  }
+}
+
+/**
+ * Bookmarks migrated while the annotation split dropped their text/href
+ * (title written as null, no chapter_href column yet) read back as bare
+ * "书签" cards. The frozen legacy annotations table still holds both, so
+ * backfill them: title unconditionally where a legacy row matches (empty
+ * text displays identically), href only where the legacy row actually has
+ * one. Rows created after the migration have no legacy counterpart and are
+ * never touched. Idempotent.
+ */
+export function repairBookmarkFields(db: ReturnType<typeof drizzle<typeof schema>>) {
+  const tables = new Set(
+    (db.all(sql.raw('SELECT name FROM sqlite_master WHERE type = \'table\'')) as Array<{ name: string }>).map(({ name }) => name),
+  )
+  if (!tables.has('bookmarks') || !tables.has('annotations')) return
+  const columns = db.all(sql.raw('PRAGMA table_info(bookmarks)')) as Array<{ name: string }>
+  const hasHref = columns.some((column) => column.name === 'chapter_href')
+  db.run(sql.raw(`UPDATE "bookmarks" SET "title" = (
+    SELECT "text" FROM "annotations" WHERE "annotations"."id" = "bookmarks"."id"
+  ) WHERE "title" IS NULL AND EXISTS (
+    SELECT 1 FROM "annotations" WHERE "annotations"."id" = "bookmarks"."id" AND "annotations"."type" = 'bookmark'
+  )`))
+  if (hasHref) {
+    db.run(sql.raw(`UPDATE "bookmarks" SET "chapter_href" = (
+      SELECT "chapter_href" FROM "annotations" WHERE "annotations"."id" = "bookmarks"."id"
+    ) WHERE "chapter_href" IS NULL AND EXISTS (
+      SELECT 1 FROM "annotations" WHERE "annotations"."id" = "bookmarks"."id"
+        AND "annotations"."type" = 'bookmark' AND "annotations"."chapter_href" IS NOT NULL
+    )`))
   }
 }

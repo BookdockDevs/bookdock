@@ -8,7 +8,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { describe, expect, it } from 'vitest'
 
 import * as schema from './schema'
-import { reconcileConsolidatedMigrationLedger, repairLegacyTextReplacementSchema, repairLibraryBooksDeletedAt, retargetBookIdReferences } from './client'
+import { reconcileConsolidatedMigrationLedger, repairBookmarkFields, repairLegacyTextReplacementSchema, repairLibraryBooksDeletedAt, retargetBookIdReferences } from './client'
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
 const baselineFile = path.join(migrationsDir, '0000_baseline.sql')
@@ -660,9 +660,48 @@ describe('text replacement migration', () => {
     expect(sqlite.prepare('SELECT replacement_id, enabled FROM text_replacement_overrides WHERE id = ?').get('o1'))
       .toEqual({ replacement_id: 'r1', enabled: 0 })
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
-      // Journal holds baseline + 0001..0013 + 0015 (0014 was abandoned for the
-      // client-side repair); reconcile rewrites the ledger to match it.
-      .toEqual({ count: 15 })
+      // Journal holds baseline + 0001..0013 + 0015 + 0016 (0014 was abandoned
+      // for the client-side repair); reconcile rewrites the ledger to match it.
+      .toEqual({ count: 16 })
+
+    sqlite.close()
+  })
+
+  it('backfills bookmark titles and hrefs dropped by the early annotation split', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrate(db, { migrationsFolder: migrationsDir })
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1);
+      INSERT INTO books (id, user_id, title, format, file_path, size, created_at, updated_at)
+        VALUES ('b1', 'u1', 'B1', 'txt', 'k1', 1, 1, 1);
+      INSERT INTO book_versions (id, format, size, created_at, updated_at)
+        VALUES ('b1', 'txt', 1, 1, 1);
+      INSERT INTO annotations (id, user_id, book_id, cfi_range, type, text, chapter, chapter_href, created_at, updated_at)
+        VALUES ('bm-old', 'u1', 'b1', 'cfi-1', 'bookmark', 'snippet', 'Ch1', 'ch:1', 1, 1);
+      INSERT INTO bookmarks (id, user_id, book_version_id, cfi, created_at, updated_at)
+        VALUES ('bm-old', 'u1', 'b1', 'cfi-1', 1, 1);
+      INSERT INTO bookmarks (id, user_id, book_version_id, cfi, title, created_at, updated_at)
+        VALUES ('bm-renamed', 'u1', 'b1', 'cfi-2', 'mine', 1, 1);
+      INSERT INTO bookmarks (id, user_id, book_version_id, cfi, created_at, updated_at)
+        VALUES ('bm-new', 'u1', 'b1', 'cfi-3', 1, 1);
+    `)
+
+    repairBookmarkFields(db)
+
+    // Legacy text/href land on the migrated row; user-set and post-migration
+    // rows are never touched.
+    expect(sqlite.prepare('SELECT title, chapter_href AS href FROM bookmarks WHERE id = ?').get('bm-old'))
+      .toEqual({ title: 'snippet', href: 'ch:1' })
+    expect(sqlite.prepare('SELECT title FROM bookmarks WHERE id = ?').get('bm-renamed'))
+      .toEqual({ title: 'mine' })
+    expect(sqlite.prepare('SELECT title FROM bookmarks WHERE id = ?').get('bm-new'))
+      .toEqual({ title: null })
+    // Reruns are no-ops.
+    repairBookmarkFields(db)
+    expect(sqlite.prepare('SELECT title FROM bookmarks WHERE id = ?').get('bm-old'))
+      .toEqual({ title: 'snippet' })
 
     sqlite.close()
   })

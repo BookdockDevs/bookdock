@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
-import { createAnnotation, deleteAnnotation, listAnnotations, searchAnnotations } from './annotations.service'
+import { createAnnotation, deleteAnnotation, listAnnotations, searchAnnotations, updateAnnotation } from './annotations.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -191,5 +191,26 @@ describe('annotations service', () => {
     })
     expect(saved.chapter).toBe('第二十七章')
     expect(saved.chapterHref).toBe('chapter:second-27')
+    // The href must survive a fresh read, not just ride along in the create
+    // response object.
+    const listed = await listAnnotations(ownerId, bookId)
+    expect(listed.find((a) => a.id === saved.id)).toMatchObject({
+      chapter: '第二十七章',
+      chapterHref: 'chapter:second-27',
+    })
+  })
+
+  it('keeps the snippet text on bookmarks through create, rename and list', async () => {
+    const saved = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/10)',
+      type: 'bookmark',
+      text: '上下文片段',
+      chapter: '第三章',
+    })
+    expect(saved.text).toBe('上下文片段')
+    const renamed = await updateAnnotation(ownerId, saved.id, { text: '改名后的书签' })
+    expect(renamed.text).toBe('改名后的书签')
+    const listed = await listAnnotations(ownerId, bookId)
+    expect(listed.find((a) => a.id === saved.id)?.text).toBe('改名后的书签')
   })
 })

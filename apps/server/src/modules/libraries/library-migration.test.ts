@@ -184,7 +184,7 @@ describe('library follow-up migrations', () => {
       },
       {
         id: 'a-bm', userId: 'u-owner', bookId: 'b-epub', cfiRange: 'cfi-b',
-        type: 'bookmark', color: 'yellow', style: 'highlight', text: '', chapter: 'Ch2',
+        type: 'bookmark', color: 'yellow', style: 'highlight', text: 'snippet context', chapter: 'Ch2',
         createdAt: 12, updatedAt: 13,
       },
       {
@@ -263,7 +263,7 @@ describe('library follow-up migrations', () => {
     expect(db.select().from(schema.highlights).where(eq(schema.highlights.id, 'a-hl')).get())
       .toMatchObject({ bookVersionId: 'b-epub', text: 'marked', revisionId: null, relocation: 'ok' })
     expect(db.select().from(schema.bookmarks).where(eq(schema.bookmarks.id, 'a-bm')).get())
-      .toMatchObject({ bookVersionId: 'b-epub', cfi: 'cfi-b', chapter: 'Ch2' })
+      .toMatchObject({ bookVersionId: 'b-epub', cfi: 'cfi-b', chapter: 'Ch2', title: 'snippet context' })
     expect(db.select().from(schema.ideas).where(eq(schema.ideas.id, 'a-note')).get())
       .toMatchObject({ bookVersionId: 'b-epub', text: 'quoted', note: 'thought', visibility: 'private', sharedLibraryId: null })
 

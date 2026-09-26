@@ -31,6 +31,7 @@ function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   style?: string
   text?: string | null
   note?: string | null
+  title?: string | null
   chapter?: string | null
   chapterHref?: string | null
   createdAt: number
@@ -49,7 +50,7 @@ function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
     return {
       id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfi ?? '', cfiAnchor: null,
       type: 'bookmark', color: 'yellow', style: 'underline',
-      text: '', note: null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
+      text: row.title ?? '', note: null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
       createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
     }
   }
@@ -103,7 +104,10 @@ export async function searchAnnotations(userId: string, bookId: string, query: s
       eq(bookmarks.userId, userId),
       eq(bookmarks.bookVersionId, bookId),
       isNull(bookmarks.deletedAt),
-      sql`instr(lower(coalesce(${bookmarks.chapter}, '')), lower(${normalized})) > 0`,
+      sql`(
+        instr(lower(coalesce(${bookmarks.title}, '')), lower(${normalized})) > 0
+        OR instr(lower(coalesce(${bookmarks.chapter}, '')), lower(${normalized})) > 0
+      )`,
     ))
     .orderBy(desc(bookmarks.updatedAt), desc(bookmarks.id))
     .limit(Math.min(Math.max(limit, 1), 20))
@@ -184,6 +188,10 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
     if (existing) {
       db.update(bookmarks).set({
         chapter: data.chapter ?? existing.chapter,
+        chapterHref: data.chapterHref ?? existing.chapterHref,
+        // Restoring refreshes the snippet like the legacy path did: an
+        // explicit new text wins, otherwise the surviving title stays.
+        title: data.text ?? existing.title,
         deletedAt: null,
         updatedAt: now,
       }).where(eq(bookmarks.id, existing.id)).run()
@@ -197,7 +205,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
       cfi: data.cfiRange,
       chapter: data.chapter ?? null,
       chapterHref: data.chapterHref ?? null,
-      title: null,
+      title: data.text ?? null,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
@@ -255,10 +263,13 @@ export async function updateAnnotation(userId: string, annotationId: string, dat
     return toRes('highlight', { ...owned.row, color: data.color ?? owned.row.color, style: data.style ?? owned.row.style, text: data.text ?? owned.row.text, updatedAt: now })
   }
   if (owned.kind === 'bookmark') {
-    // Bookmarks carry no editable body in the new model; the write refreshes
-    // recency so the call stays idempotent for old clients.
-    db.update(bookmarks).set({ updatedAt: now }).where(eq(bookmarks.id, owned.row.id)).run()
-    return toRes('bookmark', { ...owned.row, updatedAt: now })
+    // The rename entry point writes the title through text; nothing else on
+    // a bookmark is user-editable.
+    db.update(bookmarks).set({
+      title: data.text ?? owned.row.title,
+      updatedAt: now,
+    }).where(eq(bookmarks.id, owned.row.id)).run()
+    return toRes('bookmark', { ...owned.row, title: data.text ?? owned.row.title, updatedAt: now })
   }
   db.update(ideas).set({
     text: data.text ?? owned.row.text,

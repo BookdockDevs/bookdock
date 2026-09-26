@@ -375,7 +375,8 @@ export async function migrateAnnotations(): Promise<AnnotationsMigrationReport> 
         }
         db.insert(bookmarks).values({
           id: row.id, userId: row.userId, bookVersionId: row.bookId, revisionId: null,
-          cfi: row.cfiRange, chapter: row.chapter, title: null,
+          cfi: row.cfiRange, chapter: row.chapter, chapterHref: row.chapterHref,
+          title: row.text,
           createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt,
         }).run()
         report.bookmarks += 1
@@ -668,7 +669,7 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
   const ideaRows = db.select().from(ideas).all()
   check('annotations', annotationRows.every((a) =>
     (a.type === 'highlight' && highlightRows.some((h) => h.id === a.id && h.cfiRange === a.cfiRange))
-    || (a.type === 'bookmark' && bookmarkRows.some((h) => h.id === a.id))
+    || (a.type === 'bookmark' && bookmarkRows.some((h) => h.id === a.id && (h.title ?? '') === (a.text ?? '')))
     || (a.type === 'note' && ideaRows.some((h) => h.id === a.id)),
   ), `${highlightRows.length}/${bookmarkRows.length}/${ideaRows.length} of ${annotationRows.length}`)
 
