@@ -164,7 +164,7 @@
     "trashEmpty": "回收站是空的",
     "trashEmptyHint": "删除的书籍会先移入回收站",
     "trashDeletedDays": "已删除 {{days}} 天",
-    "trashPurgeInDays": "{{days}} 天后清理",
+    "trashPurgeInDays": "{{days}} 天",
     "trashPurgeSoon": "待清理",
     "originalFile": "原始文件",
     "createShelf": "创建书架",

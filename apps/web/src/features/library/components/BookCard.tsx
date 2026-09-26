@@ -105,7 +105,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
             )}
           </div>
         )}
-        {coverText && book.progress != null && book.progress > 0 && (
+        {!trashCard && coverText && book.progress != null && book.progress > 0 && (
           <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden rounded-b-xl bg-black/25 backdrop-blur-sm">
             <div className="h-full rounded-b-xl bg-white/95 transition-all" style={{ width: `${book.progress}%` }} />
           </div>
@@ -127,8 +127,13 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
             </button>
           </div>
         )}
+        {trashCard && (
+          <div className="pointer-events-none absolute right-1.5 top-1.5 z-10">
+            <TrashInfo book={book} variant="pill" />
+          </div>
+        )}
         {trashCard && !selectionActive && (
-          <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2.5 rounded-b-xl bg-gradient-to-t from-black/70 via-black/40 to-transparent p-2.5 pt-8 opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
+          <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2.5 rounded-b-xl bg-gradient-to-t from-black/75 via-black/45 to-transparent p-2.5 pt-8 opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
             <button
               type="button"
               aria-label={_('library.restore')}
@@ -138,7 +143,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
                 e.stopPropagation()
                 onRestore?.(book)
               }}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-stone-700 backdrop-blur-sm transition-colors hover:bg-white hover:text-emerald-600"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-stone-700 shadow-md backdrop-blur-sm transition-all hover:scale-105 hover:bg-white hover:text-emerald-600 active:scale-95 dark:bg-stone-800/95 dark:text-stone-200 dark:hover:bg-stone-700 dark:hover:text-emerald-400"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
@@ -154,7 +159,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
                 e.stopPropagation()
                 onPermanentDelete?.(book)
               }}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-stone-700 backdrop-blur-sm transition-colors hover:bg-red-500 hover:text-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-stone-700 shadow-md backdrop-blur-sm transition-all hover:scale-105 hover:bg-red-500 hover:text-white active:scale-95 dark:bg-stone-800/95 dark:text-stone-200 dark:hover:bg-red-600 dark:hover:text-white"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
@@ -172,7 +177,6 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           {book.author && (
             <p className="mt-0.5 truncate text-xs text-stone-500 dark:text-stone-400">{book.author}</p>
           )}
-          {trashCard && <TrashInfo book={book} className="mt-0.5" />}
         </div>
       )}
 

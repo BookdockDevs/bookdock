@@ -170,7 +170,7 @@
     "trashEmpty": "Trash is empty",
     "trashEmptyHint": "Deleted books are moved to trash first",
     "trashDeletedDays": "Deleted {{days}} days ago",
-    "trashPurgeInDays": "cleanup in {{days}} days",
+    "trashPurgeInDays": "{{days}} days",
     "trashPurgeSoon": "cleanup pending",
     "originalFile": "Original file",
     "createShelf": "Create Shelf",

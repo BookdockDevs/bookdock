@@ -95,4 +95,23 @@ describe('BookCard', () => {
     expect(screen.getByLabelText('library.restore')).toBeInTheDocument()
     expect(container.querySelector('[class*="grayscale"]')).not.toBeNull()
   })
+
+  it('renders progress bar for active books with progress', () => {
+    const { container } = render(<BookCard book={{ ...baseBook, progress: 45 }} />)
+    expect(container.querySelector('[style*="width: 45%"]')).not.toBeNull()
+  })
+
+  it('does not render progress bar on trash cards even if progress is set', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <BookCard
+          book={{ ...baseBook, progress: 45, deletedAt: Date.now() }}
+          onRestore={vi.fn()}
+          onPermanentDelete={vi.fn()}
+        />
+      </QueryClientProvider>,
+    )
+    expect(container.querySelector('[style*="width: 45%"]')).toBeNull()
+  })
 })

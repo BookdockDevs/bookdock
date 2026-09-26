@@ -155,11 +155,14 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
                 aria-label={_('library.emptyTrash')}
                 title={_('library.emptyTrash')}
                 onClick={onEmptyTrash}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-red-200 bg-white text-red-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-red-900/50 dark:bg-stone-900 dark:text-red-400 dark:hover:border-red-800 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-400 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400 dark:hover:border-red-800 dark:hover:bg-red-950/40 dark:hover:text-red-300"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
-                  <path d="M10 11v6M14 11v6" />
+                  <path d="M21 3L12 12" />
+                  <path d="M8 8l8 8" />
+                  <path d="M9.5 9.5L3 13c-.6.4-.8 1.2-.4 1.8l5.6 5.6c.6.6 1.4.4 1.8-.4l4.5-6.5" />
+                  <path d="M6 16l3-3" />
+                  <path d="M8 18l3-3" />
                 </svg>
               </button>
             )

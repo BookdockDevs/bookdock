@@ -994,7 +994,7 @@ function TrashListRow({ book, selected, selectionActive, onToggleSelect, onResto
         <div className="truncate font-serif text-sm font-medium text-stone-900 dark:text-stone-100">
           {book.title}
         </div>
-        <div className="mt-0.5 flex items-baseline gap-2">
+        <div className="mt-1 flex items-center gap-2">
           {book.author && (
             <span className="truncate text-xs text-stone-500 dark:text-stone-400">{book.author}</span>
           )}
