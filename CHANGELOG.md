@@ -2,7 +2,19 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.3.7] - Unreleased
+## [0.3.8] - Unreleased
+
+### Highlights
+
+- Bookmark and idea annotations recovered their full content after the library-model migration: bookmarks show their saved excerpts again, and ideas keep their colors and styles.
+
+### Fixed
+
+- Retrying a failed in-panel update now follows the latest release instead of replaying a stale target, and the update dialog no longer shows duplicate banners or Close buttons.
+- Server-sent update progress details are localized instead of leaking English action strings.
+- Bookmark renames persist, and bookmark/idea reads return the stored snippet, title, color, style, and chapter reference.
+
+## [0.3.7] - 2026-09-26
 
 ### Highlights
 
@@ -375,7 +387,19 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.3.7] - 待发布
+### [0.3.8] - 待发布
+
+#### 主要更新
+
+- 书签与想法标注在书库模型迁移后恢复完整内容：书签重新显示保存的摘录，想法保留颜色与样式。
+
+#### 修复
+
+- 面板内更新失败后重试改为追踪最新版本，不再重放过期目标；更新弹窗不再出现重复横幅与关闭按钮。
+- 服务端下发的更新进度文案已本地化，不再透出英文。
+- 书签改名可持久保存；书签/想法的读取返回已存的摘录、标题、颜色、样式与章节引用。
+
+### [0.3.7] - 2026-09-26
 
 #### 主要更新
 
