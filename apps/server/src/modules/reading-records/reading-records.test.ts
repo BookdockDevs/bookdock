@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -76,6 +76,35 @@ function seedProgressFile(files: Map<string, Buffer>, bookId: string, data: Reco
 
 function loadProgressFile(files: Map<string, Buffer>, bookId: string): Record<string, unknown> {
   return JSON.parse(files.get(`progress/${bookId}.json`)!.toString('utf-8')) as Record<string, unknown>
+}
+
+// New-model rows for rewired reads: private library, version reusing the
+// book id, initial revision, work and card.
+function seedVersion(db: ReturnType<typeof createTestDb>, userId: string, bookId: string, wordCount: number | null) {
+  let library = db.select({ id: schema.libraries.id }).from(schema.libraries)
+    .where(and(eq(schema.libraries.userId, userId), eq(schema.libraries.type, 'private'))).get()
+  if (!library) {
+    const libraryId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: libraryId, userId, type: 'private', name: userId,
+      description: '', visibility: null, createdAt: 1, updatedAt: 1,
+    }).run()
+    library = { id: libraryId }
+  }
+  db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 100, createdAt: 1, updatedAt: 1 }).run()
+  db.insert(schema.contentRevisions).values({
+    id: createId('rev'), bookVersionId: bookId, revisionNo: 1, blobKey: `blobs/x/${bookId}.epub`,
+    size: 100, wordCount, chapterCount: 0, meta: {}, createdAt: 1,
+  }).run()
+  const libraryBookId = createId('lb')
+  db.insert(schema.libraryBooks).values({
+    id: libraryBookId, libraryId: library.id, userId, title: 'B', createdAt: 1, updatedAt: 1,
+  }).run()
+  db.insert(schema.libraryBookVersions).values({
+    id: createId('lbv'), libraryId: library.id, libraryBookId, bookVersionId: bookId,
+    kind: 'personal', createdAt: 1, updatedAt: 1,
+  }).run()
+  return { libraryId: library.id, libraryBookId }
 }
 
 describe('reading-records service', () => {
@@ -462,28 +491,34 @@ describe('reading-records service', () => {
   })
 
   it('sums readFraction × wordCount and skips books without word counts', async () => {
-    db.update(schema.books).set({ meta: { wordCount: 1000 } }).where(eq(schema.books.id, bookId)).run()
-    db.update(schema.books).set({ meta: { wordCount: 500 } }).where(eq(schema.books.id, book2Id)).run()
+    seedVersion(db, ownerId, bookId, 1000)
+    seedVersion(db, ownerId, book2Id, 500)
     seedProgressFile(files, bookId, { percent: 50, fraction: 0.5, intervals: [[0.1, 0.4], [0.4, 0.6]], updatedAt: 1 })
     seedProgressFile(files, book2Id, { percent: 80, fraction: 0.8, intervals: [[0, 0.8]], updatedAt: 1 })
 
     const summary = await getSummary(ownerId, '2026-07-31')
     expect(summary.totalWordsRead).toBe(900)
 
-    // no wordCount in meta → skipped
-    db.update(schema.books).set({ meta: {} }).where(eq(schema.books.id, bookId)).run()
+    // no wordCount in the revision → skipped
+    db.update(schema.contentRevisions).set({ wordCount: null }).where(eq(schema.contentRevisions.bookVersionId, bookId)).run()
     expect((await getSummary(ownerId, '2026-07-31')).totalWordsRead).toBe(400)
   })
 
   it('aggregates reading time by tag, excluding untagged books and honoring the range', async () => {
     const tagA = createId('tag')
     const tagB = createId('tag')
-    db.insert(schema.tags).values([
-      { id: tagA, userId: ownerId, name: 'Fiction' },
-      { id: tagB, userId: ownerId, name: 'Tech' },
+    const { libraryId } = seedVersion(db, ownerId, bookId, null)
+    seedVersion(db, ownerId, book2Id, null)
+    db.insert(schema.libraryTags).values([
+      { id: tagA, libraryId, userId: ownerId, name: 'Fiction', createdAt: 1, updatedAt: 1 },
+      { id: tagB, libraryId, userId: ownerId, name: 'Tech', createdAt: 1, updatedAt: 1 },
     ]).run()
-    db.insert(schema.bookTags).values([{ bookId, tagId: tagA }]).run()
-    db.insert(schema.bookTags).values([{ bookId: book2Id, tagId: tagB }]).run()
+    const lbvOf = (id: string) => db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
+      .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, id)).get()!
+    db.insert(schema.libraryBookTags).values([
+      { libraryBookId: lbvOf(bookId).libraryBookId, tagId: tagA },
+      { libraryBookId: lbvOf(book2Id).libraryBookId, tagId: tagB },
+    ]).run()
     const book3Id = createId('book')
     db.insert(schema.books).values({
       id: book3Id, userId: ownerId, title: 'Book Three', author: '', format: 'txt',

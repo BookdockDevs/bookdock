@@ -7,7 +7,6 @@ import app from './app'
 import { config } from './config'
 import { runMigrations } from './db/client'
 import { log } from './lib/logger'
-import { bootstrapAuth } from './modules/auth/auth.service'
 import { migrateTxtArtifacts, purgeAllExpiredTrash } from './modules/books/books.service'
 import { interruptStaleAiGenerationRuns } from './modules/ai/ai.runs.service'
 
@@ -43,16 +42,6 @@ async function start() {
     if (interruptedRuns > 0) log('info', 'ai.generation.stale_runs_interrupted', { meta: { count: interruptedRuns } })
   } catch (err) {
     log('error', 'database.migration.failed', { durationMs: Date.now() - migrationStartedAt, error: err })
-    process.exitCode = 1
-    return
-  }
-
-  const authStartedAt = Date.now()
-  try {
-    await bootstrapAuth()
-    log('info', 'auth.bootstrap.completed', { durationMs: Date.now() - authStartedAt })
-  } catch (err) {
-    log('error', 'auth.bootstrap.failed', { durationMs: Date.now() - authStartedAt, error: err })
     process.exitCode = 1
     return
   }

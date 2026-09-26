@@ -27,6 +27,20 @@ export function accessTokenLast4(token: string): string {
   return token.slice(-4)
 }
 
+/**
+ * Browser login sessions (Phase 3). Same rules as access tokens: 32 random
+ * bytes, only the sha256 hash reaches the database, the plaintext travels
+ * once in the login response cookie. No prefix: sessions never share a
+ * transport with bd_ operation tokens (cookie vs Authorization header).
+ */
+export function generateSessionToken(): string {
+  return crypto.randomBytes(32).toString('base64url')
+}
+
+export function hashSessionToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex')
+}
+
 /** Expiry counted from `from`: creation on create, the moment of the edit on PATCH. */
 export function accessTokenExpiresAt(duration: AccessTokenDuration, from: number): number | null {
   if (duration === '90d') return from + NINETY_DAYS_MS

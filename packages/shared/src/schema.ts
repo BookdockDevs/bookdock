@@ -678,6 +678,11 @@ export const updateUserSchema = z.object({
   newPassword: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH).optional(),
 })
 
+export const createUserSchema = z.object({
+  username: z.string().transform(sanitizeUsername).pipe(z.string().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH)),
+  password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH),
+})
+
 export const shelfCreateSchema = z.object({ name: z.string().trim().min(1).max(100) })
 // PUT /shelves/:id accepts a rename, a pin toggle, or both; the route rejects
 // an empty patch.

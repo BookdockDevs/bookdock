@@ -275,6 +275,7 @@ export {
   updateUsernameSchema,
   updateInstanceSchema,
   updateUserSchema,
+  createUserSchema,
   shelfCreateSchema,
   shelfUpdateSchema,
   shelfReorderSchema,
@@ -289,6 +290,51 @@ export {
 } from './schema'
 
 export { ErrorCode, ErrorHttpStatus } from './errors'
+
+export type {
+  Library,
+  LibraryType,
+  LibraryVisibility,
+  LibraryMembership,
+  MembershipRole,
+  LibraryRelation,
+  LibraryVersionKind,
+  LibraryVersionStatus,
+  LibraryBook,
+  LibraryBookVersion,
+  BookVersion,
+  ContentRevision,
+  BlobKind,
+  BlobRef,
+  Category,
+  LibraryTag,
+  BookState,
+  RelocationStatus,
+  Highlight,
+  Bookmark,
+  Idea,
+  IdeaVisibility,
+  LibraryUser,
+  ManagedUser,
+  Instance,
+  SessionInfo,
+  AuthContext,
+  LibraryCreateReq,
+  LibraryUpdateReq,
+} from './library'
+
+export {
+  libraryTypeSchema,
+  libraryVisibilitySchema,
+  membershipRoleSchema,
+  libraryRelationSchema,
+  libraryVersionKindSchema,
+  libraryVersionStatusSchema,
+  blobKindSchema,
+  ideaVisibilitySchema,
+  libraryCreateSchema,
+  libraryUpdateSchema,
+} from './library'
 
 export { getAiModelCapabilityFlags, isAiEmbeddingModel } from './ai-models'
 

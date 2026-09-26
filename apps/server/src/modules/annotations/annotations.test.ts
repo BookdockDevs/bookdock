@@ -62,6 +62,22 @@ describe('annotations service', () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }).run()
+    // New-model mirror for the rewired service: private library, version, work, card.
+    const libraryId = createId('lib')
+    const now = Date.now()
+    db.insert(schema.libraries).values({
+      id: libraryId, userId: ownerId, type: 'private', name: 'owner',
+      description: '', visibility: null, createdAt: now, updatedAt: now,
+    }).run()
+    db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 100, createdAt: now, updatedAt: now }).run()
+    const libraryBookId = createId('lb')
+    db.insert(schema.libraryBooks).values({
+      id: libraryBookId, libraryId, userId: ownerId, title: 'Test Book', createdAt: now, updatedAt: now,
+    }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: createId('lbv'), libraryId, libraryBookId, bookVersionId: bookId,
+      kind: 'personal', createdAt: now, updatedAt: now,
+    }).run()
   })
 
   it('should create an annotation on the owner\'s book', async () => {

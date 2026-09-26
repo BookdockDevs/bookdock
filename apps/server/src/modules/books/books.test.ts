@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
@@ -35,6 +35,7 @@ import {
   listBooks,
   setBookShelf,
   getBookShelf,
+  getBookTags,
   uploadBook,
   migrateTxtArtifacts,
   reTocBook,
@@ -103,6 +104,54 @@ function seedUser(db: ReturnType<typeof createTestDb>, username: string): string
   return id
 }
 
+function ensureLibrary(db: ReturnType<typeof createTestDb>, userId: string): string {
+  const existing = db.select({ id: schema.libraries.id }).from(schema.libraries)
+    .where(and(eq(schema.libraries.userId, userId), eq(schema.libraries.type, 'private'))).get()
+  if (existing) return existing.id
+  const id = createId('lib')
+  const now = Date.now()
+  db.insert(schema.libraries).values({
+    id, userId, type: 'private', name: userId,
+    description: '', visibility: null, createdAt: now, updatedAt: now,
+  }).run()
+  return id
+}
+
+// Test doubles mirror the 2.5 migration: every old shelf/tag/relation gets
+// its new-model twin so rewired reads resolve.
+function mirrorShelf(db: ReturnType<typeof createTestDb>, userId: string, shelfId: string) {
+  const libraryId = ensureLibrary(db, userId)
+  const shelf = db.select().from(schema.shelves).where(eq(schema.shelves.id, shelfId)).get()!
+  db.insert(schema.libraryCategories).values({
+    id: shelf.id, libraryId, userId, name: shelf.name,
+    parentId: null, sortOrder: shelf.sortOrder, pinned: shelf.pinned, createdAt: shelf.createdAt, updatedAt: shelf.updatedAt,
+  }).onConflictDoNothing().run()
+}
+
+function mirrorTag(db: ReturnType<typeof createTestDb>, userId: string, tagId: string) {
+  const libraryId = ensureLibrary(db, userId)
+  const tag = db.select().from(schema.tags).where(eq(schema.tags.id, tagId)).get()!
+  db.insert(schema.libraryTags).values({
+    id: tag.id, libraryId, userId, name: tag.name,
+    sortOrder: tag.sortOrder, pinned: tag.pinned, createdAt: tag.createdAt, updatedAt: tag.updatedAt,
+  }).onConflictDoNothing().run()
+}
+
+function linkLibraryTag(db: ReturnType<typeof createTestDb>, bookId: string, tagId: string) {
+  const lbv = db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
+    .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, bookId)).get()!
+  db.insert(schema.libraryBookTags).values({ libraryBookId: lbv.libraryBookId, tagId }).onConflictDoNothing().run()
+}
+
+// Post-switch assertions read the new model: legacy books rows stay frozen
+// until Phase 12, so presence/absence checks target the library book.
+function libraryBookOf(db: ReturnType<typeof createTestDb>, bookId: string) {
+  const lbv = db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
+    .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, bookId)).get()
+  if (!lbv) return undefined
+  return db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, lbv.libraryBookId)).get()
+}
+
 function seedBook(
   db: ReturnType<typeof createTestDb>,
   userId: string,
@@ -123,6 +172,51 @@ function seedBook(
     ...overrides,
   }
   db.insert(schema.books).values(book).run()
+  // New-model mirror so rewired reads resolve (3.1): versions reuse the book
+  // id, revision meta carries the legacy meta, states mirror row fields.
+  const libraryId = ensureLibrary(db, userId)
+  const meta = (book.meta ?? {}) as Record<string, unknown>
+  const chapters = Array.isArray(meta.chapters) ? meta.chapters : []
+  const bookmeta = (meta.bookmeta ?? {}) as Record<string, unknown>
+  // Shelves double as categories (2.5 id reuse): mirror the referenced shelf
+  // so classification survives the model switch without a mapping table.
+  if (book.shelfId) {
+    const shelf = db.select().from(schema.shelves).where(eq(schema.shelves.id, book.shelfId)).get()
+    if (shelf) {
+      db.insert(schema.libraryCategories).values({
+        id: shelf.id, libraryId, userId, name: shelf.name,
+        parentId: null, sortOrder: shelf.sortOrder, pinned: shelf.pinned, createdAt: shelf.createdAt, updatedAt: shelf.updatedAt,
+      }).onConflictDoNothing().run()
+    }
+  }
+  const libraryBookId = createId('lb')
+  db.insert(schema.bookVersions).values({
+    id: book.id, format: book.format, size: book.size, createdAt: book.createdAt, updatedAt: book.updatedAt,
+  }).run()
+  db.insert(schema.contentRevisions).values({
+    id: createId('rev'), bookVersionId: book.id, revisionNo: 1, blobKey: book.filePath,
+    size: book.size, wordCount: typeof meta.wordCount === 'number' ? meta.wordCount : null,
+    chapterCount: chapters.length, meta, createdAt: book.createdAt,
+  }).run()
+  db.insert(schema.libraryBooks).values({
+    id: libraryBookId, libraryId, userId, categoryId: book.shelfId ?? null,
+    title: book.title, author: book.author,
+    description: typeof bookmeta.description === 'string' ? bookmeta.description : '',
+    coverKey: book.coverKey, createdAt: book.createdAt, updatedAt: book.updatedAt,
+    deletedAt: book.deletedAt ?? null,
+  }).run()
+  db.insert(schema.libraryBookVersions).values({
+    id: createId('lbv'), libraryId, libraryBookId, bookVersionId: book.id,
+    kind: 'personal', pinnedAt: (book as { pinnedAt?: number | null }).pinnedAt ?? null,
+    createdAt: book.createdAt, updatedAt: book.updatedAt,
+  }).run()
+  db.insert(schema.bookStates).values({
+    userId, bookVersionId: book.id,
+    readStatus: (book as { readStatus?: 'wishlist' | 'reading' | 'idle' | 'finished' | 'abandoned' }).readStatus ?? 'reading',
+    percent: book.progress ?? 0, cfi: null, chapter: null,
+    lastReadAt: (book as { lastReadAt?: number | null }).lastReadAt ?? null,
+    updatedAt: book.updatedAt,
+  }).run()
   return book
 }
 
@@ -280,6 +374,8 @@ describe('uploadBook membership', () => {
     const tagId = createId('tag')
     db.insert(schema.shelves).values({ id: shelfId, userId: ownerId, name: '科幻', sortOrder: 0, createdAt: Date.now() }).run()
     db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
+    mirrorShelf(db, ownerId, shelfId)
+    mirrorTag(db, ownerId, tagId)
 
     const { book } = await uploadBook(ownerId, new File(['book content'], 'book.txt', { type: 'text/plain' }), {
       shelfId,
@@ -287,13 +383,14 @@ describe('uploadBook membership', () => {
     })
 
     expect(book.shelfId).toBe(shelfId)
-    expect(db.select().from(schema.bookTags).where(eq(schema.bookTags.bookId, book.id)).all()).toEqual([{ bookId: book.id, tagId }])
+    expect(await getBookTags(ownerId, book.id)).toEqual([tagId])
   })
 
   it('rejects membership owned by another user', async () => {
     const otherId = seedUser(db, 'other')
     const shelfId = createId('shelf')
     db.insert(schema.shelves).values({ id: shelfId, userId: otherId, name: 'Other', sortOrder: 0, createdAt: Date.now() }).run()
+    mirrorShelf(db, otherId, shelfId)
 
     await expect(
       uploadBook(ownerId, new File(['book content'], 'book.txt', { type: 'text/plain' }), { shelfId }),
@@ -307,6 +404,9 @@ describe('uploadBook membership', () => {
     db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
     db.insert(schema.shelves).values({ id: shelfA, userId: ownerId, name: 'A', sortOrder: 0, createdAt: Date.now() }).run()
     db.insert(schema.shelves).values({ id: shelfB, userId: ownerId, name: 'B', sortOrder: 1, createdAt: Date.now() }).run()
+    mirrorTag(db, ownerId, tagId)
+    mirrorShelf(db, ownerId, shelfA)
+    mirrorShelf(db, ownerId, shelfB)
 
     const file = new File(['dup membership content'], 'dup.txt', { type: 'text/plain' })
     const { book } = await uploadBook(ownerId, file, { shelfId: shelfA })
@@ -315,12 +415,11 @@ describe('uploadBook membership', () => {
     expect(duplicated).toBe(true)
     expect(dup.id).toBe(book.id)
     expect(dup.shelfId).toBe(shelfA)
-    const rows = db.select().from(schema.bookTags).where(eq(schema.bookTags.bookId, book.id)).all()
-    expect(rows).toEqual([{ bookId: book.id, tagId }])
+    expect(await getBookTags(ownerId, book.id)).toEqual([tagId])
 
     // re-applying the same tag must stay idempotent
     await uploadBook(ownerId, file, { tagIds: [tagId] })
-    expect(db.select().from(schema.bookTags).where(eq(schema.bookTags.bookId, book.id)).all()).toHaveLength(1)
+    expect(await getBookTags(ownerId, book.id)).toHaveLength(1)
   })
 })
 
@@ -338,11 +437,10 @@ describe('lazy EPUB cover repair', () => {
   })
 
   it('rebuilds a missing cover key from the stored EPUB', async () => {
-    const filePath = 'blobs/ep/book.epub'
+    const filePath = `blobs/aa/${'a'.repeat(64)}.epub`
     const book = seedBook(db, userId, {
       format: 'epub',
       filePath,
-      contentHash: 'a'.repeat(64),
     })
     mem.files.set(filePath, Buffer.from('epub-bytes'))
 
@@ -350,7 +448,7 @@ describe('lazy EPUB cover repair', () => {
 
     expect(cover?.coverKey).toBe(`blobs/aa/${'a'.repeat(64)}.cover.jpg`)
     expect(mem.files.get(cover!.coverKey)).toEqual(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
-    expect(db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()?.coverKey).toBe(cover?.coverKey)
+    expect(libraryBookOf(db, book.id)?.coverKey).toBe(cover?.coverKey)
   })
 
   it('does not resurrect a cover after the user removes it', async () => {
@@ -429,6 +527,8 @@ describe('POST /api/v1/books upload membership', () => {
     tagId = createId('tag')
     db.insert(schema.shelves).values({ id: shelfId, userId: ownerId, name: '科幻', sortOrder: 0, createdAt: Date.now() }).run()
     db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
+    mirrorShelf(db, ownerId, shelfId)
+    mirrorTag(db, ownerId, tagId)
   })
 
   function createUploadApp() {
@@ -453,11 +553,15 @@ describe('POST /api/v1/books upload membership', () => {
     expect(response.status).toBe(201)
     const payload = await response.json() as { data: { id: string; shelfId: string } }
     expect(payload.data.shelfId).toBe(shelfId)
-    expect(db.select().from(schema.bookTags).where(eq(schema.bookTags.bookId, payload.data.id)).all()).toEqual([{ bookId: payload.data.id, tagId }])
+    expect(await getBookTags(ownerId, payload.data.id)).toEqual([tagId])
   })
 
   it('rejects uploads above the owner-set instance cap', async () => {
-    db.insert(schema.instanceSettings).values({ key: 'uploadMaxBytes', value: String(5 * 1024 * 1024) }).run()
+    db.insert(schema.instance).values({
+      id: 'instance', ownerUserId: ownerId, allowRegistration: false,
+      allowGuestAccess: false, uploadMaxBytes: 5 * 1024 * 1024,
+      createdAt: Date.now(), updatedAt: Date.now(),
+    }).run()
     resetInstanceCache()
     const body = new FormData()
     body.append('file', new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'big.txt', { type: 'text/plain' }))
@@ -507,12 +611,15 @@ describe('listBooks search escaping', () => {
     const tagId = createId('tag')
     db.insert(schema.shelves).values({ id: shelfId, userId: ownerId, name: '历史小说', sortOrder: 0, createdAt: Date.now() }).run()
     db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '宫斗', sortOrder: 0 }).run()
+    mirrorShelf(db, ownerId, shelfId)
+    mirrorTag(db, ownerId, tagId)
     const book = seedBook(db, ownerId, {
       title: 'Metadata Book',
       shelfId,
       meta: { bookmeta: { description: '简介关键词', series: '王朝系列', subjects: ['古代'] } },
     })
     db.insert(schema.bookTags).values({ bookId: book.id, tagId }).run()
+    linkLibraryTag(db, book.id, tagId)
 
     const byShelf = await listBooks(ownerId, 1, 20, '历史小说')
     const byTag = await listBooks(ownerId, 1, 20, '宫斗')
@@ -717,7 +824,7 @@ describe('trash disabled mode (routes)', () => {
 
     const response = await createApp().request(`/api/v1/books/${book.id}`, { method: 'DELETE' })
     expect(response.status).toBe(200)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()).toBeUndefined()
+    expect(libraryBookOf(db, book.id)).toBeUndefined()
     expect(mem.files.has(book.filePath)).toBe(false)
   })
 
@@ -726,7 +833,7 @@ describe('trash disabled mode (routes)', () => {
 
     const response = await createApp().request(`/api/v1/books/${book.id}`, { method: 'DELETE' })
     expect(response.status).toBe(200)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()!.deletedAt).not.toBeNull()
+    expect(libraryBookOf(db, book.id)!.deletedAt).not.toBeNull()
   })
 
   it('rejects trash listing, restore and empty-trash with TRASH_DISABLED when off', async () => {
@@ -748,8 +855,8 @@ describe('trash disabled mode (routes)', () => {
 
     const response = await putTrash({ trash: { enabled: false } })
     expect(response.status).toBe(200)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, trashed.id)).get()).toBeUndefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, active.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, trashed.id)).toBeUndefined()
+    expect(libraryBookOf(db, active.id)).toBeDefined()
     expect(mem.files.has(trashed.filePath)).toBe(false)
   })
 
@@ -895,7 +1002,7 @@ describe('books ownership', () => {
 
   it('should reject cross-user update with BOOK_NOT_FOUND', async () => {
     await expect(updateBook(otherId, book.id, { title: 'Hijacked' })).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
-    const unchanged = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()
+    const unchanged = libraryBookOf(db, book.id)
     expect(unchanged!.title).toBe('Test Book')
   })
 
@@ -903,7 +1010,7 @@ describe('books ownership', () => {
     await expect(trashBook(otherId, book.id)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
     await expect(restoreBook(otherId, book.id)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
     await expect(deleteBook(otherId, book.id)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
-    const stillThere = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()
+    const stillThere = libraryBookOf(db, book.id)
     expect(stillThere).toBeDefined()
     expect(stillThere!.deletedAt).toBeNull()
   })
@@ -923,7 +1030,9 @@ describe('updateBook viewSettings (per-book reading settings)', () => {
   })
 
   function metaOf() {
-    const row = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()!
+    const row = db.select({ meta: schema.contentRevisions.meta }).from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id))
+      .orderBy(desc(schema.contentRevisions.revisionNo)).all().at(0)!
     return row.meta as Record<string, unknown>
   }
 
@@ -968,7 +1077,9 @@ describe('updateBook coverPaletteId (pinned placeholder cover palette)', () => {
   })
 
   function metaOf() {
-    const row = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()!
+    const row = db.select({ meta: schema.contentRevisions.meta }).from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id))
+      .orderBy(desc(schema.contentRevisions.revisionNo)).all().at(0)!
     return row.meta as Record<string, unknown>
   }
 
@@ -1009,7 +1120,9 @@ describe('updateBook boundPresetId (per-book preset binding)', () => {
   })
 
   function metaOf() {
-    const row = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()!
+    const row = db.select({ meta: schema.contentRevisions.meta }).from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id))
+      .orderBy(desc(schema.contentRevisions.revisionNo)).all().at(0)!
     return row.meta as Record<string, unknown>
   }
 
@@ -1064,7 +1177,7 @@ describe('deleteBook blob reference protection', () => {
     await deleteBook(userA, bookA.id)
     expect(mem.files.has(sharedFile)).toBe(true)
     expect(mem.files.has(sharedCover)).toBe(true)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, bookA.id)).get()).toBeUndefined()
+    expect(libraryBookOf(db, bookA.id)).toBeUndefined()
 
     await deleteBook(userB, bookB.id)
     expect(mem.files.has(sharedFile)).toBe(false)
@@ -1113,8 +1226,8 @@ describe('purgeExpiredTrash', () => {
 
     const purged = await purgeExpiredTrash(userId, 30)
     expect(purged).toBe(1)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, expired.id)).get()).toBeUndefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, recent.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, expired.id)).toBeUndefined()
+    expect(libraryBookOf(db, recent.id)).toBeDefined()
   })
 
   it('should not touch active books or other users trash', async () => {
@@ -1123,8 +1236,8 @@ describe('purgeExpiredTrash', () => {
     const others = seedBook(db, otherId, { deletedAt: Date.now() - 90 * DAY_MS })
 
     await purgeExpiredTrash(userId, 30)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, active.id)).get()).toBeDefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, others.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, active.id)).toBeDefined()
+    expect(libraryBookOf(db, others.id)).toBeDefined()
   })
 
   it('should skip purging entirely when days is 0 (never auto-clean)', async () => {
@@ -1132,7 +1245,7 @@ describe('purgeExpiredTrash', () => {
 
     const purged = await purgeExpiredTrash(userId, 0)
     expect(purged).toBe(0)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, expired.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, expired.id)).toBeDefined()
   })
 })
 
@@ -1159,10 +1272,10 @@ describe('purgeTrashToCapacity', () => {
     // total trash 3MB over a 1.5MB cap: only the oldest row has to go (2MB is still over → two rows)
     const purged = await purgeTrashToCapacity(userId, 1.5 * MB)
     expect(purged).toBe(2)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, oldest.id)).get()).toBeUndefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, middle.id)).get()).toBeUndefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, newest.id)).get()).toBeDefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, active.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, oldest.id)).toBeUndefined()
+    expect(libraryBookOf(db, middle.id)).toBeUndefined()
+    expect(libraryBookOf(db, newest.id)).toBeDefined()
+    expect(libraryBookOf(db, active.id)).toBeDefined()
   })
 
   it('purges a single book that alone exceeds the cap', async () => {
@@ -1170,7 +1283,7 @@ describe('purgeTrashToCapacity', () => {
 
     const purged = await purgeTrashToCapacity(userId, 5 * MB)
     expect(purged).toBe(1)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, oversized.id)).get()).toBeUndefined()
+    expect(libraryBookOf(db, oversized.id)).toBeUndefined()
   })
 
   it('keeps trash untouched when total is at or under the cap', async () => {
@@ -1179,8 +1292,8 @@ describe('purgeTrashToCapacity', () => {
 
     const purged = await purgeTrashToCapacity(userId, 5 * MB)
     expect(purged).toBe(0)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, a.id)).get()).toBeDefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, b.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, a.id)).toBeDefined()
+    expect(libraryBookOf(db, b.id)).toBeDefined()
   })
 
   it('disables eviction when the cap is 0', async () => {
@@ -1188,7 +1301,7 @@ describe('purgeTrashToCapacity', () => {
 
     const purged = await purgeTrashToCapacity(userId, 0)
     expect(purged).toBe(0)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, kept.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, kept.id)).toBeDefined()
   })
 
   it("never evicts another user's trash", async () => {
@@ -1198,8 +1311,8 @@ describe('purgeTrashToCapacity', () => {
 
     const purged = await purgeTrashToCapacity(userId, 5 * MB)
     expect(purged).toBe(1)
-    expect(db.select().from(schema.books).where(eq(schema.books.id, mine.id)).get()).toBeUndefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, theirs.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, mine.id)).toBeUndefined()
+    expect(libraryBookOf(db, theirs.id)).toBeDefined()
   })
 })
 
@@ -1227,10 +1340,10 @@ describe('purgeAllExpiredTrash (boot sweep)', () => {
 
     await purgeAllExpiredTrash()
 
-    expect(db.select().from(schema.books).where(eq(schema.books.id, oldA.id)).get()).toBeUndefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, oldB.id)).get()).toBeUndefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, freshB.id)).get()).toBeDefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, activeA.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, oldA.id)).toBeUndefined()
+    expect(libraryBookOf(db, oldB.id)).toBeUndefined()
+    expect(libraryBookOf(db, freshB.id)).toBeDefined()
+    expect(libraryBookOf(db, activeA.id)).toBeDefined()
   })
 
   it('respects auto-clean disabled (days <= 0) per user', async () => {
@@ -1239,7 +1352,7 @@ describe('purgeAllExpiredTrash (boot sweep)', () => {
     const expired = seedBook(db, a, { deletedAt: Date.now() - 365 * DAY_MS })
 
     await purgeAllExpiredTrash()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, expired.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, expired.id)).toBeDefined()
   })
 
   it('applies the per-user size cap even when day auto-clean is disabled', async () => {
@@ -1253,10 +1366,10 @@ describe('purgeAllExpiredTrash (boot sweep)', () => {
     await purgeAllExpiredTrash()
 
     // a: 200 > 150 cap → oldest evicted, newest (100 <= 150) survives the fresh time rule
-    expect(db.select().from(schema.books).where(eq(schema.books.id, oldestA.id)).get()).toBeUndefined()
-    expect(db.select().from(schema.books).where(eq(schema.books.id, newestA.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, oldestA.id)).toBeUndefined()
+    expect(libraryBookOf(db, newestA.id)).toBeDefined()
     // b has no cap: oversized trash is untouched without a day deadline
-    expect(db.select().from(schema.books).where(eq(schema.books.id, keptB.id)).get()).toBeDefined()
+    expect(libraryBookOf(db, keptB.id)).toBeDefined()
   })
 })
 
@@ -1385,7 +1498,9 @@ describe('GET /api/v1/books/:id/file range requests', () => {
     }).jpeg().toBuffer()
     const coverKey = 'blobs/co/cover-test.cover.jpg'
     mem.files.set(coverKey, realJpg)
-    db.update(schema.books).set({ coverKey }).where(eq(schema.books.id, book.id)).run()
+    const lbv = db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
+      .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, book.id)).get()!
+    db.update(schema.libraryBooks).set({ coverKey }).where(eq(schema.libraryBooks.id, lbv.libraryBookId)).run()
 
     // Default request returns webp thumbnail
     const resThumb = await createFileApp().request(`/api/v1/books/${book.id}/cover`)
@@ -1415,6 +1530,7 @@ describe('book shelf membership (single shelf)', () => {
   function seedShelf(name: string, userId = ownerId) {
     const id = createId('shelf')
     db.insert(schema.shelves).values({ id, userId, name, sortOrder: 0, createdAt: Date.now() }).run()
+    mirrorShelf(db, userId, id)
     return id
   }
 
@@ -1465,12 +1581,14 @@ describe('listBooks shelfName and tags', () => {
   function seedShelf(name: string) {
     const id = createId('shelf')
     db.insert(schema.shelves).values({ id, userId: ownerId, name, sortOrder: 0, createdAt: Date.now() }).run()
+    mirrorShelf(db, ownerId, id)
     return id
   }
 
   function seedTag(name: string) {
     const id = createId('tag')
     db.insert(schema.tags).values({ id, userId: ownerId, name }).run()
+    mirrorTag(db, ownerId, id)
     return id
   }
 
@@ -1483,6 +1601,8 @@ describe('listBooks shelfName and tags', () => {
       { bookId: book.id, tagId: tagA },
       { bookId: book.id, tagId: tagB },
     ]).run()
+    linkLibraryTag(db, book.id, tagA)
+    linkLibraryTag(db, book.id, tagB)
 
     const res = await listBooks(ownerId, 1, 20)
     const row = res.data.find((b) => b.id === book.id)!
@@ -1506,6 +1626,8 @@ describe('listBooks shelfName and tags', () => {
       { bookId: book.id, tagId: tagA },
       { bookId: book.id, tagId: tagB },
     ]).run()
+    linkLibraryTag(db, book.id, tagA)
+    linkLibraryTag(db, book.id, tagB)
 
     const res = await listBooks(ownerId, 1, 20)
     expect(res.total).toBe(1)
@@ -1585,7 +1707,8 @@ describe('appendTxtBookContent', () => {
       rateSamples: [{ at: 1, fraction: 0.4 }],
       updatedAt: 123,
     }), 'utf-8'))
-    db.update(schema.books).set({ readStatus: 'finished' }).where(eq(schema.books.id, book.id)).run()
+    db.update(schema.bookStates).set({ readStatus: 'finished' })
+      .where(and(eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, book.id))).run()
 
     const updated = await appendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
     const stream = await store.get(progressKey)

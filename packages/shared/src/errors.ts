@@ -1,5 +1,7 @@
 export const ErrorCode = {
   BOOK_NOT_FOUND: 'BOOK_NOT_FOUND',
+  LIBRARY_NOT_FOUND: 'LIBRARY_NOT_FOUND',
+  LIBRARY_VERSION_NOT_FOUND: 'LIBRARY_VERSION_NOT_FOUND',
   SHELF_NOT_FOUND: 'SHELF_NOT_FOUND',
   SHELF_NAME_TAKEN: 'SHELF_NAME_TAKEN',
   TAG_NOT_FOUND: 'TAG_NOT_FOUND',
@@ -56,6 +58,8 @@ export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 
 export const ErrorHttpStatus: Record<ErrorCode, number> = {
   BOOK_NOT_FOUND: 404,
+  LIBRARY_NOT_FOUND: 404,
+  LIBRARY_VERSION_NOT_FOUND: 404,
   SHELF_NOT_FOUND: 404,
   SHELF_NAME_TAKEN: 409,
   TAG_NOT_FOUND: 404,

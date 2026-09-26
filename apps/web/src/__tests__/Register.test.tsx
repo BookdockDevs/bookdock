@@ -63,7 +63,7 @@ describe('Register', () => {
     expect(screen.getByText('auth.errors.usernameRequired')).toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()
 
-    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'x'.repeat(31) } })
+    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'x'.repeat(33) } })
     fireEvent.click(screen.getByText('auth.register'))
     expect(screen.getByText('auth.errors.registerUsernameTooLong')).toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()
@@ -78,8 +78,8 @@ describe('Register', () => {
     fireEvent.click(screen.getByText('auth.register'))
     expect(screen.getByText('auth.errors.passwordRequired')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: 'x'.repeat(257) } })
-    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'x'.repeat(257) } })
+    fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: 'x'.repeat(129) } })
+    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'x'.repeat(129) } })
     fireEvent.click(screen.getByText('auth.register'))
     expect(screen.getByText('auth.errors.passwordTooLong')).toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()

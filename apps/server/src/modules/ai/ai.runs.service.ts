@@ -7,7 +7,7 @@ import { normalizeAiCitationMarkers } from '@bookdock/shared'
 import type { AiCitation, AiGenerationDiagnostics, AiGenerationRunRes, AiGenerationState, AiGenerationTerminalReason, AiGenerationUsage, AiNormalizedEvent } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { aiGenerationRuns, aiMessageEvents, aiMessages, aiThreads, books } from '../../db/schema'
+import { aiGenerationRuns, aiMessageEvents, aiMessages, aiThreads, books, libraries, libraryBookVersions } from '../../db/schema'
 import type * as dbSchema from '../../db/schema'
 import { createId } from '../../lib/id'
 import { log } from '../../lib/logger'
@@ -186,7 +186,14 @@ function ownedRun(userId: string, runId: string) {
     eq(books.userId, userId),
     isNull(books.deletedAt),
   )).get()
-  if (!book) throw new AppError('AI_RUN_NOT_FOUND', 'AI generation run not found')
+  if (!book) {
+    // Version-native books have no legacy row: readability is the private library.
+    const library = getDb().select({ id: libraries.id }).from(libraries)
+      .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+    const version = library && getDb().select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+      .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, thread.bookId))).get()
+    if (!version) throw new AppError('AI_RUN_NOT_FOUND', 'AI generation run not found')
+  }
   return row
 }
 

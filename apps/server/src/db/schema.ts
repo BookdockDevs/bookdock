@@ -1,11 +1,15 @@
 import { sql } from 'drizzle-orm'
-import { sqliteTable, text, integer, real, blob, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, real, blob, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 import type { AccessTokenPermission, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
   username: text('username').notNull().unique(),
+  // Trimmed/NFKC/case-folded identity; NULL during the compat window
+  // (the UNIQUE index in 0008 ignores NULLs, so backfill in Phase 2 cannot collide).
+  usernameNormalized: text('username_normalized').unique(),
+  bio: text('bio').notNull().default(''),
   passwordHash: text('password_hash'),
   role: text('role', { enum: ['owner', 'member', 'guest'] }).notNull().default('owner'),
   disabled: integer('disabled').notNull().default(0),
@@ -131,13 +135,16 @@ export const ttsServices = sqliteTable('tts_services', {
 export const aiThreads = sqliteTable('ai_threads', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  // New-model reference (2.8); backfilled by the Phase 2 service, never in SQL.
+  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   settings: text('settings', { mode: 'json' }).$type<AiThreadSettings | null>(),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   userBookUpdatedIdx: index('ai_threads_user_book_updated_idx').on(table.userId, table.bookId, table.updatedAt),
+  versionIdx: index('ai_threads_book_version_idx').on(table.bookVersionId),
 }))
 
 export const aiMessages = sqliteTable('ai_messages', {
@@ -207,7 +214,8 @@ export const aiGenerationRuns = sqliteTable('ai_generation_runs', {
 export const aiBookIndexes = sqliteTable('ai_book_indexes', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
   sourceVersion: text('source_version').notNull(),
   status: text('status', { enum: ['indexing', 'ready', 'failed'] }).notNull(),
   embeddingStatus: text('embedding_status', { enum: ['not_indexed', 'indexing', 'ready', 'failed', 'unavailable'] }).notNull().default('unavailable'),
@@ -222,13 +230,15 @@ export const aiBookIndexes = sqliteTable('ai_book_indexes', {
 }, (table) => ({
   userBookUnique: uniqueIndex('ai_book_indexes_user_book_unique').on(table.userId, table.bookId),
   userStatusUpdatedIdx: index('ai_book_indexes_user_status_updated_idx').on(table.userId, table.status, table.updatedAt),
+  versionIdx: index('ai_book_indexes_book_version_idx').on(table.bookVersionId),
 }))
 
 export const aiChunks = sqliteTable('ai_chunks', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   indexId: text('index_id').notNull().references(() => aiBookIndexes.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
   chapterIndex: integer('chapter_index').notNull(),
   chapterId: text('chapter_id').notNull(),
   chapterTitle: text('chapter_title').notNull(),
@@ -239,6 +249,7 @@ export const aiChunks = sqliteTable('ai_chunks', {
 }, (table) => ({
   userBookChapterIdx: index('ai_chunks_user_book_chapter_idx').on(table.userId, table.bookId, table.chapterIndex, table.startOffset),
   indexIdIdx: index('ai_chunks_index_id_idx').on(table.indexId),
+  versionIdx: index('ai_chunks_book_version_idx').on(table.bookVersionId),
 }))
 
 export const aiChunkEmbeddings = sqliteTable('ai_chunk_embeddings', {
@@ -246,7 +257,8 @@ export const aiChunkEmbeddings = sqliteTable('ai_chunk_embeddings', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   indexId: text('index_id').notNull().references(() => aiBookIndexes.id, { onDelete: 'cascade' }),
   chunkId: text('chunk_id').notNull().references(() => aiChunks.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
   model: text('model').notNull(),
   dimension: integer('dimension').notNull(),
   vector: blob('vector', { mode: 'buffer' }).notNull(),
@@ -254,6 +266,7 @@ export const aiChunkEmbeddings = sqliteTable('ai_chunk_embeddings', {
 }, (table) => ({
   indexChunkUnique: uniqueIndex('ai_chunk_embeddings_index_chunk_unique').on(table.indexId, table.chunkId),
   userBookIdx: index('ai_chunk_embeddings_user_book_idx').on(table.userId, table.bookId, table.indexId),
+  versionIdx: index('ai_chunk_embeddings_book_version_idx').on(table.bookVersionId),
 }))
 
 export const instanceSettings = sqliteTable('instance_settings', {
@@ -291,7 +304,8 @@ export const annotations = sqliteTable('annotations', {
 export const textReplacements = sqliteTable('text_replacements', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').references(() => books.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
   matchType: text('match_type', { enum: ['pattern', 'point'] }).notNull().default('pattern'),
   pattern: text('pattern'),
   replacement: text('replacement'),
@@ -309,6 +323,7 @@ export const textReplacements = sqliteTable('text_replacements', {
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   userBookIdx: index('text_replacements_user_book_idx').on(table.userId, table.bookId),
+  versionIdx: index('text_replacements_book_version_idx').on(table.bookVersionId),
 }))
 
 // Per-book enable overrides for pattern rules: a row's existence is the override,
@@ -316,7 +331,8 @@ export const textReplacements = sqliteTable('text_replacements', {
 export const textReplacementOverrides = sqliteTable('text_replacement_overrides', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
   replacementId: text('replacement_id').notNull().references(() => textReplacements.id, { onDelete: 'cascade' }),
   enabled: integer('enabled').notNull(),
   createdAt: integer('created_at').notNull(),
@@ -324,6 +340,7 @@ export const textReplacementOverrides = sqliteTable('text_replacement_overrides'
 }, (table) => ({
   bookReplacementUnique: uniqueIndex('text_replacement_overrides_book_replacement_unique').on(table.bookId, table.replacementId),
   userBookIdx: index('text_replacement_overrides_user_book_idx').on(table.userId, table.bookId),
+  versionIdx: index('text_replacement_overrides_book_version_idx').on(table.bookVersionId),
 }))
 
 export const fonts = sqliteTable('fonts', {
@@ -364,13 +381,15 @@ export const tocRules = sqliteTable('toc_rules', {
 export const readingRecords = sqliteTable('reading_records', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
   // Client-local calendar day of the session start ('YYYY-MM-DD'), one row per user+book+day
   date: text('date').notNull(),
   durationSeconds: integer('duration_seconds').notNull().default(0),
 }, (table) => ({
   userBookDateIdx: uniqueIndex('reading_records_user_book_date_idx').on(table.userId, table.bookId, table.date),
   userDateIdx: index('reading_records_user_date_idx').on(table.userId, table.date),
+  versionIdx: index('reading_records_book_version_idx').on(table.bookVersionId),
 }))
 
 // Fine-grained session detail: one row per reported reading block, kept for
@@ -383,7 +402,8 @@ export const readingRecords = sqliteTable('reading_records', {
 export const readingSessions = sqliteTable('reading_sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
+  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
   // Client-local calendar day of the session start ('YYYY-MM-DD')
   date: text('date').notNull(),
   // Nullable for retroactive manual entries recorded without a start time
@@ -398,4 +418,262 @@ export const readingSessions = sqliteTable('reading_sessions', {
   endChapterIndex: integer('end_chapter_index'),
 }, (table) => ({
   userDateIdx: index('reading_sessions_user_date_idx').on(table.userId, table.date),
+  versionIdx: index('reading_sessions_book_version_idx').on(table.bookVersionId),
+}))
+
+// Library foundation (Phase 1): structure only, no data migration yet.
+// `user_id` on libraries/library_books/library_categories/library_tags is
+// the owner/tenant key (exposed on the wire as ownerUserId), so the
+// per-user scoping rule needs no second column. Source ids on
+// library_book_versions and ideas.sharedLibraryId are plain text on purpose:
+// provenance must survive the deletion of whatever they point at, which no
+// FK cascade/SET NULL/restrict can express.
+export const libraries = sqliteTable('libraries', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  type: text('type', { enum: ['private', 'shared'] }).notNull(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  visibility: text('visibility', { enum: ['public', 'password', 'private'] }),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  userTypeIdx: index('libraries_user_type_idx').on(table.userId, table.type),
+}))
+
+export const libraryMemberships = sqliteTable('library_memberships', {
+  id: text('id').primaryKey(),
+  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text('role', { enum: ['admin', 'member'] }).notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  libraryUserUnique: uniqueIndex('library_memberships_library_user_unique').on(table.libraryId, table.userId),
+  userIdx: index('library_memberships_user_idx').on(table.userId),
+}))
+
+export const libraryBooks = sqliteTable('library_books', {
+  id: text('id').primaryKey(),
+  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id),
+  categoryId: text('category_id').references(() => libraryCategories.id, { onDelete: 'set null' }),
+  title: text('title').notNull(),
+  author: text('author').notNull().default(''),
+  description: text('description').notNull().default(''),
+  coverKey: text('cover_key'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  // Soft delete carried over from books.deletedAt; trash behavior cuts over in Phase 3.
+  deletedAt: integer('deleted_at'),
+}, (table) => ({
+  libraryIdx: index('library_books_library_idx').on(table.libraryId, table.updatedAt),
+  categoryIdx: index('library_books_category_idx').on(table.categoryId),
+}))
+
+export const bookVersions = sqliteTable('book_versions', {
+  id: text('id').primaryKey(),
+  format: text('format', { enum: ['epub', 'txt'] }).notNull(),
+  size: integer('size').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+export const libraryBookVersions = sqliteTable('library_book_versions', {
+  id: text('id').primaryKey(),
+  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
+  libraryBookId: text('library_book_id').notNull().references(() => libraryBooks.id, { onDelete: 'cascade' }),
+  // Restrict (default NO ACTION): a version with library entries cannot be deleted.
+  bookVersionId: text('book_version_id').notNull().references(() => bookVersions.id),
+  kind: text('kind', { enum: ['personal', 'shared', 'local'] }).notNull(),
+  status: text('status', { enum: ['published', 'unlisted'] }).notNull().default('published'),
+  name: text('name').notNull().default(''),
+  // Null = inherit the LibraryBook default; never a copied value.
+  title: text('title'),
+  author: text('author'),
+  description: text('description'),
+  coverKey: text('cover_key'),
+  sourceLibraryId: text('source_library_id'),
+  sourceLibraryBookVersionId: text('source_library_book_version_id'),
+  pinnedRevisionId: text('pinned_revision_id').references(() => contentRevisions.id),
+  // Sort-first pin carried over from books.pinned_at (private cards keep order).
+  pinnedAt: integer('pinned_at'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  bookIdx: index('library_book_versions_book_idx').on(table.libraryBookId),
+  versionIdx: index('library_book_versions_version_idx').on(table.bookVersionId),
+  // One B per BookVersion per private library; enforced in service code against
+  // (libraryId, bookVersionId, kind) because A/C duplicates are legitimate.
+  libraryVersionIdx: index('library_book_versions_library_version_idx').on(table.libraryId, table.bookVersionId),
+}))
+
+export const contentRevisions = sqliteTable('content_revisions', {
+  id: text('id').primaryKey(),
+  bookVersionId: text('book_version_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  revisionNo: integer('revision_no').notNull(),
+  blobKey: text('blob_key').notNull(),
+  size: integer('size').notNull(),
+  wordCount: integer('word_count'),
+  chapterCount: integer('chapter_count').notNull().default(0),
+  // Full BookMeta shape (chapters, embedded metadata, reader prefs, TOC pins):
+  // the revision that produced the content owns its derived data. Readers
+  // prefer this over the frozen legacy books.meta fallback.
+  meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  versionRevisionUnique: uniqueIndex('content_revisions_version_revision_unique').on(table.bookVersionId, table.revisionNo),
+  blobIdx: index('content_revisions_blob_idx').on(table.blobKey),
+}))
+
+export const blobs = sqliteTable('blobs', {
+  key: text('key').primaryKey(),
+  size: integer('size').notNull(),
+  kind: text('kind', { enum: ['book', 'cover'] }).notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
+export const libraryCategories = sqliteTable('library_categories', {
+  id: text('id').primaryKey(),
+  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id),
+  name: text('name').notNull(),
+  parentId: text('parent_id').references((): AnySQLiteColumn => libraryCategories.id, { onDelete: 'set null' }),
+  sortOrder: integer('sort_order').notNull().default(0),
+  // Sidebar pin-to-top flag, orthogonal to every sort mode (mirrors shelves.pinned).
+  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  libraryIdx: index('library_categories_library_idx').on(table.libraryId, table.sortOrder),
+  parentIdx: index('library_categories_parent_idx').on(table.parentId),
+}))
+
+export const libraryTags = sqliteTable('library_tags', {
+  id: text('id').primaryKey(),
+  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id),
+  name: text('name').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  libraryNameUnique: uniqueIndex('library_tags_library_name_unique').on(table.libraryId, table.name),
+  libraryIdx: index('library_tags_library_idx').on(table.libraryId, table.sortOrder),
+}))
+
+export const libraryBookTags = sqliteTable('library_book_tags', {
+  libraryBookId: text('library_book_id').notNull().references(() => libraryBooks.id, { onDelete: 'cascade' }),
+  tagId: text('tag_id').notNull().references(() => libraryTags.id, { onDelete: 'cascade' }),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.libraryBookId, table.tagId] }),
+  tagIdx: index('library_book_tags_tag_idx').on(table.tagId),
+}))
+
+// Single-row deployment record. Replaces instance_settings once migrated;
+// null uploadMaxBytes falls back to the UPLOAD_MAX_BYTES env default.
+export const instance = sqliteTable('instance', {
+  id: text('id').primaryKey(),
+  ownerUserId: text('owner_user_id').notNull().references(() => users.id),
+  allowRegistration: integer('allow_registration', { mode: 'boolean' }).notNull().default(false),
+  allowGuestAccess: integer('allow_guest_access', { mode: 'boolean' }).notNull().default(false),
+  uploadMaxBytes: integer('upload_max_bytes'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+}, (table) => ({
+  userExpiryIdx: index('sessions_user_expiry_idx').on(table.userId, table.expiresAt),
+}))
+
+// Phase 0/2 migration ledger (0.4): one row per batch; completed batches
+// refuse reruns. Human-readable verification reports land in files, not here.
+export const libraryMigrationLog = sqliteTable('library_migration_log', {
+  id: text('id').primaryKey(),
+  batch: text('batch').notNull(),
+  status: text('status', { enum: ['started', 'completed', 'failed'] }).notNull(),
+  details: text('details', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+  startedAt: integer('started_at').notNull(),
+  finishedAt: integer('finished_at'),
+})
+
+// Reading entities (Phase 1): User x BookVersion dimension from day one.
+// revisionId and ideas.sharedLibraryId are plain text without FKs: anchors
+// and provenance must outlive whatever they point at.
+export const bookStates = sqliteTable('book_states', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  readStatus: text('read_status', { enum: ['wishlist', 'reading', 'idle', 'finished', 'abandoned'] }).notNull().default('reading'),
+  percent: integer('percent').notNull().default(0),
+  cfi: text('cfi'),
+  chapter: text('chapter'),
+  // Last reading activity (books.last_read_at carry-over); position writes
+  // bump updated_at, reading alone bumps last_read_at.
+  lastReadAt: integer('last_read_at'),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.bookVersionId] }),
+}))
+
+export const highlights = sqliteTable('highlights', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  revisionId: text('revision_id'),
+  cfiRange: text('cfi_range').notNull(),
+  cfiAnchor: text('cfi_anchor'),
+  color: text('color').notNull().default('yellow'),
+  style: text('style').notNull().default('highlight'),
+  text: text('text').notNull().default(''),
+  chapter: text('chapter'),
+  chapterHref: text('chapter_href'),
+  relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  deletedAt: integer('deleted_at'),
+}, (table) => ({
+  userVersionIdx: index('highlights_user_version_idx').on(table.userId, table.bookVersionId, table.deletedAt),
+  userVersionCfiUnique: uniqueIndex('highlights_user_version_cfi_unique').on(table.userId, table.bookVersionId, table.cfiRange),
+}))
+
+export const bookmarks = sqliteTable('bookmarks', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  revisionId: text('revision_id'),
+  cfi: text('cfi'),
+  chapter: text('chapter'),
+  title: text('title'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  deletedAt: integer('deleted_at'),
+}, (table) => ({
+  userVersionIdx: index('bookmarks_user_version_idx').on(table.userId, table.bookVersionId, table.deletedAt),
+  userVersionCfiUnique: uniqueIndex('bookmarks_user_version_cfi_unique').on(table.userId, table.bookVersionId, table.cfi),
+}))
+
+export const ideas = sqliteTable('ideas', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
+  cfiRange: text('cfi_range'),
+  text: text('text').notNull().default(''),
+  note: text('note'),
+  visibility: text('visibility', { enum: ['private', 'shared'] }).notNull().default('private'),
+  sharedLibraryId: text('shared_library_id'),
+  chapter: text('chapter'),
+  chapterHref: text('chapter_href'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  deletedAt: integer('deleted_at'),
+}, (table) => ({
+  userVersionIdx: index('ideas_user_version_idx').on(table.userId, table.bookVersionId, table.deletedAt),
+  sharedIdx: index('ideas_shared_idx').on(table.sharedLibraryId, table.visibility),
 }))

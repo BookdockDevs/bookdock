@@ -62,10 +62,30 @@ describe('shelves service', () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }).run()
+    // New-model mirror for rewired reads: private library, version, work, card.
+    const libraryId = createId('lib')
+    const now = Date.now()
+    db.insert(schema.libraries).values({
+      id: libraryId, userId, type: 'private', name: 'test',
+      description: '', visibility: null, createdAt: now, updatedAt: now,
+    }).run()
+    db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 100, createdAt: now, updatedAt: now }).run()
+    const libraryBookId = createId('lb')
+    db.insert(schema.libraryBooks).values({
+      id: libraryBookId, libraryId, userId, title: 'Test Book', createdAt: now, updatedAt: now,
+    }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: createId('lbv'), libraryId, libraryBookId, bookVersionId: bookId,
+      kind: 'personal', createdAt: now, updatedAt: now,
+    }).run()
   })
 
   function getBookShelfId(id: string) {
-    return db.select({ shelfId: schema.books.shelfId }).from(schema.books).where(eq(schema.books.id, id)).get()?.shelfId
+    const lbv = db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
+      .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, id)).get()
+    if (!lbv) return undefined
+    return db.select({ categoryId: schema.libraryBooks.categoryId })
+      .from(schema.libraryBooks).where(eq(schema.libraryBooks.id, lbv.libraryBookId)).get()?.categoryId
   }
 
   it('should create and list shelves', async () => {
@@ -130,10 +150,12 @@ describe('shelves service', () => {
     await moveBooksToShelf(userId, shelf.id, [bookId])
     expect((await listShelves(userId))[0].bookCount).toBe(1)
 
-    db.update(schema.books).set({ deletedAt: Date.now() }).where(eq(schema.books.id, bookId)).run()
+    const lbv = db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
+      .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, bookId)).get()!
+    db.update(schema.libraryBooks).set({ deletedAt: Date.now() }).where(eq(schema.libraryBooks.id, lbv.libraryBookId)).run()
     expect((await listShelves(userId))[0].bookCount).toBe(0)
 
-    db.update(schema.books).set({ deletedAt: null }).where(eq(schema.books.id, bookId)).run()
+    db.update(schema.libraryBooks).set({ deletedAt: null }).where(eq(schema.libraryBooks.id, lbv.libraryBookId)).run()
     expect((await listShelves(userId))[0].bookCount).toBe(1)
   })
 

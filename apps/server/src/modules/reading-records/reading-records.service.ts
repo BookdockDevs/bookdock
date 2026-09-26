@@ -14,7 +14,7 @@ import type {
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookTags, books, readingRecords, readingSessions, tags } from '../../db/schema'
+import { books, bookStates, bookVersions, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryTags, readingRecords, readingSessions } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { unionLength } from '../../lib/intervals'
 import { mergeProgressInterval, readProgressFile } from '../../lib/progress-file'
@@ -25,16 +25,31 @@ function assertBookOwnership(userId: string, bookId: string) {
   const book = db.select({ id: books.id }).from(books)
     .where(and(eq(books.id, bookId), eq(books.userId, userId), isNull(books.deletedAt)))
     .get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  if (book) return
+  // Version-native books have no legacy row: ownership is the private library.
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  const version = library && db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+    .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
+  if (!version) throw new AppError('BOOK_NOT_FOUND')
+}
+
+function versionIdIfMigrated(bookId: string): string | null {
+  const db = getDb()
+  return db.select({ id: bookVersions.id }).from(bookVersions).where(eq(bookVersions.id, bookId)).get()?.id ?? null
 }
 
 export async function addReadingTime(userId: string, body: ReadingRecordCreateReq) {
   assertBookOwnership(userId, body.bookId)
   const db = getDb()
+  // New rows bind the version when the book already migrated; history keeps
+  // flowing through bookId either way (0.3 id reuse).
+  const bookVersionId = versionIdIfMigrated(body.bookId)
   db.insert(readingRecords).values({
     id: createId('rr'),
     userId,
     bookId: body.bookId,
+    bookVersionId,
     date: body.date,
     durationSeconds: body.durationSeconds,
   }).onConflictDoUpdate({
@@ -45,6 +60,7 @@ export async function addReadingTime(userId: string, body: ReadingRecordCreateRe
     id: createId('rs'),
     userId,
     bookId: body.bookId,
+    bookVersionId,
     date: body.date,
     // Explicit null = retroactive entry without a known start time
     startedAt: body.startedAt === undefined ? Date.now() : body.startedAt,
@@ -102,13 +118,20 @@ function weekStart(date: string): string {
 
 async function computeTotalWordsRead(userId: string): Promise<number> {
   const db = getDb()
-  const rows = db.select({ id: books.id, meta: books.meta }).from(books)
-    .where(and(eq(books.userId, userId), isNull(books.deletedAt))).all()
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  if (!library) return 0
+  const versions = db.select({ versionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+    .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+    .where(and(eq(libraryBookVersions.libraryId, library.id), isNull(libraryBooks.deletedAt)))
+    .all()
   let total = 0
-  for (const row of rows) {
-    const wordCount = row.meta?.wordCount
+  for (const { versionId } of versions) {
+    const revision = db.select({ wordCount: contentRevisions.wordCount }).from(contentRevisions)
+      .where(eq(contentRevisions.bookVersionId, versionId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+    const wordCount = revision?.wordCount
     if (typeof wordCount !== 'number' || wordCount <= 0) continue
-    const progress = await readProgressFile(row.id)
+    const progress = await readProgressFile(versionId)
     if (!progress?.intervals) continue
     total += unionLength(progress.intervals) * wordCount
   }
@@ -213,15 +236,18 @@ export async function getByBook(userId: string, range: { from?: string; to?: str
   const db = getDb()
   return db.select({
     bookId: readingRecords.bookId,
-    title: books.title,
-    author: books.author,
-    coverKey: books.coverKey,
-    progress: books.progress,
-    readStatus: books.readStatus,
+    title: sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title}, ${books.title})`,
+    author: sql<string>`coalesce(${libraryBookVersions.author}, ${libraryBooks.author}, ${books.author})`,
+    coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey}, ${books.coverKey})`,
+    progress: sql<number>`coalesce(${bookStates.percent}, ${books.progress}, 0)`,
+    readStatus: sql<ReadingRecordBookItem['readStatus']>`coalesce(${bookStates.readStatus}, ${books.readStatus}, 'reading')`,
     durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
     days: sql<number>`count(distinct ${readingRecords.date})`,
   }).from(readingRecords)
-    .innerJoin(books, eq(readingRecords.bookId, books.id))
+    .leftJoin(books, eq(readingRecords.bookId, books.id))
+    .leftJoin(bookStates, and(eq(bookStates.bookVersionId, readingRecords.bookId), eq(bookStates.userId, userId)))
+    .leftJoin(libraryBookVersions, eq(libraryBookVersions.bookVersionId, readingRecords.bookId))
+    .leftJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
     .where(rangeConditions(userId, range))
     .groupBy(readingRecords.bookId)
     .orderBy(desc(sql`sum(${readingRecords.durationSeconds})`))
@@ -420,14 +446,15 @@ export async function getBookDetail(userId: string, bookId: string, limit: numbe
 export async function getByTag(userId: string, range: { from?: string; to?: string }): Promise<ReadingRecordTagItem[]> {
   const db = getDb()
   return db.select({
-    tagId: bookTags.tagId,
-    name: tags.name,
+    tagId: libraryBookTags.tagId,
+    name: libraryTags.name,
     durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
   }).from(readingRecords)
-    .innerJoin(bookTags, eq(readingRecords.bookId, bookTags.bookId))
-    .innerJoin(tags, eq(bookTags.tagId, tags.id))
+    .innerJoin(libraryBookVersions, eq(readingRecords.bookId, libraryBookVersions.bookVersionId))
+    .innerJoin(libraryBookTags, eq(libraryBookTags.libraryBookId, libraryBookVersions.libraryBookId))
+    .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
     .where(rangeConditions(userId, range))
-    .groupBy(bookTags.tagId, tags.name)
+    .groupBy(libraryBookTags.tagId, libraryTags.name)
     .orderBy(desc(sql`sum(${readingRecords.durationSeconds})`))
     .all()
 }

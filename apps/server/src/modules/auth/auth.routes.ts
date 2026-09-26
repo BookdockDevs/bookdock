@@ -1,6 +1,4 @@
 import { Hono } from 'hono'
-import type { Context } from 'hono'
-import { deleteCookie, setCookie } from 'hono/cookie'
 
 import {
   changePasswordSchema,
@@ -22,22 +20,12 @@ import {
   isSetupRequired,
   login,
   register,
+  revokeSession,
   setupUser,
   updateInstanceSettings,
 } from './auth.service'
 import { assertLoginAllowed, clearLoginFailures, createLoginRateLimitKey, recordLoginFailure } from './auth.rate-limit'
-
-const TOKEN_COOKIE = 'bd_token'
-const TOKEN_MAX_AGE = 7 * 24 * 60 * 60
-
-function setTokenCookie(c: Context, token: string) {
-  setCookie(c, TOKEN_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'Strict',
-    path: '/',
-    maxAge: TOKEN_MAX_AGE,
-  })
-}
+import { clearSessionCookie, readSessionToken, setSessionCookie } from './session-cookie'
 
 const authRoutes = new Hono()
 
@@ -66,8 +54,8 @@ authRoutes.post('/setup', async (c) => {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
   const result = await setupUser(parsed.data.username, parsed.data.password)
-  setTokenCookie(c, result.token)
-  return c.json({ data: result })
+  setSessionCookie(c, result.token)
+  return c.json({ data: { user: result.user } })
 })
 
 authRoutes.post('/register', async (c) => {
@@ -77,8 +65,8 @@ authRoutes.post('/register', async (c) => {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
   const result = await register(parsed.data.username, parsed.data.password)
-  setTokenCookie(c, result.token)
-  return c.json({ data: result })
+  setSessionCookie(c, result.token)
+  return c.json({ data: { user: result.user } })
 })
 
 authRoutes.post('/login', async (c) => {
@@ -97,12 +85,14 @@ authRoutes.post('/login', async (c) => {
     throw err
   }
   clearLoginFailures(rateLimitKey)
-  setTokenCookie(c, result.token)
-  return c.json({ data: result })
+  setSessionCookie(c, result.token)
+  return c.json({ data: { user: result.user } })
 })
 
 authRoutes.post('/logout', (c) => {
-  deleteCookie(c, TOKEN_COOKIE, { path: '/' })
+  const token = readSessionToken(c)
+  if (token) revokeSession(token)
+  clearSessionCookie(c)
   return c.json({ data: { ok: true } })
 })
 
@@ -117,6 +107,9 @@ authRoutes.post('/password', async (c) => {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
   await changePassword(user.id, parsed.data.oldPassword, parsed.data.newPassword)
+  // All sessions (including this one) are revoked; drop the dead cookie so
+  // the client lands on login instead of retrying with it.
+  clearSessionCookie(c)
   return c.json({ data: { ok: true } })
 })
 

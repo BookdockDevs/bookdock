@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 
 import { createTestDb } from '../../__tests__/setup'
 import { getDb } from '../../db/client'
-import { aiMessageEvents, aiMessages, books, users } from '../../db/schema'
+import { aiMessageEvents, aiMessages, aiThreads, books, bookVersions, users } from '../../db/schema'
 
 vi.mock('../../db/client', () => ({ getDb: vi.fn() }))
 
@@ -214,5 +214,16 @@ describe('AI session service', () => {
     expect(() => getAiThread('user-2', thread.id)).toThrow('AI thread not found')
     expect(() => prepareAiThread('user-1', 'book-2', thread.id, '问题')).toThrow('AI thread does not belong to this book')
     expect(() => saveAiMessage('user-2', thread.id, { role: 'user', content: '越权写入' })).toThrow('AI thread not found')
+  })
+
+  it('binds the version when the book already migrated, stays unbound otherwise', () => {
+    const plain = createAiThread('user-1', { bookId: 'book-1' })
+    expect(getDb().select({ bookVersionId: aiThreads.bookVersionId }).from(aiThreads).where(eq(aiThreads.id, plain.id)).get())
+      .toEqual({ bookVersionId: null })
+
+    getDb().insert(bookVersions).values({ id: 'book-1', format: 'txt', size: 10, createdAt: 1, updatedAt: 1 }).run()
+    const bound = createAiThread('user-1', { bookId: 'book-1' })
+    expect(getDb().select({ bookVersionId: aiThreads.bookVersionId }).from(aiThreads).where(eq(aiThreads.id, bound.id)).get())
+      .toEqual({ bookVersionId: 'book-1' })
   })
 })

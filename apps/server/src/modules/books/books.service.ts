@@ -1,10 +1,14 @@
 import type { Readable } from 'node:stream'
 
-import { eq, ne, lt, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
+import { eq, lt, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
 import JSZip from 'jszip'
 import sharp from 'sharp'
 import { getDb } from '../../db/client'
-import { books, annotations, bookTags, shelves, tags, settings, users as usersTable, tocRules } from '../../db/schema'
+import {
+  blobs, books, annotations, bookTags, bookVersions, bookStates, contentRevisions, libraries, libraryBooks,
+  libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
+  users as usersTable, tocRules,
+} from '../../db/schema'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
 import { extractEpubChapterText } from '../../formats/epub'
@@ -20,6 +24,7 @@ import {
 import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import { ensurePrivateLibrary } from '../libraries/library-access'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { sha256 } from '../../lib/hash'
 import { normalizeBookTitle } from '../../lib/book-title'
@@ -117,120 +122,145 @@ export function scoreTocRules(userId: string, sample: string): typeof tocRules.$
 
 export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean, author?: string, series?: string) {
   const db = getDb()
-  const conditions = [eq(books.userId, userId), trash ? isNotNull(books.deletedAt) : isNull(books.deletedAt)]
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  if (!library) return { data: [], page, pageSize, total: 0, totalSize: 0 }
+  // Latest-revision meta as a scalar subquery: content-derived fields
+  // (description/series/cover palette) always follow the current revision.
+  const revMeta = (jsonPath: string) => sql`json_extract((SELECT ${contentRevisions.meta} FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1), ${jsonPath})`
+  const effTitle = sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title})`
+  const effAuthor = sql<string>`coalesce(${libraryBookVersions.author}, ${libraryBooks.author})`
+  const effReadStatus = sql<string>`coalesce(${bookStates.readStatus}, 'reading')`
+  const effProgress = sql<number>`coalesce(${bookStates.percent}, 0)`
+  const conditions = [
+    eq(libraryBookVersions.libraryId, library.id),
+    eq(libraryBooks.userId, userId),
+    trash ? isNotNull(libraryBooks.deletedAt) : isNull(libraryBooks.deletedAt),
+  ]
   if (search) {
     // Escape LIKE wildcards so user input is matched literally. The escape
     // char is '!' (backslash would be mangled by drizzle's sql template) and
     // must itself be escaped first.
     const escaped = search.replace(/[!%_]/g, (m) => '!' + m)
     const pattern = '%' + escaped + '%'
-    const shelfMatch = sql`EXISTS (
-      SELECT 1 FROM shelves AS search_shelf
-      WHERE search_shelf.id = ${books.shelfId}
-        AND search_shelf.user_id = ${userId}
-        AND search_shelf.name LIKE ${pattern} ESCAPE '!'
+    const categoryMatch = sql`EXISTS (
+      SELECT 1 FROM ${libraryCategories} AS search_category
+      WHERE search_category.id = ${libraryBooks.categoryId}
+        AND search_category.library_id = ${library.id}
+        AND search_category.name LIKE ${pattern} ESCAPE '!'
     )`
     const tagMatch = sql`EXISTS (
       SELECT 1
-      FROM book_tags AS search_book_tag
-      INNER JOIN tags AS search_tag ON search_tag.id = search_book_tag.tag_id
-      WHERE search_book_tag.book_id = ${books.id}
-        AND search_tag.user_id = ${userId}
+      FROM ${libraryBookTags} AS search_book_tag
+      INNER JOIN ${libraryTags} AS search_tag ON search_tag.id = search_book_tag.tag_id
+      WHERE search_book_tag.library_book_id = ${libraryBooks.id}
+        AND search_tag.library_id = ${library.id}
         AND search_tag.name LIKE ${pattern} ESCAPE '!'
     )`
     conditions.push(sql`(
-      ${books.title} LIKE ${pattern} ESCAPE '!'
-      OR ${books.author} LIKE ${pattern} ESCAPE '!'
-      OR ${books.format} LIKE ${pattern} ESCAPE '!'
-      OR json_extract(${books.meta}, '$.bookmeta.description') LIKE ${pattern} ESCAPE '!'
-      OR json_extract(${books.meta}, '$.bookmeta.series') LIKE ${pattern} ESCAPE '!'
-      OR json_extract(${books.meta}, '$.bookmeta.subjects') LIKE ${pattern} ESCAPE '!'
-      OR json_extract(${books.meta}, '$.bookmeta.publisher') LIKE ${pattern} ESCAPE '!'
-      OR json_extract(${books.meta}, '$.bookmeta.isbn') LIKE ${pattern} ESCAPE '!'
-      OR json_extract(${books.meta}, '$.bookmeta.identifier') LIKE ${pattern} ESCAPE '!'
-      OR json_extract(${books.meta}, '$.bookmeta.source') LIKE ${pattern} ESCAPE '!'
-      OR ${shelfMatch}
+      ${effTitle} LIKE ${pattern} ESCAPE '!'
+      OR ${effAuthor} LIKE ${pattern} ESCAPE '!'
+      OR ${bookVersions.format} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.description')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.series')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.subjects')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.publisher')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.isbn')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.identifier')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.source')} LIKE ${pattern} ESCAPE '!'
+      OR ${categoryMatch}
       OR ${tagMatch}
     )`)
   }
   if (format) {
-    conditions.push(eq(books.format, format))
+    conditions.push(eq(bookVersions.format, format))
   }
   if (readStatus) {
-    conditions.push(eq(books.readStatus, readStatus as typeof books.$inferSelect.readStatus))
+    conditions.push(eq(effReadStatus, readStatus))
   }
-  // 'none' sentinel filters uncategorized books (shelfId IS NULL)
+  // 'none' sentinel filters uncategorized books (categoryId IS NULL)
   if (shelfId === 'none') {
-    conditions.push(isNull(books.shelfId))
+    conditions.push(isNull(libraryBooks.categoryId))
   } else if (shelfId) {
-    conditions.push(eq(books.shelfId, shelfId))
+    conditions.push(eq(libraryBooks.categoryId, shelfId))
   }
   if (tagId) {
-    const sub = db.select({ bookId: bookTags.bookId }).from(bookTags).where(eq(bookTags.tagId, tagId))
-    conditions.push(sql`${books.id} IN ${sub}`)
+    const sub = db.select({ libraryBookId: libraryBookTags.libraryBookId }).from(libraryBookTags).where(eq(libraryBookTags.tagId, tagId))
+    conditions.push(sql`${libraryBooks.id} IN ${sub}`)
   }
   if (author) {
-    conditions.push(eq(books.author, author))
+    conditions.push(eq(effAuthor, author))
   }
   if (series) {
-    conditions.push(sql`json_extract(${books.meta}, '$.bookmeta.series') = ${series}`)
+    conditions.push(sql`${revMeta('$.bookmeta.series')} = ${series}`)
   }
   // Pin-first is universal (user decision 2026-08-12): pinned books lead in
   // every sort 鈥?including lastReadAt 鈥?and the pinned group itself follows
   // the chosen sort, not the pin time (reads first by last-read time, desc
   // puts NULL lastReadAt at the bottom, never-read books stay visible).
-  const orderBy = sortBy === 'title' ? (sortOrder === 'asc' ? asc(books.title) : desc(books.title)) :
-    sortBy === 'author' ? (sortOrder === 'asc' ? asc(books.author) : desc(books.author)) :
-    sortBy === 'size' ? (sortOrder === 'asc' ? asc(books.size) : desc(books.size)) :
-    sortBy === 'progress' ? (sortOrder === 'asc' ? asc(books.progress) : desc(books.progress)) :
-    sortBy === 'lastReadAt' ? (sortOrder === 'asc' ? asc(books.lastReadAt) : desc(books.lastReadAt)) :
-    sortBy === 'updatedAt' ? (sortOrder === 'asc' ? asc(books.updatedAt) : desc(books.updatedAt)) :
-    sortBy === 'createdAt' ? (sortOrder === 'asc' ? asc(books.createdAt) : desc(books.createdAt)) :
-    sortBy === 'deletedAt' ? (sortOrder === 'asc' ? asc(books.deletedAt) : desc(books.deletedAt)) :
-    sortOrder === 'asc' ? asc(books.createdAt) : desc(books.createdAt)
+  const orderBy = sortBy === 'title' ? (sortOrder === 'asc' ? asc(effTitle) : desc(effTitle)) :
+    sortBy === 'author' ? (sortOrder === 'asc' ? asc(effAuthor) : desc(effAuthor)) :
+    sortBy === 'size' ? (sortOrder === 'asc' ? asc(bookVersions.size) : desc(bookVersions.size)) :
+    sortBy === 'progress' ? (sortOrder === 'asc' ? asc(effProgress) : desc(effProgress)) :
+    sortBy === 'lastReadAt' ? (sortOrder === 'asc' ? asc(bookStates.lastReadAt) : desc(bookStates.lastReadAt)) :
+    sortBy === 'updatedAt' ? (sortOrder === 'asc' ? asc(libraryBooks.updatedAt) : desc(libraryBooks.updatedAt)) :
+    sortBy === 'createdAt' ? (sortOrder === 'asc' ? asc(libraryBooks.createdAt) : desc(libraryBooks.createdAt)) :
+    sortBy === 'deletedAt' ? (sortOrder === 'asc' ? asc(libraryBooks.deletedAt) : desc(libraryBooks.deletedAt)) :
+    sortOrder === 'asc' ? asc(libraryBooks.createdAt) : desc(libraryBooks.createdAt)
   const offset = (page - 1) * pageSize
   const where = and(...conditions)
   const baseQuery = () => db.select({
-    id: books.id,
-    title: books.title,
-    author: books.author,
-    format: books.format,
-    coverKey: books.coverKey,
-    size: books.size,
-    readStatus: books.readStatus,
-    progress: books.progress,
-    pinnedAt: books.pinnedAt,
-    lastReadAt: books.lastReadAt,
-    createdAt: books.createdAt,
-    updatedAt: books.updatedAt,
-    deletedAt: books.deletedAt,
-    shelfId: books.shelfId,
-    shelfName: shelves.name,
+    id: bookVersions.id,
+    libraryBookId: libraryBooks.id,
+    title: effTitle,
+    author: effAuthor,
+    format: bookVersions.format,
+    coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey})`,
+    size: bookVersions.size,
+    readStatus: effReadStatus,
+    progress: effProgress,
+    pinnedAt: libraryBookVersions.pinnedAt,
+    lastReadAt: bookStates.lastReadAt,
+    createdAt: libraryBooks.createdAt,
+    updatedAt: libraryBooks.updatedAt,
+    deletedAt: libraryBooks.deletedAt,
+    shelfId: libraryBooks.categoryId,
+    shelfName: libraryCategories.name,
     // Extracted, not the whole meta column: list payloads must stay chapter-free.
-    coverPaletteId: sql<CoverPaletteId | null>`json_extract(${books.meta}, '$.coverPaletteId')`,
-  }).from(books).leftJoin(shelves, eq(books.shelfId, shelves.id)).where(where)
+    coverPaletteId: sql<CoverPaletteId | null>`${revMeta('$.coverPaletteId')}`,
+  }).from(libraryBookVersions)
+    .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+    .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
+    .leftJoin(bookStates, and(eq(bookStates.bookVersionId, bookVersions.id), eq(bookStates.userId, userId)))
+    .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
+    .where(where)
   // Pin-first is meaningless in the trash; there the chosen sort rules alone.
-  const items = baseQuery()
-    .orderBy(...(trash ? [] : [asc(sql`pinned_at IS NULL`)]), orderBy)
+  const rows = baseQuery()
+    .orderBy(...(trash ? [] : [asc(sql`${libraryBookVersions.pinnedAt} IS NULL`)]), orderBy)
     .limit(pageSize).offset(offset).all()
-  const agg = db.select({ count: sql<number>`count(*)`, totalSize: sql<number>`coalesce(sum(${books.size}), 0)` })
-    .from(books).where(where).get()
-  // Tag names are fetched per page in a second query: joining book_tags into
+  const agg = db.select({ count: sql<number>`count(*)`, totalSize: sql<number>`coalesce(sum(${bookVersions.size}), 0)` })
+    .from(libraryBookVersions)
+    .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+    .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
+    .leftJoin(bookStates, and(eq(bookStates.bookVersionId, bookVersions.id), eq(bookStates.userId, userId)))
+    .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
+    .where(where).get()
+  // Tag names are fetched per page in a second query: joining tags into
   // the paginated query would multiply rows per book and break LIMIT/OFFSET.
-  const tagRows = items.length > 0
-    ? db.select({ bookId: bookTags.bookId, name: tags.name })
-      .from(bookTags)
-      .innerJoin(tags, eq(bookTags.tagId, tags.id))
-      .where(inArray(bookTags.bookId, items.map((b) => b.id)))
+  const tagRows = rows.length > 0
+    ? db.select({ libraryBookId: libraryBookTags.libraryBookId, name: libraryTags.name })
+      .from(libraryBookTags)
+      .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
+      .where(inArray(libraryBookTags.libraryBookId, rows.map((b) => b.libraryBookId)))
       .all()
     : []
   const tagsByBook = new Map<string, string[]>()
   for (const row of tagRows) {
-    const list = tagsByBook.get(row.bookId) ?? []
+    const list = tagsByBook.get(row.libraryBookId) ?? []
     list.push(row.name)
-    tagsByBook.set(row.bookId, list)
+    tagsByBook.set(row.libraryBookId, list)
   }
-  const data = items.map((b) => ({ ...b, tags: tagsByBook.get(b.id) ?? [] }))
+  const data = rows.map(({ libraryBookId: _libraryBookId, ...b }) => ({ ...b, tags: tagsByBook.get(_libraryBookId) ?? [] }))
   return { data, page, pageSize, total: agg?.count ?? 0, totalSize: agg?.totalSize ?? 0 }
 }
 
@@ -283,6 +313,30 @@ export async function bufferFromStream(stream: Readable): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
+/** Dedup across uploads: the personal version in this library whose CURRENT
+ * content matches the candidate blob. Old revisions with the same bytes do
+ * not count (content moved on). */
+function findPersonalVersionByBlob(libraryId: string, blobKey: string): { versionId: string; libraryBookId: string } | null {
+  const db = getDb()
+  const candidates = db.select({
+    versionId: libraryBookVersions.bookVersionId,
+    libraryBookId: libraryBookVersions.libraryBookId,
+  }).from(libraryBookVersions)
+    .innerJoin(contentRevisions, eq(contentRevisions.bookVersionId, libraryBookVersions.bookVersionId))
+    .where(and(
+      eq(libraryBookVersions.libraryId, libraryId),
+      eq(libraryBookVersions.kind, 'personal'),
+      eq(contentRevisions.blobKey, blobKey),
+    )).all()
+  for (const candidate of candidates) {
+    const latest = db.select({ blobKey: contentRevisions.blobKey }).from(contentRevisions)
+      .where(eq(contentRevisions.bookVersionId, candidate.versionId))
+      .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+    if (latest?.blobKey === blobKey) return candidate
+  }
+  return null
+}
+
 export async function uploadBook(
   userId: string,
   file: File,
@@ -300,35 +354,36 @@ export async function uploadBook(
   const buffer = Buffer.from(await file.arrayBuffer())
   const parsed = await parser.parse(buffer)
   const format = fileName.toLowerCase().endsWith('.txt') ? 'txt' : 'epub'
-  const bookId = createId('book')
   const db = getDb()
+  const library = { id: ensurePrivateLibrary(db, userId) }
   const tagIds = [...new Set(membership?.tagIds ?? [])]
   if (membership?.shelfId) {
-    const shelf = db.select({ id: shelves.id }).from(shelves).where(and(eq(shelves.id, membership.shelfId), eq(shelves.userId, userId))).get()
-    if (!shelf) throw new AppError('SHELF_NOT_FOUND')
+    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
+      .where(and(eq(libraryCategories.id, membership.shelfId), eq(libraryCategories.libraryId, library.id))).get()
+    if (!category) throw new AppError('SHELF_NOT_FOUND')
   }
   if (tagIds.length > 0) {
-    const existingTags = db.select({ count: sql<number>`count(*)` }).from(tags)
-      .where(and(eq(tags.userId, userId), inArray(tags.id, tagIds))).get()
+    const existingTags = db.select({ count: sql<number>`count(*)` }).from(libraryTags)
+      .where(and(eq(libraryTags.libraryId, library.id), inArray(libraryTags.id, tagIds))).get()
     if ((existingTags?.count ?? 0) !== tagIds.length) throw new AppError('TAG_NOT_FOUND')
   }
 
   const contentHash = sha256(buffer)
-  const existing = db.select({ id: books.id }).from(books).where(
-    and(eq(books.userId, userId), eq(books.contentHash, contentHash), isNull(books.deletedAt)),
-  ).get()
-  if (existing) {
+  const fileKey = blobKey(contentHash, '.epub')
+  const versionId = createId('book')
+  const duplicate = findPersonalVersionByBlob(library.id, fileKey)
+  if (duplicate) {
     // Tags are additive and side-effect-free, so honor the requested assignment
-    // even for a duplicate. Shelf is deliberately not touched: it is a
+    // even for a duplicate. The category is deliberately not touched: it is a
     // single-value column and moving an already-shelved book silently would
     // be destructive - the UI surfaces the mismatch instead.
     if (tagIds.length > 0) {
-      db.insert(bookTags)
-        .values(tagIds.map((tagId) => ({ bookId: existing.id, tagId })))
+      db.insert(libraryBookTags)
+        .values(tagIds.map((tagId) => ({ libraryBookId: duplicate.libraryBookId, tagId })))
         .onConflictDoNothing()
         .run()
     }
-    return { book: stripMetaChapters(db.select().from(books).where(eq(books.id, existing.id)).get()!), duplicated: true }
+    return { book: stripMetaChapters(await resolvePrivateBook(userId, duplicate.versionId, { allowDeleted: true })), duplicated: true }
   }
 
   let title = parsed.meta.title
@@ -357,7 +412,6 @@ export async function uploadBook(
   // Keep the upload's file name for provenance: content is stored under a
   // content-hash key and the title may later be edited away from it.
   meta.fileName = fileName
-  let fileKey: string
   let size = buffer.length
 
   if (format === 'txt') {
@@ -398,15 +452,13 @@ export async function uploadBook(
       return normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)
     }
     const epubBuffer = await convertTxtToEpub(
-      { title, author: author || undefined, id: bookId },
+      { title, author: author || undefined, id: versionId },
       epubChapters,
       contentFor,
     )
-    fileKey = blobKey(contentHash, '.epub')
     await storage.put(fileKey, epubBuffer)
     size = epubBuffer.length
   } else {
-    fileKey = blobKey(contentHash, '.epub')
     await storage.put(fileKey, buffer)
     if (parsed.chapters.length > 0) {
       meta.chapters = parsed.chapters.map((c, idx) => ({
@@ -421,64 +473,132 @@ export async function uploadBook(
     meta.epubTocLevelVersion = EPUB_TOC_LEVEL_VERSION
   }
 
+  const now = Date.now()
+  const libraryBookId = createId('lb')
+  const description = typeof parsed.meta.bookmeta?.description === 'string' ? parsed.meta.bookmeta.description : ''
   const metaChapters = meta.chapters as Array<{ wordCount?: number }> | undefined
   if (metaChapters && metaChapters.length > 0) {
     meta.wordCount = metaChapters.reduce((sum, c) => sum + (c.wordCount ?? 0), 0)
   }
-
-  const now = Date.now()
-  const book = {
-    id: bookId,
-    userId,
-    title,
-    author,
-    format: format as BookFormat,
-    filePath: fileKey,
-    coverKey,
-    contentHash,
-    size,
-    meta,
-    shelfId: membership?.shelfId ?? null,
-    readStatus: 'reading' as const,
-    createdAt: now,
-    updatedAt: now,
-  }
+  const chapterCount = metaChapters?.length ?? 0
   db.transaction((tx) => {
-    tx.insert(books).values(book).run()
+    tx.insert(bookVersions).values({
+      id: versionId, format: format as BookFormat, size, createdAt: now, updatedAt: now,
+    }).run()
+    tx.insert(contentRevisions).values({
+      id: createId('rev'), bookVersionId: versionId, revisionNo: 1, blobKey: fileKey,
+      size, wordCount: typeof meta.wordCount === 'number' ? meta.wordCount : null,
+      chapterCount, meta, createdAt: now,
+    }).run()
+    tx.insert(blobs).values({ key: fileKey, size, kind: 'book', createdAt: now }).onConflictDoNothing().run()
+    if (coverKey && parsed.meta.cover) {
+      tx.insert(blobs).values({ key: coverKey, size: parsed.meta.cover.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+    }
+    tx.insert(libraryBooks).values({
+      id: libraryBookId, libraryId: library.id, userId, categoryId: membership?.shelfId ?? null,
+      title, author, description, coverKey, createdAt: now, updatedAt: now,
+    }).run()
+    tx.insert(libraryBookVersions).values({
+      id: createId('lbv'), libraryId: library.id, libraryBookId, bookVersionId: versionId,
+      kind: 'personal', createdAt: now, updatedAt: now,
+    }).run()
+    tx.insert(bookStates).values({
+      userId, bookVersionId: versionId, readStatus: 'reading', percent: 0,
+      cfi: null, chapter: null, lastReadAt: null, updatedAt: now,
+    }).run()
     if (tagIds.length > 0) {
-      tx.insert(bookTags).values(tagIds.map((tagId) => ({ bookId, tagId }))).run()
+      tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).run()
+    }
+    if (membership?.shelfId) {
+      tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, membership.shelfId)).run()
     }
   })
-  return { book: stripMetaChapters(book), duplicated: false }
+  return { book: stripMetaChapters(await resolvePrivateBook(userId, versionId, { allowDeleted: true })), duplicated: false }
 }
 
 export async function getBook(userId: string, bookId: string) {
-  const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
-  return book
+  return resolvePrivateBook(userId, bookId, { allowDeleted: true })
 }
 
 export async function getActiveBook(userId: string, bookId: string) {
-  const book = await getBook(userId, bookId)
-  if (book.deletedAt) throw new AppError('BOOK_NOT_FOUND')
-  return book
+  return resolvePrivateBook(userId, bookId, { allowDeleted: false })
+}
+
+/**
+ * Phase 3 read core: the private book as the legacy books row shape, assembled
+ * from library/version/revision/state rows. bookId IS the version id (0.3), so
+ * every existing caller keeps working: routes, Legado, AI, exports and tests
+ * see the same fields. Content truth comes from the latest revision; the
+ * frozen legacy books row only backs meta for not-yet-backfilled rows.
+ */
+export async function resolvePrivateBook(userId: string, bookId: string, opts?: { allowDeleted?: boolean }) {
+  const db = getDb()
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  if (!library) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  const lbv = db.select().from(libraryBookVersions)
+    .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
+  if (!lbv) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  const lb = db.select().from(libraryBooks).where(eq(libraryBooks.id, lbv.libraryBookId)).get()
+  if (!lb) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  if (lb.deletedAt && !opts?.allowDeleted) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  const bv = db.select().from(bookVersions).where(eq(bookVersions.id, bookId)).get()
+  if (!bv) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  const revision = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (!revision) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
+  const state = db.select().from(bookStates)
+    .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
+  const legacy = db.select().from(books).where(eq(books.id, bookId)).get()
+  const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
+  const meta = Object.keys(revisionMeta).length > 0 ? revisionMeta : ((legacy?.meta ?? {}) as Record<string, unknown>)
+  return {
+    id: bookId,
+    userId,
+    title: lbv.title ?? lb.title,
+    author: lbv.author ?? lb.author,
+    format: bv.format,
+    filePath: revision.blobKey,
+    coverKey: lbv.coverKey ?? lb.coverKey,
+    contentHash: hashFromBlobKey(revision.blobKey),
+    size: bv.size,
+    meta,
+    createdAt: lb.createdAt,
+    updatedAt: lb.updatedAt,
+    readStatus: state?.readStatus ?? 'reading',
+    progress: state?.percent ?? 0,
+    pinnedAt: lbv.pinnedAt ?? null,
+    lastReadAt: state?.lastReadAt ?? null,
+    deletedAt: lb.deletedAt ?? null,
+    shelfId: lb.categoryId,
+  }
+}
+
+/** Content-hash namespace keys embed the hash; anything else yields null. */
+function hashFromBlobKey(key: string): string | null {
+  const match = /^blobs\/[0-9a-f]{2}\/([0-9a-f]{64})\.epub$/.exec(key)
+  return match ? match[1]! : null
 }
 
 export function getBookMembership(userId: string, bookId: string, shelfId: string | null) {
   const db = getDb()
-  const shelfName = shelfId
-    ? db.select({ name: shelves.name })
-      .from(shelves)
-      .where(and(eq(shelves.id, shelfId), eq(shelves.userId, userId)))
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  const shelfName = shelfId && library
+    ? db.select({ name: libraryCategories.name })
+      .from(libraryCategories)
+      .where(and(eq(libraryCategories.id, shelfId), eq(libraryCategories.libraryId, library.id)))
       .get()?.name ?? null
     : null
-  const tagRows = db.select({ name: tags.name })
-    .from(bookTags)
-    .innerJoin(tags, eq(bookTags.tagId, tags.id))
-    .where(and(eq(bookTags.bookId, bookId), eq(tags.userId, userId)))
-    .orderBy(asc(tags.sortOrder), asc(tags.name))
-    .all()
+  const tagRows = library
+    ? db.select({ name: libraryTags.name })
+      .from(libraryBookTags)
+      .innerJoin(libraryBookVersions, eq(libraryBookTags.libraryBookId, libraryBookVersions.libraryBookId))
+      .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
+      .where(and(eq(libraryBookVersions.bookVersionId, bookId), eq(libraryBookVersions.libraryId, library.id)))
+      .orderBy(asc(libraryTags.sortOrder), asc(libraryTags.name))
+      .all()
+    : []
   return { shelfName, tags: tagRows.map((tag) => tag.name) }
 }
 
@@ -510,7 +630,13 @@ export async function getBookChapters(userId: string, bookId: string) {
     })
     const meta: Record<string, unknown> = { ...(book.meta as Record<string, unknown>), epubTocLevelVersion: EPUB_TOC_LEVEL_VERSION }
     if (chapters.length > 0) meta.chapters = chapters
-    getDb().update(books).set({ meta, updatedAt: Date.now() }).where(and(eq(books.id, book.id), eq(books.userId, userId))).run()
+    // Derived chapter cache lives on the latest revision now; the frozen
+    // legacy books row is read-only and keeps serving only pre-backfill rows.
+    const latestRevision = getDb().select({ id: contentRevisions.id }).from(contentRevisions)
+      .where(eq(contentRevisions.bookVersionId, book.id)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+    if (latestRevision) {
+      getDb().update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+    }
     return (chapters.length > 0 ? chapters : existingChapters) as Chapter[]
   } catch {
     return existingChapters
@@ -802,26 +928,36 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
     await storage.put(`progress/${bookId}.json`, Buffer.from(JSON.stringify(nextProgress), 'utf-8'))
   }
 
+  // New content lands as a new revision; the old revision (and its file)
+  // stays readable until the pointer moves and the ref-check passes.
   const oldFilePath = book.filePath
   const updatedAt = Date.now()
-  db.update(books).set({
-    filePath,
-    contentHash,
-    size: epubBuffer.length,
-    meta,
-    progress: newPercent,
-    updatedAt,
-  }).where(and(eq(books.id, bookId), eq(books.userId, userId))).run()
+  const maxRevision = db.select({ revisionNo: contentRevisions.revisionNo }).from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  const nextRevisionNo = (maxRevision?.revisionNo ?? 0) + 1
+  const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  db.transaction((tx) => {
+    tx.insert(contentRevisions).values({
+      id: createId('rev'), bookVersionId: bookId, revisionNo: nextRevisionNo,
+      blobKey: filePath, size: epubBuffer.length, wordCount: prepared.newWordCount,
+      chapterCount: prepared.metaChapters.length, meta, createdAt: updatedAt,
+    }).run()
+    tx.insert(blobs).values({ key: filePath, size: epubBuffer.length, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
+    tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, bookId)).run()
+    tx.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, libraryBookId)).run()
+    tx.update(bookStates).set({ percent: newPercent, updatedAt }).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
+  })
   invalidateCachedNormalized(bookId)
 
   if (oldFilePath !== filePath) {
-    const refs = db.select({ count: sql<number>`count(*)` }).from(books).where(eq(books.filePath, oldFilePath)).get()
+    const refs = db.select({ count: sql<number>`count(*)` }).from(contentRevisions).where(eq(contentRevisions.blobKey, oldFilePath)).get()
     if ((refs?.count ?? 0) === 0 && await storage.exists(oldFilePath)) {
       await storage.delete(oldFilePath)
+      db.delete(blobs).where(eq(blobs.key, oldFilePath)).run()
     }
   }
 
-  return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
 }
 
 const LEGACY_TXT_FONT_DECLARATION = /font-family\s*:\s*"Noto Serif SC"\s*,\s*"Source Han Serif SC"\s*,\s*"SimSun"\s*,\s*serif\s*;/i
@@ -962,7 +1098,36 @@ async function rebuildTocBook(
     epubChapters,
     contentFor,
   )
-  await storage.put(book.filePath, epubBuffer)
+  const newFileKey = blobKey(sha256(epubBuffer), '.epub')
+  const updatedAt = Date.now()
+  if (newFileKey !== book.filePath) {
+    // Content changed: the new bytes land as a new revision under their own
+    // key. The old revision stays intact; its file is collected only when no
+    // remaining revision references it.
+    await storage.put(newFileKey, epubBuffer)
+    const maxRevision = db.select({ revisionNo: contentRevisions.revisionNo }).from(contentRevisions)
+      .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+    db.transaction((tx) => {
+      tx.insert(contentRevisions).values({
+        id: createId('rev'), bookVersionId: bookId, revisionNo: (maxRevision?.revisionNo ?? 0) + 1,
+        blobKey: newFileKey, size: epubBuffer.length, wordCount, chapterCount: metaChapters.length,
+        meta, createdAt: updatedAt,
+      }).run()
+      tx.insert(blobs).values({ key: newFileKey, size: epubBuffer.length, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
+      tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, bookId)).run()
+    })
+    const refs = db.select({ count: sql<number>`count(*)` }).from(contentRevisions).where(eq(contentRevisions.blobKey, book.filePath)).get()
+    if ((refs?.count ?? 0) === 0 && await storage.exists(book.filePath)) {
+      await storage.delete(book.filePath)
+      db.delete(blobs).where(eq(blobs.key, book.filePath)).run()
+    }
+  } else {
+    const latestRevision = db.select({ id: contentRevisions.id }).from(contentRevisions)
+      .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+    if (latestRevision) {
+      db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+    }
+  }
 
   // A re-split re-indexes the EPUB's chapter files, so the saved progress CFI
   // is stale; keep the book-level percent so the reader can restore by
@@ -982,7 +1147,7 @@ async function rebuildTocBook(
     }
   }
 
-  db.update(books).set({ meta, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
+  db.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, resolveLibraryBook(userId, bookId).libraryBookId)).run()
   return normalized
 }
 
@@ -1269,72 +1434,98 @@ export async function getBookEpubBuffer(userId: string, bookId: string): Promise
 
 export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata; viewSettings?: ViewSettings | null; boundPresetId?: string | null; tocRuleId?: string | null; coverPaletteId?: CoverPaletteId | null }) {
   const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
-  const set: Record<string, unknown> = { updatedAt: Date.now() }
-  if (data.readStatus) set.readStatus = data.readStatus
-  if (data.progress !== undefined) set.progress = data.progress
-  if (data.pinned !== undefined) set.pinnedAt = data.pinned ? Date.now() : null
-  if (data.title) set.title = data.title
-  if (data.author !== undefined) set.author = data.author
+  const { libraryBookId, libraryBookVersionId } = resolveLibraryBook(userId, bookId)
+  const now = Date.now()
+  if (data.readStatus !== undefined || data.progress !== undefined) {
+    const state = db.select().from(bookStates)
+      .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
+    if (state) {
+      db.update(bookStates).set({
+        ...(data.readStatus !== undefined ? { readStatus: data.readStatus as typeof state.readStatus } : {}),
+        ...(data.progress !== undefined ? { percent: data.progress } : {}),
+        updatedAt: now,
+      }).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
+    } else {
+      db.insert(bookStates).values({
+        userId, bookVersionId: bookId,
+        readStatus: (data.readStatus as typeof bookStates.$inferInsert.readStatus | undefined) ?? 'reading',
+        percent: data.progress ?? 0, cfi: null, chapter: null, lastReadAt: null, updatedAt: now,
+      }).run()
+    }
+  }
+  if (data.pinned !== undefined) {
+    db.update(libraryBookVersions).set({ pinnedAt: data.pinned ? now : null }).where(eq(libraryBookVersions.id, libraryBookVersionId)).run()
+  }
+  if (data.title || data.author !== undefined) {
+    db.update(libraryBooks).set({
+      ...(data.title ? { title: data.title } : {}),
+      ...(data.author !== undefined ? { author: data.author } : {}),
+      updatedAt: now,
+    }).where(eq(libraryBooks.id, libraryBookId)).run()
+  }
+  const latestRevision = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  const baseMeta = ((latestRevision?.meta ?? {}) as Record<string, unknown>)
+  let touchedMeta = false
   if (data.bookmeta !== undefined) {
-    set.meta = { ...(book.meta as Record<string, unknown>), bookmeta: data.bookmeta }
+    baseMeta.bookmeta = data.bookmeta
+    touchedMeta = true
   }
   if (data.viewSettings !== undefined) {
     // Diff semantics: shallow-merge into the existing per-book overrides;
     // null removes the whole override so the book falls back to global.
-    const meta = { ...(book.meta as Record<string, unknown>) }
     if (data.viewSettings === null) {
-      delete meta.viewSettings
+      delete baseMeta.viewSettings
     } else {
-      meta.viewSettings = { ...((meta.viewSettings as ViewSettings | undefined) ?? {}), ...data.viewSettings }
+      baseMeta.viewSettings = { ...((baseMeta.viewSettings as ViewSettings | undefined) ?? {}), ...data.viewSettings }
     }
-    set.meta = meta
+    touchedMeta = true
   }
   if (data.boundPresetId !== undefined) {
     // Binding semantics mirror viewSettings: null removes the key so the book
     // falls back to the device resolution chain.
-    const meta = { ...(book.meta as Record<string, unknown>), ...(set.meta as Record<string, unknown> | undefined) }
     if (data.boundPresetId === null) {
-      delete meta.boundPresetId
+      delete baseMeta.boundPresetId
     } else {
-      meta.boundPresetId = data.boundPresetId
+      baseMeta.boundPresetId = data.boundPresetId
     }
-    set.meta = meta
+    touchedMeta = true
   }
   if (data.tocRuleId !== undefined) {
     // Pin semantics: null removes the pin (book falls back to auto-scoring on
     // the next re-toc). A non-null id is validated against the user's rules.
-    const meta = { ...(book.meta as Record<string, unknown>), ...(set.meta as Record<string, unknown> | undefined) }
     if (data.tocRuleId === null) {
-      delete meta.tocRuleId
-      delete meta.tocRuleAuto
+      delete baseMeta.tocRuleId
+      delete baseMeta.tocRuleAuto
     } else {
       const rule = db.select().from(tocRules).where(and(eq(tocRules.id, data.tocRuleId), eq(tocRules.userId, userId))).get()
       if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
-      meta.tocRuleId = data.tocRuleId
-      meta.tocRuleAuto = false
+      baseMeta.tocRuleId = data.tocRuleId
+      baseMeta.tocRuleAuto = false
     }
-    set.meta = meta
+    touchedMeta = true
   }
   if (data.coverPaletteId !== undefined) {
     // Decorative pin: null removes the key so the cover falls back to the id hash.
-    const meta = { ...(book.meta as Record<string, unknown>), ...(set.meta as Record<string, unknown> | undefined) }
     if (data.coverPaletteId === null) {
-      delete meta.coverPaletteId
+      delete baseMeta.coverPaletteId
     } else {
-      meta.coverPaletteId = data.coverPaletteId
+      baseMeta.coverPaletteId = data.coverPaletteId
     }
-    set.meta = meta
+    touchedMeta = true
   }
-  db.update(books).set(set).where(eq(books.id, bookId)).run()
-  return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+  if (touchedMeta && latestRevision) {
+    db.update(contentRevisions).set({ meta: baseMeta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+  }
+  if (data.title || data.author !== undefined || touchedMeta || data.pinned !== undefined || data.readStatus !== undefined || data.progress !== undefined) {
+    db.update(libraryBooks).set({ updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+  }
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
 }
 
 export async function updateBookCover(userId: string, bookId: string, file: File) {
   const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  const { libraryBookId } = resolveLibraryBook(userId, bookId)
   const buffer = Buffer.from(await file.arrayBuffer())
   if (buffer.length > 5 * 1024 * 1024) throw new AppError('UPLOAD_TOO_LARGE')
   const ext = detectImageExtension(buffer)
@@ -1346,10 +1537,17 @@ export async function updateBookCover(userId: string, bookId: string, file: File
   if (thumb) {
     await storage.put(coverThumbnailKey(coverKey), thumb)
   }
-  const meta = { ...(book.meta as Record<string, unknown>) }
-  delete meta.coverSuppressed
-  db.update(books).set({ coverKey, meta, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
-  return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+  const now = Date.now()
+  db.insert(blobs).values({ key: coverKey, size: buffer.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+  db.update(libraryBooks).set({ coverKey, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+  const latestRevision = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (latestRevision) {
+    const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>) }
+    delete meta.coverSuppressed
+    db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+  }
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
 }
 
 export async function getBookCover(userId: string, bookId: string): Promise<{ coverKey: string } | null> {
@@ -1373,7 +1571,10 @@ export async function getBookCover(userId: string, bookId: string): Promise<{ co
     if (thumb) {
       await storage.put(coverThumbnailKey(coverKey), thumb)
     }
-    db.update(books).set({ coverKey, updatedAt: Date.now() }).where(eq(books.id, book.id)).run()
+    const now = Date.now()
+    db.insert(blobs).values({ key: coverKey, size: parsed.meta.cover.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+    const { libraryBookId } = resolveLibraryBook(userId, book.id)
+    db.update(libraryBooks).set({ coverKey, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
     return { coverKey }
   } catch {
     return null
@@ -1432,22 +1633,32 @@ export async function getBookCoverContent(
 
 export async function removeBookCover(userId: string, bookId: string) {
   const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
-  const meta = { ...(book.meta as Record<string, unknown>), coverSuppressed: true }
-  db.update(books).set({ coverKey: null, meta, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
-  return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+  const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  const now = Date.now()
+  db.update(libraryBooks).set({ coverKey: null, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+  const latestRevision = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (latestRevision) {
+    const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>), coverSuppressed: true }
+    db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+  }
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
 }
 
 export async function resetBookMetadata(userId: string, bookId: string, opts?: { normalizeTitle?: boolean }) {
   const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  const book = await getBook(userId, bookId)
   const storage = getStorage()
   const parser = getParser(book.filePath, '')
   if (!parser) throw new AppError('UNSUPPORTED_FORMAT')
   const parsed = await parser.parse(await storage.get(book.filePath))
-  const meta = { ...(book.meta as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
+  const latestRevision = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (latestRevision) {
+    const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
+    db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+  }
   let title = parsed.meta.title
   let author = parsed.meta.author ?? ''
   const originalFileName = (book.meta as Record<string, unknown>).fileName
@@ -1460,34 +1671,37 @@ export async function resetBookMetadata(userId: string, bookId: string, opts?: {
   if (!author && derived?.author) {
     author = derived.author
   }
-  db.update(books).set({
+  const now = Date.now()
+  db.update(libraryBooks).set({
     title: title || book.title,
     author,
-    meta,
-    updatedAt: Date.now(),
-  }).where(eq(books.id, bookId)).run()
-  return stripMetaChapters(db.select().from(books).where(eq(books.id, bookId)).get()!)
+    updatedAt: now,
+  }).where(eq(libraryBooks.id, libraryBookId)).run()
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
 }
 
 export async function trashBook(userId: string, bookId: string) {
   const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
-  db.update(books).set({ deletedAt: Date.now(), updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
+  const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  const now = Date.now()
+  db.update(libraryBooks).set({ deletedAt: now, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
 }
 
 export async function restoreBook(userId: string, bookId: string) {
   const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
-  db.update(books).set({ deletedAt: null, updatedAt: Date.now() }).where(eq(books.id, bookId)).run()
+  const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  const now = Date.now()
+  db.update(libraryBooks).set({ deletedAt: null, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
 }
 
 export async function emptyTrash(userId: string) {
   const db = getDb()
-  const trashed = db.select({ id: books.id }).from(books).where(and(eq(books.userId, userId), isNotNull(books.deletedAt))).all()
+  const trashed = db.select({ id: libraryBooks.id }).from(libraryBooks)
+    .where(and(eq(libraryBooks.userId, userId), isNotNull(libraryBooks.deletedAt))).all()
   for (const row of trashed) {
-    await deleteBook(userId, row.id)
+    const version = db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+      .where(eq(libraryBookVersions.libraryBookId, row.id)).all().at(0)
+    if (version) await deleteBook(userId, version.bookVersionId)
   }
   return trashed.length
 }
@@ -1497,11 +1711,13 @@ export async function purgeExpiredTrash(userId: string, days: number) {
   if (days <= 0) return 0
   const db = getDb()
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
-  const expired = db.select({ id: books.id }).from(books)
-    .where(and(eq(books.userId, userId), isNotNull(books.deletedAt), lt(books.deletedAt, cutoff)))
+  const expired = db.select({ id: libraryBooks.id }).from(libraryBooks)
+    .where(and(eq(libraryBooks.userId, userId), isNotNull(libraryBooks.deletedAt), lt(libraryBooks.deletedAt, cutoff)))
     .all()
   for (const row of expired) {
-    await deleteBook(userId, row.id)
+    const version = db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+      .where(eq(libraryBookVersions.libraryBookId, row.id)).all().at(0)
+    if (version) await deleteBook(userId, version.bookVersionId)
   }
   return expired.length
 }
@@ -1512,17 +1728,23 @@ export async function purgeExpiredTrash(userId: string, days: number) {
 export async function purgeTrashToCapacity(userId: string, maxBytes: number) {
   if (maxBytes <= 0) return 0
   const db = getDb()
-  const ownedTrash = and(eq(books.userId, userId), isNotNull(books.deletedAt))
-  const agg = db.select({ total: sql<number>`coalesce(sum(${books.size}), 0)` })
-    .from(books).where(ownedTrash).get()
+  const ownedTrash = and(eq(libraryBooks.userId, userId), isNotNull(libraryBooks.deletedAt))
+  const agg = db.select({ total: sql<number>`coalesce(sum(${bookVersions.size}), 0)` })
+    .from(libraryBooks)
+    .innerJoin(libraryBookVersions, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+    .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
+    .where(ownedTrash).get()
   let total = agg?.total ?? 0
   if (total <= maxBytes) return 0
-  const rows = db.select({ id: books.id, size: books.size }).from(books)
-    .where(ownedTrash).orderBy(asc(books.deletedAt)).all()
+  const rows = db.select({ bookVersionId: libraryBookVersions.bookVersionId, size: bookVersions.size })
+    .from(libraryBooks)
+    .innerJoin(libraryBookVersions, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+    .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
+    .where(ownedTrash).orderBy(asc(libraryBooks.deletedAt)).all()
   let purged = 0
   for (const row of rows) {
     if (total <= maxBytes) break
-    await deleteBook(userId, row.id)
+    await deleteBook(userId, row.bookVersionId)
     total -= row.size
     purged++
   }
@@ -1552,11 +1774,13 @@ export async function purgeAllExpiredTrash() {
     groups.set(cutoff, list)
   }
   for (const [cutoff, userIds] of groups) {
-    const expired = db.select({ id: books.id, userId: books.userId }).from(books)
-      .where(and(inArray(books.userId, userIds), isNotNull(books.deletedAt), lt(books.deletedAt, cutoff)))
+    const expired = db.select({ id: libraryBooks.id, userId: libraryBooks.userId }).from(libraryBooks)
+      .where(and(inArray(libraryBooks.userId, userIds), isNotNull(libraryBooks.deletedAt), lt(libraryBooks.deletedAt, cutoff)))
       .all()
     for (let i = 0; i < expired.length; i++) {
-      await deleteBook(expired[i].userId, expired[i].id)
+      const version = db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+        .where(eq(libraryBookVersions.libraryBookId, expired[i].id)).all().at(0)
+      if (version) await deleteBook(expired[i].userId, version.bookVersionId)
       if (i % 10 === 9) await new Promise((resolve) => setImmediate(resolve))
     }
   }
@@ -1571,86 +1795,137 @@ export async function purgeAllExpiredTrash() {
 export async function deleteBook(userId: string, bookId: string) {
   const db = getDb()
   const storage = getStorage()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  const book = await resolvePrivateBook(userId, bookId, { allowDeleted: true })
+  const { libraryBookId } = resolveLibraryBook(userId, bookId)
 
+  // Legacy rows mirror the old delete path; the tables themselves freeze.
   db.delete(annotations).where(eq(annotations.bookId, bookId)).run()
   db.delete(bookTags).where(eq(bookTags.bookId, bookId)).run()
 
-  // Blobs are content-hash addressed and shared across users' book rows;
-  // delete the physical file only when no other row (including trashed) references it.
-  const fileRefs = db.select({ count: sql<number>`count(*)` }).from(books)
-    .where(and(eq(books.filePath, book.filePath), ne(books.id, bookId))).get()
-  if ((fileRefs?.count ?? 0) === 0 && await storage.exists(book.filePath)) {
-    await storage.delete(book.filePath)
+  const versionIds = db.select({ id: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+    .where(eq(libraryBookVersions.libraryBookId, libraryBookId)).all().map((row) => row.id)
+  const revisionKeys = versionIds.length > 0
+    ? db.select({ blobKey: contentRevisions.blobKey }).from(contentRevisions)
+      .where(inArray(contentRevisions.bookVersionId, versionIds)).all().map((row) => row.blobKey)
+    : []
+  const coverKeys = new Set(
+    db.select({ coverKey: libraryBooks.coverKey }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).all()
+      .map((row) => row.coverKey)
+      .concat(
+        db.select({ coverKey: libraryBookVersions.coverKey }).from(libraryBookVersions)
+          .where(eq(libraryBookVersions.libraryBookId, libraryBookId)).all().map((row) => row.coverKey),
+      ).filter((key): key is string => key !== null),
+  )
+
+  db.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
+  db.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
+  db.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
+  for (const versionId of versionIds) {
+    // Restrict fires while other libraries reference the version; private
+    // single-version deletes always clear their own references first.
+    // Reading states, highlights, records and AI rows follow via cascade.
+    db.delete(bookVersions).where(eq(bookVersions.id, versionId)).run()
+  }
+
+  // Content blobs are shared across versions; delete the physical file only
+  // when no remaining revision references the key.
+  for (const key of new Set(revisionKeys)) {
+    const refs = db.select({ count: sql<number>`count(*)` }).from(contentRevisions)
+      .where(eq(contentRevisions.blobKey, key)).get()
+    if ((refs?.count ?? 0) === 0) {
+      if (await storage.exists(key)) await storage.delete(key)
+      db.delete(blobs).where(eq(blobs.key, key)).run()
+    }
   }
   // Progress file
   const progressKey = `progress/${bookId}.json`
   if (await storage.exists(progressKey)) {
     await storage.delete(progressKey)
   }
-  if (book.coverKey) {
-    const coverRefs = db.select({ count: sql<number>`count(*)` }).from(books)
-      .where(and(eq(books.coverKey, book.coverKey), ne(books.id, bookId))).get()
-    if ((coverRefs?.count ?? 0) === 0 && await storage.exists(book.coverKey)) {
-      await storage.delete(book.coverKey)
-      const thumbKey = coverThumbnailKey(book.coverKey)
+  for (const coverKey of coverKeys) {
+    const coverRefs = db.select({ count: sql<number>`count(*)` }).from(libraryBooks)
+      .where(eq(libraryBooks.coverKey, coverKey)).get()
+    const versionCoverRefs = db.select({ count: sql<number>`count(*)` }).from(libraryBookVersions)
+      .where(eq(libraryBookVersions.coverKey, coverKey)).get()
+    if ((coverRefs?.count ?? 0) === 0 && (versionCoverRefs?.count ?? 0) === 0) {
+      if (await storage.exists(coverKey)) await storage.delete(coverKey)
+      const thumbKey = coverThumbnailKey(coverKey)
       if (await storage.exists(thumbKey)) {
         await storage.delete(thumbKey)
       }
+      db.delete(blobs).where(eq(blobs.key, coverKey)).run()
     }
   }
-  db.delete(books).where(eq(books.id, bookId)).run()
   return book
+}
+
+function resolveLibraryBook(userId: string, bookId: string): { libraryId: string; libraryBookId: string; libraryBookVersionId: string } {
+  const db = getDb()
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  if (!library) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  const lbv = db.select({ libraryBookId: libraryBookVersions.libraryBookId, id: libraryBookVersions.id }).from(libraryBookVersions)
+    .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
+  if (!lbv) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  return { libraryId: library.id, libraryBookId: lbv.libraryBookId, libraryBookVersionId: lbv.id }
 }
 
 export async function setBookShelf(userId: string, bookId: string, shelfId: string | null) {
   const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  const { libraryId, libraryBookId } = resolveLibraryBook(userId, bookId)
+  const now = Date.now()
   if (shelfId !== null) {
-    const shelf = db.select({ id: shelves.id }).from(shelves).where(and(eq(shelves.id, shelfId), eq(shelves.userId, userId))).get()
-    if (!shelf) throw new AppError('SHELF_NOT_FOUND')
+    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
+      .where(and(eq(libraryCategories.id, shelfId), eq(libraryCategories.libraryId, libraryId))).get()
+    if (!category) throw new AppError('SHELF_NOT_FOUND')
   }
-  db.update(books).set({ shelfId }).where(eq(books.id, bookId)).run()
+  const previous = db.select({ categoryId: libraryBooks.categoryId }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+  db.update(libraryBooks).set({ categoryId: shelfId, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+  // Membership-change time, mirroring the legacy trigger semantics.
+  for (const touched of new Set([previous?.categoryId, shelfId])) {
+    if (touched) db.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, touched)).run()
+  }
 }
 
 export async function getBookShelf(userId: string, bookId: string) {
   const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
-  return book.shelfId
+  const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  return db.select({ categoryId: libraryBooks.categoryId }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()?.categoryId ?? null
 }
 
 export async function setBookTags(userId: string, bookId: string, tagIds: string[]) {
   const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
-  if (tagIds.length > 0) {
+  const { libraryId, libraryBookId } = resolveLibraryBook(userId, bookId)
+  const uniqueTagIds = [...new Set(tagIds)]
+  if (uniqueTagIds.length > 0) {
     const existing = db
       .select({ count: sql<number>`count(*)` })
-      .from(tags)
-      .where(and(eq(tags.userId, userId), inArray(tags.id, tagIds)))
+      .from(libraryTags)
+      .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, uniqueTagIds)))
       .get()
-    if ((existing?.count ?? 0) !== tagIds.length) {
+    if ((existing?.count ?? 0) !== uniqueTagIds.length) {
       throw new AppError('TAG_NOT_FOUND')
     }
   }
-  db.delete(bookTags).where(eq(bookTags.bookId, bookId)).run()
-  if (tagIds.length > 0) {
-    const values = tagIds.map((tagId) => ({ bookId, tagId }))
-    db.insert(bookTags).values(values).onConflictDoNothing().run()
+  const previous = db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).all()
+    .map((row) => row.tagId)
+  db.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
+  if (uniqueTagIds.length > 0) {
+    db.insert(libraryBookTags).values(uniqueTagIds.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
+  }
+  const now = Date.now()
+  for (const touched of new Set([...previous, ...uniqueTagIds])) {
+    db.update(libraryTags).set({ updatedAt: now }).where(eq(libraryTags.id, touched)).run()
   }
 }
 
 export async function getBookTags(userId: string, bookId: string) {
   const db = getDb()
-  const book = db.select().from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  const { libraryBookId } = resolveLibraryBook(userId, bookId)
   const rows = db
-    .select({ tagId: bookTags.tagId })
-    .from(bookTags)
-    .where(eq(bookTags.bookId, bookId))
+    .select({ tagId: libraryBookTags.tagId })
+    .from(libraryBookTags)
+    .where(eq(libraryBookTags.libraryBookId, libraryBookId))
     .all()
   return rows.map((r) => r.tagId)
 }

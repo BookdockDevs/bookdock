@@ -4,7 +4,7 @@ import { AI_DEFAULT_READING_SCOPE, AI_TOOL_NAMES, normalizeAiCitationMarkers, no
 import type { AiCitation, AiContextReceipt, AiHistoryMessage, AiMessageEventRes, AiMessageRevisionRes, AiReadingScope, AiRetryRecipe, AiThreadCreateReq, AiThreadDetailRes, AiThreadListReq, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, AiToolName } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { aiMessageEvents, aiMessages, aiThreads, books } from '../../db/schema'
+import { aiMessageEvents, aiMessages, aiThreads, books, bookVersions, libraries, libraryBookVersions } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { AppError } from '../../middleware/error'
 import { getLatestAiGenerationRun } from './ai.runs.service'
@@ -42,12 +42,19 @@ function normalizeThreadSettings(value: unknown): AiThreadSettings {
 }
 
 function assertBookOwnership(userId: string, bookId: string) {
-  const book = getDb().select({ id: books.id }).from(books).where(and(
+  const db = getDb()
+  const book = db.select({ id: books.id }).from(books).where(and(
     eq(books.id, bookId),
     eq(books.userId, userId),
     isNull(books.deletedAt),
   )).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  if (book) return
+  // Version-native books have no legacy row: ownership is the private library.
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  const version = library && db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+    .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
+  if (!version) throw new AppError('BOOK_NOT_FOUND')
 }
 
 function titleFromPrompt(prompt: string) {
@@ -188,10 +195,14 @@ function threadMessages(userId: string, threadId: string) {
 export function createAiThread(userId: string, input: AiThreadCreateReq): AiThreadRes {
   assertBookOwnership(userId, input.bookId)
   const now = Date.now()
+  // Bind the version when the book already migrated (0.3: version id reuses
+  // book id); compat-window writes against unmigrated books stay unbound.
+  const version = getDb().select({ id: bookVersions.id }).from(bookVersions).where(eq(bookVersions.id, input.bookId)).get()
   const row = {
     id: createId('ai-thread'),
     userId,
     bookId: input.bookId,
+    bookVersionId: version?.id ?? null,
     title: input.title?.trim().slice(0, MAX_THREAD_TITLE_LENGTH) || DEFAULT_THREAD_TITLE,
     settings: normalizeThreadSettings(input.settings),
     createdAt: now,
@@ -207,6 +218,7 @@ export function listAiThreads(userId: string, input: AiThreadListReq): AiThreadR
     id: aiThreads.id,
     userId: aiThreads.userId,
     bookId: aiThreads.bookId,
+    bookVersionId: aiThreads.bookVersionId,
     title: aiThreads.title,
     settings: aiThreads.settings,
     createdAt: aiThreads.createdAt,

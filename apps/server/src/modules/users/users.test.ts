@@ -18,7 +18,8 @@ import { errorHandler } from '../../middleware/error'
 import { resetAuthCaches } from '../../middleware/auth.guard'
 import { hashPassword, verifyPassword } from '../../lib/password'
 import usersRoutes from './users.routes'
-import { listUsers, updateUser } from './users.service'
+import { createUser, listUsers, updateUser } from './users.service'
+import { createSession, resolveSession } from '../auth/auth.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -180,5 +181,48 @@ describe('users module', () => {
       expect(body.data).toHaveLength(1)
       expect(body.data[0].username).toBe('own')
     })
+
+    it('lets an owner create a user without signing them in', async () => {
+      await insertUser(db, { username: 'own', role: 'owner' })
+      const app = createUsersApp({ id: 'u1', username: 'own', role: 'owner' })
+      const res = await app.request('/api/v1/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'newbie', password: 'password123' }),
+      })
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.data.username).toBe('newbie')
+      expect(body.data.role).toBe('member')
+      expect(db.select().from(schema.sessions).all()).toHaveLength(0)
+    })
+  })
+
+  it('revokes all sessions when disabling a user', async () => {
+    const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+    const memberId = await insertUser(db, { username: 'mem', password: 'password123' })
+    const { token } = createSession(memberId)
+    expect(resolveSession(token)).not.toBeNull()
+    await updateUser(ownerId, memberId, { disabled: true })
+    expect(resolveSession(token)).toBeNull()
+  })
+
+  it('revokes all sessions when resetting a password', async () => {
+    const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+    const memberId = await insertUser(db, { username: 'mem', password: 'password123' })
+    const { token } = createSession(memberId)
+    await updateUser(ownerId, memberId, { newPassword: 'password456' })
+    expect(resolveSession(token)).toBeNull()
+  })
+
+  it('creates a user with a private library and no session', async () => {
+    await insertUser(db, { username: 'own', role: 'owner' })
+    const created = await createUser('newbie', 'password123')
+    expect(created.username).toBe('newbie')
+    expect(created.role).toBe('member')
+    const libraries = db.select().from(schema.libraries).where(eq(schema.libraries.userId, created.id)).all()
+    expect(libraries).toHaveLength(1)
+    expect(libraries[0]).toMatchObject({ type: 'private' })
+    expect(db.select().from(schema.sessions).all()).toHaveLength(0)
   })
 })

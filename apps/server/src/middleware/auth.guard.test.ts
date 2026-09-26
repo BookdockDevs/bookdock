@@ -12,14 +12,13 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { eq } from 'drizzle-orm'
 import { Hono } from 'hono'
-import { SignJWT } from 'jose'
 
 import type { AccessTokenPermission } from '@bookdock/shared'
 
 import * as schema from '../db/schema'
 import * as client from '../db/client'
-import { config } from '../config'
 import { createId } from '../lib/id'
+import { generateSessionToken, hashSessionToken } from '../lib/token'
 import { createAccessToken, setAccessTokenDisabled } from '../modules/tokens/tokens.service'
 import { authGuard, requireOwner, resetAuthCaches } from './auth.guard'
 import { errorHandler } from './error'
@@ -76,11 +75,16 @@ describe('authGuard access token branch', () => {
     return { Authorization: `Bearer ${plaintext}` }
   }
 
-  async function signSession(userId: string) {
-    return new SignJWT({ userId })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setExpirationTime('1h')
-      .sign(new TextEncoder().encode(config.jwtSecret))
+  function signSession(userId: string) {
+    const token = generateSessionToken()
+    db.insert(schema.sessions).values({
+      id: createId('session'),
+      userId,
+      tokenHash: hashSessionToken(token),
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    }).run()
+    return token
   }
 
   it('lets a token through exactly the operations it was granted', async () => {

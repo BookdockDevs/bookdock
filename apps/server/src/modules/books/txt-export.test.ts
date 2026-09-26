@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,6 +11,7 @@ import JSZip from 'jszip'
 
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
+import { retargetBookIdReferences } from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { errorHandler } from '../../middleware/error'
@@ -38,6 +39,9 @@ function createTestDb() {
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
   migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  // Same composition as production runMigrations(): structural repairs that
+  // cannot run inside the migrator transaction live here.
+  retargetBookIdReferences(db)
   return db
 }
 
@@ -103,6 +107,36 @@ function seedBook(
     ...overrides,
   }
   db.insert(schema.books).values(book).run()
+  // New-model mirror for rewired reads: versions reuse the book id.
+  let library = db.select({ id: schema.libraries.id }).from(schema.libraries)
+    .where(and(eq(schema.libraries.userId, userId), eq(schema.libraries.type, 'private'))).get()
+  if (!library) {
+    const libraryId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: libraryId, userId, type: 'private', name: userId,
+      description: '', visibility: null, createdAt: book.createdAt, updatedAt: book.updatedAt,
+    }).run()
+    library = { id: libraryId }
+  }
+  const meta = (book.meta ?? {}) as Record<string, unknown>
+  const chapters = Array.isArray(meta.chapters) ? meta.chapters : []
+  const libraryBookId = createId('lb')
+  db.insert(schema.bookVersions).values({
+    id: book.id, format: book.format, size: book.size, createdAt: book.createdAt, updatedAt: book.updatedAt,
+  }).run()
+  db.insert(schema.contentRevisions).values({
+    id: createId('rev'), bookVersionId: book.id, revisionNo: 1, blobKey: book.filePath,
+    size: book.size, wordCount: typeof meta.wordCount === 'number' ? meta.wordCount : null,
+    chapterCount: chapters.length, meta, createdAt: book.createdAt,
+  }).run()
+  db.insert(schema.libraryBooks).values({
+    id: libraryBookId, libraryId: library.id, userId,
+    title: book.title, author: book.author, createdAt: book.createdAt, updatedAt: book.updatedAt,
+  }).run()
+  db.insert(schema.libraryBookVersions).values({
+    id: createId('lbv'), libraryId: library.id, libraryBookId, bookVersionId: book.id,
+    kind: 'personal', createdAt: book.createdAt, updatedAt: book.updatedAt,
+  }).run()
   return book
 }
 
@@ -342,9 +376,12 @@ describe('exportEpubBook', () => {
 
   it('regenerates an epub with the rules applied and the current metadata', async () => {
     await createReplacement(ownerId, { pattern: '第一段', replacement: '改后段' })
-    client.getDb().update(schema.books)
+    // New model: title/author live on the library work row, not books.
+    const lbv = client.getDb().select().from(schema.libraryBookVersions)
+      .where(eq(schema.libraryBookVersions.bookVersionId, bookId)).get()!
+    client.getDb().update(schema.libraryBooks)
       .set({ title: '改名后的书', author: '某作者' })
-      .where(eq(schema.books.id, bookId)).run()
+      .where(eq(schema.libraryBooks.id, lbv.libraryBookId)).run()
     const { buffer, title } = await exportEpubBook(ownerId, bookId)
     expect(title).toBe('改名后的书')
     const zip = await JSZip.loadAsync(buffer)
@@ -367,7 +404,9 @@ describe('exportEpubBook', () => {
 
   it('embeds the cover into the package and manifest when the book has one', async () => {
     const coverKey = `blobs/co/${createId('hash')}.cover.png`
-    client.getDb().update(schema.books).set({ coverKey }).where(eq(schema.books.id, bookId)).run()
+    const coverLbv = client.getDb().select().from(schema.libraryBookVersions)
+      .where(eq(schema.libraryBookVersions.bookVersionId, bookId)).get()!
+    client.getDb().update(schema.libraryBooks).set({ coverKey }).where(eq(schema.libraryBooks.id, coverLbv.libraryBookId)).run()
     mem.files.set(coverKey, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
 
     const { buffer } = await exportEpubBook(ownerId, bookId)
@@ -380,7 +419,9 @@ describe('exportEpubBook', () => {
   })
 
   it('exports without a cover when the cover blob is missing (silent degradation)', async () => {
-    client.getDb().update(schema.books).set({ coverKey: `blobs/co/${createId('hash')}.cover.jpg` }).where(eq(schema.books.id, bookId)).run()
+    const missingLbv = client.getDb().select().from(schema.libraryBookVersions)
+      .where(eq(schema.libraryBookVersions.bookVersionId, bookId)).get()!
+    client.getDb().update(schema.libraryBooks).set({ coverKey: `blobs/co/${createId('hash')}.cover.jpg` }).where(eq(schema.libraryBooks.id, missingLbv.libraryBookId)).run()
     const { buffer } = await exportEpubBook(ownerId, bookId)
     const zip = await JSZip.loadAsync(buffer)
     const opf = await zip.file('OEBPS/content.opf')!.async('string')

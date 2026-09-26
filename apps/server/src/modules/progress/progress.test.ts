@@ -105,15 +105,41 @@ describe('progress service', () => {
     expect(saved.percent).toBe(50)
     expect(saved.chapterIndex).toBe(2)
 
-    const book = db.select().from(schema.books).where(eq(schema.books.id, bookId)).get()
-    expect(book!.progress).toBe(50)
-    // readStatus is manual-only: progress writes must not change it
-    expect(book!.readStatus).toBe('wishlist')
-    expect(book!.lastReadAt).not.toBeNull()
+    // Legacy books row stays frozen; the position mirrors into the version
+    // state row once the book migrates. Legacy-only fixtures have no version
+    // yet, so the file remains the sole truth.
+    const state = db.select().from(schema.bookStates)
+      .where(eq(schema.bookStates.bookVersionId, bookId)).get()
+    expect(state).toBeUndefined()
 
     const loaded = await getProgress(ownerId, bookId)
     expect(loaded!.percent).toBe(50)
     expect(loaded!.chapterIndex).toBe(2)
+  })
+
+  it('mirrors the position into the version state row when the version exists', async () => {
+    const now = Date.now()
+    const libraryId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: libraryId, userId: ownerId, type: 'private', name: 'owner',
+      description: '', visibility: null, createdAt: now, updatedAt: now,
+    }).run()
+    db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 100, createdAt: now, updatedAt: now }).run()
+    const libraryBookId = createId('lb')
+    db.insert(schema.libraryBooks).values({
+      id: libraryBookId, libraryId, userId: ownerId, title: 'Test Book', createdAt: now, updatedAt: now,
+    }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: createId('lbv'), libraryId, libraryBookId, bookVersionId: bookId,
+      kind: 'personal', createdAt: now, updatedAt: now,
+    }).run()
+
+    await upsertProgress(ownerId, bookId, { percent: 50, chapter: '第一章', chapterIndex: 2 })
+    const state = db.select().from(schema.bookStates)
+      .where(eq(schema.bookStates.bookVersionId, bookId)).get()!
+    expect(state.percent).toBe(50)
+    expect(state.chapter).toBe('第一章')
+    expect(state.lastReadAt).not.toBeNull()
   })
 
   it('should return null when the owner has no progress yet', async () => {

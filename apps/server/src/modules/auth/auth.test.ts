@@ -15,16 +15,31 @@ vi.hoisted(() => {
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
+import { generateSessionToken, hashSessionToken } from '../../lib/token'
 import { errorHandler } from '../../middleware/error'
 import { authGuard, resetAuthCaches } from '../../middleware/auth.guard'
 import { config } from '../../config'
 import { hashPassword, verifyPassword } from '../../lib/password'
 import authRoutes from './auth.routes'
 import { resetLoginRateLimit } from './auth.rate-limit'
-import { changePassword, effectiveUploadMaxBytes, getDefaultUser, getInstanceInfo, register, setupUser, updateInstanceSettings } from './auth.service'
+import {
+  changePassword,
+  createSession,
+  effectiveUploadMaxBytes,
+  getDefaultUser,
+  getInstanceInfo,
+  refreshSessionIfNeeded,
+  register,
+  resolveSession,
+  revokeSession,
+  revokeUserSessions,
+  setupUser,
+  updateInstanceSettings,
+} from './auth.service'
 import { issueLegadoAccessKey } from '../books/legado-access.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 function createTestDb() {
   const sqlite = new Database(':memory:')
@@ -37,12 +52,28 @@ function createTestDb() {
 
 type TestDb = ReturnType<typeof createTestDb>
 
-function seedInstanceSettings(db: TestDb, allowRegistration: boolean, allowGuestAccess: boolean) {
-  db.insert(schema.instanceSettings).values([
-    { key: 'allowRegistration', value: String(allowRegistration) },
-    { key: 'allowGuestAccess', value: String(allowGuestAccess) },
-  ]).run()
+async function seedInstance(
+  db: TestDb,
+  opts: { allowRegistration?: boolean; allowGuestAccess?: boolean; uploadMaxBytes?: number; ownerUsername?: string } = {},
+) {
+  const ownerId = createId('user')
+  db.insert(schema.users).values({
+    id: ownerId,
+    username: opts.ownerUsername ?? 'seed-owner',
+    role: 'owner',
+    createdAt: Date.now(),
+  }).run()
+  db.insert(schema.instance).values({
+    id: 'instance',
+    ownerUserId: ownerId,
+    allowRegistration: opts.allowRegistration ?? false,
+    allowGuestAccess: opts.allowGuestAccess ?? false,
+    uploadMaxBytes: opts.uploadMaxBytes ?? null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }).run()
   resetAuthCaches()
+  return ownerId
 }
 
 async function insertUser(
@@ -59,6 +90,18 @@ async function insertUser(
     createdAt: Date.now(),
   }).run()
   return id
+}
+
+function startSession(db: TestDb, userId: string, expiresAt: number = Date.now() + SESSION_TTL_MS): string {
+  const token = generateSessionToken()
+  db.insert(schema.sessions).values({
+    id: createId('session'),
+    userId,
+    tokenHash: hashSessionToken(token),
+    createdAt: Date.now(),
+    expiresAt,
+  }).run()
+  return token
 }
 
 function createGuardApp() {
@@ -82,7 +125,7 @@ function createAuthApp(user: { id: string; username: string; role: string } | nu
   return app
 }
 
-async function signToken(userId: string) {
+async function signLegacyToken(userId: string) {
   return new SignJWT({ userId })
     .setProtectedHeader({ alg: 'HS256' })
     .setExpirationTime('1h')
@@ -101,41 +144,44 @@ describe('auth module', () => {
 
   describe('register', () => {
     it('rejects when registration is disabled', async () => {
-      seedInstanceSettings(db, false, false)
-      await expect(register('alice', 'secret6')).rejects.toMatchObject({ code: 'REGISTRATION_DISABLED' })
+      await seedInstance(db, { allowRegistration: false })
+      await expect(register('alice', 'password123')).rejects.toMatchObject({ code: 'REGISTRATION_DISABLED' })
     })
 
-    it('creates a member user when enabled', async () => {
-      seedInstanceSettings(db, true, false)
-      const result = await register('alice', 'secret6')
+    it('creates a member user with a session and a private library when enabled', async () => {
+      await seedInstance(db, { allowRegistration: true })
+      const result = await register('alice', 'password123')
       expect(result.user.role).toBe('member')
       expect(result.token).toBeTruthy()
       const row = db.select().from(schema.users).where(eq(schema.users.username, 'alice')).get()
       expect(row?.role).toBe('member')
       expect(row?.passwordHash).toBeTruthy()
+      expect(row?.usernameNormalized).toBe('alice')
+      expect(db.select().from(schema.sessions).where(eq(schema.sessions.userId, row!.id)).all()).toHaveLength(1)
+      expect(db.select().from(schema.libraries).where(eq(schema.libraries.userId, row!.id)).all()).toHaveLength(1)
     })
 
     it('rejects a duplicate username', async () => {
-      seedInstanceSettings(db, true, false)
-      await register('alice', 'secret6')
-      await expect(register('alice', 'other6')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
+      await seedInstance(db, { allowRegistration: true })
+      await register('alice', 'password123')
+      await expect(register('alice', 'password456')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
     })
 
     it('rejects case, NFKC, and invisible-char near-duplicates', async () => {
-      seedInstanceSettings(db, true, false)
-      await register('alice', 'secret6')
-      await expect(register('Alice', 'other6')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
-      await expect(register('Ａlice', 'other6')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
-      await expect(register('ali\u200Bce', 'other6')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
+      await seedInstance(db, { allowRegistration: true })
+      await register('alice', 'password123')
+      await expect(register('Alice', 'password456')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
+      await expect(register('Ａlice', 'password456')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
+      await expect(register('ali\u200Bce', 'password456')).rejects.toMatchObject({ code: 'USERNAME_TAKEN' })
     })
 
     it('rejects a password below the minimum length at the route layer', async () => {
-      seedInstanceSettings(db, true, false)
+      await seedInstance(db, { allowRegistration: true })
       const app = createAuthApp(null)
       const res = await app.request('/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'shortpass', password: 'secret6' }),
+        body: JSON.stringify({ username: 'shortpass', password: 'short12' }),
       })
       expect(res.status).toBe(400)
       const body = await res.json()
@@ -143,10 +189,10 @@ describe('auth module', () => {
     })
 
     it('maps a concurrent duplicate username write to USERNAME_TAKEN', async () => {
-      seedInstanceSettings(db, true, false)
+      await seedInstance(db, { allowRegistration: true })
       const results = await Promise.allSettled([
-        register('race-user', 'secret6'),
-        register('race-user', 'secret6'),
+        register('race-user', 'password123'),
+        register('race-user', 'password456'),
       ])
 
       expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
@@ -156,57 +202,56 @@ describe('auth module', () => {
 
   describe('changePassword', () => {
     it('rejects a wrong old password', async () => {
-      const id = await insertUser(db, { username: 'bob', password: 'oldpass6' })
-      await expect(changePassword(id, 'wrong', 'newpass6')).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+      const id = await insertUser(db, { username: 'bob', password: 'oldpass123' })
+      await expect(changePassword(id, 'wrong', 'newpass123')).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
     })
 
-    it('updates the password on success', async () => {
-      const id = await insertUser(db, { username: 'bob', password: 'oldpass6' })
-      await changePassword(id, 'oldpass6', 'newpass6')
+    it('updates the password and revokes every session', async () => {
+      const id = await insertUser(db, { username: 'bob', password: 'oldpass123' })
+      const token = startSession(db, id)
+      expect(resolveSession(token)).not.toBeNull()
+      await changePassword(id, 'oldpass123', 'newpass123')
       const row = db.select().from(schema.users).where(eq(schema.users.id, id)).get()
-      expect(await verifyPassword('newpass6', row!.passwordHash!)).toBe(true)
+      expect(await verifyPassword('newpass123', row!.passwordHash!)).toBe(true)
+      expect(resolveSession(token)).toBeNull()
+      expect(db.select().from(schema.sessions).where(eq(schema.sessions.userId, id)).all()).toHaveLength(0)
     })
   })
 
   describe('instance settings', () => {
-    it('reads flags and reports initialized=false without a password user', () => {
-      seedInstanceSettings(db, false, false)
+    it('reports initialized=false without an instance row', async () => {
       const info = getInstanceInfo()
       expect(info).toEqual({ initialized: false, allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: config.uploadMaxBytes })
     })
 
-    it('falls back to the env upload cap and honors the instance override', () => {
-      seedInstanceSettings(db, false, false)
+    it('falls back to the env upload cap and honors the instance override', async () => {
+      await seedInstance(db, {})
       expect(effectiveUploadMaxBytes()).toBe(config.uploadMaxBytes)
       updateInstanceSettings({ uploadMaxBytes: 524288000 })
       expect(effectiveUploadMaxBytes()).toBe(524288000)
       expect(getInstanceInfo().uploadMaxBytes).toBe(524288000)
     })
 
-    it('ignores a malformed stored upload cap and falls back to env', () => {
-      seedInstanceSettings(db, false, false)
-      db.insert(schema.instanceSettings).values({ key: 'uploadMaxBytes', value: 'not-a-number' }).run()
-      resetAuthCaches()
-      expect(effectiveUploadMaxBytes()).toBe(config.uploadMaxBytes)
-    })
-
     it('updates flags', async () => {
-      seedInstanceSettings(db, false, false)
+      await seedInstance(db, {})
       const info = updateInstanceSettings({ allowRegistration: true, allowGuestAccess: true })
       expect(info.allowRegistration).toBe(true)
       expect(info.allowGuestAccess).toBe(true)
       expect(getInstanceInfo().allowRegistration).toBe(true)
     })
 
-    it('reports initialized=false even when guest access is on', async () => {
-      seedInstanceSettings(db, false, true)
+    it('reports initialized=true once the instance row exists', async () => {
       expect(getInstanceInfo().initialized).toBe(false)
-      await insertUser(db, { username: 'own', password: 'secret6', role: 'owner' })
+      await seedInstance(db, { allowGuestAccess: true })
       expect(getInstanceInfo().initialized).toBe(true)
     })
 
+    it('rejects settings writes before setup', async () => {
+      expect(() => updateInstanceSettings({ allowRegistration: true })).toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
+    })
+
     it('rejects PATCH /instance for a member', async () => {
-      seedInstanceSettings(db, false, false)
+      await seedInstance(db, {})
       const app = createAuthApp({ id: 'u1', username: 'mem', role: 'member' })
       const res = await app.request('/api/v1/auth/instance', {
         method: 'PATCH',
@@ -217,7 +262,7 @@ describe('auth module', () => {
     })
 
     it('rejects PATCH /instance for a guest-injected session', async () => {
-      seedInstanceSettings(db, false, true)
+      await seedInstance(db, { allowGuestAccess: true })
       const app = new Hono()
       app.onError(errorHandler)
       app.use('/api/v1/auth/*', async (c, next) => {
@@ -235,8 +280,8 @@ describe('auth module', () => {
     })
 
     it('allows PATCH /instance for an owner', async () => {
-      seedInstanceSettings(db, false, false)
-      const app = createAuthApp({ id: 'u1', username: 'own', role: 'owner' })
+      const ownerId = await seedInstance(db, {})
+      const app = createAuthApp({ id: ownerId, username: 'own', role: 'owner' })
       const res = await app.request('/api/v1/auth/instance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -248,7 +293,7 @@ describe('auth module', () => {
     })
 
     it('rejects an out-of-range upload cap', async () => {
-      seedInstanceSettings(db, false, false)
+      await seedInstance(db, {})
       const app = createAuthApp({ id: 'u1', username: 'own', role: 'owner' })
       const res = await app.request('/api/v1/auth/instance', {
         method: 'PATCH',
@@ -259,7 +304,7 @@ describe('auth module', () => {
     })
 
     it('persists an owner-set upload cap and returns the effective value', async () => {
-      seedInstanceSettings(db, false, false)
+      await seedInstance(db, {})
       const app = createAuthApp({ id: 'u1', username: 'own', role: 'owner' })
       const res = await app.request('/api/v1/auth/instance', {
         method: 'PATCH',
@@ -274,35 +319,38 @@ describe('auth module', () => {
   })
 
   describe('login route', () => {
-    it('returns a token and sets the auth cookie', async () => {
-      seedInstanceSettings(db, false, false)
-      await insertUser(db, { username: 'carol', password: 'secret6', role: 'owner' })
+    it('sets the session cookie and returns the user without a token', async () => {
+      await seedInstance(db, {})
+      await insertUser(db, { username: 'carol', password: 'password123', role: 'owner' })
       const app = createAuthApp(null)
       const res = await app.request('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'carol', password: 'secret6' }),
+        body: JSON.stringify({ username: 'carol', password: 'password123' }),
       })
       expect(res.status).toBe(200)
-      expect(res.headers.get('set-cookie')).toContain('bd_token=')
+      const cookie = res.headers.get('set-cookie') ?? ''
+      expect(cookie).toContain('bd_token=')
+      expect(cookie).toContain('HttpOnly')
       const body = await res.json()
       expect(body.data.user.username).toBe('carol')
+      expect(body.data.token).toBeUndefined()
     })
 
     it('rejects invalid credentials without revealing whether the username exists', async () => {
-      seedInstanceSettings(db, false, false)
-      await insertUser(db, { username: 'carol', password: 'secret6', role: 'owner' })
+      await seedInstance(db, {})
+      await insertUser(db, { username: 'carol', password: 'password123', role: 'owner' })
       const app = createAuthApp(null)
 
       const wrongPassword = await app.request('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'carol', password: 'wrong6' }),
+        body: JSON.stringify({ username: 'carol', password: 'wrongpass' }),
       })
       const unknownUsername = await app.request('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'nobody', password: 'wrong6' }),
+        body: JSON.stringify({ username: 'nobody', password: 'wrongpass' }),
       })
 
       expect(wrongPassword.status).toBe(401)
@@ -312,14 +360,14 @@ describe('auth module', () => {
     })
 
     it('rejects a disabled account after verifying its password', async () => {
-      seedInstanceSettings(db, false, false)
-      await insertUser(db, { username: 'dave', password: 'secret6', disabled: 1 })
+      await seedInstance(db, {})
+      await insertUser(db, { username: 'dave', password: 'password123', disabled: 1 })
       const app = createAuthApp(null)
 
       const res = await app.request('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'dave', password: 'secret6' }),
+        body: JSON.stringify({ username: 'dave', password: 'password123' }),
       })
 
       expect(res.status).toBe(403)
@@ -327,7 +375,7 @@ describe('auth module', () => {
     })
 
     it('returns validation errors for incomplete or malformed request bodies', async () => {
-      seedInstanceSettings(db, false, false)
+      await seedInstance(db, {})
       const app = createAuthApp(null)
 
       const incomplete = await app.request('/api/v1/auth/login', {
@@ -348,12 +396,12 @@ describe('auth module', () => {
     })
 
     it('rate-limits repeated credential failures with retry metadata', async () => {
-      seedInstanceSettings(db, false, false)
+      await seedInstance(db, {})
       const app = createAuthApp(null)
       const attempt = () => app.request('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'nobody', password: 'wrong6' }),
+        body: JSON.stringify({ username: 'nobody', password: 'wrongpass' }),
       })
 
       for (let i = 0; i < config.authRpm; i += 1) {
@@ -367,8 +415,8 @@ describe('auth module', () => {
     })
 
     it('clears failed attempts after a successful login', async () => {
-      seedInstanceSettings(db, false, false)
-      await insertUser(db, { username: 'erin', password: 'secret6', role: 'owner' })
+      await seedInstance(db, {})
+      await insertUser(db, { username: 'erin', password: 'password123', role: 'owner' })
       const app = createAuthApp(null)
       const request = (password: string) => app.request('/api/v1/auth/login', {
         method: 'POST',
@@ -376,35 +424,37 @@ describe('auth module', () => {
         body: JSON.stringify({ username: 'erin', password }),
       })
 
-      expect((await request('wrong6')).status).toBe(401)
-      expect((await request('secret6')).status).toBe(200)
+      expect((await request('wrongpass')).status).toBe(401)
+      expect((await request('password123')).status).toBe(200)
       for (let i = 0; i < config.authRpm; i += 1) {
-        expect((await request('wrong6')).status).toBe(401)
+        expect((await request('wrongpass')).status).toBe(401)
       }
-      expect((await request('wrong6')).status).toBe(429)
+      expect((await request('wrongpass')).status).toBe(429)
     })
   })
 
   describe('setup', () => {
-    it('allows setup while guest access is on (no password user yet)', async () => {
-      seedInstanceSettings(db, false, true)
-      await getDefaultUser()
-      const result = await setupUser('admin', 'secret6')
+    it('creates the owner, their private library and the instance atomically', async () => {
+      const result = await setupUser('admin', 'password123')
       expect(result.user.role).toBe('owner')
       expect(getInstanceInfo().initialized).toBe(true)
+      const libraries = db.select().from(schema.libraries).where(eq(schema.libraries.userId, result.user.id)).all()
+      expect(libraries).toHaveLength(1)
+      expect(libraries[0]).toMatchObject({ type: 'private' })
+      const instanceRow = db.select().from(schema.instance).all()
+      expect(instanceRow).toHaveLength(1)
+      expect(instanceRow[0]?.ownerUserId).toBe(result.user.id)
     })
 
-    it('rejects setup once a password user exists', async () => {
-      seedInstanceSettings(db, false, true)
-      await setupUser('admin', 'secret6')
-      await expect(setupUser('admin2', 'secret6')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    it('rejects setup once the instance exists', async () => {
+      await setupUser('admin', 'password123')
+      await expect(setupUser('admin2', 'password123')).rejects.toMatchObject({ code: 'FORBIDDEN' })
     })
 
     it('allows only one concurrent setup request to create an owner', async () => {
-      seedInstanceSettings(db, false, false)
       const results = await Promise.allSettled([
-        setupUser('owner-one', 'secret6'),
-        setupUser('owner-two', 'secret6'),
+        setupUser('owner-one', 'password123'),
+        setupUser('owner-two', 'password123'),
       ])
 
       expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
@@ -414,7 +464,7 @@ describe('auth module', () => {
 
   describe('changeUsername', () => {
     it('renames the user and returns the fresh account', async () => {
-      const id = await insertUser(db, { username: 'frank', password: 'secret6' })
+      const id = await insertUser(db, { username: 'frank', password: 'password123' })
       const app = createAuthApp({ id, username: 'frank', role: 'member' })
       const res = await app.request('/api/v1/auth/username', {
         method: 'POST',
@@ -427,11 +477,12 @@ describe('auth module', () => {
       expect(body.data.avatarKey).toBeNull()
       const row = db.select().from(schema.users).where(eq(schema.users.id, id)).get()
       expect(row?.username).toBe('frank2')
+      expect(row?.usernameNormalized).toBe('frank2')
     })
 
     it('rejects a taken username with 409', async () => {
-      await insertUser(db, { username: 'grace', password: 'secret6' })
-      const id = await insertUser(db, { username: 'heidi', password: 'secret6' })
+      await insertUser(db, { username: 'grace', password: 'password123' })
+      const id = await insertUser(db, { username: 'heidi', password: 'password123' })
       const app = createAuthApp({ id, username: 'heidi', role: 'member' })
       const res = await app.request('/api/v1/auth/username', {
         method: 'POST',
@@ -444,8 +495,8 @@ describe('auth module', () => {
     })
 
     it('rejects a case-variant near-duplicate with 409', async () => {
-      await insertUser(db, { username: 'grace', password: 'secret6' })
-      const id = await insertUser(db, { username: 'heidi', password: 'secret6' })
+      await insertUser(db, { username: 'grace', password: 'password123' })
+      const id = await insertUser(db, { username: 'heidi', password: 'password123' })
       const app = createAuthApp({ id, username: 'heidi', role: 'member' })
       const res = await app.request('/api/v1/auth/username', {
         method: 'POST',
@@ -458,7 +509,7 @@ describe('auth module', () => {
     })
 
     it('stores the sanitized username, stripping invisible characters', async () => {
-      const id = await insertUser(db, { username: 'ivan', password: 'secret6' })
+      const id = await insertUser(db, { username: 'ivan', password: 'password123' })
       const app = createAuthApp({ id, username: 'ivan', role: 'member' })
       const res = await app.request('/api/v1/auth/username', {
         method: 'POST',
@@ -471,7 +522,7 @@ describe('auth module', () => {
     })
 
     it('keeps the current username when unchanged', async () => {
-      const id = await insertUser(db, { username: 'ivan', password: 'secret6' })
+      const id = await insertUser(db, { username: 'ivan', password: 'password123' })
       const app = createAuthApp({ id, username: 'ivan', role: 'member' })
       const res = await app.request('/api/v1/auth/username', {
         method: 'POST',
@@ -501,7 +552,7 @@ describe('auth module', () => {
 
   describe('me route', () => {
     it('flags guest-injected sessions', async () => {
-      seedInstanceSettings(db, false, true)
+      await seedInstance(db, { allowGuestAccess: true })
       const app = new Hono()
       app.onError(errorHandler)
       app.use('/api/v1/auth/*', async (c, next) => {
@@ -517,7 +568,7 @@ describe('auth module', () => {
     })
 
     it('flags real sessions as non-guest', async () => {
-      seedInstanceSettings(db, false, false)
+      await seedInstance(db, {})
       const app = createAuthApp({ id: 'u1', username: 'own', role: 'owner' })
       const res = await app.request('/api/v1/auth/me')
       expect(res.status).toBe(200)
@@ -526,13 +577,75 @@ describe('auth module', () => {
     })
   })
 
+  describe('sessions', () => {
+    it('resolves a live session and drops unknown tokens', async () => {
+      const id = await insertUser(db, { username: 'sess', password: 'password123' })
+      const created = createSession(id)
+      expect(resolveSession(created.token)).toMatchObject({ userId: id, sessionId: created.sessionId })
+      expect(resolveSession('nope')).toBeNull()
+    })
+
+    it('expires sessions past their deadline and cleans the row', async () => {
+      const id = await insertUser(db, { username: 'sess', password: 'password123' })
+      const token = startSession(db, id, Date.now() - 1000)
+      expect(resolveSession(token)).toBeNull()
+      expect(db.select().from(schema.sessions).all()).toHaveLength(0)
+    })
+
+    it('refreshes sessions inside the 7-day window and leaves fresh ones alone', async () => {
+      const id = await insertUser(db, { username: 'sess', password: 'password123' })
+      const created = createSession(id)
+      expect(refreshSessionIfNeeded(created.sessionId, created.expiresAt)).toBe(false)
+
+      const nearExpiry = Date.now() + 6 * 24 * 60 * 60 * 1000
+      db.update(schema.sessions).set({ expiresAt: nearExpiry }).where(eq(schema.sessions.id, created.sessionId)).run()
+      expect(refreshSessionIfNeeded(created.sessionId, nearExpiry)).toBe(true)
+      const row = db.select().from(schema.sessions).where(eq(schema.sessions.id, created.sessionId)).get()
+      expect(row!.expiresAt).toBeGreaterThan(nearExpiry)
+    })
+
+    it('revokes one session on logout and all on demand', async () => {
+      const id = await insertUser(db, { username: 'sess', password: 'password123' })
+      const first = createSession(id)
+      const second = createSession(id)
+      revokeSession(first.token)
+      expect(resolveSession(first.token)).toBeNull()
+      expect(resolveSession(second.token)).not.toBeNull()
+      revokeUserSessions(id)
+      expect(resolveSession(second.token)).toBeNull()
+    })
+
+    it('logs out through the route by revoking the presented session', async () => {
+      const id = await insertUser(db, { username: 'sess', password: 'password123' })
+      const token = startSession(db, id)
+      const app = createAuthApp({ id, username: 'sess', role: 'member' })
+      const res = await app.request('/api/v1/auth/logout', {
+        method: 'POST',
+        headers: { Cookie: `bd_token=${token}` },
+      })
+      expect(res.status).toBe(200)
+      expect(resolveSession(token)).toBeNull()
+      expect(res.headers.get('set-cookie')).toContain('bd_token=')
+    })
+
+    it('rejects legacy JWTs so old clients re-authenticate', async () => {
+      await seedInstance(db, {})
+      const id = await insertUser(db, { username: 'jwt', role: 'owner', password: 'password123' })
+      const app = createGuardApp()
+      const res = await app.request('/api/v1/protected', {
+        headers: { Authorization: `Bearer ${await signLegacyToken(id)}` },
+      })
+      expect(res.status).toBe(401)
+    })
+  })
+
   describe('authGuard', () => {
     it('rejects a disabled user with ACCOUNT_DISABLED', async () => {
-      seedInstanceSettings(db, false, false)
+      await seedInstance(db, {})
       const id = await insertUser(db, { username: 'dave', disabled: 1 })
       const app = createGuardApp()
       const res = await app.request('/api/v1/protected', {
-        headers: { Authorization: `Bearer ${await signToken(id)}` },
+        headers: { Authorization: `Bearer ${startSession(db, id)}` },
       })
       expect(res.status).toBe(403)
       const body = await res.json()
@@ -540,14 +653,14 @@ describe('auth module', () => {
     })
 
     it('rejects requests without a token when guest access is off', async () => {
-      seedInstanceSettings(db, false, false)
+      await seedInstance(db, {})
       const app = createGuardApp()
       const res = await app.request('/api/v1/protected')
       expect(res.status).toBe(401)
     })
 
     it('injects the default user when guest access is on', async () => {
-      seedInstanceSettings(db, false, true)
+      await seedInstance(db, { allowGuestAccess: true })
       const app = createGuardApp()
       const res = await app.request('/api/v1/protected')
       expect(res.status).toBe(200)
@@ -557,7 +670,7 @@ describe('auth module', () => {
     })
 
     it('rejects mutations from a guest session before route handling', async () => {
-      seedInstanceSettings(db, false, true)
+      await seedInstance(db, { allowGuestAccess: true })
       const app = createGuardApp()
       const res = await app.request('/api/v1/protected-write', { method: 'POST' })
       expect(res.status).toBe(403)
@@ -566,18 +679,18 @@ describe('auth module', () => {
     })
 
     it('keeps mutations available to a signed-in owner', async () => {
-      seedInstanceSettings(db, false, false)
-      const id = await insertUser(db, { username: 'owner', role: 'owner', password: 'secret6' })
+      await seedInstance(db, {})
+      const id = await insertUser(db, { username: 'owner', role: 'owner', password: 'password123' })
       const app = createGuardApp()
       const res = await app.request('/api/v1/protected-write', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${await signToken(id)}` },
+        headers: { Authorization: `Bearer ${startSession(db, id)}` },
       })
       expect(res.status).toBe(200)
     })
 
     it('creates the default user with the guest role, never owner', async () => {
-      seedInstanceSettings(db, false, true)
+      await seedInstance(db, { allowGuestAccess: true })
       const user = await getDefaultUser()
       expect(user.role).toBe('guest')
       expect(user.username).toBe(user.id)
@@ -586,29 +699,41 @@ describe('auth module', () => {
     })
 
     it('reuses a legacy guest row as-is, without renaming or duplicating', async () => {
-      seedInstanceSettings(db, false, true)
+      await seedInstance(db, { allowGuestAccess: true })
       const legacyId = await insertUser(db, { username: 'admin', role: 'guest' })
       const user = await getDefaultUser()
       expect(user.id).toBe(legacyId)
       expect(user.username).toBe('admin')
       const rows = db.select().from(schema.users).all()
-      expect(rows).toHaveLength(1)
+      expect(rows).toHaveLength(2)
     })
 
-    it('accepts a valid token from the cookie', async () => {
-      seedInstanceSettings(db, false, false)
+    it('accepts a valid session from the cookie', async () => {
+      await seedInstance(db, {})
       const id = await insertUser(db, { username: 'erin', role: 'owner' })
       const app = createGuardApp()
       const res = await app.request('/api/v1/protected', {
-        headers: { Cookie: `bd_token=${await signToken(id)}` },
+        headers: { Cookie: `bd_token=${startSession(db, id)}` },
       })
       expect(res.status).toBe(200)
       const body = await res.json()
       expect(body.data.id).toBe(id)
     })
 
+    it('rejects an expired session and cleans the row', async () => {
+      await seedInstance(db, {})
+      const id = await insertUser(db, { username: 'erin', role: 'owner' })
+      const token = startSession(db, id, Date.now() - 1000)
+      const app = createGuardApp()
+      const res = await app.request('/api/v1/protected', {
+        headers: { Cookie: `bd_token=${token}` },
+      })
+      expect(res.status).toBe(401)
+      expect(db.select().from(schema.sessions).all()).toHaveLength(0)
+    })
+
     it('accepts a scoped access key only on Legado routes', async () => {
-      seedInstanceSettings(db, false, false)
+      await seedInstance(db, {})
       const id = await insertUser(db, { username: 'frank', role: 'member' })
       db.insert(schema.settings).values({
         id: createId('setting'),
@@ -634,10 +759,11 @@ describe('auth module', () => {
         .set({ value: { legado: { enabled: true, authMode: 'login' } } })
         .where(and(eq(schema.settings.userId, id), eq(schema.settings.key, 'integrations')))
         .run()
+      const sessionToken = startSession(db, id)
       const disabledModeResponse = await app.request('/api/v1/legado/protected', {
         headers: {
           Authorization: `Bearer ${key.token}`,
-          Cookie: `bd_token=${await signToken(id)}`,
+          Cookie: `bd_token=${sessionToken}`,
         },
       })
       expect(disabledModeResponse.status).toBe(401)

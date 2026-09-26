@@ -62,6 +62,22 @@ describe('tags service', () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }).run()
+    // New-model mirror for rewired reads: private library, version, work, card.
+    const libraryId = createId('lib')
+    const now = Date.now()
+    db.insert(schema.libraries).values({
+      id: libraryId, userId, type: 'private', name: 'test',
+      description: '', visibility: null, createdAt: now, updatedAt: now,
+    }).run()
+    db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 100, createdAt: now, updatedAt: now }).run()
+    const libraryBookId = createId('lb')
+    db.insert(schema.libraryBooks).values({
+      id: libraryBookId, libraryId, userId, title: 'Test Book', createdAt: now, updatedAt: now,
+    }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: createId('lbv'), libraryId, libraryBookId, bookVersionId: bookId,
+      kind: 'personal', createdAt: now, updatedAt: now,
+    }).run()
   })
 
   it('should create and list tags', async () => {
@@ -124,10 +140,12 @@ describe('tags service', () => {
     await addBooksToTag(userId, tag.id, [bookId])
     expect((await listTags(userId))[0].bookCount).toBe(1)
 
-    db.update(schema.books).set({ deletedAt: Date.now() }).where(eq(schema.books.id, bookId)).run()
+    const book = db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
+      .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, bookId)).get()!
+    db.update(schema.libraryBooks).set({ deletedAt: Date.now() }).where(eq(schema.libraryBooks.id, book.libraryBookId)).run()
     expect((await listTags(userId))[0].bookCount).toBe(0)
 
-    db.update(schema.books).set({ deletedAt: null }).where(eq(schema.books.id, bookId)).run()
+    db.update(schema.libraryBooks).set({ deletedAt: null }).where(eq(schema.libraryBooks.id, book.libraryBookId)).run()
     expect((await listTags(userId))[0].bookCount).toBe(1)
   })
 

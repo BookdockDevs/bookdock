@@ -178,7 +178,6 @@ export interface LoginReq {
 }
 
 export interface LoginRes {
-  token: string
   user: {
     id: string
     username: string
@@ -192,7 +191,6 @@ export interface SetupReq {
 }
 
 export interface SetupRes {
-  token: string
   user: {
     id: string
     username: string
@@ -245,7 +243,6 @@ export interface RegisterReq {
 }
 
 export interface RegisterRes {
-  token: string
   user: {
     id: string
     username: string

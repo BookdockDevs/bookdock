@@ -35,9 +35,9 @@ export function compareReleaseVersions(left: [number, number, number], right: [n
 }
 
 export const AUTH_PASSWORD_MIN_LENGTH = 8
-export const AUTH_PASSWORD_MAX_LENGTH = 256
-export const AUTH_USERNAME_MAX_LENGTH = 100
-export const AUTH_REGISTER_USERNAME_MAX_LENGTH = 30
+export const AUTH_PASSWORD_MAX_LENGTH = 128
+export const AUTH_USERNAME_MAX_LENGTH = 32
+export const AUTH_REGISTER_USERNAME_MAX_LENGTH = 32
 
 // Zero-width, bidi-control and C0/C1 characters have no legitimate use in a
 // username — they only enable display spoofing (e.g. RTL "trojan source").

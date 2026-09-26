@@ -1,18 +1,17 @@
 import { eq } from 'drizzle-orm'
 import type { Context, MiddlewareHandler } from 'hono'
 import { getCookie } from 'hono/cookie'
-import { jwtVerify } from 'jose'
 
 import { requiredPermissionFor } from '@bookdock/shared'
 import type { AccessTokenPermission } from '@bookdock/shared'
 
 import { getDb } from '../db/client'
 import { users } from '../db/schema'
-import { config } from '../config'
-import { getDefaultUser, getInstanceSettings, resetInstanceCache } from '../modules/auth/auth.service'
+import { getDefaultUser, getInstanceSettings, refreshSessionIfNeeded, resetInstanceCache, resolveSession, revokeSession } from '../modules/auth/auth.service'
 import { resolveLegadoAccessKey } from '../modules/books/legado-access.service'
 import { resolveAccessToken } from '../modules/tokens/tokens.service'
 import { isLegadoAccessKeyEnabled } from '../modules/settings/settings.service'
+import { SESSION_COOKIE, setSessionCookie } from '../modules/auth/session-cookie'
 
 export interface AuthUser {
   id: string
@@ -39,7 +38,7 @@ declare module 'hono' {
   }
 }
 
-const TOKEN_COOKIE = 'bd_token'
+const TOKEN_COOKIE = SESSION_COOKIE
 
 const PUBLIC_ROUTES = new Set([
   'GET /api/v1/auth/instance',
@@ -193,15 +192,17 @@ export function authGuard(): MiddlewareHandler {
         if (blocked) return blocked
         return next()
       }
-      let userId: string
-      try {
-        const { payload } = await jwtVerify(token, new TextEncoder().encode(config.jwtSecret))
-        userId = payload.userId as string
-      } catch {
+      // Server-side sessions (Phase 3): the cookie/Bearer value is a random
+      // token whose sha256 hash is the database key. Old JWTs share the
+      // transport but never resolve here, so they get a clean 401 and the
+      // client re-authenticates under the new scheme.
+      const session = resolveSession(token)
+      if (!session) {
         return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } }, 401)
       }
-      const user = getFreshUser(userId)
+      const user = getFreshUser(session.userId)
       if (!user) {
+        revokeSession(token)
         return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } }, 401)
       }
       if (user.disabled) {
@@ -210,6 +211,9 @@ export function authGuard(): MiddlewareHandler {
       c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
       c.set('legadoAccessKey', false)
       c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
+      if (refreshSessionIfNeeded(session.sessionId, session.expiresAt)) {
+        setSessionCookie(c, token)
+      }
       const blocked = rejectGuestMutation(c)
       if (blocked) return blocked
       return next()

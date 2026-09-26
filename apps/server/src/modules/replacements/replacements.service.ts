@@ -3,9 +3,21 @@ import { and, eq, isNull, or } from 'drizzle-orm'
 import { compileReplacementRegex, type TextReplacementRes, type ReplacementCreateReq, type ReplacementOverrideReq, type ReplacementUpdateReq } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { books, textReplacementOverrides, textReplacements } from '../../db/schema'
+import { books, bookVersions, libraries, libraryBookVersions, textReplacementOverrides, textReplacements } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { AppError } from '../../middleware/error'
+
+function assertBookAccessible(userId: string, bookId: string) {
+  const db = getDb()
+  const legacy = db.select({ id: books.id }).from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
+  if (legacy) return
+  // Version-native books have no legacy row: existence is the private library.
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  const version = library && db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+    .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
+  if (!version) throw new AppError('BOOK_NOT_FOUND')
+}
 
 type ReplacementRow = typeof textReplacements.$inferSelect
 type ReplacementOverrideRow = typeof textReplacementOverrides.$inferSelect
@@ -92,14 +104,19 @@ export async function createReplacement(userId: string, data: ReplacementCreateR
   // Null bookId = user-global pattern rule; set = book-scoped pattern or point patch
   const bookId = data.bookId ?? null
   if (bookId) {
-    const book = db.select({ id: books.id }).from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-    if (!book) throw new AppError('BOOK_NOT_FOUND')
+    assertBookAccessible(userId, bookId)
   }
   const now = Date.now()
+  const version = bookId
+    ? db.select({ id: bookVersions.id }).from(bookVersions).where(eq(bookVersions.id, bookId)).get()
+    : null
   const row: ReplacementRow = {
     id: createId('replacement'),
     userId,
     bookId,
+    // Scoped rules bind the version when the book already migrated (0.3:
+    // version id reuses book id); compat-window writes stay unbound.
+    bookVersionId: version?.id ?? null,
     matchType,
     pattern: data.pattern ?? null,
     replacement: data.replacement ?? null,
@@ -143,8 +160,7 @@ export async function updateReplacement(userId: string, replacementId: string, d
   }
   if (data.bookId !== undefined) {
     if (data.bookId !== null) {
-      const book = db.select({ id: books.id }).from(books).where(and(eq(books.id, data.bookId), eq(books.userId, userId))).get()
-      if (!book) throw new AppError('BOOK_NOT_FOUND')
+      assertBookAccessible(userId, data.bookId)
     }
     patch.bookId = data.bookId
   }
@@ -175,8 +191,7 @@ export async function setReplacementOverride(userId: string, replacementId: stri
   if (existing.matchType === 'point' || existing.bookId) {
     throw new AppError('VALIDATION_ERROR', 'per-book overrides only apply to global pattern rules')
   }
-  const book = db.select({ id: books.id }).from(books).where(and(eq(books.id, data.bookId), eq(books.userId, userId))).get()
-  if (!book) throw new AppError('BOOK_NOT_FOUND')
+  assertBookAccessible(userId, data.bookId)
 
   if (data.enabled === null) {
     db.delete(textReplacementOverrides).where(

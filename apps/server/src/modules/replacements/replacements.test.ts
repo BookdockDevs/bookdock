@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
+import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -107,6 +108,17 @@ describe('replacements service', () => {
     expect(forBook[0].matchType).toBe('pattern')
     expect(forBook[0].effectiveEnabled).toBe(true)
     expect(forBook[0].hasOverride).toBe(false)
+  })
+
+  it('binds the version for scoped rules once the book migrated', async () => {
+    const before = await createReplacement(ownerId, { bookId, pattern: 'before' })
+    expect(db.select({ bookVersionId: schema.textReplacements.bookVersionId }).from(schema.textReplacements).where(eq(schema.textReplacements.id, before.id)).get())
+      .toEqual({ bookVersionId: null })
+
+    db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 100, createdAt: 1, updatedAt: 1 }).run()
+    const after = await createReplacement(ownerId, { bookId, pattern: 'after' })
+    expect(db.select({ bookVersionId: schema.textReplacements.bookVersionId }).from(schema.textReplacements).where(eq(schema.textReplacements.id, after.id)).get())
+      .toEqual({ bookVersionId: bookId })
   })
 
   it('rejects book-scoped patterns on another user\'s book with BOOK_NOT_FOUND', async () => {
