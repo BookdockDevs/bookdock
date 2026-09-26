@@ -108,6 +108,45 @@ describe('AboutSettingsSection in-app update', () => {
     expect(screen.getByRole('button', { name: '立即更新' })).toBeInTheDocument()
   })
 
+  it('retries a stale failed job against the latest release instead of replaying it', async () => {
+    renderSection([{ phase: 'failed', outcome: 'failed', currentVersion: CURRENT, targetVersion: '0.3.6', error: { code: 'UPDATE_FAILED', message: 'old failure' } }])
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看更新状态' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '重试' }))
+
+    // The stored job targets 0.3.6 but the check reports TARGET: retry must
+    // follow latest (the server rejects non-latest targets outright).
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(apiPost).mock.calls[0]).toEqual([
+      '/system/update',
+      { targetVersion: TARGET, progressId: expect.stringMatching(/^update-/) },
+    ])
+  })
+
+  it('shows a single banner and close button when a retry fails on a failed job', async () => {
+    renderSection([{ phase: 'failed', outcome: 'failed', currentVersion: CURRENT, targetVersion: TARGET, error: { code: 'UPDATE_FAILED', message: 'Checksum mismatch' } }])
+    vi.mocked(apiPost).mockRejectedValueOnce(new ApiError('UPDATE_NOT_AVAILABLE', 'gone'))
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看更新状态' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '重试' }))
+
+    expect(await screen.findByText('该版本暂时无法通过应用内更新获取，请重新检查更新或改用 docker compose pull。')).toBeInTheDocument()
+    // The fresh start error supersedes the stale settled box: no duplicate
+    // banner, and exactly one footer Close next to the header X.
+    expect(screen.queryByText('Checksum mismatch')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getAllByRole('button', { name: '关闭' })).toHaveLength(2)
+  })
+
+  it('localizes server-sent download progress instead of leaking English', async () => {
+    renderSection([{ phase: 'download', outcome: 'active', currentVersion: CURRENT, targetVersion: TARGET, action: 'Release server responded; receiving package data', download: { state: 'receiving', receivedBytes: 1024, totalBytes: 2048 } }])
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看更新状态' }))
+
+    // The raw server string must not leak anywhere in the dialog.
+    expect(await screen.findByText('已收到响应，正在接收')).toBeInTheDocument()
+    expect(screen.queryByText('Release server responded; receiving package data')).not.toBeInTheDocument()
+  })
+
   it('copies version number and updates badge to show copied state', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })

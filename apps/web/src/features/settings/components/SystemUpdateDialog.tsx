@@ -37,6 +37,26 @@ const UPDATE_PHASE_KEYS: Record<Exclude<UpdatePhase, 'idle' | 'failed' | 'cancel
 
 const UPDATE_STALL_HINT_MS = 90 * 1000
 
+// Server-sent progress details are English-only; map the known closed set to
+// i18n keys so the dialog never leaks them (unknown future strings fall back
+// to the raw text rather than blanking out).
+const SERVER_ACTION_KEYS: Record<string, string> = {
+  'Checking the latest release and runtime compatibility': 'settings.aboutUpdateActionCheck',
+  'Connecting to release server': 'settings.aboutUpdateConnecting',
+  'Release server responded; receiving package data': 'settings.aboutUpdateReceiving',
+  'Checking the package SHA-256 checksum': 'settings.aboutUpdateActionVerify',
+  'Creating a rollback snapshot of the database': 'settings.aboutUpdateActionSnapshot',
+  'Unpacking release files': 'settings.aboutUpdateActionExtract',
+  'Preparing the verified release for startup': 'settings.aboutUpdateActionPromote',
+  'Waiting for the launcher health check': 'settings.aboutUpdateActionRestarting',
+}
+
+function localizeServerAction(t: (key: string) => string, action?: string): string | undefined {
+  if (!action) return undefined
+  const key = SERVER_ACTION_KEYS[action]
+  return key ? t(key) : action
+}
+
 type StepStatus = 'pending' | 'active' | 'completed'
 
 function getStepStatuses(phase: UpdatePhase | undefined, isStarting: boolean, isApplied: boolean) {
@@ -135,6 +155,13 @@ export default function SystemUpdateDialog({
     activeMessage = _('settings.aboutUpdateStarting')
   }
 
+  // A failed start attempt supersedes the stale settled box: showing both
+  // produced duplicate banners and duplicate Close buttons.
+  const visibleSettled = isSettled && !startErrorKey
+  const serverActionText = status?.action && status.action !== activeMessage
+    ? localizeServerAction(_, status.action)
+    : undefined
+
   const handleCopyDiagnostic = async () => {
     if (!status?.diagnostic) return
     try {
@@ -231,7 +258,7 @@ export default function SystemUpdateDialog({
           )}
 
           {/* Settled / Terminal State Notification Banner (Unified, no nested boxes) */}
-          {isSettled && (
+          {visibleSettled && (
             <div
               role={isFailed ? 'alert' : 'status'}
               className={`rounded-xl border p-4 text-xs leading-relaxed ${
@@ -311,9 +338,9 @@ export default function SystemUpdateDialog({
               </div>
 
               {/* Sub-action description: only display standalone when no progress bar is active */}
-              {!['snapshot', 'download', 'extract'].includes(status?.phase ?? '') && status?.action && status.action !== activeMessage && (
+              {!['snapshot', 'download', 'extract'].includes(status?.phase ?? '') && serverActionText && (
                 <p className="mt-1.5 text-xs text-stone-500 dark:text-stone-400">
-                  {status.action}
+                  {serverActionText}
                 </p>
               )}
 
@@ -341,7 +368,7 @@ export default function SystemUpdateDialog({
                   <div className="mt-1.5">
                     <DownloadProgress
                       download={status.download}
-                      action={status.action !== activeMessage ? status.action : undefined}
+                      action={serverActionText}
                     />
                   </div>
                 </div>
@@ -452,7 +479,7 @@ export default function SystemUpdateDialog({
                 </button>
                 <button
                   type="button"
-                  onClick={onStartUpdate}
+                  onClick={() => onStartUpdate()}
                   disabled={isStarting}
                   className="inline-flex items-center gap-2 rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white shadow-xs transition-all hover:bg-stone-800 active:scale-95 disabled:opacity-60 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
                 >
@@ -512,7 +539,7 @@ export default function SystemUpdateDialog({
               </>
             )}
 
-            {(isFailed || isReverted || isCancelled) && (
+            {(isFailed || isReverted || isCancelled) && !startErrorKey && (
               <>
                 <button
                   type="button"
@@ -532,13 +559,22 @@ export default function SystemUpdateDialog({
             )}
 
             {startErrorKey && (
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-lg border border-stone-200/90 bg-white px-3.5 py-2 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300"
-              >
-                {_('settings.aboutUpdateClose')}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-lg border border-stone-200/90 bg-white px-3.5 py-2 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300"
+                >
+                  {_('settings.aboutUpdateClose')}
+                </button>
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white shadow-xs transition-all hover:bg-stone-800 active:scale-95 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+                >
+                  <span>{_('settings.aboutRetry')}</span>
+                </button>
+              </>
             )}
           </div>
         </div>

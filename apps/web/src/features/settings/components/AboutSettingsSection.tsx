@@ -83,7 +83,8 @@ export default function AboutSettingsSection() {
   const appName = _('app.name')
 
   const status = updateStatus.data?.data
-  const taskTarget = updateTarget ?? status?.targetVersion ?? update?.latestVersion
+  const latestVersion = update?.latestVersion
+  const taskTarget = updateTarget ?? status?.targetVersion ?? latestVersion
   const updateActive = status?.outcome === 'active'
   const startError = startUpdate.isError ? getUserErrorNotification(startUpdate.error) : null
 
@@ -92,8 +93,8 @@ export default function AboutSettingsSection() {
     setIsModalOpen(true)
   }
 
-  const handleStartUpdate = () => {
-    const target = taskTarget
+  const handleStartUpdate = (overrideTarget?: string) => {
+    const target = overrideTarget ?? taskTarget
     if (!target) return
     startUpdate.mutate(
       { targetVersion: target, progressId: `update-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}` },
@@ -108,7 +109,10 @@ export default function AboutSettingsSection() {
 
   const handleRetryUpdate = () => {
     startUpdate.reset()
-    handleStartUpdate()
+    // A newer release may have appeared since this job settled; replaying the
+    // stale target is rejected server-side, so retry follows latest instead.
+    const stale = status?.targetVersion && latestVersion && status.targetVersion !== latestVersion
+    handleStartUpdate(stale ? latestVersion : undefined)
   }
 
   const handleCopyVersion = async () => {
