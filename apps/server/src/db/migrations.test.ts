@@ -8,7 +8,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { describe, expect, it } from 'vitest'
 
 import * as schema from './schema'
-import { reconcileConsolidatedMigrationLedger, repairBookmarkFields, repairLegacyTextReplacementSchema, repairLibraryBooksDeletedAt, retargetBookIdReferences } from './client'
+import { reconcileConsolidatedMigrationLedger, repairBookmarkFields, repairIdeaStyle, repairLegacyTextReplacementSchema, repairLibraryBooksDeletedAt, retargetBookIdReferences } from './client'
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
 const baselineFile = path.join(migrationsDir, '0000_baseline.sql')
@@ -660,9 +660,9 @@ describe('text replacement migration', () => {
     expect(sqlite.prepare('SELECT replacement_id, enabled FROM text_replacement_overrides WHERE id = ?').get('o1'))
       .toEqual({ replacement_id: 'r1', enabled: 0 })
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
-      // Journal holds baseline + 0001..0013 + 0015 + 0016 (0014 was abandoned
+      // Journal holds baseline + 0001..0013 + 0015..0017 (0014 was abandoned
       // for the client-side repair); reconcile rewrites the ledger to match it.
-      .toEqual({ count: 16 })
+      .toEqual({ count: 17 })
 
     sqlite.close()
   })
@@ -702,6 +702,37 @@ describe('text replacement migration', () => {
     repairBookmarkFields(db)
     expect(sqlite.prepare('SELECT title FROM bookmarks WHERE id = ?').get('bm-old'))
       .toEqual({ title: 'snippet' })
+
+    sqlite.close()
+  })
+
+  it('backfills idea colors, styles and anchors dropped by the early annotation split', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrate(db, { migrationsFolder: migrationsDir })
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1);
+      INSERT INTO books (id, user_id, title, format, file_path, size, created_at, updated_at)
+        VALUES ('b1', 'u1', 'B1', 'txt', 'k1', 1, 1, 1);
+      INSERT INTO book_versions (id, format, size, created_at, updated_at)
+        VALUES ('b1', 'txt', 1, 1, 1);
+      INSERT INTO annotations (id, user_id, book_id, cfi_range, cfi_anchor, type, color, style, text, created_at, updated_at)
+        VALUES ('idea-old', 'u1', 'b1', 'cfi-1', 'anchor-1', 'note', 'red', 'highlight', 'quoted', 1, 1);
+      INSERT INTO ideas (id, user_id, book_version_id, cfi_range, text, created_at, updated_at)
+        VALUES ('idea-old', 'u1', 'b1', 'cfi-1', 'quoted', 1, 1);
+      INSERT INTO ideas (id, user_id, book_version_id, cfi_range, text, color, style, created_at, updated_at)
+        VALUES ('idea-new', 'u1', 'b1', 'cfi-2', 'fresh', 'green', 'squiggly', 1, 1);
+    `)
+
+    repairIdeaStyle(db)
+
+    // Legacy looks land on the migrated row; rows without a legacy
+    // counterpart keep the values their own writes carried.
+    expect(sqlite.prepare('SELECT color, style, cfi_anchor AS anchor FROM ideas WHERE id = ?').get('idea-old'))
+      .toEqual({ color: 'red', style: 'highlight', anchor: 'anchor-1' })
+    expect(sqlite.prepare('SELECT color, style FROM ideas WHERE id = ?').get('idea-new'))
+      .toEqual({ color: 'green', style: 'squiggly' })
 
     sqlite.close()
   })

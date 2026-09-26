@@ -188,8 +188,8 @@ describe('library follow-up migrations', () => {
         createdAt: 12, updatedAt: 13,
       },
       {
-        id: 'a-note', userId: 'u-owner', bookId: 'b-epub', cfiRange: 'cfi-n',
-        type: 'note', color: 'yellow', style: 'highlight', text: 'quoted', note: 'thought', chapter: 'Ch1',
+        id: 'a-note', userId: 'u-owner', bookId: 'b-epub', cfiRange: 'cfi-n', cfiAnchor: 'anchor-n',
+        type: 'note', color: 'green', style: 'highlight', text: 'quoted', note: 'thought', chapter: 'Ch1',
         createdAt: 14, updatedAt: 15,
       },
       {
@@ -265,7 +265,7 @@ describe('library follow-up migrations', () => {
     expect(db.select().from(schema.bookmarks).where(eq(schema.bookmarks.id, 'a-bm')).get())
       .toMatchObject({ bookVersionId: 'b-epub', cfi: 'cfi-b', chapter: 'Ch2', title: 'snippet context' })
     expect(db.select().from(schema.ideas).where(eq(schema.ideas.id, 'a-note')).get())
-      .toMatchObject({ bookVersionId: 'b-epub', text: 'quoted', note: 'thought', visibility: 'private', sharedLibraryId: null })
+      .toMatchObject({ bookVersionId: 'b-epub', text: 'quoted', note: 'thought', color: 'green', style: 'highlight', cfiAnchor: 'anchor-n', visibility: 'private', sharedLibraryId: null })
 
     const rerun = await migrateAnnotations()
     expect(rerun).toMatchObject({ highlights: 0, bookmarks: 0, ideas: 0, skipped: 3 })

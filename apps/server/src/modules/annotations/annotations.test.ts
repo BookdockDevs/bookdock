@@ -213,4 +213,20 @@ describe('annotations service', () => {
     const listed = await listAnnotations(ownerId, bookId)
     expect(listed.find((a) => a.id === saved.id)?.text).toBe('改名后的书签')
   })
+
+  it('keeps the author color and style on ideas through create, update and list', async () => {
+    const saved = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/12)',
+      type: 'note',
+      color: 'green',
+      style: 'highlight',
+      text: 'quoted text',
+      note: 'a thought',
+    })
+    expect(saved).toMatchObject({ color: 'green', style: 'highlight' })
+    const updated = await updateAnnotation(ownerId, saved.id, { color: 'red', style: 'underline' })
+    expect(updated).toMatchObject({ color: 'red', style: 'underline' })
+    const listed = await listAnnotations(ownerId, bookId)
+    expect(listed.find((a) => a.id === saved.id)).toMatchObject({ color: 'red', style: 'underline' })
+  })
 })

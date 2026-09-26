@@ -55,8 +55,8 @@ function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
     }
   }
   return {
-    id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? '', cfiAnchor: null,
-    type: 'note', color: 'yellow', style: 'underline',
+    id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? '', cfiAnchor: row.cfiAnchor ?? null,
+    type: 'note', color: row.color ?? 'yellow', style: (row.style ?? 'underline') as AnnotationRes['style'],
     text: row.text ?? '', note: row.note ?? null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
     createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
   }
@@ -219,6 +219,9 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
     userId,
     bookVersionId: bookId,
     cfiRange: data.cfiRange,
+    cfiAnchor: data.cfiAnchor ?? null,
+    color: data.color ?? 'yellow',
+    style: data.style ?? 'underline',
     text: data.text ?? '',
     note: data.note ?? null,
     visibility: 'private' as const,
@@ -272,11 +275,13 @@ export async function updateAnnotation(userId: string, annotationId: string, dat
     return toRes('bookmark', { ...owned.row, title: data.text ?? owned.row.title, updatedAt: now })
   }
   db.update(ideas).set({
+    color: data.color ?? owned.row.color,
+    style: data.style ?? owned.row.style,
     text: data.text ?? owned.row.text,
     note: data.note ?? owned.row.note,
     updatedAt: now,
   }).where(eq(ideas.id, owned.row.id)).run()
-  return toRes('idea', { ...owned.row, text: data.text ?? owned.row.text, note: data.note ?? owned.row.note, updatedAt: now })
+  return toRes('idea', { ...owned.row, color: data.color ?? owned.row.color, style: data.style ?? owned.row.style, text: data.text ?? owned.row.text, note: data.note ?? owned.row.note, updatedAt: now })
 }
 
 export async function deleteAnnotation(userId: string, annotationId: string) {

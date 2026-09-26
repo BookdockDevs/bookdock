@@ -388,6 +388,7 @@ export async function migrateAnnotations(): Promise<AnnotationsMigrationReport> 
         }
         db.insert(ideas).values({
           id: row.id, userId: row.userId, bookVersionId: row.bookId, cfiRange: row.cfiRange,
+          cfiAnchor: row.cfiAnchor, color: row.color, style: row.style,
           text: row.text, note: row.note, visibility: 'private', sharedLibraryId: null,
           chapter: row.chapter, chapterHref: row.chapterHref,
           createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt,
@@ -670,7 +671,7 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
   check('annotations', annotationRows.every((a) =>
     (a.type === 'highlight' && highlightRows.some((h) => h.id === a.id && h.cfiRange === a.cfiRange))
     || (a.type === 'bookmark' && bookmarkRows.some((h) => h.id === a.id && (h.title ?? '') === (a.text ?? '')))
-    || (a.type === 'note' && ideaRows.some((h) => h.id === a.id)),
+    || (a.type === 'note' && ideaRows.some((h) => h.id === a.id && h.color === a.color && h.style === a.style)),
   ), `${highlightRows.length}/${bookmarkRows.length}/${ideaRows.length} of ${annotationRows.length}`)
 
   const refTargets = [readingRecords, readingSessions, aiThreads, aiBookIndexes, aiChunks, aiChunkEmbeddings, textReplacements, textReplacementOverrides]
