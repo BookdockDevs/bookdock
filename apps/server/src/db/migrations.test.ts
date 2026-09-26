@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { describe, expect, it } from 'vitest'
 
 import * as schema from './schema'
@@ -604,6 +605,22 @@ describe('text replacement migration', () => {
         expect.objectContaining({ name: 'text_replacement_overrides_user_book_idx' }),
       ]))
 
+    sqlite.close()
+  })
+
+  it('refuses downgrade boots instead of rewriting the ledger down', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrate(db, { migrationsFolder: migrationsDir })
+    const before = sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get()
+    // Simulate a newer release having migrated further: an unknown record on
+    // top makes the ledger longer than this code's journal.
+    sqlite.exec(`INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('newer-release-migration', 9999999999999)`)
+    expect(() => reconcileConsolidatedMigrationLedger(db, migrationsDir)).toThrow(/newer release/)
+    // The ledger is untouched, so the next boot with matching code still works.
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
+      .toEqual({ count: (before as { count: number }).count + 1 })
     sqlite.close()
   })
 

@@ -2,7 +2,32 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.3.6] - Unreleased
+## [0.3.7] - Unreleased
+
+### Highlights
+
+- Private-library book storage and reading data now use the versioned library model, laying the groundwork for future multi-library features; shared bookstores are not part of this release.
+- The in-panel updater bundle now checks its production dependency closure before publication, addressing the missing-module failure that affected the 0.3.6 update package.
+
+### Changed
+
+- Login now uses revocable server-side sessions instead of JWTs; existing browser sessions must sign in again after upgrading.
+- The library view menu groups columns and page size, uses compact controls for cover and card fields, and keeps book-display preferences in the library rather than duplicating them in Settings.
+- Book cards place nonzero reading progress alongside author information, simplify the completed state, and show trash retention in a compact cover pill; list rows omit empty shelf placeholders.
+- Reader dialogs, including ideas, excerpt sharing, replacement rules, and confirmations, center within the reading area and leave an open sidebar visible and interactive.
+
+### Fixed
+
+- The release workflow verifies imports from the flattened updater ZIP before publishing, preventing dependencies that resolve only through pnpm's symlinked store from breaking the staged server.
+- Returning to the library no longer briefly changes the auto-column layout, and background data refreshes no longer dim the whole page.
+- The About page has clearer copy feedback and consistent dark-theme styling.
+
+### Upgrade notes
+
+- Take a complete cold backup of `DATA_DIR` before upgrading; this version introduces new private-library, reading-data, and session tables. Existing JWT login cookies are not converted to sessions.
+- Upgrading remarks: on first boot, an existing database automatically migrates legacy books into the private-library model (idempotent; safe to interrupt and restart). Databases that are already migrated skip this step, and fresh installs are unaffected. If the migration is blocked (for example conflicting usernames, or no unique owner) the server refuses to start with an explicit error instead of showing an empty library — restore from backup and resolve the reported issue.
+
+## [0.3.6] - 2026-09-26
 
 ### Highlights
 
@@ -350,7 +375,32 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.3.6] - 待发布
+### [0.3.7] - 待发布
+
+#### 主要更新
+
+- 私人书库的书籍存储与阅读数据已切换到带版本的书库模型，为后续多书库能力打基础；本版本尚不提供共享书坞。
+- 应用内更新包在发布前检查生产依赖是否齐全，针对 0.3.6 更新包缺少模块导致的启动失败补上发布门槛。
+
+#### 变更
+
+- 登录改用可撤销的服务端会话，不再使用 JWT；升级后原有浏览器会话需要重新登录。
+- 书库视图菜单将列数和每页数量归组，精简封面与卡片信息选项；书籍显示偏好集中在书库中，不再于设置页重复提供。
+- 书籍卡片将非零阅读进度放在作者信息旁，简化已读完状态，并以封面上的紧凑标签显示回收站保留期；列表不再显示空书架占位。
+- 想法、书摘分享、替换规则和确认窗口在阅读区内居中；已打开的侧页保持可见且可操作。
+
+#### 修复
+
+- 发布流程在上传前检查展开后的更新 ZIP 的模块引用，避免只在 pnpm 符号链接仓库中可解析的依赖导致新服务启动失败。
+- 返回书库时自动列数不再短暂闪动，后台数据刷新也不再让整页变暗。
+- 「关于」页面的复制反馈更清楚，深色主题样式保持一致。
+
+#### 升级说明
+
+- 升级前请停止容器并完整备份 `DATA_DIR`；此版本新增私人书库、阅读数据和会话表。旧 JWT 登录 Cookie 不会转换为新会话。
+- 旧版本数据库在首次启动时自动把旧书籍数据迁入私人书库模型（幂等，中断后重启可继续）；已迁完的库直接跳过，全新安装不受影响。迁移被阻塞（如用户名冲突、Owner 不唯一）或校验失败时，服务器会明确报错并拒绝启动，而不是显示空书库，请凭备份恢复后按报错处理。
+
+### [0.3.6] - 2026-09-26
 
 #### 主要更新
 

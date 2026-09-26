@@ -190,6 +190,16 @@ jobs:
           cp "$BUNDLE_DIR/release.json" "$ARTIFACT_DIR/release.json"
           cat "$ARTIFACT_DIR/$archive.sha256"
 
+      # The boot check resolves jszip from the checkout (same extractor the
+      # production updater uses), so dependencies must be installed first.
+      # The Docker steps above never touch the runner's checkout.
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
       - name: Boot-check the updater artifact
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}

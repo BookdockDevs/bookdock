@@ -86,6 +86,21 @@ export function reconcileConsolidatedMigrationLedger(
     throw new Error(`Cannot reconcile migration ledger; missing tables: ${missingTables.join(', ')}`)
   }
 
+  // Downgrade guard: the ledger holds migrations this code never heard of
+  // (e.g. an older release booted against a newer database). Rewriting the
+  // ledger down to the known set would orphan those records and break the
+  // next boot with re-runs against existing tables — refuse loudly instead.
+  // Abandoned migrations (same count, e.g. a deleted forward file) still
+  // reconcile as before.
+  const recordedHashes = (db.all(sql.raw('SELECT hash AS "hash" FROM "__drizzle_migrations"')) as Array<{ hash: string }>)
+    .map((row) => row.hash)
+  const journalHashes = new Set(migrations.map((migration) => migration.hash))
+  if (recordedHashes.length > migrations.length && recordedHashes.some((hash) => !journalHashes.has(hash))) {
+    throw new Error(
+      `Refusing to reconcile migration ledger: database ran ${recordedHashes.length} migrations but this code knows ${migrations.length}. Boot the newer release instead; downgrade boots are not supported.`,
+    )
+  }
+
   db.transaction((tx) => {
     tx.run(sql.raw('DELETE FROM "__drizzle_migrations"'))
     for (const migration of migrations) {
@@ -94,7 +109,18 @@ export function reconcileConsolidatedMigrationLedger(
   })
 }
 
-export function runMigrations() {
+export interface RunMigrationsHooks {
+  /**
+   * Runs after structural repairs and before the book-id retarget. The
+   * production server uses this for the Phase 2 data backfill: versions must
+   * exist before book-bound rows are retargeted at them, otherwise the
+   * retarget refuses to boot on legacy databases. Callers without legacy data
+   * (tests, manual drill runner with its own sequencing) omit it.
+   */
+  beforeRetarget?: () => unknown
+}
+
+export async function runMigrations(hooks?: RunMigrationsHooks) {
   const db = getDb()
   // Resolved relative to this module so it works from src/ (dev) and the
   // bundled dist/ (production); the build copies migrations next to the bundle.
@@ -126,6 +152,7 @@ export function runMigrations() {
   }
 
   repairLibraryBooksDeletedAt(db)
+  await hooks?.beforeRetarget?.()
   retargetBookIdReferences(db)
 
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
