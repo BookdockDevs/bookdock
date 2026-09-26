@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AnnotationRes } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { useDialogLayout } from '@/components/ui/dialog-layout-context'
 import { avatarUrl } from '@/lib/avatar'
 import { cn } from '@/lib/utils'
 
@@ -70,6 +71,7 @@ export function IdeaOverlay({
   onDelete,
   onClose,
 }: IdeaOverlayProps) {
+  const dialogLayout = useDialogLayout()
   const _ = useTranslation()
   const [detail, setDetail] = useState<IdeaEntry | null>(null)
   const quoteRef = useRef<HTMLParagraphElement>(null)
@@ -112,7 +114,8 @@ export function IdeaOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-black/50 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm"
+      className={`fixed inset-0 z-50 flex flex-col bg-black/50 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm ${dialogLayout.className}`}
+      style={dialogLayout.style}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}

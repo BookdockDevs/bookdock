@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
+import { useDialogLayout } from './dialog-layout-context'
+
 interface ModalProps {
   title: ReactNode
   onClose: () => void
@@ -38,6 +40,7 @@ export default function Modal({
   children,
 }: ModalProps) {
   const _ = useTranslation()
+  const dialogLayout = useDialogLayout()
   const resolvedCloseLabel = closeLabel ?? _('library.cancel')
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -126,7 +129,8 @@ export default function Modal({
   return createPortal(
     <div
       {...containerProps}
-      className={`fixed inset-0 z-50 flex items-end justify-center overscroll-none bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
+      className={`fixed inset-0 z-50 flex items-end justify-center overscroll-none bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
+      style={{ ...dialogLayout.style, ...containerProps?.style }}
       onClick={onClose}
       onWheel={(event) => { if (event.target === event.currentTarget) event.preventDefault() }}
     >

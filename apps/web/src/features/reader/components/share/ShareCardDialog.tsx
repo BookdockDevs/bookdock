@@ -7,6 +7,7 @@ import type { BookDetailRes } from '@bookdock/shared'
 import { apiGet } from '@/api/client'
 import { useFonts } from '@/api/hooks/useFonts'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import { useDialogLayout } from '@/components/ui/dialog-layout-context'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
 import { notify } from '@/lib/notifications'
@@ -32,6 +33,7 @@ interface ShareCardDialogProps {
  * wrapper while the untransformed card node is what gets exported. */
 export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const _ = useTranslation()
+  const dialogLayout = useDialogLayout()
   const shareTarget = useReaderState((s) => s.shareTarget)
   const setShareTarget = useReaderState((s) => s.setShareTarget)
   const user = useAuthStore((s) => s.user)
@@ -145,7 +147,8 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   if (bookQuery.isError) {
     return (
       <div
-        className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 animate-modal-backdrop"
+        className={`fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop`}
+        style={dialogLayout.style}
         onClick={() => setShareTarget(null)}
       >
         <div
@@ -222,7 +225,8 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 animate-modal-backdrop"
+      className={`fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop`}
+      style={dialogLayout.style}
       onClick={() => setShareTarget(null)}
     >
       <div

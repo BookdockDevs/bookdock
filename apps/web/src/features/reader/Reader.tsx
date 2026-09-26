@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import ErrorBoundary from '@/components/ui/ErrorBoundary'
 import Modal from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
+import { DialogLayoutContext } from '@/components/ui/dialog-layout-context'
 
 import { useReaderRenderer } from './hooks/useReaderRenderer'
 import { useReadingTimer } from './hooks/useReadingTimer'
@@ -177,6 +178,8 @@ export default function Reader() {
   const setCurrentChapterIndex = useReaderState((s) => s.setCurrentChapterIndex)
   const readingMode = useUiStore((s) => s.readingMode)
   const toolbarLocked = useUiStore((s) => s.toolbarLocked)
+  const sidebarWidth = useUiStore((s) => s.sidebarWidth)
+  const dialogInset = !isTouch && (sidebarOpen || toolbarLocked) ? 56 + (sidebarOpen ? sidebarWidth : 0) : 0
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
   const { data: annotations } = useAnnotations(id, { enabled: !isGuest })
@@ -1344,6 +1347,7 @@ export default function Reader() {
   return (
     <ErrorBoundary>
       <ViewSettingsContext.Provider value={viewSettingsContextValue}>
+      <DialogLayoutContext.Provider value={dialogInset}>
       <RendererContext.Provider value={rendererContextValue}>
       <AutoReadingSessionProvider renderer={renderer} coordinator={playbackCoordinator}>
       <TtsSessionProvider renderer={renderer} coordinator={playbackCoordinator} guestReadOnly={isGuest}>
@@ -1629,7 +1633,8 @@ export default function Reader() {
       </div>
       </TtsSessionProvider>
       </AutoReadingSessionProvider>
-    </RendererContext.Provider>
+      </RendererContext.Provider>
+      </DialogLayoutContext.Provider>
     </ViewSettingsContext.Provider>
     </ErrorBoundary>
   )

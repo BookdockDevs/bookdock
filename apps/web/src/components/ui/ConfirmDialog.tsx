@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { Button } from './Button'
+import { useDialogLayout } from './dialog-layout-context'
 
 export interface ConfirmDialogProps {
   title: string
@@ -31,6 +32,7 @@ export default function ConfirmDialog({
   onClose,
 }: ConfirmDialogProps) {
   const _ = useTranslation()
+  const dialogLayout = useDialogLayout()
   const dialogId = useId()
   const titleId = `${dialogId}-title`
   const messageId = `${dialogId}-message`
@@ -85,7 +87,8 @@ export default function ConfirmDialog({
   return createPortal(
     <div
       data-settings-toggle=""
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 animate-modal-backdrop"
+      className={`fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop`}
+      style={dialogLayout.style}
       onClick={onClose}
     >
       <div

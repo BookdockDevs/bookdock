@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 
 import Modal from '@/components/ui/Modal'
 import SmartMenu from '@/components/ui/SmartMenu'
+import { DialogLayoutContext } from '@/components/ui/dialog-layout-context'
 
 vi.mock('@/hooks/useTranslation', () => ({
   useTranslation: () => (key: string) => key,
@@ -43,6 +44,25 @@ function NestedMenuHarness() {
 }
 
 describe('Modal', () => {
+  it('keeps the reader inset when portaled to the document body', () => {
+    const { rerender } = render(
+      <DialogLayoutContext.Provider value={344}>
+        <Modal title="Test modal" onClose={() => undefined}>Content</Modal>
+      </DialogLayoutContext.Provider>,
+    )
+
+    const backdrop = screen.getByRole('dialog').parentElement
+    expect(backdrop).toHaveStyle({ '--reader-dialog-inset': '344px' })
+    expect(backdrop?.className).toContain('left-[var(--reader-dialog-inset)]')
+
+    rerender(
+      <DialogLayoutContext.Provider value={0}>
+        <Modal title="Test modal" onClose={() => undefined}>Content</Modal>
+      </DialogLayoutContext.Provider>,
+    )
+    expect(backdrop).toHaveStyle({ '--reader-dialog-inset': '0px' })
+  })
+
   it('does not steal focus after a controlled form rerenders', () => {
     render(<FocusHarness />)
 
