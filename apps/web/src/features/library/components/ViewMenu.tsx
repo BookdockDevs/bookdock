@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { useUiStore, LIST_INFO_ITEMS, LIBRARY_PAGE_SIZES, type CoverFit, type ListInfoItem, type RecentlyReadStyle } from '@/stores/ui.store'
+import {
+  useUiStore,
+  LIST_INFO_ITEMS,
+  GRID_CARD_FIELDS,
+  LIBRARY_PAGE_SIZES,
+  type CoverFit,
+  type ListInfoItem,
+  type GridCardField,
+} from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { cn } from '@/lib/utils'
 
@@ -52,11 +60,11 @@ const COVER_FITS: { value: CoverFit; labelKey: string }[] = [
   { value: 'full', labelKey: 'library.coverFitFull' },
 ]
 
-const RECENTLY_READ_STYLES: { value: RecentlyReadStyle; labelKey: string }[] = [
-  { value: 'off', labelKey: 'library.recentlyReadOff' },
-  { value: 'covers', labelKey: 'library.recentlyReadCovers' },
-  { value: 'cards', labelKey: 'library.recentlyReadCards' },
-]
+const GRID_CARD_FIELD_LABEL_KEYS: Record<GridCardField, string> = {
+  title: 'library.gridCardTitle',
+  author: 'library.gridCardAuthor',
+  progress: 'library.gridCardProgress',
+}
 
 const LIST_INFO_LABEL_KEYS: Record<ListInfoItem, string> = {
   progress: 'library.sortBy.progress',
@@ -84,17 +92,15 @@ export default function ViewMenu({
   const ref = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
-  const coverText = useUiStore((s) => s.coverText)
   const coverFit = useUiStore((s) => s.coverFit)
   const gridColumns = useUiStore((s) => s.gridColumns)
+  const gridCardFields = useUiStore((s) => s.gridCardFields)
   const libraryPageSize = useUiStore((s) => s.libraryPageSize)
-  const recentlyReadStyle = useUiStore((s) => s.recentlyReadStyle)
   const listInfoItems = useUiStore((s) => s.listInfoItems)
-  const setCoverText = useUiStore((s) => s.setCoverText)
   const setCoverFit = useUiStore((s) => s.setCoverFit)
   const setGridColumns = useUiStore((s) => s.setGridColumns)
+  const setGridCardFields = useUiStore((s) => s.setGridCardFields)
   const setLibraryPageSize = useUiStore((s) => s.setLibraryPageSize)
-  const setRecentlyReadStyle = useUiStore((s) => s.setRecentlyReadStyle)
   const setListInfoItems = useUiStore((s) => s.setListInfoItems)
   const setSortBy = useUiStore((s) => s.setSortBy)
   const setSortOrder = useUiStore((s) => s.setSortOrder)
@@ -397,62 +403,6 @@ export default function ViewMenu({
 
               {view === 'grid' && (
                 <>
-                  {/* Unified Cover & Card Options */}
-                  <div className="mb-3 rounded-xl border border-stone-200/70 bg-stone-50/50 p-2.5 dark:border-stone-800 dark:bg-stone-800/30">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-stone-700 dark:text-stone-300">
-                        {_('library.coverFit')}
-                      </span>
-                      <div className="flex gap-1 rounded-lg bg-stone-200/60 p-0.5 dark:bg-stone-800">
-                        {COVER_FITS.map((opt) => {
-                          const active = coverFit === opt.value
-                          return (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              aria-pressed={active}
-                              onClick={() => setCoverFit(opt.value)}
-                              className={cn(
-                                'rounded-md px-2.5 py-1 text-xs font-medium transition-all',
-                                active
-                                  ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-700 dark:text-stone-100'
-                                  : 'text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200',
-                              )}
-                            >
-                              {_(opt.labelKey)}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-
-                    {!trash && (
-                      <div className="mt-2.5 flex items-center justify-between border-t border-stone-200/60 pt-2.5 dark:border-stone-800/60">
-                        <span className="text-xs text-stone-700 dark:text-stone-300">
-                          {_('library.coverText')}
-                        </span>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={coverText}
-                          aria-label={_('library.coverText')}
-                          onClick={() => setCoverText(!coverText)}
-                          className={cn(
-                            'relative h-5 w-9 shrink-0 rounded-full transition-colors focus:outline-hidden',
-                            coverText ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-200 dark:bg-stone-700',
-                          )}
-                        >
-                          <span
-                            className={cn(
-                              'absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-xs transition-transform dark:bg-stone-900',
-                              coverText && 'translate-x-4',
-                            )}
-                          />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
                   {/* Columns */}
                   <div className="mb-3">
                     <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
@@ -481,60 +431,51 @@ export default function ViewMenu({
                       })}
                     </div>
                   </div>
-                </>
-              )}
 
-              {view === 'list' && !trash && (
-                <div className="mb-3">
-                  <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
-                    {_('library.listInfo')}
-                  </div>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {LIST_INFO_ITEMS.map((item) => {
-                      const active = listInfoItems.includes(item)
-                      return (
-                        <button
-                          key={item}
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() =>
-                            setListInfoItems(
-                              active
-                                ? listInfoItems.filter((v) => v !== item)
-                                : [...listInfoItems, item],
-                            )
-                          }
-                          className={cn(
-                            'flex h-7 items-center justify-center rounded-lg text-xs font-medium transition-all whitespace-nowrap',
-                            active
-                              ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
-                              : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
-                          )}
-                        >
-                          {_(LIST_INFO_LABEL_KEYS[item])}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
+                  {/* Page Size (Grid) */}
+                  {!trash && (
+                    <div className="mb-3">
+                      <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
+                        {_('library.pageSize')}
+                      </div>
+                      <div className="flex gap-1">
+                        {LIBRARY_PAGE_SIZES.map((size) => {
+                          const active = libraryPageSize === size
+                          return (
+                            <button
+                              key={size}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => setLibraryPageSize(size)}
+                              className={cn(
+                                'flex h-7 flex-1 items-center justify-center rounded-lg font-mono text-xs font-medium transition-all',
+                                active
+                                  ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
+                                  : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
+                              )}
+                            >
+                              {size}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-              {!trash && (
-                <>
-                  {/* Recently Read Style */}
+                  {/* Cover Fit */}
                   <div className="mb-3">
                     <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
-                      {_('library.showRecentShelf')}
+                      {_('library.coverFit')}
                     </div>
-                    <div className="flex gap-1.5">
-                      {RECENTLY_READ_STYLES.map((opt) => {
-                        const active = recentlyReadStyle === opt.value
+                    <div className="flex gap-1">
+                      {COVER_FITS.map((opt) => {
+                        const active = coverFit === opt.value
                         return (
                           <button
                             key={opt.value}
                             type="button"
                             aria-pressed={active}
-                            onClick={() => setRecentlyReadStyle(opt.value)}
+                            onClick={() => setCoverFit(opt.value)}
                             className={cn(
                               'flex h-7 flex-1 items-center justify-center rounded-lg text-xs font-medium transition-all',
                               active
@@ -549,31 +490,100 @@ export default function ViewMenu({
                     </div>
                   </div>
 
-                  {/* Page Size */}
-                  <div>
-                    <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
-                      {_('library.pageSize')}
+                  {/* Card Info Fields */}
+                  {!trash && (
+                    <div className="mb-1">
+                      <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
+                        {_('library.gridCardFields')}
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {GRID_CARD_FIELDS.map((field) => {
+                          const active = gridCardFields.includes(field)
+                          return (
+                            <button
+                              key={field}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() =>
+                                setGridCardFields(
+                                  active
+                                    ? gridCardFields.filter((f) => f !== field)
+                                    : [...gridCardFields, field],
+                                )
+                              }
+                              className={cn(
+                                'flex h-7 items-center justify-center rounded-lg text-xs font-medium transition-all whitespace-nowrap',
+                                active
+                                  ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
+                                  : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
+                              )}
+                            >
+                              {_(GRID_CARD_FIELD_LABEL_KEYS[field])}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
-                    <div className="flex gap-1.5">
-                      {LIBRARY_PAGE_SIZES.map((val) => {
-                        const active = libraryPageSize === val
+                  )}
+                </>
+              )}
+
+              {view === 'list' && !trash && (
+                <>
+                  <div className="mb-3">
+                    <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
+                      {_('library.listInfo')}
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {LIST_INFO_ITEMS.map((item) => {
+                        const active = listInfoItems.includes(item)
                         return (
                           <button
-                            key={val}
+                            key={item}
                             type="button"
                             aria-pressed={active}
-                            onClick={() => {
-                              setLibraryPageSize(val)
-                              navSearch({ page: undefined })
-                            }}
+                            onClick={() =>
+                              setListInfoItems(
+                                active
+                                  ? listInfoItems.filter((v) => v !== item)
+                                  : [...listInfoItems, item],
+                              )
+                            }
                             className={cn(
-                              'flex h-7 flex-1 items-center justify-center rounded-lg text-xs font-mono font-medium transition-all',
+                              'flex h-7 items-center justify-center rounded-lg text-xs font-medium transition-all whitespace-nowrap',
                               active
                                 ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
                                 : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
                             )}
                           >
-                            {val}
+                            {_(LIST_INFO_LABEL_KEYS[item])}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mb-1">
+                    <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
+                      {_('library.pageSize')}
+                    </div>
+                    <div className="flex gap-1">
+                      {LIBRARY_PAGE_SIZES.map((size) => {
+                        const active = libraryPageSize === size
+                        return (
+                          <button
+                            key={size}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => setLibraryPageSize(size)}
+                            className={cn(
+                              'flex h-7 flex-1 items-center justify-center rounded-lg font-mono text-xs font-medium transition-all',
+                              active
+                                ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
+                                : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
+                            )}
+                          >
+                            {size}
                           </button>
                         )
                       })}

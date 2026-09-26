@@ -33,10 +33,13 @@ export type CoverFit = 'crop' | 'full'
 /** Recently-read strip presentation: hidden, large cover row, or card carousel. */
 export type RecentlyReadStyle = 'off' | 'covers' | 'cards'
 
+export const GRID_CARD_FIELDS = ['title', 'author', 'progress'] as const
+export type GridCardField = (typeof GRID_CARD_FIELDS)[number]
+
 /** Optional info items on the right side of a list-view row */
 export type ListInfoItem = 'progress' | 'size' | 'lastRead' | 'shelf' | 'tags' | 'createdAt'
 /** Fixed display order: the row renders enabled items in this sequence */
-export const LIST_INFO_ITEMS: ListInfoItem[] = ['progress', 'size', 'lastRead', 'shelf', 'tags', 'createdAt']
+export const LIST_INFO_ITEMS: ListInfoItem[] = ['progress', 'lastRead', 'shelf', 'tags', 'size', 'createdAt']
 
 export const LIBRARY_PAGE_SIZES = [24, 48, 96] as const
 export type LibraryPageSize = (typeof LIBRARY_PAGE_SIZES)[number]
@@ -189,8 +192,10 @@ interface UiState {
 
   // Library UI prefs
   coverText: boolean
+  gridCardFields: GridCardField[]
   coverFit: CoverFit
   gridColumns: string
+  readingStatsEnabled: boolean
   recentlyReadStyle: RecentlyReadStyle
   listInfoItems: ListInfoItem[]
   sortBy: string
@@ -199,9 +204,11 @@ interface UiState {
   libraryPageSize: number
   setLibraryPageSize: (v: number) => void
   setCoverText: (v: boolean) => void
+  setGridCardFields: (v: GridCardField[]) => void
   setCoverFit: (v: CoverFit) => void
   setGridColumns: (v: string) => void
   setRecentlyReadStyle: (v: RecentlyReadStyle) => void
+  setReadingStatsEnabled: (v: boolean) => void
   setListInfoItems: (v: ListInfoItem[]) => void
   setSortBy: (v: string) => void
   setSortOrder: (v: 'asc' | 'desc') => void
@@ -413,6 +420,25 @@ function getInitialCoverText(): boolean {
   return stored === null ? true : stored === 'true'
 }
 
+function getInitialGridCardFields(): GridCardField[] {
+  if (typeof window === 'undefined') return ['title', 'author', 'progress']
+  try {
+    const raw = localStorage.getItem('bd-grid-card-fields')
+    if (raw === null) {
+      const oldCoverText = localStorage.getItem('bd-cover-text')
+      if (oldCoverText === 'false') {
+        return ['progress']
+      }
+      return ['title', 'author', 'progress']
+    }
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return ['title', 'author', 'progress']
+    return parsed.filter((v): v is GridCardField => (GRID_CARD_FIELDS as readonly string[]).includes(v as string))
+  } catch {
+    return ['title', 'author', 'progress']
+  }
+}
+
 function getInitialLibraryPageSize(): number {
   if (typeof window === 'undefined') return 24
   const stored = localStorage.getItem('bd-library-page-size')
@@ -521,9 +547,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   boundPresetId: null,
 
   coverText: getInitialCoverText(),
+  gridCardFields: getInitialGridCardFields(),
   coverFit: getInitialCoverFit(),
   gridColumns: getInitial<string>('bd-grid-columns', 'auto'),
   libraryPageSize: getInitialLibraryPageSize(),
+  readingStatsEnabled: getInitialBoolean('bd-reading-stats-enabled', true),
   recentlyReadStyle: getInitialRecentlyReadStyle(),
   listInfoItems: getInitialListInfoItems(),
   sortBy: getInitial<string>('bd-sort-by', 'createdAt'),
@@ -536,7 +564,24 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   setCoverText: (coverText) => {
     setStorage('bd-cover-text', String(coverText))
-    set({ coverText })
+    set((state) => {
+      let next = state.gridCardFields
+      if (coverText) {
+        if (!next.includes('title')) next = [...next, 'title']
+        if (!next.includes('author')) next = [...next, 'author']
+      } else {
+        next = next.filter((f) => f !== 'title' && f !== 'author')
+      }
+      setStorage('bd-grid-card-fields', JSON.stringify(next))
+      return { coverText, gridCardFields: next }
+    })
+  },
+  setGridCardFields: (gridCardFields) => {
+    setStorage('bd-grid-card-fields', JSON.stringify(gridCardFields))
+    set({
+      gridCardFields,
+      coverText: gridCardFields.includes('title') || gridCardFields.includes('author'),
+    })
   },
   setCoverFit: (coverFit) => {
     setStorage('bd-cover-fit', coverFit)
@@ -581,6 +626,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setRecentlyReadStyle: (recentlyReadStyle) => {
     setStorage('bd-recently-read-style', recentlyReadStyle)
     set({ recentlyReadStyle })
+  },
+  setReadingStatsEnabled: (readingStatsEnabled) => {
+    setStorage('bd-reading-stats-enabled', String(readingStatsEnabled))
+    set({ readingStatsEnabled })
   },
   setListInfoItems: (listInfoItems) => {
     setStorage('bd-list-info-items', JSON.stringify(listInfoItems))

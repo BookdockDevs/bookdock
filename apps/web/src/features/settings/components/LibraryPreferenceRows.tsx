@@ -4,6 +4,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { nextSidebarSort, sidebarSortDir, type SortDir } from '@/features/library/sort-modes'
 import { useLibraryPrefs, useUpdateLibraryPrefs } from '@/features/library/hooks'
+import { useUiStore, type RecentlyReadStyle } from '@/stores/ui.store'
 
 // N-06: default sidebar sort modes for shelves and tags. These are defaults
 // only — an explicit URL still overrides them, and a shelf/tag drag flips the
@@ -66,6 +67,42 @@ function SegRow({ label, hint, options, onSelect }: SegRowProps) {
   )
 }
 
+interface ToggleRowProps {
+  label: string
+  hint: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+}
+
+function ToggleRow({ label, hint, checked, onChange }: ToggleRowProps) {
+  return (
+    <div className="flex items-center justify-between gap-x-4 py-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{label}</p>
+        <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={cn(
+          'relative h-5 w-9 shrink-0 rounded-full transition-colors focus:outline-hidden',
+          checked ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-200 dark:bg-stone-700',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-xs transition-transform dark:bg-stone-900',
+            checked && 'translate-x-4',
+          )}
+        />
+      </button>
+    </div>
+  )
+}
+
 function Divider() {
   return <div className="border-t border-stone-100 dark:border-stone-800" />
 }
@@ -75,6 +112,10 @@ export default function LibraryPreferenceRows() {
   const prefs = useLibraryPrefs()
   const update = useUpdateLibraryPrefs()
 
+  const readingStatsEnabled = useUiStore((s) => s.readingStatsEnabled)
+  const setReadingStatsEnabled = useUiStore((s) => s.setReadingStatsEnabled)
+  const recentlyReadStyle = useUiStore((s) => s.recentlyReadStyle)
+  const setRecentlyReadStyle = useUiStore((s) => s.setRecentlyReadStyle)
   const shelfSort = prefs?.shelfSort
   const tagSort = prefs?.tagSort
 
@@ -88,8 +129,28 @@ export default function LibraryPreferenceRows() {
     }))
   }
 
+  const recentlyReadOptions: SegOption[] = [
+    { value: 'off', label: _('library.recentlyReadOff'), active: recentlyReadStyle === 'off' },
+    { value: 'covers', label: _('library.recentlyReadCovers'), active: recentlyReadStyle === 'covers' },
+    { value: 'cards', label: _('library.recentlyReadCards'), active: recentlyReadStyle === 'cards' },
+  ]
+
   return (
     <>
+      <Divider />
+      <ToggleRow
+        label={_('settings.prefReadingStats')}
+        hint={_('settings.prefReadingStatsHint')}
+        checked={readingStatsEnabled}
+        onChange={setReadingStatsEnabled}
+      />
+      <Divider />
+      <SegRow
+        label={_('settings.prefRecentlyRead')}
+        hint={_('settings.prefRecentlyReadHint')}
+        options={recentlyReadOptions}
+        onSelect={(value) => setRecentlyReadStyle(value as RecentlyReadStyle)}
+      />
       <Divider />
       <SegRow
         label={_('settings.prefShelfSort')}

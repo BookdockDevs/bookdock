@@ -13,10 +13,13 @@ import { ContextMenuContent } from './BookContextMenu'
 import TrashInfo from './TrashInfo'
 import UnpinButton, { PinIcon } from './UnpinButton'
 
+import type { GridCardField } from '@/stores/ui.store'
+
 interface BookCardProps {
   book: BookListItem
   selected?: boolean
   selectionActive?: boolean
+  gridCardFields?: GridCardField[]
   coverText?: boolean
   readOnly?: boolean
   onToggleSelect?: (id: string, shiftKey?: boolean) => void
@@ -29,7 +32,9 @@ interface BookCardProps {
 const MENU_W = 184
 const MENU_H = 250
 
-const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, coverText = true, readOnly = false, onToggleSelect, onDelete, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
+const DEFAULT_CARD_FIELDS: GridCardField[] = ['title', 'author', 'progress']
+
+const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, gridCardFields, coverText = true, readOnly = false, onToggleSelect, onDelete, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
   const trashCard = Boolean(onRestore && onPermanentDelete)
@@ -57,6 +62,14 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
     e.stopPropagation()
     menu.toggleFromButton()
   }
+
+  const activeFields = gridCardFields ?? (coverText ? DEFAULT_CARD_FIELDS : [])
+  const showTitle = activeFields.includes('title')
+  const showAuthor = activeFields.includes('author') && Boolean(book.author)
+  const showProgress = activeFields.includes('progress') && !trashCard && book.progress != null && book.progress > 0
+  const progressText = showProgress ? `${Math.min(100, Math.round(book.progress!))}%` : null
+  const hasSubtitle = showAuthor || Boolean(progressText)
+  const hasCardInfo = showTitle || hasSubtitle
 
   return (
     <article
@@ -103,11 +116,6 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             )}
-          </div>
-        )}
-        {!trashCard && coverText && book.progress != null && book.progress > 0 && (
-          <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden rounded-b-xl bg-black/25 backdrop-blur-sm">
-            <div className="h-full rounded-b-xl bg-white/95 transition-all" style={{ width: `${book.progress}%` }} />
           </div>
         )}
         {showMenu && !selectionActive && (
@@ -169,13 +177,23 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           </div>
         )}
       </div>
-      {coverText && (
+      {hasCardInfo && (
         <div className="min-w-0 px-0.5">
-          <h3 className="truncate font-serif text-[13px] font-medium leading-snug text-stone-900 dark:text-stone-100">
-            {book.title}
-          </h3>
-          {book.author && (
-            <p className="mt-0.5 truncate text-xs text-stone-500 dark:text-stone-400">{book.author}</p>
+          {showTitle && (
+            <h3 className="truncate font-serif text-[13px] font-medium leading-snug text-stone-900 dark:text-stone-100">
+              {book.title}
+            </h3>
+          )}
+          {hasSubtitle && (
+            <p className="mt-0.5 flex items-center truncate text-xs text-stone-500 dark:text-stone-400">
+              {showAuthor && <span className="truncate">{book.author}</span>}
+              {showAuthor && progressText && <span className="mx-1 shrink-0 text-stone-300 dark:text-stone-600">·</span>}
+              {progressText && (
+                <span className="shrink-0 font-medium font-mono text-[11px] text-stone-500 dark:text-stone-400">
+                  {progressText}
+                </span>
+              )}
+            </p>
           )}
         </div>
       )}

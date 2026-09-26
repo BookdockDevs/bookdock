@@ -63,7 +63,7 @@ describe('Library list row', () => {
   it('shows the progress text by default', () => {
     renderRow()
 
-    expect(screen.getByText('进度 59%')).toBeInTheDocument()
+    expect(screen.getByText('59%')).toBeInTheDocument()
     expect(screen.queryByText('1 KB')).toBeNull()
   })
 
@@ -75,7 +75,7 @@ describe('Library list row', () => {
     expect(screen.getByText('Favorites')).toBeInTheDocument()
     expect(screen.getByText('小说、科幻')).toBeInTheDocument()
     expect(screen.getByText('2026-01-02')).toBeInTheDocument()
-    expect(screen.queryByText('进度 59%')).toBeNull()
+    expect(screen.queryByText('59%')).toBeNull()
   })
 
   it('renders no info area when every item is off', () => {
@@ -83,6 +83,6 @@ describe('Library list row', () => {
     const { container } = renderRow()
 
     expect(container.querySelector('.md\\:flex')).toBeNull()
-    expect(screen.queryByText('进度 59%')).toBeNull()
+    expect(screen.queryByText('59%')).toBeNull()
   })
 })

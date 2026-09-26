@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 
@@ -50,6 +50,19 @@ import { applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type Bo
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
 import { useBooks, prefetchBooks, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useUpdateLibraryPrefs } from './hooks'
 
+
+function estimateDynColumns(): number {
+  if (typeof window === 'undefined') return 4
+  const isDesktop = window.innerWidth >= 768
+  const estimatedContentWidth = isDesktop
+    ? Math.max(320, window.innerWidth - 260 - 48)
+    : Math.max(320, window.innerWidth - 32)
+  const gap = 20
+  const itemWidth = 176
+  return Math.min(6, Math.max(2, Math.floor((estimatedContentWidth + gap) / (itemWidth + gap))))
+}
+
+let lastKnownDynColumns = typeof window !== 'undefined' ? estimateDynColumns() : 4
 
 export default function Library() {
   const _ = useTranslation()
@@ -526,22 +539,31 @@ export default function Library() {
     }
   }, [shelfId, isLoading, total, navSearch])
 
-  const coverText = useUiStore((s) => s.coverText)
+  const gridCardFields = useUiStore((s) => s.gridCardFields)
   const gridColumns = useUiStore((s) => s.gridColumns)
   const recentlyReadStyle = useUiStore((s) => s.recentlyReadStyle)
+  const readingStatsEnabled = useUiStore((s) => s.readingStatsEnabled)
 
   const containerRef = useRef<HTMLDivElement>(null)
-  const [dynColumns, setDynColumns] = useState(4)
+  const [dynColumns, setDynColumns] = useState(lastKnownDynColumns)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (gridColumns !== 'auto') return
     const el = containerRef.current
     if (!el) return
-    const observer = new ResizeObserver(([entry]) => {
-      const width = entry.contentRect.width
+    const update = (width: number) => {
+      if (width <= 0) return
       const gap = 20
       const itemWidth = 176
-      setDynColumns(Math.min(6, Math.max(2, Math.floor((width + gap) / (itemWidth + gap)))))
+      const next = Math.min(6, Math.max(2, Math.floor((width + gap) / (itemWidth + gap))))
+      lastKnownDynColumns = next
+      setDynColumns((prev) => (prev !== next ? next : prev))
+    }
+    const initialWidth = el.getBoundingClientRect().width || el.clientWidth
+    if (initialWidth > 0) update(initialWidth)
+
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) update(entry.contentRect.width)
     })
     observer.observe(el)
     return () => observer.disconnect()
@@ -619,12 +641,12 @@ export default function Library() {
           />
         )}
 
-        {!isGuest && recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <ReadingStatsCard />}
+        {!isGuest && readingStatsEnabled && !trash && !query && !metadataFilter && !selectionActive && <ReadingStatsCard />}
         {!isGuest && recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <RecentlyRead style={recentlyReadStyle} />}
 
         <div
           ref={containerRef}
-          className={`min-h-0 flex-1 transition-opacity duration-150 ${isFetching && !isLoading ? 'opacity-65' : ''} ${totalPages > 1 ? (selectionActive ? 'pb-32 sm:pb-36' : 'pb-20 sm:pb-24') : (selectionActive ? 'pb-20' : 'pb-6')}`}
+          className={`min-h-0 flex-1 ${totalPages > 1 ? (selectionActive ? 'pb-32 sm:pb-36' : 'pb-20 sm:pb-24') : (selectionActive ? 'pb-20' : 'pb-6')}`}
         >
           {isLoading ? (
             <InitialLoading view={view} columns={columns} />
@@ -649,7 +671,7 @@ export default function Library() {
                         book={book}
                         selected={selection.has(book.id)}
                         selectionActive={selectionActive}
-                        coverText={true}
+                        gridCardFields={['title', 'author']}
                         onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
                         onRestore={(b) => {
                           deselect(b.id)
@@ -689,7 +711,7 @@ export default function Library() {
                         book={book}
                         selected={selection.has(book.id)}
                         selectionActive={selectionActive}
-                        coverText={coverText}
+                        gridCardFields={gridCardFields}
                         onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
                         readOnly={isGuest}
                         onDelete={isGuest ? undefined : setDeleteTarget}

@@ -30,7 +30,7 @@ function renderMenu(props: Partial<Parameters<typeof ViewMenu>[0]> = {}) {
 
 beforeEach(async () => {
   localStorage.clear()
-  useUiStore.setState({ coverText: true, coverFit: 'crop', recentlyReadStyle: 'cards', sortBy: 'createdAt', sortOrder: 'desc', listInfoItems: ['progress'] })
+  useUiStore.setState({ coverText: true, gridCardFields: ['title', 'author', 'progress'], libraryPageSize: 24, coverFit: 'crop', recentlyReadStyle: 'cards', sortBy: 'createdAt', sortOrder: 'desc', listInfoItems: ['progress'] })
   await i18n.changeLanguage('zh-CN')
 })
 
@@ -79,66 +79,48 @@ describe('ViewMenu sort chips', () => {
   })
 })
 
-describe('ViewMenu recently read segmented control', () => {
-  it('renders the three options with the stored one active', () => {
+describe('ViewMenu cover and card field prefs', () => {
+  it('renders card field buttons and fit options with stored values', () => {
     renderMenu({ defaultTab: 'viewLayout' })
 
-    expect(screen.getByRole('button', { name: '关闭' })).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByRole('button', { name: '封面行' })).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByRole('button', { name: '卡片行' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '书名' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '作者' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '进度' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '裁剪' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '完整' })).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('updates the store and persists the choice', () => {
+  it('toggles card fields in the store and persists it', () => {
     renderMenu({ defaultTab: 'viewLayout' })
 
-    fireEvent.click(screen.getByRole('button', { name: '封面行' }))
-    expect(useUiStore.getState().recentlyReadStyle).toBe('covers')
-    expect(localStorage.getItem('bd-recently-read-style')).toBe('covers')
-    expect(screen.getByRole('button', { name: '封面行' })).toHaveAttribute('aria-pressed', 'true')
-
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    expect(useUiStore.getState().recentlyReadStyle).toBe('off')
-    expect(localStorage.getItem('bd-recently-read-style')).toBe('off')
+    fireEvent.click(screen.getByRole('button', { name: '进度' }))
+    expect(useUiStore.getState().gridCardFields).toEqual(['title', 'author'])
+    expect(localStorage.getItem('bd-grid-card-fields')).toBe(JSON.stringify(['title', 'author']))
   })
 
-  it('stays visible in list view', () => {
-    renderMenu({ defaultTab: 'viewLayout', view: 'list' })
-    expect(screen.getByRole('button', { name: '封面行' })).toBeInTheDocument()
-  })
-})
-
-describe('ViewMenu cover prefs', () => {
-  it('renders the card-text toggle and fit options with stored values', () => {
+  it('switches cover fit independently of card fields', () => {
     renderMenu({ defaultTab: 'viewLayout' })
 
-    expect(screen.getByRole('switch', { name: '卡片文字' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('button', { name: '裁切填充' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: '完整显示' })).toHaveAttribute('aria-pressed', 'false')
-  })
-
-  it('toggles card text in the store and persists it', () => {
-    renderMenu({ defaultTab: 'viewLayout' })
-
-    fireEvent.click(screen.getByRole('switch', { name: '卡片文字' }))
-    expect(useUiStore.getState().coverText).toBe(false)
-    expect(localStorage.getItem('bd-cover-text')).toBe('false')
-  })
-
-  it('switches cover fit independently of the card-text toggle', () => {
-    renderMenu({ defaultTab: 'viewLayout' })
-
-    fireEvent.click(screen.getByRole('switch', { name: '卡片文字' }))
-    fireEvent.click(screen.getByRole('button', { name: '完整显示' }))
-    expect(useUiStore.getState().coverText).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '书名' }))
+    fireEvent.click(screen.getByRole('button', { name: '完整' }))
+    expect(useUiStore.getState().gridCardFields).toEqual(['author', 'progress'])
     expect(useUiStore.getState().coverFit).toBe('full')
     expect(localStorage.getItem('bd-cover-fit')).toBe('full')
-    expect(screen.getByRole('button', { name: '完整显示' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '完整' })).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('hides the cover options in list view', () => {
+  it('hides the grid card options in list view', () => {
     renderMenu({ defaultTab: 'viewLayout', view: 'list' })
-    expect(screen.queryByRole('switch', { name: '卡片文字' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '裁切填充' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '书名' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '裁剪' })).toBeNull()
+  })
+
+  it('renders page size selector and allows changing page size', () => {
+    renderMenu({ defaultTab: 'viewLayout' })
+    expect(screen.getByRole('button', { name: '24' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '48' }))
+    expect(useUiStore.getState().libraryPageSize).toBe(48)
+    expect(localStorage.getItem('bd-library-page-size')).toBe('48')
   })
 })
 
