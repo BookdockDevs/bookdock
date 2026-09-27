@@ -25,11 +25,11 @@ vi.mock('../../config', async () => {
 const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'db', 'migrations')
 const CURRENT_VERSION = BOOKDOCK_BUILD_INFO.version
 
-function createApp(role: 'owner' | 'member', guest = false) {
+function createApp(role: 'owner' | 'member', guest = false, id = 'user-1') {
   const app = new Hono()
   app.onError(errorHandler)
   app.use('*', async (c, next) => {
-    c.set('user', { id: 'user-1', username: 'tester', role, avatarKey: null })
+    c.set('user', { id, username: 'tester', role, avatarKey: null })
     if (guest) c.set('guest', true)
     return next()
   })
@@ -46,6 +46,13 @@ beforeEach(async () => {
   migrate(db, { migrationsFolder })
   vi.spyOn(client, 'getDb').mockReturnValue(db)
   await rm(path.join(config.dataDir, 'snapshots'), { recursive: true, force: true })
+  // requireOwner reads the Instance row, not the context role.
+  const now = Date.now()
+  db.insert(schema.users).values({ id: 'user-1', username: 'tester', role: 'owner', createdAt: now }).run()
+  db.insert(schema.instance).values({
+    id: 'instance', ownerUserId: 'user-1', allowRegistration: false,
+    allowGuestAccess: false, uploadMaxBytes: null, createdAt: now, updatedAt: now,
+  }).run()
 })
 
 describe('snapshot routes', () => {
@@ -73,7 +80,9 @@ describe('snapshot routes', () => {
   })
 
   it('refuses snapshot access to members and guests', async () => {
-    for (const app of [createApp('member'), createApp('owner', true)]) {
+    // A member is a different user, not a different role on the owner id:
+    // ownership is the Instance row, never the context role.
+    for (const app of [createApp('member', false, 'user-2'), createApp('owner', true)]) {
       const list = await app.request('/api/v1/system/snapshots')
       const create = await app.request('/api/v1/system/snapshots', { method: 'POST' })
 

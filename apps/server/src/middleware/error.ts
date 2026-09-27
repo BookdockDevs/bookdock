@@ -15,6 +15,12 @@ export class AppError extends Error {
   }
 }
 
+/** better-sqlite3 duplicate-key hit (unique/partial-unique index). */
+export function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null
+    && (err as { code?: unknown }).code === 'SQLITE_CONSTRAINT_UNIQUE'
+}
+
 export function errorHandler(err: Error, c: Context) {
   if (err instanceof AppError) {
     const status = (ErrorHttpStatus[err.code as keyof typeof ErrorHttpStatus] ?? 500) as StatusCode

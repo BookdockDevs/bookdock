@@ -4,7 +4,7 @@ import { getDb } from '../../db/client'
 import { libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryTags } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
-import { ensurePrivateLibrary } from '../libraries/library-access'
+import { ensurePrivateLibrary, requireLibraryManager, assertLibraryBrowsable } from '../libraries/library-access'
 
 function privateLibraryId(userId: string): string | null {
   const db = getDb()
@@ -170,4 +170,121 @@ async function verifyBookOwnership(libraryId: string, bookIds: string[]): Promis
     throw new AppError('BOOK_NOT_FOUND')
   }
   return rows.map((row) => row.libraryBookId)
+}
+
+/**
+ * `bookCount` mirrors what a private tag already reports, so the sidebar uses
+ * one row component for every library (see toCategoryRes for why it is counted
+ * here rather than in the list query).
+ */
+function toLibraryTagRes(row: typeof libraryTags.$inferSelect) {
+  const bookCount = getDb().select({ count: sql<number>`count(${libraryBooks.id})` })
+    .from(libraryBookTags)
+    .leftJoin(libraryBooks, and(eq(libraryBooks.id, libraryBookTags.libraryBookId), isNull(libraryBooks.deletedAt)))
+    .where(eq(libraryBookTags.tagId, row.id))
+    .get()?.count ?? 0
+  return {
+    id: row.id,
+    libraryId: row.libraryId,
+    userId: row.userId,
+    name: row.name,
+    sortOrder: row.sortOrder,
+    pinned: row.pinned,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    bookCount,
+  }
+}
+
+/**
+ * Library-scoped tag maintenance (4.4): owners and admins curate the shared
+ * taxonomy; the per-book tagging itself stays a catalog concern (Phase 5).
+ */
+export async function listLibraryTags(actorId: string, libraryId: string) {
+  const db = getDb()
+  await assertLibraryBrowsable(actorId, libraryId)
+  // Counts ride along in the same grouped query: one query for N rows, not
+  // N+1. Single-row call sites keep toLibraryTagRes.
+  return db
+    .select({
+      id: libraryTags.id,
+      libraryId: libraryTags.libraryId,
+      userId: libraryTags.userId,
+      name: libraryTags.name,
+      sortOrder: libraryTags.sortOrder,
+      pinned: libraryTags.pinned,
+      createdAt: libraryTags.createdAt,
+      updatedAt: libraryTags.updatedAt,
+      bookCount: sql<number>`count(${libraryBooks.id})`,
+    })
+    .from(libraryTags)
+    .leftJoin(libraryBookTags, eq(libraryTags.id, libraryBookTags.tagId))
+    .leftJoin(libraryBooks, and(eq(libraryBooks.id, libraryBookTags.libraryBookId), isNull(libraryBooks.deletedAt)))
+    .where(eq(libraryTags.libraryId, libraryId))
+    .groupBy(libraryTags.id)
+    .orderBy(asc(libraryTags.sortOrder), asc(libraryTags.name))
+    .all()
+}
+
+export async function createLibraryTag(actorId: string, libraryId: string, name: string) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  return db.transaction((tx) => {
+    const existing = tx.select({ id: libraryTags.id }).from(libraryTags)
+      .where(and(eq(libraryTags.libraryId, libraryId), eq(libraryTags.name, name))).get()
+    if (existing) throw new AppError('TAG_NAME_TAKEN', 'Tag name is already in use')
+    const max = tx.select({ max: sql<number>`max(${libraryTags.sortOrder})` }).from(libraryTags)
+      .where(eq(libraryTags.libraryId, libraryId)).get()
+    const now = Date.now()
+    const row = {
+      id: createId('tag'), libraryId, userId: actorId, name,
+      sortOrder: (max?.max ?? -1) + 1, pinned: false, createdAt: now, updatedAt: now,
+    }
+    tx.insert(libraryTags).values(row).run()
+    return toLibraryTagRes(row)
+  })
+}
+
+export async function updateLibraryTag(actorId: string, libraryId: string, tagId: string, patch: { name?: string; pinned?: boolean }) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  return db.transaction((tx) => {
+    const existing = tx.select().from(libraryTags)
+      .where(and(eq(libraryTags.id, tagId), eq(libraryTags.libraryId, libraryId))).get()
+    if (!existing) throw new AppError('TAG_NOT_FOUND')
+    if (patch.name !== undefined && patch.name !== existing.name) {
+      const duplicate = tx.select({ id: libraryTags.id }).from(libraryTags)
+        .where(and(eq(libraryTags.libraryId, libraryId), eq(libraryTags.name, patch.name), ne(libraryTags.id, tagId))).get()
+      if (duplicate) throw new AppError('TAG_NAME_TAKEN', 'Tag name is already in use')
+    }
+    tx.update(libraryTags).set({ ...patch, updatedAt: Date.now() }).where(eq(libraryTags.id, tagId)).run()
+    return toLibraryTagRes({ ...existing, ...patch, updatedAt: Date.now() })
+  })
+}
+
+export async function reorderLibraryTags(actorId: string, libraryId: string, tagIds: string[]) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  const existing = db.select({ id: libraryTags.id }).from(libraryTags)
+    .where(eq(libraryTags.libraryId, libraryId)).all()
+  const owned = new Set(existing.map((row) => row.id))
+  if (tagIds.length !== owned.size || new Set(tagIds).size !== owned.size || tagIds.some((id) => !owned.has(id))) {
+    throw new AppError('TAG_NOT_FOUND')
+  }
+  db.transaction((tx) => {
+    for (const [index, id] of tagIds.entries()) {
+      tx.update(libraryTags).set({ sortOrder: index }).where(eq(libraryTags.id, id)).run()
+    }
+  })
+}
+
+export async function deleteLibraryTag(actorId: string, libraryId: string, tagId: string) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  const existing = db.select().from(libraryTags)
+    .where(and(eq(libraryTags.id, tagId), eq(libraryTags.libraryId, libraryId))).get()
+  if (!existing) throw new AppError('TAG_NOT_FOUND')
+  // Relations cascade off the tag row.
+  db.delete(libraryTags).where(eq(libraryTags.id, tagId)).run()
+  return toLibraryTagRes(existing)
 }

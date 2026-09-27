@@ -1,24 +1,11 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
-import { bookmarks, bookVersions, highlights, ideas, libraries, libraryBookVersions } from '../../db/schema'
+import { bookmarks, highlights, ideas } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import { assertReadableBook } from '../books/books.service'
 import type { AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq } from '@bookdock/shared'
-
-function versionInPrivateLibrary(userId: string, bookId: string) {
-  const db = getDb()
-  const library = db.select({ id: libraries.id }).from(libraries)
-    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
-  if (!library) return null
-  const version = db.select({ id: bookVersions.id }).from(bookVersions)
-    .innerJoin(libraryBookVersions, and(
-      eq(libraryBookVersions.bookVersionId, bookVersions.id),
-      eq(libraryBookVersions.libraryId, library.id),
-    ))
-    .where(eq(bookVersions.id, bookId)).get()
-  return version ? library.id : null
-}
 
 function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   id: string
@@ -135,7 +122,10 @@ export async function searchAnnotations(userId: string, bookId: string, query: s
 
 export async function createAnnotation(userId: string, bookId: string, data: AnnotationCreateReq) {
   const db = getDb()
-  if (!versionInPrivateLibrary(userId, bookId)) throw new AppError('BOOK_NOT_FOUND')
+  // Reading data belongs to User x BookVersion, not to a private card: anyone
+  // with read rights may annotate, with or without collecting first. Guests
+  // never reach here (mutations are guest-refused at the guard).
+  await assertReadableBook(userId, bookId)
   const now = Date.now()
   if (data.type === 'highlight') {
     // A soft-deleted highlight at this CFI is restored instead of forked.

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
+import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import path from 'node:path'
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
-import { getLibrary, getLibraryBookVersion, requireLibraryRelation, resolveLibraryRelation, resolveSourceRead } from './library-access'
+import { getLibrary, getLibraryBookVersion, requireLibraryRelation, resolveLibraryRelation, resolveSharedVersionRead, resolveSourceRead } from './library-access'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -87,8 +88,15 @@ describe('library access base', () => {
     const b = { sourceLibraryId: libraryId, sourceLibraryBookVersionId: 'src' }
 
     await expect(resolveSourceRead(b, { userId: memberId })).resolves.toMatchObject({ readable: true })
-    await expect(resolveSourceRead(b, { userId: outsiderId })).resolves.toMatchObject({ readable: false })
+    // Source reads follow the same visibility rules as any other read (4.3): an
+    // authenticated non-member of a public library may read it, a guest may not
+    // (the version is not guest-readable), and a non-member of a gated library
+    // never can.
+    await expect(resolveSourceRead(b, { userId: outsiderId })).resolves.toMatchObject({ readable: true })
     await expect(resolveSourceRead(b, { userId: null })).resolves.toMatchObject({ readable: false })
+    db.update(schema.libraries).set({ visibility: 'password' }).run()
+    await expect(resolveSourceRead(b, { userId: outsiderId })).resolves.toMatchObject({ readable: false })
+    db.update(schema.libraries).set({ visibility: 'public' }).run()
 
     db.update(schema.libraryBookVersions).set({ status: 'unlisted' }).run()
     await expect(resolveSourceRead(b, { userId: memberId })).resolves.toMatchObject({ readable: false })
@@ -98,5 +106,93 @@ describe('library access base', () => {
     await expect(resolveSourceRead(b, { userId: memberId })).resolves.toMatchObject({
       readable: false, sourceLibraryId: libraryId, sourceLibraryBookVersionId: 'src',
     })
+  })
+})
+
+describe('shared version reads', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let memberId: string
+  let outsiderId: string
+  let libraryId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = createId('user')
+    memberId = createId('user')
+    outsiderId = createId('user')
+    for (const [id, username] of [[ownerId, 'owner'], [memberId, 'member'], [outsiderId, 'outsider']] as const) {
+      db.insert(schema.users).values({ id, username, createdAt: 1 }).run()
+    }
+    db.insert(schema.instance).values({
+      id: 'instance', ownerUserId: ownerId, allowRegistration: false,
+      allowGuestAccess: true, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
+    }).run()
+    libraryId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: libraryId, userId: ownerId, type: 'shared', name: 'City',
+      description: '', visibility: 'public', createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.libraryMemberships).values({
+      id: createId('m'), libraryId, userId: memberId, role: 'member', createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.bookVersions).values({ id: 'v1', format: 'txt', size: 5, createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.libraryBooks).values({ id: 'wb', libraryId, userId: ownerId, title: 'W', createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: 'lv1', libraryId, libraryBookId: 'wb', bookVersionId: 'v1',
+      kind: 'personal', status: 'published', createdAt: 1, updatedAt: 1,
+    }).run()
+  })
+
+  it('serves members and owners while hiding unlisted versions', async () => {
+    await expect(resolveSharedVersionRead(libraryId, 'v1', ownerId)).resolves.toMatchObject({ relation: 'owner' })
+    await expect(resolveSharedVersionRead(libraryId, 'v1', memberId)).resolves.toMatchObject({ relation: 'member' })
+    db.update(schema.libraryBookVersions).set({ status: 'unlisted' }).where(eq(schema.libraryBookVersions.id, 'lv1')).run()
+    await expect(resolveSharedVersionRead(libraryId, 'v1', memberId))
+      .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    await expect(resolveSharedVersionRead(libraryId, 'v1', ownerId))
+      .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+  })
+
+  it('lets authenticated non-members read public scope without the guest switch', async () => {
+    db.update(schema.instance).set({ allowGuestAccess: false }).run()
+    await expect(resolveSharedVersionRead(libraryId, 'v1', outsiderId))
+      .resolves.toMatchObject({ relation: 'non-member' })
+  })
+
+  it('gates guests on the instance switch and the version flag', async () => {
+    // Neither switch nor flag: invisible.
+    await expect(resolveSharedVersionRead(libraryId, 'v1', null))
+      .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
+    db.update(schema.bookVersions).set({ guestReadable: true }).where(eq(schema.bookVersions.id, 'v1')).run()
+    await expect(resolveSharedVersionRead(libraryId, 'v1', null))
+      .resolves.toMatchObject({ relation: 'guest' })
+    db.update(schema.instance).set({ allowGuestAccess: false }).run()
+    await expect(resolveSharedVersionRead(libraryId, 'v1', null))
+      .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
+  })
+
+  it('refuses cross-library, gated-library and private reads without leaking', async () => {
+    const otherId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: otherId, userId: ownerId, type: 'shared', name: 'Other',
+      description: '', visibility: 'public', createdAt: 1, updatedAt: 1,
+    }).run()
+    // v1 is not linked in the other library.
+    await expect(resolveSharedVersionRead(otherId, 'v1', memberId))
+      .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    // Password and private libraries are invisible to outsiders and guests.
+    db.update(schema.libraries).set({ visibility: 'password' }).where(eq(schema.libraries.id, libraryId)).run()
+    await expect(resolveSharedVersionRead(libraryId, 'v1', outsiderId))
+      .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
+    await expect(resolveSharedVersionRead(libraryId, 'v1', null))
+      .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
+    // Members keep reading through the gate.
+    await expect(resolveSharedVersionRead(libraryId, 'v1', memberId))
+      .resolves.toMatchObject({ relation: 'member' })
+    db.update(schema.libraries).set({ type: 'private', visibility: null }).where(eq(schema.libraries.id, libraryId)).run()
+    await expect(resolveSharedVersionRead(libraryId, 'v1', memberId))
+      .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
   })
 })

@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
+import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import path from 'node:path'
@@ -9,7 +10,11 @@ import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import { createId } from '../../lib/id'
-import { runPhase2StartupBackfill } from './startup-backfill'
+import {
+  STARTUP_BACKFILL_BATCHES,
+  STARTUP_BACKFILL_VERIFY_BATCH,
+  runPhase2StartupBackfill,
+} from './startup-backfill'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -92,5 +97,43 @@ describe('phase 2 startup backfill', () => {
     seedOwner(db, 'owner-a')
     seedOwner(db, 'owner-b')
     await expect(runPhase2StartupBackfill()).rejects.toThrow('instance seed blocked')
+  })
+
+  it('re-runs when batches completed but verification never passed', async () => {
+    const ownerId = seedOwner(db)
+    seedBook(db, ownerId)
+    for (const batch of STARTUP_BACKFILL_BATCHES) {
+      db.insert(schema.libraryMigrationLog).values({
+        id: createId('mig'), batch, status: 'completed', details: {}, startedAt: 1, finishedAt: 1,
+      }).run()
+    }
+    // Completed batches alone must not fast-path: the run re-executes the
+    // idempotent steps and records its own verification.
+    const outcome = await runPhase2StartupBackfill()
+    expect(outcome.status).toBe('completed')
+    const verifyRows = db.select().from(schema.libraryMigrationLog)
+      .where(eq(schema.libraryMigrationLog.batch, STARTUP_BACKFILL_VERIFY_BATCH)).all()
+    expect(verifyRows).toHaveLength(1)
+    expect(verifyRows[0].status).toBe('completed')
+    // Now the fast path is unlocked and writes nothing further.
+    const logRows = db.select().from(schema.libraryMigrationLog).all().length
+    expect(await runPhase2StartupBackfill()).toEqual({ status: 'skipped-complete' })
+    expect(db.select().from(schema.libraryMigrationLog).all()).toHaveLength(logRows)
+  })
+
+  it('re-runs while the latest verification failed', async () => {
+    const ownerId = seedOwner(db)
+    seedBook(db, ownerId)
+    for (const batch of STARTUP_BACKFILL_BATCHES) {
+      db.insert(schema.libraryMigrationLog).values({
+        id: createId('mig'), batch, status: 'completed', details: {}, startedAt: 1, finishedAt: 1,
+      }).run()
+    }
+    db.insert(schema.libraryMigrationLog).values([
+      { id: createId('mig'), batch: STARTUP_BACKFILL_VERIFY_BATCH, status: 'completed', details: {}, startedAt: 1, finishedAt: 1 },
+      { id: createId('mig'), batch: STARTUP_BACKFILL_VERIFY_BATCH, status: 'failed', details: { failed: ['stale'] }, startedAt: 2, finishedAt: 2 },
+    ]).run()
+    // The failed row is latest, so the ledger must not skip.
+    expect((await runPhase2StartupBackfill()).status).toBe('completed')
   })
 })

@@ -1,6 +1,7 @@
 import type { AccessTokenDuration, AccessTokenPermission } from './access-tokens'
 import type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
+import type { BookSourceInfo } from './library'
 import type { AnnotationStyle, AnnotationType, TocRulePattern, ReplacementMatchType, ReplacementScope, ViewSettings } from './domain'
 
 export interface ApiResponse<T> {
@@ -264,8 +265,8 @@ export interface AdminUserRes {
   bookCount: number
 }
 
+/** Instance ownership no longer moves through PATCH (4.9) — it is a transfer. */
 export interface UpdateUserReq {
-  role?: 'owner' | 'member'
   disabled?: boolean
   newPassword?: string
 }
@@ -1158,6 +1159,24 @@ export interface BookListItem {
   tags?: string[]
   /** Pinned placeholder-cover palette picked by the user; absent = auto id-hash palette */
   coverPaletteId?: CoverPaletteId | null
+  /**
+   * 7.7: the shared library this card was collected from. Null for A (own
+   * upload) and C (forked). Its presence means the content stays
+   * library-owned, so the reader must not offer content-mutating actions.
+   */
+  source?: BookSourceInfo | null
+  /**
+   * 7.7: the source library or its pinned version is gone or unpublished, so
+   * this card can no longer be read. Does not cover lost library membership —
+   * the read path decides that.
+   */
+  sourceUnavailable?: boolean
+  /**
+   * 0.4.0: false only for a version read straight from a library without
+   * collecting it. Such a book has no private card, so the UI hides shelf/tag
+   * and content-editing affordances and offers "add to my library" instead.
+   */
+  collected?: boolean
 }
 
 export interface BookContributor {

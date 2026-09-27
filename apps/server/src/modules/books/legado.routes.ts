@@ -365,14 +365,14 @@ legadoRoutes.use('*', async (c, next) => {
     return next()
   }
   if (c.get('guest')) {
-    return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot use Legado integration' } }, 403)
+    throw new AppError('FORBIDDEN', 'Guest sessions cannot use Legado integration')
   }
   const user = c.get('user')
   if (c.get('legadoAccessKey') && c.req.path.endsWith('/access-key')) {
-    return c.json({ error: { code: 'FORBIDDEN', message: 'Legado access keys require the Bookdock session' } }, 403)
+    throw new AppError('FORBIDDEN', 'Legado access keys require the Bookdock session')
   }
   if (user && !isLegadoEnabled(user.id)) {
-    return c.json({ error: { code: 'FORBIDDEN', message: 'Legado book source is disabled' } }, 403)
+    throw new AppError('FORBIDDEN', 'Legado book source is disabled')
   }
   return next()
 })
@@ -414,9 +414,9 @@ legadoRoutes.get('/source.json', (c) => {
   const token = c.req.query('key')
   if (!token) return c.json(sourceDefinition(c))
   const access = resolveLegadoAccessKey(token)
-  if (!access) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired Legado access key' } }, 401)
-  if (!isLegadoEnabled(access.userId)) return c.json({ error: { code: 'FORBIDDEN', message: 'Legado book source is disabled' } }, 403)
-  if (!isLegadoAccessKeyEnabled(access.userId)) return c.json({ error: { code: 'FORBIDDEN', message: 'Legado access keys are disabled' } }, 403)
+  if (!access) throw new AppError('UNAUTHORIZED', 'Invalid or expired Legado access key')
+  if (!isLegadoEnabled(access.userId)) throw new AppError('FORBIDDEN', 'Legado book source is disabled')
+  if (!isLegadoAccessKeyEnabled(access.userId)) throw new AppError('FORBIDDEN', 'Legado access keys are disabled')
   return c.json(sourceDefinition(c, { id: access.id, token, createdAt: access.createdAt }))
 })
 
@@ -436,7 +436,7 @@ legadoRoutes.get('/login', (c) => {
 async function exploreBooks(c: Context, scope: LegadoExploreScope, id?: string) {
   const parsed = legadoExploreSchema.safeParse(c.req.query())
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid Legado explore query', details: parsed.error.flatten() } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'Invalid Legado explore query', parsed.error.flatten())
   }
 
   const user = c.get('user')
@@ -494,7 +494,7 @@ legadoRoutes.get('/explore/tags/:id', (c) => exploreBooks(c, 'tag', c.req.param(
 legadoRoutes.get('/search', async (c) => {
   const parsed = legadoSearchSchema.safeParse(c.req.query())
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid Legado search query', details: parsed.error.flatten() } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'Invalid Legado search query', parsed.error.flatten())
   }
 
   const user = c.get('user')
@@ -550,7 +550,7 @@ legadoRoutes.get('/books/:id', async (c) => {
 legadoRoutes.get('/books/:id/cover', async (c) => {
   const user = c.get('user')
   const cover = await getBookCoverContent(user.id, c.req.param('id'), { size: 'thumb' })
-  if (!cover) return c.json({ error: { code: 'BOOK_NOT_FOUND', message: 'No cover' } }, 404)
+  if (!cover) throw new AppError('BOOK_NOT_FOUND', 'No cover')
   return c.newResponse(new Uint8Array(cover.data), 200, { 'Content-Type': cover.contentType, 'Cache-Control': 'private, immutable, max-age=31536000' })
 })
 

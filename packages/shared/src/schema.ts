@@ -673,7 +673,6 @@ export const updateInstanceSchema = z.object({
 })
 
 export const updateUserSchema = z.object({
-  role: z.enum(['owner', 'member']).optional(),
   disabled: z.boolean().optional(),
   newPassword: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH).optional(),
 })
@@ -681,6 +680,14 @@ export const updateUserSchema = z.object({
 export const createUserSchema = z.object({
   username: z.string().transform(sanitizeUsername).pipe(z.string().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH)),
   password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH),
+})
+
+export const ownershipTransferSchema = z.object({
+  userId: z.string().min(1).max(128),
+})
+
+export const deleteAccountSchema = z.object({
+  password: z.string().min(1).max(AUTH_PASSWORD_MAX_LENGTH),
 })
 
 export const shelfCreateSchema = z.object({ name: z.string().trim().min(1).max(100) })
@@ -697,6 +704,16 @@ export const tagUpdateSchema = z.object({
   pinned: z.boolean().optional(),
 })
 export const tagReorderSchema = z.object({ tagIds: z.array(z.string().min(1)) })
+export const categoryCreateSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  parentId: z.string().min(1).optional(),
+})
+export const categoryUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  parentId: z.string().min(1).nullable().optional(),
+  pinned: z.boolean().optional(),
+})
+export const categoryReorderSchema = z.object({ categoryIds: z.array(z.string().min(1)) })
 export const bookMembershipSchema = z.object({
   shelfId: z.string().min(1).nullable().optional(),
   tagIds: z.array(z.string().min(1)).optional(),

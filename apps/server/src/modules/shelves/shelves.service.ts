@@ -4,7 +4,7 @@ import { getDb } from '../../db/client'
 import { libraries, libraryBooks, libraryBookVersions, libraryCategories } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
-import { ensurePrivateLibrary } from '../libraries/library-access'
+import { ensurePrivateLibrary, requireLibraryManager, assertLibraryBrowsable } from '../libraries/library-access'
 
 function privateLibraryId(userId: string): string | null {
   const db = getDb()
@@ -176,4 +176,150 @@ async function verifyBookOwnership(libraryId: string, bookIds: string[]): Promis
     throw new AppError('BOOK_NOT_FOUND')
   }
   return rows.map((row) => row.libraryBookId)
+}
+
+/**
+ * `bookCount` is part of the category shape a private shelf already returns, so
+ * the sidebar can render one row component for every library instead of a
+ * count-less variant. Counted here rather than in the list query because the
+ * single-row call sites (create, rename, delete) also answer with a category.
+ */
+function toCategoryRes(row: typeof libraryCategories.$inferSelect) {
+  const bookCount = getDb().select({ count: sql<number>`count(${libraryBooks.id})` })
+    .from(libraryBooks)
+    .where(and(eq(libraryBooks.categoryId, row.id), isNull(libraryBooks.deletedAt)))
+    .get()?.count ?? 0
+  return {
+    id: row.id,
+    libraryId: row.libraryId,
+    userId: row.userId,
+    name: row.name,
+    parentId: row.parentId,
+    sortOrder: row.sortOrder,
+    pinned: row.pinned,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    bookCount,
+  }
+}
+
+function getLibraryCategory(libraryId: string, categoryId: string) {
+  const db = getDb()
+  const row = db.select().from(libraryCategories)
+    .where(and(eq(libraryCategories.id, categoryId), eq(libraryCategories.libraryId, libraryId))).get()
+  if (!row) throw new AppError('CATEGORY_NOT_FOUND', 'Category not found')
+  return row
+}
+
+/**
+ * Library-scoped category management (4.4): owners and admins of any
+ * library curate its taxonomy; members and outsiders are refused by
+ * requireLibraryManager before any row is touched.
+ */
+export async function listLibraryCategories(actorId: string, libraryId: string) {
+  const db = getDb()
+  await assertLibraryBrowsable(actorId, libraryId)
+  // Counts ride along in the same grouped query: one query for N rows, not
+  // N+1. Single-row call sites (create, rename, delete) keep toCategoryRes.
+  return db
+    .select({
+      id: libraryCategories.id,
+      libraryId: libraryCategories.libraryId,
+      userId: libraryCategories.userId,
+      name: libraryCategories.name,
+      parentId: libraryCategories.parentId,
+      sortOrder: libraryCategories.sortOrder,
+      pinned: libraryCategories.pinned,
+      createdAt: libraryCategories.createdAt,
+      updatedAt: libraryCategories.updatedAt,
+      bookCount: sql<number>`count(${libraryBooks.id})`,
+    })
+    .from(libraryCategories)
+    .leftJoin(libraryBooks, and(eq(libraryCategories.id, libraryBooks.categoryId), isNull(libraryBooks.deletedAt)))
+    .where(eq(libraryCategories.libraryId, libraryId))
+    .groupBy(libraryCategories.id)
+    .orderBy(asc(libraryCategories.sortOrder), asc(libraryCategories.createdAt))
+    .all()
+}
+
+export async function createLibraryCategory(actorId: string, libraryId: string, data: { name: string; parentId?: string }) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  return db.transaction((tx) => {
+    const duplicate = tx.select({ id: libraryCategories.id }).from(libraryCategories)
+      .where(and(eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.name, data.name))).get()
+    if (duplicate) throw new AppError('CATEGORY_NAME_TAKEN', 'Category name is already in use')
+    if (data.parentId) getLibraryCategory(libraryId, data.parentId)
+    const max = tx.select({ max: sql<number>`max(${libraryCategories.sortOrder})` }).from(libraryCategories)
+      .where(eq(libraryCategories.libraryId, libraryId)).get()
+    const now = Date.now()
+    const row = {
+      id: createId('cat'), libraryId, userId: actorId, name: data.name,
+      parentId: data.parentId ?? null, sortOrder: (max?.max ?? -1) + 1,
+      pinned: false, createdAt: now, updatedAt: now,
+    }
+    tx.insert(libraryCategories).values(row).run()
+    return toCategoryRes(row)
+  })
+}
+
+export async function updateLibraryCategory(actorId: string, libraryId: string, categoryId: string, patch: { name?: string; pinned?: boolean }) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  return db.transaction((tx) => {
+    const existing = getLibraryCategory(libraryId, categoryId)
+    if (patch.name !== undefined && patch.name !== existing.name) {
+      const duplicate = tx.select({ id: libraryCategories.id }).from(libraryCategories)
+        .where(and(eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.name, patch.name), ne(libraryCategories.id, categoryId))).get()
+      if (duplicate) throw new AppError('CATEGORY_NAME_TAKEN', 'Category name is already in use')
+    }
+    tx.update(libraryCategories).set({ ...patch, updatedAt: Date.now() }).where(eq(libraryCategories.id, categoryId)).run()
+    return toCategoryRes({ ...existing, ...patch, updatedAt: Date.now() })
+  })
+}
+
+export async function setLibraryCategoryParent(actorId: string, libraryId: string, categoryId: string, parentId: string | null) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  const existing = getLibraryCategory(libraryId, categoryId)
+  if (parentId === existing.parentId) return toCategoryRes(existing)
+  if (parentId !== null) {
+    if (parentId === categoryId) throw new AppError('VALIDATION_ERROR', 'A category cannot parent itself')
+    getLibraryCategory(libraryId, parentId)
+    // Walk up: the new parent must not descend from the category itself.
+    let cursor: string | null = parentId
+    while (cursor) {
+      if (cursor === categoryId) throw new AppError('VALIDATION_ERROR', 'Category parenting would create a cycle')
+      cursor = db.select({ parentId: libraryCategories.parentId }).from(libraryCategories)
+        .where(and(eq(libraryCategories.id, cursor), eq(libraryCategories.libraryId, libraryId))).get()?.parentId ?? null
+    }
+  }
+  const now = Date.now()
+  db.update(libraryCategories).set({ parentId, updatedAt: now }).where(eq(libraryCategories.id, categoryId)).run()
+  return toCategoryRes({ ...existing, parentId, updatedAt: now })
+}
+
+export async function reorderLibraryCategories(actorId: string, libraryId: string, categoryIds: string[]) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  const existing = db.select({ id: libraryCategories.id }).from(libraryCategories)
+    .where(eq(libraryCategories.libraryId, libraryId)).all()
+  const owned = new Set(existing.map((row) => row.id))
+  if (categoryIds.length !== owned.size || new Set(categoryIds).size !== owned.size || categoryIds.some((id) => !owned.has(id))) {
+    throw new AppError('CATEGORY_NOT_FOUND')
+  }
+  db.transaction((tx) => {
+    for (const [index, id] of categoryIds.entries()) {
+      tx.update(libraryCategories).set({ sortOrder: index }).where(eq(libraryCategories.id, id)).run()
+    }
+  })
+}
+
+export async function deleteLibraryCategory(actorId: string, libraryId: string, categoryId: string) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  const existing = getLibraryCategory(libraryId, categoryId)
+  // Books fall back to uncategorized (FK SET NULL); child categories become roots.
+  db.delete(libraryCategories).where(eq(libraryCategories.id, categoryId)).run()
+  return toCategoryRes(existing)
 }

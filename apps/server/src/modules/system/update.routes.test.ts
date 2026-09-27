@@ -1,9 +1,16 @@
 import { Hono } from 'hono'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import Database from 'better-sqlite3'
+import { drizzle } from 'drizzle-orm/better-sqlite3'
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import type { UpdateStartReq } from '@bookdock/shared'
 
 import { AppError, errorHandler } from '../../middleware/error'
+import * as schema from '../../db/schema'
+import * as client from '../../db/client'
 import systemRoutes from './system.routes'
 import { cancelUpdate, startUpdate } from './update.service'
 
@@ -13,11 +20,11 @@ vi.mock('./update.service', () => ({
   cancelUpdate: vi.fn(async () => ({ phase: 'cancelled', outcome: 'cancelled', currentVersion: '0.3.2' })),
 }))
 
-function createApp(role: 'owner' | 'member', guest = false) {
+function createApp(role: 'owner' | 'member', guest = false, id = 'user-1') {
   const app = new Hono()
   app.onError(errorHandler)
   app.use('*', async (c, next) => {
-    c.set('user', { id: 'user-1', username: 'tester', role, avatarKey: null })
+    c.set('user', { id, username: 'tester', role, avatarKey: null })
     if (guest) c.set('guest', true)
     return next()
   })
@@ -27,6 +34,24 @@ function createApp(role: 'owner' | 'member', guest = false) {
 
 const owner = createApp('owner')
 const body: UpdateStartReq = { targetVersion: '0.4.0', progressId: 'progress-1' }
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// requireOwner reads the Instance row, not the context role: the harness
+// seeds a real owner instead of role-playing one.
+beforeEach(() => {
+  const sqlite = new Database(':memory:')
+  sqlite.pragma('foreign_keys = ON')
+  const db = drizzle(sqlite, { schema })
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  vi.spyOn(client, 'getDb').mockReturnValue(db)
+  const now = Date.now()
+  db.insert(schema.users).values({ id: 'user-1', username: 'tester', role: 'owner', createdAt: now }).run()
+  db.insert(schema.instance).values({
+    id: 'instance', ownerUserId: 'user-1', allowRegistration: false,
+    allowGuestAccess: false, uploadMaxBytes: null, createdAt: now, updatedAt: now,
+  }).run()
+})
 
 describe('update routes', () => {
   it('reports status without an in-flight update', async () => {
@@ -71,7 +96,7 @@ describe('update routes', () => {
   })
 
   it('refuses update access to members and guests', async () => {
-    for (const app of [createApp('member'), createApp('owner', true)]) {
+    for (const app of [createApp('member', false, 'user-2'), createApp('owner', true)]) {
       const status = await app.request('/api/v1/system/update/status')
       const start = await app.request('/api/v1/system/update', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const cancel = await app.request('/api/v1/system/update/progress-1', { method: 'DELETE' })

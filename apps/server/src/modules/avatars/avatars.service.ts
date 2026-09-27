@@ -13,7 +13,6 @@ const AVATAR_MIME_TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
-  'image/gif': 'gif',
 }
 
 export function avatarStorageKey(key: string): string {

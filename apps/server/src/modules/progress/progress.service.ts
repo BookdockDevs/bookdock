@@ -1,53 +1,19 @@
-import { eq, and, isNull } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { getDb } from '../../db/client'
-import { books, bookStates, bookVersions, libraries, libraryBooks, libraryBookVersions } from '../../db/schema'
-import { getStorage } from '../../storage'
-import { AppError } from '../../middleware/error'
+import { bookStates, bookVersions } from '../../db/schema'
+import { assertReadableBook } from '../books/books.service'
 import { mergeInterval, unionLength, type FractionInterval } from '../../lib/intervals'
+import { readProgressFile, writeProgressFile, type ProgressFileData } from '../../lib/progress-file'
 import type { RateSample } from '@bookdock/shared'
-
-function progressKey(bookId: string): string {
-  return `progress/${bookId}.json`
-}
-
-interface ProgressData {
-  cfi?: string | null
-  chapter?: string | null
-  chapterIndex?: number | null
-  percent: number
-  fraction?: number | null
-  intervals: FractionInterval[]
-  rateSamples?: RateSample[]
-  updatedAt: number
-}
 
 const RATE_SAMPLE_MAX = 20
 
-async function readProgressData(bookId: string): Promise<ProgressData | null> {
-  const storage = getStorage()
-  const key = progressKey(bookId)
-  if (!(await storage.exists(key))) return null
-  const stream = await storage.get(key)
-  const chunks: Buffer[] = []
-  for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-  return JSON.parse(Buffer.concat(chunks).toString('utf-8')) as ProgressData
-}
-
-function assertBookReadable(userId: string, bookId: string) {
-  const db = getDb()
-  const book = db.select({ id: books.id }).from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (book) return
-  // Version-native books have no legacy row: readability is the private library.
-  const library = db.select({ id: libraries.id }).from(libraries)
-    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
-  const version = library && db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
-    .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
-  if (!version) throw new AppError('BOOK_NOT_FOUND')
-}
-
 export async function getProgress(userId: string, bookId: string) {
-  assertBookReadable(userId, bookId)
-  const data = await readProgressData(bookId)
+  // Readability is the shared gate, not a private-library lookup: a version read
+  // in a library has no private row, and refusing it here made the reader treat
+  // "no saved position" as a failure to load.
+  await assertReadableBook(userId, bookId)
+  const data = await readProgressFile(userId, bookId)
   if (!data) return null
   // intervals stay server-side; clients get the precomputed union length
   const { intervals, ...rest } = data
@@ -57,25 +23,14 @@ export async function getProgress(userId: string, bookId: string) {
 
 export async function upsertProgress(userId: string, bookId: string, data: { cfi?: string; chapter?: string; chapterIndex?: number; percent: number; fraction?: number; segmentStartFraction?: number; sample?: RateSample }) {
   const db = getDb()
-  const storage = getStorage()
-  const legacy = db.select({ id: books.id }).from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (legacy) {
-    const active = db.select({ id: books.id }).from(books).where(and(eq(books.id, bookId), isNull(books.deletedAt))).get()
-    if (!active) throw new AppError('BOOK_NOT_FOUND')
-  } else {
-    // Version-native books have no legacy row: readability is the private
-    // library, and trashed works stay out like their legacy counterparts.
-    const library = db.select({ id: libraries.id }).from(libraries)
-      .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
-    const lbv = library && db.select({ libraryBookId: libraryBookVersions.libraryBookId }).from(libraryBookVersions)
-      .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
-    const work = lbv && db.select({ deletedAt: libraryBooks.deletedAt }).from(libraryBooks)
-      .where(eq(libraryBooks.id, lbv.libraryBookId)).get()
-    if (!work || work.deletedAt) throw new AppError('BOOK_NOT_FOUND')
-  }
+  // Reading needs no collection, and a position is the reader's own: design
+  // invariant 14 files BookState by User x BookVersion, so a library read keeps
+  // its place exactly like a collected one. The file is filed per user, which is
+  // what makes that true for two people reading one version.
+  await assertReadableBook(userId, bookId)
 
   const now = Date.now()
-  const existing = await readProgressData(bookId)
+  const existing = await readProgressFile(userId, bookId) as ProgressFileData | null
 
   let intervals = existing?.intervals ?? [[0, data.fraction ?? data.percent / 100] as FractionInterval]
   if (data.fraction !== undefined && data.segmentStartFraction !== undefined) {
@@ -94,7 +49,7 @@ export async function upsertProgress(userId: string, bookId: string, data: { cfi
   }
 
   // Write per-book progress file
-  const payload: ProgressData = {
+  const payload: ProgressFileData = {
     cfi: data.cfi ?? existing?.cfi ?? null,
     chapter: data.chapter ?? existing?.chapter ?? null,
     chapterIndex: data.chapterIndex ?? existing?.chapterIndex ?? null,
@@ -104,7 +59,7 @@ export async function upsertProgress(userId: string, bookId: string, data: { cfi
     rateSamples: rateSamples.length > 0 ? rateSamples : undefined,
     updatedAt: now,
   }
-  await storage.put(progressKey(bookId), Buffer.from(JSON.stringify(payload), 'utf-8'))
+  await writeProgressFile(userId, bookId, payload)
 
   // Mirror the position into the version state row for library sorting;
   // bumps lastReadAt, not the work updatedAt, so cover cache keys and

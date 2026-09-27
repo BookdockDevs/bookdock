@@ -18,21 +18,8 @@ import { books, bookStates, bookVersions, contentRevisions, libraries, libraryBo
 import { createId } from '../../lib/id'
 import { unionLength } from '../../lib/intervals'
 import { mergeProgressInterval, readProgressFile } from '../../lib/progress-file'
+import { assertReadableBook } from '../books/books.service'
 import { AppError } from '../../middleware/error'
-
-function assertBookOwnership(userId: string, bookId: string) {
-  const db = getDb()
-  const book = db.select({ id: books.id }).from(books)
-    .where(and(eq(books.id, bookId), eq(books.userId, userId), isNull(books.deletedAt)))
-    .get()
-  if (book) return
-  // Version-native books have no legacy row: ownership is the private library.
-  const library = db.select({ id: libraries.id }).from(libraries)
-    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
-  const version = library && db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
-    .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
-  if (!version) throw new AppError('BOOK_NOT_FOUND')
-}
 
 function versionIdIfMigrated(bookId: string): string | null {
   const db = getDb()
@@ -40,7 +27,7 @@ function versionIdIfMigrated(bookId: string): string | null {
 }
 
 export async function addReadingTime(userId: string, body: ReadingRecordCreateReq) {
-  assertBookOwnership(userId, body.bookId)
+  await assertReadableBook(userId, body.bookId)
   const db = getDb()
   // New rows bind the version when the book already migrated; history keeps
   // flowing through bookId either way (0.3 id reuse).
@@ -77,7 +64,7 @@ export async function addReadingTime(userId: string, body: ReadingRecordCreateRe
   // book's interval union. This is a pure interval merge — the current
   // reading position (cfi/percent/lastReadAt) stays untouched.
   if (body.startFraction !== undefined && body.endFraction !== undefined) {
-    await mergeProgressInterval(body.bookId, [body.startFraction, body.endFraction])
+    await mergeProgressInterval(userId, body.bookId, [body.startFraction, body.endFraction])
   }
   return db.select().from(readingRecords).where(and(
     eq(readingRecords.userId, userId),
@@ -131,7 +118,7 @@ async function computeTotalWordsRead(userId: string): Promise<number> {
       .where(eq(contentRevisions.bookVersionId, versionId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
     const wordCount = revision?.wordCount
     if (typeof wordCount !== 'number' || wordCount <= 0) continue
-    const progress = await readProgressFile(versionId)
+    const progress = await readProgressFile(userId, versionId)
     if (!progress?.intervals) continue
     total += unionLength(progress.intervals) * wordCount
   }
@@ -255,7 +242,7 @@ export async function getByBook(userId: string, range: { from?: string; to?: str
 }
 
 export async function getBookRecords(userId: string, bookId: string): Promise<ReadingRecordBookDetailRes> {
-  assertBookOwnership(userId, bookId)
+  await assertReadableBook(userId, bookId)
   const db = getDb()
   const total = db.select({
     totalSeconds: sql<number>`coalesce(sum(${readingRecords.durationSeconds}), 0)`,
@@ -340,7 +327,7 @@ export function getSessionOrThrow(userId: string, sessionId: string): SessionRow
 }
 
 export async function listSessions(userId: string, bookId: string, limit: number, offset: number): Promise<ReadingSessionItem[]> {
-  assertBookOwnership(userId, bookId)
+  await assertReadableBook(userId, bookId)
   const db = getDb()
   // Manual sessions only: auto-mode blocks are heuristic fragments without
   // exact bounds and are immutable — they never appear in the session list.
@@ -410,7 +397,7 @@ export async function deleteSession(userId: string, sessionId: string): Promise<
  * sessions produce no auto row.
  */
 export async function getBookDetail(userId: string, bookId: string, limit: number, offset: number): Promise<ReadingDetailItem[]> {
-  assertBookOwnership(userId, bookId)
+  await assertReadableBook(userId, bookId)
   const db = getDb()
   const manualRows = db.select().from(readingSessions)
     .where(and(

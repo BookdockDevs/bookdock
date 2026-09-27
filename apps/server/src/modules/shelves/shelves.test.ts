@@ -17,6 +17,12 @@ import {
   reorderShelves,
   moveBooksToShelf,
   removeBooksFromShelf,
+  listLibraryCategories,
+  createLibraryCategory,
+  updateLibraryCategory,
+  setLibraryCategoryParent,
+  reorderLibraryCategories,
+  deleteLibraryCategory,
 } from './shelves.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -235,5 +241,73 @@ describe('shelves service', () => {
     // No shelves for the other user: their own single-shelf reorder must pass.
     await reorderShelves(otherUserId, [theirs.id])
     expect((await listShelves(otherUserId))[0].id).toBe(theirs.id)
+  })
+})
+
+describe('shared library categories', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let adminId: string
+  let memberId: string
+  let outsiderId: string
+  let libraryId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    const now = Date.now()
+    ownerId = createId('user')
+    adminId = createId('user')
+    memberId = createId('user')
+    outsiderId = createId('user')
+    for (const [id, username] of [[ownerId, 'owner'], [adminId, 'admin'], [memberId, 'member'], [outsiderId, 'outsider']] as const) {
+      db.insert(schema.users).values({ id, username, passwordHash: null, role: 'member', createdAt: now }).run()
+    }
+    libraryId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: libraryId, userId: ownerId, type: 'shared', name: 'City',
+      description: '', visibility: 'private', createdAt: now, updatedAt: now,
+    }).run()
+    db.insert(schema.libraryMemberships).values([
+      { id: createId('lbm'), libraryId, userId: adminId, role: 'admin', createdAt: now, updatedAt: now },
+      { id: createId('lbm'), libraryId, userId: memberId, role: 'member', createdAt: now, updatedAt: now },
+    ]).run()
+  })
+
+  it('lets owners and admins manage the taxonomy with parent checks', async () => {
+    const fiction = await createLibraryCategory(ownerId, libraryId, { name: 'Fiction' })
+    expect(fiction).toMatchObject({ name: 'Fiction', parentId: null, libraryId })
+    const scifi = await createLibraryCategory(adminId, libraryId, { name: 'Sci-Fi', parentId: fiction.id })
+    expect(scifi.parentId).toBe(fiction.id)
+    await expect(createLibraryCategory(memberId, libraryId, { name: 'Nope' }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(createLibraryCategory(outsiderId, libraryId, { name: 'Nope' }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(createLibraryCategory(ownerId, libraryId, { name: 'Fiction' }))
+      .rejects.toMatchObject({ code: 'CATEGORY_NAME_TAKEN' })
+    // Cycles and cross-library parents are refused.
+    await expect(setLibraryCategoryParent(ownerId, libraryId, fiction.id, scifi.id))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(setLibraryCategoryParent(ownerId, libraryId, fiction.id, fiction.id))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    const otherLib = createId('lib')
+    db.insert(schema.libraries).values({
+      id: otherLib, userId: ownerId, type: 'shared', name: 'Other',
+      description: '', visibility: 'private', createdAt: 1, updatedAt: 1,
+    }).run()
+    const foreign = await createLibraryCategory(ownerId, otherLib, { name: 'Foreign' })
+    await expect(setLibraryCategoryParent(ownerId, libraryId, fiction.id, foreign.id))
+      .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
+    // Rename, reorder, delete.
+    expect((await updateLibraryCategory(adminId, libraryId, fiction.id, { name: 'Novels' })).name).toBe('Novels')
+    await reorderLibraryCategories(ownerId, libraryId, [scifi.id, fiction.id])
+    expect((await listLibraryCategories(ownerId, libraryId)).map((c) => c.id)).toEqual([scifi.id, fiction.id])
+    await expect(reorderLibraryCategories(memberId, libraryId, [fiction.id, scifi.id]))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await deleteLibraryCategory(ownerId, libraryId, fiction.id)
+    expect((await listLibraryCategories(ownerId, libraryId)).map((c) => c.id)).toEqual([scifi.id])
+    // Members browse but never manage.
+    expect((await listLibraryCategories(memberId, libraryId)).map((c) => c.name)).toEqual(['Sci-Fi'])
+    await expect(listLibraryCategories(outsiderId, libraryId)).rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
   })
 })

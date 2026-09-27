@@ -290,7 +290,9 @@ export async function migrateReadingStates(): Promise<ReadingStatesMigrationRepo
       }
       let file: { cfi?: string | null; chapter?: string | null; percent?: number; updatedAt?: number } | null = null
       try {
-        file = await readProgressFile(book.id)
+        // The migration is what first files positions per user, so it reads
+        // through the legacy fallback on purpose.
+        file = await readProgressFile(book.userId, book.id)
       } catch {
         report.anomalies.push({ bookId: book.id, reason: 'unreadable progress file, fell back to books row' })
       }

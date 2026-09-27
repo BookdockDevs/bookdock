@@ -276,12 +276,17 @@ export {
   updateInstanceSchema,
   updateUserSchema,
   createUserSchema,
+  ownershipTransferSchema,
+  deleteAccountSchema,
   shelfCreateSchema,
   shelfUpdateSchema,
   shelfReorderSchema,
   tagCreateSchema,
   tagUpdateSchema,
   tagReorderSchema,
+  categoryCreateSchema,
+  categoryUpdateSchema,
+  categoryReorderSchema,
   bookMembershipSchema,
   bookMetadataSchema,
   viewSettingsSchema,
@@ -293,6 +298,9 @@ export { ErrorCode, ErrorHttpStatus } from './errors'
 
 export type {
   Library,
+  LibraryListItem,
+  LibraryMembersRes,
+  LibraryMemberEntry,
   LibraryType,
   LibraryVisibility,
   LibraryMembership,
@@ -303,6 +311,10 @@ export type {
   LibraryBook,
   LibraryBookVersion,
   BookVersion,
+  CatalogBook,
+  CatalogBookTag,
+  CatalogVersion,
+  CatalogListRes,
   ContentRevision,
   BlobKind,
   BlobRef,
@@ -321,6 +333,14 @@ export type {
   AuthContext,
   LibraryCreateReq,
   LibraryUpdateReq,
+  LibraryJoinReq,
+  MembershipManageReq,
+  CatalogUploadReq,
+  CatalogBookUpdateReq,
+  CatalogVersionUpdateReq,
+  CollectBookReq,
+  CollectBookRes,
+  BookSourceInfo,
 } from './library'
 
 export {
@@ -334,6 +354,14 @@ export {
   ideaVisibilitySchema,
   libraryCreateSchema,
   libraryUpdateSchema,
+  libraryJoinSchema,
+  membershipManageSchema,
+  catalogUploadSchema,
+  catalogBookUpdateSchema,
+  catalogVersionUpdateSchema,
+  catalogVersionMoveSchema,
+  catalogSimilarQuerySchema,
+  collectBookSchema,
 } from './library'
 
 export { getAiModelCapabilityFlags, isAiEmbeddingModel } from './ai-models'

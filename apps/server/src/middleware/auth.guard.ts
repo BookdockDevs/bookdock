@@ -7,7 +7,7 @@ import type { AccessTokenPermission } from '@bookdock/shared'
 
 import { getDb } from '../db/client'
 import { users } from '../db/schema'
-import { getDefaultUser, getInstanceSettings, refreshSessionIfNeeded, resetInstanceCache, resolveSession, revokeSession } from '../modules/auth/auth.service'
+import { getDefaultUser, getInstanceSettings, isInstanceOwner, refreshSessionIfNeeded, resetInstanceCache, resolveSession, revokeSession } from '../modules/auth/auth.service'
 import { resolveLegadoAccessKey } from '../modules/books/legado-access.service'
 import { resolveAccessToken } from '../modules/tokens/tokens.service'
 import { isLegadoAccessKeyEnabled } from '../modules/settings/settings.service'
@@ -111,13 +111,25 @@ function rejectGuestMutation(c: Context): Response | null {
 }
 
 /**
+ * Request identity for read paths: an anonymous guest is `null`, an
+ * authenticated caller is their user id. Shared-library verdicts must branch
+ * on this — never on the injected default guest row's id, which otherwise
+ * reads as an authenticated non-member and skips the guest triple gate
+ * (instance switch + public visibility + version guestReadable).
+ */
+export function requestUserId(c: Context): string | null {
+  if (c.get('guest') === true || c.get('user')?.role === 'guest') return null
+  return c.get('user').id
+}
+
+/**
  * Owner-only gate. Single checkpoint so a future permission/group system
  * replaces the role comparison here instead of across routes.
  */
 export function requireOwner(): MiddlewareHandler {
   return async (c, next) => {
     const user = c.get('user')
-    if (!user || c.get('guest') || user.role !== 'owner') {
+    if (!user || c.get('guest') || !isInstanceOwner(user.id)) {
       return c.json({ error: { code: 'FORBIDDEN', message: 'Owner only' } }, 403)
     }
     return next()

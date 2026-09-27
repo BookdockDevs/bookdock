@@ -134,6 +134,14 @@ describe('avatars routes', () => {
     expect(body.error.code).toBe('UNSUPPORTED_FORMAT')
   })
 
+  it('rejects GIF: only JPEG, PNG and WebP are supported', async () => {
+    const app = createApp(owner)
+    const res = await app.request(uploadRequest(new File([Buffer.alloc(8)], 'a.gif', { type: 'image/gif' })))
+    expect(res.status).toBe(415)
+    const body = (await res.json()) as { error: { code: string } }
+    expect(body.error.code).toBe('UNSUPPORTED_FORMAT')
+  })
+
   it('rejects files over the size limit with 413', async () => {
     const app = createApp(owner)
     const big = new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' })

@@ -48,6 +48,7 @@ import {
   getBookCover,
   getBookCoverContent,
   removeBookCover,
+  cleanupStagedUpload,
 } from './books.service'
 import { createTocRule } from '../toc-rules/toc-rules.service'
 
@@ -1195,15 +1196,39 @@ describe('deleteBook blob reference protection', () => {
     expect(mem.files.has(sharedFile)).toBe(false)
   })
 
-  it('should delete unshared blobs and the per-book progress file', async () => {
+  it('should delete unshared blobs and only the owner own progress file', async () => {
     const bookA = seedBook(db, userA, { filePath: sharedFile, coverKey: sharedCover })
-    const progressKey = `progress/${bookA.id}.json`
-    mem.files.set(progressKey, Buffer.from('{}'))
+    // A second reader's position for the same version must survive: it belongs
+    // to them, not to the book.
+    const ownerProgress = `progress/${userA}/${bookA.id}.json`
+    const otherProgress = `progress/${userB}/${bookA.id}.json`
+    mem.files.set(ownerProgress, Buffer.from('{}'))
+    mem.files.set(otherProgress, Buffer.from('{}'))
 
     await deleteBook(userA, bookA.id)
     expect(mem.files.has(sharedFile)).toBe(false)
     expect(mem.files.has(sharedCover)).toBe(false)
-    expect(mem.files.has(progressKey)).toBe(false)
+    expect(mem.files.has(ownerProgress)).toBe(false)
+    expect(mem.files.has(otherProgress)).toBe(true)
+  })
+
+  it('should clean staged files a failed upload leaves behind, but keep shared blobs', async () => {
+    const orphanFile = 'blobs/or/orphan.epub'
+    const orphanCover = 'blobs/or/orphan.cover.jpg'
+    const orphanThumb = 'blobs/or/orphan.thumb.webp'
+    const sharedStaged = 'blobs/or/shared.epub'
+    for (const key of [orphanFile, orphanCover, orphanThumb, sharedStaged]) {
+      mem.files.set(key, Buffer.from('staged'))
+    }
+    db.insert(schema.blobs).values({ key: sharedStaged, size: 6, kind: 'book', createdAt: Date.now() }).run()
+
+    await cleanupStagedUpload({ fileKey: orphanFile, coverKey: orphanCover })
+    await cleanupStagedUpload({ fileKey: sharedStaged, coverKey: null })
+
+    expect(mem.files.has(orphanFile)).toBe(false)
+    expect(mem.files.has(orphanCover)).toBe(false)
+    expect(mem.files.has(orphanThumb)).toBe(false)
+    expect(mem.files.has(sharedStaged)).toBe(true)
   })
 })
 
@@ -1228,6 +1253,28 @@ describe('purgeExpiredTrash', () => {
     expect(purged).toBe(1)
     expect(libraryBookOf(db, expired.id)).toBeUndefined()
     expect(libraryBookOf(db, recent.id)).toBeDefined()
+  })
+
+  it('should purge every version of a multi-version trashed work', async () => {
+    const book = seedBook(db, userId, { deletedAt: Date.now() - 31 * DAY_MS })
+    const link = db.select().from(schema.libraryBookVersions)
+      .where(eq(schema.libraryBookVersions.bookVersionId, book.id)).get()!
+    const v2 = createId('book')
+    db.insert(schema.bookVersions).values({ id: v2, format: 'txt', size: 50, createdAt: Date.now(), updatedAt: Date.now() }).run()
+    db.insert(schema.contentRevisions).values({
+      id: createId('rev'), bookVersionId: v2, revisionNo: 1, blobKey: `blobs/te/${v2}.epub`,
+      size: 50, chapterCount: 0, meta: {}, createdAt: Date.now(),
+    }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: createId('lbv'), libraryId: link.libraryId, libraryBookId: link.libraryBookId,
+      bookVersionId: v2, kind: 'personal', createdAt: Date.now(), updatedAt: Date.now(),
+    }).run()
+
+    expect(await purgeExpiredTrash(userId, 30)).toBe(1)
+    expect(db.select().from(schema.libraryBookVersions)
+      .where(eq(schema.libraryBookVersions.libraryBookId, link.libraryBookId)).all()).toHaveLength(0)
+    expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, v2)).get()).toBeUndefined()
+    expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, book.id)).get()).toBeUndefined()
   })
 
   it('should not touch active books or other users trash', async () => {
@@ -1492,6 +1539,15 @@ describe('GET /api/v1/books/:id/file range requests', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'FORBIDDEN' } })
   })
 
+  it('refuses guest reader access to another user private book', async () => {
+    // The guest flag maps to an anonymous identity, never to the injected
+    // row id: a private book must not resolve through the shared fallback.
+    const res = await createFileApp('guest', true).request(`/api/v1/books/${book.id}/file?reader=1`)
+    expect(res.status).toBe(404)
+    const meta = await createFileApp('guest', true).request(`/api/v1/books/${book.id}`)
+    expect(meta.status).toBe(404)
+  })
+
   it('serves the cover route with thumbnail by default and original for download', async () => {
     const realJpg = await sharp({
       create: { width: 600, height: 900, channels: 3, background: { r: 10, g: 20, b: 30 } },
@@ -1696,7 +1752,7 @@ describe('appendTxtBookContent', () => {
     const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
     const preview = await previewAppendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
     const store = storage.getStorage()
-    const progressKey = `progress/${book.id}.json`
+    const progressKey = `progress/${ownerId}/${book.id}.json`
     await store.put(progressKey, Buffer.from(JSON.stringify({
       cfi: 'chapter-0002.xhtml#epubcfi(/6/4/4)',
       chapter: '第二章 旅途',
@@ -1894,7 +1950,7 @@ describe('reTocBook', () => {
     })
 
     const store = storage.getStorage()
-    const progressKey = `progress/${book.id}.json`
+    const progressKey = `progress/${ownerId}/${book.id}.json`
     await store.put(progressKey, Buffer.from(JSON.stringify({
       cfi: 'chapter-0002.xhtml#epubcfi(/6/4/4)',
       chapter: '第一章',
@@ -1926,7 +1982,7 @@ describe('reTocBook', () => {
     const store = storage.getStorage()
     await reTocBook(ownerId, book.id, rule.id)
 
-    const progressKey = `progress/${book.id}.json`
+    const progressKey = `progress/${ownerId}/${book.id}.json`
     await store.put(progressKey, Buffer.from(JSON.stringify({
       cfi: 'chapter-0001.xhtml#epubcfi(/6/4/4)',
       chapter: '第一章 启程',

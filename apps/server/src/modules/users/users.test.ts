@@ -13,12 +13,14 @@ vi.hoisted(() => {
 
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
+import * as storage from '../../storage'
+import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
 import { errorHandler } from '../../middleware/error'
 import { resetAuthCaches } from '../../middleware/auth.guard'
 import { hashPassword, verifyPassword } from '../../lib/password'
 import usersRoutes from './users.routes'
-import { createUser, listUsers, updateUser } from './users.service'
+import { createUser, deleteUser, listUsers, transferInstanceOwnership, updateUser } from './users.service'
 import { createSession, resolveSession } from '../auth/auth.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -66,6 +68,31 @@ function insertBook(db: TestDb, userId: string, deletedAt: number | null = null)
   }).run()
 }
 
+function createMemoryStorage() {
+  const files = new Map<string, Buffer>()
+  const driver: StorageDriver = {
+    async put(key, data) {
+      files.set(key, Buffer.isBuffer(data) ? data : Buffer.from(data as Uint8Array))
+    },
+    async get(key) {
+      const buf = files.get(key)
+      if (!buf) throw new Error(`missing blob: ${key}`)
+      const { Readable } = await import('node:stream')
+      return Readable.from(buf)
+    },
+    async delete(key) {
+      files.delete(key)
+    },
+    async exists(key) {
+      return files.has(key)
+    },
+    async size(key) {
+      return files.get(key)?.length ?? 0
+    },
+  }
+  return { driver, files }
+}
+
 function createUsersApp(user: { id: string; username: string; role: string }) {
   const app = new Hono()
   app.onError(errorHandler)
@@ -102,11 +129,12 @@ describe('users module', () => {
     expect(member.disabled).toBe(false)
   })
 
-  it('changes a user role', async () => {
-    const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
-    const memberId = await insertUser(db, { username: 'mem' })
-    const updated = await updateUser(ownerId, memberId, { role: 'owner' })
-    expect(updated.role).toBe('owner')
+  it('creates an owner-managed account with exactly one private library', async () => {
+    const created = await createUser('managed', 'password123')
+    expect(created.role).toBe('member')
+    const libraries = db.select().from(schema.libraries).where(eq(schema.libraries.userId, created.id)).all()
+    expect(libraries).toHaveLength(1)
+    expect(libraries[0]).toMatchObject({ type: 'private' })
   })
 
   it('disables and re-enables a user', async () => {
@@ -133,36 +161,25 @@ describe('users module', () => {
       .rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
     await expect(updateUser(ownerId, guestId, { disabled: true }))
       .rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
-    await expect(updateUser(ownerId, guestId, { role: 'member' }))
-      .rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
   })
 
-  it('rejects disabling or demoting oneself', async () => {
+  it('rejects disabling oneself', async () => {
     const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
     await insertUser(db, { username: 'other', role: 'owner' })
     await expect(updateUser(ownerId, ownerId, { disabled: true })).rejects.toMatchObject({ code: 'CANNOT_MODIFY_SELF' })
-    await expect(updateUser(ownerId, ownerId, { role: 'member' })).rejects.toMatchObject({ code: 'CANNOT_MODIFY_SELF' })
   })
 
-  it('allows demoting an owner when another active owner remains', async () => {
-    const actorId = await insertUser(db, { username: 'actor', role: 'owner' })
-    const targetId = await insertUser(db, { username: 'target', role: 'owner' })
-    const demoted = await updateUser(actorId, targetId, { role: 'member' })
-    expect(demoted.role).toBe('member')
-  })
-
-  it('rejects disabling or demoting the last active owner', async () => {
+  it('rejects disabling the last active owner', async () => {
     const actorId = await insertUser(db, { username: 'actor', role: 'owner' })
     const targetId = await insertUser(db, { username: 'target', role: 'owner' })
     // stale session: actor is itself disabled, so target is the only active owner
     db.update(schema.users).set({ disabled: 1 }).where(eq(schema.users.id, actorId)).run()
     await expect(updateUser(actorId, targetId, { disabled: true })).rejects.toMatchObject({ code: 'LAST_OWNER' })
-    await expect(updateUser(actorId, targetId, { role: 'member' })).rejects.toMatchObject({ code: 'LAST_OWNER' })
   })
 
   it('rejects updates for a missing user', async () => {
     const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
-    await expect(updateUser(ownerId, 'missing', { role: 'member' })).rejects.toMatchObject({ code: 'USER_NOT_FOUND' })
+    await expect(updateUser(ownerId, 'missing', { disabled: true })).rejects.toMatchObject({ code: 'USER_NOT_FOUND' })
   })
 
   describe('routes', () => {
@@ -173,8 +190,12 @@ describe('users module', () => {
     })
 
     it('lists users for an owner', async () => {
-      await insertUser(db, { username: 'own', role: 'owner' })
-      const app = createUsersApp({ id: 'u1', username: 'own', role: 'owner' })
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      db.insert(schema.instance).values({
+        id: 'instance', ownerUserId: ownerId, allowRegistration: false,
+        allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
+      }).run()
+      const app = createUsersApp({ id: ownerId, username: 'own', role: 'owner' })
       const res = await app.request('/api/v1/users')
       expect(res.status).toBe(200)
       const body = await res.json()
@@ -183,8 +204,12 @@ describe('users module', () => {
     })
 
     it('lets an owner create a user without signing them in', async () => {
-      await insertUser(db, { username: 'own', role: 'owner' })
-      const app = createUsersApp({ id: 'u1', username: 'own', role: 'owner' })
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      db.insert(schema.instance).values({
+        id: 'instance', ownerUserId: ownerId, allowRegistration: false,
+        allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
+      }).run()
+      const app = createUsersApp({ id: ownerId, username: 'own', role: 'owner' })
       const res = await app.request('/api/v1/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -195,6 +220,41 @@ describe('users module', () => {
       expect(body.data.username).toBe('newbie')
       expect(body.data.role).toBe('member')
       expect(db.select().from(schema.sessions).all()).toHaveLength(0)
+    })
+
+    it('refuses a stale role-owner who is not the instance owner', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      const staleId = await insertUser(db, { username: 'stale', role: 'owner' })
+      db.insert(schema.instance).values({
+        id: 'instance', ownerUserId: ownerId, allowRegistration: false,
+        allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
+      }).run()
+      // The legacy role column still says owner, but ownership lives on the
+      // Instance row: a drifted role must grant nothing.
+      const app = createUsersApp({ id: staleId, username: 'stale', role: 'owner' })
+      const res = await app.request('/api/v1/users')
+      expect(res.status).toBe(403)
+    })
+
+    it('lets an owner delete a user and transfer instance ownership', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      const memberId = await insertUser(db, { username: 'mem', password: 'password123' })
+      db.insert(schema.instance).values({
+        id: 'instance', ownerUserId: ownerId, allowRegistration: false,
+        allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
+      }).run()
+      const app = createUsersApp({ id: ownerId, username: 'own', role: 'owner' })
+      const transfer = await app.request('/api/v1/users/instance-owner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: memberId }),
+      })
+      expect(transfer.status).toBe(200)
+      expect((await transfer.json()).data).toMatchObject({ ownerUserId: memberId })
+      const app2 = createUsersApp({ id: memberId, username: 'mem', role: 'owner' })
+      const del = await app2.request(`/api/v1/users/${ownerId}`, { method: 'DELETE' })
+      expect(del.status).toBe(200)
+      expect(db.select().from(schema.users).where(eq(schema.users.id, ownerId)).get()).toBeUndefined()
     })
   })
 
@@ -224,5 +284,246 @@ describe('users module', () => {
     expect(libraries).toHaveLength(1)
     expect(libraries[0]).toMatchObject({ type: 'private' })
     expect(db.select().from(schema.sessions).all()).toHaveLength(0)
+  })
+
+  describe('instance ownership transfer', () => {
+    function seedInstanceDb(ownerId: string) {
+      db.insert(schema.instance).values({
+        id: 'instance', ownerUserId: ownerId, allowRegistration: false,
+        allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
+      }).run()
+    }
+
+    it('moves ownership and demotes the former owner atomically', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      const memberId = await insertUser(db, { username: 'mem' })
+      seedInstanceDb(ownerId)
+      expect(await transferInstanceOwnership(ownerId, memberId)).toMatchObject({ ownerUserId: memberId })
+      expect(db.select().from(schema.users).where(eq(schema.users.id, ownerId)).get()!.role).toBe('member')
+      expect(db.select().from(schema.users).where(eq(schema.users.id, memberId)).get()!.role).toBe('owner')
+    })
+
+    it('refuses non-owners, guests and disabled targets', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      const memberId = await insertUser(db, { username: 'mem' })
+      const otherId = await insertUser(db, { username: 'other' })
+      seedInstanceDb(ownerId)
+      await expect(transferInstanceOwnership(memberId, otherId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      const guestId = await insertUser(db, { username: 'ghost', role: 'guest' })
+      await expect(transferInstanceOwnership(ownerId, guestId)).rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
+      const offId = await insertUser(db, { username: 'off' })
+      db.update(schema.users).set({ disabled: 1 }).where(eq(schema.users.id, offId)).run()
+      await expect(transferInstanceOwnership(ownerId, offId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      expect(db.select().from(schema.instance).get()!.ownerUserId).toBe(ownerId)
+    })
+  })
+
+  describe('user deletion', () => {
+    let mem: ReturnType<typeof createMemoryStorage>
+
+    beforeEach(() => {
+      mem = createMemoryStorage()
+      vi.spyOn(storage, 'getStorage').mockReturnValue(mem.driver)
+    })
+
+    function seedInstanceDb(ownerId: string) {
+      db.insert(schema.instance).values({
+        id: 'instance', ownerUserId: ownerId, allowRegistration: false,
+        allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
+      }).run()
+    }
+
+    function seedPrivateLibrary(userId: string, bookId?: string) {
+      const libraryId = createId('lib')
+      const now = Date.now()
+      db.insert(schema.libraries).values({
+        id: libraryId, userId, type: 'private', name: userId,
+        description: '', visibility: null, createdAt: now, updatedAt: now,
+      }).run()
+      if (bookId) {
+        db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 8, createdAt: now, updatedAt: now }).run()
+        const lbId = createId('lb')
+        db.insert(schema.libraryBooks).values({
+          id: lbId, libraryId, userId, title: 'T', createdAt: now, updatedAt: now,
+        }).run()
+        db.insert(schema.libraryBookVersions).values({
+          id: createId('lbv'), libraryId, libraryBookId: lbId, bookVersionId: bookId,
+          kind: 'personal', createdAt: now, updatedAt: now,
+        }).run()
+        db.insert(schema.bookStates).values({
+          userId, bookVersionId: bookId, readStatus: 'reading', percent: 10,
+          cfi: null, chapter: null, lastReadAt: null, updatedAt: now,
+        }).run()
+      }
+      return libraryId
+    }
+
+    it('self-deletes with password and cleans rows and files', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      seedInstanceDb(ownerId)
+      const memberId = await insertUser(db, { username: 'mem', password: 'password123' })
+      const bookId = createId('book')
+      db.insert(schema.books).values({
+        id: bookId, userId: memberId, title: 'B', format: 'txt', filePath: 'books/mm/book.epub',
+        size: 8, meta: {}, createdAt: 1, updatedAt: 1, deletedAt: null,
+      }).run()
+      mem.files.set('books/mm/book.epub', Buffer.from('data'))
+      mem.files.set(`progress/${bookId}.json`, Buffer.from('{}'))
+      seedPrivateLibrary(memberId, bookId)
+      await insertUser(db, { username: 'ghost', role: 'guest' })
+
+      expect((await deleteUser(memberId, memberId, 'password123')).id).toBe(memberId)
+      expect(db.select().from(schema.users).where(eq(schema.users.id, memberId)).get()).toBeUndefined()
+      expect(db.select().from(schema.books).where(eq(schema.books.userId, memberId)).all()).toHaveLength(0)
+      expect(db.select().from(schema.libraries).where(eq(schema.libraries.userId, memberId)).all()).toHaveLength(0)
+      expect(db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, memberId)).all()).toHaveLength(0)
+      expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, bookId)).get()).toBeUndefined()
+      expect(mem.files.has('books/mm/book.epub')).toBe(false)
+      expect(mem.files.has(`progress/${bookId}.json`)).toBe(false)
+      // The owner, the guest row and other data survive.
+      expect(db.select().from(schema.users).all()).toHaveLength(2)
+    })
+
+    it('rejects self-deletion with a wrong password and touches nothing', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      seedInstanceDb(ownerId)
+      const memberId = await insertUser(db, { username: 'mem', password: 'password123' })
+      await expect(deleteUser(memberId, memberId, 'wrongpass')).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+      expect(db.select().from(schema.users).where(eq(schema.users.id, memberId)).get()).toBeDefined()
+    })
+
+    it('refuses owners of the instance or a shared library', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner', password: 'password123' })
+      seedInstanceDb(ownerId)
+      await expect(deleteUser(ownerId, ownerId, 'password123')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      const memberId = await insertUser(db, { username: 'mem', password: 'password123' })
+      const libId = createId('lib')
+      db.insert(schema.libraries).values({
+        id: libId, userId: memberId, type: 'shared', name: 'City',
+        description: '', visibility: 'private', createdAt: 1, updatedAt: 1,
+      }).run()
+      await expect(deleteUser(memberId, memberId, 'password123')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      await expect(deleteUser(ownerId, memberId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    })
+
+    it('lets owners delete ordinary members and keeps shared blobs by reference', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      seedInstanceDb(ownerId)
+      const memberId = await insertUser(db, { username: 'mem' })
+      const otherId = await insertUser(db, { username: 'other' })
+      // Identical uploads share one content-addressed blob key.
+      const sharedKey = 'books/ab/shared.epub'
+      const bookA = createId('book')
+      const bookB = createId('book')
+      for (const [bookId, userId] of [[bookA, memberId], [bookB, otherId]] as const) {
+        db.insert(schema.books).values({
+          id: bookId, userId, title: 'B', format: 'txt', filePath: sharedKey,
+          size: 8, meta: {}, createdAt: 1, updatedAt: 1, deletedAt: null,
+        }).run()
+      }
+      mem.files.set(sharedKey, Buffer.from('shared'))
+      seedPrivateLibrary(memberId, bookA)
+      seedPrivateLibrary(otherId, bookB)
+
+      expect((await deleteUser(ownerId, memberId)).id).toBe(memberId)
+      expect(db.select().from(schema.users).where(eq(schema.users.id, memberId)).get()).toBeUndefined()
+      // Other user's version keeps the blob alive.
+      expect(mem.files.has(sharedKey)).toBe(true)
+      expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, bookB)).get()).toBeDefined()
+      expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, bookA)).get()).toBeUndefined()
+    })
+
+    it('refuses the guest account and missing users', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      seedInstanceDb(ownerId)
+      const guestId = await insertUser(db, { username: 'ghost', role: 'guest' })
+      await expect(deleteUser(ownerId, guestId)).rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
+      await expect(deleteUser(ownerId, 'missing')).rejects.toMatchObject({ code: 'USER_NOT_FOUND' })
+    })
+
+    it('cleans new-model revisions, version covers and per-user progress without legacy rows', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      seedInstanceDb(ownerId)
+      const memberId = await insertUser(db, { username: 'mem' })
+      const now = Date.now()
+      const libraryId = createId('lib')
+      db.insert(schema.libraries).values({
+        id: libraryId, userId: memberId, type: 'private', name: 'mem',
+        description: '', visibility: null, createdAt: now, updatedAt: now,
+      }).run()
+      const blobKey = 'blobs/nm/exclusive.epub'
+      const coverKey = 'blobs/nm/exclusive.cover.jpg'
+      const versionId = createId('book')
+      db.insert(schema.bookVersions).values({ id: versionId, format: 'txt', size: 8, createdAt: now, updatedAt: now }).run()
+      db.insert(schema.contentRevisions).values({
+        id: createId('rev'), bookVersionId: versionId, revisionNo: 1, blobKey,
+        size: 8, chapterCount: 1, meta: {}, createdAt: now,
+      }).run()
+      db.insert(schema.blobs).values([
+        { key: blobKey, size: 8, kind: 'book', createdAt: now },
+        { key: coverKey, size: 4, kind: 'cover', createdAt: now },
+      ]).run()
+      const workId = createId('lb')
+      db.insert(schema.libraryBooks).values({
+        id: workId, libraryId, userId: memberId, title: 'T', coverKey,
+        createdAt: now, updatedAt: now,
+      }).run()
+      db.insert(schema.libraryBookVersions).values({
+        id: createId('lbv'), libraryId, libraryBookId: workId, bookVersionId: versionId,
+        kind: 'personal', coverKey, createdAt: now, updatedAt: now,
+      }).run()
+      mem.files.set(blobKey, Buffer.from('data'))
+      mem.files.set(coverKey, Buffer.from('cover'))
+      mem.files.set(`progress/${memberId}/${versionId}.json`, Buffer.from('{}'))
+
+      expect((await deleteUser(ownerId, memberId)).id).toBe(memberId)
+      expect(db.select().from(schema.contentRevisions)
+        .where(eq(schema.contentRevisions.bookVersionId, versionId)).all()).toHaveLength(0)
+      expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, versionId)).get()).toBeUndefined()
+      expect(db.select().from(schema.blobs).where(eq(schema.blobs.key, blobKey)).get()).toBeUndefined()
+      expect(db.select().from(schema.blobs).where(eq(schema.blobs.key, coverKey)).get()).toBeUndefined()
+      expect(mem.files.has(blobKey)).toBe(false)
+      expect(mem.files.has(coverKey)).toBe(false)
+      expect(mem.files.has(`progress/${memberId}/${versionId}.json`)).toBe(false)
+    })
+
+    it('reassigns shared creator rows to the library owner instead of failing', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      seedInstanceDb(ownerId)
+      const adminId = await insertUser(db, { username: 'adm' })
+      seedPrivateLibrary(adminId)
+      const now = Date.now()
+      const sharedId = createId('lib')
+      db.insert(schema.libraries).values({
+        id: sharedId, userId: ownerId, type: 'shared', name: 'City',
+        description: '', visibility: 'public', createdAt: now, updatedAt: now,
+      }).run()
+      // Rows the admin created as a manager: the content belongs to the city.
+      const workId = createId('lb')
+      db.insert(schema.libraryBooks).values({
+        id: workId, libraryId: sharedId, userId: adminId, title: 'City Work',
+        createdAt: now, updatedAt: now,
+      }).run()
+      const categoryId = createId('cat')
+      db.insert(schema.libraryCategories).values({
+        id: categoryId, libraryId: sharedId, userId: adminId, name: 'Sci-Fi',
+        createdAt: now, updatedAt: now,
+      }).run()
+      const tagId = createId('ltag')
+      db.insert(schema.libraryTags).values({
+        id: tagId, libraryId: sharedId, userId: adminId, name: 'Classic',
+        createdAt: now, updatedAt: now,
+      }).run()
+
+      expect((await deleteUser(ownerId, adminId)).id).toBe(adminId)
+      expect(db.select().from(schema.users).where(eq(schema.users.id, adminId)).get()).toBeUndefined()
+      // The city's rows survive, attributed to the library owner.
+      expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, workId)).get())
+        .toMatchObject({ userId: ownerId })
+      expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, categoryId)).get())
+        .toMatchObject({ userId: ownerId })
+      expect(db.select().from(schema.libraryTags).where(eq(schema.libraryTags.id, tagId)).get())
+        .toMatchObject({ userId: ownerId })
+    })
   })
 })

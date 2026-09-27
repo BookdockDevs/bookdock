@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
 
-import { createUserSchema, updateUserSchema } from '@bookdock/shared'
+import { createUserSchema, ownershipTransferSchema, updateUserSchema } from '@bookdock/shared'
 
 import { requireOwner } from '../../middleware/auth.guard'
 
-import { createUser, listUsers, updateUser } from './users.service'
+import { createUser, deleteUser, listUsers, transferInstanceOwnership, updateUser } from './users.service'
 
 const usersRoutes = new Hono()
 
@@ -33,6 +33,23 @@ usersRoutes.patch('/:id', async (c) => {
   const actor = c.get('user')
   const updated = await updateUser(actor.id, c.req.param('id'), parsed.data)
   return c.json({ data: updated })
+})
+
+usersRoutes.delete('/:id', async (c) => {
+  const actor = c.get('user')
+  const result = await deleteUser(actor.id, c.req.param('id'))
+  return c.json({ data: result })
+})
+
+usersRoutes.post('/instance-owner', async (c) => {
+  const body = await c.req.json().catch(() => null)
+  const parsed = ownershipTransferSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  const actor = c.get('user')
+  const result = await transferInstanceOwnership(actor.id, parsed.data.userId)
+  return c.json({ data: result })
 })
 
 export default usersRoutes

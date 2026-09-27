@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 
 import {
   changePasswordSchema,
+  deleteAccountSchema,
   loginSchema,
   registerSchema,
   setupSchema,
@@ -12,6 +13,7 @@ import {
 } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
+import { deleteUser } from '../users/users.service'
 import { requireOwner } from '../../middleware/auth.guard'
 import {
   changePassword,
@@ -133,6 +135,22 @@ authRoutes.get('/me', (c) => {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
   }
   return c.json({ data: { ...user, guest: c.get('guest') === true } })
+})
+
+authRoutes.delete('/account', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest')) {
+    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
+  }
+  const body = await c.req.json().catch(() => null)
+  const parsed = deleteAccountSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  const result = await deleteUser(user.id, user.id, parsed.data.password)
+  // Sessions cascade with the user row; drop the dead cookie too.
+  clearSessionCookie(c)
+  return c.json({ data: result })
 })
 
 export default authRoutes

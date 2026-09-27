@@ -32,6 +32,7 @@ import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../se
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { getStorage } from '../../storage'
 import { AppError } from '../../middleware/error'
+import { requestUserId } from '../../middleware/auth.guard'
 import { decodeTextBuffer } from '../../formats/txt'
 import { exportEpubBook, exportTxtBook } from './txt-export'
 
@@ -77,7 +78,7 @@ booksRoutes.get('/', async (c) => {
   const query = c.req.query()
   const parsed = paginationSchema.safeParse(query)
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid pagination', details: parsed.error.flatten() } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'Invalid pagination', parsed.error.flatten())
   }
   const user = c.get('user')
   const search = query['search']
@@ -110,26 +111,26 @@ booksRoutes.post('/', async (c) => {
   const body = await c.req.parseBody()
   const file = body['file']
   if (!file || !(file instanceof File)) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'File is required' } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'File is required')
   }
   if (file.size > effectiveUploadMaxBytes()) {
-    return c.json({ error: { code: 'UPLOAD_TOO_LARGE', message: 'File too large' } }, 413)
+    throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
   }
   const rawTagIds = body['tagIds']
   let tagIds: unknown
   if (rawTagIds !== undefined) {
     if (typeof rawTagIds !== 'string') {
-      return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid tagIds' } }, 400)
+      throw new AppError('VALIDATION_ERROR', 'Invalid tagIds')
     }
     try {
       tagIds = JSON.parse(rawTagIds)
     } catch {
-      return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid tagIds' } }, 400)
+      throw new AppError('VALIDATION_ERROR', 'Invalid tagIds')
     }
   }
   const membership = bookMembershipSchema.safeParse({ shelfId: body['shelfId'], tagIds })
   if (!membership.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid membership', details: membership.error.flatten() } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'Invalid membership', membership.error.flatten())
   }
   const { book, duplicated } = await uploadBook(user.id, file, membership.data, { normalizeTitle: isTitleNormalizeEnabled(user.id) })
   return c.json({ data: book, duplicated }, 201)
@@ -160,7 +161,7 @@ booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
   if ((c.get('guest') || user.role === 'guest') && c.req.query('reader') !== '1') {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
   }
-  const book = await getActiveBook(user.id, id)
+  const book = await getActiveBook(requestUserId(c), id)
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) {
     throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
@@ -276,17 +277,16 @@ booksRoutes.get('/:id/export.epub', async (c) => {
 })
 
 booksRoutes.get('/:id', async (c) => {
-  const user = c.get('user')
   const id = c.req.param('id')
-  const book = await getActiveBook(user.id, id)
+  const book = await getActiveBook(requestUserId(c), id)
   return c.json({ data: stripMetaChapters(book) })
 })
 
 booksRoutes.get('/:id/chapters', async (c) => {
-  const user = c.get('user')
+  const readerId = requestUserId(c)
   const id = c.req.param('id')
-  await getActiveBook(user.id, id)
-  const chapters = await getBookChapters(user.id, id)
+  await getActiveBook(readerId, id)
+  const chapters = await getBookChapters(readerId, id)
   return c.json({ data: chapters })
 })
 
@@ -296,7 +296,7 @@ booksRoutes.patch('/:id', async (c) => {
   const body = await c.req.json()
   const parsed = bookUpdateSchema.safeParse(body)
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
   const book = await updateBook(user.id, id, parsed.data)
   return c.json({ data: book })
@@ -308,7 +308,7 @@ booksRoutes.post('/:id/toc-preview', async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const parsed = tocPreviewSchema.safeParse(body)
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
   const preview = await previewBookToc(user.id, id, parsed.data)
   return c.json({ data: preview })
@@ -334,7 +334,7 @@ booksRoutes.post('/:id/re-toc', async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const parsed = reTocSchema.safeParse(body)
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
   await reTocBook(user.id, id, parsed.data.tocRuleId, parsed.data.customPatterns, parsed.data.excludedChapterIds)
   const book = await getActiveBook(user.id, id)
@@ -373,20 +373,20 @@ booksRoutes.delete('/:id/permanent', async (c) => {
 })
 
 booksRoutes.get('/:id/cover', async (c) => {
-  const user = c.get('user')
+  const readerId = requestUserId(c)
   const id = c.req.param('id')
   const size = c.req.query('size') === 'original' ? 'original' : 'thumb'
   const download = c.req.query('download') === '1' || c.req.query('download') === 'true'
-  const cover = await getBookCoverContent(user.id, id, { size })
+  const cover = await getBookCoverContent(readerId, id, { size })
   if (!cover) {
-    return c.json({ error: { code: 'BOOK_NOT_FOUND', message: 'No cover' } }, 404)
+    throw new AppError('BOOK_NOT_FOUND', 'No cover')
   }
   const headers: Record<string, string> = {
     'Content-Type': cover.contentType,
     'Cache-Control': 'private, immutable, max-age=31536000',
   }
   if (download) {
-    const book = await getActiveBook(user.id, id)
+    const book = await getActiveBook(readerId, id)
     const safeTitle = (book.title || 'cover').replace(/[\\/:*?"<>|]/g, '_').trim()
     const filename = `${safeTitle}-cover.${cover.ext}`
     headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`
@@ -400,7 +400,7 @@ booksRoutes.put('/:id/cover', async (c) => {
   const body = await c.req.parseBody()
   const file = body['file']
   if (!file || !(file instanceof File)) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'File is required' } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'File is required')
   }
   const book = await updateBookCover(user.id, id, file)
   return c.json({ data: book })
@@ -426,7 +426,7 @@ booksRoutes.put('/:id/shelves', async (c) => {
   const body = await c.req.json()
   const parsed = bookMembershipSchema.safeParse(body)
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
   await setBookShelf(user.id, bookId, parsed.data.shelfId ?? null)
   return c.json({ data: null })
@@ -438,7 +438,7 @@ booksRoutes.put('/:id/tags', async (c) => {
   const body = await c.req.json()
   const parsed = bookMembershipSchema.safeParse(body)
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+    throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
   await setBookTags(user.id, bookId, parsed.data.tagIds ?? [])
   return c.json({ data: null })

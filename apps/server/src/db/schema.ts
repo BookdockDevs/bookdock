@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, blob, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 import type { AccessTokenPermission, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
@@ -435,10 +435,16 @@ export const libraries = sqliteTable('libraries', {
   name: text('name').notNull(),
   description: text('description').notNull().default(''),
   visibility: text('visibility', { enum: ['public', 'password', 'private'] }),
+  // Scrypt hash for password-visibility libraries; null otherwise. Never
+  // exposed through shared contracts.
+  accessPasswordHash: text('access_password_hash'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   userTypeIdx: index('libraries_user_type_idx').on(table.userId, table.type),
+  // Exactly one private library per user. The partial index (not a plain
+  // unique on userId) leaves shared-library ownership untouched.
+  privateUserUnique: uniqueIndex('libraries_private_user_unique').on(table.userId).where(eq(table.type, 'private')),
 }))
 
 export const libraryMemberships = sqliteTable('library_memberships', {
@@ -475,6 +481,9 @@ export const bookVersions = sqliteTable('book_versions', {
   id: text('id').primaryKey(),
   format: text('format', { enum: ['epub', 'txt'] }).notNull(),
   size: integer('size').notNull(),
+  // Version-level anonymous readability; the library must still be public
+  // and the instance must allow guest access for it to take effect.
+  guestReadable: integer('guest_readable', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 })
@@ -506,6 +515,10 @@ export const libraryBookVersions = sqliteTable('library_book_versions', {
   // One B per BookVersion per private library; enforced in service code against
   // (libraryId, bookVersionId, kind) because A/C duplicates are legitimate.
   libraryVersionIdx: index('library_book_versions_library_version_idx').on(table.libraryId, table.bookVersionId),
+  // The database backstop for that rule: only shared (B) rows are constrained,
+  // so legitimate A/C duplicates in the same library keep working.
+  sharedVersionUnique: uniqueIndex('library_book_versions_shared_unique')
+    .on(table.libraryId, table.bookVersionId).where(eq(table.kind, 'shared')),
 }))
 
 export const contentRevisions = sqliteTable('content_revisions', {

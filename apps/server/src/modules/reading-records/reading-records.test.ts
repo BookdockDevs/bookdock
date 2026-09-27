@@ -70,17 +70,18 @@ function createMemoryStorage() {
   return { driver, files }
 }
 
-function seedProgressFile(files: Map<string, Buffer>, bookId: string, data: Record<string, unknown>) {
-  files.set(`progress/${bookId}.json`, Buffer.from(JSON.stringify(data), 'utf-8'))
+function seedProgressFile(files: Map<string, Buffer>, userId: string, bookId: string, data: Record<string, unknown>) {
+  files.set(`progress/${userId}/${bookId}.json`, Buffer.from(JSON.stringify(data), 'utf-8'))
 }
 
-function loadProgressFile(files: Map<string, Buffer>, bookId: string): Record<string, unknown> {
-  return JSON.parse(files.get(`progress/${bookId}.json`)!.toString('utf-8')) as Record<string, unknown>
+function loadProgressFile(files: Map<string, Buffer>, userId: string, bookId: string): Record<string, unknown> {
+  return JSON.parse(files.get(`progress/${userId}/${bookId}.json`)!.toString('utf-8')) as Record<string, unknown>
 }
 
 // New-model rows for rewired reads: private library, version reusing the
-// book id, initial revision, work and card.
-function seedVersion(db: ReturnType<typeof createTestDb>, userId: string, bookId: string, wordCount: number | null) {
+// book id, initial revision, work and card. Title/author mirror the legacy
+// row, the way the migration preserves display metadata.
+function seedVersion(db: ReturnType<typeof createTestDb>, userId: string, bookId: string, wordCount: number | null, title = 'B', author = '') {
   let library = db.select({ id: schema.libraries.id }).from(schema.libraries)
     .where(and(eq(schema.libraries.userId, userId), eq(schema.libraries.type, 'private'))).get()
   if (!library) {
@@ -98,7 +99,7 @@ function seedVersion(db: ReturnType<typeof createTestDb>, userId: string, bookId
   }).run()
   const libraryBookId = createId('lb')
   db.insert(schema.libraryBooks).values({
-    id: libraryBookId, libraryId: library.id, userId, title: 'B', createdAt: 1, updatedAt: 1,
+    id: libraryBookId, libraryId: library.id, userId, title, author, createdAt: 1, updatedAt: 1,
   }).run()
   db.insert(schema.libraryBookVersions).values({
     id: createId('lbv'), libraryId: library.id, libraryBookId, bookVersionId: bookId,
@@ -137,6 +138,11 @@ describe('reading-records service', () => {
       id: book2Id, userId: ownerId, title: 'Book Two', author: 'Author B', format: 'epub',
       filePath: 'books/b/b.epub', coverKey: 'covers/b.jpg', size: 200, meta: {}, createdAt: Date.now(), updatedAt: Date.now(),
     }).run()
+    // Migrated reality: every book has library rows, and reading gates check
+    // them — a legacy-only row is not a readable book (the reader itself
+    // requires the version row).
+    seedVersion(db, ownerId, bookId, 1000, 'Book One', 'Author A')
+    seedVersion(db, ownerId, book2Id, 500, 'Book Two', 'Author B')
   })
 
   it('accumulates duration for the same user+book+day and separates other days', async () => {
@@ -402,7 +408,7 @@ describe('reading-records service', () => {
   })
 
   it('merges retroactive start/end fractions into the interval union without touching the position', async () => {
-    seedProgressFile(files, bookId, {
+    seedProgressFile(files, ownerId, bookId, {
       cfi: 'epubcfi(/6/4!/4/2)', chapter: 'ch1', percent: 42, fraction: 0.42,
       intervals: [[0.1, 0.2]], updatedAt: 1,
     })
@@ -411,7 +417,7 @@ describe('reading-records service', () => {
       startFraction: 0.15, endFraction: 0.3,
     })
 
-    const saved = loadProgressFile(files, bookId)
+    const saved = loadProgressFile(files, ownerId, bookId)
     expect(saved.intervals).toEqual([[0.1, 0.3]])
     expect(saved.cfi).toBe('epubcfi(/6/4!/4/2)')
     expect(saved.percent).toBe(42)
@@ -426,7 +432,7 @@ describe('reading-records service', () => {
       bookId, date: '2026-07-30', durationSeconds: 600, startedAt: null, endedAt: 1785000600000,
       startFraction: 0.2, endFraction: 0.35,
     })
-    const saved = loadProgressFile(files, bookId)
+    const saved = loadProgressFile(files, ownerId, bookId)
     expect(saved.intervals).toEqual([[0.2, 0.35]])
     expect(saved.cfi).toBeNull()
     expect(saved.percent).toBe(0)
@@ -491,10 +497,8 @@ describe('reading-records service', () => {
   })
 
   it('sums readFraction × wordCount and skips books without word counts', async () => {
-    seedVersion(db, ownerId, bookId, 1000)
-    seedVersion(db, ownerId, book2Id, 500)
-    seedProgressFile(files, bookId, { percent: 50, fraction: 0.5, intervals: [[0.1, 0.4], [0.4, 0.6]], updatedAt: 1 })
-    seedProgressFile(files, book2Id, { percent: 80, fraction: 0.8, intervals: [[0, 0.8]], updatedAt: 1 })
+    seedProgressFile(files, ownerId, bookId, { percent: 50, fraction: 0.5, intervals: [[0.1, 0.4], [0.4, 0.6]], updatedAt: 1 })
+    seedProgressFile(files, ownerId, book2Id, { percent: 80, fraction: 0.8, intervals: [[0, 0.8]], updatedAt: 1 })
 
     const summary = await getSummary(ownerId, '2026-07-31')
     expect(summary.totalWordsRead).toBe(900)
@@ -507,8 +511,8 @@ describe('reading-records service', () => {
   it('aggregates reading time by tag, excluding untagged books and honoring the range', async () => {
     const tagA = createId('tag')
     const tagB = createId('tag')
-    const { libraryId } = seedVersion(db, ownerId, bookId, null)
-    seedVersion(db, ownerId, book2Id, null)
+    const libraryId = db.select({ id: schema.libraries.id }).from(schema.libraries)
+      .where(and(eq(schema.libraries.userId, ownerId), eq(schema.libraries.type, 'private'))).get()!.id
     db.insert(schema.libraryTags).values([
       { id: tagA, libraryId, userId: ownerId, name: 'Fiction', createdAt: 1, updatedAt: 1 },
       { id: tagB, libraryId, userId: ownerId, name: 'Tech', createdAt: 1, updatedAt: 1 },
@@ -524,6 +528,7 @@ describe('reading-records service', () => {
       id: book3Id, userId: ownerId, title: 'Book Three', author: '', format: 'txt',
       filePath: 'books/c/c.txt', coverKey: null, size: 100, meta: {}, createdAt: Date.now(), updatedAt: Date.now(),
     }).run()
+    seedVersion(db, ownerId, book3Id, null)
 
     await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 500 })
     await addReadingTime(ownerId, { bookId: book2Id, date: '2026-07-30', durationSeconds: 900 })

@@ -100,6 +100,20 @@ describe('annotations service', () => {
     expect(await listAnnotations(ownerId, bookId)).toHaveLength(0)
   })
 
+  it('hides other users annotations without leaking', async () => {
+    const saved = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/2)',
+      type: 'highlight',
+      text: 'secret',
+    })
+    expect(await listAnnotations(otherId, bookId)).toHaveLength(0)
+    await expect(updateAnnotation(otherId, saved.id, { text: 'x' }))
+      .rejects.toMatchObject({ code: 'ANNOTATION_NOT_FOUND' })
+    await expect(deleteAnnotation(otherId, saved.id))
+      .rejects.toMatchObject({ code: 'ANNOTATION_NOT_FOUND' })
+    expect((await listAnnotations(ownerId, bookId))[0].text).toBe('secret')
+  })
+
   it('allows multiple notes on the same range without overwriting earlier ideas', async () => {
     await createAnnotation(ownerId, bookId, {
       cfiRange: 'epubcfi(/6/2!/4/2)',

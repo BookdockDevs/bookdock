@@ -293,8 +293,8 @@ describe('auth module', () => {
     })
 
     it('rejects an out-of-range upload cap', async () => {
-      await seedInstance(db, {})
-      const app = createAuthApp({ id: 'u1', username: 'own', role: 'owner' })
+      const ownerId = await seedInstance(db, {})
+      const app = createAuthApp({ id: ownerId, username: 'own', role: 'owner' })
       const res = await app.request('/api/v1/auth/instance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -304,8 +304,8 @@ describe('auth module', () => {
     })
 
     it('persists an owner-set upload cap and returns the effective value', async () => {
-      await seedInstance(db, {})
-      const app = createAuthApp({ id: 'u1', username: 'own', role: 'owner' })
+      const ownerId = await seedInstance(db, {})
+      const app = createAuthApp({ id: ownerId, username: 'own', role: 'owner' })
       const res = await app.request('/api/v1/auth/instance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -357,6 +357,19 @@ describe('auth module', () => {
       expect(unknownUsername.status).toBe(401)
       expect(await wrongPassword.json()).toEqual({ error: { code: 'UNAUTHORIZED', message: 'Invalid credentials' } })
       expect(await unknownUsername.json()).toEqual({ error: { code: 'UNAUTHORIZED', message: 'Invalid credentials' } })
+    })
+
+    it('matches the login username on the normalized identity, not raw bytes', async () => {
+      await seedInstance(db, {})
+      await insertUser(db, { username: 'CaseUser', password: 'password123', role: 'owner' })
+      const app = createAuthApp(null)
+
+      const res = await app.request('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'caseuser', password: 'password123' }),
+      })
+      expect(res.status).toBe(200)
     })
 
     it('rejects a disabled account after verifying its password', async () => {
@@ -698,6 +711,12 @@ describe('auth module', () => {
       expect(row?.role).toBe('guest')
     })
 
+    it('never gives the guest row a private library', async () => {
+      await seedInstance(db, { allowGuestAccess: true })
+      const user = await getDefaultUser()
+      expect(db.select().from(schema.libraries).where(eq(schema.libraries.userId, user.id)).all()).toHaveLength(0)
+    })
+
     it('reuses a legacy guest row as-is, without renaming or duplicating', async () => {
       await seedInstance(db, { allowGuestAccess: true })
       const legacyId = await insertUser(db, { username: 'admin', role: 'guest' })
@@ -706,6 +725,27 @@ describe('auth module', () => {
       expect(user.username).toBe('admin')
       const rows = db.select().from(schema.users).all()
       expect(rows).toHaveLength(2)
+    })
+
+    it('deletes the own account with password verification', async () => {
+      const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
+      await seedInstance(db, {})
+      const memberId = await insertUser(db, { username: 'mem', password: 'password123' })
+      const app = createAuthApp({ id: memberId, username: 'mem', role: 'member' })
+      const bad = await app.request('/api/v1/auth/account', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'wrongpass' }),
+      })
+      expect(bad.status).toBe(401)
+      const res = await app.request('/api/v1/auth/account', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'password123' }),
+      })
+      expect(res.status).toBe(200)
+      expect(db.select().from(schema.users).where(eq(schema.users.id, memberId)).get()).toBeUndefined()
+      expect(ownerId).toBeTruthy()
     })
 
     it('accepts a valid session from the cookie', async () => {

@@ -17,6 +17,11 @@ import {
   deleteTag,
   addBooksToTag,
   removeBooksFromTag,
+  listLibraryTags,
+  createLibraryTag,
+  updateLibraryTag,
+  reorderLibraryTags,
+  deleteLibraryTag,
 } from './tags.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -184,5 +189,57 @@ describe('tags service', () => {
     const c = await createTag(userId, 'C')
     const ordered = (await listTags(userId)).map((tag) => tag.id)
     expect(ordered).toEqual([b.id, a.id, c.id])
+  })
+})
+
+describe('shared library tags', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let adminId: string
+  let memberId: string
+  let outsiderId: string
+  let libraryId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    const now = Date.now()
+    ownerId = createId('user')
+    adminId = createId('user')
+    memberId = createId('user')
+    outsiderId = createId('user')
+    for (const [id, username] of [[ownerId, 'owner'], [adminId, 'admin'], [memberId, 'member'], [outsiderId, 'outsider']] as const) {
+      db.insert(schema.users).values({ id, username, passwordHash: null, role: 'member', createdAt: now }).run()
+    }
+    libraryId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: libraryId, userId: ownerId, type: 'shared', name: 'City',
+      description: '', visibility: 'private', createdAt: now, updatedAt: now,
+    }).run()
+    db.insert(schema.libraryMemberships).values([
+      { id: createId('lbm'), libraryId, userId: adminId, role: 'admin', createdAt: now, updatedAt: now },
+      { id: createId('lbm'), libraryId, userId: memberId, role: 'member', createdAt: now, updatedAt: now },
+    ]).run()
+  })
+
+  it('lets owners and admins curate tags but refuses members and outsiders', async () => {
+    const created = await createLibraryTag(ownerId, libraryId, 'Sci-Fi')
+    expect(created).toMatchObject({ name: 'Sci-Fi', libraryId })
+    await createLibraryTag(adminId, libraryId, 'Fantasy')
+    await expect(createLibraryTag(memberId, libraryId, 'Nope')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(createLibraryTag(outsiderId, libraryId, 'Nope')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(createLibraryTag(ownerId, libraryId, 'Sci-Fi')).rejects.toMatchObject({ code: 'TAG_NAME_TAKEN' })
+    const renamed = await updateLibraryTag(adminId, libraryId, created.id, { name: 'Science Fiction' })
+    expect(renamed.name).toBe('Science Fiction')
+    const fantasy = db.select().from(schema.libraryTags).where(eq(schema.libraryTags.name, 'Fantasy')).get()!
+    await reorderLibraryTags(ownerId, libraryId, [fantasy.id, created.id])
+    expect((await listLibraryTags(ownerId, libraryId)).map((t) => t.id)).toEqual([fantasy.id, created.id])
+    await expect(reorderLibraryTags(memberId, libraryId, [fantasy.id, created.id])).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await deleteLibraryTag(ownerId, libraryId, created.id)
+    expect((await listLibraryTags(ownerId, libraryId)).map((t) => t.id)).toEqual([fantasy.id])
+    await expect(deleteLibraryTag(memberId, libraryId, fantasy.id)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    // Members browse but never manage.
+    expect((await listLibraryTags(memberId, libraryId)).map((t) => t.name)).toEqual(['Fantasy'])
+    await expect(listLibraryTags(outsiderId, libraryId)).rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
   })
 })

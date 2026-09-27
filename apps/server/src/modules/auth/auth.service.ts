@@ -64,6 +64,21 @@ export function resetInstanceCache() {
   instanceCache = null
 }
 
+/**
+ * Source of truth for instance ownership: the Instance row, not the legacy
+ * users.role column (which can hold multiple/stale 'owner' rows). Falls back
+ * to the role only when no Instance row exists yet (pre-setup), where every
+ * owner-flavored check degrades to "refuse" rather than "allow".
+ */
+export function isInstanceOwner(userId: string): boolean {
+  const db = getDb()
+  const row = db.select({ ownerUserId: instance.ownerUserId }).from(instance).get()
+  if (!row) {
+    return db.select({ role: users.role }).from(users).where(eq(users.id, userId)).get()?.role === 'owner'
+  }
+  return row.ownerUserId === userId
+}
+
 export function getInstanceSettings(): InstanceSettings {
   if (instanceCache && Date.now() - instanceCache.at < INSTANCE_CACHE_TTL) {
     return instanceCache.value
@@ -164,7 +179,10 @@ function createPrivateLibrary(tx: Pick<ReturnType<typeof getDb>, 'insert'>, user
 
 export async function login(username: string, password: string) {
   const db = getDb()
-  const user = db.select().from(users).where(eq(users.username, username)).get()
+  // Identity is the normalized username (case/NFKC-insensitive), matching
+  // registration uniqueness: `Admin` must log in as `admin` too.
+  const norm = normalizeUsername(username)
+  const user = db.select().from(users).all().find((row) => normalizeUsername(row.username) === norm)
   if (!user || !user.passwordHash) {
     throw new AppError('UNAUTHORIZED', 'Invalid credentials')
   }

@@ -24,12 +24,15 @@ import {
 import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
-import { ensurePrivateLibrary } from '../libraries/library-access'
+import { assertMutableContent, ensurePrivateLibrary, requireLibraryManager, sourceStillReadable } from '../libraries/library-access'
+import { libraryOrderBy } from '../libraries/library-query'
+import { resolveSharedVersionRead } from '../libraries/library-access'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { sha256 } from '../../lib/hash'
 import { normalizeBookTitle } from '../../lib/book-title'
 import { countWords } from '../../lib/word-count'
-import { readProgressFile } from '../../lib/progress-file'
+import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
+import { coverThumbnailKey } from '../../lib/cover'
 import { log } from '../../lib/logger'
 import type { AppendContentCandidate, AppendContentPreviewRes, BookFormat, BookMetadata, CoverPaletteId, Chapter, TocPreviewChapter, TocPreviewRes, TocRulePattern, TrashSettings, ViewSettings } from '@bookdock/shared'
 
@@ -195,18 +198,20 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     conditions.push(sql`${revMeta('$.bookmeta.series')} = ${series}`)
   }
   // Pin-first is universal (user decision 2026-08-12): pinned books lead in
-  // every sort 鈥?including lastReadAt 鈥?and the pinned group itself follows
+  // every sort - including lastReadAt - and the pinned group itself follows
   // the chosen sort, not the pin time (reads first by last-read time, desc
   // puts NULL lastReadAt at the bottom, never-read books stay visible).
-  const orderBy = sortBy === 'title' ? (sortOrder === 'asc' ? asc(effTitle) : desc(effTitle)) :
-    sortBy === 'author' ? (sortOrder === 'asc' ? asc(effAuthor) : desc(effAuthor)) :
-    sortBy === 'size' ? (sortOrder === 'asc' ? asc(bookVersions.size) : desc(bookVersions.size)) :
-    sortBy === 'progress' ? (sortOrder === 'asc' ? asc(effProgress) : desc(effProgress)) :
-    sortBy === 'lastReadAt' ? (sortOrder === 'asc' ? asc(bookStates.lastReadAt) : desc(bookStates.lastReadAt)) :
-    sortBy === 'updatedAt' ? (sortOrder === 'asc' ? asc(libraryBooks.updatedAt) : desc(libraryBooks.updatedAt)) :
-    sortBy === 'createdAt' ? (sortOrder === 'asc' ? asc(libraryBooks.createdAt) : desc(libraryBooks.createdAt)) :
-    sortBy === 'deletedAt' ? (sortOrder === 'asc' ? asc(libraryBooks.deletedAt) : desc(libraryBooks.deletedAt)) :
-    sortOrder === 'asc' ? asc(libraryBooks.createdAt) : desc(libraryBooks.createdAt)
+  // Shared with the shared-library catalog so both lists sort identically.
+  const orderBy = libraryOrderBy(sortBy, sortOrder, {
+    title: effTitle,
+    author: effAuthor,
+    size: bookVersions.size,
+    createdAt: libraryBooks.createdAt,
+    updatedAt: libraryBooks.updatedAt,
+    progress: effProgress,
+    lastReadAt: bookStates.lastReadAt,
+    deletedAt: libraryBooks.deletedAt,
+  })
   const offset = (page - 1) * pageSize
   const where = and(...conditions)
   const baseQuery = () => db.select({
@@ -226,6 +231,10 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     deletedAt: libraryBooks.deletedAt,
     shelfId: libraryBooks.categoryId,
     shelfName: libraryCategories.name,
+    // 7.7: a B carries its single source; A/C rows resolve to null.
+    sourceLibraryId: libraryBookVersions.sourceLibraryId,
+    sourceLibraryBookVersionId: libraryBookVersions.sourceLibraryBookVersionId,
+    kind: libraryBookVersions.kind,
     // Extracted, not the whole meta column: list payloads must stay chapter-free.
     coverPaletteId: sql<CoverPaletteId | null>`${revMeta('$.coverPaletteId')}`,
   }).from(libraryBookVersions)
@@ -236,7 +245,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     .where(where)
   // Pin-first is meaningless in the trash; there the chosen sort rules alone.
   const rows = baseQuery()
-    .orderBy(...(trash ? [] : [asc(sql`${libraryBookVersions.pinnedAt} IS NULL`)]), orderBy)
+    .orderBy(...(trash ? [] : [asc(sql`${libraryBookVersions.pinnedAt} IS NULL`)]), ...orderBy)
     .limit(pageSize).offset(offset).all()
   const agg = db.select({ count: sql<number>`count(*)`, totalSize: sql<number>`coalesce(sum(${bookVersions.size}), 0)` })
     .from(libraryBookVersions)
@@ -260,7 +269,46 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     list.push(row.name)
     tagsByBook.set(row.libraryBookId, list)
   }
-  const data = rows.map(({ libraryBookId: _libraryBookId, ...b }) => ({ ...b, tags: tagsByBook.get(_libraryBookId) ?? [] }))
+  // 7.7: mark collected cards whose source is gone so the list can say so
+  // before the reader refuses the file. Batched in two queries — existence of
+  // the source library and of the pinned source version, still published.
+  // Losing library membership is not part of this flag; the read path stays the
+  // authority for that.
+  const sourceIds = [...new Set(rows.flatMap((row) => (row.sourceLibraryId ? [row.sourceLibraryId] : [])))]
+  const sourceLinkIds = [...new Set(rows.flatMap((row) => (row.sourceLibraryBookVersionId ? [row.sourceLibraryBookVersionId] : [])))]
+  const sourceNameById = new Map(
+    sourceIds.length === 0 ? [] : db.select({ id: libraries.id, name: libraries.name }).from(libraries)
+      .where(inArray(libraries.id, sourceIds)).all().map((row) => [row.id, row.name] as const),
+  )
+  const liveSourceLibraries = new Set(
+    sourceIds.length === 0 ? [] : db.select({ id: libraries.id }).from(libraries)
+      .where(inArray(libraries.id, sourceIds)).all().map((row) => row.id),
+  )
+  const liveSourceLinks = new Set(
+    sourceLinkIds.length === 0 ? [] : db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+      .where(and(
+        inArray(libraryBookVersions.id, sourceLinkIds),
+        eq(libraryBookVersions.status, 'published'),
+      )).all().map((row) => row.id),
+  )
+  const data = rows.map(({
+    libraryBookId: _libraryBookId, kind: _kind,
+    sourceLibraryId, sourceLibraryBookVersionId, ...b
+  }) => ({
+    ...b,
+    tags: tagsByBook.get(_libraryBookId) ?? [],
+    // 7.7: a B carries its single source; A/C rows report null.
+    source: sourceLibraryId
+      ? {
+          libraryId: sourceLibraryId,
+          libraryBookVersionId: sourceLibraryBookVersionId,
+          libraryName: sourceNameById.get(sourceLibraryId) ?? null,
+        }
+      : null,
+    sourceUnavailable: sourceLibraryId
+      ? !liveSourceLibraries.has(sourceLibraryId) || !liveSourceLinks.has(sourceLibraryBookVersionId!)
+      : false,
+  }))
   return { data, page, pageSize, total: agg?.count ?? 0, totalSize: agg?.totalSize ?? 0 }
 }
 
@@ -285,10 +333,6 @@ function detectImageExtension(buffer: Buffer): string | null {
 
 function blobKey(hash: string, ext: string): string {
   return `blobs/${hash.slice(0, 2)}/${hash}${ext}`
-}
-
-export function coverThumbnailKey(coverKey: string): string {
-  return coverKey.replace(/\.cover\.[^.]+$/, '.thumb.webp')
 }
 
 export async function generateCoverThumbnail(buffer: Buffer, ext?: string | null): Promise<Buffer | null> {
@@ -337,12 +381,14 @@ function findPersonalVersionByBlob(libraryId: string, blobKey: string): { versio
   return null
 }
 
-export async function uploadBook(
-  userId: string,
-  file: File,
-  membership?: { shelfId?: string | null; tagIds?: string[] },
-  opts?: { normalizeTitle?: boolean },
-) {
+/**
+ * Content half of an upload (5.1): parse, cover, TXT→EPUB conversion and the
+ * revision meta. Nothing is written to the database here, so both the private
+ * library and a shared library can adopt the same result. `versionId` is the id
+ * the caller will register the new BookVersion under; TXT generation embeds it
+ * as the EPUB identifier.
+ */
+async function materializeUpload(userId: string, file: File, buffer: Buffer, versionId: string, opts?: { normalizeTitle?: boolean }) {
   const storage = getStorage()
   const fileName = file.name
   const mime = file.type
@@ -351,40 +397,10 @@ export async function uploadBook(
     throw new AppError('UNSUPPORTED_FORMAT', `Unsupported format: ${fileName}`)
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer())
   const parsed = await parser.parse(buffer)
-  const format = fileName.toLowerCase().endsWith('.txt') ? 'txt' : 'epub'
-  const db = getDb()
-  const library = { id: ensurePrivateLibrary(db, userId) }
-  const tagIds = [...new Set(membership?.tagIds ?? [])]
-  if (membership?.shelfId) {
-    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.id, membership.shelfId), eq(libraryCategories.libraryId, library.id))).get()
-    if (!category) throw new AppError('SHELF_NOT_FOUND')
-  }
-  if (tagIds.length > 0) {
-    const existingTags = db.select({ count: sql<number>`count(*)` }).from(libraryTags)
-      .where(and(eq(libraryTags.libraryId, library.id), inArray(libraryTags.id, tagIds))).get()
-    if ((existingTags?.count ?? 0) !== tagIds.length) throw new AppError('TAG_NOT_FOUND')
-  }
-
+  const format: BookFormat = fileName.toLowerCase().endsWith('.txt') ? 'txt' : 'epub'
   const contentHash = sha256(buffer)
   const fileKey = blobKey(contentHash, '.epub')
-  const versionId = createId('book')
-  const duplicate = findPersonalVersionByBlob(library.id, fileKey)
-  if (duplicate) {
-    // Tags are additive and side-effect-free, so honor the requested assignment
-    // even for a duplicate. The category is deliberately not touched: it is a
-    // single-value column and moving an already-shelved book silently would
-    // be destructive - the UI surfaces the mismatch instead.
-    if (tagIds.length > 0) {
-      db.insert(libraryBookTags)
-        .values(tagIds.map((tagId) => ({ libraryBookId: duplicate.libraryBookId, tagId })))
-        .onConflictDoNothing()
-        .run()
-    }
-    return { book: stripMetaChapters(await resolvePrivateBook(userId, duplicate.versionId, { allowDeleted: true })), duplicated: true }
-  }
 
   let title = parsed.meta.title
   let author = parsed.meta.author ?? ''
@@ -440,7 +456,7 @@ export async function uploadBook(
 
     // Generate EPUB eagerly and save as the only file. Chapter content is
     // sliced on demand (B5): holding every chapter's slice at once roughly
-    // doubles peak memory for large books 鈥?the getter keeps only metadata
+    // doubles peak memory for large books — the getter keeps only metadata
     // plus the single normalized string.
     const epubChapters = chapters.map((c) => ({
       id: `ch-${c.startOffset}`,
@@ -473,55 +489,389 @@ export async function uploadBook(
     meta.epubTocLevelVersion = EPUB_TOC_LEVEL_VERSION
   }
 
-  const now = Date.now()
-  const libraryBookId = createId('lb')
-  const description = typeof parsed.meta.bookmeta?.description === 'string' ? parsed.meta.bookmeta.description : ''
   const metaChapters = meta.chapters as Array<{ wordCount?: number }> | undefined
   if (metaChapters && metaChapters.length > 0) {
     meta.wordCount = metaChapters.reduce((sum, c) => sum + (c.wordCount ?? 0), 0)
   }
-  const chapterCount = metaChapters?.length ?? 0
-  db.transaction((tx) => {
-    tx.insert(bookVersions).values({
-      id: versionId, format: format as BookFormat, size, createdAt: now, updatedAt: now,
-    }).run()
-    tx.insert(contentRevisions).values({
-      id: createId('rev'), bookVersionId: versionId, revisionNo: 1, blobKey: fileKey,
-      size, wordCount: typeof meta.wordCount === 'number' ? meta.wordCount : null,
-      chapterCount, meta, createdAt: now,
-    }).run()
-    tx.insert(blobs).values({ key: fileKey, size, kind: 'book', createdAt: now }).onConflictDoNothing().run()
-    if (coverKey && parsed.meta.cover) {
-      tx.insert(blobs).values({ key: coverKey, size: parsed.meta.cover.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
-    }
-    tx.insert(libraryBooks).values({
-      id: libraryBookId, libraryId: library.id, userId, categoryId: membership?.shelfId ?? null,
-      title, author, description, coverKey, createdAt: now, updatedAt: now,
-    }).run()
-    tx.insert(libraryBookVersions).values({
-      id: createId('lbv'), libraryId: library.id, libraryBookId, bookVersionId: versionId,
-      kind: 'personal', createdAt: now, updatedAt: now,
-    }).run()
-    tx.insert(bookStates).values({
-      userId, bookVersionId: versionId, readStatus: 'reading', percent: 0,
-      cfi: null, chapter: null, lastReadAt: null, updatedAt: now,
-    }).run()
+  return {
+    format,
+    fileKey,
+    size,
+    meta,
+    title,
+    author,
+    coverKey,
+    coverSize: parsed.meta.cover?.length ?? null,
+    description: typeof parsed.meta.bookmeta?.description === 'string' ? parsed.meta.bookmeta.description : '',
+    chapterCount: metaChapters?.length ?? 0,
+    wordCount: typeof meta.wordCount === 'number' ? meta.wordCount : null,
+  }
+}
+
+/**
+ * Staged-upload compensation: materializeUpload writes files before the
+ * database transaction commits, so a failed commit must not leave orphan
+ * files behind. Keys that gained a blob registry row meanwhile (an identical
+ * upload landing at the same time) are shared and kept; only unregistered
+ * keys go. Best-effort by design — a missed delete is an orphaned blob, a
+ * wrong delete would be data loss.
+ */
+export async function cleanupStagedUpload(upload: { fileKey: string; coverKey: string | null }): Promise<void> {
+  const db = getDb()
+  const storage = getStorage()
+  const keys = [upload.fileKey]
+  if (upload.coverKey) {
+    const registered = db.select({ key: blobs.key }).from(blobs).where(eq(blobs.key, upload.coverKey)).get()
+    if (!registered) keys.push(upload.coverKey, coverThumbnailKey(upload.coverKey))
+  }
+  for (const key of keys) {
+    const registered = db.select({ key: blobs.key }).from(blobs).where(eq(blobs.key, key)).get()
+    if (registered) continue
+    if (await storage.exists(key)) await storage.delete(key)
+  }
+}
+
+/** Cover-only counterpart: a staged cover (+ derived thumb) with no content file. */
+export async function cleanupStagedCover(coverKey: string): Promise<void> {
+  const db = getDb()
+  const storage = getStorage()
+  for (const key of [coverKey, coverThumbnailKey(coverKey)]) {
+    const registered = db.select({ key: blobs.key }).from(blobs).where(eq(blobs.key, key)).get()
+    if (registered) continue
+    if (await storage.exists(key)) await storage.delete(key)
+  }
+}
+
+export async function uploadBook(
+  userId: string,
+  file: File,
+  membership?: { shelfId?: string | null; tagIds?: string[] },
+  opts?: { normalizeTitle?: boolean },
+) {
+  const db = getDb()
+  const library = { id: ensurePrivateLibrary(db, userId) }
+  const tagIds = [...new Set(membership?.tagIds ?? [])]
+  if (membership?.shelfId) {
+    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
+      .where(and(eq(libraryCategories.id, membership.shelfId), eq(libraryCategories.libraryId, library.id))).get()
+    if (!category) throw new AppError('SHELF_NOT_FOUND')
+  }
+  if (tagIds.length > 0) {
+    const existingTags = db.select({ count: sql<number>`count(*)` }).from(libraryTags)
+      .where(and(eq(libraryTags.libraryId, library.id), inArray(libraryTags.id, tagIds))).get()
+    if ((existingTags?.count ?? 0) !== tagIds.length) throw new AppError('TAG_NOT_FOUND')
+  }
+
+  const versionId = createId('book')
+  const buffer = Buffer.from(await file.arrayBuffer())
+  const duplicate = findPersonalVersionByBlob(library.id, blobKey(sha256(buffer), '.epub'))
+  if (duplicate) {
+    // Tags are additive and side-effect-free, so honor the requested assignment
+    // even for a duplicate. The category is deliberately not touched: it is a
+    // single-value column and moving an already-shelved book silently would
+    // be destructive - the UI surfaces the mismatch instead.
     if (tagIds.length > 0) {
-      tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).run()
+      db.insert(libraryBookTags)
+        .values(tagIds.map((tagId) => ({ libraryBookId: duplicate.libraryBookId, tagId })))
+        .onConflictDoNothing()
+        .run()
     }
-    if (membership?.shelfId) {
-      tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, membership.shelfId)).run()
-    }
-  })
+    return { book: stripMetaChapters(await resolvePrivateBook(userId, duplicate.versionId, { allowDeleted: true })), duplicated: true }
+  }
+
+  const upload = await materializeUpload(userId, file, buffer, versionId, opts)
+  const now = Date.now()
+  const libraryBookId = createId('lb')
+  try {
+    db.transaction((tx) => {
+      tx.insert(bookVersions).values({
+        id: versionId, format: upload.format, size: upload.size, createdAt: now, updatedAt: now,
+      }).run()
+      tx.insert(contentRevisions).values({
+        id: createId('rev'), bookVersionId: versionId, revisionNo: 1, blobKey: upload.fileKey,
+        size: upload.size, wordCount: upload.wordCount,
+        chapterCount: upload.chapterCount, meta: upload.meta, createdAt: now,
+      }).run()
+      tx.insert(blobs).values({ key: upload.fileKey, size: upload.size, kind: 'book', createdAt: now }).onConflictDoNothing().run()
+      if (upload.coverKey && upload.coverSize !== null) {
+        tx.insert(blobs).values({ key: upload.coverKey, size: upload.coverSize, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+      }
+      tx.insert(libraryBooks).values({
+        id: libraryBookId, libraryId: library.id, userId, categoryId: membership?.shelfId ?? null,
+        title: upload.title, author: upload.author, description: upload.description,
+        coverKey: upload.coverKey, createdAt: now, updatedAt: now,
+      }).run()
+      tx.insert(libraryBookVersions).values({
+        id: createId('lbv'), libraryId: library.id, libraryBookId, bookVersionId: versionId,
+        kind: 'personal', createdAt: now, updatedAt: now,
+      }).run()
+      tx.insert(bookStates).values({
+        userId, bookVersionId: versionId, readStatus: 'reading', percent: 0,
+        cfi: null, chapter: null, lastReadAt: null, updatedAt: now,
+      }).run()
+      if (tagIds.length > 0) {
+        tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).run()
+      }
+      if (membership?.shelfId) {
+        tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, membership.shelfId)).run()
+      }
+    })
+  } catch (err) {
+    await cleanupStagedUpload(upload)
+    throw err
+  }
   return { book: stripMetaChapters(await resolvePrivateBook(userId, versionId, { allowDeleted: true })), duplicated: false }
 }
 
-export async function getBook(userId: string, bookId: string) {
+/**
+ * Catalog upload (5.1): the content goes into a shared library the caller
+ * manages, never into their private library. The uploader gets no reading
+ * state here — reading data is created when someone actually reads, and a city
+ * copy is not a private card. `kind` stays 'personal' because A/B/C describe
+ * private-library entries: in a shared library this row is the library-owned
+ * source that other libraries' B references point at.
+ */
+export async function uploadCatalogBook(
+  libraryId: string,
+  userId: string,
+  file: File,
+  opts?: {
+    libraryBookId?: string
+    categoryId?: string
+    tagIds?: string[]
+    name?: string
+    title?: string
+    author?: string
+    normalizeTitle?: boolean
+  },
+) {
+  const db = getDb()
+  // Owner/admin only: ordinary members have no submission path in this design.
+  await requireLibraryManager(userId, libraryId)
+  const tagIds = [...new Set(opts?.tagIds ?? [])]
+  if (opts?.categoryId) {
+    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
+      .where(and(eq(libraryCategories.id, opts.categoryId), eq(libraryCategories.libraryId, libraryId))).get()
+    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
+  }
+  if (tagIds.length > 0) {
+    const existingTags = db.select({ count: sql<number>`count(*)` }).from(libraryTags)
+      .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, tagIds))).get()
+    if ((existingTags?.count ?? 0) !== tagIds.length) throw new AppError('TAG_NOT_FOUND')
+  }
+  // Grouping into an existing work (5.2) is the admin's explicit choice; the
+  // work must live in the same library, and the version must not be there yet.
+  let targetLibraryBookId = opts?.libraryBookId
+  if (targetLibraryBookId) {
+    const target = db.select({ id: libraryBooks.id }).from(libraryBooks)
+      .where(and(eq(libraryBooks.id, targetLibraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
+    if (!target) throw new AppError('LIBRARY_BOOK_NOT_FOUND')
+  }
+
+  const versionId = createId('book')
+  const buffer = Buffer.from(await file.arrayBuffer())
+  const duplicate = findPersonalVersionByBlob(libraryId, blobKey(sha256(buffer), '.epub'))
+  if (duplicate) {
+    if (tagIds.length > 0) {
+      db.insert(libraryBookTags)
+        .values(tagIds.map((tagId) => ({ libraryBookId: duplicate.libraryBookId, tagId })))
+        .onConflictDoNothing()
+        .run()
+    }
+    return { bookVersionId: duplicate.versionId, libraryBookId: duplicate.libraryBookId, duplicated: true }
+  }
+
+  const upload = await materializeUpload(userId, file, buffer, versionId, opts)
+  const now = Date.now()
+  // An existing work keeps its own defaults; the new version carries the parsed
+  // metadata as overrides so the upload is never silently lost.
+  let libraryBookId = targetLibraryBookId ?? createId('lb')
+  const linkId = createId('lbv')
+  try {
+    db.transaction((tx) => {
+      tx.insert(bookVersions).values({
+        id: versionId, format: upload.format, size: upload.size, createdAt: now, updatedAt: now,
+      }).run()
+      tx.insert(contentRevisions).values({
+        id: createId('rev'), bookVersionId: versionId, revisionNo: 1, blobKey: upload.fileKey,
+        size: upload.size, wordCount: upload.wordCount,
+        chapterCount: upload.chapterCount, meta: upload.meta, createdAt: now,
+      }).run()
+      tx.insert(blobs).values({ key: upload.fileKey, size: upload.size, kind: 'book', createdAt: now }).onConflictDoNothing().run()
+      if (upload.coverKey && upload.coverSize !== null) {
+        tx.insert(blobs).values({ key: upload.coverKey, size: upload.coverSize, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+      }
+      if (!targetLibraryBookId) {
+        tx.insert(libraryBooks).values({
+          id: libraryBookId, libraryId, userId, categoryId: opts?.categoryId ?? null,
+          title: opts?.title ?? upload.title, author: opts?.author ?? upload.author,
+          description: upload.description, coverKey: upload.coverKey, createdAt: now, updatedAt: now,
+        }).run()
+      }
+      tx.insert(libraryBookVersions).values({
+        id: linkId, libraryId, libraryBookId, bookVersionId: versionId, kind: 'personal',
+        name: opts?.name ?? '',
+        title: targetLibraryBookId ? upload.title : null,
+        author: targetLibraryBookId ? upload.author : null,
+        coverKey: targetLibraryBookId ? upload.coverKey : null,
+        createdAt: now, updatedAt: now,
+      }).run()
+      if (tagIds.length > 0) {
+        tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
+      }
+      if (opts?.categoryId) {
+        tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, opts.categoryId)).run()
+      }
+    })
+  } catch (err) {
+    await cleanupStagedUpload(upload)
+    throw err
+  }
+  return { bookVersionId: versionId, libraryBookId, versionLinkId: linkId, duplicated: false }
+}
+
+export async function getBook(userId: string | null, bookId: string) {
   return resolvePrivateBook(userId, bookId, { allowDeleted: true })
 }
 
-export async function getActiveBook(userId: string, bookId: string) {
+export async function getActiveBook(userId: string | null, bookId: string) {
   return resolvePrivateBook(userId, bookId, { allowDeleted: false })
+}
+
+/**
+ * The single readability gate for user-scoped reads. Progress, annotations and
+ * reading records must ask this instead of re-deriving "is this mine from my
+ * private library" on their own: that duplication is exactly how a library read
+ * passed the content check but was then refused by the progress endpoint, which
+ * made the reader refuse to open the book at all.
+ *
+ * It returns how the caller reached the book, because that decides more than
+ * permission: 'private' means the caller has their own card, 'library' means
+ * they are only reading a library's copy.
+ *
+ * It deliberately does NOT fall back to the frozen legacy `books` table. That
+ * table stopped tracking deletion when the library model landed - trashBook only
+ * writes library_books.deletedAt - so a `books` row outlives the book it used
+ * to describe. Trusting it here would report a permanently deleted book as
+ * readable, and worse, writable, since callers persist whatever this allows.
+ * The upgrade path runs the Phase 2 backfill, so a real instance never has a
+ * book outside the new model, and resolvePrivateBook never accepted one either:
+ * the gate and the content route now agree on the same model.
+ *
+ * It answers permission only. resolvePrivateBook answers "give me the book" and
+ * so additionally needs a materialized revision; the two agree on who may read
+ * what, and both live here so that stays reviewable in one place.
+ */
+export async function assertReadableBook(userId: string | null, bookId: string): Promise<'private' | 'library'> {
+  const db = getDb()
+  // Anonymous guests own no private library: they only ever reach the shared
+  // verdict below, which applies the guest triple gate.
+  if (userId === null) {
+    if (!await resolveLibraryReadGrant(null, bookId)) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+    return 'library'
+  }
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  // A missing private library is not a refusal: an account that has never
+  // uploaded anything may still read a library it can see.
+  if (library) {
+    const lbv = db.select().from(libraryBookVersions)
+      .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
+    if (lbv) {
+      const lb = db.select({ deletedAt: libraryBooks.deletedAt }).from(libraryBooks)
+        .where(eq(libraryBooks.id, lbv.libraryBookId)).get()
+      if (!lb || lb.deletedAt) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+      // A collected B only while its source is still readable (7.2/7.3), the
+      // same rule the read core applies.
+      if (lbv.kind === 'shared' && !(await sourceStillReadable(userId, bookId))) {
+        throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+      }
+      return 'private'
+    }
+  }
+  if (!await resolveLibraryReadGrant(userId, bookId)) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  return 'library'
+}
+
+/**
+ * The shared-library read verdict for a version nobody collected, or null when
+ * no library the caller may read publishes it. The verdict is the single
+ * shared-library read decision, so a non-member only reaches a published version
+ * of a public library, and a member only their own libraries' versions. Guests
+ * are rejected by the routes before this runs (Phase 6 owns anonymous access).
+ */
+async function resolveLibraryReadGrant(userId: string | null, bookId: string) {
+  const db = getDb()
+  const candidates = db.select({ libraryId: libraryBookVersions.libraryId })
+    .from(libraryBookVersions)
+    .where(and(
+      eq(libraryBookVersions.bookVersionId, bookId),
+      eq(libraryBookVersions.status, 'published'),
+    )).all()
+  for (const candidate of candidates) {
+    try {
+      return await resolveSharedVersionRead(candidate.libraryId, bookId, userId)
+    } catch (err) {
+      // Not readable here; another library listing the same version may allow
+      // it. Only verdict denials are swallowed — a database or system failure
+      // must not masquerade as "not readable here".
+      if (err instanceof AppError) continue
+      throw err
+    }
+  }
+  return null
+}
+
+/**
+ * 0.4.0 read fallback for a version that lives in a shared library. There is no
+ * pinned revision here on purpose: nothing was collected, so the current
+ * published revision is what the library offers today.
+ */
+async function resolveLibraryRead(userId: string | null, bookId: string) {
+  const db = getDb()
+  const granted = await resolveLibraryReadGrant(userId, bookId)
+  if (!granted) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  const link = granted.link
+  const work = db.select().from(libraryBooks).where(eq(libraryBooks.id, link.libraryBookId)).get()
+  if (!work) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  const bv = db.select().from(bookVersions).where(eq(bookVersions.id, bookId)).get()
+  if (!bv) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  const revision = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (!revision) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
+  // Guests create no server-side reading state; there is nothing to load.
+  const state = userId === null ? undefined : db.select().from(bookStates)
+    .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
+  return {
+    id: bookId,
+    userId,
+    // Version override wins, then the work default — the same inheritance the
+    // catalog shows, so a library read and the catalog card agree.
+    title: link.title ?? work.title,
+    author: link.author ?? work.author,
+    format: bv.format,
+    filePath: revision.blobKey,
+    coverKey: link.coverKey ?? work.coverKey,
+    contentHash: hashFromBlobKey(revision.blobKey),
+    size: bv.size,
+    meta: (revision.meta ?? {}) as Record<string, unknown>,
+    createdAt: work.createdAt,
+    updatedAt: work.updatedAt,
+    readStatus: state?.readStatus ?? 'reading',
+    progress: state?.percent ?? 0,
+    pinnedAt: link.pinnedAt ?? null,
+    lastReadAt: state?.lastReadAt ?? null,
+    deletedAt: null,
+    shelfId: null,
+    // Present so the UI can offer "add to my library" and hide the actions
+    // that would write library-owned content.
+    source: {
+      libraryId: granted.library.id,
+      libraryBookVersionId: link.id,
+      libraryName: granted.library.name,
+    },
+    collected: false,
+  }
 }
 
 /**
@@ -530,28 +880,63 @@ export async function getActiveBook(userId: string, bookId: string) {
  * every existing caller keeps working: routes, Legado, AI, exports and tests
  * see the same fields. Content truth comes from the latest revision; the
  * frozen legacy books row only backs meta for not-yet-backfilled rows.
+ *
+ * 0.4.0 adds one fallback: a version the caller has NOT collected but may read
+ * in a shared library resolves here too, so browsing a library leads to the
+ * existing reader with no second context. Reading is dimensioned by
+ * BookVersion, so progress and annotations land in the same place either way
+ * (design invariant 4/5: reading does not require collecting).
+ *
+ * The fallback is strictly a READ path. Every mutation goes through
+ * resolveLibraryBook and still requires a private row, so a library version can
+ * never be written to from here. A collected B keeps taking the private branch,
+ * which is what preserves its pinned revision and source gate.
  */
-export async function resolvePrivateBook(userId: string, bookId: string, opts?: { allowDeleted?: boolean }) {
+export async function resolvePrivateBook(userId: string | null, bookId: string, opts?: { allowDeleted?: boolean; skipSourceCheck?: boolean }) {
   const db = getDb()
+  // Anonymous guests own no private rows: straight to the shared verdict,
+  // which applies the guest triple gate (instance switch + public + version).
+  if (userId === null) return resolveLibraryRead(null, bookId)
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
   if (!library) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   const lbv = db.select().from(libraryBookVersions)
     .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
-  if (!lbv) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  // Not in the private library at all: the only other way in is a library the
+  // caller is allowed to read. Anything unauthorized is the same NOT_FOUND.
+  if (!lbv) return resolveLibraryRead(userId, bookId)
   const lb = db.select().from(libraryBooks).where(eq(libraryBooks.id, lbv.libraryBookId)).get()
   if (!lb) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   if (lb.deletedAt && !opts?.allowDeleted) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   const bv = db.select().from(bookVersions).where(eq(bookVersions.id, bookId)).get()
   if (!bv) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
-  const revision = db.select().from(contentRevisions)
-    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  // (7.2/7.3) A B reads its pinned revision and only while its source is still
+  // readable. Both checks live in the read core so every caller — reader,
+  // Legado, AI, exports — inherits them instead of re-implementing the rule.
+  // The delete path passes skipSourceCheck: removing your own card must never
+  // require the source to still be readable.
+  if (!opts?.skipSourceCheck && lbv.kind === 'shared' && !(await sourceStillReadable(userId, bookId))) {
+    throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  }
+  const revision = lbv.kind === 'shared' && lbv.pinnedRevisionId
+    ? db.select().from(contentRevisions)
+      .where(and(
+        eq(contentRevisions.id, lbv.pinnedRevisionId),
+        eq(contentRevisions.bookVersionId, bookId),
+      )).get()
+    : db.select().from(contentRevisions)
+      .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
   if (!revision) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
   const state = db.select().from(bookStates)
     .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
   const legacy = db.select().from(books).where(eq(books.id, bookId)).get()
   const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
   const meta = Object.keys(revisionMeta).length > 0 ? revisionMeta : ((legacy?.meta ?? {}) as Record<string, unknown>)
+  // 7.7: the UI needs to know a card is library-owned (hide content edits) and
+  // which city it came from. A deleted source keeps its id, loses its name.
+  const sourceLibrary = lbv.sourceLibraryId
+    ? db.select({ name: libraries.name }).from(libraries).where(eq(libraries.id, lbv.sourceLibraryId)).get()
+    : null
   return {
     id: bookId,
     userId,
@@ -571,6 +956,15 @@ export async function resolvePrivateBook(userId: string, bookId: string, opts?: 
     lastReadAt: state?.lastReadAt ?? null,
     deletedAt: lb.deletedAt ?? null,
     shelfId: lb.categoryId,
+    source: lbv.sourceLibraryId
+      ? {
+          libraryId: lbv.sourceLibraryId,
+          libraryBookVersionId: lbv.sourceLibraryBookVersionId,
+          libraryName: sourceLibrary?.name ?? null,
+        }
+      : null,
+    // A private row is a collected card by definition.
+    collected: true,
   }
 }
 
@@ -602,8 +996,8 @@ export function getBookMembership(userId: string, bookId: string, shelfId: strin
   return { shelfName, tags: tagRows.map((tag) => tag.name) }
 }
 
-export async function getBookChapters(userId: string, bookId: string) {
-  const book = await getBook(userId, bookId)
+export async function getBookChapters(userId: string | null, bookId: string) {
+  const book = await getActiveBook(userId, bookId)
   const existingChapters = (book.meta?.chapters ?? []) as Chapter[]
   if (book.format !== 'epub' || book.meta?.epubTocLevelVersion === EPUB_TOC_LEVEL_VERSION) {
     return existingChapters
@@ -632,7 +1026,9 @@ export async function getBookChapters(userId: string, bookId: string) {
     if (chapters.length > 0) meta.chapters = chapters
     // Derived chapter cache lives on the latest revision now; the frozen
     // legacy books row is read-only and keeps serving only pre-backfill rows.
-    const latestRevision = getDb().select({ id: contentRevisions.id }).from(contentRevisions)
+    // Anonymous reads never warm that cache: persisting from a guest context
+    // would be a server-side write with no owner.
+    const latestRevision = userId === null ? undefined : getDb().select({ id: contentRevisions.id }).from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, book.id)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
     if (latestRevision) {
       getDb().update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
@@ -870,6 +1266,7 @@ export async function previewAppendTxtBookContent(userId: string, bookId: string
 }
 
 export async function appendTxtBookContent(userId: string, bookId: string, appendedText: string, startOffset?: number) {
+  assertMutableContent(resolveLibraryBook(userId, bookId).kind)
   const prepared = await prepareTxtAppend(userId, bookId, appendedText, startOffset)
   const db = getDb()
   const storage = getStorage()
@@ -905,7 +1302,7 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
   const filePath = blobKey(contentHash, '.epub')
   await storage.put(filePath, epubBuffer)
 
-  const progress = await readProgressFile(bookId)
+  const progress = await readProgressFile(userId, bookId)
   const scale = prepared.newWordCount > 0 ? prepared.originalWordCount / prepared.newWordCount : 1
   const scaleFraction = (value: number) => Math.max(0, Math.min(1, value * scale))
   const oldPercent = progress?.percent ?? book.progress
@@ -925,7 +1322,7 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
         : progress.rateSamples,
       updatedAt: Date.now(),
     }
-    await storage.put(`progress/${bookId}.json`, Buffer.from(JSON.stringify(nextProgress), 'utf-8'))
+    await writeProgressFile(userId, bookId, nextProgress)
   }
 
   // New content lands as a new revision; the old revision (and its file)
@@ -936,17 +1333,22 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
     .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
   const nextRevisionNo = (maxRevision?.revisionNo ?? 0) + 1
   const { libraryBookId } = resolveLibraryBook(userId, bookId)
-  db.transaction((tx) => {
-    tx.insert(contentRevisions).values({
-      id: createId('rev'), bookVersionId: bookId, revisionNo: nextRevisionNo,
-      blobKey: filePath, size: epubBuffer.length, wordCount: prepared.newWordCount,
-      chapterCount: prepared.metaChapters.length, meta, createdAt: updatedAt,
-    }).run()
-    tx.insert(blobs).values({ key: filePath, size: epubBuffer.length, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
-    tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, bookId)).run()
-    tx.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, libraryBookId)).run()
-    tx.update(bookStates).set({ percent: newPercent, updatedAt }).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
-  })
+  try {
+    db.transaction((tx) => {
+      tx.insert(contentRevisions).values({
+        id: createId('rev'), bookVersionId: bookId, revisionNo: nextRevisionNo,
+        blobKey: filePath, size: epubBuffer.length, wordCount: prepared.newWordCount,
+        chapterCount: prepared.metaChapters.length, meta, createdAt: updatedAt,
+      }).run()
+      tx.insert(blobs).values({ key: filePath, size: epubBuffer.length, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
+      tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, bookId)).run()
+      tx.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, libraryBookId)).run()
+      tx.update(bookStates).set({ percent: newPercent, updatedAt }).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
+    })
+  } catch (err) {
+    await cleanupStagedUpload({ fileKey: filePath, coverKey: null })
+    throw err
+  }
   invalidateCachedNormalized(bookId)
 
   if (oldFilePath !== filePath) {
@@ -1107,15 +1509,20 @@ async function rebuildTocBook(
     await storage.put(newFileKey, epubBuffer)
     const maxRevision = db.select({ revisionNo: contentRevisions.revisionNo }).from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
-    db.transaction((tx) => {
-      tx.insert(contentRevisions).values({
-        id: createId('rev'), bookVersionId: bookId, revisionNo: (maxRevision?.revisionNo ?? 0) + 1,
-        blobKey: newFileKey, size: epubBuffer.length, wordCount, chapterCount: metaChapters.length,
-        meta, createdAt: updatedAt,
-      }).run()
-      tx.insert(blobs).values({ key: newFileKey, size: epubBuffer.length, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
-      tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, bookId)).run()
-    })
+    try {
+      db.transaction((tx) => {
+        tx.insert(contentRevisions).values({
+          id: createId('rev'), bookVersionId: bookId, revisionNo: (maxRevision?.revisionNo ?? 0) + 1,
+          blobKey: newFileKey, size: epubBuffer.length, wordCount, chapterCount: metaChapters.length,
+          meta, createdAt: updatedAt,
+        }).run()
+        tx.insert(blobs).values({ key: newFileKey, size: epubBuffer.length, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
+        tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, bookId)).run()
+      })
+    } catch (err) {
+      await cleanupStagedUpload({ fileKey: newFileKey, coverKey: null })
+      throw err
+    }
     const refs = db.select({ count: sql<number>`count(*)` }).from(contentRevisions).where(eq(contentRevisions.blobKey, book.filePath)).get()
     if ((refs?.count ?? 0) === 0 && await storage.exists(book.filePath)) {
       await storage.delete(book.filePath)
@@ -1133,17 +1540,14 @@ async function rebuildTocBook(
   // is stale; keep the book-level percent so the reader can restore by
   // fraction. No-op when the split is unchanged (identical chapters).
   if (chaptersChanged) {
-    const progressKey = `progress/${bookId}.json`
-    if (await storage.exists(progressKey)) {
-      const stream = await storage.get(progressKey)
-      const chunks: Buffer[] = []
-      for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-      const progress = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { cfi?: string | null; chapter?: string | null } | null
-      if (progress) {
-        progress.cfi = null
-        progress.chapter = null
-        await storage.put(progressKey, Buffer.from(JSON.stringify(progress), 'utf-8'))
-      }
+    // Re-indexing invalidates the saved CFI for the owner; the book-level percent
+    // survives so the reader can restore by fraction. Per user, because a
+    // collected book has a position per reader.
+    const progress = await readProgressFile(userId, bookId) as { cfi?: string | null; chapter?: string | null } | null
+    if (progress) {
+      progress.cfi = null
+      progress.chapter = null
+      await writeProgressFile(userId, bookId, progress as never)
     }
   }
 
@@ -1244,6 +1648,7 @@ export async function reTocBook(
   excludedChapterIds?: string[],
 ): Promise<string> {
   const db = getDb()
+  assertMutableContent(resolveLibraryBook(userId, bookId).kind)
   const book = await getBook(userId, bookId)
   if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'Re-TOC only supports txt books')
   const storedExcludedChapterIds = (book.meta as { tocExcludedChapterIds?: string[] }).tocExcludedChapterIds ?? []
@@ -1397,15 +1802,15 @@ export async function previewBookToc(
   }
 }
 
-export async function getBookContent(userId: string, bookId: string): Promise<string> {
-  const book = await getBook(userId, bookId)
+export async function getBookContent(userId: string | null, bookId: string): Promise<string> {
+  const book = await getActiveBook(userId, bookId)
   if (book.format !== 'txt') {
     throw new AppError('UNSUPPORTED_FORMAT', 'Content endpoint only supports txt')
   }
   return getOrRecoverTxtNormalized(book)
 }
 
-export async function getBookChapterContent(userId: string, bookId: string, chapterIndex: number) {
+export async function getBookChapterContent(userId: string | null, bookId: string, chapterIndex: number) {
   const book = await getActiveBook(userId, bookId)
   const chapters = await getBookChapters(userId, bookId)
   const chapter = chapters[chapterIndex]
@@ -1425,17 +1830,26 @@ export async function getBookChapterContent(userId: string, bookId: string, chap
   }
 }
 
-export async function getBookEpubBuffer(userId: string, bookId: string): Promise<Buffer> {
+export async function getBookEpubBuffer(userId: string | null, bookId: string): Promise<Buffer> {
   const storage = getStorage()
-  const book = await getBook(userId, bookId)
+  const book = await getActiveBook(userId, bookId)
   if (!(await storage.exists(book.filePath))) throw new AppError('BOOK_FILE_MISSING')
   return bufferFromStream(await storage.get(book.filePath))
 }
 
 export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata; viewSettings?: ViewSettings | null; boundPresetId?: string | null; tocRuleId?: string | null; coverPaletteId?: CoverPaletteId | null }) {
   const db = getDb()
-  const { libraryBookId, libraryBookVersionId } = resolveLibraryBook(userId, bookId)
+  const { libraryBookId, libraryBookVersionId, kind } = resolveLibraryBook(userId, bookId)
   const now = Date.now()
+  // Revision-bound display fields live on the shared BookVersion: a B may only
+  // touch its own card (status, pin, title, author). The content-immutable
+  // boundary is the same one append/re-toc obey.
+  if (kind === 'shared' && (
+    data.bookmeta !== undefined || data.viewSettings !== undefined || data.boundPresetId !== undefined
+    || data.tocRuleId !== undefined || data.coverPaletteId !== undefined
+  )) {
+    assertMutableContent(kind)
+  }
   if (data.readStatus !== undefined || data.progress !== undefined) {
     const state = db.select().from(bookStates)
       .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
@@ -1525,7 +1939,7 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
 
 export async function updateBookCover(userId: string, bookId: string, file: File) {
   const db = getDb()
-  const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  const { libraryBookId, kind } = resolveLibraryBook(userId, bookId)
   const buffer = Buffer.from(await file.arrayBuffer())
   if (buffer.length > 5 * 1024 * 1024) throw new AppError('UPLOAD_TOO_LARGE')
   const ext = detectImageExtension(buffer)
@@ -1538,20 +1952,32 @@ export async function updateBookCover(userId: string, bookId: string, file: File
     await storage.put(coverThumbnailKey(coverKey), thumb)
   }
   const now = Date.now()
-  db.insert(blobs).values({ key: coverKey, size: buffer.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
-  db.update(libraryBooks).set({ coverKey, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
-  const latestRevision = db.select().from(contentRevisions)
-    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
-  if (latestRevision) {
-    const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>) }
-    delete meta.coverSuppressed
-    db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+  try {
+    db.insert(blobs).values({ key: coverKey, size: buffer.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+    db.update(libraryBooks).set({ coverKey, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+  } catch (err) {
+    await cleanupStagedCover(coverKey)
+    throw err
+  }
+  // A private cover always wins over the inherited one, so a B needs no
+  // shared-meta change to show it; touching the shared revision here would
+  // un-suppress the cover for every library at once.
+  if (kind !== 'shared') {
+    const latestRevision = db.select().from(contentRevisions)
+      .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+    if (latestRevision) {
+      const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>) }
+      delete meta.coverSuppressed
+      db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+    }
   }
   return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
 }
 
-export async function getBookCover(userId: string, bookId: string): Promise<{ coverKey: string } | null> {
+export async function getBookCover(userId: string | null, bookId: string): Promise<{ coverKey: string } | null> {
   const db = getDb()
+  // Deleted rows stay cover-readable on purpose: the trash list renders
+  // covers (greyed out). Chapters/content/epub stay active-gated.
   const book = await getBook(userId, bookId)
   const storage = getStorage()
   if (book.coverKey && await storage.exists(book.coverKey)) return { coverKey: book.coverKey }
@@ -1566,15 +1992,26 @@ export async function getBookCover(userId: string, bookId: string): Promise<{ co
     const ext = detectImageExtension(parsed.meta.cover)
     if (!ext) return null
     const coverKey = blobKey(book.contentHash, `.cover.${ext}`)
+    // Anonymous reads never materialize covers: persisting a repair needs a
+    // private library row the guest does not have, and the put below would
+    // orphan files before the row lookup below can fail.
+    if (userId === null) return null
     await storage.put(coverKey, parsed.meta.cover)
     const thumb = await generateCoverThumbnail(parsed.meta.cover, ext)
     if (thumb) {
       await storage.put(coverThumbnailKey(coverKey), thumb)
     }
     const now = Date.now()
-    db.insert(blobs).values({ key: coverKey, size: parsed.meta.cover.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
-    const { libraryBookId } = resolveLibraryBook(userId, book.id)
-    db.update(libraryBooks).set({ coverKey, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+    try {
+      db.insert(blobs).values({ key: coverKey, size: parsed.meta.cover.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+      const { libraryBookId } = resolveLibraryBook(userId, book.id)
+      db.update(libraryBooks).set({ coverKey, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+    } catch (err) {
+      // resolveLibraryBook throws for direct (uncollected) reads after the
+      // puts already landed: clean the staged files instead of orphaning them.
+      await cleanupStagedCover(coverKey)
+      throw err
+    }
     return { coverKey }
   } catch {
     return null
@@ -1582,7 +2019,7 @@ export async function getBookCover(userId: string, bookId: string): Promise<{ co
 }
 
 export async function getBookCoverContent(
-  userId: string,
+  userId: string | null,
   bookId: string,
   opts?: { size?: 'original' | 'thumb' },
 ): Promise<{ data: Buffer; contentType: string; ext: string } | null> {
@@ -1633,21 +2070,28 @@ export async function getBookCoverContent(
 
 export async function removeBookCover(userId: string, bookId: string) {
   const db = getDb()
-  const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  const { libraryBookId, kind } = resolveLibraryBook(userId, bookId)
   const now = Date.now()
   db.update(libraryBooks).set({ coverKey: null, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
-  const latestRevision = db.select().from(contentRevisions)
-    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
-  if (latestRevision) {
-    const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>), coverSuppressed: true }
-    db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+  // Clearing the private override reveals the inherited cover; writing the
+  // suppression flag would hide it for every library sharing this revision.
+  if (kind !== 'shared') {
+    const latestRevision = db.select().from(contentRevisions)
+      .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+    if (latestRevision) {
+      const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>), coverSuppressed: true }
+      db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+    }
   }
   return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
 }
 
 export async function resetBookMetadata(userId: string, bookId: string, opts?: { normalizeTitle?: boolean }) {
   const db = getDb()
-  const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  // Rewrites the revision's derived metadata in place, which for a B is the
+  // city's own revision.
+  const { libraryBookId, kind } = resolveLibraryBook(userId, bookId)
+  assertMutableContent(kind)
   const book = await getBook(userId, bookId)
   const storage = getStorage()
   const parser = getParser(book.filePath, '')
@@ -1699,11 +2143,29 @@ export async function emptyTrash(userId: string) {
   const trashed = db.select({ id: libraryBooks.id }).from(libraryBooks)
     .where(and(eq(libraryBooks.userId, userId), isNotNull(libraryBooks.deletedAt))).all()
   for (const row of trashed) {
-    const version = db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
-      .where(eq(libraryBookVersions.libraryBookId, row.id)).all().at(0)
-    if (version) await deleteBook(userId, version.bookVersionId)
+    // Every version, not just the first: deleteBook removes the whole work on
+    // the first call, and later versions of an already-gone work read as
+    // NOT_FOUND instead of failing the sweep.
+    const versions = db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+      .where(eq(libraryBookVersions.libraryBookId, row.id)).all()
+    for (const version of versions) {
+      await deleteBookLenient(userId, version.bookVersionId)
+    }
   }
   return trashed.length
+}
+
+/** deleteBook that tolerates an already-removed work: purges iterate versions
+ * of a work the first delete already took with it. Returns whether anything
+ * was actually deleted, so capacity accounting stays honest. */
+async function deleteBookLenient(userId: string, bookId: string): Promise<boolean> {
+  try {
+    await deleteBook(userId, bookId)
+    return true
+  } catch (err) {
+    if (err instanceof AppError && err.code === 'BOOK_NOT_FOUND') return false
+    throw err
+  }
 }
 
 /** Purge trash rows whose deletedAt is older than `days`; 0 or negative disables auto-clean */
@@ -1715,9 +2177,11 @@ export async function purgeExpiredTrash(userId: string, days: number) {
     .where(and(eq(libraryBooks.userId, userId), isNotNull(libraryBooks.deletedAt), lt(libraryBooks.deletedAt, cutoff)))
     .all()
   for (const row of expired) {
-    const version = db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
-      .where(eq(libraryBookVersions.libraryBookId, row.id)).all().at(0)
-    if (version) await deleteBook(userId, version.bookVersionId)
+    const versions = db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+      .where(eq(libraryBookVersions.libraryBookId, row.id)).all()
+    for (const version of versions) {
+      await deleteBookLenient(userId, version.bookVersionId)
+    }
   }
   return expired.length
 }
@@ -1744,9 +2208,10 @@ export async function purgeTrashToCapacity(userId: string, maxBytes: number) {
   let purged = 0
   for (const row of rows) {
     if (total <= maxBytes) break
-    await deleteBook(userId, row.bookVersionId)
-    total -= row.size
-    purged++
+    if (await deleteBookLenient(userId, row.bookVersionId)) {
+      total -= row.size
+      purged++
+    }
   }
   return purged
 }
@@ -1778,9 +2243,11 @@ export async function purgeAllExpiredTrash() {
       .where(and(inArray(libraryBooks.userId, userIds), isNotNull(libraryBooks.deletedAt), lt(libraryBooks.deletedAt, cutoff)))
       .all()
     for (let i = 0; i < expired.length; i++) {
-      const version = db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
-        .where(eq(libraryBookVersions.libraryBookId, expired[i].id)).all().at(0)
-      if (version) await deleteBook(expired[i].userId, version.bookVersionId)
+      const versions = db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+        .where(eq(libraryBookVersions.libraryBookId, expired[i].id)).all()
+      for (const version of versions) {
+        await deleteBookLenient(expired[i].userId, version.bookVersionId)
+      }
       if (i % 10 === 9) await new Promise((resolve) => setImmediate(resolve))
     }
   }
@@ -1795,7 +2262,10 @@ export async function purgeAllExpiredTrash() {
 export async function deleteBook(userId: string, bookId: string) {
   const db = getDb()
   const storage = getStorage()
-  const book = await resolvePrivateBook(userId, bookId, { allowDeleted: true })
+  // Removing your own card never requires the source to still be readable:
+  // an unreadable B (unlisted source, lost membership, deleted library) is
+  // exactly the card you most need to remove. The route discards this value.
+  const book = await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true })
   const { libraryBookId } = resolveLibraryBook(userId, bookId)
 
   // Legacy rows mirror the old delete path; the tables themselves freeze.
@@ -1817,18 +2287,40 @@ export async function deleteBook(userId: string, bookId: string) {
       ).filter((key): key is string => key !== null),
   )
 
-  db.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
-  db.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
-  db.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
-  for (const versionId of versionIds) {
-    // Restrict fires while other libraries reference the version; private
-    // single-version deletes always clear their own references first.
-    // Reading states, highlights, records and AI rows follow via cascade.
-    db.delete(bookVersions).where(eq(bookVersions.id, versionId)).run()
-  }
+  // One transaction for the whole removal. Deleting the private rows first
+  // and the shared version afterwards used to leave "card gone but 500"
+  // whenever another library still listed the version (restrict FK): a
+  // version with any remaining library entry is kept, and only a version no
+  // library lists anymore goes with its revisions (dependents cascade).
+  const removedVersionIds: string[] = []
+  db.transaction((tx) => {
+    tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
+    tx.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
+    tx.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
+    for (const versionId of versionIds) {
+      const stillListed = tx.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+        .where(eq(libraryBookVersions.bookVersionId, versionId)).get()
+      if (stillListed) continue
+      // Defensive: a pin is owned by a library entry, so no live row can
+      // still point at these revisions — but a stray pin must not trip the
+      // NO ACTION reference on the revision delete below.
+      const doomed = tx.select({ id: contentRevisions.id }).from(contentRevisions)
+        .where(eq(contentRevisions.bookVersionId, versionId)).all()
+      for (const row of doomed) {
+        tx.update(libraryBookVersions).set({ pinnedRevisionId: null })
+          .where(eq(libraryBookVersions.pinnedRevisionId, row.id)).run()
+      }
+      // Reading states, highlights, records and AI rows follow via cascade.
+      tx.delete(bookVersions).where(eq(bookVersions.id, versionId)).run()
+      removedVersionIds.push(versionId)
+    }
+  })
 
   // Content blobs are shared across versions; delete the physical file only
-  // when no remaining revision references the key.
+  // when no remaining revision references the key. Legacy books rows stay
+  // frozen until Phase 12 and are deliberately not counted here: the new
+  // model owns liveness now. Keys of a kept version are still referenced,
+  // so they are skipped naturally.
   for (const key of new Set(revisionKeys)) {
     const refs = db.select({ count: sql<number>`count(*)` }).from(contentRevisions)
       .where(eq(contentRevisions.blobKey, key)).get()
@@ -1837,12 +2329,15 @@ export async function deleteBook(userId: string, bookId: string) {
       db.delete(blobs).where(eq(blobs.key, key)).run()
     }
   }
-  // Progress file
-  const progressKey = `progress/${bookId}.json`
-  if (await storage.exists(progressKey)) {
-    await storage.delete(progressKey)
+  // Progress file follows the version, not the card: deleting a B whose
+  // version survives elsewhere keeps the caller's position (like the reading
+  // rows the cascade keeps), and only a dying version takes it. Other
+  // readers' slots are never touched either way.
+  for (const versionId of removedVersionIds) {
+    await deleteProgressFile(userId, versionId)
   }
   for (const coverKey of coverKeys) {
+    // Covers are only referenced from the new model; legacy rows freeze.
     const coverRefs = db.select({ count: sql<number>`count(*)` }).from(libraryBooks)
       .where(eq(libraryBooks.coverKey, coverKey)).get()
     const versionCoverRefs = db.select({ count: sql<number>`count(*)` }).from(libraryBookVersions)
@@ -1859,15 +2354,19 @@ export async function deleteBook(userId: string, bookId: string) {
   return book
 }
 
-function resolveLibraryBook(userId: string, bookId: string): { libraryId: string; libraryBookId: string; libraryBookVersionId: string } {
+function resolveLibraryBook(userId: string, bookId: string): { libraryId: string; libraryBookId: string; libraryBookVersionId: string; kind: string } {
   const db = getDb()
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
   if (!library) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
-  const lbv = db.select({ libraryBookId: libraryBookVersions.libraryBookId, id: libraryBookVersions.id }).from(libraryBookVersions)
+  const lbv = db.select({
+    libraryBookId: libraryBookVersions.libraryBookId,
+    id: libraryBookVersions.id,
+    kind: libraryBookVersions.kind,
+  }).from(libraryBookVersions)
     .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
   if (!lbv) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
-  return { libraryId: library.id, libraryBookId: lbv.libraryBookId, libraryBookVersionId: lbv.id }
+  return { libraryId: library.id, libraryBookId: lbv.libraryBookId, libraryBookVersionId: lbv.id, kind: lbv.kind }
 }
 
 export async function setBookShelf(userId: string, bookId: string, shelfId: string | null) {

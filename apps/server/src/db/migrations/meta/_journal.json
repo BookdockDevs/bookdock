@@ -120,6 +120,20 @@
       "when": 1790422026518,
       "tag": "0017_idea_style",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790424308005,
+      "tag": "0018_library_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790433600000,
+      "tag": "0019_library_uniqueness",
+      "breakpoints": true
     }
   ]
 }

@@ -621,6 +621,11 @@ describe('text replacement migration', () => {
     // The ledger is untouched, so the next boot with matching code still works.
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
       .toEqual({ count: (before as { count: number }).count + 1 })
+    // 4.3 access control columns ride the same chain.
+    expect(sqlite.prepare('PRAGMA table_info(libraries)').all())
+      .toEqual(expect.arrayContaining([expect.objectContaining({ name: 'access_password_hash' })]))
+    expect(sqlite.prepare('PRAGMA table_info(book_versions)').all())
+      .toEqual(expect.arrayContaining([expect.objectContaining({ name: 'guest_readable' })]))
     sqlite.close()
   })
 
@@ -660,9 +665,9 @@ describe('text replacement migration', () => {
     expect(sqlite.prepare('SELECT replacement_id, enabled FROM text_replacement_overrides WHERE id = ?').get('o1'))
       .toEqual({ replacement_id: 'r1', enabled: 0 })
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
-      // Journal holds baseline + 0001..0013 + 0015..0017 (0014 was abandoned
+      // Journal holds baseline + 0001..0013 + 0015..0019 (0014 was abandoned
       // for the client-side repair); reconcile rewrites the ledger to match it.
-      .toEqual({ count: 17 })
+      .toEqual({ count: 19 })
 
     sqlite.close()
   })
