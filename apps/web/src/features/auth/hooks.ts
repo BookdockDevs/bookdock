@@ -136,3 +136,18 @@ export function useUpdateUser() {
     },
   })
 }
+
+/**
+ * Instance ownership transfer (4.9): the owner seat moves atomically, the
+ * former owner drops to a plain member. Role columns are never patched.
+ */
+export function useTransferInstanceOwnership() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (userId: string) => apiPost<{ data: { ownerUserId: string } }>('/users/instance-owner', { userId }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ADMIN_USERS_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+    },
+  })
+}

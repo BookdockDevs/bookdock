@@ -3,11 +3,11 @@ import { memo } from 'react'
 import type { BookListItem } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { cn } from '@/lib/utils'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 
-import BookCover from './BookCover'
+import { privateBookRow } from '../book-row'
+import BookCardShell from './BookCardShell'
 import { useContextMenu } from './use-context-menu'
 import { ContextMenuContent } from './BookContextMenu'
 import TrashInfo from './TrashInfo'
@@ -32,14 +32,16 @@ interface BookCardProps {
 const MENU_W = 184
 const MENU_H = 250
 
-const DEFAULT_CARD_FIELDS: GridCardField[] = ['title', 'author', 'progress']
-
+/**
+ * A book the reader owns. This is the shared card plus the things only a book
+ * someone owns can do: be pinned, be trashed and restored, be deleted, and open
+ * the context menu whose actions all address that ownership.
+ */
 const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, gridCardFields, coverText = true, readOnly = false, onToggleSelect, onDelete, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
   const trashCard = Boolean(onRestore && onPermanentDelete)
   const showMenu = !trashCard
-  const selectable = !!onToggleSelect
 
   function handleContextMenu(e: React.MouseEvent) {
     if (!showMenu) return
@@ -48,48 +50,22 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
     menu.openFromEvent(e)
   }
 
-  function handleClick(e: React.MouseEvent) {
-    if (!selectable) return
-    if (e.ctrlKey || e.metaKey || selectionActive) {
-      e.preventDefault()
-      e.stopPropagation()
-      onToggleSelect(book.id, e.shiftKey)
-    }
-  }
-
   function handleMenuClick(e: React.MouseEvent) {
     e.preventDefault()
     e.stopPropagation()
     menu.toggleFromButton()
   }
 
-  const activeFields = gridCardFields ?? (coverText ? DEFAULT_CARD_FIELDS : [])
-  const showTitle = activeFields.includes('title')
-  const showAuthor = activeFields.includes('author') && Boolean(book.author)
-  const showProgress = activeFields.includes('progress') && !trashCard && book.progress != null && book.progress > 0
-  const progressText = showProgress ? `${Math.min(100, Math.round(book.progress!))}%` : null
-  const hasSubtitle = showAuthor || Boolean(progressText)
-  const hasCardInfo = showTitle || hasSubtitle
-
   return (
-    <article
-      onClick={handleClick}
-      onContextMenu={handleContextMenu}
-      className={`group relative flex min-w-0 select-none flex-col gap-1.5 ${selectable ? 'cursor-pointer' : ''}`}
-    >
-      <div
-        className={cn(
-          'relative rounded-xl transition-all duration-200 ease-out',
-          selectionActive
-            ? ''
-            : 'group-hover:-translate-y-1.5 group-hover:shadow-xl group-hover:shadow-stone-900/15 dark:group-hover:shadow-black/50',
-        )}
-      >
-        <div className={cn('rounded-xl', trashCard && 'opacity-80 grayscale-[60%]')}>
-          <BookCover book={book} />
-        </div>
-        <div className="pointer-events-none absolute inset-0 rounded-xl ring-1 ring-inset ring-stone-900/10 dark:ring-white/10" />
-        {!selectionActive && book.pinnedAt && (
+    <>
+      <BookCardShell
+        row={privateBookRow(book)}
+        gridCardFields={gridCardFields}
+        coverText={coverText}
+        selected={selected}
+        selectionActive={selectionActive}
+        onToggleSelect={onToggleSelect}
+        pinAffordance={book.pinnedAt ? (
           <div className="absolute left-1.5 top-1.5 z-10 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
             <UnpinButton
               bookId={book.id}
@@ -98,106 +74,39 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
               <PinIcon size={12} />
             </UnpinButton>
           </div>
-        )}
-        {selected && (
-          <div className="pointer-events-none absolute inset-0 z-10 rounded-xl ring-2 ring-inset ring-stone-900 dark:ring-stone-100" />
-        )}
-        {selectable && selectionActive && (
-          <div
-            className={cn(
-              'absolute left-2.5 top-2.5 z-20 flex h-6 w-6 items-center justify-center rounded-full shadow-md transition-all',
-              selected
-                ? 'border-2 border-stone-900 bg-stone-900 text-white dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900'
-                : 'border-2 border-white/80 bg-black/30 backdrop-blur-xs group-hover:scale-105 group-hover:border-white group-hover:bg-black/50',
-            )}
-          >
-            {selected && (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            )}
-          </div>
-        )}
-        {showMenu && !selectionActive && (
-          <div className={`absolute right-1.5 top-1.5 z-10 transition-opacity duration-150 ${menu.open ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
-            <button
-              ref={menu.btnRef}
-              type="button"
-              onClick={handleMenuClick}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
-              aria-label={_('library.moreActions')}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="5" r="2" />
-                <circle cx="12" cy="12" r="2" />
-                <circle cx="12" cy="19" r="2" />
-              </svg>
-            </button>
-          </div>
-        )}
-        {trashCard && (
+        ) : undefined}
+        trashCard={trashCard}
+        onRestore={onRestore ? () => onRestore(book) : undefined}
+        onPermanentDelete={onPermanentDelete ? () => onPermanentDelete(book) : undefined}
+        onContextMenu={handleContextMenu}
+        coverOverlay={trashCard ? (
           <div className="pointer-events-none absolute right-1.5 top-1.5 z-10">
             <TrashInfo book={book} variant="pill" />
           </div>
-        )}
-        {trashCard && !selectionActive && (
-          <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2.5 rounded-b-xl bg-gradient-to-t from-black/75 via-black/45 to-transparent p-2.5 pt-8 opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
-            <button
-              type="button"
-              aria-label={_('library.restore')}
-              title={_('library.restore')}
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                onRestore?.(book)
-              }}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-stone-700 shadow-md backdrop-blur-sm transition-all hover:scale-105 hover:bg-white hover:text-emerald-600 active:scale-95 dark:bg-stone-800/95 dark:text-stone-200 dark:hover:bg-stone-700 dark:hover:text-emerald-400"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                <path d="M3 3v5h5" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              aria-label={_('library.permanentDelete')}
-              title={_('library.permanentDelete')}
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                onPermanentDelete?.(book)
-              }}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-stone-700 shadow-md backdrop-blur-sm transition-all hover:scale-105 hover:bg-red-500 hover:text-white active:scale-95 dark:bg-stone-800/95 dark:text-stone-200 dark:hover:bg-red-600 dark:hover:text-white"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
-                <path d="M10 11v6M14 11v6" />
-              </svg>
-            </button>
-          </div>
-        )}
-      </div>
-      {hasCardInfo && (
-        <div className="min-w-0 px-0.5">
-          {showTitle && (
-            <h3 className="truncate font-serif text-[13px] font-medium leading-snug text-stone-900 dark:text-stone-100">
-              {book.title}
-            </h3>
-          )}
-          {hasSubtitle && (
-            <p className="mt-0.5 flex items-center truncate text-xs text-stone-500 dark:text-stone-400">
-              {showAuthor && <span className="truncate">{book.author}</span>}
-              {showAuthor && progressText && <span className="mx-1 shrink-0 text-stone-300 dark:text-stone-600">·</span>}
-              {progressText && (
-                <span className="shrink-0 font-medium font-mono text-[11px] text-stone-500 dark:text-stone-400">
-                  {progressText}
-                </span>
-              )}
-            </p>
-          )}
-        </div>
-      )}
-
+        ) : undefined}
+        infoFooter={book.sourceUnavailable ? (
+          /* 7.7: a collected card whose source is gone says so here; the
+             reader is the authority, this just avoids a dead click. */
+          <p className="mt-0.5 truncate text-[11px] text-amber-600 dark:text-amber-400">
+            {_('library.sourceUnavailable')}
+          </p>
+        ) : undefined}
+        menu={showMenu ? (
+          <button
+            ref={menu.btnRef}
+            type="button"
+            onClick={handleMenuClick}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
+            aria-label={_('library.moreActions')}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="5" r="2" />
+              <circle cx="12" cy="12" r="2" />
+              <circle cx="12" cy="19" r="2" />
+            </svg>
+          </button>
+        ) : undefined}
+      />
       {showMenu && menu.open && (
         <SmartMenu
           triggerRef={menu.btnRef}
@@ -209,7 +118,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onDelete={onDelete} onClose={menu.close} />
         </SmartMenu>
       )}
-    </article>
+    </>
   )
 })
 

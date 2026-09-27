@@ -26,6 +26,12 @@ interface ViewMenuProps {
   format: string | null
   readStatus: string | null
   trash?: boolean
+  /**
+   * A shared library's catalog is the same list, minus the dimensions that only
+   * exist for books someone owns: per-user read status, progress and last-read
+   * sorting. Offering them there would be a filter the server cannot honour.
+   */
+  catalogMode?: boolean
   defaultTab?: 'sortFilter' | 'viewLayout'
 }
 
@@ -35,6 +41,14 @@ const SORT_FIELDS: { field: string; defaultOrder: 'asc' | 'desc'; labelKey: stri
   { field: 'lastReadAt', defaultOrder: 'desc', labelKey: 'library.sortBy.lastRead' },
   { field: 'createdAt', defaultOrder: 'desc', labelKey: 'library.sortBy.createdAt' },
   { field: 'progress', defaultOrder: 'desc', labelKey: 'library.sortBy.progress' },
+  { field: 'title', defaultOrder: 'asc', labelKey: 'library.sortBy.title' },
+  { field: 'author', defaultOrder: 'asc', labelKey: 'library.sortBy.author' },
+  { field: 'size', defaultOrder: 'desc', labelKey: 'library.sortBy.size' },
+]
+
+/** The same list without the two per-user keys; see catalogMode. */
+const CATALOG_SORT_FIELDS: { field: string; defaultOrder: 'asc' | 'desc'; labelKey: string }[] = [
+  { field: 'createdAt', defaultOrder: 'desc', labelKey: 'library.sortBy.createdAt' },
   { field: 'title', defaultOrder: 'asc', labelKey: 'library.sortBy.title' },
   { field: 'author', defaultOrder: 'asc', labelKey: 'library.sortBy.author' },
   { field: 'size', defaultOrder: 'desc', labelKey: 'library.sortBy.size' },
@@ -83,6 +97,7 @@ export default function ViewMenu({
   format,
   readStatus,
   trash = false,
+  catalogMode = false,
   defaultTab = 'sortFilter',
 }: ViewMenuProps) {
   const _ = useTranslation()
@@ -158,7 +173,6 @@ export default function ViewMenu({
   }, [open, isNarrow])
 
   const isFilterActive = Boolean(format) || Boolean(readStatus)
-
   function handleSort(field: string, defaultOrder: 'asc' | 'desc') {
     // Trash sorting is ephemeral: it must not overwrite the library-wide preference
     if (sortBy === field) {
@@ -171,7 +185,13 @@ export default function ViewMenu({
     }
   }
 
-  const sortFields = trash ? TRASH_SORT_FIELDS : SORT_FIELDS
+  const sortFields = trash ? TRASH_SORT_FIELDS : (catalogMode ? CATALOG_SORT_FIELDS : SORT_FIELDS)
+
+  // A shared library's row is a work: it has no reading state and no shelf, but
+  // it does have a date it was added. Offering only the columns a row can fill
+  // is what keeps this menu the same menu in both libraries.
+  const CATALOG_LIST_INFO: ListInfoItem[] = ['createdAt']
+  const availableListInfo = catalogMode ? CATALOG_LIST_INFO : LIST_INFO_ITEMS
 
   const viewOptions: { value: 'grid' | 'list'; label: string; icon: ReactNode }[] = [
     {
@@ -336,31 +356,33 @@ export default function ViewMenu({
                   </div>
 
                   {/* Read Status Filter */}
-                  <div>
-                    <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
-                      {_('library.readStatusLabel')}
+                  {!catalogMode && (
+                    <div>
+                      <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
+                        {_('library.readStatusLabel')}
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {(['', 'wishlist', 'reading', 'finished', 'idle', 'abandoned'] as const).map((s) => {
+                          const active = (readStatus ?? '') === s
+                          return (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => navSearch({ status: s === '' ? undefined : (s as ReadStatus) })}
+                              className={cn(
+                                'flex h-7 items-center justify-center rounded-lg text-xs font-medium transition-all',
+                                active
+                                  ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
+                                  : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
+                              )}
+                            >
+                              {s === '' ? _('library.readStatusAll') : _(STATUS_FILTER_KEYS[s])}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {(['', 'wishlist', 'reading', 'finished', 'idle', 'abandoned'] as const).map((s) => {
-                        const active = (readStatus ?? '') === s
-                        return (
-                          <button
-                            key={s}
-                            type="button"
-                            onClick={() => navSearch({ status: s === '' ? undefined : (s as ReadStatus) })}
-                            className={cn(
-                              'flex h-7 items-center justify-center rounded-lg text-xs font-medium transition-all',
-                              active
-                                ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
-                                : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
-                            )}
-                          >
-                            {s === '' ? _('library.readStatusAll') : _(STATUS_FILTER_KEYS[s])}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
+                  )}
                 </>
               )}
             </div>
@@ -491,7 +513,7 @@ export default function ViewMenu({
                   </div>
 
                   {/* Card Info Fields */}
-                  {!trash && (
+                  {!trash && !catalogMode && (
                     <div className="mb-1">
                       <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
                         {_('library.gridCardFields')}
@@ -530,38 +552,40 @@ export default function ViewMenu({
 
               {view === 'list' && !trash && (
                 <>
-                  <div className="mb-3">
-                    <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
-                      {_('library.listInfo')}
-                    </div>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {LIST_INFO_ITEMS.map((item) => {
-                        const active = listInfoItems.includes(item)
-                        return (
-                          <button
-                            key={item}
-                            type="button"
-                            aria-pressed={active}
-                            onClick={() =>
-                              setListInfoItems(
+                  {(!catalogMode || availableListInfo.length > 0) && (
+                    <div className="mb-3">
+                      <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
+                        {_('library.listInfo')}
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {availableListInfo.map((item) => {
+                          const active = listInfoItems.includes(item)
+                          return (
+                            <button
+                              key={item}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() =>
+                                setListInfoItems(
+                                  active
+                                    ? listInfoItems.filter((v) => v !== item)
+                                    : [...listInfoItems, item],
+                                )
+                              }
+                              className={cn(
+                                'flex h-7 items-center justify-center rounded-lg text-xs font-medium transition-all whitespace-nowrap',
                                 active
-                                  ? listInfoItems.filter((v) => v !== item)
-                                  : [...listInfoItems, item],
-                              )
-                            }
-                            className={cn(
-                              'flex h-7 items-center justify-center rounded-lg text-xs font-medium transition-all whitespace-nowrap',
-                              active
-                                ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
-                                : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
-                            )}
-                          >
-                            {_(LIST_INFO_LABEL_KEYS[item])}
-                          </button>
-                        )
-                      })}
+                                  ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
+                                  : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
+                              )}
+                            >
+                              {_(LIST_INFO_LABEL_KEYS[item])}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   <div className="mb-1">
                     <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">

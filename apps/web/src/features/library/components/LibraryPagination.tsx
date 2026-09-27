@@ -172,7 +172,7 @@ export default function LibraryPagination({
               className="h-7 w-12 rounded-lg border border-stone-300 bg-stone-100 px-1 text-center font-mono text-xs font-semibold text-stone-900 outline-none focus:border-stone-900 focus:bg-white focus:ring-1 focus:ring-stone-900 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:focus:border-stone-100 dark:focus:ring-stone-100"
             />
             <span className="font-medium text-stone-400 dark:text-stone-500">
-              / {totalPages} 页
+              {_('library.pageCount', { total: totalPages })}
             </span>
             <div className="flex items-center gap-1 pl-1">
               <button

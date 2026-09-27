@@ -5,7 +5,7 @@ import type { AdminUserRes, UpdateUserReq } from '@bookdock/shared'
 
 import { cn } from '@/lib/utils'
 import SmartMenu from '@/components/ui/SmartMenu'
-import { useAdminUsers, useUpdateUser } from '@/features/auth/hooks'
+import { useAdminUsers, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
@@ -40,7 +40,9 @@ export default function UserManagementSection() {
   const currentUser = useAuthStore((s) => s.user)
   const { data: usersData, isError, isFetching, isLoading, refetch } = useAdminUsers()
   const updateUser = useUpdateUser()
+  const transferOwnership = useTransferInstanceOwnership()
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
+  const [transferTarget, setTransferTarget] = useState<AdminUserRes | null>(null)
   const [resetTarget, setResetTarget] = useState<AdminUserRes | null>(null)
 
   const users = usersData?.data ?? []
@@ -96,6 +98,7 @@ export default function UserManagementSection() {
                     user={user}
                     isSelf={user.id === currentUser?.id}
                     onAction={setPendingAction}
+                    onTransfer={setTransferTarget}
                     onResetPassword={setResetTarget}
                   />
                 ))}
@@ -120,6 +123,23 @@ export default function UserManagementSection() {
         />
       )}
 
+      {transferTarget && (
+        <ConfirmDialog
+          title={_('admin.transferOwner')}
+          message={_('admin.transferOwnerConfirm', { name: transferTarget.username })}
+          confirmLabel={_('admin.transferOwner')}
+          onClose={() => setTransferTarget(null)}
+          onConfirm={() => {
+            const target = transferTarget
+            setTransferTarget(null)
+            transferOwnership.mutate(target.id, {
+              onSuccess: () => notify.success(_('admin.transferOwnerSuccess', { name: target.username })),
+              onError: (err) => notify.error(getUserErrorNotification(err, 'admin.transferOwnerFailed')),
+            })
+          }}
+        />
+      )}
+
       <ResetPasswordDialog
         user={resetTarget}
         onClose={() => setResetTarget(null)}
@@ -133,10 +153,11 @@ export default function UserManagementSection() {
   )
 }
 
-function UserRow({ user, isSelf, onAction, onResetPassword }: {
+function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword }: {
   user: AdminUserRes
   isSelf: boolean
   onAction: (action: PendingAction) => void
+  onTransfer: (user: AdminUserRes) => void
   onResetPassword: (user: AdminUserRes) => void
 }) {
   const _ = useTranslation()
@@ -180,24 +201,16 @@ function UserRow({ user, isSelf, onAction, onResetPassword }: {
           </svg>
         </button>
         <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(176, isSelf ? 64 : 148)} onClose={menu.close}>
-          {!isSelf && user.role !== 'guest' && (
+          {!isSelf && user.role === 'member' && !user.disabled && (
             <button
               type="button"
               onClick={() => {
                 menu.close()
-                const toOwner = user.role !== 'owner'
-                onAction({
-                  user,
-                  req: { role: toOwner ? 'owner' : 'member' },
-                  title: toOwner ? _('admin.makeOwner') : _('admin.makeMember'),
-                  message: toOwner
-                    ? _('admin.makeOwnerConfirm', { name: user.username })
-                    : _('admin.makeMemberConfirm', { name: user.username }),
-                })
+                onTransfer(user)
               }}
               className={menuItemClass}
             >
-              {user.role === 'owner' ? _('admin.makeMember') : _('admin.makeOwner')}
+              {_('admin.transferOwner')}
             </button>
           )}
           {!isSelf && (

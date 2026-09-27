@@ -17,6 +17,7 @@ const apiUpload = vi.fn()
 const createShelfMutate = vi.fn()
 const createTagMutate = vi.fn()
 const updateBookMutate = vi.fn()
+const collectBookMutate = vi.fn()
 const navigateMock = vi.fn()
 
 vi.mock('@/api/client', () => ({
@@ -60,6 +61,7 @@ vi.mock('../features/library/hooks', () => ({
   useUploadCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRemoveCover: () => ({ mutate: vi.fn(), isPending: false }),
   useResetMetadata: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCollectBook: () => ({ mutate: collectBookMutate, isPending: false }),
 }))
 
 const book: BookListItem = {

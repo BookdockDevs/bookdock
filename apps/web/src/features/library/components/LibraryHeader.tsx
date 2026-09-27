@@ -28,9 +28,11 @@ interface LibraryHeaderProps {
   title?: string
   bookCount?: number
   onResetMetadataFilter?: () => void
+  /** A shared library's list; see ViewMenu's catalogMode. */
+  catalogMode?: boolean
 }
 
-export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter, catalogMode = false }: LibraryHeaderProps) {
   const _ = useTranslation()
   const [searchInput, setSearchInput] = useState(query)
 
@@ -146,6 +148,7 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
             format={format}
             readStatus={readStatus}
             trash={trash}
+            catalogMode={catalogMode}
           />
 
           {trash ? (

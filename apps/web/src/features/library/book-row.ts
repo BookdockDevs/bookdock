@@ -1,0 +1,85 @@
+import type { BookFormat, BookListItem, CatalogBook } from '@bookdock/shared'
+
+import type { CoverSource } from './components/BookCover'
+
+/**
+ * One row shape for every library's book list.
+ *
+ * A private library's row is a book; a shared library's row is a work with the
+ * versions it manages. The two arrive as different types, but a card only needs
+ * a title, an author, some artwork and - when the row belongs to someone - a
+ * progress figure. Normalising here is what lets one card component decide what
+ * to draw, instead of each row component hard-coding its own idea of which
+ * fields exist.
+ *
+ * A missing field is not rendered; it is never faked. That is the whole point:
+ * a catalog work has no progress because it belongs to nobody, and the card
+ * shows no progress for the same reason it would show none for a book at 0%.
+ */
+export interface BookRow {
+  id: string
+  title: string
+  author: string | null
+  format: BookFormat
+  /**
+   * Explicit artwork URL. Undefined means "ask the cover endpoint for this
+   * row's own id", which is what a private book does; null means "there is
+   * nothing to fetch", which is what a work with no version has.
+   */
+  coverSrc?: string | null
+  coverKey: string | null
+  /** Reading progress, 0-100. Null on a row nobody owns. */
+  progress: number | null
+  createdAt: number
+  updatedAt: number
+  size: number
+}
+
+/** What the card component needs to draw artwork, in either row's terms. */
+export function rowCover(row: BookRow): CoverSource {
+  return {
+    id: row.id,
+    title: row.title,
+    format: row.format,
+    coverKey: row.coverKey,
+  }
+}
+
+export function privateBookRow(book: BookListItem): BookRow {
+  return {
+    id: book.id,
+    title: book.title,
+    author: book.author ?? null,
+    format: book.format,
+    coverSrc: undefined,
+    coverKey: book.coverKey ?? null,
+    progress: book.progress ?? null,
+    createdAt: book.createdAt,
+    updatedAt: book.updatedAt,
+    size: book.size,
+  }
+}
+
+/**
+ * A work's artwork comes from its first version, and the cover endpoint
+ * authorizes through the shared read verdict - so the URL a private card builds
+ * is the URL this builds. A work with several versions is represented by the
+ * first one, which is the same order the catalog lists versions in.
+ */
+export function catalogWorkRow(work: CatalogBook): BookRow {
+  const first = work.versions[0]
+  return {
+    id: work.id,
+    title: work.title,
+    author: work.author ?? null,
+    format: first?.format ?? 'epub',
+    coverSrc: first ? `/api/v1/books/${first.bookVersionId}/cover?size=thumb` : null,
+    coverKey: work.coverKey ?? null,
+    // A work belongs to nobody, so there is no progress to show - and none is
+    // invented, exactly as a private book at 0% shows none.
+    progress: null,
+    createdAt: work.createdAt,
+    updatedAt: work.updatedAt,
+    size: first?.size ?? 0,
+  }
+}

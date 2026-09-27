@@ -10,7 +10,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
-import { useShelves, useTags } from '../hooks'
+import { useLibraryCategories, useLibraryTags, useShelves, useTags } from '../hooks'
 
 interface SelectionBarProps {
   selectedIds: string[]
@@ -18,6 +18,13 @@ interface SelectionBarProps {
   onComplete?: () => void
   trash?: boolean
   elevated?: boolean
+  /**
+   * The shared library whose works are selected, or undefined for the reader's
+   * own library. A work can be filed and tagged - that is the same operation a
+   * book can - so the bar is the same bar with the same classify action; what it
+   * cannot offer is everything that needs the reader to own the row.
+   */
+  libraryId?: string
 }
 
 const BATCH_STATUS_ACTIONS: { value: ReadStatus; labelKey: string }[] = [
@@ -28,9 +35,13 @@ const BATCH_STATUS_ACTIONS: { value: ReadStatus; labelKey: string }[] = [
   { value: 'abandoned', labelKey: 'library.markAbandoned' },
 ]
 
-export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, trash = false, elevated = false }: SelectionBarProps) {
+export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, trash = false, elevated = false, libraryId }: SelectionBarProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
+  // Trash is a private-library state. The caller already forces it off in a
+  // shared library, but a stale prop must never flip this bar into offering
+  // restore/permanent-delete for work ids against private endpoints.
+  const effectiveTrash = trash && !libraryId
   const [dialog, setDialog] = useState<'classify' | 'delete' | 'permanent' | null>(null)
   const [marking, setMarking] = useState(false)
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -52,7 +63,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
     const observer = new ResizeObserver(updateScrollState)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [updateScrollState, selectedIds.length, trash])
+  }, [updateScrollState, selectedIds.length, effectiveTrash])
 
   async function runBatch(
     action: (bookId: string) => Promise<unknown>,
@@ -143,7 +154,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
             <span className="mr-1 whitespace-nowrap text-xs font-medium text-stone-600 dark:text-stone-300">
               {_('library.selectionCount', { count: selectedIds.length })}
             </span>
-          {trash ? (
+          {effectiveTrash ? (
             <>
               <Button className="shrink-0 whitespace-nowrap" variant="secondary" size="sm" disabled={marking} onClick={() => void handleBatchRestore()}>
                 {_('library.restore')}
@@ -154,7 +165,9 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
             </>
           ) : (
             <>
-              {BATCH_STATUS_ACTIONS.map((action) => (
+              {/* Read status belongs to books someone owns, so a shared
+                  library's selection offers only what a work can answer. */}
+              {!libraryId && BATCH_STATUS_ACTIONS.map((action) => (
                 <Button
                   key={action.value}
                   className="shrink-0 whitespace-nowrap"
@@ -166,13 +179,15 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
                   {_(action.labelKey)}
                 </Button>
               ))}
-              <span className="mx-1 h-4 w-px shrink-0 bg-stone-200 dark:bg-stone-700" />
+              {!libraryId && <span className="mx-1 h-4 w-px shrink-0 bg-stone-200 dark:bg-stone-700" />}
               <Button className="shrink-0 whitespace-nowrap" variant="secondary" size="sm" onClick={() => setDialog('classify')}>
                 {_('library.batchClassify')}
               </Button>
-              <Button className="shrink-0 whitespace-nowrap" variant="danger" size="sm" onClick={() => setDialog('delete')}>
-                {_('library.batchDelete')}
-              </Button>
+              {!libraryId && (
+                <Button className="shrink-0 whitespace-nowrap" variant="danger" size="sm" onClick={() => setDialog('delete')}>
+                  {_('library.batchDelete')}
+                </Button>
+              )}
             </>
           )}
           <button
@@ -192,6 +207,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
       {dialog === 'classify' && (
         <BatchClassifyDialog
           ids={selectedIds}
+          libraryId={libraryId}
           onClose={() => setDialog(null)}
           onDone={onComplete}
         />
@@ -216,32 +232,51 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
   )
 }
 
-function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose: () => void; onDone: () => void }) {
+/**
+ * Filing a selection under a category and a set of tags. One dialog for both
+ * libraries: a private library's shelf is a shared library's category, the rows
+ * are the same shape, and the work is the same - what changes is which list is
+ * read and which endpoint each row is written to.
+ */
+function BatchClassifyDialog({ ids, libraryId, onClose, onDone }: { ids: string[]; libraryId?: string; onClose: () => void; onDone: () => void }) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()
+  const { data: libraryCategories } = useLibraryCategories(libraryId ?? null)
+  const { data: libraryTags } = useLibraryTags(libraryId ?? null)
   const [activeTab, setActiveTab] = useState<'shelves' | 'tags'>('shelves')
   // undefined = untouched (no shelf PUT), null = move out of shelf (uncategorized)
   const [selectedShelf, setSelectedShelf] = useState<string | null | undefined>(undefined)
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
 
-  const shelves = shelvesData?.data ?? []
-  const tags = tagsData?.data ?? []
+  const shelves = libraryId ? (libraryCategories?.data ?? []) : (shelvesData?.data ?? [])
+  const tags = libraryId ? (libraryTags?.data ?? []) : (tagsData?.data ?? [])
 
   async function handleApply() {
     const tagIds = Array.from(selectedTags)
-    const results = await Promise.allSettled(ids.map((bookId) =>
-      Promise.all([
-        selectedShelf !== undefined ? apiPut(`/books/${bookId}/shelves`, { shelfId: selectedShelf }) : Promise.resolve(),
-        tagIds.length > 0 ? apiPut(`/books/${bookId}/tags`, { tagIds }) : Promise.resolve(),
-      ]),
+    const results = await Promise.allSettled(ids.map((id) =>
+      libraryId
+        ? apiPatch(`/libraries/${libraryId}/books/${id}`, {
+          ...(selectedShelf !== undefined ? { categoryId: selectedShelf } : {}),
+          ...(tagIds.length > 0 ? { tagIds } : {}),
+        })
+        : Promise.all([
+          selectedShelf !== undefined ? apiPut(`/books/${id}/shelves`, { shelfId: selectedShelf }) : Promise.resolve(),
+          tagIds.length > 0 ? apiPut(`/books/${id}/tags`, { tagIds }) : Promise.resolve(),
+        ]),
     ))
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
-    void queryClient.invalidateQueries({ queryKey: ['books'] })
-    void queryClient.invalidateQueries({ queryKey: ['shelves'] })
-    void queryClient.invalidateQueries({ queryKey: ['tags'] })
+    if (libraryId) {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
+    } else {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['shelves'] })
+      void queryClient.invalidateQueries({ queryKey: ['tags'] })
+    }
     if (failed === 0) {
       notify.success({ key: 'library.batchClassifySucceeded', params: { count: succeeded } })
     } else {
@@ -279,7 +314,7 @@ function BatchClassifyDialog({ ids, onClose, onDone }: { ids: string[]; onClose:
                 : 'text-stone-500 hover:text-stone-900 dark:hover:text-stone-200',
             )}
           >
-            {_('library.shelves')}
+            {_(libraryId ? 'library.categories' : 'library.shelves')}
           </button>
           <button
             type="button"

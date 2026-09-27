@@ -26,6 +26,16 @@ vi.mock('../features/library/hooks', () => ({
   useRenameTag: vi.fn(),
   useDeleteTag: vi.fn(),
   useToggleTagPin: vi.fn(),
+  useLibraryCategories: vi.fn(),
+  useLibraryTags: vi.fn(),
+  useLibraryCatalog: vi.fn(),
+  useLibraryRelation: vi.fn(),
+  useCreateLibraryCategory: vi.fn(),
+  useUpdateLibraryCategory: vi.fn(),
+  useDeleteLibraryCategory: vi.fn(),
+  useCreateLibraryTag: vi.fn(),
+  useUpdateLibraryTag: vi.fn(),
+  useDeleteLibraryTag: vi.fn(),
 }))
 
 vi.mock('@/features/auth/AccountMenu', () => ({
@@ -58,6 +68,51 @@ function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1, trashEnabl
   ;(libraryHooks.useRenameTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useDeleteTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
   ;(libraryHooks.useToggleTagPin as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
+  ;(libraryHooks.useUpdateLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
+  ;(libraryHooks.useDeleteLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+  ;(libraryHooks.useUpdateLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
+  ;(libraryHooks.useDeleteLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+  // Inert library context: these tests are about the private library, and the
+  // sidebar still calls the shared-library hooks on every render.
+  mockLibraryHooks()
+}
+
+/**
+ * The sidebar shows one taxonomy, read from whichever library is in context:
+ * a private one lists shelves and tags, a shared one lists its categories and
+ * tags. Only the endpoint changes, so these tests cover both through the same
+ * row assertions.
+ */
+function mockLibraryHooks({
+  categories = [],
+  tags = [],
+  relation = 'owner',
+  uncategorizedTotal = 0,
+}: {
+  categories?: ShelfItemData[]
+  tags?: TagItemData[]
+  relation?: string
+  uncategorizedTotal?: number
+} = {}) {
+  ;(libraryHooks.useLibraryCategories as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: { data: categories },
+    isLoading: false,
+  })
+  ;(libraryHooks.useLibraryTags as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: { data: tags },
+    isLoading: false,
+  })
+  ;(libraryHooks.useLibraryRelation as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: { data: { relation } },
+  })
+  ;(libraryHooks.useLibraryCatalog as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: { data: { items: [], total: uncategorizedTotal } },
+    isLoading: false,
+  })
+  // The name dialogs mount with the sidebar (closed), so their mutations are
+  // called on every render even in a private-library test.
+  ;(libraryHooks.useCreateLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
+  ;(libraryHooks.useCreateLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
 }
 
 describe('LibrarySidebar', () => {
@@ -309,5 +364,221 @@ describe('LibrarySidebar', () => {
 
     const badge = screen.getByText('5')
     expect(badge).toHaveClass('rounded-full', 'dark:bg-stone-700/60', 'dark:text-stone-200')
+  })
+
+  // 0.4.0: a shared library is not a second sidebar. The rows below the library
+  // switcher are the same rows, reading the library in context.
+  describe('shared library context', () => {
+    it('lists the library categories under a 分类 heading instead of the private shelves', () => {
+      mockHooks({ shelves: [{ id: 'shelf-1', name: 'PrivateShelf', bookCount: 2 }] })
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }] })
+
+      render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+
+      expect(screen.getByText('分类')).toBeInTheDocument()
+      expect(screen.queryByText('书架')).toBeNull()
+      expect(screen.getByText('Sci-Fi')).toBeInTheDocument()
+      // The private shelf must not leak into another library's taxonomy.
+      expect(screen.queryByText('PrivateShelf')).toBeNull()
+    })
+
+    it('filters a shared library by one of its categories through the same navigation', () => {
+      mockHooks()
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }] })
+
+      render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+      fireEvent.click(screen.getByText('Sci-Fi'))
+
+      expect(navSearch).toHaveBeenCalledWith({ shelf: 'cat-1', tag: undefined, status: undefined, trash: undefined })
+    })
+
+    it('offers the uncategorized entry for works filed under no category', () => {
+      mockHooks({ uncategorizedTotal: 0 })
+      mockLibraryHooks({ uncategorizedTotal: 7 })
+
+      render(<LibrarySidebar navSearch={navSearch} shelfId="none" tagId={null} trash={false} activeLibraryId="lib-1" />)
+
+      expect(screen.getByText('未分类')).toBeInTheDocument()
+      expect(screen.getByText('7')).toBeInTheDocument()
+    })
+
+    it('lets an owner curate the taxonomy but not a plain member', () => {
+      mockHooks()
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }], relation: 'member' })
+
+      const { unmount } = render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+      expect(screen.queryByTitle('新建分类')).toBeNull()
+      expect(screen.getByText('Sci-Fi')).toBeInTheDocument()
+      unmount()
+
+      mockHooks()
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }], relation: 'owner' })
+      render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+      expect(screen.getByTitle('新建分类')).toBeInTheDocument()
+    })
+
+    it('renames a category through the shared-library endpoint', () => {
+      mockHooks()
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }] })
+      const mutate = vi.fn()
+      ;(libraryHooks.useUpdateLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutate, isPending: false })
+
+      render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+      fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+      fireEvent.click(screen.getByText('重命名'))
+      fireEvent.change(screen.getByPlaceholderText('分类名称'), { target: { value: '科幻' } })
+      fireEvent.click(screen.getAllByRole('button', { name: '保存' })[0])
+
+      expect(mutate).toHaveBeenCalledWith(
+        expect.objectContaining({ libraryId: 'lib-1', categoryId: 'cat-1', patch: { name: '科幻' } }),
+        expect.anything(),
+      )
+    })
+
+    it('creates a category through the shared-library endpoint', () => {
+      mockHooks()
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }] })
+      const createCategory = vi.fn()
+      ;(libraryHooks.useCreateLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: createCategory, isPending: false })
+
+      render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+      fireEvent.click(screen.getByTitle('新建分类'))
+      // Names are trimmed before they are sent.
+      fireEvent.change(screen.getByPlaceholderText('分类名称'), { target: { value: '  Poetry  ' } })
+      fireEvent.click(screen.getAllByRole('button', { name: '创建' })[0])
+
+      expect(createCategory).toHaveBeenCalledWith({ libraryId: 'lib-1', name: 'Poetry' }, expect.anything())
+    })
+
+    it('creates a tag through the shared-library endpoint', () => {
+      mockHooks()
+      mockLibraryHooks({ tags: [{ id: 'tag-1', name: 'Award', bookCount: 2 }] })
+      const createTag = vi.fn()
+      ;(libraryHooks.useCreateLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: createTag, isPending: false })
+
+      render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+      fireEvent.click(screen.getByTitle('新建标签'))
+      fireEvent.change(screen.getByPlaceholderText('标签名称'), { target: { value: '  Prize  ' } })
+      fireEvent.click(screen.getAllByRole('button', { name: '创建' })[0])
+
+      expect(createTag).toHaveBeenCalledWith({ libraryId: 'lib-1', name: 'Prize' }, expect.anything())
+    })
+
+    it('says what happens to the works filed under a deleted category', () => {
+      mockHooks()
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }] })
+      const mutateAsync = vi.fn().mockResolvedValue({})
+      ;(libraryHooks.useDeleteLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
+
+      render(<LibrarySidebar navSearch={navSearch} shelfId="cat-1" tagId={null} trash={false} activeLibraryId="lib-1" />)
+      fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+      fireEvent.click(screen.getByText('删除'))
+
+      expect(screen.getByText(/回到未分类/)).toBeInTheDocument()
+      fireEvent.click(screen.getAllByRole('button', { name: '删除' }).at(-1)!)
+      expect(mutateAsync).toHaveBeenCalledWith({ libraryId: 'lib-1', categoryId: 'cat-1' })
+      // Deleting the category being viewed is a dead end, so leave the filter.
+      expect(navSearch).toHaveBeenCalledWith({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
+    })
+
+    it('hides the trash, which is a private-library concept', () => {
+      mockHooks({ trashEnabled: true })
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 1 }] })
+
+      render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+
+      expect(screen.queryByText('回收站')).toBeNull()
+    })
+
+    it('leaves a shared library in one navigation so the private row can get back', () => {
+      mockHooks()
+      const onSelectLibrary = vi.fn()
+      render(
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[
+            { id: 'p1', type: 'private', ownerUserId: 'u1', name: '个人书库', description: '', visibility: null, createdAt: 1, updatedAt: 1, relation: 'owner' },
+            { id: 'lib-1', type: 'shared', ownerUserId: 'u2', name: 'City', description: '', visibility: 'public', createdAt: 1, updatedAt: 1, relation: 'owner' },
+          ]}
+          activeLibraryId="lib-1"
+          onSelectLibrary={onSelectLibrary}
+        />,
+      )
+
+      fireEvent.click(screen.getByText('个人书库'))
+
+      // Two navigations here used to race, and the second - built from the URL
+      // state the first had not replaced yet - put the library id back, so the
+      // reader could never leave the library.
+      expect(onSelectLibrary).toHaveBeenCalledTimes(1)
+      expect(onSelectLibrary).toHaveBeenCalledWith(null)
+    })
+
+    it('offers join on a public library the reader has not joined, and manage otherwise', () => {
+      mockHooks()
+      const onJoinLibrary = vi.fn()
+      const onManageLibrary = vi.fn()
+      const row = (relation: string, name: string) => ({
+        id: `lib-${name}`, type: 'shared' as const, ownerUserId: 'u2', name, description: '',
+        visibility: 'public' as const, createdAt: 1, updatedAt: 1, relation,
+      })
+      const { unmount } = render(
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[row('non-member', 'Open'), row('owner', 'Mine')]}
+          onJoinLibrary={onJoinLibrary}
+          onManageLibrary={onManageLibrary}
+        />,
+      )
+
+      // A reader outside the library can only be let in.
+      fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+      expect(screen.queryByText('管理')).toBeNull()
+      fireEvent.click(screen.getByText('加入书库'))
+      expect(onJoinLibrary).toHaveBeenCalledWith(expect.objectContaining({ id: 'lib-Open' }))
+      unmount()
+
+      render(
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[row('non-member', 'Open'), row('owner', 'Mine')]}
+          onJoinLibrary={onJoinLibrary}
+          onManageLibrary={onManageLibrary}
+        />,
+      )
+      // A member is already in and has no settings, so the row offers neither.
+      fireEvent.click(screen.getAllByLabelText('更多操作')[1])
+      expect(screen.queryByText('加入书库')).toBeNull()
+      fireEvent.click(screen.getByText('管理'))
+      expect(onManageLibrary).toHaveBeenCalledWith(expect.objectContaining({ id: 'lib-Mine' }))
+    })
+
+    it('shows a library row\'s identity even when it has nothing to act on', () => {
+      mockHooks()
+      render(
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[
+            { id: 'lib-x', type: 'shared', ownerUserId: 'u2', name: 'Closed', description: '', visibility: 'private', createdAt: 1, updatedAt: 1, relation: 'member' },
+          ]}
+        />,
+      )
+      fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+      expect(screen.getByText('私密')).toBeInTheDocument()
+      expect(screen.queryByText('加入书库')).toBeNull()
+      expect(screen.queryByText('管理')).toBeNull()
+    })
   })
 })

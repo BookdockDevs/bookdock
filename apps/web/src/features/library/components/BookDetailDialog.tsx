@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import type { BookListItem } from '@bookdock/shared'
+import type { BookListItem, CatalogBook, Library } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
@@ -22,15 +22,23 @@ import BookDetailView from './book-detail/BookDetailView'
 import BookMetaForm from './book-detail/BookMetaForm'
 import { draftFrom, draftToBookmeta, type MetaDraft } from './book-detail/types'
 import TocRulePicker from './TocRulePicker'
+import WorkDetailBody from './WorkDetailBody'
 
 interface BookDetailDialogProps {
   book: BookListItem | null
+  /**
+   * A work in a shared library, shown in this same dialog. The design puts a
+   * library's versions in its detail (library-design-v1.md §6), so the detail is
+   * where a reader picks one to read - not a panel folded into the list row.
+   * Only one of `book` and `work` is ever set.
+   */
+  work?: { work: CatalogBook; library: Library; canManage: boolean; canCollect: boolean; moveCandidates: CatalogBook[] } | null
   readOnly?: boolean
   onClose: () => void
   onDelete: (book: BookListItem) => void
 }
 
-export default function BookDetailDialog({ book, readOnly = false, onClose, onDelete }: BookDetailDialogProps) {
+export default function BookDetailDialog({ book, work = null, readOnly = false, onClose, onDelete }: BookDetailDialogProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
 
@@ -198,11 +206,35 @@ export default function BookDetailDialog({ book, readOnly = false, onClose, onDe
     setCoverRemovalPending(false)
   }
 
+  if (work) {
+    return (
+      <Modal title={work.work.title} onClose={closeDialog} closeLabel={_('library.close')} size="wide">
+        <WorkDetailBody
+          work={work.work}
+          library={work.library}
+          canManage={work.canManage}
+          canCollect={work.canCollect}
+          moveCandidates={work.moveCandidates}
+        />
+      </Modal>
+    )
+  }
+
   if (!book) return null
 
   const currentShelfId =
     memShelves.data?.data !== undefined ? memShelves.data.data : (book.shelfId ?? null)
   const tagIds = memTags.data?.data ? new Set(memTags.data.data) : null
+  // 7.x: a collected B keeps its own metadata editable, but its content belongs
+  // to the library �?appending, re-chaptering and resetting derived metadata
+  // would rewrite the city's revision, so the server refuses them too. `source`
+  // is the right test for that: it is set for a B and for a library read, and
+  // absent for A/C.
+  // 0.4.0: a library version read *without* collecting it has no private card,
+  // so every private-library affordance (edit, delete, shelf, tags) is hidden
+  // and the view offers the collect action instead.
+  const isLibraryOwned = Boolean(displayBook.source)
+  const isLibraryRead = displayBook.collected === false
   const shelfName = currentShelfId
     ? (shelvesData?.data ?? []).find((s) => s.id === currentShelfId)?.name ?? book.shelfName ?? undefined
     : undefined
@@ -227,7 +259,7 @@ export default function BookDetailDialog({ book, readOnly = false, onClose, onDe
         closeLabel={_('library.close')}
         size="xl"
         actions={
-          !readOnly && displayBook.format === 'txt' ? (
+          !readOnly && !isLibraryOwned && displayBook.format === 'txt' ? (
             <div ref={moreAnchorRef} className="relative">
               <button
                 type="button"
@@ -303,17 +335,19 @@ export default function BookDetailDialog({ book, readOnly = false, onClose, onDe
                   </button>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => setConfirmReset(true)}
-                  className="inline-flex items-center gap-1.5 text-xs text-stone-400 transition-colors hover:text-stone-700 dark:hover:text-stone-200"
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-70">
-                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                    <path d="M3 3v5h5" />
-                  </svg>
-                  <span>{_('library.resetMetadata')}</span>
-                </button>
+                !isLibraryOwned && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmReset(true)}
+                    className="inline-flex items-center gap-1.5 text-xs text-stone-400 transition-colors hover:text-stone-700 dark:hover:text-stone-200"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-70">
+                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                      <path d="M3 3v5h5" />
+                    </svg>
+                    <span>{_('library.resetMetadata')}</span>
+                  </button>
+                )
               )}
               <div className="flex shrink-0 items-center gap-2">
                 <Button variant="secondary" onClick={discardEdit} disabled={saving}>
@@ -362,7 +396,9 @@ export default function BookDetailDialog({ book, readOnly = false, onClose, onDe
           ) : (
             <BookDetailView
               book={displayBook}
-              readOnly={readOnly}
+              // A library read has no private card, so everything private-only
+              // (edit, delete, shelf, tags) is read-only until it is collected.
+              readOnly={readOnly || isLibraryRead}
               detail={detail}
               shelfName={shelfName}
               currentShelfId={currentShelfId}
@@ -374,7 +410,7 @@ export default function BookDetailDialog({ book, readOnly = false, onClose, onDe
             />
           )}
 
-          {!readOnly && displayBook.format === 'txt' && tocRuleOpen && (
+          {!readOnly && !isLibraryOwned && displayBook.format === 'txt' && tocRuleOpen && (
             <TocRulePicker
               bookId={book.id}
               currentRuleId={detail?.meta?.tocRuleId}
@@ -386,7 +422,7 @@ export default function BookDetailDialog({ book, readOnly = false, onClose, onDe
             />
         )}
       </Modal>
-      {!readOnly && appendContentOpen && <AppendContentModal bookId={book.id} onClose={() => setAppendContentOpen(false)} />}
+      {!readOnly && !isLibraryOwned && appendContentOpen && <AppendContentModal bookId={book.id} onClose={() => setAppendContentOpen(false)} />}
     </>
   )
 }

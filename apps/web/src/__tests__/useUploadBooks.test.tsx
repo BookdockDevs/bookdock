@@ -18,10 +18,24 @@ class FakeXHR {
   status = 200
   responseText = '{}'
   upload = { addEventListener: vi.fn() }
+  /** What the queue actually asked the server for. */
+  method = ''
+  url = ''
+  fields: Record<string, string> = {}
+  files: File[] = []
   private listeners = new Map<string, (() => void)[]>()
 
-  open() {}
-  send() {
+  open(method: string, url: string) {
+    this.method = method
+    this.url = url
+  }
+  send(body: FormData) {
+    this.fields = Object.fromEntries(Array.from(body.entries())
+      .filter(([, v]) => typeof v === 'string')
+      .map(([k, v]) => [k, String(v)]))
+    this.files = Array.from(body.entries())
+      .filter(([, v]) => v instanceof File)
+      .map(([, v]) => v as File)
     FakeXHR.instances.push(this)
   }
   addEventListener(type: string, cb: () => void) {
@@ -144,6 +158,53 @@ describe('useUploadBooks', () => {
     })
     expect(result.current.items[0]!.status).toBe('uploading')
     expect(result.current.items[0]!.messageKey).toBeUndefined()
+  })
+
+  /**
+   * One queue, two destinations. A shared library's catalog upload runs through
+   * this same machine, so the endpoint, the form fields and the refreshed query
+   * keys all have to come from the target - if they do not, a catalog upload
+   * would silently post to the reader's own library.
+   */
+  it('sends files to a shared library catalog with the target\'s fields and refreshes the library\'s own lists', () => {
+    queryClient.setQueryData(['libraries', 'lib-1', 'catalog'], { data: { items: [], total: 0 } })
+    queryClient.setQueryData(['libraries', 'lib-1', 'categories'], { data: [] })
+    const target = {
+      url: '/libraries/lib-1/books',
+      fields: () => ({ libraryBookId: 'lb-9', categoryId: 'cat-3' }),
+      invalidateKeys: [['libraries', 'lib-1', 'catalog'], ['libraries', 'lib-1', 'categories']],
+    }
+    const { result } = renderHook(() => useUploadBooks(target), { wrapper: wrapper(queryClient) })
+
+    act(() => {
+      result.current.addFiles([new File(['x'], 'book.epub')], { autoStart: true })
+    })
+    act(() => {
+      FakeXHR.instances[0]!.respond(201, { data: { id: 'lb-10' }, duplicated: false })
+    })
+
+    const sent = FakeXHR.instances[0]!
+    expect(sent.method).toBe('POST')
+    expect(sent.url).toMatch(/\/libraries\/lib-1\/books$/)
+    expect(sent.fields).toEqual({ libraryBookId: 'lb-9', categoryId: 'cat-3' })
+    expect(sent.files.map((f) => f.name)).toEqual(['book.epub'])
+    // The private lists are not the reader's concern here, and the catalog is.
+    expect(queryClient.getQueryState(['books'])?.isInvalidated).not.toBe(true)
+    expect(queryClient.getQueryState(['libraries', 'lib-1', 'catalog'])?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(['libraries', 'lib-1', 'categories'])?.isInvalidated).toBe(true)
+  })
+
+  it('still posts to the private library by default', () => {
+    const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
+
+    act(() => {
+      result.current.addFiles([new File(['x'], 'book.epub')], { autoStart: true, shelfId: 'shelf-1', tagIds: ['tag-1'] })
+    })
+
+    const sent = FakeXHR.instances[0]!
+    expect(sent.url).toMatch(/\/books$/)
+    expect(sent.fields).toEqual({ shelfId: 'shelf-1', tagIds: '["tag-1"]' })
+    expect(sent.files.map((f) => f.name)).toEqual(['book.epub'])
   })
 
   it('prunes settled rows but keeps in-flight uploads', () => {

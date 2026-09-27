@@ -38,6 +38,19 @@ describe('BookCard', () => {
     expect(screen.getByText('Author Name')).toBeInTheDocument()
   })
 
+  it('marks a collected card whose source is gone', () => {
+    const { rerender } = render(
+      <BookCard book={{ ...baseBook, source: { libraryId: 'lib1', libraryBookVersionId: 'lbv1', libraryName: null } }} />,
+    )
+    // Nothing to show while the source is healthy...
+    expect(screen.queryByText('library.sourceUnavailable')).not.toBeInTheDocument()
+    rerender(
+      <BookCard book={{ ...baseBook, sourceUnavailable: true, source: { libraryId: 'lib1', libraryBookVersionId: 'lbv1', libraryName: null } }} />,
+    )
+    // ...and a plain explanation once it is not, instead of a dead card.
+    expect(screen.getByText('library.sourceUnavailable')).toBeInTheDocument()
+  })
+
   it('ctrl+click toggles selection', () => {
     const onToggleSelect = vi.fn()
     const { container } = render(<BookCard book={baseBook} onToggleSelect={onToggleSelect} />)

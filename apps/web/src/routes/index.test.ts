@@ -15,4 +15,13 @@ describe('library page search parameter', () => {
       expect(validateSearch({ page }).page).toBeUndefined()
     }
   })
+
+  it('keeps the shared-library context reproducible and drops dirty ids', () => {
+    // The selected library must survive refreshes and deep links.
+    expect(validateSearch({ libraryId: 'lib_city' }).libraryId).toBe('lib_city')
+    // Anything else falls back to the private library instead of a broken view.
+    for (const libraryId of [undefined, '', 0, 42, {}, ['lib_city']]) {
+      expect(validateSearch({ libraryId }).libraryId).toBeUndefined()
+    }
+  })
 })

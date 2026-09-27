@@ -12,6 +12,7 @@ import { useUpdateBook } from '../hooks'
 import { downloadDefault } from '../download'
 
 import { READ_STATUS_OPTIONS, STATUS_DOT } from './read-status'
+import { MenuHeader } from './RowMenuChrome'
 
 const itemClass = 'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-stone-700 transition-colors hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800'
 const divider = <div className="mx-2 my-1 border-t border-stone-100 dark:border-stone-800" />
@@ -23,6 +24,8 @@ function MenuIcon({ children, className = 'text-stone-400' }: { children: ReactN
     </svg>
   )
 }
+
+export { MenuHeader, MenuDivider, MenuItem, MenuDangerItem } from './RowMenuChrome'
 
 function StatusFlyout({ book, onClose }: { book: BookListItem; onClose: () => void }) {
   const _ = useTranslation()
@@ -92,12 +95,10 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onDe
   const updateBook = useUpdateBook()
   return (
     <>
-      <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
-        <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{book.title}</p>
-        <p className="mt-0.5 truncate text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500">
-          {book.author ? `${book.author} · ` : ''}{book.format}
-        </p>
-      </div>
+      <MenuHeader
+        title={book.title}
+        subtitle={`${book.author ? `${book.author} · ` : ''}${book.format}`}
+      />
 
       {onShowDetails && (
         <button

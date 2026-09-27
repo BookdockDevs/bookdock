@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 
 import type { BookDetailRes, BookListItem } from '@bookdock/shared'
@@ -16,6 +17,7 @@ import { computeFromAnchor, type SmartPosition } from '@/lib/position'
 import { formatBytes, formatDate } from '@/lib/utils'
 
 import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../../download'
+import { useCollectBook } from '../../hooks'
 import BookCover from '../BookCover'
 import ReadStatusChip from './ReadStatusChip'
 import { copyText, middleTruncate } from './types'
@@ -71,6 +73,8 @@ export default function BookDetailView({
 }: BookDetailViewProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const collectBook = useCollectBook()
 
   const displayBook = detail ?? book
   const bookmeta = detail?.meta?.bookmeta
@@ -234,6 +238,39 @@ export default function BookDetailView({
 
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <ReadStatusChip book={displayBook} />
+            {displayBook.source && (
+              // 7.7: where a collected card came from. A deleted source keeps
+              // its id, so the chip degrades to "unavailable" instead of
+              // pretending the book was uploaded here.
+              <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-[11px] text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+                {displayBook.source.libraryName
+                  ? _('library.fromLibrary', { name: displayBook.source.libraryName })
+                  : _('library.sourceUnavailable')}
+              </span>
+            )}
+            {displayBook.collected === false && displayBook.source?.libraryBookVersionId && (
+              // 0.4.0: reading in library context is free, collecting gives the
+              // book a home (shelf, tags, deletion) in the private library.
+              <button
+                type="button"
+                onClick={() => collectBook.mutate({
+                  libraryId: displayBook.source!.libraryId,
+                  versionLinkId: displayBook.source!.libraryBookVersionId!,
+                }, {
+                  onSuccess: (res) => {
+                    notify[res.data.alreadyExists ? 'info' : 'success'](
+                      res.data.alreadyExists ? _('library.collectAlready') : _('library.collectSuccess'),
+                    )
+                    void queryClient.invalidateQueries({ queryKey: ['books'] })
+                  },
+                  onError: (err) => notify.error(getUserErrorNotification(err, 'library.collectFailed')),
+                })}
+                disabled={collectBook.isPending}
+                className="rounded-full bg-stone-900 px-2.5 py-1 text-[11px] font-medium text-white transition-colors hover:bg-stone-700 disabled:opacity-60 dark:bg-stone-100 dark:text-stone-900"
+              >
+                {_('library.collect')}
+              </button>
+            )}
             {shelfName && currentShelfId ? (
               <FilterChip prefix="📁" label={shelfName} onClick={() => goToFilter({ shelf: currentShelfId })} />
             ) : null}
@@ -261,7 +298,7 @@ export default function BookDetailView({
               {hasReadingState && (
                 <div
                   role="progressbar"
-                  aria-label="阅读进度"
+                  aria-label={_('library.readingProgress')}
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={Math.round(displayBook.progress ?? 0)}

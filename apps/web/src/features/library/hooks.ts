@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
+import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, CatalogBook, CatalogListRes, CatalogVersionUpdateReq, CollectBookRes, Category, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import i18n from '@/i18n/i18n'
@@ -47,6 +47,12 @@ export function useBooks(params: UseBooksParams, options?: { enabled?: boolean }
     queryKey: ['books', params],
     queryFn: () => apiGet<BookListRes>(buildBooksPath(params)),
     enabled: options?.enabled ?? true,
+    // Never show another domain's rows: trash and active lists are different
+    // queries even when the key has not caught up yet.
+    placeholderData: (prev, prevQuery) => {
+      const prevParams = (prevQuery?.queryKey as unknown[])?.[1] as UseBooksParams | undefined
+      return prevParams && prevParams.trash === params.trash ? prev : undefined
+    },
   })
 }
 
@@ -130,6 +136,36 @@ export interface UploadAssignment {
   tagIds?: string[]
 }
 
+/**
+ * Where a queued file goes. The upload queue - concurrency pool, per-file
+ * progress, duplicate detection, retry, the summary toast - is one machine, and
+ * a shared library's catalog is the same kind of destination as the private
+ * library, just a different endpoint. Naming the destination here is what keeps
+ * one window and one queue serving both instead of a second, thinner one.
+ */
+export interface UploadTarget {
+  url: string
+  /** Form fields sent with every file, beyond the file itself. */
+  fields?: (item: UploadItem) => Record<string, string>
+  /** Query keys to refresh once the queue settles. */
+  invalidateKeys: readonly (readonly unknown[])[]
+  /**
+   * Whether a duplicate kept the shelf it was asked for. Private only: a
+   * duplicate that lands elsewhere is worth telling the reader about.
+   */
+  reportsAppliedShelf?: boolean
+}
+
+const PRIVATE_UPLOAD_TARGET: UploadTarget = {
+  url: '/books',
+  fields: (item) => ({
+    ...(item.shelfId ? { shelfId: item.shelfId } : {}),
+    ...(item.tagIds?.length ? { tagIds: JSON.stringify(item.tagIds) } : {}),
+  }),
+  invalidateKeys: [['books'], ['shelves']],
+  reportsAppliedShelf: true,
+}
+
 /** Instance-level upload limit (read-only, injected by GET /settings). */
 export function useUploadSettings() {
   const { data } = useQuery({
@@ -162,6 +198,459 @@ export function useTrashCapBytes(options: { enabled?: boolean } = {}): number | 
   if (!isEnabled) return undefined
   const cap = data?.data.trash?.maxTrashBytes
   return cap && cap > 0 ? cap : undefined
+}
+
+/**
+ * Libraries visible to the caller: own private library first, then shared. Each
+ * row carries the caller's relation to it, so the sidebar can offer "join" or
+ * "manage" per row without a request per library.
+ */
+export function useLibraries(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['libraries'],
+    queryFn: () => apiGet<{ data: LibraryListItem[] }>('/libraries'),
+    enabled: options?.enabled ?? true,
+  })
+}
+
+/** The caller's relation to one library; drives badges and available actions. */
+export function useLibraryRelation(libraryId: string | null, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['libraries', libraryId, 'relation'],
+    queryFn: () => apiGet<{ data: { relation: LibraryRelation } }>(`/libraries/${libraryId}/relation`),
+    enabled: (options?.enabled ?? true) && !!libraryId,
+  })
+}
+
+/** Shared-library taxonomy for browsing; keyed per library so switching never leaks rows. */
+export function useLibraryCategories(libraryId: string | null, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['libraries', libraryId, 'categories'],
+    queryFn: () => apiGet<{ data: Category[] }>(`/libraries/${libraryId}/categories`),
+    enabled: (options?.enabled ?? true) && !!libraryId,
+  })
+}
+
+export function useLibraryTags(libraryId: string | null, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['libraries', libraryId, 'tags'],
+    queryFn: () => apiGet<{ data: LibraryTag[] }>(`/libraries/${libraryId}/tags`),
+    enabled: (options?.enabled ?? true) && !!libraryId,
+  })
+}
+
+export function useJoinLibrary() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, accessPassword }: { libraryId: string; accessPassword?: string }) =>
+      apiPost<{ data: { membership: unknown; relation: LibraryRelation } }>(`/libraries/${libraryId}/join`, accessPassword ? { accessPassword } : {}),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'relation'] })
+    },
+  })
+}
+
+/**
+ * Library management (0.4.0). Every mutation refreshes the library list and the
+ * affected library's own queries, because a renamed library, a new member or a
+ * new visibility all change what the panel may show.
+ */
+function useLibraryMutation<TVars extends { libraryId?: string } | Record<string, never>>(
+  build: (vars: TVars) => { url: string; method: 'post' | 'patch' | 'delete'; body?: unknown },
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: TVars) => {
+      const { url, method, body } = build(vars)
+      if (method === 'delete') return apiDelete<{ data: unknown }>(url)
+      if (method === 'patch') return apiPatch<{ data: unknown }>(url, body)
+      return apiPost<{ data: unknown }>(url, body)
+    },
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      if (vars.libraryId) {
+        void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId] })
+      }
+    },
+  })
+}
+
+export function useCreateLibrary() {
+  // No libraryId yet: this is the one mutation that creates the row the others
+  // then address.
+  return useLibraryMutation<{ body: LibraryCreateReq } & { libraryId?: undefined }>(({ body }) => ({
+    url: '/libraries', method: 'post', body,
+  }))
+}
+
+export function useUpdateLibrary() {
+  return useLibraryMutation<{ libraryId: string; patch: LibraryUpdateReq }>(({ libraryId, patch }) => ({
+    url: `/libraries/${libraryId}`, method: 'patch', body: patch,
+  }))
+}
+
+export function useDeleteLibrary() {
+  return useLibraryMutation<{ libraryId: string }>(({ libraryId }) => ({
+    url: `/libraries/${libraryId}`, method: 'delete',
+  }))
+}
+
+export function useTransferLibrary() {
+  return useLibraryMutation<{ libraryId: string; userId: string }>(({ libraryId, userId }) => ({
+    url: `/libraries/${libraryId}/transfer`, method: 'post', body: { userId },
+  }))
+}
+
+/** Owner/admin only; members can still leave on their own. */
+export function useLibraryMembers(libraryId: string | null) {  return useQuery({
+    queryKey: ['libraries', libraryId, 'members'],
+    queryFn: () => apiGet<{ data: LibraryMembersRes }>(`/libraries/${libraryId}/members`),
+    enabled: !!libraryId,
+    retry: false,
+  })
+}
+
+export function useAddLibraryMember() {
+  return useLibraryMutation<{ libraryId: string; username: string; role: MembershipRole }>(({ libraryId, username, role }) => ({
+    url: `/libraries/${libraryId}/members`, method: 'post', body: { username, role },
+  }))
+}
+
+export function useSetLibraryMemberRole() {
+  return useLibraryMutation<{ libraryId: string; userId: string; role: MembershipRole }>(({ libraryId, userId, role }) => ({
+    url: `/libraries/${libraryId}/members/${userId}`, method: 'patch', body: { role },
+  }))
+}
+
+export function useRemoveLibraryMember() {
+  return useLibraryMutation<{ libraryId: string; userId: string }>(({ libraryId, userId }) => ({
+    url: `/libraries/${libraryId}/members/${userId}`, method: 'delete',
+  }))
+}
+
+/**
+ * Library taxonomy (11.5). Mutating a category or tag also changes what a
+ * catalog card shows, so the catalog query is invalidated with the taxonomy.
+ */
+function useTaxonomyMutation<TVars extends { libraryId: string }>(
+  build: (vars: TVars) => { url: string; method: 'post' | 'patch' | 'delete'; body?: unknown },
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: TVars) => {
+      const { url, method, body } = build(vars)
+      if (method === 'delete') return apiDelete<{ data: unknown }>(url)
+      if (method === 'patch') return apiPatch<{ data: unknown }>(url, body)
+      return apiPost<{ data: unknown }>(url, body)
+    },
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+    },
+  })
+}
+
+export function useCreateLibraryCategory() {
+  return useTaxonomyMutation<{ libraryId: string; name: string }>(({ libraryId, name }) => ({
+    url: `/libraries/${libraryId}/categories`, method: 'post', body: { name },
+  }))
+}
+
+export function useUpdateLibraryCategory() {
+  return useTaxonomyMutation<{ libraryId: string; categoryId: string; patch: { name?: string; pinned?: boolean } }>(
+    ({ libraryId, categoryId, patch }) => ({
+      url: `/libraries/${libraryId}/categories/${categoryId}`, method: 'patch', body: patch,
+    }),
+  )
+}
+
+export function useDeleteLibraryCategory() {
+  return useTaxonomyMutation<{ libraryId: string; categoryId: string }>(({ libraryId, categoryId }) => ({
+    url: `/libraries/${libraryId}/categories/${categoryId}`, method: 'delete',
+  }))
+}
+
+export function useCreateLibraryTag() {
+  return useTaxonomyMutation<{ libraryId: string; name: string }>(({ libraryId, name }) => ({
+    url: `/libraries/${libraryId}/tags`, method: 'post', body: { name },
+  }))
+}
+
+export function useUpdateLibraryTag() {
+  return useTaxonomyMutation<{ libraryId: string; tagId: string; patch: { name?: string; pinned?: boolean } }>(
+    ({ libraryId, tagId, patch }) => ({
+      url: `/libraries/${libraryId}/tags/${tagId}`, method: 'patch', body: patch,
+    }),
+  )
+}
+
+export function useDeleteLibraryTag() {
+  return useTaxonomyMutation<{ libraryId: string; tagId: string }>(({ libraryId, tagId }) => ({
+    url: `/libraries/${libraryId}/tags/${tagId}`, method: 'delete',
+  }))
+}
+
+/**
+ * Reorder is the same gesture as a private shelf's: the sidebar writes the full
+ * id list and the server rewrites every sortOrder by index, so a drag can never
+ * leave two rows claiming the same slot. Rejects optimistically and restores the
+ * previous list so a manager who cannot reorder (a member) is not left looking
+ * at a local order the server never accepted.
+ */
+export function useReorderLibraryCategories() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, categoryIds }: { libraryId: string; categoryIds: string[] }) =>
+      apiPut<{ data: null }>(`/libraries/${libraryId}/categories/order`, { categoryIds }),
+    onMutate: ({ libraryId, categoryIds }) => {
+      const key = ['libraries', libraryId, 'categories']
+      const prev = queryClient.getQueryData<{ data: Category[] }>(key)
+      if (prev) {
+        const byId = new Map(prev.data.map((category) => [category.id, category]))
+        queryClient.setQueryData(key, {
+          data: categoryIds.map((id) => byId.get(id)).filter((c): c is Category => Boolean(c)),
+        })
+      }
+      return { key, prev }
+    },
+    onError: (error, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(ctx.key, ctx.prev)
+      notify.error(getUserErrorNotification(error, 'toast.reorderShelvesFailed'))
+    },
+  })
+}
+
+export function useReorderLibraryTags() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, tagIds }: { libraryId: string; tagIds: string[] }) =>
+      apiPut<{ data: null }>(`/libraries/${libraryId}/tags/order`, { tagIds }),
+    onMutate: ({ libraryId, tagIds }) => {
+      const key = ['libraries', libraryId, 'tags']
+      const prev = queryClient.getQueryData<{ data: LibraryTag[] }>(key)
+      if (prev) {
+        const byId = new Map(prev.data.map((tag) => [tag.id, tag]))
+        queryClient.setQueryData(key, {
+          data: tagIds.map((id) => byId.get(id)).filter((t): t is LibraryTag => Boolean(t)),
+        })
+      }
+      return { key, prev }
+    },
+    onError: (error, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(ctx.key, ctx.prev)
+      notify.error(getUserErrorNotification(error, 'toast.reorderTagsFailed'))
+    },
+  })
+}
+
+/**
+ * Catalog page (5.7). Works with their versions already resolved, so the UI
+ * never has to recompute inheritance. The query vocabulary is the one
+ * `GET /books` already speaks (q, sortBy, sortOrder, categoryId/shelfId, tagId,
+ * format, page, pageSize), so a shared library and a private one are browsed
+ * through one list component instead of two that drift apart. Keyed per library
+ * and per filter so switching libraries or paging can never show another
+ * library's rows.
+ */
+export interface CatalogListParams {
+  page?: number
+  pageSize?: number
+  q?: string
+  sortBy?: string
+  sortOrder?: string
+  categoryId?: string
+  tagId?: string
+  format?: string
+  author?: string
+  series?: string
+}
+
+/**
+ * One place that turns catalog filters into both a cache key and a request, so
+ * the sidebar's hover-prefetch and the list's own fetch can never disagree about
+ * what "the same page" means (see prefetchBooks for the same shape).
+ */
+function catalogQueryParts(libraryId: string, params: CatalogListParams) {
+  const key = {
+    page: params.page ?? 1,
+    pageSize: params.pageSize,
+    q: params.q ?? '',
+    sortBy: params.sortBy ?? '',
+    sortOrder: params.sortOrder ?? '',
+    categoryId: params.categoryId ?? '',
+    tagId: params.tagId ?? '',
+    format: params.format ?? '',
+    author: params.author ?? '',
+    series: params.series ?? '',
+  }
+  const search = new URLSearchParams({ page: String(key.page) })
+  if (key.pageSize) search.set('pageSize', String(key.pageSize))
+  if (key.q) search.set('q', key.q)
+  if (key.sortBy) search.set('sortBy', key.sortBy)
+  if (key.sortOrder) search.set('sortOrder', key.sortOrder)
+  if (key.categoryId) search.set('categoryId', key.categoryId)
+  if (key.tagId) search.set('tagId', key.tagId)
+  if (key.format) search.set('format', key.format)
+  if (key.author) search.set('author', key.author)
+  if (key.series) search.set('series', key.series)
+  return { key, path: `/libraries/${libraryId}/books?${search.toString()}` }
+}
+
+export function useLibraryCatalog(libraryId: string | null, params: CatalogListParams = {}) {
+  const { key, path } = catalogQueryParts(libraryId ?? '', params)
+  return useQuery({
+    queryKey: ['libraries', libraryId, 'catalog', key],
+    queryFn: () => apiGet<{ data: CatalogListRes }>(path),
+    enabled: !!libraryId,
+    // Keep the previous page while the same library reloads, but never show
+    // another library's cards under the new library's actions: the key carries
+    // the library id, yet the data belongs to the query that fetched it.
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === libraryId ? prev : undefined),
+  })
+}
+
+export function prefetchLibraryCatalog(queryClient: QueryClient, libraryId: string, params: CatalogListParams) {
+  const { key, path } = catalogQueryParts(libraryId, params)
+  return queryClient.prefetchQuery({
+    queryKey: ['libraries', libraryId, 'catalog', key],
+    queryFn: () => apiGet<{ data: CatalogListRes }>(path),
+  })
+}
+
+/** Grouping candidates for an upload (5.2): a hint, never an automatic grouping. */
+export function useCatalogSimilar(libraryId: string | null, params: { title: string; enabled: boolean }) {
+  return useQuery({
+    queryKey: ['libraries', libraryId, 'catalog', 'similar', { title: params.title }],
+    queryFn: () => apiGet<{ data: CatalogBook[] }>(
+      `/libraries/${libraryId}/books/similar?title=${encodeURIComponent(params.title)}`,
+    ),
+    enabled: !!libraryId && params.enabled && params.title.trim().length > 0,
+  })
+}
+
+export interface CatalogUploadVars {
+  libraryId: string
+  file: File
+  libraryBookId?: string
+  categoryId?: string
+  name?: string
+  title?: string
+  author?: string
+}
+
+export function useUploadCatalogBook() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, file, ...fields }: CatalogUploadVars) => {
+      const form = new FormData()
+      form.set('file', file)
+      for (const [key, value] of Object.entries(fields)) {
+        if (value) form.set(key, value)
+      }
+      return apiUpload<{ data: CatalogBook; duplicated: boolean }>(`/libraries/${libraryId}/books`, form)
+    },
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+    },
+  })
+}
+
+/**
+ * File a work under a category (or take it out of one by passing null). This is
+ * the shared library's counterpart of moving a private book to a shelf, and it
+ * is what a card dropped on a category row and a batch classify both call.
+ */
+export function useSetWorkCategory() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, libraryBookId, categoryId }: { libraryId: string; libraryBookId: string; categoryId: string | null }) =>
+      apiPatch(`/libraries/${libraryId}/books/${libraryBookId}`, { categoryId }),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+    },
+  })
+}
+
+function useCatalogVersionMutation<TVars extends { libraryId: string; libraryBookId: string }>(
+  build: (vars: TVars) => { url: string; method: 'patch' | 'delete'; body?: unknown },
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: TVars) => {
+      const { url, method, body } = build(vars)
+      return method === 'delete'
+        ? apiDelete<{ data: unknown }>(url)
+        : apiPatch<{ data: unknown }>(url, body)
+    },
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+    },
+  })
+}
+
+/** Version overrides and publish state (5.3/5.4). */
+export function useUpdateCatalogVersion() {
+  return useCatalogVersionMutation<{
+    libraryId: string
+    libraryBookId: string
+    versionLinkId: string
+    patch: CatalogVersionUpdateReq
+  }>(({ libraryId, libraryBookId, versionLinkId, patch }) => ({
+    url: `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}`,
+    method: 'patch',
+    body: patch,
+  }))
+}
+
+/** Re-group a misfiled version under another work (5.5). */
+export function useMoveCatalogVersion() {
+  return useCatalogVersionMutation<{
+    libraryId: string
+    libraryBookId: string
+    versionLinkId: string
+    targetLibraryBookId: string
+  }>(({ libraryId, libraryBookId, versionLinkId, targetLibraryBookId }) => ({
+    url: `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/move`,
+    method: 'patch',
+    body: { libraryBookId: targetLibraryBookId },
+  }))
+}
+
+/** Deleting the last version of a work deletes the work with it (5.6). */
+export function useDeleteCatalogVersion() {
+  return useCatalogVersionMutation<{
+    libraryId: string
+    libraryBookId: string
+    versionLinkId: string
+  }>(({ libraryId, libraryBookId, versionLinkId }) => ({
+    url: `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}`,
+    method: 'delete',
+  }))
+}
+
+/**
+ * Add to my library (7.1). One server action does the whole collect; the button
+ * only reports the outcome, including "already collected" (7.5), which is a
+ * success state rather than an error.
+ */
+export function useCollectBook() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, versionLinkId, categoryId }: { libraryId: string; versionLinkId: string; categoryId?: string }) =>
+      apiPost<{ data: CollectBookRes }>(
+        `/libraries/${libraryId}/versions/${versionLinkId}/collect`,
+        categoryId ? { categoryId } : {},
+      ),
+    onSuccess: (_res, vars) => {
+      // The collected card shows up in the private library, and the catalog
+      // must stop offering the same version again.
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+    },
+  })
 }
 
 /** Per-user library preferences (N-06 default sort modes, view, title normalization). */
@@ -221,7 +710,7 @@ const UPLOAD_CONCURRENCY = 3
  * Multi-file upload with a small concurrency pool and per-file queue status.
  * A single invalidate + summary toast fires when the whole queue settles.
  */
-export function useUploadBooks() {
+export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
   const queryClient = useQueryClient()
   const [items, setItems] = useState<UploadItem[]>([])
   const runningRef = useRef(0)
@@ -239,9 +728,10 @@ export function useUploadBooks() {
       const xhr = new XMLHttpRequest()
       const formData = new FormData()
       formData.append('file', item.file)
-      if (item.shelfId) formData.append('shelfId', item.shelfId)
-      if (item.tagIds?.length) formData.append('tagIds', JSON.stringify(item.tagIds))
-      xhr.open('POST', `${BASE_URL}/books`)
+      for (const [key, value] of Object.entries(target.fields?.(item) ?? {})) {
+        formData.append(key, value)
+      }
+      xhr.open('POST', `${BASE_URL}${target.url}`)
       xhr.upload.addEventListener('progress', (e) => {
         if (!e.lengthComputable) return
         const pct = Math.round((e.loaded / e.total) * 100)
@@ -263,7 +753,8 @@ export function useUploadBooks() {
           if (duplicated) {
             // A duplicate keeps its own shelf: tell the user when the requested
             // shelf was not applied instead of a bare "already exists".
-            const notMoved = Boolean(item.shelfId) && shelfId !== item.shelfId
+            const notMoved = target.reportsAppliedShelf === true
+              && Boolean(item.shelfId) && shelfId !== item.shelfId
             patchItem(item.id, {
               status: 'duplicate',
               progress: 100,
@@ -298,7 +789,7 @@ export function useUploadBooks() {
       })
       xhr.send(formData)
     },
-    [patchItem],
+    [patchItem, target],
   )
 
   // Scheduler: each item state change starts at most one more queued upload
@@ -327,10 +818,12 @@ export function useUploadBooks() {
     const succeeded = items.filter((it) => it.status === 'success').length
     const duplicated = items.filter((it) => it.status === 'duplicate').length
     const failed = items.filter((it) => it.status === 'error').length
-    queryClient.invalidateQueries({ queryKey: ['books'] })
-    // Shelf rows carry their own aggregated bookCount, so refreshing book
-    // lists alone leaves the sidebar count stale after an upload.
-    queryClient.invalidateQueries({ queryKey: ['shelves'] })
+    // Whatever the destination lists are, they are what the reader will look at
+    // next: the private library's book list and its shelf counts, or a shared
+    // library's catalog and its taxonomy counts.
+    for (const key of target.invalidateKeys) {
+      void queryClient.invalidateQueries({ queryKey: key })
+    }
     if (failed > 0 || (succeeded > 0 && duplicated > 0)) {
       const showSummary = failed > 0 ? notify.error : notify.warning
       const summary = [
@@ -344,7 +837,7 @@ export function useUploadBooks() {
     } else {
       notify.success({ key: 'library.uploadImported', params: { count: succeeded } })
     }
-  }, [items, queryClient])
+  }, [items, queryClient, target])
 
   const addFiles = useCallback(
     (files: FileList | File[], opts?: { autoStart?: boolean; maxBytes?: number } & UploadAssignment) => {

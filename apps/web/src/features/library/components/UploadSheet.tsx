@@ -5,13 +5,19 @@ import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatBytes } from '@/lib/utils'
 
-import { useShelves, useTags, useUploadBooks, useUploadSettings, type UploadAssignment, type UploadItem } from '../hooks'
+import { useShelves, useTags, useUploadBooks, useUploadSettings, type UploadAssignment, type UploadItem, type UploadTarget } from '../hooks'
 
 interface UploadSheetProps {
   open: boolean
   onClose: () => void
   shelfId?: string
   tagId?: string
+  /**
+   * Where the files go. Omitted means the reader's own library, which is the
+   * default everywhere; a shared library passes its catalog endpoint and gets
+   * this same window, queue and progress bar rather than a second one.
+   */
+  target?: UploadTarget
 }
 
 function statusLabel(item: UploadItem): string | null {
@@ -38,13 +44,13 @@ function hasFiles(e: { dataTransfer: DataTransfer | null }): boolean {
   return Boolean(e.dataTransfer?.types.includes('Files'))
 }
 
-export default function UploadSheet({ open, onClose, shelfId, tagId }: UploadSheetProps) {
+export default function UploadSheet({ open, onClose, shelfId, tagId, target }: UploadSheetProps) {
   const _ = useTranslation()
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [includeCurrentTag, setIncludeCurrentTag] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const { items, addFiles, startUpload, retry, pruneSettled, isUploading, clearQueue } = useUploadBooks()
+  const { items, addFiles, startUpload, retry, pruneSettled, isUploading, clearQueue } = useUploadBooks(target)
   const { maxBytes } = useUploadSettings()
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()

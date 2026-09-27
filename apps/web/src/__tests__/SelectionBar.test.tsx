@@ -20,10 +20,13 @@ vi.mock('@/api/client', () => ({
 }))
 
 let mockShelves: { id: string; name: string; bookCount: number }[] = []
+let mockLibraryCategories: { id: string; name: string; bookCount: number }[] = []
 
 vi.mock('../features/library/hooks', () => ({
   useShelves: () => ({ data: { data: mockShelves } }),
   useTags: () => ({ data: { data: [] } }),
+  useLibraryCategories: () => ({ data: { data: mockLibraryCategories } }),
+  useLibraryTags: () => ({ data: { data: [] } }),
 }))
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -34,6 +37,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   useToastStore.getState().clearToasts()
   mockShelves = []
+  mockLibraryCategories = []
   apiPatch.mockResolvedValue({})
   apiPut.mockResolvedValue({})
   apiPost.mockResolvedValue({})
@@ -41,6 +45,53 @@ beforeEach(() => {
 })
 
 describe('SelectionBar', () => {
+  /**
+   * A shared library's selection is the same bar with the same classify action;
+   * what it cannot offer is everything that needs the reader to own the row.
+   */
+  describe('shared library scope', () => {
+    it('offers classify and nothing that needs ownership', () => {
+      render(<SelectionBar selectedIds={['lb1']} onClear={vi.fn()} libraryId="lib-1" />, { wrapper })
+
+      expect(screen.getByText('library.batchClassify')).toBeInTheDocument()
+      expect(screen.queryByText('library.markFinished')).toBeNull()
+      expect(screen.queryByText('library.batchDelete')).toBeNull()
+    })
+
+    it('files the selected works under a category of that library', async () => {
+      mockLibraryCategories = [{ id: 'cat-1', name: '科幻', bookCount: 2 }]
+      const onComplete = vi.fn()
+      render(<SelectionBar selectedIds={['lb1', 'lb2']} onClear={vi.fn()} onComplete={onComplete} libraryId="lib-1" />, { wrapper })
+
+      fireEvent.click(screen.getByText('library.batchClassify'))
+      fireEvent.click(screen.getByText('科幻'))
+      fireEvent.click(screen.getByText('library.save'))
+
+      await waitFor(() => expect(onComplete).toHaveBeenCalled())
+      expect(apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/lb1', { categoryId: 'cat-1' })
+      expect(apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/lb2', { categoryId: 'cat-1' })
+      // The private endpoints are never touched from a shared library.
+      expect(apiPut).not.toHaveBeenCalled()
+    })
+
+    it('names the taxonomy 分类 rather than 书架', () => {
+      mockLibraryCategories = [{ id: 'cat-1', name: '科幻', bookCount: 1 }]
+      render(<SelectionBar selectedIds={['lb1']} onClear={vi.fn()} libraryId="lib-1" />, { wrapper })
+
+      fireEvent.click(screen.getByText('library.batchClassify'))
+      expect(screen.getByText('library.categories')).toBeInTheDocument()
+      expect(screen.queryByText('library.shelves')).toBeNull()
+    })
+
+    it('never offers trash actions for a shared selection, even with a stale trash flag', () => {
+      render(<SelectionBar selectedIds={['lb1']} onClear={vi.fn()} libraryId="lib-1" trash />, { wrapper })
+
+      expect(screen.queryByText('library.restore')).toBeNull()
+      expect(screen.queryByText('library.permanentDelete')).toBeNull()
+      expect(screen.getByText('library.batchClassify')).toBeInTheDocument()
+    })
+  })
+
   it('applies batch read status to every selected book and clears selection', async () => {
     const onClear = vi.fn()
     render(<SelectionBar selectedIds={['a', 'b', 'c']} onClear={onClear} />, { wrapper })

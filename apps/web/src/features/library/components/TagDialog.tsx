@@ -3,23 +3,28 @@ import { useEffect, useState } from 'react'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 
-import { useCreateTag, useRenameTag } from '../hooks'
+import { useCreateLibraryTag, useCreateTag, useRenameTag, useUpdateLibraryTag } from '../hooks'
 
 interface TagDialogProps {
   open: boolean
+  /** Set when the library in context is shared: the same dialog curates its tags. */
+  libraryId?: string
   tagId?: string
   initialName?: string
   onClose: () => void
 }
 
-export default function TagDialog({ open, tagId, initialName = '', onClose }: TagDialogProps) {
+export default function TagDialog({ open, libraryId, tagId, initialName = '', onClose }: TagDialogProps) {
   const _ = useTranslation()
   const createTag = useCreateTag()
   const renameTag = useRenameTag()
+  const createLibraryTag = useCreateLibraryTag()
+  const renameLibraryTag = useUpdateLibraryTag()
   const [name, setName] = useState(initialName)
 
   const isRename = Boolean(tagId)
   const isPending = createTag.isPending || renameTag.isPending
+    || createLibraryTag.isPending || renameLibraryTag.isPending
 
   useEffect(() => {
     if (open) setName(initialName)
@@ -30,6 +35,11 @@ export default function TagDialog({ open, tagId, initialName = '', onClose }: Ta
   const submit = () => {
     const trimmed = name.trim()
     if (!trimmed || isPending) return
+    if (libraryId) {
+      if (isRename && tagId) renameLibraryTag.mutate({ libraryId, tagId, patch: { name: trimmed } }, { onSuccess: onClose })
+      else createLibraryTag.mutate({ libraryId, name: trimmed }, { onSuccess: onClose })
+      return
+    }
     if (isRename && tagId) {
       renameTag.mutate({ id: tagId, name: trimmed }, { onSuccess: onClose })
     } else {

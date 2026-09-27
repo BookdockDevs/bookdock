@@ -3,23 +3,28 @@ import { useEffect, useState } from 'react'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 
-import { useCreateShelf, useRenameShelf } from '../hooks'
+import { useCreateLibraryCategory, useCreateShelf, useRenameShelf, useUpdateLibraryCategory } from '../hooks'
 
 interface ShelfDialogProps {
   open: boolean
+  /** Set when the library in context is shared: the same dialog curates its categories. */
+  libraryId?: string
   shelfId?: string
   initialName?: string
   onClose: () => void
 }
 
-export default function ShelfDialog({ open, shelfId, initialName = '', onClose }: ShelfDialogProps) {
+export default function ShelfDialog({ open, libraryId, shelfId, initialName = '', onClose }: ShelfDialogProps) {
   const _ = useTranslation()
   const createShelf = useCreateShelf()
   const renameShelf = useRenameShelf()
+  const createCategory = useCreateLibraryCategory()
+  const renameCategory = useUpdateLibraryCategory()
   const [name, setName] = useState(initialName)
 
   const isRename = Boolean(shelfId)
   const isPending = createShelf.isPending || renameShelf.isPending
+    || createCategory.isPending || renameCategory.isPending
 
   useEffect(() => {
     if (open) setName(initialName)
@@ -30,6 +35,13 @@ export default function ShelfDialog({ open, shelfId, initialName = '', onClose }
   const submit = () => {
     const trimmed = name.trim()
     if (!trimmed || isPending) return
+    if (libraryId) {
+      // A private shelf and a shared library's category are the same row in the
+      // same table, so this is the same dialog pointed at the other library.
+      if (isRename && shelfId) renameCategory.mutate({ libraryId, categoryId: shelfId, patch: { name: trimmed } }, { onSuccess: onClose })
+      else createCategory.mutate({ libraryId, name: trimmed }, { onSuccess: onClose })
+      return
+    }
     if (isRename && shelfId) {
       renameShelf.mutate({ id: shelfId, name: trimmed }, { onSuccess: onClose })
     } else {
@@ -39,7 +51,9 @@ export default function ShelfDialog({ open, shelfId, initialName = '', onClose }
 
   return (
     <Modal
-      title={isRename ? _('library.renameShelf') : _('library.createShelf')}
+      title={isRename
+        ? _(libraryId ? 'library.renameCategory' : 'library.renameShelf')
+        : _(libraryId ? 'library.createCategory' : 'library.createShelf')}
       onClose={onClose}
       size="sm"
     >
@@ -57,7 +71,7 @@ export default function ShelfDialog({ open, shelfId, initialName = '', onClose }
           onKeyDown={(e) => {
             if (e.key === 'Enter') submit()
           }}
-          placeholder={_('library.shelfName')}
+          placeholder={_(libraryId ? 'library.categoryName' : 'library.shelfName')}
           autoFocus
           className="h-11 min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 outline-none placeholder:text-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
         />

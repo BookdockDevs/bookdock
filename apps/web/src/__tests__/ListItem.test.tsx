@@ -6,7 +6,7 @@ import type { BookListItem } from '@bookdock/shared'
 
 import i18n from '../i18n/i18n'
 import { useUiStore } from '@/stores/ui.store'
-import { ListItemWrapper } from '../features/library/Library'
+import ListItemWrapper from '../features/library/components/ListItemWrapper'
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,

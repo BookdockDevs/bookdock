@@ -5,7 +5,7 @@ import { useDndContext, useDroppable } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
-import type { ShelfListItem, TagListItem } from '@bookdock/shared'
+import type { LibraryListItem, LibraryRelation } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
@@ -15,7 +15,7 @@ import SmartMenu from '@/components/ui/SmartMenu'
 import AccountMenu from '@/features/auth/AccountMenu'
 import { applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
 import { sortSidebarItems } from '../sort-modes'
-import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleTagPin, useTrashEnabled, useLibraryPrefs } from '../hooks'
+import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleTagPin, useTrashEnabled, useLibraryPrefs, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import ShelfDialog from './ShelfDialog'
 import TagDialog from './TagDialog'
@@ -23,11 +23,9 @@ import { useContextMenu } from './use-context-menu'
 
 interface LibrarySidebarProps {
   navSearch: (patch: Partial<LibrarySearch>) => void
-  onPrefetchNavigation?: (patch: Partial<LibrarySearch>) => void
+  onPrefetchNavigation?: (patch: Partial<LibrarySearch>, targetLibraryId?: string | null) => void
   shelfId: string | null
   tagId: string | null
-  author: string | null
-  series: string | null
   trash: boolean
   /** Mobile navigation drawer state; desktop keeps the sidebar in flow. */
   mobileOpen?: boolean
@@ -44,25 +42,59 @@ interface LibrarySidebarProps {
   settleTagId?: string | null
   /** Guest sessions may browse but cannot mutate library organization. */
   readOnly?: boolean
+  /**
+   * Libraries the reader can switch between (0.4.0). Each row carries the
+   * reader's relation to it, so the row's own menu can offer what applies to
+   * that reader. Switching one changes what the shelves, tags and the book list
+   * below mean, the same way picking a shelf does - there is no separate
+   * library page.
+   */
+  libraries?: LibraryListItem[]
+  activeLibraryId?: string | null
+  onSelectLibrary?: (libraryId: string | null) => void
+  onManageLibrary?: (library: LibraryListItem) => void
+  /** Opens the join flow for a library the reader can see but has not joined. */
+  onJoinLibrary?: (library: LibraryListItem) => void
+  onCreateLibrary?: () => void
 }
-const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavigation, shelfId, tagId, author, series, trash, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavigation, shelfId, tagId, trash, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, onSelectLibrary, onManageLibrary, onJoinLibrary, onCreateLibrary }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const { data: shelvesData, isLoading: shelvesLoading } = useShelves()
   const { data: tagsData, isLoading: tagsLoading } = useTags()
+  // 0.4.0: the library in context decides which taxonomy the rows below the
+  // library switcher are. A private library's shelf is a library category, so
+  // this is one list read from whichever library is selected - not a second set
+  // of sidebar rows for shared libraries.
+  const inLibrary = activeLibraryId !== null
+  const categoriesQuery = useLibraryCategories(activeLibraryId)
+  const libraryTagsQuery = useLibraryTags(activeLibraryId)
+  const relationQuery = useLibraryRelation(activeLibraryId)
+  const canCurate = inLibrary
+    && (relationQuery.data?.data.relation === 'owner' || relationQuery.data?.data.relation === 'admin')
   const libraryPrefs = useLibraryPrefs()
 
   // Auto modes re-sort the full list client-side over the server (manual)
-  // order; the same memo exists in Library for the drag materialization.
+  // order; the same memo exists in Library for the drag materialization. Both
+  // taxonomies satisfy SidebarSortableItem, so the preference applies to either.
   const shelves = useMemo(
-    () => sortSidebarItems(applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort),
-    [shelvesData, shelfOrderOverride, libraryPrefs?.shelfSort],
+    () => sortSidebarItems(
+      applyShelfOrder(inLibrary ? (categoriesQuery.data?.data ?? []) : (shelvesData?.data ?? []), shelfOrderOverride),
+      libraryPrefs?.shelfSort,
+    ),
+    [inLibrary, categoriesQuery.data, shelvesData, shelfOrderOverride, libraryPrefs?.shelfSort],
   )
   const tags = useMemo(
-    () => sortSidebarItems(applyTagOrder(tagsData?.data ?? [], tagOrderOverride), libraryPrefs?.tagSort),
-    [tagsData, tagOrderOverride, libraryPrefs?.tagSort],
+    () => sortSidebarItems(
+      applyTagOrder(inLibrary ? (libraryTagsQuery.data?.data ?? []) : (tagsData?.data ?? []), tagOrderOverride),
+      libraryPrefs?.tagSort,
+    ),
+    [inLibrary, libraryTagsQuery.data, tagsData, tagOrderOverride, libraryPrefs?.tagSort],
   )
-  const trashEnabled = useTrashEnabled({ enabled: !readOnly })
+  const taxonomyLoading = inLibrary
+    ? (categoriesQuery.isLoading || libraryTagsQuery.isLoading)
+    : (shelvesLoading || tagsLoading)
+  const trashEnabled = useTrashEnabled({ enabled: !readOnly && !inLibrary })
   const { data: trashData } = useBooks({
     page: 1,
     pageSize: 1,
@@ -77,6 +109,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
   }, { enabled: trashEnabled })
   const trashCount = trashData?.total
 
+  // The uncategorized count is a per-view badge, so it is asked of whichever
+  // list is in context: a private library's books, or the shared catalog's
+  // works filed under no category.
   const { data: uncategorizedData, isLoading: uncategorizedLoading } = useBooks({
     page: 1,
     pageSize: 1,
@@ -88,21 +123,37 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
     format: null,
     readStatus: null,
     trash: false,
-  })
-  const uncategorizedCount = uncategorizedData?.total
+  }, { enabled: !inLibrary })
+  const { data: libraryUncategorizedData, isLoading: libraryUncategorizedLoading } = useLibraryCatalog(
+    activeLibraryId,
+    { page: 1, pageSize: 1, categoryId: 'none' },
+  )
+  const uncategorizedCount = inLibrary ? libraryUncategorizedData?.data.total : uncategorizedData?.total
 
   const [shelfDialog, setShelfDialog] = useState<{ shelfId?: string; initialName?: string } | null>(null)
-  const [deleteShelfTarget, setDeleteShelfTarget] = useState<ShelfListItem | null>(null)
+  const [deleteShelfTarget, setDeleteShelfTarget] = useState<TaxonomyRow | null>(null)
   const deleteShelf = useDeleteShelf()
   const toggleShelfPin = useToggleShelfPin()
+  const updateLibraryCategory = useUpdateLibraryCategory()
+  const deleteLibraryCategory = useDeleteLibraryCategory()
   const [tagDialog, setTagDialog] = useState<{ tagId?: string; initialName?: string } | null>(null)
-  const [deleteTagTarget, setDeleteTagTarget] = useState<TagListItem | null>(null)
+  const [deleteTagTarget, setDeleteTagTarget] = useState<TaxonomyRow | null>(null)
   const deleteTag = useDeleteTag()
   const toggleTagPin = useToggleTagPin()
+  const updateLibraryTag = useUpdateLibraryTag()
+  const deleteLibraryTag = useDeleteLibraryTag()
 
-  const isAllActive = !shelfId && !tagId && !author && !series && !trash
+  // Two levels can be lit at once: the library row says which library is in
+  // context, the category and tag rows say what is filtered inside it.
   const isUncategorizedActive = !trash && shelfId === 'none'
-  const isShelvesLoading = Boolean(shelvesLoading || (uncategorizedLoading && !isUncategorizedActive))
+  const isShelvesLoading = Boolean(
+    (inLibrary ? categoriesQuery.isLoading || libraryUncategorizedLoading : shelvesLoading || uncategorizedLoading)
+    && !isUncategorizedActive,
+  )
+  // Curating a taxonomy is the library owner's call, never the reader's: a
+  // private library is its owner's, a shared one needs owner/admin.
+  const canEditShelves = inLibrary ? canCurate : !readOnly
+  const canEditTags = inLibrary ? canCurate : !readOnly
 
   const localNavRef = useRef<HTMLElement | null>(null)
   const [canScrollUp, setCanScrollUp] = useState(false)
@@ -178,30 +229,35 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
           onScroll={updateScrollShadows}
           className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] -mx-1 px-1 py-0.5 -my-0.5"
         >
-        <NavItem
-          label={_('library.allBooks')}
-          active={isAllActive}
-          icon={
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-            </svg>
-          }
-          onClick={() => selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })}
-          onPointerEnter={() => onPrefetchNavigation?.({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })}
+        <LibrarySection
+          libraries={libraries ?? []}
+          activeLibraryId={activeLibraryId}
+          onSelect={onSelectLibrary}
+          onSelectPrivate={() => {
+            // One navigation, not two: the second would be built from the URL
+            // state this one is still replacing and would put the library id
+            // back, so the reader could never leave a shared library.
+            onSelectLibrary?.(null)
+            onMobileClose?.()
+          }}
+          onPrefetchPrivate={() => onPrefetchNavigation?.({ shelf: undefined, tag: undefined, status: undefined, trash: undefined }, null)}
+          onManage={onManageLibrary}
+          onJoin={onJoinLibrary}
+          onCreate={onCreateLibrary}
+          disabled={readOnly}
         />
-        {(!readOnly || isShelvesLoading || shelves.length > 0) && (
+        {(canEditShelves || isShelvesLoading || shelves.length > 0) && (
           <>
             <div className="mb-1 mt-6 flex items-center justify-between px-3">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
-                {_('library.shelves')}
+                {_(inLibrary ? 'library.categories' : 'library.shelves')}
               </span>
-              {!readOnly && (
+              {canEditShelves && (
                 <button
                   type="button"
                   onClick={() => setShelfDialog({})}
                   className="-mr-[3px] flex h-5 w-5 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                  title={_('library.newShelf')}
+                  title={_(inLibrary ? 'library.newCategory' : 'library.newShelf')}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 5v14M5 12h14" />
@@ -236,12 +292,14 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
                         shelf={shelf}
                         active={!trash && shelfId === shelf.id}
                         settling={settleShelfId === shelf.id}
-                        readOnly={readOnly}
+                        readOnly={!canEditShelves}
                         onClick={() => selectNavigation({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
                         onPointerEnter={() => onPrefetchNavigation?.({ shelf: shelf.id, tag: undefined, status: undefined, trash: undefined })}
                         onRename={() => setShelfDialog({ shelfId: shelf.id, initialName: shelf.name })}
                         onDelete={() => setDeleteShelfTarget(shelf)}
-                        onTogglePin={() => toggleShelfPin.mutate({ id: shelf.id, pinned: !shelf.pinned })}
+                        onTogglePin={() => (activeLibraryId
+                          ? updateLibraryCategory.mutate({ libraryId: activeLibraryId, categoryId: shelf.id, patch: { pinned: !shelf.pinned } })
+                          : toggleShelfPin.mutate({ id: shelf.id, pinned: !shelf.pinned }))}
                       />
                     ))}
                   </SortableContext>
@@ -251,13 +309,13 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
           </>
         )}
 
-        {(!readOnly || tagsLoading || tags.length > 0) && (
+        {(canEditTags || taxonomyLoading || tags.length > 0) && (
           <>
             <div className="mb-1 mt-6 flex items-center justify-between px-3">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
                 {_('library.tags')}
               </span>
-              {!readOnly && (
+              {canEditTags && (
                 <button
                   type="button"
                   onClick={() => setTagDialog({})}
@@ -270,7 +328,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
                 </button>
               )}
             </div>
-            {tagsLoading ? (
+            {(inLibrary ? libraryTagsQuery.isLoading : tagsLoading) ? (
               <div className="space-y-1 py-1" aria-busy="true">
                 <div className="flex h-8 animate-pulse items-center gap-2.5 rounded-lg px-3">
                   <div className="h-3.5 w-3.5 rounded bg-stone-200/70 dark:bg-stone-800/80" />
@@ -286,13 +344,15 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
                     key={tag.id}
                     tag={tag}
                     settling={settleTagId === tag.id}
-                    readOnly={readOnly}
+                    readOnly={!canEditTags}
                     active={!trash && tagId === tag.id}
                     onClick={() => selectNavigation({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
                     onPointerEnter={() => onPrefetchNavigation?.({ tag: tag.id, shelf: undefined, status: undefined, trash: undefined })}
                     onRename={() => setTagDialog({ tagId: tag.id, initialName: tag.name })}
                     onDelete={() => setDeleteTagTarget(tag)}
-                    onTogglePin={() => toggleTagPin.mutate({ id: tag.id, pinned: !tag.pinned })}
+                    onTogglePin={() => (activeLibraryId
+                      ? updateLibraryTag.mutate({ libraryId: activeLibraryId, tagId: tag.id, patch: { pinned: !tag.pinned } })
+                      : toggleTagPin.mutate({ id: tag.id, pinned: !tag.pinned }))}
                   />
                 ))}
               </SortableContext>
@@ -300,7 +360,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
           </>
         )}
 
-        {trashEnabled && !readOnly && (
+        {/* The trash is a private-library concept: a shared library has no
+            soft-delete flow, so the row is not offered there. */}
+        {trashEnabled && !readOnly && !inLibrary && (
           <div className="mt-6 border-t border-stone-200/60 pt-4 dark:border-stone-800/50">
             <NavItem
               label={_('library.trash')}
@@ -370,6 +432,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
 
       <ShelfDialog
         open={shelfDialog !== null}
+        libraryId={activeLibraryId ?? undefined}
         shelfId={shelfDialog?.shelfId}
         initialName={shelfDialog?.initialName}
         onClose={() => setShelfDialog(null)}
@@ -377,6 +440,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
 
       <TagDialog
         open={tagDialog !== null}
+        libraryId={activeLibraryId ?? undefined}
         tagId={tagDialog?.tagId}
         initialName={tagDialog?.initialName}
         onClose={() => setTagDialog(null)}
@@ -384,8 +448,8 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
 
       {deleteShelfTarget && (
         <ConfirmDialog
-          title={_('library.deleteShelf')}
-          message={_('library.deleteShelfConfirm', { name: deleteShelfTarget.name ?? '' })}
+          title={_(inLibrary ? 'library.deleteCategory' : 'library.deleteShelf')}
+          message={_(inLibrary ? 'library.deleteCategoryConfirm' : 'library.deleteShelfConfirm', { name: deleteShelfTarget.name })}
           confirmLabel={_('reader.delete')}
           confirmVariant="danger"
           onClose={() => setDeleteShelfTarget(null)}
@@ -393,7 +457,8 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
             const target = deleteShelfTarget
             setDeleteShelfTarget(null)
             if (shelfId === target.id) selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
-            void deleteShelf.mutateAsync(target.id).catch(() => undefined)
+            if (activeLibraryId) void deleteLibraryCategory.mutateAsync({ libraryId: activeLibraryId, categoryId: target.id }).catch(() => undefined)
+            else void deleteShelf.mutateAsync(target.id).catch(() => undefined)
           }}
         />
       )}
@@ -401,7 +466,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
       {deleteTagTarget && (
         <ConfirmDialog
           title={_('library.deleteTag')}
-          message={_('library.deleteTagConfirm', { name: deleteTagTarget.name ?? '' })}
+          message={_('library.deleteTagConfirm', { name: deleteTagTarget.name })}
           confirmLabel={_('reader.delete')}
           confirmVariant="danger"
           onClose={() => setDeleteTagTarget(null)}
@@ -409,7 +474,8 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
             const target = deleteTagTarget
             setDeleteTagTarget(null)
             if (tagId === target.id) selectNavigation({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
-            void deleteTag.mutateAsync(target.id).catch(() => undefined)
+            if (activeLibraryId) void deleteLibraryTag.mutateAsync({ libraryId: activeLibraryId, tagId: target.id }).catch(() => undefined)
+            else void deleteTag.mutateAsync(target.id).catch(() => undefined)
           }}
         />
       )}
@@ -419,6 +485,179 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
 })
 
 export default LibrarySidebar
+
+/**
+ * Library switcher (0.4.0). One row per library the reader can see, with their
+ * own private library first. It sits in the sidebar rather than above the book
+ * list so that switching libraries feels like picking a shelf: the rows below
+ * it - categories and tags - then describe whichever library is in context.
+ *
+ * The private row is labelled "all books" while it is the only library, because
+ * that is what it shows; once a shared library exists, "all books" would be a
+ * lie (it would be one of several), so it becomes "my library". A library is
+ * renamed through its own management dialog, not from here.
+ */
+function LibrarySection({
+  libraries, activeLibraryId, onSelect, onSelectPrivate, onPrefetchPrivate, onManage, onJoin, onCreate, disabled,
+}: {
+  libraries: LibraryListItem[]
+  activeLibraryId: string | null
+  onSelect?: (libraryId: string | null) => void
+  /** Leaving library context also drops shelf/tag/status filters, as before. */
+  onSelectPrivate?: () => void
+  onPrefetchPrivate?: () => void
+  onManage?: (library: LibraryListItem) => void
+  onJoin?: (library: LibraryListItem) => void
+  onCreate?: () => void
+  disabled?: boolean
+}) {
+  const _ = useTranslation()
+  const shared = libraries.filter((library) => library.type === 'shared')
+  if (shared.length === 0 && !onCreate) return null
+  const privateActive = activeLibraryId === null
+
+  return (
+    <>
+      {/* This row IS the old "all books" entry: while it is the only library it
+          shows everything, and once a shared library exists "all books" would be
+          a lie, so the same row is named "my library". */}
+      <NavItem
+        label={_(shared.length > 0 ? 'library.myLibrary' : 'library.allBooks')}
+        active={privateActive}
+        icon={
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a4 4 0 0 0-3-3H2z" />
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a4 4 0 0 1 3-3h7z" />
+          </svg>
+        }
+        onClick={onSelectPrivate ?? (() => onSelect?.(null))}
+        onPointerEnter={onPrefetchPrivate}
+      />
+      {shared.map((library) => (
+        <LibraryRow
+          key={library.id}
+          library={library}
+          active={activeLibraryId === library.id}
+          disabled={disabled}
+          relation={library.relation}
+          onSelect={() => onSelect?.(library.id)}
+          onManage={onManage ? () => onManage(library) : undefined}
+          onJoin={onJoin ? () => onJoin(library) : undefined}
+        />
+      ))}
+      {onCreate && !disabled && (
+        <button
+          type="button"
+          onClick={onCreate}
+          className="mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-stone-400 transition-colors hover:bg-stone-200/50 hover:text-stone-800 dark:hover:bg-stone-800/50 dark:hover:text-stone-100"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span className="truncate">{_('library.createLibrary')}</span>
+        </button>
+      )}
+    </>
+  )
+}
+
+function LibraryRow({
+  library, active, disabled, relation, onSelect, onManage, onJoin,
+}: {
+  library: LibraryListItem
+  active: boolean
+  disabled?: boolean
+  relation?: LibraryRelation
+  onSelect: () => void
+  onManage?: () => void
+  onJoin?: () => void
+}) {
+  const _ = useTranslation()
+  const menu = useContextMenu()
+  // What a row's menu offers follows from the reader's relation to that
+  // library: a non-member can only be let in, a member has nothing to do here,
+  // and only an owner or admin has settings to change. The menu itself always
+  // exists, because the library's name and visibility are worth seeing either
+  // way.
+  const joinable = relation === 'non-member' && (library.visibility === 'public' || library.visibility === 'password')
+  const canManageRow = relation === 'owner' || relation === 'admin'
+  const menuItems = [
+    joinable && onJoin ? { key: 'join', label: _('library.joinLibrary'), run: onJoin } : null,
+    canManageRow && onManage ? { key: 'manage', label: _('library.manageLibrary'), run: onManage } : null,
+  ].filter((item) => item !== null)
+  return (
+    <div
+      className="group relative"
+      onContextMenu={!disabled ? (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        menu.openFromEvent(e)
+      } : undefined}
+    >
+      <NavItem
+        label={library.name}
+        active={active}
+        countHidden={!disabled && menu.open}
+        hasMenu={!disabled}
+        icon={
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+        }
+        onClick={onSelect}
+      />
+      {!disabled && (
+        <div className="absolute right-2 top-1/2 -translate-y-1/2">
+          <button
+            ref={menu.btnRef}
+            type="button"
+            aria-label={_('library.moreActions')}
+            onClick={(e) => {
+              e.stopPropagation()
+              menu.toggleFromButton()
+            }}
+            className={cn(
+              'flex h-6 w-6 items-center justify-center rounded-md text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
+              menu.open ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100',
+            )}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="1" />
+              <circle cx="19" cy="12" r="1" />
+              <circle cx="5" cy="12" r="1" />
+            </svg>
+          </button>
+          {menu.open && (
+            <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, 186)} onClose={menu.close} width={152}>
+              <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
+                <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{library.name}</p>
+                <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">
+                  {_(`library.visibility${library.visibility === 'public' ? 'Public' : library.visibility === 'password' ? 'Password' : 'Private'}`)}
+                </p>
+              </div>
+              {menuItems.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => {
+                    menu.close()
+                    item.run()
+                  }}
+                  className={cn(libraryMenuItemClass, 'w-full text-left')}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </SmartMenu>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function NavItem({
   label,
@@ -522,6 +761,19 @@ function UncategorizedDropTarget({
   )
 }
 
+/**
+ * One taxonomy row, whichever library it came from. A private shelf is a
+ * LibraryBook.categoryId and a shared library's category is the same table scoped
+ * by libraryId, so the two response shapes are the same shape - including the
+ * book count, which the server reports for both.
+ */
+interface TaxonomyRow {
+  id: string
+  name: string
+  pinned: boolean
+  bookCount: number
+}
+
 function ShelfItem({
   shelf,
   active,
@@ -533,7 +785,7 @@ function ShelfItem({
   onTogglePin,
   readOnly = false,
 }: {
-  shelf: ShelfListItem
+  shelf: TaxonomyRow
   active: boolean
   settling: boolean
   onClick: () => void
@@ -663,6 +915,7 @@ function ShelfItem({
 }
 
 const shelfMenuItemClass = 'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-stone-700 transition-colors hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800'
+const libraryMenuItemClass = shelfMenuItemClass
 
 function TagItem({
   tag,
@@ -675,7 +928,7 @@ function TagItem({
   onTogglePin,
   readOnly = false,
 }: {
-  tag: TagListItem
+  tag: TaxonomyRow
   settling: boolean
   active: boolean
   onClick: () => void
@@ -693,7 +946,6 @@ function TagItem({
     disabled: readOnly,
     animateLayoutChanges: () => false,
   })
-
   return (
     <div
       ref={setNodeRef}

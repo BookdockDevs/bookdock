@@ -15,6 +15,8 @@ export interface LibrarySearch {
   format?: 'epub' | 'txt'
   status?: 'wishlist' | 'reading' | 'idle' | 'finished' | 'abandoned'
   trash?: boolean
+  /** Active shared library; absent = the user's own private library. */
+  libraryId?: string
 }
 
 const VALID_VIEWS = new Set(['grid', 'list'])
@@ -40,6 +42,7 @@ export const indexRoute = createRoute({
       format: VALID_FORMATS.has(input.format as string) ? (input.format as 'epub' | 'txt') : undefined,
       status: VALID_STATUSES.has(input.status as string) ? (input.status as LibrarySearch['status']) : undefined,
       trash: input.trash === true ? true : undefined,
+      libraryId: typeof input.libraryId === 'string' && input.libraryId.length > 0 ? input.libraryId : undefined,
     }
   },
   component: Library,

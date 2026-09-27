@@ -1,13 +1,28 @@
 import { useEffect, useState } from 'react'
-import type { BookListItem, CoverPaletteId } from '@bookdock/shared'
+import type { CoverPaletteId } from '@bookdock/shared'
 
 import { useUiStore } from '@/stores/ui.store'
 import { cn } from '@/lib/utils'
 
 import { getCoverPalette } from './cover-palettes'
 
+/**
+ * The only cover fields this component reads. Narrowing the prop to exactly
+ * these is what lets a shared library's version reuse the same cover as a
+ * private book - the two carry their artwork under different row types, but the
+ * cover itself is one component with one set of rules (fit, lazy load, error
+ * fallback, palette placeholder).
+ */
+export interface CoverSource {
+  id: string
+  title: string
+  format: string
+  coverKey?: string | null
+  coverPaletteId?: CoverPaletteId | null
+}
+
 interface BookCoverProps {
-  book: BookListItem
+  book: CoverSource
   size?: 'sm' | 'md'
   coverSrc?: string | null
   coverPaletteId?: CoverPaletteId | null

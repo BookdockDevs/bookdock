@@ -1,5 +1,3 @@
-import type { ShelfListItem, TagListItem } from '@bookdock/shared'
-
 // Shared dnd-kit contracts for library drag interactions.
 // Drag sources (book cards / list rows) carry a BookDragPayload; drop targets
 // are the sortable shelf/tag rows plus the uncategorized entry
@@ -20,24 +18,25 @@ export function resolveDropShelfId(overId: string): string | null {
   return overId === SHELF_NONE_DROPPABLE ? null : overId
 }
 
-// Same-frame shelf order mirror during drag end (see Library): reorder the
+// Same-frame taxonomy order mirror during drag end (see Library): reorder the
 // base list by the override while it is active, falling back to the base when
-// the override is missing or no longer covers every shelf (e.g. a shelf was
-// created elsewhere and the query refetched).
-export function applyShelfOrder(base: ShelfListItem[], override: string[] | null | undefined): ShelfListItem[] {
+// the override is missing or no longer covers every row (e.g. a category was
+// created elsewhere and the query refetched). Generic over the row so a private
+// shelf, a private tag, a shared library's category and its tag all share it.
+export function applyShelfOrder<T extends { id: string }>(base: T[], override: string[] | null | undefined): T[] {
   if (!override) return base
   const byId = new Map(base.map((s) => [s.id, s]))
   const ordered = override
     .map((id) => byId.get(id))
-    .filter((s): s is ShelfListItem => Boolean(s))
+    .filter((s): s is T => Boolean(s))
   return ordered.length === base.length ? ordered : base
 }
 
-export function applyTagOrder(base: TagListItem[], override: string[] | null | undefined): TagListItem[] {
+export function applyTagOrder<T extends { id: string }>(base: T[], override: string[] | null | undefined): T[] {
   if (!override) return base
   const byId = new Map(base.map((tag) => [tag.id, tag]))
   const ordered = override
     .map((id) => byId.get(id))
-    .filter((tag): tag is TagListItem => Boolean(tag))
+    .filter((tag): tag is T => Boolean(tag))
   return ordered.length === base.length ? ordered : base
 }
