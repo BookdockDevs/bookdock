@@ -56,7 +56,7 @@ import type { FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, ReaderAnnota
 import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
 import { FootnotePopup } from './components/FootnotePopup'
 import { ImageViewer } from './components/ImageViewer'
-import type { BookDetailRes, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+import type { BookDetailRes, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 
 export default function Reader() {
   const _ = useTranslation()
@@ -291,22 +291,23 @@ export default function Reader() {
     [setFontSize, setLineHeight, setPageWidth, setHorizontalPadding, setVerticalPadding, setPageColumns, setColumnGap],
   )
 
-  // Diff lives in books.meta.viewSettings (server state, fetched by bookQuery).
-  const perBook = (bookQuery.data?.data?.meta?.viewSettings as ViewSettings | undefined) ?? undefined
+  // Per-book settings belong to the current user and BookVersion, not to the
+  // shared content revision.
+  const perBook = bookQuery.data?.data?.readerSettings?.viewSettings
   const effectiveSettings = useMemo(() => mergeViewSettings(globalSettings, perBook), [globalSettings, perBook])
 
   // Optimistic cache update so the panel and renderer follow immediately;
   // the PATCH itself is debounced and diffs are merged while pending.
   const saveViewSettingsMutation = useMutation({
     mutationFn: (viewSettings: ViewSettings | null) =>
-      apiPatch<{ data: BookDetailRes }>(`/books/${id}`, { viewSettings }),
+      apiPatch<{ data: ReaderBookSettings }>(`/books/${id}/reader-settings`, { viewSettings }),
     onMutate: (viewSettings) => {
       queryClient.setQueryData(['book', id], (old: { data: BookDetailRes } | undefined) => {
         if (!old?.data) return old
-        const meta = { ...old.data.meta }
-        if (viewSettings === null) delete meta.viewSettings
-        else meta.viewSettings = { ...((meta.viewSettings as ViewSettings | undefined) ?? {}), ...viewSettings }
-        return { ...old, data: { ...old.data, meta } }
+        const readerSettings = { ...(old.data.readerSettings ?? {}) }
+        if (viewSettings === null) delete readerSettings.viewSettings
+        else readerSettings.viewSettings = { ...(readerSettings.viewSettings ?? {}), ...viewSettings }
+        return { ...old, data: { ...old.data, readerSettings } }
       })
     },
     onError: () => {
@@ -334,19 +335,19 @@ export default function Reader() {
     if (viewSettingsTimerRef.current) clearTimeout(viewSettingsTimerRef.current)
   }, [])
 
-  // --- Per-book preset binding (book.meta.boundPresetId) -------------------
+  // --- Per-book preset binding ----------------------------------------------
   // Same optimistic-cache pattern as the viewSettings mutation above.
-  const boundPresetId = (bookQuery.data?.data?.meta?.boundPresetId as string | undefined) ?? null
+  const boundPresetId = bookQuery.data?.data?.readerSettings?.boundPresetId ?? null
   const bindPresetMutation = useMutation({
     mutationFn: (presetId: string | null) =>
-      apiPatch<{ data: BookDetailRes }>(`/books/${id}`, { boundPresetId: presetId }),
+      apiPatch<{ data: ReaderBookSettings }>(`/books/${id}/reader-settings`, { boundPresetId: presetId }),
     onMutate: (presetId) => {
       queryClient.setQueryData(['book', id], (old: { data: BookDetailRes } | undefined) => {
         if (!old?.data) return old
-        const meta = { ...old.data.meta }
-        if (presetId === null) delete meta.boundPresetId
-        else meta.boundPresetId = presetId
-        return { ...old, data: { ...old.data, meta } }
+        const readerSettings = { ...(old.data.readerSettings ?? {}) }
+        if (presetId === null) delete readerSettings.boundPresetId
+        else readerSettings.boundPresetId = presetId
+        return { ...old, data: { ...old.data, readerSettings } }
       })
     },
     onError: () => {

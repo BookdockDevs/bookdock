@@ -22,6 +22,7 @@ interface ListItemWrapperProps {
   readOnly: boolean
   onToggleSelect: (id: string, shiftKey?: boolean) => void
   onDelete?: (b: BookListItem) => void
+  onPublish?: (b: BookListItem) => void
   onShowDetails: (b: BookListItem) => void
 }
 
@@ -29,7 +30,7 @@ interface ListItemWrapperProps {
  * A private book's row in list view. Drag listeners span the row while the
  * cover thumbnail is the measuring node, so the preview follows the cursor.
  */
-export default function ListItemWrapper({ book, selection, selectionActive, dragJustEndedRef, onToggleSelect, readOnly, onDelete, onShowDetails }: ListItemWrapperProps) {
+export default function ListItemWrapper({ book, selection, selectionActive, dragJustEndedRef, onToggleSelect, readOnly, onDelete, onPublish, onShowDetails }: ListItemWrapperProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
   const selected = selection.has(book.id)
@@ -118,11 +119,11 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
         <SmartMenu
           triggerRef={menu.btnRef}
           innerRef={menu.menuRef}
-          position={menu.position(184, 250)}
+          position={menu.position(184, 300)}
           width={184}
           onClose={menu.close}
         >
-          <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onDelete={onDelete} onClose={menu.close} />
+          <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onPublish={onPublish} onDelete={onDelete} onClose={menu.close} />
         </SmartMenu>
       )}
     </div>

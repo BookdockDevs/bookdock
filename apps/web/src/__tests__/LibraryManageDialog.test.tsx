@@ -1,16 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within, act } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import LibraryManageDialog from '../features/library/components/LibraryManageDialog'
-import type { Library, LibraryMembersRes } from '@bookdock/shared'
+import type { Library } from '@bookdock/shared'
 
 const HOOKS = vi.hoisted(() => ({
-  useLibraryMembers: vi.fn(),
   useUpdateLibrary: vi.fn(),
-  useAddLibraryMember: vi.fn(),
-  useSetLibraryMemberRole: vi.fn(),
-  useRemoveLibraryMember: vi.fn(),
-  useTransferLibrary: vi.fn(),
   useDeleteLibrary: vi.fn(),
 }))
 vi.mock('../features/library/hooks', () => HOOKS)
@@ -23,14 +18,6 @@ const LIBRARY: Library = {
   ...{ ownerUserId: 'u1' },
 } as Library
 
-const MEMBERS: LibraryMembersRes = {
-  owner: { id: 'u1', username: 'alice' },
-  members: [
-    { id: 'lbm1', userId: 'u2', username: 'bob', role: 'admin', createdAt: 1, updatedAt: 1 },
-    { id: 'lbm2', userId: 'u3', username: 'carol', role: 'member', createdAt: 1, updatedAt: 1 },
-  ],
-}
-
 describe('LibraryManageDialog', () => {
   const onClose = vi.fn()
   const onDeleted = vi.fn()
@@ -38,10 +25,8 @@ describe('LibraryManageDialog', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     await i18n.changeLanguage('zh-CN')
-    HOOKS.useLibraryMembers.mockReturnValue({ data: { data: MEMBERS } })
-    for (const key of ['useUpdateLibrary', 'useAddLibraryMember', 'useSetLibraryMemberRole', 'useRemoveLibraryMember', 'useTransferLibrary', 'useDeleteLibrary'] as const) {
-      HOOKS[key].mockReturnValue({ mutate: vi.fn(), isPending: false })
-    }
+    HOOKS.useUpdateLibrary.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    HOOKS.useDeleteLibrary.mockReturnValue({ mutate: vi.fn(), isPending: false })
   })
 
   function renderDialog(canManage = true, isOwner = true) {
@@ -56,13 +41,12 @@ describe('LibraryManageDialog', () => {
     )
   }
 
-  it('shows the roster with names and the owner outside the member list', () => {
+  it('renders library settings and delete button for owner without member section', () => {
     renderDialog()
-    expect(screen.getByText('alice')).toBeInTheDocument()
-    // Members also appear in the transfer picker, so assert on the roster rows.
-    expect(screen.getAllByText('bob').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('carol').length).toBeGreaterThan(0)
-    expect(screen.getByText('所有者')).toBeInTheDocument()
+    expect(screen.getByLabelText('名称')).toHaveValue('City')
+    expect(screen.getByRole('button', { name: '删除书库' })).toBeInTheDocument()
+    expect(screen.queryByText('成员')).not.toBeInTheDocument()
+    expect(screen.queryByText('危险区域')).not.toBeInTheDocument()
   })
 
   it('saves settings only after a change', () => {
@@ -90,35 +74,7 @@ describe('LibraryManageDialog', () => {
     )
   })
 
-  it('adds a member by username and clears the field', () => {
-    renderDialog()
-    fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'dave' } })
-    fireEvent.change(screen.getByLabelText('新成员角色'), { target: { value: 'admin' } })
-    fireEvent.click(screen.getByRole('button', { name: '添加' }))
-    const mutate = HOOKS.useAddLibraryMember().mutate
-    expect(mutate).toHaveBeenCalledWith(
-      { libraryId: 'lib_city', username: 'dave', role: 'admin' },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    )
-    act(() => mutate.mock.calls[0]![1].onSuccess())
-    expect(screen.getByLabelText('用户名')).toHaveValue('')
-  })
-
-  it('confirms before removing a member, and the wording says what survives', () => {
-    renderDialog()
-    const carolRow = screen.getAllByText('carol')[0]!.closest('div')!
-    fireEvent.click(within(carolRow).getByLabelText('移除'))
-    // The prompt states the consequence instead of just "are you sure".
-    const dialog = screen.getByRole('alertdialog')
-    expect(within(dialog).getByText(/自己的书库和阅读数据不受影响/)).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: '移除' }))
-    expect(HOOKS.useRemoveLibraryMember().mutate).toHaveBeenCalledWith(
-      { libraryId: 'lib_city', userId: 'u3' },
-      expect.any(Object),
-    )
-  })
-
-  it('states that deleting a library leaves collected copies unreadable', () => {
+  it('states that deleting a library leaves collected copies unreadable in confirmation dialog', () => {
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '删除书库' }))
     const dialog = screen.getByRole('alertdialog')
@@ -127,44 +83,8 @@ describe('LibraryManageDialog', () => {
     expect(HOOKS.useDeleteLibrary().mutate).toHaveBeenCalledWith({ libraryId: 'lib_city' }, expect.any(Object))
   })
 
-  it('offers ownership transfer only to the owner, from existing members', () => {
-    renderDialog()
-    const transfer = screen.getByRole('button', { name: '转让所有者' })
-    expect(transfer).toBeDisabled()
-    fireEvent.change(screen.getByLabelText('转让所有者'), { target: { value: 'u2' } })
-    expect(transfer).not.toBeDisabled()
-    fireEvent.click(transfer)
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '转让所有者' }))
-    expect(HOOKS.useTransferLibrary().mutate).toHaveBeenCalledWith(
-      { libraryId: 'lib_city', userId: 'u2' },
-      expect.any(Object),
-    )
-  })
-
-  it('hides owner actions from a plain member', () => {
-    renderDialog(false, false)
-    expect(screen.getByText('只有书库所有者可以转让或删除这个书库。')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '删除书库' })).not.toBeInTheDocument()
-    expect(screen.queryByText('成员')).not.toBeInTheDocument()
-  })
-
-  it('lets an admin add members but never hand out admin seats', () => {
+  it('hides delete button when isOwner is false', () => {
     renderDialog(true, false)
-    // The role picker offers member only; admins cannot create admins.
-    const options = within(screen.getByLabelText('新成员角色')).getAllByRole('option')
-    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(['member'])
-    // Removing a fellow admin is owner-only; removing a member is allowed.
-    const bobRow = screen.getAllByText('bob')[0]!.closest('div')!
-    expect(within(bobRow).getByLabelText('移除')).toBeDisabled()
-    const carolRow = screen.getAllByText('carol')[0]!.closest('div')!
-    expect(within(carolRow).getByLabelText('移除')).not.toBeDisabled()
-  })
-
-  it('lets the owner hand out admin seats and remove anyone', () => {
-    renderDialog(true, true)
-    const options = within(screen.getByLabelText('新成员角色')).getAllByRole('option')
-    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(['member', 'admin'])
-    const bobRow = screen.getAllByText('bob')[0]!.closest('div')!
-    expect(within(bobRow).getByLabelText('移除')).not.toBeDisabled()
+    expect(screen.queryByRole('button', { name: '删除书库' })).not.toBeInTheDocument()
   })
 })

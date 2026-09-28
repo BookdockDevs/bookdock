@@ -79,6 +79,7 @@ const GRID_CARD_FIELD_LABEL_KEYS: Record<GridCardField, string> = {
   author: 'library.gridCardAuthor',
   progress: 'library.gridCardProgress',
 }
+const CATALOG_GRID_CARD_FIELDS: GridCardField[] = ['title', 'author']
 
 const LIST_INFO_LABEL_KEYS: Record<ListInfoItem, string> = {
   progress: 'library.sortBy.progress',
@@ -186,11 +187,13 @@ export default function ViewMenu({
   }
 
   const sortFields = trash ? TRASH_SORT_FIELDS : (catalogMode ? CATALOG_SORT_FIELDS : SORT_FIELDS)
+  const availableGridCardFields = catalogMode ? CATALOG_GRID_CARD_FIELDS : GRID_CARD_FIELDS
 
-  // A shared library's row is a work: it has no reading state and no shelf, but
-  // it does have a date it was added. Offering only the columns a row can fill
-  // is what keeps this menu the same menu in both libraries.
-  const CATALOG_LIST_INFO: ListInfoItem[] = ['createdAt']
+  // A shared library's row is a work: it has no reading state, but it does have
+  // a category, tags, a size and a date it was added. Offering exactly the
+  // columns a row can fill is what keeps this menu the same menu in both
+  // libraries; progress and last-read stay private-only for lack of data.
+  const CATALOG_LIST_INFO: ListInfoItem[] = ['shelf', 'tags', 'size', 'createdAt']
   const availableListInfo = catalogMode ? CATALOG_LIST_INFO : LIST_INFO_ITEMS
 
   const viewOptions: { value: 'grid' | 'list'; label: string; icon: ReactNode }[] = [
@@ -513,13 +516,13 @@ export default function ViewMenu({
                   </div>
 
                   {/* Card Info Fields */}
-                  {!trash && !catalogMode && (
+                  {!trash && (
                     <div className="mb-1">
                       <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
                         {_('library.gridCardFields')}
                       </div>
                       <div className="grid grid-cols-3 gap-1.5">
-                        {GRID_CARD_FIELDS.map((field) => {
+                        {availableGridCardFields.map((field) => {
                           const active = gridCardFields.includes(field)
                           return (
                             <button
@@ -579,7 +582,7 @@ export default function ViewMenu({
                                   : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
                               )}
                             >
-                              {_(LIST_INFO_LABEL_KEYS[item])}
+                              {_(catalogMode && item === 'shelf' ? 'library.categories' : LIST_INFO_LABEL_KEYS[item])}
                             </button>
                           )
                         })}

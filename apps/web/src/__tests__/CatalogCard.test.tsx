@@ -4,7 +4,7 @@ import type { ReactElement } from 'react'
 
 import i18n from '../i18n/i18n'
 import CatalogCard from '../features/library/components/CatalogCard'
-import type { CatalogBook, Library } from '@bookdock/shared'
+import type { CatalogBook } from '@bookdock/shared'
 
 const HOOKS = vi.hoisted(() => ({
   useUpdateCatalogVersion: vi.fn(),
@@ -19,19 +19,12 @@ vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn(), info: vi.fn(
 const navigateMock = vi.fn()
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => navigateMock }))
 
-function library(overrides: Partial<Library> = {}): Library {
-  return {
-    id: 'lib_city', userId: 'u2', type: 'shared', name: 'City', description: 'All the books',
-    visibility: 'public', createdAt: 1, updatedAt: 1, ...overrides,
-  }
-}
-
 function version(overrides: Partial<CatalogBook['versions'][number]> = {}): CatalogBook['versions'][number] {
   return {
     id: 'lbv1', libraryBookId: 'lb1', bookVersionId: 'v1', kind: 'personal', status: 'published',
     name: '', title: null, author: null, description: null, coverKey: null,
-    effective: { title: 'City Book', author: 'Someone', description: '', coverKey: null },
-    format: 'epub', size: 10, chapterCount: 3, wordCount: 100, createdAt: 1, updatedAt: 1,
+    effective: { title: 'City Book', author: 'Someone', description: '', coverKey: null, bookmeta: {}, fileName: null },
+    format: 'epub', size: 10, chapterCount: 3, wordCount: 100, pinnedAt: null, createdAt: 1, updatedAt: 1,
     ...overrides,
   }
 }
@@ -47,13 +40,12 @@ function renderRow(element: ReactElement) {
   return render(<ul>{element}</ul>)
 }
 
-function renderCard(book: CatalogBook, { canManage = false, canCollect = true, moveCandidates = [] as CatalogBook[] } = {}) {
+function renderCard(book: CatalogBook, { canManage = false, canCollect = true } = {}) {
   const updateVersion = vi.fn()
   const moveVersion = vi.fn()
   const deleteVersion = vi.fn()
   const collect = vi.fn()
   const onShowDetails = vi.fn()
-  const onOpen = vi.fn()
   HOOKS.useUpdateCatalogVersion.mockReturnValue({ mutate: updateVersion })
   HOOKS.useMoveCatalogVersion.mockReturnValue({ mutate: moveVersion })
   HOOKS.useDeleteCatalogVersion.mockReturnValue({ mutate: deleteVersion })
@@ -61,15 +53,12 @@ function renderCard(book: CatalogBook, { canManage = false, canCollect = true, m
   const { container } = renderRow(
     <CatalogCard
       book={book}
-      library={library()}
       canManage={canManage}
       canCollect={canCollect}
-      moveCandidates={moveCandidates}
       onShowDetails={onShowDetails}
-      onOpen={onOpen}
     />,
   )
-  return { container, updateVersion, moveVersion, deleteVersion, collect, onShowDetails, onOpen }
+  return { container, updateVersion, moveVersion, deleteVersion, collect, onShowDetails }
 }
 
 /** Opens the row's overflow menu, the way a reader does. */
@@ -84,7 +73,7 @@ describe('CatalogCard', () => {
   })
 
   it('draws the work with the same card a private book uses', () => {
-    renderCard(work({ tags: [{ id: 't1', name: 'classic' }] }), { moveCandidates: [work()] })
+    renderCard(work({ tags: [{ id: 't1', name: 'classic' }] }))
     // Title, author and artwork, and nothing about reading: a work belongs to
     // nobody, so there is no progress to show and none is invented.
     expect(screen.getByText('City Book')).toBeInTheDocument()
@@ -97,12 +86,9 @@ describe('CatalogCard', () => {
     const { container } = renderRow(
       <CatalogCard
         book={work({ coverKey: 'cover-1' })}
-        library={library()}
         canManage={false}
         canCollect
-        moveCandidates={[]}
         onShowDetails={vi.fn()}
-        onOpen={vi.fn()}
       />,
     )
     const img = container.querySelector('img')!
@@ -116,55 +102,129 @@ describe('CatalogCard', () => {
     const { container } = renderRow(
       <CatalogCard
         book={work({ coverKey: null })}
-        library={library()}
         canManage={false}
         canCollect
-        moveCandidates={[]}
         onShowDetails={vi.fn()}
-        onOpen={vi.fn()}
       />,
     )
     expect(container.querySelector('img')?.getAttribute('src')).toBe('/api/v1/books/v1/cover?size=thumb')
   })
 
-  it('obeys the grid card fields, so a hidden field is really hidden', () => {
+  it('shows the title placeholder at once for a coverless txt, with no doomed fetch', () => {
+    const { container } = renderRow(
+      <CatalogCard
+        book={work({ coverKey: null, versions: [version({ format: 'txt' })] })}
+        canManage={false}
+        canCollect
+        onShowDetails={vi.fn()}
+      />,
+    )
+    // No artwork can exist, so no request is issued: the placeholder title is
+    // already on screen instead of arriving with the cover 404.
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.getAllByText('City Book')).toHaveLength(2)
+  })
+
+  it('obeys the selected card fields and never renders progress', () => {
     renderRow(
       <CatalogCard
         book={work()}
-        library={library()}
         canManage={false}
         canCollect
-        moveCandidates={[]}
         gridCardFields={['title']}
         onShowDetails={vi.fn()}
-        onOpen={vi.fn()}
       />,
     )
     expect(screen.getByText('City Book')).toBeInTheDocument()
     expect(screen.queryByText('Someone')).toBeNull()
+    expect(screen.queryByText(/^\d+%$/)).toBeNull()
   })
 
   it('opens the shared detail dialog from the menu', () => {
-    const { container, onShowDetails, onOpen } = renderCard(work())
+    const { container, onShowDetails } = renderCard(work())
     openMenu(container)
     fireEvent.click(screen.getByText('详情'))
     expect(onShowDetails).toHaveBeenCalledWith(expect.objectContaining({ id: 'lb1' }))
-    // Versions are chosen in the detail, not on the card.
-    expect(onOpen).not.toHaveBeenCalled()
   })
 
-  it('sends a reader straight to the first version when there is nothing to pick', () => {
-    const { onOpen } = renderCard(work())
-    onOpen(work())
-    expect(onOpen).toHaveBeenCalled()
+  it('keeps version picking out of the menu', () => {
+    const { container } = renderCard(work(), { canManage: true })
+    openMenu(container)
+    expect(screen.queryByText('版本')).toBeNull()
   })
 
-  it('offers no read-status or delete item, because a work has neither', () => {
+  it('offers details and download to a reader, nothing managerial', () => {
+    const { container } = renderCard(work())
+    openMenu(container)
+    expect(screen.getByText('详情')).toBeInTheDocument()
+    expect(screen.getByText('下载')).toBeInTheDocument()
+    expect(screen.queryByText('置顶')).toBeNull()
+    expect(screen.queryByText('删除')).toBeNull()
+  })
+
+  it('offers collect to a reader in the menu when canCollect is true', () => {
+    const { container, collect } = renderCard(work(), { canCollect: true })
+    openMenu(container)
+    expect(screen.getByText('加入我的书库')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('加入我的书库'))
+    expect(collect).toHaveBeenCalledWith(
+      { libraryId: 'lib_city', versionLinkId: 'lbv1' },
+      expect.any(Object),
+    )
+  })
+
+  it('hides collect when the first version is already in the private library', () => {
+    const { container } = renderCard(work({ versions: [version({ collected: true })] }))
+    openMenu(container)
+    expect(screen.queryByText('加入我的书库')).not.toBeInTheDocument()
+  })
+
+  it('withholds download for an unlisted version the server would refuse', () => {
+    const { container } = renderCard(work({ versions: [version({ status: 'unlisted' })] }))
+    openMenu(container)
+    expect(screen.getByText('详情')).toBeInTheDocument()
+    expect(screen.queryByText('下载')).toBeNull()
+  })
+
+  it('pins and deletes through the manager-only items', () => {
+    const { container, updateVersion, deleteVersion } = renderCard(work(), { canManage: true })
+    openMenu(container)
+    fireEvent.click(screen.getByText('置顶'))
+    expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({
+      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { pinned: true },
+    }))
+    // Like a private menu, each action closes the menu first.
+    openMenu(container)
+    fireEvent.click(screen.getByText('删除'))
+    expect(deleteVersion).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1' })
+  })
+
+  it('offers unpin when the work is already pinned', () => {
+    const { container, updateVersion } = renderCard(work({ versions: [version({ pinnedAt: 99 })] }), { canManage: true })
+    openMenu(container)
+    fireEvent.click(screen.getByText('取消置顶'))
+    expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
+  })
+
+  it('offers no read-status item, because a work has none', () => {
     const { container } = renderCard(work({ versions: [version({ status: 'unlisted' })] }))
     openMenu(container)
     // An unlisted version is still listed in the detail; the row only offers
     // what a work can answer for.
     expect(screen.queryByText('library.markFinished')).toBeNull()
-    expect(screen.queryByText('删除')).toBeNull()
+  })
+
+  it('renders unpin button on the card for managers when pinned', () => {
+    const { updateVersion } = renderCard(work({ versions: [version({ pinnedAt: 99 })] }), { canManage: true })
+    const unpinBtn = screen.getByLabelText('取消置顶')
+    expect(unpinBtn).toBeInTheDocument()
+    fireEvent.click(unpinBtn)
+    expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
+  })
+
+  it('renders read-only pin indicator on the card for members without unpin affordance', () => {
+    renderCard(work({ versions: [version({ pinnedAt: 99 })] }), { canManage: false })
+    expect(screen.getByLabelText('置顶')).toBeInTheDocument()
+    expect(screen.queryByLabelText('取消置顶')).toBeNull()
   })
 })

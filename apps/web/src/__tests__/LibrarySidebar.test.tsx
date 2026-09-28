@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+
+import type { LibraryListItem } from '@bookdock/shared'
+
 import i18n from '../i18n/i18n'
 import LibrarySidebar from '../features/library/components/LibrarySidebar'
 import * as libraryHooks from '../features/library/hooks'
@@ -186,6 +189,70 @@ describe('LibrarySidebar', () => {
     fireEvent.click(screen.getByText('未分类'))
     expect(navSearch).toHaveBeenCalledWith({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })
     expect(screen.queryByText('暂无书架')).toBeNull()
+  })
+
+  it('shows the empty-shelf hint only when the section would otherwise be bare', () => {
+
+    mockHooks({ uncategorizedTotal: 0 })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+
+    expect(screen.getByText('暂无书架')).toBeInTheDocument()
+    expect(screen.queryByText('未分类')).toBeNull()
+  })
+
+  it('shows the empty-category hint for a shared library without categories', () => {
+    mockHooks()
+    mockLibraryHooks({ relation: 'owner', uncategorizedTotal: 0 })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+
+    expect(screen.getByText('分类')).toBeInTheDocument()
+    expect(screen.getByText('暂无分类')).toBeInTheDocument()
+    expect(screen.queryByText('未分类')).toBeNull()
+  })
+
+  it('keeps the uncategorized row for read-only readers when categories are empty', () => {
+    mockHooks()
+    mockLibraryHooks({ relation: 'member', uncategorizedTotal: 3 })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} readOnly activeLibraryId="lib-1" />)
+
+    expect(screen.getByText('分类')).toBeInTheDocument()
+    expect(screen.getByText('未分类')).toBeInTheDocument()
+    expect(screen.queryByText('暂无分类')).toBeNull()
+  })
+
+  it('offers no create entry: creating moved to the settings library list', () => {
+    mockHooks()
+    const memberLibraries: LibraryListItem[] = [{
+      id: 'lib-1', type: 'shared', ownerUserId: 'u9', name: 'Club', description: '',
+      visibility: 'public', createdAt: 1, updatedAt: 2, relation: 'member',
+    }]
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} libraries={memberLibraries} />)
+
+    expect(screen.getByText('Club')).toBeInTheDocument()
+    expect(screen.queryByText('新建书库')).toBeNull()
+  })
+
+  it('lists only joined libraries, never discoverable strangers', () => {
+    mockHooks()
+    const mixedLibraries: LibraryListItem[] = [
+      {
+        id: 'lib-1', type: 'shared', ownerUserId: 'u9', name: 'Club', description: '',
+        visibility: 'public', createdAt: 1, updatedAt: 2, relation: 'member',
+      },
+      {
+        id: 'lib-2', type: 'shared', ownerUserId: 'u9', name: 'Strangers', description: '',
+        visibility: 'public', createdAt: 1, updatedAt: 2, relation: 'non-member',
+      },
+    ]
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} libraries={mixedLibraries} />)
+
+    expect(screen.getByText('Club')).toBeInTheDocument()
+    expect(screen.queryByText('Strangers')).toBeNull()
   })
 
   it('uses a three-quarter width mobile drawer', () => {
@@ -517,7 +584,7 @@ describe('LibrarySidebar', () => {
       expect(onSelectLibrary).toHaveBeenCalledWith(null)
     })
 
-    it('offers join on a public library the reader has not joined, and manage otherwise', () => {
+    it('lists only joined libraries; unjoined public rows moved to future discovery', () => {
       mockHooks()
       const onJoinLibrary = vi.fn()
       const onManageLibrary = vi.fn()
@@ -525,25 +592,6 @@ describe('LibrarySidebar', () => {
         id: `lib-${name}`, type: 'shared' as const, ownerUserId: 'u2', name, description: '',
         visibility: 'public' as const, createdAt: 1, updatedAt: 1, relation,
       })
-      const { unmount } = render(
-        <LibrarySidebar
-          navSearch={navSearch}
-          shelfId={null}
-          tagId={null}
-          trash={false}
-          libraries={[row('non-member', 'Open'), row('owner', 'Mine')]}
-          onJoinLibrary={onJoinLibrary}
-          onManageLibrary={onManageLibrary}
-        />,
-      )
-
-      // A reader outside the library can only be let in.
-      fireEvent.click(screen.getAllByLabelText('更多操作')[0])
-      expect(screen.queryByText('管理')).toBeNull()
-      fireEvent.click(screen.getByText('加入书库'))
-      expect(onJoinLibrary).toHaveBeenCalledWith(expect.objectContaining({ id: 'lib-Open' }))
-      unmount()
-
       render(
         <LibrarySidebar
           navSearch={navSearch}
@@ -555,8 +603,11 @@ describe('LibrarySidebar', () => {
           onManageLibrary={onManageLibrary}
         />,
       )
-      // A member is already in and has no settings, so the row offers neither.
-      fireEvent.click(screen.getAllByLabelText('更多操作')[1])
+
+      // The unjoined library is not a switching row at all anymore.
+      expect(screen.queryByText('Open')).toBeNull()
+      expect(screen.getByText('Mine')).toBeInTheDocument()
+      fireEvent.click(screen.getAllByLabelText('更多操作')[0])
       expect(screen.queryByText('加入书库')).toBeNull()
       fireEvent.click(screen.getByText('管理'))
       expect(onManageLibrary).toHaveBeenCalledWith(expect.objectContaining({ id: 'lib-Mine' }))
@@ -579,6 +630,24 @@ describe('LibrarySidebar', () => {
       expect(screen.getByText('私密')).toBeInTheDocument()
       expect(screen.queryByText('加入书库')).toBeNull()
       expect(screen.queryByText('管理')).toBeNull()
+    })
+
+    it('triggers onExploreLibraries when clicking explore button', () => {
+      mockHooks()
+      const onExploreLibraries = vi.fn()
+      render(
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[]}
+          onExploreLibraries={onExploreLibraries}
+        />,
+      )
+      const exploreButton = screen.getByText('探索书库')
+      fireEvent.click(exploreButton)
+      expect(onExploreLibraries).toHaveBeenCalledTimes(1)
     })
   })
 })

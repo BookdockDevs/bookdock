@@ -35,11 +35,12 @@ import BookGrid from './components/BookGrid'
 import CatalogCard from './components/CatalogCard'
 import CatalogListRow from './components/CatalogListRow'
 import CatalogUploadSheet from './components/CatalogUploadSheet'
-import LibraryCreateDialog from './components/LibraryCreateDialog'
 import LibraryManageDialog from './components/LibraryManageDialog'
 import BookDetailDialog from './components/BookDetailDialog'
+import PublishBookDialog from './components/PublishBookDialog'
 import EmptyLibrary from './components/EmptyLibrary'
 import JoinLibraryDialog from './components/JoinLibraryDialog'
+import LibraryDiscoveryDialog from './components/LibraryDiscoveryDialog'
 import LibraryHeader from './components/LibraryHeader'
 import LibraryPagination from './components/LibraryPagination'
 import LibrarySidebar from './components/LibrarySidebar'
@@ -68,6 +69,7 @@ function estimateDynColumns(): number {  if (typeof window === 'undefined') retu
 }
 
 let lastKnownDynColumns = typeof window !== 'undefined' ? estimateDynColumns() : 4
+const CLEAR_USER_DATA_STORAGE_KEY = 'bookdock:clear_user_data_on_remove'
 
 export default function Library() {
   const _ = useTranslation()
@@ -121,9 +123,9 @@ export default function Library() {
   // and bookmarks reproduce it; the server stays authoritative on access.
   // Guests keep the private view until Phase 6 wires anonymous browsing.
   const libraryStale = !!requestedLibraryId && librariesData !== undefined && !activeLibrary
-  const [createOpen, setCreateOpen] = useState(false)
   const [manageTarget, setManageTarget] = useState<LibraryListItem | null>(null)
   const [joinTarget, setJoinTarget] = useState<Library | null>(null)
+  const [discoveryOpen, setDiscoveryOpen] = useState(false)
 
   const prefetchLibrary = useCallback(
     (patch: Partial<LibrarySearch>, targetLibraryId?: string | null) => {
@@ -177,9 +179,17 @@ export default function Library() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<BookListItem | null>(null)
+  const [clearUserDataOnRemove, setClearUserDataOnRemove] = useState(() => {
+    try {
+      return localStorage.getItem(CLEAR_USER_DATA_STORAGE_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<BookListItem | null>(null)
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false)
   const [detailTarget, setDetailTarget] = useState<BookListItem | null>(null)
+  const [publishTarget, setPublishTarget] = useState<BookListItem | null>(null)
   const [workDetail, setWorkDetail] = useState<CatalogBook | null>(null)
   const [selection, setSelection] = useState<Set<string>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
@@ -497,6 +507,11 @@ export default function Library() {
 
   const libraryRelation = libraryRelationQuery.data?.data.relation
   const isLibraryManager = libraryRelation === 'owner' || libraryRelation === 'admin'
+  const hasPublishTarget = !isGuest && !activeLibrary && libraries.some((library) => (
+    library.type === 'shared' && (library.relation === 'owner' || library.relation === 'admin')
+  ))
+  const canPublishBook = (book: BookListItem) => hasPublishTarget && (book.kind === undefined || book.kind === 'personal')
+  const canPublishDetail = detailTarget ? canPublishBook(detailTarget) : false
   // The manage dialog can target a library that is not in context, so its
   // relation comes from the listed row rather than the active-library query;
   // the row's own relation is the fallback before the list loads.
@@ -780,7 +795,7 @@ export default function Library() {
           onSelectLibrary={handleSwitchLibrary}
           onManageLibrary={setManageTarget}
           onJoinLibrary={setJoinTarget}
-          onCreateLibrary={() => setCreateOpen(true)}
+          onExploreLibraries={() => setDiscoveryOpen(true)}
         />
 
       <main className="flex min-w-0 flex-1 flex-col px-3 py-5 sm:px-4 sm:py-8 md:px-8">
@@ -856,6 +871,7 @@ export default function Library() {
                     key={work.id}
                     work={work}
                     canManage={isLibraryManager}
+                    canCollect={libraryRelation !== 'guest'}
                     selected={selection.has(work.id)}
                     selectionActive={selectionActive}
                     selection={selection}
@@ -874,10 +890,8 @@ export default function Library() {
                   <DraggableWorkCard
                     key={work.id}
                     work={work}
-                    library={activeLibrary}
                     canManage={isLibraryManager}
                     canCollect={libraryRelation !== 'guest'}
-                    moveCandidates={catalogWorks.filter((other) => other.id !== work.id)}
                     gridCardFields={gridCardFields}
                     selected={selection.has(work.id)}
                     selectionActive={selectionActive}
@@ -946,6 +960,7 @@ export default function Library() {
                         onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
                         readOnly={isGuest}
                         onDelete={isGuest ? undefined : setDeleteTarget}
+                        onPublish={canPublishBook(book) ? setPublishTarget : undefined}
                         onShowDetails={setDetailTarget}
                       />
                     </Link>
@@ -982,6 +997,7 @@ export default function Library() {
                     onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
                     readOnly={isGuest}
                     onDelete={isGuest ? undefined : setDeleteTarget}
+                    onPublish={canPublishBook(book) ? setPublishTarget : undefined}
                     onShowDetails={setDetailTarget}
                   />
                 )
@@ -1015,24 +1031,29 @@ export default function Library() {
         />
       )}
 
-      {/* 0.4.0: the two dialogs that make a shared library reachable and
-          reversible from the UI instead of only through the API. */}
-      {createOpen && (
-        <LibraryCreateDialog
-          onClose={() => setCreateOpen(false)}
-          onCreated={(library) => {
-            setCreateOpen(false)
-            void navSearch({ libraryId: library.id })
-          }}
-        />
-      )}
-
+      {/* The dialogs that make a shared library reversible from the UI instead
+          of only through the API. Creating moved to the settings library list. */}
       {joinTarget && (
         <JoinLibraryDialog
           open
           libraryId={joinTarget.id}
+          libraryName={joinTarget.name}
           needsPassword={joinTarget.visibility === 'password'}
           onClose={() => setJoinTarget(null)}
+        />
+      )}
+
+      {discoveryOpen && (
+        <LibraryDiscoveryDialog
+          open
+          onClose={() => setDiscoveryOpen(false)}
+          onSelectLibrary={(id) => {
+            void handleSwitchLibrary(id)
+            setDiscoveryOpen(false)
+          }}
+          onJoinWithPassword={(lib) => {
+            setJoinTarget(lib)
+          }}
         />
       )}
 
@@ -1054,6 +1075,7 @@ export default function Library() {
         <CatalogUploadSheet
           open={uploadOpen}
           libraryId={activeLibrary.id}
+          categoryId={shelfId === 'none' ? null : shelfId}
           onClose={() => setUploadOpen(false)}
         />
       ) : (
@@ -1079,13 +1101,75 @@ export default function Library() {
           setDetailTarget(null)
           setWorkDetail(null)
         }}
+        onPublish={canPublishDetail ? (book) => {
+          setDetailTarget(null)
+          setPublishTarget(book)
+        } : undefined}
         onDelete={(b) => {
           setDetailTarget(null)
           setDeleteTarget(b)
         }}
       />
 
-      {deleteTarget && (
+      {publishTarget && (
+        <PublishBookDialog
+          book={publishTarget}
+          libraries={libraries}
+          onClose={() => setPublishTarget(null)}
+          onOpenLibrary={(libraryId) => {
+            setPublishTarget(null)
+            handleSwitchLibrary(libraryId)
+          }}
+        />
+      )}
+
+      {deleteTarget && (() => {
+        const isCollected = Boolean(deleteTarget.source)
+        if (isCollected) {
+          const title = deleteTarget.title ?? ''
+          return (
+            <ConfirmDialog
+              title={_('library.removeFromLibrary')}
+              message={
+                <div>
+                  <div>
+                    {title.startsWith('《')
+                      ? _('library.removeConfirmBare', { title })
+                      : _('library.removeConfirm', { title })}
+                  </div>
+                  <label className="mt-3 flex items-start gap-2 cursor-pointer select-none text-xs text-stone-600 dark:text-stone-300">
+                    <input
+                      type="checkbox"
+                      checked={clearUserDataOnRemove}
+                      onChange={(e) => {
+                        setClearUserDataOnRemove(e.target.checked)
+                        try {
+                          localStorage.setItem(CLEAR_USER_DATA_STORAGE_KEY, e.target.checked ? 'true' : 'false')
+                        } catch {}
+                      }}
+                      className="mt-0.5 rounded border-stone-300 text-stone-900 focus:ring-stone-500 dark:border-stone-600 dark:bg-stone-800 dark:checked:bg-stone-200 dark:checked:text-stone-900"
+                    />
+                    <span>{_('library.clearUserDataOnRemove')}</span>
+                  </label>
+                </div>
+              }
+              confirmLabel={_('library.removeFromLibrary')}
+              confirmVariant="danger"
+              onClose={() => setDeleteTarget(null)}
+              onConfirm={() => {
+                const target = deleteTarget
+                setDeleteTarget(null)
+                void deleteBook.mutateAsync({
+                  id: target.id,
+                  title: target.title,
+                  isCollected: true,
+                  deleteUserData: clearUserDataOnRemove,
+                }).catch(() => undefined)
+              }}
+            />
+          )
+        }
+        return (
         <ConfirmDialog
           title={trashEnabled ? _('library.deleteBook') : _('library.permanentDelete')}
           message={
@@ -1111,10 +1195,11 @@ export default function Library() {
           onConfirm={() => {
             const target = deleteTarget
             setDeleteTarget(null)
-            void deleteBook.mutateAsync({ id: target.id, title: target.title }).catch(() => undefined)
+            void deleteBook.mutateAsync({ id: target.id, title: target.title, isCollected: false }).catch(() => undefined)
           }}
         />
-      )}
+        )
+      })()}
 
       {permanentDeleteTarget && (
         <ConfirmDialog
@@ -1235,14 +1320,12 @@ function DraggableBookCard({
  * library, so a work cannot be dropped on one either.
  */
 function DraggableWorkCard({
-  work, library, canManage, canCollect, moveCandidates, gridCardFields,
+  work, canManage, canCollect, gridCardFields,
   selected, selectionActive, selection, dragJustEndedRef, onToggleSelect, onShowDetails,
 }: {
   work: CatalogBook
-  library: Library
   canManage: boolean
   canCollect: boolean
-  moveCandidates: CatalogBook[]
   gridCardFields?: Parameters<typeof BookCard>[0]['gridCardFields']
   selected: boolean
   selectionActive: boolean
@@ -1251,7 +1334,6 @@ function DraggableWorkCard({
   onToggleSelect: (id: string, shiftKey?: boolean) => void
   onShowDetails: (work: CatalogBook) => void
 }) {
-  const navigate = useNavigate()
   // A selected card dragged in selection mode carries the whole selection,
   // the same rule a private card follows; a lone card carries only itself.
   const workIds = selectionActive && selected ? Array.from(selection) : [work.id]
@@ -1260,6 +1342,21 @@ function DraggableWorkCard({
     data: { bookIds: workIds } satisfies BookDragPayload,
     disabled: !canManage,
   })
+  // A plain click reads the work's first version, the way a private card
+  // reads its book; without a version there is no reader target to link to.
+  const firstVersionId = work.versions[0]?.bookVersionId
+  const card = (
+    <CatalogCard
+      book={work}
+      canManage={canManage}
+      canCollect={canCollect}
+      gridCardFields={gridCardFields}
+      selected={selected}
+      selectionActive={selectionActive}
+      onToggleSelect={onToggleSelect}
+      onShowDetails={onShowDetails}
+    />
+  )
   return (
     <div
       ref={setNodeRef}
@@ -1279,22 +1376,32 @@ function DraggableWorkCard({
         }
       }}
     >
-      <CatalogCard
-        book={work}
-        library={library}
-        canManage={canManage}
-        canCollect={canCollect}
-        moveCandidates={moveCandidates}
-        gridCardFields={gridCardFields}
-        selected={selected}
-        selectionActive={selectionActive}
-        onToggleSelect={onToggleSelect}
-        onShowDetails={onShowDetails}
-        onOpen={(target) => {
-          const first = target.versions[0]
-          if (first) void navigate({ to: '/books/$id', params: { id: first.bookVersionId } })
-        }}
-      />
+      {firstVersionId ? (
+        <Link
+          to="/books/$id"
+          params={{ id: firstVersionId }}
+          onClick={(e) => {
+            if (dragJustEndedRef.current) {
+              e.preventDefault()
+              return
+            }
+            if (selectionActive) {
+              e.preventDefault()
+              onToggleSelect(work.id, e.shiftKey)
+              return
+            }
+            if (e.ctrlKey || e.metaKey || e.shiftKey) {
+              e.preventDefault()
+              onToggleSelect(work.id, e.shiftKey)
+            }
+          }}
+          className="block rounded-xl"
+        >
+          {card}
+        </Link>
+      ) : (
+        card
+      )}
     </div>
   )
 }

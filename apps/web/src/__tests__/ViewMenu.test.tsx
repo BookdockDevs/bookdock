@@ -115,6 +115,15 @@ describe('ViewMenu cover and card field prefs', () => {
     expect(screen.queryByRole('button', { name: '裁剪' })).toBeNull()
   })
 
+  it('offers title and author card fields, but not progress, in catalog grid view', () => {
+    renderMenu({ defaultTab: 'viewLayout', view: 'grid', catalogMode: true })
+
+    expect(screen.getByText('卡片信息')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '书名' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '作者' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '进度' })).toBeNull()
+  })
+
   it('renders page size selector and allows changing page size', () => {
     renderMenu({ defaultTab: 'viewLayout' })
     expect(screen.getByRole('button', { name: '24' })).toHaveAttribute('aria-pressed', 'true')
@@ -151,6 +160,20 @@ describe('ViewMenu list info toggles', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '书架' }))
     expect(useUiStore.getState().listInfoItems).toEqual(['progress'])
+  })
+
+  it('offers only fillable columns in catalog mode, with shelf relabeled as category', () => {
+    renderMenu({ defaultTab: 'viewLayout', view: 'list', catalogMode: true })
+
+    expect(screen.getByText('列表信息')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '分类' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '标签' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '大小' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加时间' })).toBeInTheDocument()
+    // Reading state has no row to read from in a shared library.
+    expect(screen.queryByRole('button', { name: '进度' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '最近阅读' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '书架' })).toBeNull()
   })
 })
 

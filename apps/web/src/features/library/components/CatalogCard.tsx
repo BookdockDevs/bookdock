@@ -1,7 +1,4 @@
-import { useState } from 'react'
-
-import type { CatalogBook, Library } from '@bookdock/shared'
-
+import type { CatalogBook } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import type { GridCardField } from '@/stores/ui.store'
@@ -9,44 +6,40 @@ import type { GridCardField } from '@/stores/ui.store'
 import { catalogWorkRow } from '../book-row'
 
 import BookCardShell from './BookCardShell'
-import CatalogVersionList from './CatalogVersionList'
 import { useContextMenu } from './use-context-menu'
 import CatalogWorkMenu from './CatalogWorkMenu'
+import { PinIcon } from './UnpinButton'
+import { useUpdateCatalogVersion } from '../hooks'
 
 /**
  * A work in a shared library, drawn by the same card as a private book.
  *
  * What the card shows is the work - cover, title, author - and nothing about
  * reading, because a work belongs to nobody: no progress, no read status, no
- * pin. Its versions live in the work's detail dialog, which is where a reader
- * chooses one to read, the same place a private book's detail shows what is
- * known about it.
+ * personal pin. Its versions live in the work's detail dialog, which is where
+ * a reader chooses one to read, the same place a private book's detail shows
+ * what is known about it. A manager's pin is the library's, not the reader's.
  */
 interface CatalogCardProps {
   book: CatalogBook
-  library: Library
   canManage: boolean
   canCollect: boolean
-  moveCandidates: CatalogBook[]
   gridCardFields?: GridCardField[]
   selected?: boolean
   selectionActive?: boolean
   onToggleSelect?: (id: string, shiftKey?: boolean) => void
   onShowDetails: (book: CatalogBook) => void
-  /** Opens the work's detail dialog; versions are chosen inside it. */
-  onOpen: (book: CatalogBook) => void
-  /** Curators see the versions inline; everyone else reads them in the dialog. */
-  showVersionsInline?: boolean
 }
 
 export default function CatalogCard({
-  book, library, canManage, canCollect, moveCandidates, gridCardFields,
-  selected = false, selectionActive = false, onToggleSelect, onShowDetails, onOpen, showVersionsInline = false,
+  book, canManage, canCollect, gridCardFields,
+  selected = false, selectionActive = false, onToggleSelect, onShowDetails,
 }: CatalogCardProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
-  const [versionsOpen, setVersionsOpen] = useState(false)
-  const versionsVisible = versionsOpen && showVersionsInline
+  const updateVersion = useUpdateCatalogVersion()
+  const first = book.versions[0]
+  const isPinned = Boolean(first?.pinnedAt)
 
   return (
     <div className="flex flex-col gap-2">
@@ -56,6 +49,39 @@ export default function CatalogCard({
         selected={selected}
         selectionActive={selectionActive}
         onToggleSelect={onToggleSelect}
+        pinAffordance={isPinned ? (
+          <div className="absolute left-1.5 top-1.5 z-10 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
+            {canManage ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (!first) return
+                  updateVersion.mutate({
+                    libraryId: book.libraryId,
+                    libraryBookId: book.id,
+                    versionLinkId: first.id,
+                    patch: { pinned: false },
+                  })
+                }}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
+                aria-label={_('library.unpin')}
+                title={_('library.unpin')}
+              >
+                <PinIcon size={12} />
+              </button>
+            ) : (
+              <div
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm cursor-default"
+                aria-label={_('library.pin')}
+                title={_('library.pin')}
+              >
+                <PinIcon size={12} />
+              </div>
+            )}
+          </div>
+        ) : undefined}
         onContextMenu={(e) => {
           e.preventDefault()
           e.stopPropagation()
@@ -85,29 +111,15 @@ export default function CatalogCard({
         <CatalogWorkMenu
           innerRef={menu.menuRef}
           triggerRef={menu.btnRef}
-          position={menu.position(184, 210)}
+          position={menu.position(184, 300)}
           width={184}
           onClose={menu.close}
           work={book}
           canManage={canManage}
+          canCollect={canCollect && first?.collected !== true}
+          canDownload={canCollect && book.versions[0]?.status === 'published'}
           onShowDetails={() => { menu.close(); onShowDetails(book) }}
-          onOpenVersions={() => {
-            menu.close()
-            if (showVersionsInline) setVersionsOpen((v) => !v)
-            else onOpen(book)
-          }}
         />
-      )}
-      {versionsVisible && (
-        <ul className="flex flex-col gap-2 rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-700 dark:bg-stone-800">
-          <CatalogVersionList
-            work={book}
-            library={library}
-            canManage={canManage}
-            canCollect={canCollect}
-            moveCandidates={moveCandidates}
-          />
-        </ul>
       )}
     </div>
   )

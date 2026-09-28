@@ -104,3 +104,26 @@ export function toggleSetItem(prev: Set<string>, id: string): Set<string> {
   else next.add(id)
   return next
 }
+
+export function isMachineIdentifier(id: string): boolean {
+  const trimmed = id.trim()
+  return (
+    /^urn:uuid:/i.test(trimmed) ||
+    /^uuid:/i.test(trimmed) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)
+  )
+}
+
+export function formatLanguage(lang: string, locale: string): string {
+  try {
+    const normalized = lang.replace(/_/g, '-').trim()
+    if (/^zh-cn$|^zh-hans/i.test(normalized)) return '简体中文'
+    if (/^zh-tw$|^zh-hk$|^zh-hant/i.test(normalized)) return '繁體中文'
+    if (/^en/i.test(normalized)) return 'English'
+    if (/^ja/i.test(normalized)) return '日本語'
+    const displayNames = new Intl.DisplayNames([locale, 'zh-CN', 'en'], { type: 'language' })
+    return displayNames.of(normalized) ?? lang
+  } catch {
+    return lang
+  }
+}

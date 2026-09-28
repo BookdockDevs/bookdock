@@ -1,4 +1,4 @@
-import type { BookFormat, BookListItem, CatalogBook } from '@bookdock/shared'
+import type { BookFormat, BookListItem, CatalogBook, CoverPaletteId } from '@bookdock/shared'
 
 import type { CoverSource } from './components/BookCover'
 
@@ -28,6 +28,8 @@ export interface BookRow {
    */
   coverSrc?: string | null
   coverKey: string | null
+  coverPaletteKey?: string
+  coverPaletteId?: CoverPaletteId | null
   /** Reading progress, 0-100. Null on a row nobody owns. */
   progress: number | null
   createdAt: number
@@ -42,6 +44,8 @@ export function rowCover(row: BookRow): CoverSource {
     title: row.title,
     format: row.format,
     coverKey: row.coverKey,
+    coverPaletteKey: row.coverPaletteKey,
+    coverPaletteId: row.coverPaletteId,
   }
 }
 
@@ -53,6 +57,8 @@ export function privateBookRow(book: BookListItem): BookRow {
     format: book.format,
     coverSrc: undefined,
     coverKey: book.coverKey ?? null,
+    coverPaletteKey: book.coverPaletteKey ?? book.id,
+    coverPaletteId: book.coverPaletteId,
     progress: book.progress ?? null,
     createdAt: book.createdAt,
     updatedAt: book.updatedAt,
@@ -65,16 +71,23 @@ export function privateBookRow(book: BookListItem): BookRow {
  * authorizes through the shared read verdict - so the URL a private card builds
  * is the URL this builds. A work with several versions is represented by the
  * first one, which is the same order the catalog lists versions in.
+ *
+ * The fetch happens only when artwork may exist (a stored cover or an EPUB
+ * that can carry an embedded one), the same rule a private row uses: a
+ * coverless TXT otherwise pays a doomed request per card and shows its title
+ * placeholder only after the 404 lands.
  */
 export function catalogWorkRow(work: CatalogBook): BookRow {
   const first = work.versions[0]
+  const mayHaveArtwork = Boolean(work.coverKey) || first?.format === 'epub'
   return {
     id: work.id,
     title: work.title,
     author: work.author ?? null,
     format: first?.format ?? 'epub',
-    coverSrc: first ? `/api/v1/books/${first.bookVersionId}/cover?size=thumb` : null,
+    coverSrc: first && mayHaveArtwork ? `/api/v1/books/${first.bookVersionId}/cover?size=thumb` : null,
     coverKey: work.coverKey ?? null,
+    coverPaletteKey: first?.effective.coverPaletteKey ?? first?.bookVersionId ?? work.id,
     // A work belongs to nobody, so there is no progress to show - and none is
     // invented, exactly as a private book at 0% shows none.
     progress: null,

@@ -18,6 +18,8 @@ export interface CoverSource {
   title: string
   format: string
   coverKey?: string | null
+  /** Stable content identity used for the automatic placeholder palette. */
+  coverPaletteKey?: string | null
   coverPaletteId?: CoverPaletteId | null
 }
 
@@ -40,8 +42,9 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
   const [error, setError] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const coverFit = useUiStore((s) => s.coverFit)
-  // Hash by id, not title: renaming must not repaint the placeholder cover.
-  const palette = getCoverPalette(book.id, coverPaletteId ?? book.coverPaletteId)
+  // Hash by stable content identity, not a library work/card id or title:
+  // moving a version between libraries and renaming it must not repaint it.
+  const palette = getCoverPalette(book.coverPaletteKey ?? book.id, coverPaletteId ?? book.coverPaletteId)
   const isSm = size === 'sm'
   const source = coverSrc === undefined
     ? (book.coverKey || book.format === 'epub'

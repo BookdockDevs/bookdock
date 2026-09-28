@@ -55,9 +55,10 @@ interface LibrarySidebarProps {
   onManageLibrary?: (library: LibraryListItem) => void
   /** Opens the join flow for a library the reader can see but has not joined. */
   onJoinLibrary?: (library: LibraryListItem) => void
-  onCreateLibrary?: () => void
+  /** Opens the discovery dialog showing all public and password libraries. */
+  onExploreLibraries?: () => void
 }
-const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavigation, shelfId, tagId, trash, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, onSelectLibrary, onManageLibrary, onJoinLibrary, onCreateLibrary }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavigation, shelfId, tagId, trash, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const { data: shelvesData, isLoading: shelvesLoading } = useShelves()
@@ -146,6 +147,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
   // Two levels can be lit at once: the library row says which library is in
   // context, the category and tag rows say what is filtered inside it.
   const isUncategorizedActive = !trash && shelfId === 'none'
+  // The empty hint only describes a bare section: no shelf row and no
+  // uncategorized row. Any visible row already answers "where are my books".
+  const uncategorizedRowVisible = isUncategorizedActive || (uncategorizedCount ?? 0) > 0
   const isShelvesLoading = Boolean(
     (inLibrary ? categoriesQuery.isLoading || libraryUncategorizedLoading : shelvesLoading || uncategorizedLoading)
     && !isUncategorizedActive,
@@ -243,10 +247,12 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
           onPrefetchPrivate={() => onPrefetchNavigation?.({ shelf: undefined, tag: undefined, status: undefined, trash: undefined }, null)}
           onManage={onManageLibrary}
           onJoin={onJoinLibrary}
-          onCreate={onCreateLibrary}
+          onExplore={onExploreLibraries}
           disabled={readOnly}
         />
-        {(canEditShelves || isShelvesLoading || shelves.length > 0) && (
+        {/* A read-only taxonomy with uncategorized books still offers the
+            uncategorized row; without it those books lose their sidebar entry. */}
+        {(canEditShelves || isShelvesLoading || shelves.length > 0 || uncategorizedRowVisible) && (
           <>
             <div className="mb-1 mt-6 flex items-center justify-between px-3">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-400">
@@ -303,7 +309,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
                       />
                     ))}
                   </SortableContext>
-                ) : null}
+                ) : (!uncategorizedRowVisible && (
+                  <div className="px-3 py-1 text-xs text-stone-400">{_(inLibrary ? 'library.noCategories' : 'library.noShelves')}</div>
+                ))}
               </>
             )}
           </>
@@ -497,8 +505,17 @@ export default LibrarySidebar
  * lie (it would be one of several), so it becomes "my library". A library is
  * renamed through its own management dialog, not from here.
  */
+function CompassIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+    </svg>
+  )
+}
+
 function LibrarySection({
-  libraries, activeLibraryId, onSelect, onSelectPrivate, onPrefetchPrivate, onManage, onJoin, onCreate, disabled,
+  libraries, activeLibraryId, onSelect, onSelectPrivate, onPrefetchPrivate, onManage, onJoin, onExplore, disabled,
 }: {
   libraries: LibraryListItem[]
   activeLibraryId: string | null
@@ -508,12 +525,16 @@ function LibrarySection({
   onPrefetchPrivate?: () => void
   onManage?: (library: LibraryListItem) => void
   onJoin?: (library: LibraryListItem) => void
-  onCreate?: () => void
+  onExplore?: () => void
   disabled?: boolean
 }) {
   const _ = useTranslation()
-  const shared = libraries.filter((library) => library.type === 'shared')
-  if (shared.length === 0 && !onCreate) return null
+  // Only libraries the reader belongs to are listed here: discoverable but
+  // unjoined libraries live in the settings library list's future discovery
+  // home, not in the daily switching rows.
+  const shared = libraries.filter((library) => library.type === 'shared'
+    && (library.relation === 'owner' || library.relation === 'admin' || library.relation === 'member'))
+  if (shared.length === 0 && !onExplore) return null
   const privateActive = activeLibraryId === null
 
   return (
@@ -545,16 +566,15 @@ function LibrarySection({
           onJoin={onJoin ? () => onJoin(library) : undefined}
         />
       ))}
-      {onCreate && !disabled && (
+      {onExplore && (
         <button
           type="button"
-          onClick={onCreate}
-          className="mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-stone-400 transition-colors hover:bg-stone-200/50 hover:text-stone-800 dark:hover:bg-stone-800/50 dark:hover:text-stone-100"
+          onClick={onExplore}
+          disabled={disabled}
+          className="group mt-0.5 flex w-full items-center gap-2.5 rounded-xl px-3 py-1.5 text-left text-xs font-medium text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100 cursor-pointer"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          <span className="truncate">{_('library.createLibrary')}</span>
+          <CompassIcon className="h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform group-hover:scale-110 group-hover:text-stone-600 dark:group-hover:text-stone-300" />
+          <span className="truncate">{_('library.exploreLibraries')}</span>
         </button>
       )}
     </>

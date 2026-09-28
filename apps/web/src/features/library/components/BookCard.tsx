@@ -24,20 +24,21 @@ interface BookCardProps {
   readOnly?: boolean
   onToggleSelect?: (id: string, shiftKey?: boolean) => void
   onDelete?: (book: BookListItem) => void
+  onPublish?: (book: BookListItem) => void
   onShowDetails?: (book: BookListItem) => void
   onRestore?: (book: BookListItem) => void
   onPermanentDelete?: (book: BookListItem) => void
 }
 
 const MENU_W = 184
-const MENU_H = 250
+const MENU_H = 300
 
 /**
  * A book the reader owns. This is the shared card plus the things only a book
  * someone owns can do: be pinned, be trashed and restored, be deleted, and open
  * the context menu whose actions all address that ownership.
  */
-const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, gridCardFields, coverText = true, readOnly = false, onToggleSelect, onDelete, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
+const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, gridCardFields, coverText = true, readOnly = false, onToggleSelect, onDelete, onPublish, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
   const trashCard = Boolean(onRestore && onPermanentDelete)
@@ -115,7 +116,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           width={MENU_W}
           onClose={menu.close}
         >
-          <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onDelete={onDelete} onClose={menu.close} />
+          <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onPublish={onPublish} onDelete={onDelete} onClose={menu.close} />
         </SmartMenu>
       )}
     </>

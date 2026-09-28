@@ -175,7 +175,7 @@ interface UiState {
   // devices; activation does not (intents sync, outcomes stay local):
   // `activePresetId` is the device-local pointer (own localStorage key,
   // BroadcastChannel only), `boundPresetId` is the session-only binding of
-  // the currently open book (set by Reader from book.meta.boundPresetId).
+  // the currently open book (set by Reader from book.readerSettings.boundPresetId).
   // Resolution chain: bound preset > device active > global; the flat fields
   // above always hold the resolved config's values.
   readingConfig: string

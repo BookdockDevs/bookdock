@@ -10,6 +10,7 @@ import { useJoinLibrary } from '../hooks'
 interface JoinLibraryDialogProps {
   open: boolean
   libraryId: string
+  libraryName?: string
   /** Password-protected libraries ask for it; a public one joins on confirm. */
   needsPassword: boolean
   onClose: () => void
@@ -21,7 +22,7 @@ interface JoinLibraryDialogProps {
  * library - who owns it, who can see it, how to leave it - is in that row's own
  * menu, exactly like a private library's settings.
  */
-export default function JoinLibraryDialog({ open, libraryId, needsPassword, onClose }: JoinLibraryDialogProps) {
+export default function JoinLibraryDialog({ open, libraryId, libraryName, needsPassword, onClose }: JoinLibraryDialogProps) {
   const _ = useTranslation()
   const [password, setPassword] = useState('')
   const join = useJoinLibrary()
@@ -31,6 +32,11 @@ export default function JoinLibraryDialog({ open, libraryId, needsPassword, onCl
   return (
     <Modal title={_('library.joinLibrary')} onClose={onClose} size="sm">
       <div className="mt-1 flex flex-col gap-3">
+        {libraryName && (
+          <p className="text-xs font-medium text-stone-600 dark:text-stone-300">
+            {libraryName}
+          </p>
+        )}
         {needsPassword && (
           <input
             type="password"

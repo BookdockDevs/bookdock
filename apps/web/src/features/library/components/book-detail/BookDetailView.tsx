@@ -20,31 +20,8 @@ import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub
 import { useCollectBook } from '../../hooks'
 import BookCover from '../BookCover'
 import ReadStatusChip from './ReadStatusChip'
-import { copyText, middleTruncate } from './types'
+import { copyText, middleTruncate, isMachineIdentifier, formatLanguage } from './types'
 import { ActionIcon, FilterChip, GroupLabel } from './ui'
-
-function isMachineIdentifier(id: string): boolean {
-  const trimmed = id.trim()
-  return (
-    /^urn:uuid:/i.test(trimmed) ||
-    /^uuid:/i.test(trimmed) ||
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)
-  )
-}
-
-function formatLanguage(lang: string, locale: string): string {
-  try {
-    const normalized = lang.replace(/_/g, '-').trim()
-    if (/^zh-cn$|^zh-hans/i.test(normalized)) return '简体中文'
-    if (/^zh-tw$|^zh-hant|^zh-hk/i.test(normalized)) return '繁体中文'
-    if (/^zh$/i.test(normalized)) return '中文'
-    const displayNames = new Intl.DisplayNames([locale], { type: 'language' })
-    const formatted = displayNames.of(normalized)
-    return formatted || lang
-  } catch {
-    return lang
-  }
-}
 
 interface BookDetailViewProps {
   book: BookListItem
@@ -242,10 +219,17 @@ export default function BookDetailView({
               // 7.7: where a collected card came from. A deleted source keeps
               // its id, so the chip degrades to "unavailable" instead of
               // pretending the book was uploaded here.
-              <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-[11px] text-stone-500 dark:bg-stone-800 dark:text-stone-400">
-                {displayBook.source.libraryName
-                  ? _('library.fromLibrary', { name: displayBook.source.libraryName })
-                  : _('library.sourceUnavailable')}
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/80 bg-stone-50/80 px-2.5 py-0.5 text-[11px] font-medium text-stone-600 dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300"
+                title={displayBook.source.libraryName ? _('library.fromLibrary', { name: displayBook.source.libraryName }) : _('library.sourceUnavailable')}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400 dark:text-stone-500" aria-hidden="true">
+                  <rect x="3" y="3" width="7" height="18" rx="1" />
+                  <rect x="14" y="3" width="7" height="18" rx="1" />
+                </svg>
+                <span className="truncate max-w-[12rem]">
+                  {displayBook.source.libraryName || _('library.sourceUnavailable')}
+                </span>
               </span>
             )}
             {displayBook.collected === false && displayBook.source?.libraryBookVersionId && (
@@ -406,7 +390,7 @@ export default function BookDetailView({
                 )}
               </div>}
               {!readOnly && <div className="ml-auto">
-                <ActionIcon label={_('library.delete')} danger onClick={() => onDelete(book)}>
+                <ActionIcon label={displayBook.source ? _('library.removeFromLibrary') : _('library.delete')} danger onClick={() => onDelete(book)}>
                   <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
                 </ActionIcon>
               </div>}

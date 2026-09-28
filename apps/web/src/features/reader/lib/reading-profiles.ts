@@ -6,7 +6,7 @@
 //
 // Activation is deliberately NOT part of the synced blob (intents sync,
 // outcomes stay local): the device-local active preset lives in the ui.store
-// (`bd-reading-active-preset`), per-book bindings in `book.meta.boundPresetId`.
+// (`bd-reading-active-preset`), per-book bindings in `book.readerSettings.boundPresetId`.
 // Resolution chain: bound preset > device active > global.
 
 // Exactly the settings reachable in the reader's settings menu — fonts,

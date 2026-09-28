@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, CatalogBook, CatalogListRes, CatalogVersionUpdateReq, CollectBookRes, Category, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
+import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, CatalogBook, CatalogListRes, CatalogVersionUpdateReq, CollectBookRes, Category, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, PublishPrivateBookRes, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import i18n from '@/i18n/i18n'
@@ -653,6 +653,28 @@ export function useCollectBook() {
   })
 }
 
+export function usePublishPrivateBook() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, bookId, categoryId, tagIds }: {
+      libraryId: string
+      bookId: string
+      categoryId?: string
+      tagIds?: string[]
+    }) => apiPost<{ data: PublishPrivateBookRes }>(
+      `/libraries/${libraryId}/books/from-private`,
+      { bookId, ...(categoryId ? { categoryId } : {}), ...(tagIds && tagIds.length > 0 ? { tagIds } : {}) },
+    ),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+    },
+  })
+}
+
 /** Per-user library preferences (N-06 default sort modes, view, title normalization). */
 export function useLibraryPrefs(): SettingsRes['library'] {
   const { data } = useQuery({
@@ -909,9 +931,20 @@ export function useDeleteBook() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id }: { id: string; title: string }) => apiDelete<{ data: null }>(`/books/${id}`),
-    onSuccess: (_, { title }) => {
+    mutationFn: ({ id, deleteUserData }: { id: string; title: string; isCollected?: boolean; deleteUserData?: boolean }) => {
+      const query = deleteUserData ? '?deleteUserData=true' : ''
+      return apiDelete<{ data: null }>(`/books/${id}${query}`)
+    },
+    onSuccess: (_, { title, isCollected }) => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
+      queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      if (isCollected) {
+        notify.success({
+          key: 'library.bookRemovedFromLibrary',
+          params: { title },
+        })
+        return
+      }
       // The server deletes permanently when trash is off; match the toast.
       const settings = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
       const trashOn = settings?.data.trash?.enabled !== false

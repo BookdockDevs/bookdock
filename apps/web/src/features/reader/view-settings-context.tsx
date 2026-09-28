@@ -14,14 +14,14 @@ export interface ViewSettingsContextValue {
   setPerBookActive: (active: boolean) => void
   updateSetting: (key: PerBookSettingKey, value: number) => void
   /**
-   * Raw per-book override diff (book.meta.viewSettings). Preset creation
+   * Raw per-book override diff (book.readerSettings.viewSettings). Preset creation
    * overlays it onto the snapshot so a preset made while 仅本书 is on captures
    * the effective (WYSIWYG) values.
    */
   perBookDiff?: ViewSettings
-  /** Reading preset bound to this book (book.meta.boundPresetId); null when unbound */
+  /** Reading preset bound to this book (book.readerSettings.boundPresetId); null when unbound */
   boundPresetId: string | null
-  /** Bind/unbind a reading preset to this book (PATCH books.meta.boundPresetId) */
+  /** Bind/unbind a reading preset to this book (PATCH books/:id/reader-settings) */
   setBoundPreset: (presetId: string | null) => void
 }
 

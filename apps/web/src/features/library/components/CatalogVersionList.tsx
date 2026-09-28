@@ -64,7 +64,7 @@ export default function CatalogVersionList({ work, library, canManage, canCollec
           >
             {_('library.catalogRead')}
           </button>
-          {canCollect && (
+          {canCollect && version.collected !== true && (
             <button
               type="button"
               disabled={collect.isPending}

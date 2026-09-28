@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
-import type { BookListItem } from '@bookdock/shared'
+import type { BookListItem, CatalogBook, Library } from '@bookdock/shared'
 
 import i18n from '../i18n/i18n'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
@@ -18,6 +18,9 @@ const createShelfMutate = vi.fn()
 const createTagMutate = vi.fn()
 const updateBookMutate = vi.fn()
 const collectBookMutate = vi.fn()
+const updateCatalogVersionMutate = vi.fn()
+const deleteCatalogVersionMutate = vi.fn()
+const moveCatalogVersionMutate = vi.fn()
 const navigateMock = vi.fn()
 
 vi.mock('@/api/client', () => ({
@@ -62,6 +65,9 @@ vi.mock('../features/library/hooks', () => ({
   useRemoveCover: () => ({ mutate: vi.fn(), isPending: false }),
   useResetMetadata: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCollectBook: () => ({ mutate: collectBookMutate, isPending: false }),
+  useUpdateCatalogVersion: () => ({ mutate: updateCatalogVersionMutate, isPending: false }),
+  useDeleteCatalogVersion: () => ({ mutate: deleteCatalogVersionMutate, isPending: false }),
+  useMoveCatalogVersion: () => ({ mutate: moveCatalogVersionMutate, isPending: false }),
 }))
 
 const book: BookListItem = {
@@ -711,5 +717,129 @@ describe('BookDetailDialog download menu (2×2)', () => {
     openFormatMenu('原文')
     fireEvent.click(screen.getByRole('button', { name: 'TXT' }))
     expect(downloadOriginalTxt).toHaveBeenCalledWith('book-1', 'Test Book')
+  })
+})
+
+describe('BookDetailDialog shared work mode', () => {
+  const cityLibrary: Library = {
+    id: 'lib_city', userId: 'u2', type: 'shared', name: 'City', description: '',
+    visibility: 'public', createdAt: 1, updatedAt: 1,
+  }
+
+  function catalogVersion(overrides: Partial<CatalogBook['versions'][number]> = {}): CatalogBook['versions'][number] {
+    return {
+      id: 'lbv1', libraryBookId: 'lb1', bookVersionId: 'v1', kind: 'personal', status: 'published',
+      name: '', title: null, author: null, description: null, coverKey: null,
+      effective: {
+        title: 'City Book', author: 'Someone', description: '', coverKey: null,
+        bookmeta: { publisher: 'Pub House', series: 'Trilogy', seriesIndex: 2 },
+        fileName: 'city-book.txt',
+      },
+      format: 'txt', size: 160900, chapterCount: 220, wordCount: 454385, pinnedAt: null, createdAt: 1, updatedAt: 1,
+      ...overrides,
+    }
+  }
+
+  function catalogWork(overrides: Partial<CatalogBook> = {}): CatalogBook {
+    return {
+      id: 'lb1', libraryId: 'lib_city', categoryId: null, title: 'City Book', author: 'Someone',
+      description: 'A tale', coverKey: null, tags: [{ id: 't1', name: 'classic' }],
+      versions: [catalogVersion()], createdAt: 1710000000000, updatedAt: 1710000000000, ...overrides,
+    }
+  }
+
+  function renderWorkDialog(target: CatalogBook, { canManage = false, canCollect = true } = {}) {
+    const onClose = vi.fn()
+    render(
+      <BookDetailDialog
+        book={null}
+        work={{ work: target, library: cityLibrary, canManage, canCollect, moveCandidates: [] }}
+        onClose={onClose}
+        onDelete={vi.fn()}
+      />,
+      { wrapper },
+    )
+    return { onClose }
+  }
+
+  it('tells the work in the private layout: header, facts, actions, no personal state', () => {
+    renderWorkDialog(catalogWork())
+
+    expect(screen.getByRole('heading', { name: '书籍详情' })).toBeInTheDocument()
+    expect(screen.getByText('A tale')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'classic' })).toBeInTheDocument()
+    expect(screen.getByText('格式')).toBeInTheDocument()
+    expect(screen.getByText('TXT')).toBeInTheDocument()
+    expect(screen.getByText('大小')).toBeInTheDocument()
+    expect(screen.getByText('添加时间')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '开始阅读' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加入我的书库' })).toBeInTheDocument()
+    expect(screen.getByLabelText('下载')).toBeInTheDocument()
+    // A work belongs to nobody: no read-status chip, no progress, no editor.
+    expect(screen.queryByRole('button', { name: '在读' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
+    expect(screen.queryByText('0%')).toBeNull()
+  })
+
+  it('reads the first version from the primary action', () => {
+    const { onClose } = renderWorkDialog(catalogWork())
+
+    fireEvent.click(screen.getByRole('button', { name: '开始阅读' }))
+    expect(onClose).toHaveBeenCalled()
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/books/$id', params: { id: 'v1' } })
+  })
+
+  it('filters by author and tag inside the library', () => {
+    const { onClose } = renderWorkDialog(catalogWork())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Someone' }))
+    expect(onClose).toHaveBeenCalled()
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', author: 'Someone' } })
+  })
+
+  it('manages through publish toggle and delete', () => {
+    renderWorkDialog(catalogWork(), { canManage: true })
+
+    fireEvent.click(screen.getByRole('button', { name: '下架' }))
+    expect(updateCatalogVersionMutate).toHaveBeenCalledWith(expect.objectContaining({
+      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { status: 'unlisted' },
+    }))
+    fireEvent.click(screen.getByLabelText('删除'))
+    expect(deleteCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1' })
+  })
+
+  it('hides the version list for a single version and shows it past one', () => {
+    const { unmount } = render(
+      <BookDetailDialog
+        book={null}
+        work={{ work: catalogWork(), library: cityLibrary, canManage: false, canCollect: true, moveCandidates: [] }}
+        onClose={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+      { wrapper },
+    )
+    expect(screen.queryByText('删除版本')).toBeNull()
+    unmount()
+
+    renderWorkDialog(catalogWork({ versions: [catalogVersion(), catalogVersion({ id: 'lbv2', bookVersionId: 'v2' })] }), { canManage: true })
+    expect(screen.getAllByText('删除版本')).toHaveLength(2)
+  })
+
+  it('locks reading and download on an unlisted version', () => {
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ status: 'unlisted' })] }), { canManage: true })
+
+    expect(screen.getByRole('button', { name: '开始阅读' })).toBeDisabled()
+    expect(screen.queryByLabelText('下载')).toBeNull()
+  })
+
+  it('shows the version publication metadata like a private book', () => {
+    renderWorkDialog(catalogWork())
+
+    expect(screen.getByText('出版商')).toBeInTheDocument()
+    expect(screen.getByText('Pub House')).toBeInTheDocument()
+    expect(screen.getByText('原始文件')).toBeInTheDocument()
+    expect(screen.getByText('系列')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Trilogy #2' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', series: 'Trilogy' } })
   })
 })

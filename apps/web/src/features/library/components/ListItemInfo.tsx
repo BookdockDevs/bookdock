@@ -1,5 +1,3 @@
-import type { BookListItem } from '@bookdock/shared'
-
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn, formatBytes, formatDate } from '@/lib/utils'
 import { LIST_INFO_ITEMS, useUiStore } from '@/stores/ui.store'
@@ -7,7 +5,17 @@ import { LIST_INFO_ITEMS, useUiStore } from '@/stores/ui.store'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
 
 interface ListItemInfoProps {
-  book: BookListItem
+  book: ListInfoSource
+}
+
+/** The row facts ListItemInfo reads. Both a private book and a catalog work satisfy it. */
+export interface ListInfoSource {
+  progress: number | null
+  lastReadAt?: number | null
+  shelfName?: string | null
+  tags?: string[]
+  size: number
+  createdAt: number
 }
 
 interface InfoPart {

@@ -84,10 +84,11 @@ function StatusFlyout({ book, onClose }: { book: BookListItem; onClose: () => vo
   )
 }
 
-export function ContextMenuContent({ book, readOnly = false, onShowDetails, onDelete, onClose }: {
+export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPublish, onDelete, onClose }: {
   book: BookListItem
   readOnly?: boolean
   onShowDetails?: (book: BookListItem) => void
+  onPublish?: (book: BookListItem) => void
   onDelete?: (book: BookListItem) => void
   onClose: () => void
 }) {
@@ -164,6 +165,28 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onDe
 
       {divider}
 
+      {onPublish && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onClose()
+            onPublish(book)
+          }}
+          className={itemClass}
+        >
+          <MenuIcon>
+            <path d="M12 3v12" />
+            <path d="m7 10 5 5 5-5" />
+            <path d="M5 21h14" />
+          </MenuIcon>
+          {_('library.publish')}
+        </button>
+      )}
+
+      {onPublish && onDelete && divider}
+
       {onDelete && (
         <button
           type="button"
@@ -178,7 +201,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onDe
           <MenuIcon className="text-red-400">
             <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
           </MenuIcon>
-          {_('library.delete')}
+          {book.source ? _('library.removeFromLibrary') : _('library.delete')}
         </button>
       )}
         </>

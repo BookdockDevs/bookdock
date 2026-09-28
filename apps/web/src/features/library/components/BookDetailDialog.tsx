@@ -36,9 +36,10 @@ interface BookDetailDialogProps {
   readOnly?: boolean
   onClose: () => void
   onDelete: (book: BookListItem) => void
+  onPublish?: (book: BookListItem) => void
 }
 
-export default function BookDetailDialog({ book, work = null, readOnly = false, onClose, onDelete }: BookDetailDialogProps) {
+export default function BookDetailDialog({ book, work = null, readOnly = false, onClose, onDelete, onPublish }: BookDetailDialogProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
 
@@ -208,13 +209,14 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
 
   if (work) {
     return (
-      <Modal title={work.work.title} onClose={closeDialog} closeLabel={_('library.close')} size="wide">
+      <Modal title={_('library.bookDetails')} onClose={closeDialog} closeLabel={_('library.close')} size="xl">
         <WorkDetailBody
           work={work.work}
           library={work.library}
           canManage={work.canManage}
           canCollect={work.canCollect}
           moveCandidates={work.moveCandidates}
+          onClose={closeDialog}
         />
       </Modal>
     )
@@ -259,7 +261,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
         closeLabel={_('library.close')}
         size="xl"
         actions={
-          !readOnly && !isLibraryOwned && displayBook.format === 'txt' ? (
+          !readOnly && !isLibraryOwned && (displayBook.format === 'txt' || onPublish) ? (
             <div ref={moreAnchorRef} className="relative">
               <button
                 type="button"
@@ -307,6 +309,23 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
                     </svg>
                     <span className="flex-1">{_('library.appendContent')}</span>
                   </button>
+                  {onPublish && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreMenu(null)
+                        onPublish(displayBook)
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                        <path d="M12 3v12" />
+                        <path d="m7 10 5 5 5-5" />
+                        <path d="M5 21h14" />
+                      </svg>
+                      <span className="flex-1">{_('library.publish')}</span>
+                    </button>
+                  )}
                 </SmartMenu>
               )}
             </div>

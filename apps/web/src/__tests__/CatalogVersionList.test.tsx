@@ -29,8 +29,8 @@ function version(overrides: Partial<CatalogBook['versions'][number]> = {}): Cata
   return {
     id: 'lbv1', libraryBookId: 'lb1', bookVersionId: 'v1', kind: 'personal', status: 'published',
     name: '', title: null, author: null, description: null, coverKey: null,
-    effective: { title: 'City Book', author: 'Someone', description: '', coverKey: null },
-    format: 'epub', size: 10, chapterCount: 3, wordCount: 100, createdAt: 1, updatedAt: 1,
+    effective: { title: 'City Book', author: 'Someone', description: '', coverKey: null, bookmeta: {}, fileName: null },
+    format: 'epub', size: 10, chapterCount: 3, wordCount: 100, pinnedAt: null, createdAt: 1, updatedAt: 1,
     ...overrides,
   }
 }
@@ -93,6 +93,11 @@ describe('CatalogVersionList', () => {
     expect(screen.getByText('已在书库中')).toBeInTheDocument()
     fireEvent.click(screen.getByText('已在书库中'))
     expect(collect).toHaveBeenCalledTimes(2)
+  })
+
+  it('hides collect for a version already in the private library', () => {
+    renderList(work({ versions: [version({ collected: true })] }))
+    expect(screen.queryByText('加入我的书库')).not.toBeInTheDocument()
   })
 
   it('gives managers publish, move and delete on a version', () => {

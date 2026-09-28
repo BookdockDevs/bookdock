@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 
 import { Button } from '@/components/ui/Button'
 import { useInstanceInfo } from '@/features/auth/hooks'
+import { useLibraries } from '@/features/library/hooks'
 
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
@@ -12,6 +13,7 @@ import { cn } from '@/lib/utils'
 
 import InstanceSettingsSection from './components/InstanceSettingsSection'
 import UserManagementSection from './components/UserManagementSection'
+import LibraryManagementSection from './components/LibraryManagementSection'
 import LanguageSwitcher from './components/LanguageSwitcher'
 import LibraryPreferenceRows from './components/LibraryPreferenceRows'
 import TrashSettingsRow from './components/TrashSettingsRow'
@@ -37,6 +39,11 @@ export default function Settings() {
   const isOwner = user?.role === 'owner' && user.guest !== true
   // Guest sessions share one anonymous identity and cannot manage tokens at all.
   const isGuest = user?.guest === true || user?.role === 'guest'
+  const { data: userLibrariesData } = useLibraries()
+  const hasManageableLibraries = (userLibrariesData?.data ?? []).some(
+    (lib) => lib.type === 'shared' && (lib.relation === 'owner' || lib.relation === 'admin'),
+  )
+  const canAccessAdmin = isOwner || hasManageableLibraries
   const search = useSearch({ from: '/settings' })
   const [active, setActive] = useState<SectionId>(search.section ?? 'general')
   const [visitedSections, setVisitedSections] = useState<Set<SectionId>>(() => new Set([search.section ?? 'general']))
@@ -114,7 +121,7 @@ export default function Settings() {
         </svg>
       ),
     },
-    ...(isOwner
+    ...(canAccessAdmin
       ? [
           {
             id: 'admin' as const,
@@ -227,6 +234,7 @@ export default function Settings() {
                     <TitleSettingsRow />
                     {isOwner && <UploadSettingsSection />}
                   </SettingsCard>
+                  <LibraryManagementSection />
                   <TrashSettingsRow />
                 </>
               )}
@@ -253,10 +261,14 @@ export default function Settings() {
               <AboutSettingsSection />
             </div>
           )}
-          {isOwner && visitedSections.has('admin') && (
+          {canAccessAdmin && visitedSections.has('admin') && (
             <div className={active === 'admin' ? 'flex flex-col gap-6' : 'hidden'}>
-              <InstanceSettingsSection />
-              <UserManagementSection />
+              {isOwner && <InstanceSettingsSection />}
+              <UserManagementSection
+                initialTab={!isOwner ? 'library' : search.userTab}
+                initialLibraryId={search.libraryId}
+                lockTab={!isOwner ? 'library' : undefined}
+              />
             </div>
           )}
         </div>
