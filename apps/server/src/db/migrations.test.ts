@@ -21,6 +21,7 @@ const annotationChapterHrefMigrationFile = path.join(migrationsDir, '0006_annota
 const librarySortTimestampsMigrationFile = path.join(migrationsDir, '0007_library_sort_timestamps.sql')
 const libraryFoundationMigrationFile = path.join(migrationsDir, '0008_library_foundation.sql')
 const readingEntitiesMigrationFile = path.join(migrationsDir, '0009_reading_entities.sql')
+const listingGuestReadableMigrationFile = path.join(migrationsDir, '0020_listing_guest_readable.sql')
 
 function applyBaseline(sqlite: Database.Database) {
   const sql = fs.readFileSync(baselineFile, 'utf8')
@@ -621,10 +622,13 @@ describe('text replacement migration', () => {
     // The ledger is untouched, so the next boot with matching code still works.
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
       .toEqual({ count: (before as { count: number }).count + 1 })
-    // 4.3 access control columns ride the same chain.
+    // 4.3 access control columns ride the same chain; the guest switch has
+    // since moved from the shared version row onto each library listing.
     expect(sqlite.prepare('PRAGMA table_info(libraries)').all())
       .toEqual(expect.arrayContaining([expect.objectContaining({ name: 'access_password_hash' })]))
     expect(sqlite.prepare('PRAGMA table_info(book_versions)').all())
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'guest_readable' })]))
+    expect(sqlite.prepare('PRAGMA table_info(library_book_versions)').all())
       .toEqual(expect.arrayContaining([expect.objectContaining({ name: 'guest_readable' })]))
     sqlite.close()
   })
@@ -665,9 +669,9 @@ describe('text replacement migration', () => {
     expect(sqlite.prepare('SELECT replacement_id, enabled FROM text_replacement_overrides WHERE id = ?').get('o1'))
       .toEqual({ replacement_id: 'r1', enabled: 0 })
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
-      // Journal holds baseline + 0001..0013 + 0015..0019 (0014 was abandoned
+      // Journal holds baseline + 0001..0013 + 0015..0020 (0014 was abandoned
       // for the client-side repair); reconcile rewrites the ledger to match it.
-      .toEqual({ count: 19 })
+      .toEqual({ count: 20 })
 
     sqlite.close()
   })
@@ -738,6 +742,43 @@ describe('text replacement migration', () => {
       .toEqual({ color: 'red', style: 'highlight', anchor: 'anchor-1' })
     expect(sqlite.prepare('SELECT color, style FROM ideas WHERE id = ?').get('idea-new'))
       .toEqual({ color: 'green', style: 'squiggly' })
+
+    sqlite.close()
+  })
+})
+
+describe('listing guest readability migration', () => {
+  function applyListingGuestReadableMigration(sqlite: Database.Database) {
+    const sql = fs.readFileSync(listingGuestReadableMigrationFile, 'utf8')
+    for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
+      sqlite.exec(statement)
+    }
+  }
+
+  it('propagates open versions to every listing and drops the version column', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.exec(`
+      CREATE TABLE book_versions (id TEXT PRIMARY KEY, format TEXT NOT NULL, size INTEGER NOT NULL, guest_readable INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE library_book_versions (id TEXT PRIMARY KEY, library_id TEXT NOT NULL, library_book_id TEXT NOT NULL, book_version_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'published', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      INSERT INTO book_versions (id, format, size, guest_readable, created_at, updated_at)
+        VALUES ('v-open', 'txt', 1, 1, 1, 1), ('v-closed', 'txt', 1, 0, 1, 1);
+      INSERT INTO library_book_versions (id, library_id, library_book_id, book_version_id, kind, created_at, updated_at)
+        VALUES ('l1', 'lib-a', 'w1', 'v-open', 'personal', 1, 1),
+               ('l2', 'lib-b', 'w2', 'v-open', 'personal', 1, 1),
+               ('l3', 'lib-a', 'w3', 'v-closed', 'personal', 1, 1);
+    `)
+
+    applyListingGuestReadableMigration(sqlite)
+
+    // One library opening its copy never touches another library's copy.
+    expect(sqlite.prepare('SELECT guest_readable AS flag FROM library_book_versions WHERE id = ?').get('l1'))
+      .toEqual({ flag: 1 })
+    expect(sqlite.prepare('SELECT guest_readable AS flag FROM library_book_versions WHERE id = ?').get('l2'))
+      .toEqual({ flag: 1 })
+    expect(sqlite.prepare('SELECT guest_readable AS flag FROM library_book_versions WHERE id = ?').get('l3'))
+      .toEqual({ flag: 0 })
+    const columns = sqlite.prepare("PRAGMA table_info('book_versions')").all() as { name: string }[]
+    expect(columns.map((column) => column.name)).not.toContain('guest_readable')
 
     sqlite.close()
   })

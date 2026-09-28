@@ -49,6 +49,15 @@ export function rowCover(row: BookRow): CoverSource {
   }
 }
 
+/**
+ * Display name of one version inside its work: the manager-set label, or an
+ * ordinal fallback (第N版) when it was never named. The fallback text stays
+ * with the caller for i18n; naming lives in the version editor, never here.
+ */
+export function versionTabLabel(name: string, fallback: string): string {
+  return name.trim() ? name : fallback
+}
+
 export function privateBookRow(book: BookListItem): BookRow {
   return {
     id: book.id,

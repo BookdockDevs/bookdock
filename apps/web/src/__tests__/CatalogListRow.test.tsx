@@ -35,7 +35,7 @@ function version(overrides: Partial<CatalogBook['versions'][number]> = {}): Cata
     id: 'lbv1', libraryBookId: 'lb1', bookVersionId: 'v1', kind: 'personal', status: 'published',
     name: '', title: null, author: null, description: null, coverKey: null,
     effective: { title: 'City Book', author: 'Someone', description: '', coverKey: null, bookmeta: {}, fileName: null },
-    format: 'epub', size: 10, chapterCount: 3, wordCount: 100, pinnedAt: null, createdAt: 1, updatedAt: 1,
+    format: 'epub', size: 10, chapterCount: 3, wordCount: 100, guestReadable: false, pinnedAt: null, createdAt: 1, updatedAt: 1,
     ...overrides,
   }
 }
@@ -97,9 +97,9 @@ describe('CatalogListRow', () => {
     expect(onToggleSelect).not.toHaveBeenCalled()
   })
 
-  it('does not show a version count for works with several versions', () => {
+  it('shows a version count for works with several versions', () => {
     renderRow(work({ versions: [version(), version({ id: 'lbv2', bookVersionId: 'v2' })] }))
-    expect(screen.queryByText('2 个版本')).toBeNull()
+    expect(screen.getByText('2 个版本')).toBeInTheDocument()
   })
 
   it('toggles selection instead of navigating in selection mode', () => {

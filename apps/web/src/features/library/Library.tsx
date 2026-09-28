@@ -1060,7 +1060,6 @@ export default function Library() {
       {manageTarget && (
         <LibraryManageDialog
           library={manageTarget}
-          canManage={manageRelation === 'owner' || manageRelation === 'admin'}
           isOwner={manageRelation === 'owner'}
           onClose={() => setManageTarget(null)}
           onDeleted={() => {
@@ -1094,7 +1093,6 @@ export default function Library() {
           library: activeLibrary,
           canManage: isLibraryManager,
           canCollect: libraryRelation !== 'guest',
-          moveCandidates: catalogWorks.filter((other) => other.id !== workDetail.id),
         } : null}
         readOnly={isGuest}
         onClose={() => {

@@ -17,8 +17,7 @@ import {
 
 interface LibraryManageDialogProps {
   library: Library
-  /** True for owners and admins, who may edit settings and the roster. */
-  canManage: boolean
+  /** Settings and deletion are owner-only; the backend rejects managers. */
   isOwner: boolean
   onClose: () => void
   onDeleted: () => void
@@ -65,12 +64,14 @@ function GlobeIcon({ className }: { className?: string }) {
 }
 
 /**
- * 0.4.0: library management. Settings and membership for owners and admins,
- * plus the two irreversible actions behind an explicit confirmation that names
- * the consequence - deleting a library leaves members' collected copies in place
- * but unreadable, and that must never happen by surprise.
+ * 0.4.0: library management. Settings are owner-only (updateLibrary rejects
+ * managers); admins get a management dialog that explains that instead of a
+ * save button that could never succeed. Deletion stays behind an explicit
+ * confirmation that names the consequence - deleting a library leaves
+ * members' collected copies in place but unreadable, and that must never
+ * happen by surprise.
  */
-export default function LibraryManageDialog({ library, canManage, isOwner, onClose, onDeleted }: LibraryManageDialogProps) {
+export default function LibraryManageDialog({ library, isOwner, onClose, onDeleted }: LibraryManageDialogProps) {
   const _ = useTranslation()
   const [name, setName] = useState(library.name)
   const [description, setDescription] = useState(library.description)
@@ -168,7 +169,7 @@ export default function LibraryManageDialog({ library, canManage, isOwner, onClo
               <Button variant="secondary" onClick={onClose}>
                 {_('library.close')}
               </Button>
-              {canManage && (
+              {isOwner && (
                 <Button
                   disabled={!settingsChanged || name.trim().length === 0 || updateLibrary.isPending}
                   onClick={handleSave}
@@ -181,7 +182,10 @@ export default function LibraryManageDialog({ library, canManage, isOwner, onClo
         }
       >
         <div className="flex flex-col gap-6">
-          {canManage && (
+          {/* Library settings are owner-only (the backend rejects managers
+              with FORBIDDEN): admins see why the form is absent instead of a
+              save button that can never succeed. */}
+          {isOwner ? (
             <section className="flex flex-col gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/30 p-4 dark:border-stone-800 dark:bg-stone-800/20">
               <div className="flex items-center gap-2 pb-1 border-b border-stone-100 dark:border-stone-800">
                 <div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">
@@ -263,6 +267,10 @@ export default function LibraryManageDialog({ library, canManage, isOwner, onClo
                 </label>
               )}
             </section>
+          ) : (
+            <p className="rounded-2xl border border-stone-200/80 bg-stone-50/30 p-4 text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-800/20 dark:text-stone-400">
+              {_('library.settingsOwnerOnly')}
+            </p>
           )}
         </div>
       </Modal>

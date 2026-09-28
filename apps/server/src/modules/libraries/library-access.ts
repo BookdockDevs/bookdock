@@ -140,7 +140,8 @@ export async function getLibraryBookVersion(libraryId: string, versionId: string
  *   reads (pinned B reads bypass through Phase 7, not here).
  * - Authenticated non-members read published versions of public libraries,
  *   independent of the instance guest switch.
- * - Guests additionally need the instance guest switch and the version flag.
+ * - Guests additionally need the instance guest switch and this listing's own
+ *   guestReadable flag — never another library's copy of the same version.
  * Permissions are re-read from the database on every call.
  */
 export interface SharedVersionRead {
@@ -176,9 +177,8 @@ function resolveSharedVersionReadInternal(
   if (link.status !== 'published') throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
   if (relation === 'guest') {
     const settings = db.select().from(instance).get()
-    const version = db.select({ guestReadable: bookVersions.guestReadable }).from(bookVersions)
-      .where(eq(bookVersions.id, bookVersionId)).get()
-    if (!settings?.allowGuestAccess || !version?.guestReadable) {
+    // Per-listing flag: this library's own switch, never a sibling library's.
+    if (!settings?.allowGuestAccess || !link.guestReadable) {
       throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
     }
   }

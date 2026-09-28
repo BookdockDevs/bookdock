@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
 import type { BookListItem, CatalogBook, Library } from '@bookdock/shared'
@@ -19,8 +19,8 @@ const createTagMutate = vi.fn()
 const updateBookMutate = vi.fn()
 const collectBookMutate = vi.fn()
 const updateCatalogVersionMutate = vi.fn()
+const updateCatalogBookMutate = vi.fn()
 const deleteCatalogVersionMutate = vi.fn()
-const moveCatalogVersionMutate = vi.fn()
 const navigateMock = vi.fn()
 
 vi.mock('@/api/client', () => ({
@@ -66,8 +66,15 @@ vi.mock('../features/library/hooks', () => ({
   useResetMetadata: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCollectBook: () => ({ mutate: collectBookMutate, isPending: false }),
   useUpdateCatalogVersion: () => ({ mutate: updateCatalogVersionMutate, isPending: false }),
-  useDeleteCatalogVersion: () => ({ mutate: deleteCatalogVersionMutate, isPending: false }),
-  useMoveCatalogVersion: () => ({ mutate: moveCatalogVersionMutate, isPending: false }),
+  useUpdateCatalogBook: () => ({ mutateAsync: updateCatalogBookMutate, isPending: false }),
+  useLibraryCategories: () => ({ data: { data: [] } }),
+  useLibraryTags: () => ({ data: { data: [] } }),
+  useUploadBooks: () => ({
+    items: [], addFiles: vi.fn(), startUpload: vi.fn(), retry: vi.fn(), retryAll: vi.fn(),
+    abortAll: vi.fn(), pruneSettled: vi.fn(), isUploading: false, clearQueue: vi.fn(), patchItem: vi.fn(),
+  }),
+  useUploadSettings: () => ({}),
+  useDeleteCatalogVersion: () => ({ mutate: deleteCatalogVersionMutate, mutateAsync: deleteCatalogVersionMutate, isPending: false }),
 }))
 
 const book: BookListItem = {
@@ -731,11 +738,11 @@ describe('BookDetailDialog shared work mode', () => {
       id: 'lbv1', libraryBookId: 'lb1', bookVersionId: 'v1', kind: 'personal', status: 'published',
       name: '', title: null, author: null, description: null, coverKey: null,
       effective: {
-        title: 'City Book', author: 'Someone', description: '', coverKey: null,
+        title: 'City Book', author: 'Someone', description: 'A tale', coverKey: null,
         bookmeta: { publisher: 'Pub House', series: 'Trilogy', seriesIndex: 2 },
         fileName: 'city-book.txt',
       },
-      format: 'txt', size: 160900, chapterCount: 220, wordCount: 454385, pinnedAt: null, createdAt: 1, updatedAt: 1,
+      format: 'txt', size: 160900, chapterCount: 220, wordCount: 454385, guestReadable: false, pinnedAt: null, createdAt: 1, updatedAt: 1,
       ...overrides,
     }
   }
@@ -750,16 +757,16 @@ describe('BookDetailDialog shared work mode', () => {
 
   function renderWorkDialog(target: CatalogBook, { canManage = false, canCollect = true } = {}) {
     const onClose = vi.fn()
-    render(
+    const rendered = render(
       <BookDetailDialog
         book={null}
-        work={{ work: target, library: cityLibrary, canManage, canCollect, moveCandidates: [] }}
+        work={{ work: target, library: cityLibrary, canManage, canCollect }}
         onClose={onClose}
         onDelete={vi.fn()}
       />,
       { wrapper },
     )
-    return { onClose }
+    return { onClose, container: rendered.container }
   }
 
   it('tells the work in the private layout: header, facts, actions, no personal state', () => {
@@ -800,29 +807,83 @@ describe('BookDetailDialog shared work mode', () => {
   it('manages through publish toggle and delete', () => {
     renderWorkDialog(catalogWork(), { canManage: true })
 
+    // Single published version: unlisting breaks collected B cards, so it
+    // confirms first.
     fireEvent.click(screen.getByRole('button', { name: '下架' }))
+    expect(updateCatalogVersionMutate).not.toHaveBeenCalled()
+    const unlistDialog = screen.getByRole('alertdialog')
+    expect(within(unlistDialog).getByText(/下架后，已收藏的成员将无法继续阅读/)).toBeInTheDocument()
+    fireEvent.click(within(unlistDialog).getByRole('button', { name: '下架' }))
     expect(updateCatalogVersionMutate).toHaveBeenCalledWith(expect.objectContaining({
       libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { status: 'unlisted' },
     }))
+    // Deleting the last version removes the whole work: also confirmed.
     fireEvent.click(screen.getByLabelText('删除'))
+    expect(deleteCatalogVersionMutate).not.toHaveBeenCalled()
+    const deleteDialog = screen.getByRole('alertdialog')
+    expect(within(deleteDialog).getByText(/删除后整个作品会被移除/)).toBeInTheDocument()
+    fireEvent.click(within(deleteDialog).getByRole('button', { name: '删除' }))
     expect(deleteCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1' })
   })
 
-  it('hides the version list for a single version and shows it past one', () => {
+  it('switches the visible version from the tabs and acts on it', () => {
+    renderWorkDialog(catalogWork({
+      versions: [
+        catalogVersion({ name: '初版' }),
+        catalogVersion({ id: 'lbv2', bookVersionId: 'v2', name: '修订版', effective: { title: 'City Book 修订版', author: 'Someone', description: '', coverKey: null, bookmeta: {}, fileName: null } }),
+      ],
+    }), { canManage: true })
+
+    // Header follows the first version until another tab is picked.
+    expect(screen.getByRole('heading', { name: 'City Book' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /修订版/ }))
+    expect(screen.getByRole('heading', { name: 'City Book 修订版' })).toBeInTheDocument()
+
+    // Manager delete presets the visible version.
+    fireEvent.click(screen.getByLabelText('删除'))
+    const dialog = screen.getByRole('alertdialog')
+    const boxes = within(dialog).getAllByRole('checkbox') as HTMLInputElement[]
+    expect(boxes).toHaveLength(2)
+    expect(boxes[1]!.checked).toBe(true)
+    expect(boxes[0]!.checked).toBe(false)
+  })
+
+  it('opens the work editor for managers only', () => {
+    renderWorkDialog(catalogWork(), { canManage: true })
+    fireEvent.click(screen.getByRole('button', { name: '编辑作品' }))
+    expect(screen.getByText('作品信息')).toBeInTheDocument()
+    expect(screen.getByText(/版本信息/)).toBeInTheDocument()
+    cleanup()
+
+    renderWorkDialog(catalogWork())
+    expect(screen.queryByRole('button', { name: '编辑作品' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '上传新版本' })).not.toBeInTheDocument()
+  })
+
+  it('opens the version-bound upload sheet for managers', () => {
+    renderWorkDialog(catalogWork(), { canManage: true })
+    fireEvent.click(screen.getByRole('button', { name: '上传新版本' }))
+    expect(screen.getByText(/将作为「City Book」的新版本上传/)).toBeInTheDocument()
+  })
+
+  it('shows no tabs for a single version and tabs past one', () => {
     const { unmount } = render(
       <BookDetailDialog
         book={null}
-        work={{ work: catalogWork(), library: cityLibrary, canManage: false, canCollect: true, moveCandidates: [] }}
+        work={{ work: catalogWork(), library: cityLibrary, canManage: false, canCollect: true }}
         onClose={vi.fn()}
         onDelete={vi.fn()}
       />,
       { wrapper },
     )
-    expect(screen.queryByText('删除版本')).toBeNull()
+    expect(screen.queryByRole('tablist')).toBeNull()
     unmount()
 
     renderWorkDialog(catalogWork({ versions: [catalogVersion(), catalogVersion({ id: 'lbv2', bookVersionId: 'v2' })] }), { canManage: true })
-    expect(screen.getAllByText('删除版本')).toHaveLength(2)
+    expect(screen.getByRole('tablist')).toBeInTheDocument()
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    // Unnamed versions fall back to an ordinal label.
+    expect(screen.getByRole('tab', { name: /第1版/ })).toBeInTheDocument()
   })
 
   it('locks reading and download on an unlisted version', () => {

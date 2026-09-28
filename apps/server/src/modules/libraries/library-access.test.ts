@@ -161,15 +161,34 @@ describe('shared version reads', () => {
       .resolves.toMatchObject({ relation: 'non-member' })
   })
 
-  it('gates guests on the instance switch and the version flag', async () => {
+  it('gates guests on the instance switch and the listing flag', async () => {
     // Neither switch nor flag: invisible.
     await expect(resolveSharedVersionRead(libraryId, 'v1', null))
       .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
-    db.update(schema.bookVersions).set({ guestReadable: true }).where(eq(schema.bookVersions.id, 'v1')).run()
+    db.update(schema.libraryBookVersions).set({ guestReadable: true }).where(eq(schema.libraryBookVersions.id, 'lv1')).run()
     await expect(resolveSharedVersionRead(libraryId, 'v1', null))
       .resolves.toMatchObject({ relation: 'guest' })
     db.update(schema.instance).set({ allowGuestAccess: false }).run()
     await expect(resolveSharedVersionRead(libraryId, 'v1', null))
+      .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
+  })
+
+  it('keeps one listing’s guest flag from opening a sibling library’s copy', async () => {
+    const otherId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: otherId, userId: ownerId, type: 'shared', name: 'Other',
+      description: '', visibility: 'public', createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.libraryBooks).values({ id: 'wb2', libraryId: otherId, userId: ownerId, title: 'W', createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: 'lv2', libraryId: otherId, libraryBookId: 'wb2', bookVersionId: 'v1',
+      kind: 'personal', status: 'published', createdAt: 1, updatedAt: 1,
+    }).run()
+    // Same BookVersion, flag open in the first library only.
+    db.update(schema.libraryBookVersions).set({ guestReadable: true }).where(eq(schema.libraryBookVersions.id, 'lv1')).run()
+    await expect(resolveSharedVersionRead(libraryId, 'v1', null))
+      .resolves.toMatchObject({ relation: 'guest' })
+    await expect(resolveSharedVersionRead(otherId, 'v1', null))
       .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
   })
 

@@ -29,11 +29,10 @@ describe('LibraryManageDialog', () => {
     HOOKS.useDeleteLibrary.mockReturnValue({ mutate: vi.fn(), isPending: false })
   })
 
-  function renderDialog(canManage = true, isOwner = true) {
+  function renderDialog(isOwner = true) {
     render(
       <LibraryManageDialog
         library={LIBRARY}
-        canManage={canManage}
         isOwner={isOwner}
         onClose={onClose}
         onDeleted={onDeleted}
@@ -84,7 +83,14 @@ describe('LibraryManageDialog', () => {
   })
 
   it('hides delete button when isOwner is false', () => {
-    renderDialog(true, false)
+    renderDialog(false)
     expect(screen.queryByRole('button', { name: '删除书库' })).not.toBeInTheDocument()
+  })
+
+  it('shows admins a read-only notice instead of the settings form', () => {
+    renderDialog(false)
+    expect(screen.queryByLabelText('名称')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument()
+    expect(screen.getByText('书库设置仅所有者可修改')).toBeInTheDocument()
   })
 })

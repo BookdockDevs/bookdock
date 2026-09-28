@@ -1,4 +1,4 @@
-import type { RefObject } from 'react'
+import { useState, type RefObject } from 'react'
 
 import type { CatalogBook } from '@bookdock/shared'
 
@@ -10,9 +10,10 @@ import { notify } from '@/lib/notifications'
 import type { SmartPosition } from '@/lib/position'
 
 import { downloadDefault } from '../download'
-import { useCollectBook, useDeleteCatalogVersion, useUpdateCatalogVersion } from '../hooks'
+import { useCollectBook, useUpdateCatalogVersion } from '../hooks'
 
 import { MenuDangerItem, MenuDivider, MenuHeader, MenuItem } from './RowMenuChrome'
+import DeleteVersionsDialog from './DeleteVersionsDialog'
 
 /**
  * A work's menu, in the same language as a private book's: what it is, get it,
@@ -38,7 +39,7 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
   const _ = useTranslation()
   const collectBook = useCollectBook()
   const updateVersion = useUpdateCatalogVersion()
-  const deleteVersion = useDeleteCatalogVersion()
+  const [deleteOpen, setDeleteOpen] = useState(false)
   // The menu predates versions in the UI: one work, one version, the first one.
   const first = work.versions[0]
 
@@ -53,7 +54,8 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
   }
 
   return (
-    <SmartMenu triggerRef={triggerRef} innerRef={innerRef} position={position} onClose={onClose} width={width}>
+    <>
+      <SmartMenu triggerRef={triggerRef} innerRef={innerRef} position={position} onClose={onClose} width={width}>
       <MenuHeader
         title={work.title}
         subtitle={[work.author, first?.format].filter(Boolean).join(' · ')}
@@ -111,13 +113,23 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
           <MenuDangerItem
             label={_('library.delete')}
             icon={<><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2 2V6h14z" /></>}
-            onClick={() => {
-              onClose()
-              deleteVersion.mutate({ libraryId: work.libraryId, libraryBookId: work.id, versionLinkId: first.id })
-            }}
+            onClick={() => setDeleteOpen(true)}
           />
         </>
       )}
-    </SmartMenu>
+      </SmartMenu>
+      {deleteOpen && (
+        <DeleteVersionsDialog
+          work={work}
+          libraryId={work.libraryId}
+          preselectedIds={work.versions.map((v) => v.id)}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={() => {
+            setDeleteOpen(false)
+            onClose()
+          }}
+        />
+      )}
+    </>
   )
 }

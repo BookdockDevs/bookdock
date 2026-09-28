@@ -136,7 +136,6 @@ export default function LibraryManagementSection() {
       {manageTarget && (
         <LibraryManageDialog
           library={manageTarget}
-          canManage={manageRelation === 'owner' || manageRelation === 'admin'}
           isOwner={manageRelation === 'owner'}
           onClose={() => setManageTarget(null)}
           onDeleted={() => setManageTarget(null)}

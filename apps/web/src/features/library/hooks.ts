@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, CatalogBook, CatalogListRes, CatalogVersionUpdateReq, CollectBookRes, Category, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, PublishPrivateBookRes, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
+import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, CatalogBook, CatalogBookUpdateReq, CatalogListRes, CatalogVersionUpdateReq, CollectBookRes, Category, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, PublishPrivateBookRes, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import i18n from '@/i18n/i18n'
@@ -127,6 +127,8 @@ export interface UploadItem {
   progress: number
   shelfId?: string
   tagIds?: string[]
+  /** Edition label for a catalog upload into an existing work (P3). */
+  versionName?: string
   /** i18n key resolved client-side; raw server messages are never displayed */
   messageKey?: string
   /** Set once the server answers; the id the reader opens. */
@@ -596,6 +598,23 @@ export function useSetWorkCategory() {
   })
 }
 
+/**
+ * Edit a work's own metadata (5.3): title, author, description, category and
+ * the whole tag set. Version overrides are a separate PATCH on the version.
+ */
+export function useUpdateCatalogBook() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, libraryBookId, patch }: { libraryId: string; libraryBookId: string; patch: CatalogBookUpdateReq }) =>
+      apiPatch<{ data: CatalogBook }>(`/libraries/${libraryId}/books/${libraryBookId}`, patch),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+    },
+  })
+}
+
 function useCatalogVersionMutation<TVars extends { libraryId: string; libraryBookId: string }>(
   build: (vars: TVars) => { url: string; method: 'patch' | 'delete'; body?: unknown },
 ) {
@@ -1012,7 +1031,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
     setItems((prev) => prev.filter((it) => it.status !== 'success' && it.status !== 'duplicate' && it.status !== 'error'))
   }, [])
 
-  return { items, addFiles, startUpload, retry, retryAll, abortAll, pruneSettled, isUploading, clearQueue }
+  return { items, addFiles, startUpload, retry, retryAll, abortAll, pruneSettled, isUploading, clearQueue, patchItem }
 }
 
 export function useDeleteBook() {

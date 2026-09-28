@@ -264,6 +264,8 @@ export interface AdminUserRes {
   createdAt: number
   bookCount: number
   avatarKey?: string | null
+  /** Shared libraries this user owns; deleting the account is blocked until these are transferred or deleted. */
+  ownedLibraries: { id: string; name: string }[]
 }
 
 /** Instance ownership no longer moves through PATCH (4.9) — it is a transfer. */

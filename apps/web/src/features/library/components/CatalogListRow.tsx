@@ -124,6 +124,11 @@ export default function CatalogListRow({
             {row.format}
           </span>
         )}
+        {work.versions.length > 1 && (
+          <span className="rounded border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500">
+            {_('library.versionCount', { count: work.versions.length })}
+          </span>
+        )}
       </div>
       {selectionActive ? (
         <SelectionCheck selected={selected} />

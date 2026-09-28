@@ -138,6 +138,32 @@ export function useUpdateUser() {
 }
 
 /**
+ * Owner-provisioned account (no session): the new user logs in themselves.
+ * Delete removes the account with its private library and personal data;
+ * shared content survives by reference count.
+ */
+export function useCreateUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { username: string; password: string }) =>
+      apiPost<{ data: AdminUserRes }>('/users', body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ADMIN_USERS_QUERY_KEY })
+    },
+  })
+}
+
+export function useDeleteUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => apiDelete<{ data: { id: string } }>(`/users/${id}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ADMIN_USERS_QUERY_KEY })
+    },
+  })
+}
+
+/**
  * Instance ownership transfer (4.9): the owner seat moves atomically, the
  * former owner drops to a plain member. Role columns are never patched.
  */

@@ -127,6 +127,23 @@ describe('users module', () => {
     expect(member.bookCount).toBe(2)
     expect(member.role).toBe('member')
     expect(member.disabled).toBe(false)
+    expect(member.ownedLibraries).toEqual([])
+  })
+
+  it('lists owned shared libraries for the account-deletion guard', async () => {
+    const memberId = await insertUser(db, { username: 'mem' })
+    db.insert(schema.libraries).values({
+      id: createId('lib'), userId: memberId, type: 'shared', name: 'City',
+      description: '', visibility: 'public', createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.libraries).values({
+      id: createId('lib'), userId: memberId, type: 'private', name: 'mem',
+      description: '', visibility: null, createdAt: 1, updatedAt: 1,
+    }).run()
+
+    const member = listUsers().find((u) => u.id === memberId)!
+    // Only shared libraries block deletion; the private one goes with the account.
+    expect(member.ownedLibraries).toEqual([{ id: expect.any(String), name: 'City' }])
   })
 
   it('creates an owner-managed account with exactly one private library', async () => {

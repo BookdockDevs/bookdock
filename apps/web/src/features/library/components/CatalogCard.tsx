@@ -121,6 +121,11 @@ export default function CatalogCard({
           onShowDetails={() => { menu.close(); onShowDetails(book) }}
         />
       )}
+      {book.versions.length > 1 && (
+        <p className="px-0.5 text-[11px] text-stone-400 dark:text-stone-500">
+          {_('library.versionCount', { count: book.versions.length })}
+        </p>
+      )}
     </div>
   )
 }

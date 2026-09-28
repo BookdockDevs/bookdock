@@ -400,6 +400,19 @@ describe('libraries service', () => {
     }).run()
     expect(await setVersionGuestReadable(bobId, sharedId, 'v1', true))
       .toMatchObject({ bookVersionId: 'v1', guestReadable: true })
+    // Per-listing: the same version listed in another library stays closed.
+    const otherId = seedLibrary(aliceId)
+    const otherLbId = createId('lb')
+    db.insert(schema.libraryBooks).values({
+      id: otherLbId, libraryId: otherId, userId: aliceId, title: 'T', createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: createId('lbv'), libraryId: otherId, libraryBookId: otherLbId, bookVersionId: 'v1',
+      kind: 'personal', createdAt: 1, updatedAt: 1,
+    }).run()
+    expect(db.select({ guestReadable: schema.libraryBookVersions.guestReadable }).from(schema.libraryBookVersions)
+      .where(and(eq(schema.libraryBookVersions.libraryId, otherId), eq(schema.libraryBookVersions.bookVersionId, 'v1'))).get())
+      .toMatchObject({ guestReadable: false })
     db.insert(schema.libraryMemberships).values({
       id: createId('lbm'), libraryId: sharedId, userId: carolId, role: 'member', createdAt: 1, updatedAt: 1,
     }).run()

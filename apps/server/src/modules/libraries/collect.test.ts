@@ -15,7 +15,7 @@ import { createId } from '../../lib/id'
 import { readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
-import { assertReadableBookSync, getActiveBook, getBook, reTocBook, appendTxtBookContent, resetBookMetadata, updateBook, uploadBook, deleteBook, updateBookCover, removeBookCover } from '../books/books.service'
+import { assertReadableBookSync, getActiveBook, getBook, getBookShelf, reTocBook, appendTxtBookContent, resetBookMetadata, updateBook, uploadBook, deleteBook, updateBookCover, removeBookCover } from '../books/books.service'
 import { uploadCatalogBook } from '../books/books.service'
 import { addMember, createLibrary, deleteLibrary } from './libraries.service'
 import { updateCatalogVersion } from './catalog.service'
@@ -368,8 +368,8 @@ describe('add-to-private (7.x)', () => {
       .rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
     await expect(getActiveBook(outsiderId, city.bookVersionId))
       .resolves.toMatchObject({ id: city.bookVersionId })
-    // Flag on: anonymous reads work, with no personal state attached.
-    db.update(schema.bookVersions).set({ guestReadable: true }).where(eq(schema.bookVersions.id, city.bookVersionId)).run()
+    // Flag on (per-listing): anonymous reads work, with no personal state attached.
+    db.update(schema.libraryBookVersions).set({ guestReadable: true }).where(eq(schema.libraryBookVersions.id, city.versionLinkId!)).run()
     const book = await getActiveBook(null, city.bookVersionId)
     expect(book).toMatchObject({ id: city.bookVersionId, title: '三体' })
     expect(book.userId).toBeNull()
@@ -540,6 +540,27 @@ describe('add-to-private (7.x)', () => {
     expect(renamed.title).toBe('我的三体')
     const cityWork = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, city.libraryBookId)).get()!
     expect(cityWork.title).toBe('三体')
+  })
+
+  it('keeps card-local edits working on a B whose source was unpublished', async () => {
+    const city = await seedCityBook()
+    await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
+    await updateCatalogVersion(ownerId, libraryId, city.libraryBookId, city.versionLinkId!, { status: 'unlisted' })
+    expect(await sourceStillReadable(memberId, city.bookVersionId)).toBe(false)
+
+    // Content reads stay blocked, content writes stay forbidden.
+    await expect(getBook(memberId, city.bookVersionId)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
+    await expect(appendTxtBookContent(memberId, city.bookVersionId, '追加内容'))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+
+    // Card-local fields apply and report success instead of throwing after
+    // writing: the card is retained by design, only its content is blocked.
+    const renamed = await updateBook(memberId, city.bookVersionId, { title: '我的三体' })
+    expect(renamed.title).toBe('我的三体')
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+    await updateBookCover(memberId, city.bookVersionId, new File([png], 'cover.png', { type: 'image/png' }))
+    expect((await getBookShelf(memberId, city.bookVersionId))).toBeNull()
+    await removeBookCover(memberId, city.bookVersionId)
   })
 
   it('uncollecting a book retains user reading state and notes by default, but deletes them when deleteUserData is true', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 
 import i18n from '../i18n/i18n'
@@ -24,7 +24,7 @@ function version(overrides: Partial<CatalogBook['versions'][number]> = {}): Cata
     id: 'lbv1', libraryBookId: 'lb1', bookVersionId: 'v1', kind: 'personal', status: 'published',
     name: '', title: null, author: null, description: null, coverKey: null,
     effective: { title: 'City Book', author: 'Someone', description: '', coverKey: null, bookmeta: {}, fileName: null },
-    format: 'epub', size: 10, chapterCount: 3, wordCount: 100, pinnedAt: null, createdAt: 1, updatedAt: 1,
+    format: 'epub', size: 10, chapterCount: 3, wordCount: 100, guestReadable: false, pinnedAt: null, createdAt: 1, updatedAt: 1,
     ...overrides,
   }
 }
@@ -48,7 +48,7 @@ function renderCard(book: CatalogBook, { canManage = false, canCollect = true } 
   const onShowDetails = vi.fn()
   HOOKS.useUpdateCatalogVersion.mockReturnValue({ mutate: updateVersion })
   HOOKS.useMoveCatalogVersion.mockReturnValue({ mutate: moveVersion })
-  HOOKS.useDeleteCatalogVersion.mockReturnValue({ mutate: deleteVersion })
+  HOOKS.useDeleteCatalogVersion.mockReturnValue({ mutate: deleteVersion, mutateAsync: deleteVersion })
   HOOKS.useCollectBook.mockReturnValue({ mutate: collect, isPending: false })
   const { container } = renderRow(
     <CatalogCard
@@ -179,6 +179,13 @@ describe('CatalogCard', () => {
     expect(screen.queryByText('加入我的书库')).not.toBeInTheDocument()
   })
 
+  it('badges multi-version works and stays quiet for single versions', () => {
+    renderCard(work())
+    expect(screen.queryByText(/个版本/)).not.toBeInTheDocument()
+    renderCard(work({ versions: [version(), version({ id: 'lbv2', bookVersionId: 'v2' })] }))
+    expect(screen.getByText('2 个版本')).toBeInTheDocument()
+  })
+
   it('withholds download for an unlisted version the server would refuse', () => {
     const { container } = renderCard(work({ versions: [version({ status: 'unlisted' })] }))
     openMenu(container)
@@ -193,10 +200,33 @@ describe('CatalogCard', () => {
     expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({
       libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { pinned: true },
     }))
-    // Like a private menu, each action closes the menu first.
+    // Deleting the last version removes the whole work: confirmed first.
     openMenu(container)
     fireEvent.click(screen.getByText('删除'))
+    expect(deleteVersion).not.toHaveBeenCalled()
+    const dialog = screen.getByRole('alertdialog')
+    expect(within(dialog).getByText(/删除后整个作品会被移除/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除' }))
     expect(deleteVersion).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1' })
+  })
+
+  it('preselects every version when deleting a multi-version work from the menu', async () => {
+    const { container, deleteVersion } = renderCard(
+      work({ versions: [version(), version({ id: 'lbv2', bookVersionId: 'v2' })] }),
+      { canManage: true },
+    )
+    openMenu(container)
+    fireEvent.click(screen.getByText('删除'))
+    const dialog = screen.getByRole('alertdialog')
+    const boxes = within(dialog).getAllByRole('checkbox') as HTMLInputElement[]
+    expect(boxes).toHaveLength(2)
+    expect(boxes.every((box) => box.checked)).toBe(true)
+    fireEvent.click(boxes[0]!)
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(deleteVersion).toHaveBeenCalledTimes(1))
+    expect(deleteVersion).toHaveBeenCalledWith(
+      { libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv2' },
+    )
   })
 
   it('offers unpin when the work is already pinned', () => {

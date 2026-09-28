@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, or } from 'drizzle-orm'
 import { normalizeUsername } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookVersions, ideas, libraries, libraryBooks, libraryBookVersions, libraryMemberships, users } from '../../db/schema'
+import { ideas, libraries, libraryBooks, libraryBookVersions, libraryMemberships, users } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { hashPassword, verifyPassword } from '../../lib/password'
 import { AppError } from '../../middleware/error'
@@ -406,7 +406,9 @@ export async function setVersionGuestReadable(actorId: string, libraryId: string
   const link = db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
     .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.bookVersionId, bookVersionId))).get()
   if (!link) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Version is not in this library')
-  db.update(bookVersions).set({ guestReadable: readable }).where(eq(bookVersions.id, bookVersionId)).run()
+  // Per-listing switch: opening this copy to guests leaves every other
+  // library's copy of the same version exactly as it was.
+  db.update(libraryBookVersions).set({ guestReadable: readable }).where(eq(libraryBookVersions.id, link.id)).run()
   return { bookVersionId, guestReadable: readable }
 }
 

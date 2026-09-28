@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import UserManagementSection from '../features/settings/components/UserManagementSection'
-import { useAdminUsers, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
+import { useAdminUsers, useCreateUser, useDeleteUser, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
 import {
   useLibraries,
   useLibraryMembers,
@@ -16,6 +16,8 @@ import type { AdminUserRes, LibraryListItem, LibraryMembersRes } from '@bookdock
 vi.mock('@/features/auth/hooks', () => ({
   useAdminUsers: vi.fn(),
   useUpdateUser: vi.fn(),
+  useCreateUser: vi.fn(),
+  useDeleteUser: vi.fn(),
   useTransferInstanceOwnership: vi.fn(),
 }))
 
@@ -28,9 +30,9 @@ vi.mock('@/features/library/hooks', () => ({
 }))
 
 const USERS: AdminUserRes[] = [
-  { id: 'u1', username: 'alice', role: 'owner', disabled: false, createdAt: 1700000000000, bookCount: 12 },
-  { id: 'u2', username: 'bob', role: 'member', disabled: true, createdAt: 1700000000000, bookCount: 3 },
-  { id: 'u3', username: 'carol', role: 'member', disabled: false, createdAt: 1700000000000, bookCount: 1 },
+  { id: 'u1', username: 'alice', role: 'owner', disabled: false, createdAt: 1700000000000, bookCount: 12, ownedLibraries: [] },
+  { id: 'u2', username: 'bob', role: 'member', disabled: true, createdAt: 1700000000000, bookCount: 3, ownedLibraries: [] },
+  { id: 'u3', username: 'carol', role: 'member', disabled: false, createdAt: 1700000000000, bookCount: 1, ownedLibraries: [] },
 ]
 
 const LIBRARIES: LibraryListItem[] = [
@@ -56,6 +58,8 @@ const MEMBERS: LibraryMembersRes = {
 
 describe('UserManagementSection', () => {
   const mutateUser = vi.fn()
+  const createUser = vi.fn()
+  const deleteUser = vi.fn()
   const transferInstance = vi.fn()
   const setMemberRole = vi.fn()
   const removeMember = vi.fn()
@@ -67,6 +71,8 @@ describe('UserManagementSection', () => {
     useAuthStore.getState().setAuth({ id: 'u1', username: 'alice', role: 'owner' })
     ;(useAdminUsers as ReturnType<typeof vi.fn>).mockReturnValue({ data: { data: USERS }, isLoading: false })
     ;(useUpdateUser as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: mutateUser })
+    ;(useCreateUser as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: createUser })
+    ;(useDeleteUser as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: deleteUser })
     ;(useTransferInstanceOwnership as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: transferInstance })
 
     ;(useLibraries as ReturnType<typeof vi.fn>).mockReturnValue({ data: { data: LIBRARIES }, isLoading: false })
@@ -124,6 +130,62 @@ describe('UserManagementSection', () => {
 
       fireEvent.click(within(screen.getByText('alice').closest('tr')!).getByLabelText('更多操作'))
       expect(screen.queryByText('转让所有者')).not.toBeInTheDocument()
+    })
+
+    it('creates a user with a validated form', () => {
+      const { container } = render(<UserManagementSection />)
+      fireEvent.click(screen.getByRole('button', { name: '新建用户' }))
+      const form = container.querySelector('form')!
+
+      // Validation runs before any request.
+      fireEvent.submit(form)
+      expect(screen.getByText('请输入用户名')).toBeInTheDocument()
+      expect(createUser).not.toHaveBeenCalled()
+
+      fireEvent.change(screen.getByPlaceholderText('用户名'), { target: { value: 'dave' } })
+      fireEvent.change(screen.getByPlaceholderText('新密码'), { target: { value: 'password123' } })
+      fireEvent.change(screen.getByPlaceholderText('确认密码'), { target: { value: 'mismatch' } })
+      fireEvent.submit(form)
+      expect(screen.getByText('两次输入的密码不一致')).toBeInTheDocument()
+      expect(createUser).not.toHaveBeenCalled()
+
+      fireEvent.change(screen.getByPlaceholderText('确认密码'), { target: { value: 'password123' } })
+      fireEvent.submit(form)
+      expect(createUser).toHaveBeenCalledWith(
+        { username: 'dave', password: 'password123' },
+        expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+      )
+    })
+
+    it('confirms and deletes a plain member', () => {
+      render(<UserManagementSection />)
+      fireEvent.click(within(screen.getByText('carol').closest('tr')!).getByLabelText('更多操作'))
+      fireEvent.click(screen.getByRole('button', { name: '删除用户' }))
+
+      const dialog = screen.getByRole('alertdialog')
+      expect(within(dialog).getByText(/其私人书库与个人数据会被清除/)).toBeInTheDocument()
+      fireEvent.click(within(dialog).getByRole('button', { name: '删除用户' }))
+      expect(deleteUser).toHaveBeenCalledWith('u3', expect.objectContaining({ onSuccess: expect.any(Function) }))
+    })
+
+    it('hides deletion for self and explains blocked rows', () => {
+      const usersWithOwner: AdminUserRes[] = [
+        ...USERS,
+        { id: 'u4', username: 'dave', role: 'member', disabled: false, createdAt: 1700000000000, bookCount: 0, ownedLibraries: [{ id: 'lib1', name: 'City' }] },
+      ]
+      ;(useAdminUsers as ReturnType<typeof vi.fn>).mockReturnValue({ data: { data: usersWithOwner }, isLoading: false })
+      render(<UserManagementSection />)
+
+      fireEvent.click(within(screen.getByText('alice').closest('tr')!).getByLabelText('更多操作'))
+      expect(screen.queryByText('删除用户')).not.toBeInTheDocument()
+      fireEvent.keyDown(window, { key: 'Escape' })
+
+      fireEvent.click(within(screen.getByText('dave').closest('tr')!).getByLabelText('更多操作'))
+      const blocked = screen.getByTitle(/拥有书库/)
+      expect(blocked).toHaveTextContent('删除用户')
+      expect(blocked.getAttribute('title')).toMatch(/City/)
+      fireEvent.click(blocked)
+      expect(deleteUser).not.toHaveBeenCalled()
     })
   })
 

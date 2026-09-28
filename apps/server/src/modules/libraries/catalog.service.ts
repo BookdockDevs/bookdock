@@ -102,6 +102,9 @@ function toCatalogVersion(
       fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
     },
     collected: collectedVersionIds?.has(link.bookVersionId) ?? false,
+    // Per-listing anonymous switch; only meaningful with public visibility
+    // and the instance guest switch (see resolveSharedVersionRead).
+    guestReadable: link.guestReadable,
     format: version?.format ?? 'epub',
     size: version?.size ?? 0,
     chapterCount: revision?.chapterCount ?? 0,

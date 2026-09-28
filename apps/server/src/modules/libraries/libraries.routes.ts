@@ -283,7 +283,13 @@ librariesRoutes.post('/:id/books', async (c) => {
     normalizeTitle: isTitleNormalizeEnabled(user.id),
   })
   const book = await getCatalogBook(user.id, libraryId, result.libraryBookId)
-  return c.json({ data: book, duplicated: result.duplicated }, 201)
+  // The new link id lets uploaders select the version they just added without
+  // re-listing; duplicates carry no new link.
+  return c.json({
+    data: book,
+    duplicated: result.duplicated,
+    versionLinkId: result.duplicated ? undefined : result.versionLinkId,
+  }, 201)
 })
 
 librariesRoutes.patch('/:id/books/:bookId', async (c) => {

@@ -32,7 +32,7 @@ interface BookDetailDialogProps {
    * where a reader picks one to read - not a panel folded into the list row.
    * Only one of `book` and `work` is ever set.
    */
-  work?: { work: CatalogBook; library: Library; canManage: boolean; canCollect: boolean; moveCandidates: CatalogBook[] } | null
+  work?: { work: CatalogBook; library: Library; canManage: boolean; canCollect: boolean } | null
   readOnly?: boolean
   onClose: () => void
   onDelete: (book: BookListItem) => void
@@ -215,7 +215,6 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
           library={work.library}
           canManage={work.canManage}
           canCollect={work.canCollect}
-          moveCandidates={work.moveCandidates}
           onClose={closeDialog}
         />
       </Modal>

@@ -197,6 +197,12 @@ export interface CatalogVersion {
   }
   /** Whether this version already has a B entry in the current user's private library. */
   collected?: boolean
+  /**
+   * Per-listing anonymous switch. Only takes effect with public visibility
+   * and the instance guest switch; one library's value never opens another
+   * library's copy of the same version.
+   */
+  guestReadable: boolean
   format: BookFormat
   size: number
   chapterCount: number

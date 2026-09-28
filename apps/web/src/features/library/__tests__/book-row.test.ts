@@ -3,14 +3,14 @@ import { describe, expect, it } from 'vitest'
 import type { BookListItem, CatalogBook } from '@bookdock/shared'
 
 import { getCoverPalette } from '../components/cover-palettes'
-import { catalogWorkRow, privateBookRow } from '../book-row'
+import { catalogWorkRow, privateBookRow, versionTabLabel } from '../book-row'
 
 function version(): CatalogBook['versions'][number] {
   return {
     id: 'lbv1', libraryBookId: 'lb1', bookVersionId: 'v1', kind: 'personal', status: 'published',
     name: '', title: null, author: null, description: null, coverKey: null,
     effective: { title: 'Coverless TXT', author: '', description: '', coverKey: null, coverPaletteKey: 'v1', bookmeta: {}, fileName: 'book.txt' },
-    format: 'txt', size: 10, chapterCount: 1, wordCount: 2, pinnedAt: null, createdAt: 1, updatedAt: 1,
+    format: 'txt', size: 10, chapterCount: 1, wordCount: 2, guestReadable: false, pinnedAt: null, createdAt: 1, updatedAt: 1,
   }
 }
 
@@ -37,5 +37,13 @@ describe('library book row cover identity', () => {
     expect(privateRow.coverPaletteKey).toBe('v1')
     expect(getCoverPalette(sharedRow.coverPaletteKey!).id)
       .toBe(getCoverPalette(privateRow.coverPaletteKey!).id)
+  })
+})
+
+describe('versionTabLabel', () => {
+  it('prefers the manager-set label and falls back to the ordinal', () => {
+    expect(versionTabLabel('精校版', '第1版')).toBe('精校版')
+    expect(versionTabLabel('', '第1版')).toBe('第1版')
+    expect(versionTabLabel('   ', '第2版')).toBe('第2版')
   })
 })

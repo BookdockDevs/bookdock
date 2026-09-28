@@ -1961,7 +1961,11 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
   if (data.title || data.author !== undefined || touchedMeta || data.pinned !== undefined || data.readStatus !== undefined || data.progress !== undefined) {
     db.update(libraryBooks).set({ updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
   }
-  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
+  // Card-local fields stay editable on a B whose source died (title, pin,
+  // state): the card is retained by design, only its content reads are
+  // blocked. skipSourceCheck keeps the write-then-throw split from turning an
+  // applied edit into a NOT_FOUND.
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true }))
 }
 
 export async function updateBookCover(userId: string, bookId: string, file: File) {
@@ -1989,6 +1993,8 @@ export async function updateBookCover(userId: string, bookId: string, file: File
   // A private cover always wins over the inherited one, so a B needs no
   // shared-meta change to show it; touching the shared revision here would
   // un-suppress the cover for every library at once.
+  // Card-local cover override: allowed on a dead-source B for the same reason
+  // as updateBook — the card survives, only content reads are blocked.
   if (kind !== 'shared') {
     const latestRevision = db.select().from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
@@ -1998,7 +2004,7 @@ export async function updateBookCover(userId: string, bookId: string, file: File
       db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
     }
   }
-  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true }))
 }
 
 export async function getBookCover(userId: string | null, bookId: string): Promise<{ coverKey: string } | null> {
@@ -2102,6 +2108,8 @@ export async function removeBookCover(userId: string, bookId: string) {
   db.update(libraryBooks).set({ coverKey: null, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
   // Clearing the private override reveals the inherited cover; writing the
   // suppression flag would hide it for every library sharing this revision.
+  // Same card-local allowance as updateBookCover: a dead-source B keeps an
+  // editable card, only its content reads are blocked.
   if (kind !== 'shared') {
     const latestRevision = db.select().from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
@@ -2110,7 +2118,7 @@ export async function removeBookCover(userId: string, bookId: string) {
       db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
     }
   }
-  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true }))
 }
 
 export async function resetBookMetadata(userId: string, bookId: string, opts?: { normalizeTitle?: boolean }) {

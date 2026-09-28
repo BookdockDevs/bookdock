@@ -115,7 +115,7 @@ function rejectGuestMutation(c: Context): Response | null {
  * authenticated caller is their user id. Shared-library verdicts must branch
  * on this — never on the injected default guest row's id, which otherwise
  * reads as an authenticated non-member and skips the guest triple gate
- * (instance switch + public visibility + version guestReadable).
+ * (instance switch + public visibility + listing guestReadable).
  */
 export function requestUserId(c: Context): string | null {
   if (c.get('guest') === true || c.get('user')?.role === 'guest') return null

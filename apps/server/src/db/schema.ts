@@ -481,9 +481,6 @@ export const bookVersions = sqliteTable('book_versions', {
   id: text('id').primaryKey(),
   format: text('format', { enum: ['epub', 'txt'] }).notNull(),
   size: integer('size').notNull(),
-  // Version-level anonymous readability; the library must still be public
-  // and the instance must allow guest access for it to take effect.
-  guestReadable: integer('guest_readable', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 })
@@ -507,6 +504,10 @@ export const libraryBookVersions = sqliteTable('library_book_versions', {
   pinnedRevisionId: text('pinned_revision_id').references(() => contentRevisions.id),
   // Sort-first pin carried over from books.pinned_at (private cards keep order).
   pinnedAt: integer('pinned_at'),
+  // Per-listing anonymous readability: one library's guest switch never opens
+  // another library's copy of the same version. Takes effect only inside a
+  // public library on a guest-enabled instance (see resolveSharedVersionRead).
+  guestReadable: integer('guest_readable', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({

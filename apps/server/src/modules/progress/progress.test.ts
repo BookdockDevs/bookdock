@@ -133,7 +133,7 @@ describe('progress service', () => {
     }).run()
     const versionId = createId('book')
     db.insert(schema.bookVersions).values({
-      id: versionId, format: 'txt', size: 100, guestReadable: false,
+      id: versionId, format: 'txt', size: 100,
       createdAt: Date.now(), updatedAt: Date.now(),
     }).run()
     db.insert(schema.contentRevisions).values({

@@ -134,6 +134,13 @@
       "when": 1790433600000,
       "tag": "0019_library_uniqueness",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790500000000,
+      "tag": "0020_listing_guest_readable",
+      "breakpoints": true
     }
   ]
 }

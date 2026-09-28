@@ -53,7 +53,20 @@ export function listUsers(): AdminUserRes[] {
     .where(ne(users.role, 'guest'))
     .groupBy(users.id)
     .all()
-  return rows.map((r) => ({ ...r, disabled: r.disabled === 1 }))
+  // One extra query for the delete guard: an account owning shared libraries
+  // cannot be deleted until they are transferred or deleted.
+  const owned = db
+    .select({ userId: libraries.userId, id: libraries.id, name: libraries.name })
+    .from(libraries)
+    .where(eq(libraries.type, 'shared'))
+    .all()
+  const ownedByUser = new Map<string, { id: string; name: string }[]>()
+  for (const lib of owned) {
+    const list = ownedByUser.get(lib.userId) ?? []
+    list.push({ id: lib.id, name: lib.name })
+    ownedByUser.set(lib.userId, list)
+  }
+  return rows.map((r) => ({ ...r, disabled: r.disabled === 1, ownedLibraries: ownedByUser.get(r.id) ?? [] }))
 }
 
 export async function updateUser(actorId: string, targetId: string, patch: UpdateUserReq): Promise<AdminUserRes> {

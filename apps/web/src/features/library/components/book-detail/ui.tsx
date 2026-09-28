@@ -90,12 +90,14 @@ export function ActionIcon({
   label,
   danger = false,
   secondary = false,
+  disabled = false,
   onClick,
   children,
 }: {
   label: string
   danger?: boolean
   secondary?: boolean
+  disabled?: boolean
   onClick: () => void
   children: ReactNode
 }) {
@@ -104,8 +106,9 @@ export function ActionIcon({
       type="button"
       title={label}
       aria-label={label}
+      disabled={disabled}
       onClick={onClick}
-      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
         danger
           ? 'text-stone-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400'
           : secondary

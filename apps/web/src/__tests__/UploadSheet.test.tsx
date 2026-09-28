@@ -148,6 +148,42 @@ describe('UploadSheet', () => {
     expect(addFiles).toHaveBeenCalledWith(expect.anything(), { maxBytes: undefined, shelfId: undefined, tagIds: [] })
   })
 
+  it('renders per-file version name inputs only in version-name mode for pending items', () => {
+    const patchItem = vi.fn()
+    mockUseUploadBooks.mockReturnValue(uploadOverrides({
+      items: makeItems([{ status: 'pending' }, { status: 'uploading', progress: 10 }]),
+      patchItem,
+      isUploading: true,
+    }))
+    render(<UploadSheet open onClose={vi.fn()} versionNameMode />)
+    const inputs = screen.getAllByPlaceholderText('library.versionNamePlaceholder')
+    expect(inputs).toHaveLength(1)
+    fireEvent.change(inputs[0]!, { target: { value: '精校版' } })
+    expect(patchItem).toHaveBeenCalledWith('up-0', { versionName: '精校版' })
+  })
+
+  it('hides version name inputs outside version-name mode', () => {
+    mockUseUploadBooks.mockReturnValue(uploadOverrides({ items: makeItems([{ status: 'pending' }]) }))
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.queryByPlaceholderText('library.versionNamePlaceholder')).toBeNull()
+  })
+
+  it('shows the context note when provided', () => {
+    render(<UploadSheet open onClose={vi.fn()} contextNote="joining work" />)
+    expect(screen.getByText('joining work')).toBeInTheDocument()
+  })
+
+  it('reports settled successes once', () => {
+    const onUploaded = vi.fn()
+    mockUseUploadBooks.mockReturnValue(uploadOverrides({
+      items: makeItems([{ status: 'success', bookVersionId: 'v9' }]),
+    }))
+    const { rerender } = render(<UploadSheet open onClose={vi.fn()} onUploaded={onUploaded} />)
+    expect(onUploaded).toHaveBeenCalledWith(['v9'])
+    rerender(<UploadSheet open onClose={vi.fn()} onUploaded={onUploaded} />)
+    expect(onUploaded).toHaveBeenCalledTimes(1)
+  })
+
   it('accepts file drops on the sheet panel outside the dashed dropzone', () => {
     const addFiles = vi.fn()
     mockUseUploadBooks.mockReturnValue(uploadOverrides({ addFiles }))

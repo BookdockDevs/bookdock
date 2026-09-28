@@ -20,6 +20,16 @@ interface UploadSheetProps {
    * this same window, queue and progress bar rather than a second one.
    */
   target?: UploadTarget
+  /**
+   * Version-name mode (P3): each queued file gets an edition-label input that
+   * rides along as the upload's `name` field. Only meaningful with a catalog
+   * target already bound to one work.
+   */
+  versionNameMode?: boolean
+  /** One-line context under the dropzone, e.g. which work new versions join. */
+  contextNote?: string
+  /** Fired once per settle cycle with the ids the server answered. */
+  onUploaded?: (ids: string[]) => void
 }
 
 function statusLabel(item: UploadItem): string | null {
@@ -46,13 +56,14 @@ function hasFiles(e: { dataTransfer: DataTransfer | null }): boolean {
   return Boolean(e.dataTransfer?.types.includes('Files'))
 }
 
-export default function UploadSheet({ open, onClose, shelfId, tagId, target }: UploadSheetProps) {
+export default function UploadSheet({ open, onClose, shelfId, tagId, target, versionNameMode = false, contextNote, onUploaded }: UploadSheetProps) {
   const _ = useTranslation()
   const [dragOver, setDragOver] = useState(false)
   const [includeCurrentTag, setIncludeCurrentTag] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
-  const { items, addFiles, startUpload, retry, retryAll, abortAll, pruneSettled, isUploading, clearQueue } = useUploadBooks(target)
+  const { items, addFiles, startUpload, retry, retryAll, abortAll, pruneSettled, isUploading, clearQueue, patchItem } = useUploadBooks(target)
+  const reportedRef = useRef('')
   const { maxBytes } = useUploadSettings()
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()
@@ -97,11 +108,25 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target }: U
   const hasPending = items.some((it) => it.status === 'pending')
   const settled = items.length > 0 && !isUploading && !hasPending
   const failed = items.filter((it) => it.status === 'error').length
+
+  // Report fresh successes once per settle cycle so an uploader into an
+  // existing work can select the version it just added.
+  useEffect(() => {
+    if (!onUploaded || !settled) return
+    const ids = items.filter((it) => it.status === 'success' && it.bookVersionId).map((it) => it.bookVersionId as string)
+    if (ids.length === 0 || ids.join(',') === reportedRef.current) return
+    reportedRef.current = ids.join(',')
+    onUploaded(ids)
+  }, [settled, items, onUploaded])
   // One finished book is worth opening straight away: closing this window and
   // hunting the book back out of the grid is the longer path to the same read.
+  // Version-name uploads are the exception: their picked id is a version link,
+  // not a readable book, and the caller selects it into the open dialog via
+  // onUploaded instead of navigating.
   const readable = settled && items.length === 1
     && (items[0].status === 'success' || items[0].status === 'duplicate')
     && Boolean(items[0].bookVersionId)
+    && !versionNameMode
 
   function handleRead() {
     const bookVersionId = items[0]?.bookVersionId
@@ -174,9 +199,10 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target }: U
         </div>
       </div>
 
-      {(shelfName || tagName) && (
+      {(shelfName || tagName || contextNote) && (
         <div className="mt-3 space-y-2 rounded-xl bg-stone-50 px-3.5 py-2.5 text-xs text-stone-600 dark:bg-stone-800/50 dark:text-stone-300">
           {shelfName && <p>{_('library.uploadShelfContext', { name: shelfName })}</p>}
+          {contextNote && <p>{contextNote}</p>}
           {tagName && (
             <label className="flex cursor-pointer items-center gap-2">
               <input
@@ -211,6 +237,18 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target }: U
                   ) : null}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-stone-700 dark:text-stone-300">{item.name}</span>
+                {versionNameMode && item.status === 'pending' && (
+                  <input
+                    type="text"
+                    value={item.versionName ?? ''}
+                    onChange={(e) => patchItem(item.id, { versionName: e.target.value })}
+                    maxLength={120}
+                    placeholder={_('library.versionNamePlaceholder')}
+                    aria-label={_('library.versionName')}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-28 shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs outline-none placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:placeholder:text-stone-500"
+                  />
+                )}
                 {item.status === 'error' ? (
                   <>
                     {note && <span className="shrink-0 text-xs text-red-600 dark:text-red-400">{note}</span>}

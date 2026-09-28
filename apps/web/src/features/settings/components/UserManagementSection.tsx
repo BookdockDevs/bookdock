@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 
-import { AUTH_PASSWORD_MIN_LENGTH } from '@bookdock/shared'
+import { AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, sanitizeUsername } from '@bookdock/shared'
 import type { AdminUserRes, LibraryMemberEntry, MembershipRole, UpdateUserReq } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import SmartMenu from '@/components/ui/SmartMenu'
-import { useAdminUsers, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
+import { useAdminUsers, useCreateUser, useDeleteUser, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
 import {
   useLibraries,
@@ -213,10 +213,14 @@ function InstanceUsersView() {
   const currentUser = useAuthStore((s) => s.user)
   const { data: usersData, isError, isFetching, isLoading, refetch } = useAdminUsers()
   const updateUser = useUpdateUser()
+  const createUser = useCreateUser()
+  const deleteUser = useDeleteUser()
   const transferOwnership = useTransferInstanceOwnership()
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [transferTarget, setTransferTarget] = useState<AdminUserRes | null>(null)
   const [resetTarget, setResetTarget] = useState<AdminUserRes | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<AdminUserRes | null>(null)
 
   const users = usersData?.data ?? []
 
@@ -256,6 +260,11 @@ function InstanceUsersView() {
 
   return (
     <>
+      <div className="flex items-center justify-end px-4 pt-3 sm:px-6">
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
+          {_('admin.createUser')}
+        </Button>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[28rem] text-left text-sm sm:min-w-full">
           <thead>
@@ -277,6 +286,7 @@ function InstanceUsersView() {
                 onAction={setPendingAction}
                 onTransfer={setTransferTarget}
                 onResetPassword={setResetTarget}
+                onDelete={setDeleteTarget}
               />
             ))}
           </tbody>
@@ -324,19 +334,61 @@ function InstanceUsersView() {
           if (target) runUpdate(target.id, { newPassword: password })
         }}
       />
+
+      {createOpen && (
+        <CreateUserDialog
+          onClose={() => setCreateOpen(false)}
+          onSubmit={(username, password) => {
+            setCreateOpen(false)
+            createUser.mutate({ username, password }, {
+              onSuccess: (res) => notify.success(_('admin.createUserSuccess', { name: res.data.username })),
+              onError: (err) => notify.error(getUserErrorNotification(err, 'admin.createUserFailed')),
+            })
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title={_('admin.deleteUser')}
+          message={_('admin.deleteUserConfirm', { name: deleteTarget.username })}
+          confirmLabel={_('admin.deleteUser')}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            const target = deleteTarget
+            setDeleteTarget(null)
+            deleteUser.mutate(target.id, {
+              onSuccess: () => notify.success(_('admin.deleteUserSuccess', { name: target.username })),
+              onError: (err) => notify.error(getUserErrorNotification(err, 'admin.deleteUserFailed')),
+            })
+          }}
+        />
+      )}
     </>
   )
 }
 
-function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword }: {
+function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword, onDelete }: {
   user: AdminUserRes
   isSelf: boolean
   onAction: (action: PendingAction) => void
   onTransfer: (user: AdminUserRes) => void
   onResetPassword: (user: AdminUserRes) => void
+  onDelete: (user: AdminUserRes) => void
 }) {
   const _ = useTranslation()
   const menu = useContextMenu()
+  // Deletion blockers are pre-checked so the menu never offers an action the
+  // server would refuse: self-service deletion lives on the profile page, the
+  // instance owner must transfer first, and shared-library owners must
+  // transfer or delete those libraries first.
+  const deleteBlocked = isSelf
+    ? _('admin.cannotDeleteSelf')
+    : user.role === 'owner'
+      ? _('admin.cannotDeleteOwner')
+      : user.ownedLibraries.length > 0
+        ? _('admin.cannotDeleteLibraryOwner', { names: user.ownedLibraries.map((l) => l.name).join('、') })
+        : null
 
   return (
     <tr className="transition-colors hover:bg-stone-50/50 dark:hover:bg-stone-800/30">
@@ -420,6 +472,22 @@ function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword }: {
           >
             {_('admin.resetPassword')}
           </button>
+          {deleteBlocked === null ? (
+            <button
+              type="button"
+              onClick={() => {
+                menu.close()
+                onDelete(user)
+              }}
+              className={cn(menuItemClass, 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40')}
+            >
+              {_('admin.deleteUser')}
+            </button>
+          ) : !isSelf && (
+            <span title={deleteBlocked} className={cn(menuItemClass, 'cursor-not-allowed opacity-50')}>
+              {_('admin.deleteUser')}
+            </span>
+          )}
         </SmartMenu>
       </td>
     </tr>
@@ -473,6 +541,91 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
             {_('library.cancel')}
           </Button>
           <Button type="submit">{_('library.save')}</Button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function CreateUserDialog({ onClose, onSubmit }: {
+  onClose: () => void
+  onSubmit: (username: string, password: string) => void
+}) {
+  const _ = useTranslation()
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    const name = sanitizeUsername(username)
+    if (!name) {
+      setError(_('auth.errors.usernameRequired'))
+      return
+    }
+    if (password.length < AUTH_PASSWORD_MIN_LENGTH) {
+      setError(_('auth.passwordTooShort', { min: AUTH_PASSWORD_MIN_LENGTH }))
+      return
+    }
+    if (password !== confirm) {
+      setError(_('auth.passwordMismatch'))
+      return
+    }
+    onSubmit(name, password)
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
+      onClick={onClose}
+    >
+      <form
+        onSubmit={submit}
+        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-2xl border border-stone-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="mb-2 font-serif text-base font-medium text-stone-900 dark:text-stone-100">
+          {_('admin.createUser')}
+        </h2>
+        <p className="mb-4 text-sm text-stone-500">{_('admin.createUserFor')}</p>
+        <input
+          type="text"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          required
+          maxLength={AUTH_REGISTER_USERNAME_MAX_LENGTH}
+          aria-label={_('auth.username')}
+          placeholder={_('auth.username')}
+          autoComplete="off"
+          className="mb-3 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
+        />
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          aria-label={_('auth.newPassword')}
+          placeholder={_('auth.newPassword')}
+          autoComplete="new-password"
+          className="mb-3 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
+        />
+        <input
+          type="password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          required
+          aria-label={_('auth.confirmPassword')}
+          placeholder={_('auth.confirmPassword')}
+          autoComplete="new-password"
+          className="mb-4 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
+        />
+        {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {_('library.cancel')}
+          </Button>
+          <Button type="submit">{_('admin.createUser')}</Button>
         </div>
       </form>
     </div>

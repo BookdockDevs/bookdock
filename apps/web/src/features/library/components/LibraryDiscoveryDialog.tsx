@@ -169,6 +169,11 @@ export default function LibraryDiscoveryDialog({
                           <LockIcon className="h-3 w-3" />
                           {_('library.visibilityPassword')}
                         </span>
+                      ) : lib.visibility === 'private' ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+                          <LockIcon className="h-3 w-3" />
+                          {_('library.visibilityPrivate')}
+                        </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
                           <GlobeIcon className="h-3 w-3" />

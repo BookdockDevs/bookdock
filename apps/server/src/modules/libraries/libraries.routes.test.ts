@@ -120,9 +120,11 @@ describe('libraries routes', () => {
         method: 'POST', body: uploadBody('第一章\n正文'),
       })
       expect(res.status).toBe(201)
-      const body = await res.json() as { data: { id: string; versions: unknown[] }; duplicated: boolean }
+      const body = await res.json() as { data: { id: string; versions: { id: string }[] }; duplicated: boolean; versionLinkId?: string }
       expect(body.duplicated).toBe(false)
       expect(body.data.versions).toHaveLength(1)
+      // The new link id lets uploaders select the version they just added.
+      expect(body.versionLinkId).toBe(body.data.versions[0]!.id)
 
       const memberApp = createApp({ id: memberId })
       const denied = await memberApp.request(`/api/v1/libraries/${libraryId}/books`, {
