@@ -52,7 +52,7 @@ function settingsChanged(
   state: ReturnType<typeof useUiStore.getState>,
   prevState: ReturnType<typeof useUiStore.getState>,
 ): boolean {
-  if (state.customThemes !== prevState.customThemes) return true
+  if (JSON.stringify(state.customThemes) !== JSON.stringify(prevState.customThemes)) return true
   if (JSON.stringify(state.fontPreferences) !== JSON.stringify(prevState.fontPreferences)) return true
   if (JSON.stringify(state.fontOrder) !== JSON.stringify(prevState.fontOrder)) return true
   return SETTINGS_KEYS.filter((key) => key !== 'fontPreferences' && key !== 'fontOrder').some((key) => {

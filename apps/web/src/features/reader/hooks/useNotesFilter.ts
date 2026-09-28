@@ -1,9 +1,25 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
 export type NoteSort = 'time-desc' | 'time-asc' | 'chapter' | 'chapter-desc'
 export type ItemKind = 'bookmark' | 'idea' | 'highlight'
+
+// Device-local, same shape as the display-type key the panel owns: a view
+// preference belongs to the reader, not to the book, so it survives reopening
+// the panel and navigating away and back.
+const SORT_KEY = 'bd-notes-sort'
+const ALL_SORTS: NoteSort[] = ['time-desc', 'time-asc', 'chapter', 'chapter-desc']
+
+function loadSort(): NoteSort {
+  try {
+    const raw = window.localStorage.getItem(SORT_KEY)
+    if (raw && ALL_SORTS.includes(raw as NoteSort)) return raw as NoteSort
+  } catch {
+    // ignore storage errors
+  }
+  return 'chapter'
+}
 
 export function kindOf(a: AnnotationRes): ItemKind {
   if (a.type === 'bookmark') return 'bookmark'
@@ -23,9 +39,17 @@ function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
  */
 export function useNotesFilter(items: AnnotationRes[], displayTypes?: Set<ItemKind>) {
   const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<NoteSort>('chapter')
+  const [sort, setSort] = useState<NoteSort>(loadSort)
   const [styleFilter, setStyleFilter] = useState<Set<AnnotationStyle>>(new Set())
   const [colorFilter, setColorFilter] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SORT_KEY, sort)
+    } catch {
+      // ignore storage errors
+    }
+  }, [sort])
 
   const filtered = useMemo(() => {
     let result = items
@@ -47,13 +71,17 @@ export function useNotesFilter(items: AnnotationRes[], displayTypes?: Set<ItemKi
     setSort,
     styleFilter,
     colorFilter,
-    hasActiveFilter: styleFilter.size > 0 || colorFilter.size > 0 || sort !== 'chapter',
+    // Sort reorders, it does not select: counting it lit the filter icon and
+    // the "filter active" dot for someone who only wanted a different order.
+    // The search box, which really does hide rows, was the one missing here.
+    hasActiveFilter: styleFilter.size > 0 || colorFilter.size > 0 || query.trim().length > 0,
     toggleStyle: (style: AnnotationStyle) => setStyleFilter((s) => toggleInSet(s, style)),
     toggleColor: (color: string) => setColorFilter((s) => toggleInSet(s, color)),
     reset: () => {
+      // Deliberately leaves sort alone - it is not a filter, so resetting
+      // filters has no business discarding the reader's chosen order.
       setStyleFilter(new Set())
       setColorFilter(new Set())
-      setSort('chapter')
     },
     filtered,
   }

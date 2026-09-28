@@ -6,18 +6,29 @@ import type { AccountRes } from '@bookdock/shared'
 
 import { config } from '../../config'
 import { getStorage } from '../../storage'
+import type { StorageDriver } from '../../storage/driver'
 import { AppError } from '../../middleware/error'
-import { avatarStorageKey, deleteAvatar, uploadAvatar } from './avatars.service'
+import { avatarThumbnailKey } from '../../lib/avatar'
+import { avatarStorageKey, deleteAvatar, generateAvatarThumbnail, uploadAvatar } from './avatars.service'
 
 const AVATAR_CONTENT_TYPES: Record<string, string> = {
   jpg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',
-  gif: 'image/gif',
 }
 
-// Keys are `<hh>/<sha256>.<ext>` — validated before storage is touched
-const AVATAR_KEY_PATTERN = /^[0-9a-f]{2}\/[0-9a-f]{64}\.(jpg|png|webp|gif)$/
+// Keys are `<hh>/<sha256>.<ext>` — validated before storage is touched.
+// Only the three upload types exist: the service rejects anything else, so a
+// GIF key can never be produced.
+const AVATAR_KEY_PATTERN = /^[0-9a-f]{2}\/[0-9a-f]{64}\.(jpg|png|webp)$/
+
+async function readAll(storage: StorageDriver, storageKey: string): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  for await (const chunk of (await storage.get(storageKey)) as Readable) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks)
+}
 
 const avatarsRoutes = new Hono()
 
@@ -56,13 +67,39 @@ avatarsRoutes.get('/:key{.+}', async (c) => {
   if (!match || !(await storage.exists(storageKey))) {
     throw new AppError('AVATAR_NOT_FOUND')
   }
-  const chunks: Buffer[] = []
-  for await (const chunk of (await storage.get(storageKey)) as Readable) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+
+  // No surface renders an avatar larger than 96 CSS px, so the thumbnail is
+  // the default and the original stays opt-in for the untouched bytes.
+  let payload: Buffer
+  let contentType: string
+  if (c.req.query('size') === 'original') {
+    payload = await readAll(storage, storageKey)
+    contentType = AVATAR_CONTENT_TYPES[match[1]]
+  } else {
+    const thumbKey = avatarStorageKey(avatarThumbnailKey(key))
+    if (await storage.exists(thumbKey)) {
+      payload = await readAll(storage, thumbKey)
+      contentType = 'image/webp'
+    } else {
+      const original = await readAll(storage, storageKey)
+      const thumb = await generateAvatarThumbnail(original)
+      if (thumb) {
+        await storage.put(thumbKey, thumb)
+        payload = thumb
+        contentType = 'image/webp'
+      } else {
+        // Bytes sharp cannot decode still render as themselves; serving them
+        // beats failing the request.
+        payload = original
+        contentType = AVATAR_CONTENT_TYPES[match[1]]
+      }
+    }
   }
-  // The blob is content-hash addressed; the payload never changes under the same URL.
-  return c.newResponse(new Uint8Array(Buffer.concat(chunks)), 200, {
-    'Content-Type': AVATAR_CONTENT_TYPES[match[1]],
+
+  // The blob and its thumbnail are both content-hash addressed, so the payload
+  // under a given URL never changes.
+  return c.newResponse(new Uint8Array(payload), 200, {
+    'Content-Type': contentType,
     'Cache-Control': 'private, immutable, max-age=31536000',
   })
 })

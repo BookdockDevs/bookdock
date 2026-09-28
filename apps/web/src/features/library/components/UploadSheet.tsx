@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent } from 'react'
 
+import { useNavigate } from '@tanstack/react-router'
+
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -47,10 +49,10 @@ function hasFiles(e: { dataTransfer: DataTransfer | null }): boolean {
 export default function UploadSheet({ open, onClose, shelfId, tagId, target }: UploadSheetProps) {
   const _ = useTranslation()
   const [dragOver, setDragOver] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [includeCurrentTag, setIncludeCurrentTag] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const { items, addFiles, startUpload, retry, pruneSettled, isUploading, clearQueue } = useUploadBooks(target)
+  const navigate = useNavigate()
+  const { items, addFiles, startUpload, retry, retryAll, abortAll, pruneSettled, isUploading, clearQueue } = useUploadBooks(target)
   const { maxBytes } = useUploadSettings()
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()
@@ -71,7 +73,6 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target }: U
   useEffect(() => {
     if (!open) {
       setDragOver(false)
-      setError(null)
     }
     setIncludeCurrentTag(false)
   }, [open, tagId])
@@ -90,12 +91,25 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target }: U
     if (!hasFiles(e)) return
     e.preventDefault()
     setDragOver(false)
-    setError(null)
     if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files, { autoStart: true, maxBytes, ...assignment })
   }
 
   const hasPending = items.some((it) => it.status === 'pending')
   const settled = items.length > 0 && !isUploading && !hasPending
+  const failed = items.filter((it) => it.status === 'error').length
+  // One finished book is worth opening straight away: closing this window and
+  // hunting the book back out of the grid is the longer path to the same read.
+  const readable = settled && items.length === 1
+    && (items[0].status === 'success' || items[0].status === 'duplicate')
+    && Boolean(items[0].bookVersionId)
+
+  function handleRead() {
+    const bookVersionId = items[0]?.bookVersionId
+    if (!bookVersionId) return
+    clearQueue()
+    onClose()
+    void navigate({ to: '/books/$id', params: { id: bookVersionId } })
+  }
 
   if (!open) return null
 
@@ -103,6 +117,9 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target }: U
     <Modal
       title={_('library.upload')}
       onClose={handleClose}
+      // The default reads "cancel", which now collides with the footer's
+      // cancel-upload: here closing the window is not cancelling anything.
+      closeLabel={_('library.close')}
       size="default"
       containerProps={{
         onDragOver: (e) => {
@@ -125,7 +142,7 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target }: U
           setDragOver(false)
         }}
         className={
-          'flex h-44 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed text-center transition-colors duration-150 ' +
+          'flex h-60 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed text-center transition-colors duration-150 ' +
           (dragOver
             ? 'border-stone-400 bg-stone-100/70 dark:border-stone-500 dark:bg-stone-800/40'
             : 'border-stone-300 dark:border-stone-700')
@@ -173,8 +190,6 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target }: U
           )}
         </div>
       )}
-
-      {error && <p className="mt-3 text-xs text-red-600 dark:text-red-400">{error}</p>}
 
       {items.length > 0 && (
         <ul className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">
@@ -237,27 +252,30 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target }: U
         </ul>
       )}
 
-      <div className="mt-6 flex justify-end gap-3">
-        {settled ? (
-          <>
-            <Button variant="ghost" onClick={() => inputRef.current?.click()}>
-              {_('library.selectFiles')}
-            </Button>
+      {/* One action per state, and nothing at all while the queue is empty:
+          the close affordance is the header X, and adding files is the drop
+          zone above, which is the bigger and more obvious of the two. */}
+      {items.length > 0 && (
+        <div className="mt-6 flex justify-end gap-3">
+          {hasPending ? (
+            <Button onClick={() => startUpload(assignment)}>{_('library.upload')}</Button>
+          ) : isUploading ? (
+            <Button variant="secondary" onClick={abortAll}>{_('library.uploadCancel')}</Button>
+          ) : readable ? (
+            <>
+              <Button variant="secondary" onClick={handleClose}>{_('library.done')}</Button>
+              <Button onClick={handleRead}>{_('library.startReading')}</Button>
+            </>
+          ) : failed > 0 ? (
+            <>
+              <Button variant="secondary" onClick={retryAll}>{_('library.uploadRetryAll')}</Button>
+              <Button onClick={handleClose}>{_('library.done')}</Button>
+            </>
+          ) : (
             <Button onClick={handleClose}>{_('library.done')}</Button>
-          </>
-        ) : (
-          <>
-            <Button variant="ghost" onClick={handleClose}>
-              {_('library.cancel')}
-            </Button>
-            {hasPending ? (
-              <Button onClick={() => startUpload(assignment)}>{_('library.upload')}</Button>
-            ) : (
-              <Button onClick={() => inputRef.current?.click()}>{_('library.selectFiles')}</Button>
-            )}
-          </>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       <input
         ref={inputRef}
@@ -266,7 +284,6 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target }: U
         multiple
         className="hidden"
         onChange={(e) => {
-          setError(null)
           // Picker-selected files wait for an explicit upload click
           if (e.target.files?.length) addFiles(e.target.files, { maxBytes, ...assignment })
           e.target.value = ''

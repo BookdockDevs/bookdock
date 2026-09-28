@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 
 import type { AnnotationRes } from '@bookdock/shared'
 
@@ -57,6 +57,133 @@ function renderPanel(onClose = vi.fn(), sort: 'chapter' | 'chapter-desc' | 'time
     <NotesPanel items={ANNOTATIONS} total={ANNOTATIONS.length} sort={sort} onClose={onClose} chapterOrder={[{ label: '第一章', href: 'chapter:1' }, { label: '第二章', href: 'chapter:2' }]} bookId="book-1" />,
   )
 }
+
+describe('bookmark cards', () => {
+  // A bookmark always captures 80 characters, so its card has to be able to
+  // show them and has to offer the same expand affordance the other kinds have.
+  beforeEach(() => {
+    vi.mocked(useReaderApi).mockReturnValue({
+      renderer: { display, pushPopupGuard: vi.fn(), popPopupGuard: vi.fn() },
+    })
+    display.mockClear()
+    deleteMutate.mockClear()
+    updateMutate.mockClear()
+  })
+
+  const LONG = '他走进屋子看见桌上放着一封信信封上没有任何署名窗外传来巷口小贩的叫卖声'
+    + '他停在门口犹豫了很久最终还是没有伸手去拿而是转身走向窗边看着外面熙攘的人群和暮色中的屋檐'
+  expect(LONG.length).toBe(79)
+
+  function renderOne(overrides: Partial<AnnotationRes>, sort: 'chapter' | 'time-desc' = 'time-desc') {
+    const item = makeAnnotation({ id: 'bm', type: 'bookmark', cfiAnchor: 'cfi-anchor', ...overrides })
+    return render(
+      <NotesPanel items={[item]} total={1} sort={sort} onClose={vi.fn()} chapterOrder={[{ label: '第三章', href: 'chapter:3' }]} bookId="book-1" />,
+    )
+  }
+
+  it('gives the snippet four lines, not two', () => {
+    const { container } = renderOne({ text: LONG })
+    const snippet = screen.getByText(LONG)
+    expect(snippet.className).toContain('line-clamp-4')
+    expect(snippet.className).not.toContain('line-clamp-2')
+    expect(container).toBeTruthy()
+  })
+
+  it('offers expand once the snippet passes the same threshold as a highlight', () => {
+    renderOne({ text: LONG })
+    const expand = screen.getByText('annotation.expand')
+    fireEvent.click(expand)
+
+    expect(screen.getByText(LONG).className).not.toContain('line-clamp-4')
+    expect(screen.getByText('annotation.collapse')).toBeTruthy()
+  })
+
+  // The reported symptom: widening the panel made all 80 characters fit, yet
+  // the toggle stayed, and expanding it revealed only the padding the button
+  // reserves for itself. Whether text is cut off is a question about the
+  // rendered box, so these drive the measurement directly.
+  function stubResizeObserver() {
+    const seen: Array<() => void> = []
+    class FakeResizeObserver {
+      constructor(cb: () => void) { seen.push(cb) }
+      observe() { /* the test fires the callback itself */ }
+      unobserve() { /* not used */ }
+      disconnect() { /* not used */ }
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    return () => seen.at(-1)?.()
+  }
+
+  function layout(snippet: HTMLElement, client: number, scroll: number) {
+    Object.defineProperty(snippet, 'clientHeight', { configurable: true, value: client })
+    Object.defineProperty(snippet, 'scrollHeight', { configurable: true, value: scroll })
+  }
+
+  it('drops the toggle once the box reports no overflow', () => {
+    const notifyResize = stubResizeObserver()
+    const { container } = renderOne({ text: LONG })
+    layout(screen.getByText(LONG), 64, 64)
+
+    act(() => { notifyResize() })
+
+    expect(container.innerHTML).not.toContain('annotation.expand')
+    expect(container.innerHTML).not.toContain('annotation.collapse')
+  })
+
+  it('keeps the toggle while the box is still clipped', () => {
+    const notifyResize = stubResizeObserver()
+    const { container } = renderOne({ text: LONG })
+    layout(screen.getByText(LONG), 64, 128)
+
+    act(() => { notifyResize() })
+
+    expect(container.innerHTML).toContain('annotation.expand')
+  })
+
+  it('reserves no button padding when the snippet is not clipped', () => {
+    // The empty line came from padding held for a button that had nothing to
+    // reveal, so neither may appear when the box is not clipped.
+    const notifyResize = stubResizeObserver()
+    const { container } = renderOne({ text: LONG })
+    layout(screen.getByText(LONG), 64, 64)
+
+    act(() => { notifyResize() })
+
+    expect(container.innerHTML).not.toContain('pb-5')
+  })
+
+  it('holds the toggle once expanded so the snippet can be folded back', () => {
+    const notifyResize = stubResizeObserver()
+    const { container } = renderOne({ text: LONG })
+    layout(screen.getByText(LONG), 64, 128)
+    act(() => { notifyResize() })
+
+    fireEvent.click(screen.getByText('annotation.expand'))
+
+    // Expanded, the padding is what keeps the button off the last line, and the
+    // button has to stay to fold it back.
+    expect(container.innerHTML).toContain('annotation.collapse')
+    expect(container.innerHTML).toContain('pb-5')
+  })
+
+  it('leaves a short snippet alone', () => {
+    renderOne({ text: '很短的书签' })
+    expect(screen.queryByText('annotation.expand')).toBeNull()
+    expect(screen.getByText('很短的书签').className).toContain('line-clamp-4')
+  })
+
+  it('labels the chapter in a flat list so a position is recognizable', () => {
+    const { container } = renderOne({ text: LONG, chapter: '第三章' })
+    expect(container.querySelector('span[title="第三章"]')?.textContent).toBe('第三章')
+  })
+
+  it('drops the per-card chapter when the list is already grouped by it', () => {
+    const { container } = renderOne({ text: LONG, chapter: '第三章' }, 'chapter')
+    // The group header carries it instead, so repeating it per card is noise.
+    expect(container.querySelector('span[title="第三章"]')).toBeNull()
+    expect(screen.getByText('第三章')).toBeTruthy()
+  })
+})
 
 describe('NotesPanel', () => {
   beforeEach(() => {

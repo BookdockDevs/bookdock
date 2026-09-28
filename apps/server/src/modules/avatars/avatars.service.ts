@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm'
+import sharp from 'sharp'
 
 import type { AccountRes } from '@bookdock/shared'
 
@@ -7,7 +8,9 @@ import { users } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { AppError } from '../../middleware/error'
 import { invalidateUserCache } from '../../middleware/auth.guard'
+import { avatarThumbnailKey } from '../../lib/avatar'
 import { sha256 } from '../../lib/hash'
+import { log } from '../../lib/logger'
 
 const AVATAR_MIME_TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -19,12 +22,32 @@ export function avatarStorageKey(key: string): string {
   return `avatars/${key}`
 }
 
+/**
+ * The largest avatar the UI renders is 96 CSS px (the profile hero), which is
+ * 192 device px on a 2x display and 96 px again in the 2x share-card export.
+ * 256 px covers all of them with room for a 3x phone, without storing an
+ * image sharper than any current surface can show.
+ */
+export async function generateAvatarThumbnail(buffer: Buffer): Promise<Buffer | null> {
+  try {
+    return await sharp(buffer)
+      .resize({ width: 256, withoutEnlargement: true })
+      .webp({ quality: 82 })
+      .toBuffer()
+  } catch (err) {
+    // An avatar the pipeline cannot decode still renders as its original; a
+    // chip showing a full-size image beats a broken image.
+    log('warn', 'avatar_thumbnail_failed', { error: err })
+    return null
+  }
+}
+
 function toAccountRes(row: typeof users.$inferSelect): AccountRes {
   return { id: row.id, username: row.username, role: row.role, avatarKey: row.avatarKey }
 }
 
 // Blobs are content-hash addressed and can be shared across users; delete the
-// physical file only when no user row references the key (same pattern as fonts).
+// physical files only when no user row references the key (same pattern as fonts).
 async function deleteBlobIfUnreferenced(key: string) {
   const db = getDb()
   const refs = db
@@ -33,9 +56,10 @@ async function deleteBlobIfUnreferenced(key: string) {
     .where(eq(users.avatarKey, key))
     .get()
   const storage = getStorage()
-  const storageKey = avatarStorageKey(key)
-  if ((refs?.count ?? 0) === 0 && (await storage.exists(storageKey))) {
-    await storage.delete(storageKey)
+  if ((refs?.count ?? 0) > 0) return
+  // The thumbnail is derived from the same key, so it dies with the original.
+  for (const storageKey of [avatarStorageKey(key), avatarStorageKey(avatarThumbnailKey(key))]) {
+    if (await storage.exists(storageKey)) await storage.delete(storageKey)
   }
 }
 

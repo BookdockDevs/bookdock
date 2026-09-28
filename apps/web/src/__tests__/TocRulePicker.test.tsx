@@ -102,7 +102,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
       />,
     )
 
-    expect(screen.getByText('分章规则')).toBeInTheDocument()
+    expect(screen.getByText('目录规则')).toBeInTheDocument()
     expect(screen.getByText('自动分章')).toBeInTheDocument()
     expect(screen.getByText('中文网文（卷·章·节）')).toBeInTheDocument()
 
@@ -168,7 +168,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
 
     expect(screen.getByText('本书专属规则')).toBeInTheDocument()
     expect(screen.queryByText('专属')).not.toBeInTheDocument()
-    expect(screen.getByTitle('编辑专属分章规则')).toBeInTheDocument()
+    expect(screen.getByTitle('编辑专属目录规则')).toBeInTheDocument()
   })
 
   it('syncs the highlighted target when rules finish loading', async () => {
@@ -262,7 +262,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
       />,
     )
 
-    expect(screen.getByText('编辑专属分章规则')).toBeInTheDocument()
+    expect(screen.getByText('编辑专属目录规则')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /测试匹配/ })).toBeInTheDocument()
 
     // Click test match button

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 
 import type { AnnotationStyle } from '@bookdock/shared'
 
@@ -23,6 +23,8 @@ interface NotesFilterPanelProps {
   onToggleStyle: (style: AnnotationStyle) => void
   onToggleColor: (color: string) => void
   onReset: () => void
+  /** From useNotesFilter; recomputing it here is how the two drifted apart. */
+  hasActiveFilter: boolean
 }
 
 export function NotesFilterPanel({
@@ -38,6 +40,7 @@ export function NotesFilterPanel({
   onToggleStyle,
   onToggleColor,
   onReset,
+  hasActiveFilter,
 }: NotesFilterPanelProps) {
   const _ = useTranslation()
   const rootRef = useRef<HTMLDivElement>(null)
@@ -118,10 +121,7 @@ export function NotesFilterPanel({
     }
   }
 
-  const isFiltered = useMemo(
-    () => displayTypes.size < 3 || styleFilter.size > 0 || colorFilter.size > 0 || sort !== 'chapter',
-    [displayTypes, styleFilter, colorFilter, sort],
-  )
+  const isFiltered = displayTypes.size < 3 || hasActiveFilter
 
   if (!open || !pos) return null
 

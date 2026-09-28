@@ -776,6 +776,13 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (Object.keys(patch).length > 0) set(patch)
   },
   setCustomThemes: (themes) => {
+    // A received sync payload is re-parsed into brand new theme objects every
+    // time, so reference equality reports a change on every broadcast. Writing
+    // that back made each tab see "the user edited the themes", answer with its
+    // own copy, and leave the other one to do the same - two tabs echoing the
+    // same unchanged payload to the server once a second, forever. Content is
+    // the only thing that can decide whether this is an edit.
+    if (JSON.stringify(get().customThemes) === JSON.stringify(themes)) return
     persistCustomThemes(themes)
     set({ customThemes: themes })
   },

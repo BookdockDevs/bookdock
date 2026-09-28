@@ -6,6 +6,7 @@ import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
+import sharp from 'sharp'
 
 import type { AccountRes } from '@bookdock/shared'
 
@@ -15,6 +16,7 @@ import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import { avatarThumbnailKey } from '../../lib/avatar'
 import { sha256 } from '../../lib/hash'
 import { avatarStorageKey } from './avatars.service'
 import avatarsRoutes from './avatars.routes'
@@ -198,17 +200,116 @@ describe('avatars routes', () => {
     expect(mem.files.has(avatarStorageKey(avatarKeyOf(content, 'png')))).toBe(false)
   })
 
-  it('serves the blob by key with immutable cache headers', async () => {
+  it('serves the original bytes with immutable cache headers on request', async () => {
     const app = createApp(owner)
     const content = Buffer.from('served avatar')
     const upload = await app.request(uploadRequest(new File([content], 'serve.jpg', { type: 'image/jpeg' })))
     const { data } = (await upload.json()) as { data: AccountRes }
 
-    const res = await app.request(`http://test/api/v1/avatars/${data.avatarKey}`)
+    const res = await app.request(`http://test/api/v1/avatars/${data.avatarKey}?size=original`)
     expect(res.status).toBe(200)
     expect(res.headers.get('Content-Type')).toBe('image/jpeg')
     expect(res.headers.get('Cache-Control')).toBe('private, immutable, max-age=31536000')
     expect(Buffer.from(await res.arrayBuffer()).equals(content)).toBe(true)
+  })
+
+  it('generates a 256px webp thumbnail by default and caches it', async () => {
+    const app = createApp(owner)
+    const realJpg = await sharp({
+      create: { width: 1200, height: 1200, channels: 3, background: { r: 20, g: 120, b: 200 } },
+    }).jpeg().toBuffer()
+    const upload = await app.request(uploadRequest(new File([realJpg], 'me.jpg', { type: 'image/jpeg' })))
+    const { data } = (await upload.json()) as { data: AccountRes }
+    const thumbKey = avatarStorageKey(avatarThumbnailKey(data.avatarKey!))
+
+    // Nothing is materialized on upload; the first display request pays for it.
+    expect(mem.files.has(thumbKey)).toBe(false)
+
+    const res = await app.request(`http://test/api/v1/avatars/${data.avatarKey}`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Content-Type')).toBe('image/webp')
+    expect(res.headers.get('Cache-Control')).toBe('private, immutable, max-age=31536000')
+
+    const metadata = await sharp(Buffer.from(await res.arrayBuffer())).metadata()
+    expect(metadata.format).toBe('webp')
+    expect(metadata.width).toBe(256)
+    expect(metadata.height).toBe(256)
+    expect(mem.files.has(thumbKey)).toBe(true)
+
+    // The original is untouched beside it and still served on request.
+    expect(mem.files.get(avatarStorageKey(data.avatarKey!))?.equals(realJpg)).toBe(true)
+    const original = await app.request(`http://test/api/v1/avatars/${data.avatarKey}?size=original`)
+    expect(original.headers.get('Content-Type')).toBe('image/jpeg')
+    expect(Buffer.from(await original.arrayBuffer()).equals(realJpg)).toBe(true)
+  })
+
+  it('reuses a cached thumbnail instead of regenerating it', async () => {
+    const app = createApp(owner)
+    const realPng = await sharp({
+      create: { width: 600, height: 400, channels: 4, background: { r: 200, g: 30, b: 90, alpha: 1 } },
+    }).png().toBuffer()
+    const upload = await app.request(uploadRequest(new File([realPng], 'me.png', { type: 'image/png' })))
+    const { data } = (await upload.json()) as { data: AccountRes }
+    const thumbKey = avatarStorageKey(avatarThumbnailKey(data.avatarKey!))
+
+    await app.request(`http://test/api/v1/avatars/${data.avatarKey}`)
+    expect(mem.files.get(thumbKey)!.length).toBeGreaterThan(0)
+    // A sentinel sharp would never emit, so a match proves the read was a hit.
+    mem.files.set(thumbKey, Buffer.from('cached thumb sentinel'))
+    const res = await app.request(`http://test/api/v1/avatars/${data.avatarKey}`)
+    expect(Buffer.from(await res.arrayBuffer()).toString()).toBe('cached thumb sentinel')
+  })
+
+  it('falls back to the original bytes when the image cannot be decoded', async () => {
+    const app = createApp(owner)
+    const content = Buffer.from('not really a png')
+    const upload = await app.request(uploadRequest(new File([content], 'bad.png', { type: 'image/png' })))
+    const { data } = (await upload.json()) as { data: AccountRes }
+
+    const res = await app.request(`http://test/api/v1/avatars/${data.avatarKey}`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Content-Type')).toBe('image/png')
+    expect(Buffer.from(await res.arrayBuffer()).equals(content)).toBe(true)
+    expect(mem.files.has(avatarStorageKey(avatarThumbnailKey(data.avatarKey!)))).toBe(false)
+  })
+
+  it('never enlarges a small avatar', async () => {
+    const app = createApp(owner)
+    const small = await sharp({
+      create: { width: 64, height: 64, channels: 3, background: { r: 240, g: 240, b: 240 } },
+    }).png().toBuffer()
+    const upload = await app.request(uploadRequest(new File([small], 'tiny.png', { type: 'image/png' })))
+    const { data } = (await upload.json()) as { data: AccountRes }
+
+    const res = await app.request(`http://test/api/v1/avatars/${data.avatarKey}`)
+    const metadata = await sharp(Buffer.from(await res.arrayBuffer())).metadata()
+    expect(metadata.width).toBe(64)
+  })
+
+  it('deletes the derived thumbnail with the original once unreferenced', async () => {
+    const app = createApp(owner)
+    const member = seedUser(db, 'member', 'member')
+    const memberApp = createApp(member)
+    const realJpg = await sharp({
+      create: { width: 800, height: 800, channels: 3, background: { r: 90, g: 90, b: 90 } },
+    }).jpeg().toBuffer()
+    const file = () => new File([realJpg], 'same.jpg', { type: 'image/jpeg' })
+    const { data } = (await (await app.request(uploadRequest(file()))).json()) as { data: AccountRes }
+    await memberApp.request(uploadRequest(file()))
+
+    const thumbKey = avatarStorageKey(avatarThumbnailKey(data.avatarKey!))
+    await app.request(`http://test/api/v1/avatars/${data.avatarKey}`)
+    expect(mem.files.has(thumbKey)).toBe(true)
+
+    // One user leaving keeps the shared blobs for the other.
+    await app.request('http://test/api/v1/avatars', { method: 'DELETE' })
+    expect(mem.files.has(avatarStorageKey(data.avatarKey!))).toBe(true)
+    expect(mem.files.has(thumbKey)).toBe(true)
+
+    // The last reference takes both.
+    await memberApp.request('http://test/api/v1/avatars', { method: 'DELETE' })
+    expect(mem.files.has(avatarStorageKey(data.avatarKey!))).toBe(false)
+    expect(mem.files.has(thumbKey)).toBe(false)
   })
 
   it('404s on malformed keys and missing blobs', async () => {

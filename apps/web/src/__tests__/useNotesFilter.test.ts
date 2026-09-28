@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, it, expect } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 
 import type { AnnotationRes } from '@bookdock/shared'
@@ -31,6 +31,12 @@ const ITEMS: AnnotationRes[] = [
 ]
 
 describe('useNotesFilter', () => {
+  beforeEach(() => {
+    // Sort is a persisted view preference, so one test must not hand the next
+    // one a different default.
+    localStorage.clear()
+  })
+
   it('returns all items by default', () => {
     const { result } = renderHook(() => useNotesFilter(ITEMS))
     expect(result.current.filtered).toHaveLength(4)
@@ -59,7 +65,7 @@ describe('useNotesFilter', () => {
     expect(result.current.filtered.map((a) => a.id)).toEqual(['h1'])
   })
 
-  it('resets filters and sort together', () => {
+  it('resets filters without discarding the chosen order', () => {
     const { result } = renderHook(() => useNotesFilter(ITEMS))
     act(() => {
       result.current.toggleColor('blue')
@@ -67,14 +73,46 @@ describe('useNotesFilter', () => {
     })
     act(() => result.current.reset())
     expect(result.current.filtered).toHaveLength(4)
-    expect(result.current.sort).toBe('chapter')
+    // Sort is not a filter, so clearing filters has no business resetting it.
+    expect(result.current.sort).toBe('time-desc')
     expect(result.current.hasActiveFilter).toBe(false)
   })
 
-  it('marks reverse chapter order as an active sort', () => {
+  it('does not count a sort choice as an active filter', () => {
     const { result } = renderHook(() => useNotesFilter(ITEMS))
     act(() => result.current.setSort('chapter-desc'))
     expect(result.current.sort).toBe('chapter-desc')
+    // Reordering hides nothing, so the filter badge and reset must stay quiet.
+    expect(result.current.hasActiveFilter).toBe(false)
+  })
+
+  it('counts a search query as an active filter', () => {
+    const { result } = renderHook(() => useNotesFilter(ITEMS))
+    act(() => result.current.setQuery('想法丙'))
+    // The rows really are hidden, which is what the badge is supposed to say.
+    expect(result.current.filtered).toHaveLength(1)
     expect(result.current.hasActiveFilter).toBe(true)
+  })
+
+  it('treats a whitespace-only query as no filter', () => {
+    const { result } = renderHook(() => useNotesFilter(ITEMS))
+    act(() => result.current.setQuery('   '))
+    expect(result.current.filtered).toHaveLength(4)
+    expect(result.current.hasActiveFilter).toBe(false)
+  })
+
+  it('remembers the chosen order across a remount', () => {
+    const first = renderHook(() => useNotesFilter(ITEMS))
+    act(() => first.result.current.setSort('time-asc'))
+    first.unmount()
+
+    const second = renderHook(() => useNotesFilter(ITEMS))
+    expect(second.result.current.sort).toBe('time-asc')
+  })
+
+  it('ignores a stored order it does not recognise', () => {
+    localStorage.setItem('bd-notes-sort', 'nonsense')
+    const { result } = renderHook(() => useNotesFilter(ITEMS))
+    expect(result.current.sort).toBe('chapter')
   })
 })

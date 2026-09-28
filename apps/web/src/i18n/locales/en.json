@@ -101,7 +101,11 @@
     "cancel": "Cancel",
     "done": "Done",
     "selectFiles": "Select files",
-    "uploadHint": "Supports EPUB, TXT",
+    "uploadCancel": "Cancel upload",
+    "uploadCancelled": "Cancelled",
+    "uploadRetryAll": "Retry all",
+    "uploadHint": "Click or drop files here",
+    "uploadFormats": "Supports EPUB, TXT",
     "uploadMaxSize": "Up to {{size}} per file",
     "uploadShelfContext": "Add uploaded books to shelf: {{name}}",
     "uploadTagContext": "Also add tag “{{name}}”",
@@ -525,8 +529,7 @@
     "tocRuleWordsK": "{{count}}k words",
     "tocRulePreviewLoadMore": "Load more (showing {{current}} / {{total}} chapters)",
     "trashCap": "Trash capacity limit reached ({{cap}}); oldest books were permanently cleared",
-    "trashCapImmediate": "Trash capacity limit reached ({{cap}}); moved books were permanently deleted",
-    "uploadFormats": "Supports EPUB, TXT and other e-book formats"
+    "trashCapImmediate": "Trash capacity limit reached ({{cap}}); moved books were permanently deleted"
   },
   "reader": {
     "loading": "Loading...",

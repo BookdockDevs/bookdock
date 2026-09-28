@@ -1106,6 +1106,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             onToggleStyle={notesFilter.toggleStyle}
             onToggleColor={notesFilter.toggleColor}
             onReset={resetNotesFilter}
+            hasActiveFilter={notesFilter.hasActiveFilter}
           />
         </div>
       )}

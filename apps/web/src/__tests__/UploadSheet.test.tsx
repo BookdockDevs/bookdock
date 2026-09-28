@@ -14,6 +14,11 @@ function makeItems(overrides: Partial<UploadItem>[]): UploadItem[] {
   }))
 }
 
+const navigateMock = vi.fn()
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => navigateMock,
+}))
+
 const mockUseUploadBooks = vi.fn()
 const mockUseShelves = vi.fn()
 const mockUseTags = vi.fn()
@@ -29,7 +34,10 @@ function uploadOverrides(overrides: Partial<ReturnType<typeof defaultUpload>> = 
 }
 
 function defaultUpload() {
-  return { items: [], addFiles: vi.fn(), startUpload: vi.fn(), retry: vi.fn(), pruneSettled: vi.fn(), isUploading: false, clearQueue: vi.fn() }
+  return {
+    items: [], addFiles: vi.fn(), startUpload: vi.fn(), retry: vi.fn(), retryAll: vi.fn(),
+    abortAll: vi.fn(), pruneSettled: vi.fn(), isUploading: false, clearQueue: vi.fn(),
+  }
 }
 
 function fileDropData(files: File[]) {
@@ -85,13 +93,32 @@ describe('UploadSheet', () => {
     expect(document.querySelectorAll('span[class*="h-1.5"]')).toHaveLength(2)
   })
 
-  it('keeps the close button enabled while uploading (closing stays resumable)', () => {
+  it('offers cancel-upload while running, and the header X still closes without aborting', () => {
+    const clearQueue = vi.fn()
+    const abortAll = vi.fn()
+    const onClose = vi.fn()
     mockUseUploadBooks.mockReturnValue(
-      uploadOverrides({ items: makeItems([{ status: 'uploading', progress: 10 }]), isUploading: true }),
+      uploadOverrides({ items: makeItems([{ status: 'uploading', progress: 10 }]), isUploading: true, clearQueue, abortAll }),
     )
+    render(<UploadSheet open onClose={onClose} />)
+
+    // The X keeps closing while the upload runs: closing is not cancelling.
+    // It is named "close" here so the word "cancel" belongs to the footer alone.
+    fireEvent.click(screen.getByRole('button', { name: 'library.close' }))
+    expect(clearQueue).toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalled()
+    expect(abortAll).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.uploadCancel' }))
+    expect(abortAll).toHaveBeenCalled()
+  })
+
+  it('renders no footer at all while the queue is empty', () => {
     render(<UploadSheet open onClose={vi.fn()} />)
-    const cancel = screen.getByText('library.cancel')
-    expect((cancel as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.queryByRole('button', { name: 'library.upload' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'library.uploadCancel' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'library.done' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'library.startReading' })).toBeNull()
   })
 
   it('starts pending uploads only after clicking the upload button', () => {
@@ -179,9 +206,84 @@ describe('UploadSheet', () => {
       uploadOverrides({ items: makeItems([{ status: 'success' }, { status: 'duplicate' }]), clearQueue }),
     )
     render(<UploadSheet open onClose={onClose} />)
-    expect(screen.queryByText('library.cancel')).toBeNull()
     fireEvent.click(screen.getByText('library.done'))
     expect(clearQueue).toHaveBeenCalled()
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('offers to read straight away when one book finished', () => {
+    const clearQueue = vi.fn()
+    const onClose = vi.fn()
+    mockUseUploadBooks.mockReturnValue(
+      uploadOverrides({
+        items: makeItems([{ status: 'success', bookVersionId: 'bv-1' }]),
+        clearQueue,
+      }),
+    )
+    render(<UploadSheet open onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.startReading' }))
+    expect(clearQueue).toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalled()
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/books/$id', params: { id: 'bv-1' } })
+  })
+
+  it('reads a duplicate too, and offers reading only for a single finished book', () => {
+    mockUseUploadBooks.mockReturnValue(
+      uploadOverrides({ items: makeItems([{ status: 'duplicate', bookVersionId: 'bv-2' }]) }),
+    )
+    const { unmount } = render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'library.startReading' })).toBeTruthy()
+    unmount()
+
+    // Two books, one of them readable: no single obvious target to open.
+    mockUseUploadBooks.mockReturnValue(
+      uploadOverrides({
+        items: makeItems([{ status: 'success', bookVersionId: 'bv-1' }, { status: 'duplicate', bookVersionId: 'bv-2' }]),
+      }),
+    )
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'library.startReading' })).toBeNull()
+  })
+
+  it('keeps done as the action when the finished book is unreadable', () => {
+    mockUseUploadBooks.mockReturnValue(
+      uploadOverrides({ items: makeItems([{ status: 'success' }]) }),
+    )
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'library.startReading' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'library.done' })).toBeTruthy()
+  })
+
+  it('offers retry-all when some rows failed, and done beside it', () => {
+    const retryAll = vi.fn()
+    mockUseUploadBooks.mockReturnValue(
+      uploadOverrides({
+        items: makeItems([{ status: 'success' }, { status: 'error' }, { status: 'error' }]),
+        retryAll,
+      }),
+    )
+    render(<UploadSheet open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'library.uploadRetryAll' }))
+    expect(retryAll).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'library.done' })).toBeTruthy()
+  })
+
+  it('does not offer retry-all when nothing failed', () => {
+    mockUseUploadBooks.mockReturnValue(
+      uploadOverrides({ items: makeItems([{ status: 'success' }, { status: 'duplicate' }]) }),
+    )
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'library.uploadRetryAll' })).toBeNull()
+  })
+
+  it('offers upload while files are staged, and no cancel-upload', () => {
+    mockUseUploadBooks.mockReturnValue(
+      uploadOverrides({ items: makeItems([{ status: 'pending' }]) }),
+    )
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'library.upload' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'library.uploadCancel' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'library.done' })).toBeNull()
   })
 })

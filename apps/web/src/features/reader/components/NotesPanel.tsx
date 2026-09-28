@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
@@ -18,6 +18,111 @@ import AnnotationExportDialog from './AnnotationExportDialog'
 import { HIGHLIGHT_COLORS } from './annotation-colors'
 import { BookmarkIcon, BulbIcon, CheckIcon, CloseIcon, CopyIcon, DocumentExportIcon, PencilIcon, SelectionIcon, ShareIcon, TrashIcon } from './annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from './format-relative-time'
+
+/**
+ * A clamped paragraph that only offers the expand toggle when it is genuinely
+ * cut off.
+ *
+ * A character count cannot answer that. The panel is resizable and the reader
+ * picks their own font and size, so the same 80 characters take two lines on a
+ * wide panel and five on a narrow one - and a bookmark always captures exactly
+ * 80, so a count-only guess showed the toggle no matter what, then expanded into
+ * nothing but the padding reserved for the button. Only the rendered box knows,
+ * so measure it and re-measure when it resizes.
+ *
+ * `minLengthForToggle` is the fallback for when no layout exists to measure
+ * (JSDOM), and a cheap way to skip observing paragraphs that cannot overflow.
+ */
+function ClampedText({
+  text,
+  clampClassName,
+  className,
+  wrapperClassName,
+  buttonClassName,
+  renderText,
+  expanded,
+  onToggle,
+  expandLabel,
+  collapseLabel,
+  minLengthForToggle,
+}: {
+  text: string
+  clampClassName: string
+  className: string
+  /** Extra box treatment some call sites wrap the paragraph in. */
+  wrapperClassName?: string
+  /** Keeps each site's existing toggle size and placement. */
+  buttonClassName?: string
+  /** Lets a call site decorate the text (a highlight's underline) without
+   *  giving up the plain string the length check needs. */
+  renderText?: (text: string) => ReactNode
+  expanded: boolean
+  onToggle: (e: MouseEvent) => void
+  expandLabel: string
+  collapseLabel: string
+  minLengthForToggle: number
+}) {
+  const ref = useRef<HTMLParagraphElement | null>(null)
+  const [clipped, setClipped] = useState(false)
+  const [measurable, setMeasurable] = useState(false)
+  const couldOverflow = text.length > minLengthForToggle || text.includes('\n')
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => {
+      // JSDOM lays nothing out, so there is no answer to give. Report that
+      // rather than claiming every box is unclipped.
+      if (el.clientHeight === 0) return
+      setMeasurable(true)
+      setClipped(el.scrollHeight - el.clientHeight > 1)
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [text, expanded])
+
+  const showToggle = couldOverflow && (measurable ? clipped || expanded : true)
+
+  return (
+    <div
+      className={cn(
+        'group/clamp relative min-w-0 flex-1',
+        wrapperClassName,
+        expanded && showToggle && 'pb-5',
+      )}
+    >
+      <p ref={ref} className={cn(className, !expanded && clampClassName)}>
+        {renderText ? renderText(text) : text}
+      </p>
+      {showToggle && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className={cn(
+            'absolute inline-flex items-center gap-0.5 border border-stone-200/80 bg-[var(--bd-read-bg)]/95 text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover/clamp:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80',
+            buttonClassName ?? 'bottom-1 right-1.5 rounded px-1.5 py-0.5 text-[10px]',
+          )}
+        >
+          <span>{expanded ? collapseLabel : expandLabel}</span>
+          <svg
+            className={cn('h-2.5 w-2.5 transition-transform duration-150', expanded && 'rotate-180')}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+      )}
+    </div>
+  )
+}
 
 function hexOf(a: AnnotationRes): string {
   return HIGHLIGHT_COLORS.find((c) => c.name === a.color)?.hex ?? '#eab308'
@@ -364,16 +469,6 @@ export const NotesPanel = memo(function NotesPanel({
     const orphaned = orphanedKeys.includes(`${a.cfiRange}|${a.type}`)
     const isNoteExpanded = expandedCardIds.has(a.id)
     const isQuoteExpanded = expandedQuoteIds.has(a.id)
-    const isLongIdeaNote =
-      kind === 'idea' &&
-      ((a.note?.length ?? 0) > 60 || (a.note?.includes('\n') ?? false))
-    const isLongQuote =
-      kind === 'idea' &&
-      ((a.text?.length ?? 0) > 40 || (a.text?.includes('\n') ?? false))
-    const isLongHighlight =
-      kind === 'highlight' &&
-      ((a.text?.length ?? 0) > 65 || (a.text?.includes('\n') ?? false))
-
     return (
       <div
         onContextMenu={(e) => handleContextMenu(e, a)}
@@ -421,7 +516,18 @@ export const NotesPanel = memo(function NotesPanel({
                   <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-500 dark:text-blue-400">
                     <BookmarkIcon />
                   </span>
-                  <p className="line-clamp-2 flex-1 text-sm font-medium text-current">{a.text || _('reader.bookmark')}</p>
+                  {/* A bookmark always captures 80 characters, so four lines is
+                      what it takes to show them all. */}
+                  <ClampedText
+                    text={a.text || _('reader.bookmark')}
+                    clampClassName="line-clamp-4"
+                    className="text-sm font-medium leading-relaxed text-current"
+                    expanded={isQuoteExpanded}
+                    onToggle={(e) => toggleQuoteExpand(a.id, e)}
+                    expandLabel={_('annotation.expand')}
+                    collapseLabel={_('annotation.collapse')}
+                    minLengthForToggle={65}
+                  />
                 </div>
               )}
               {kind === 'idea' && (
@@ -430,66 +536,30 @@ export const NotesPanel = memo(function NotesPanel({
                     <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-500 dark:text-amber-400">
                       <BulbIcon />
                     </span>
-                    <div className={cn('relative flex-1 min-w-0', isNoteExpanded && isLongIdeaNote && 'pb-5')}>
-                      <p
-                        className={cn(
-                          'text-sm font-medium leading-relaxed text-current whitespace-pre-wrap break-words',
-                          !isNoteExpanded && 'line-clamp-3',
-                        )}
-                      >
-                        {a.note}
-                      </p>
-                      {isLongIdeaNote && (
-                        <button
-                          type="button"
-                          onClick={(e) => toggleNoteExpand(a.id, e)}
-                          className="absolute bottom-0 right-0 inline-flex items-center gap-0.5 rounded-md border border-stone-200/80 bg-[var(--bd-read-bg)]/95 px-1.5 py-0.5 text-[11px] text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover/note:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80"
-                        >
-                          <span>{isNoteExpanded ? _('annotation.collapse') : _('annotation.expand')}</span>
-                          <svg
-                            className={cn('h-2.5 w-2.5 transition-transform duration-150', isNoteExpanded && 'rotate-180')}
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="m6 9 6 6 6-6" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
+                    <ClampedText
+                      text={a.note ?? ''}
+                      clampClassName="line-clamp-3"
+                      className="text-sm font-medium leading-relaxed text-current whitespace-pre-wrap break-words"
+                      buttonClassName="bottom-0 right-0 rounded-md px-1.5 py-0.5 text-[11px]"
+                      expanded={isNoteExpanded}
+                      onToggle={(e) => toggleNoteExpand(a.id, e)}
+                      expandLabel={_('annotation.expand')}
+                      collapseLabel={_('annotation.collapse')}
+                      minLengthForToggle={60}
+                    />
                   </div>
                   {a.text && (
-                    <div
-                      className={cn(
-                        'group/quote relative ml-7 rounded-lg border-l-2 border-[var(--bd-read-accent)]/70 bg-stone-500/5 px-2.5 py-1.5 text-xs text-[var(--bd-read-sub)]',
-                        isQuoteExpanded && isLongQuote && 'pb-5',
-                      )}
-                    >
-                      <p className={cn('leading-relaxed', !isQuoteExpanded && 'line-clamp-2')}>{a.text}</p>
-                      {isLongQuote && (
-                        <button
-                          type="button"
-                          onClick={(e) => toggleQuoteExpand(a.id, e)}
-                          className="absolute bottom-1 right-1.5 inline-flex items-center gap-0.5 rounded border border-stone-200/80 bg-[var(--bd-read-bg)]/95 px-1.5 py-0.5 text-[10px] text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover/quote:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80"
-                        >
-                          <span>{isQuoteExpanded ? _('annotation.collapse') : _('annotation.expand')}</span>
-                          <svg
-                            className={cn('h-2.5 w-2.5 transition-transform duration-150', isQuoteExpanded && 'rotate-180')}
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="m6 9 6 6 6-6" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
+                    <ClampedText
+                      text={a.text}
+                      clampClassName="line-clamp-2"
+                      className="leading-relaxed"
+                      wrapperClassName="ml-7 rounded-lg border-l-2 border-[var(--bd-read-accent)]/70 bg-stone-500/5 px-2.5 py-1.5 text-xs text-[var(--bd-read-sub)]"
+                      expanded={isQuoteExpanded}
+                      onToggle={(e) => toggleQuoteExpand(a.id, e)}
+                      expandLabel={_('annotation.expand')}
+                      collapseLabel={_('annotation.collapse')}
+                      minLengthForToggle={40}
+                    />
                   )}
                 </div>
               )}
@@ -500,41 +570,28 @@ export const NotesPanel = memo(function NotesPanel({
                     style={{ backgroundColor: hex }}
                     aria-hidden="true"
                   />
-                  <div className={cn('relative flex-1 min-w-0', isNoteExpanded && isLongHighlight && 'pb-5')}>
-                    <p
-                      className={cn(
-                        'text-sm leading-relaxed text-current',
-                        !isNoteExpanded && 'line-clamp-4',
-                      )}
-                    >
-                      <span style={highlightDecoration(a.style, hex)}>{a.text}</span>
-                    </p>
-                    {isLongHighlight && (
-                      <button
-                        type="button"
-                        onClick={(e) => toggleNoteExpand(a.id, e)}
-                        className="absolute bottom-0 right-0 inline-flex items-center gap-0.5 rounded-md border border-stone-200/80 bg-[var(--bd-read-bg)]/95 px-1.5 py-0.5 text-[11px] text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80"
-                      >
-                        <span>{isNoteExpanded ? _('annotation.collapse') : _('annotation.expand')}</span>
-                        <svg
-                          className={cn('h-2.5 w-2.5 transition-transform duration-150', isNoteExpanded && 'rotate-180')}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="m6 9 6 6 6-6" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
+                  <ClampedText
+                    text={a.text}
+                    clampClassName="line-clamp-4"
+                    className="text-sm leading-relaxed text-current"
+                    buttonClassName="bottom-0 right-0 rounded-md px-1.5 py-0.5 text-[11px]"
+                    renderText={(value) => <span style={highlightDecoration(a.style, hex)}>{value}</span>}
+                    expanded={isNoteExpanded}
+                    onToggle={(e) => toggleNoteExpand(a.id, e)}
+                    expandLabel={_('annotation.expand')}
+                    collapseLabel={_('annotation.collapse')}
+                    minLengthForToggle={65}
+                  />
                 </div>
               )}
             </button>
             {!selectionMode && (
               <div className="mt-2 flex h-6 items-center px-0.5 text-xs text-[var(--bd-read-sub)]">
+                {a.type === 'bookmark' && a.chapter && !groups && (
+                  <span className="truncate text-[11px] text-[var(--bd-read-sub)]" title={a.chapter}>
+                    {a.chapter}
+                  </span>
+                )}
                 <span
                   aria-label={formatFullDateTime(_, a.createdAt)}
                   className="group/time text-[11px] tabular-nums text-[var(--bd-read-sub)] opacity-70 transition-opacity cursor-default select-none hover:opacity-100 truncate"

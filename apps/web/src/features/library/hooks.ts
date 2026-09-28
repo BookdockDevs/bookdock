@@ -129,6 +129,8 @@ export interface UploadItem {
   tagIds?: string[]
   /** i18n key resolved client-side; raw server messages are never displayed */
   messageKey?: string
+  /** Set once the server answers; the id the reader opens. */
+  bookVersionId?: string
 }
 
 export interface UploadAssignment {
@@ -154,7 +156,23 @@ export interface UploadTarget {
    * duplicate that lands elsewhere is worth telling the reader about.
    */
   reportsAppliedShelf?: boolean
+  /**
+   * Where this endpoint keeps the uploaded book in its response. A private
+   * upload answers a flat book, a catalog upload answers a work whose first
+   * version is the reader target. Absent means the destination cannot name one.
+   */
+  pickBookId?: (body: unknown) => string | undefined
 }
+
+/**
+ * Every mutation that moves a book between the grid and the taxonomy has to
+ * refresh all three: books for the list, shelves and tags for the counts the
+ * sidebar prints. Both taxonomy endpoints count with `isNull(deletedAt)`, so
+ * trashing a book drops it out of those numbers. Queries are configured
+ * `staleTime: Infinity` with window-focus refetch off, so a key left out here
+ * stays wrong until a full page reload.
+ */
+const BOOK_MEMBERSHIP_KEYS = [['books'], ['shelves'], ['tags']] as const
 
 const PRIVATE_UPLOAD_TARGET: UploadTarget = {
   url: '/books',
@@ -162,8 +180,9 @@ const PRIVATE_UPLOAD_TARGET: UploadTarget = {
     ...(item.shelfId ? { shelfId: item.shelfId } : {}),
     ...(item.tagIds?.length ? { tagIds: JSON.stringify(item.tagIds) } : {}),
   }),
-  invalidateKeys: [['books'], ['shelves']],
+  invalidateKeys: [...BOOK_MEMBERSHIP_KEYS],
   reportsAppliedShelf: true,
+  pickBookId: (body) => (body as { data?: { id?: string } } | null)?.data?.id,
 }
 
 /** Instance-level upload limit (read-only, injected by GET /settings). */
@@ -553,6 +572,9 @@ export function useUploadCatalogBook() {
     },
     onSuccess: (_res, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+      // The upload lands in a category and under tags, so both counters moved.
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
     },
   })
 }
@@ -587,6 +609,10 @@ function useCatalogVersionMutation<TVars extends { libraryId: string; libraryBoo
     },
     onSuccess: (_res, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+      // Removing the last version of a work removes the work, and with it the
+      // category row and the tag links the sidebar counts.
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
     },
   })
 }
@@ -737,6 +763,12 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
   const [items, setItems] = useState<UploadItem[]>([])
   const runningRef = useRef(0)
   const settledRef = useRef(false)
+  // The requests themselves, so a cancel can reach them. Kept as a set because
+  // the pool holds several at once and each loadend drops its own.
+  const inflightRef = useRef(new Set<XMLHttpRequest>())
+  // Set by a cancel, cleared whenever a new batch starts. A cancelled batch is
+  // the reader's own decision and must not be summarised as a failure.
+  const stoppingRef = useRef(false)
   const nextIdRef = useRef(0)
 
   const patchItem = useCallback((id: string, patch: Partial<UploadItem>) => {
@@ -748,6 +780,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
       runningRef.current += 1
       patchItem(item.id, { status: 'uploading', progress: 0 })
       const xhr = new XMLHttpRequest()
+      inflightRef.current.add(xhr)
       const formData = new FormData()
       formData.append('file', item.file)
       for (const [key, value] of Object.entries(target.fields?.(item) ?? {})) {
@@ -762,13 +795,16 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
         patchItem(item.id, pct >= 100 ? { progress: 100, status: 'processing' } : { progress: pct })
       })
       xhr.addEventListener('load', () => {
+        inflightRef.current.delete(xhr)
         if (xhr.status >= 200 && xhr.status < 300) {
           let duplicated = false
           let shelfId: string | null | undefined
+          let bookVersionId: string | undefined
           try {
             const body = JSON.parse(xhr.responseText) as { duplicated?: boolean; data?: { shelfId?: string | null } }
             duplicated = body.duplicated === true
             shelfId = body.data?.shelfId
+            bookVersionId = target.pickBookId?.(body)
           } catch {
             // keep false
           }
@@ -781,9 +817,10 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
               status: 'duplicate',
               progress: 100,
               messageKey: notMoved ? 'library.uploadDuplicateNotMoved' : undefined,
+              bookVersionId,
             })
           } else {
-            patchItem(item.id, { status: 'success', progress: 100 })
+            patchItem(item.id, { status: 'success', progress: 100, bookVersionId })
           }
         } else {
           let code: string | null = null
@@ -804,9 +841,16 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
         patchItem(item.id, { status: 'error', progress: 100, messageKey: 'library.uploadFailed' })
       })
       xhr.addEventListener('abort', () => {
-        patchItem(item.id, { status: 'error', progress: 100, messageKey: 'library.uploadFailed' })
+        inflightRef.current.delete(xhr)
+        // progress is left as-is: how far the file got is the useful fact, and
+        // error rows do not render a bar anyway.
+        patchItem(item.id, {
+          status: 'error',
+          messageKey: stoppingRef.current ? 'library.uploadCancelled' : 'library.uploadFailed',
+        })
       })
       xhr.addEventListener('loadend', () => {
+        inflightRef.current.delete(xhr)
         runningRef.current -= 1
       })
       xhr.send(formData)
@@ -846,6 +890,10 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
     for (const key of target.invalidateKeys) {
       void queryClient.invalidateQueries({ queryKey: key })
     }
+    // Rows already say "cancelled", and files that finished before the cancel
+    // still landed, so the lists above are refreshed either way. What must not
+    // happen is a red "N failed" toast for a batch the reader stopped on purpose.
+    if (stoppingRef.current) return
     if (failed > 0 || (succeeded > 0 && duplicated > 0)) {
       const showSummary = failed > 0 ? notify.error : notify.warning
       const summary = [
@@ -868,11 +916,22 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
       const oversized = opts?.maxBytes ? accepted.filter((f) => f.size > opts.maxBytes!) : []
       const inRange = accepted.filter((f) => !opts?.maxBytes || f.size <= opts.maxBytes!)
       const rejected = list.length - inRange.length - oversized.length
-      // Drag-dropped files start immediately; picker-selected files wait for
-      // an explicit "upload" click (pending -> queued via startUpload)
-      const status = opts?.autoStart ? ('queued' as const) : ('pending' as const)
-      setItems((prev) => [
-        ...prev,
+      // Picking files stages them for an explicit "upload" click, so a file
+      // chosen by mistake is never sent; several picks stage as one batch and
+      // are confirmed together. A drop means "send these", and a pick made
+      // while the batch is already running means "add to it", so both go
+      // straight out. Staging therefore only ever happens while nothing is
+      // running, which is what keeps a staged row from coexisting with an
+      // upload in flight - a combination that would need two different footer
+      // buttons for one state.
+      setItems((prev) => {
+        const autoStart = opts?.autoStart === true
+        const running = prev.some((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'processing')
+        const status = autoStart || running ? ('queued' as const) : ('pending' as const)
+        return [
+        // A drop also releases whatever was staged; otherwise the staged row
+        // would sit behind a running upload until the reader clicked again.
+        ...prev.map((it) => (autoStart && it.status === 'pending' ? { ...it, status } : it)),
         ...inRange.map((file) => ({
           id: `up-${Date.now()}-${nextIdRef.current++}`,
           name: file.name,
@@ -882,7 +941,9 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
           shelfId: opts?.shelfId,
           tagIds: opts?.tagIds,
         })),
-      ])
+        ]
+      })
+      if (inRange.length > 0) stoppingRef.current = false
       if (rejected > 0) notify.info({ key: 'library.uploadIgnored', params: { count: rejected } })
       if (oversized.length > 0) notify.info({ key: 'library.uploadOversized', params: { count: oversized.length } })
     },
@@ -890,6 +951,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
   )
 
   const startUpload = useCallback((assignment?: UploadAssignment) => {
+    stoppingRef.current = false
     setItems((prev) => prev.map((it) => {
       if (it.status !== 'pending') return it
       if (!assignment) return { ...it, status: 'queued' as const }
@@ -903,6 +965,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
   }, [])
 
   const retry = useCallback((id: string) => {
+    stoppingRef.current = false
     setItems((prev) =>
       prev.map((it) =>
         it.id === id && it.status === 'error'
@@ -910,6 +973,31 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
           : it,
       ),
     )
+  }, [])
+
+  const retryAll = useCallback(() => {
+    stoppingRef.current = false
+    setItems((prev) => prev.map((it) =>
+      it.status === 'error'
+        ? { ...it, status: 'queued' as const, progress: 0, messageKey: undefined }
+        : it,
+    ))
+  }, [])
+
+  /**
+   * Stop the batch. Parking the not-yet-sent rows first matters: the scheduler
+   * restarts anything still `queued`, so aborting the open requests alone would
+   * simply roll into the next file.
+   */
+  const abortAll = useCallback(() => {
+    stoppingRef.current = true
+    setItems((prev) => prev.map((it) =>
+      it.status === 'queued' || it.status === 'pending'
+        ? { ...it, status: 'error' as const, messageKey: 'library.uploadCancelled' }
+        : it,
+    ))
+    for (const xhr of inflightRef.current) xhr.abort()
+    inflightRef.current.clear()
   }, [])
 
   const isUploading = items.some((it) => it.status === 'queued' || it.status === 'uploading' || it.status === 'processing')
@@ -924,7 +1012,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
     setItems((prev) => prev.filter((it) => it.status !== 'success' && it.status !== 'duplicate' && it.status !== 'error'))
   }, [])
 
-  return { items, addFiles, startUpload, retry, pruneSettled, isUploading, clearQueue }
+  return { items, addFiles, startUpload, retry, retryAll, abortAll, pruneSettled, isUploading, clearQueue }
 }
 
 export function useDeleteBook() {
@@ -936,7 +1024,8 @@ export function useDeleteBook() {
       return apiDelete<{ data: null }>(`/books/${id}${query}`)
     },
     onSuccess: (_, { title, isCollected }) => {
-      queryClient.invalidateQueries({ queryKey: ['books'] })
+      for (const queryKey of BOOK_MEMBERSHIP_KEYS) queryClient.invalidateQueries({ queryKey })
+      // Removing a collected card also changes the source library's catalog.
       queryClient.invalidateQueries({ queryKey: ['libraries'] })
       if (isCollected) {
         notify.success({
@@ -965,7 +1054,7 @@ export function useRestoreBook() {
   return useMutation({
     mutationFn: ({ id }: { id: string; title: string }) => apiPost<{ data: null }>(`/books/${id}/restore`),
     onSuccess: (_, { title }) => {
-      queryClient.invalidateQueries({ queryKey: ['books'] })
+      for (const queryKey of BOOK_MEMBERSHIP_KEYS) queryClient.invalidateQueries({ queryKey })
       notify.success({ key: 'library.bookRestored', params: { title } })
     },
     onError: (error) => {
@@ -980,7 +1069,7 @@ export function usePermanentDeleteBook() {
   return useMutation({
     mutationFn: ({ id }: { id: string; title: string }) => apiDelete<{ data: null }>(`/books/${id}/permanent`),
     onSuccess: (_, { title }) => {
-      queryClient.invalidateQueries({ queryKey: ['books'] })
+      for (const queryKey of BOOK_MEMBERSHIP_KEYS) queryClient.invalidateQueries({ queryKey })
       notify.success({ key: 'library.bookPermanentlyDeleted', params: { title } })
     },
     onError: (error) => {
@@ -995,7 +1084,7 @@ export function useEmptyTrash() {
   return useMutation({
     mutationFn: () => apiDelete<{ data: { count: number } }>('/books/trash'),
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['books'] })
+      for (const queryKey of BOOK_MEMBERSHIP_KEYS) queryClient.invalidateQueries({ queryKey })
       notify.success({ key: 'library.trashEmptied', params: { count: result.data.count } })
     },
     onError: (error) => {

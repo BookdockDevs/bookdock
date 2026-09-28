@@ -610,9 +610,9 @@ describe('BookDetailDialog TOC rule menu', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    fireEvent.click(await screen.findByRole('button', { name: '修改分章规则' }))
+    fireEvent.click(await screen.findByRole('button', { name: '更换目录规则' }))
 
-    expect(await screen.findByRole('heading', { name: '分章规则' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '目录规则' })).toBeInTheDocument()
   })
 })
 

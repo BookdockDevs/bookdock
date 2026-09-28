@@ -136,6 +136,95 @@ describe('SettingsSync persistence', () => {
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
   })
 
+  it('does not answer a foreign broadcast that changed nothing', async () => {
+    // The observable half of the echo loop. A tab that replies to a payload it
+    // did not change is what turned two tabs into a once-a-second PUT storm, so
+    // the reply has to be tied to an actual edit.
+    const channels: FakeChannel[] = []
+    class FakeChannel {
+      onmessage: ((e: { data: unknown }) => void) | null = null
+      posted: unknown[] = []
+      constructor() { channels.push(this) }
+      postMessage(data: unknown) { this.posted.push(data) }
+      close() { /* nothing to release */ }
+    }
+    vi.stubGlobal('BroadcastChannel', FakeChannel)
+
+    useUiStore.setState({ customThemes: [theme] })
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    const inbox = channels.find((c) => c.onmessage)
+    expect(inbox).toBeDefined()
+    vi.mocked(fetch).mockClear()
+
+    // Another tab answers with byte-identical settings.
+    inbox!.onmessage!({
+      data: {
+        sessionId: 'another-tab',
+        settings: { customThemes: JSON.stringify([theme]) },
+        activePresetId: null,
+      },
+    })
+    await vi.advanceTimersByTimeAsync(3000)
+
+    // Nothing changed here, so this tab owes the other one no answer.
+    expect(channels.every((c) => c.posted.length === 0)).toBe(true)
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+  })
+
+  it('answers a foreign broadcast that really changed something', async () => {
+    const channels: FakeChannel[] = []
+    class FakeChannel {
+      onmessage: ((e: { data: unknown }) => void) | null = null
+      posted: unknown[] = []
+      constructor() { channels.push(this) }
+      postMessage(data: unknown) { this.posted.push(data) }
+      close() { /* nothing to release */ }
+    }
+    vi.stubGlobal('BroadcastChannel', FakeChannel)
+
+    useUiStore.setState({ customThemes: [theme] })
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    const inbox = channels.find((c) => c.onmessage)
+    const night = { id: 't2', name: 'Night', colors: { bg: '#000', fg: '#eee', primary: '#0af' } }
+    inbox!.onmessage!({
+      data: {
+        sessionId: 'another-tab',
+        settings: { customThemes: JSON.stringify([night]) },
+        activePresetId: null,
+      },
+    })
+    await vi.advanceTimersByTimeAsync(3000)
+
+    // A real change is still adopted, which is the whole point of the channel.
+    expect(useUiStore.getState().customThemes).toEqual([night])
+  })
+
+  it('ignores a synced custom-theme list that is identical in content', () => {
+    // The echo loop: a received payload is re-parsed into new theme objects, so
+    // reference equality called every reply an edit and two tabs answered each
+    // other once a second, forever. Content equality is what says "not a change".
+    useUiStore.setState({ customThemes: [theme] })
+    const before = useUiStore.getState().customThemes
+
+    // Same content, different array and different object identity.
+    useUiStore.getState().setCustomThemes([{ ...theme, colors: { ...theme.colors } }])
+
+    expect(useUiStore.getState().customThemes).toBe(before)
+  })
+
+  it('still applies a synced custom-theme list whose content differs', () => {
+    useUiStore.setState({ customThemes: [theme] })
+    const other = { id: 't2', name: 'Night', colors: { bg: '#000', fg: '#eee', primary: '#0af' } }
+
+    useUiStore.getState().setCustomThemes([other])
+
+    expect(useUiStore.getState().customThemes).toEqual([other])
+  })
+
   it('keeps guest preferences local instead of syncing the shared guest account', async () => {
     useAuthStore.getState().setAuth({ id: 'guest-1', username: 'admin', role: 'guest', guest: true })
     mountSync()

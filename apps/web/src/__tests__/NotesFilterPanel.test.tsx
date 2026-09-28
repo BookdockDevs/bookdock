@@ -40,6 +40,7 @@ describe('NotesFilterPanel', () => {
         onToggleStyle={mockOnToggleStyle}
         onToggleColor={mockOnToggleColor}
         onReset={mockOnReset}
+        hasActiveFilter={false}
         {...props}
       />,
     )
@@ -82,6 +83,7 @@ describe('NotesFilterPanel', () => {
         onToggleStyle={mockOnToggleStyle}
         onToggleColor={mockOnToggleColor}
         onReset={mockOnReset}
+        hasActiveFilter={false}
       />,
     )
     const reverseBtn = screen.getByTitle('reader.sortChapterReverse')
@@ -112,6 +114,7 @@ describe('NotesFilterPanel', () => {
         onToggleStyle={mockOnToggleStyle}
         onToggleColor={mockOnToggleColor}
         onReset={mockOnReset}
+        hasActiveFilter={false}
       />,
     )
     fireEvent.click(screen.getByTitle('reader.sortTimeDesc'))
@@ -152,6 +155,7 @@ describe('NotesFilterPanel', () => {
         onToggleStyle={mockOnToggleStyle}
         onToggleColor={mockOnToggleColor}
         onReset={mockOnReset}
+        hasActiveFilter={true}
       />,
     )
 
