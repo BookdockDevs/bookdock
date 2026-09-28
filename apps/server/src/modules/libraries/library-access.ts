@@ -149,11 +149,11 @@ export interface SharedVersionRead {
   relation: LibraryRelation
 }
 
-export async function resolveSharedVersionRead(
+function resolveSharedVersionReadInternal(
   libraryId: string,
   bookVersionId: string,
   userId: string | null,
-): Promise<SharedVersionRead> {
+): SharedVersionRead {
   const db = getDb()
   const library = db.select().from(libraries).where(eq(libraries.id, libraryId)).get()
   if (!library || library.type === 'private') throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
@@ -185,6 +185,14 @@ export async function resolveSharedVersionRead(
   return { library, link, relation }
 }
 
+export async function resolveSharedVersionRead(
+  libraryId: string,
+  bookVersionId: string,
+  userId: string | null,
+): Promise<SharedVersionRead> {
+  return resolveSharedVersionReadInternal(libraryId, bookVersionId, userId)
+}
+
 export interface SourceReadVerdict {
   readable: boolean
   /** Retained source identity, even when it no longer resolves. */
@@ -203,10 +211,10 @@ export interface SourceReadVerdict {
  * A dangling source is not an error here: the B row keeps its provenance and
  * reads as unavailable.
  */
-export async function resolveSourceRead(
+function resolveSourceReadVerdict(
   version: { sourceLibraryId: string | null; sourceLibraryBookVersionId: string | null },
   identity: RequestIdentity,
-): Promise<SourceReadVerdict> {
+): SourceReadVerdict {
   const verdict: SourceReadVerdict = {
     readable: false,
     sourceLibraryId: version.sourceLibraryId,
@@ -221,7 +229,7 @@ export async function resolveSourceRead(
     )).get()
   if (!source) return verdict
   try {
-    await resolveSharedVersionRead(version.sourceLibraryId, source.bookVersionId, identity.userId)
+    resolveSharedVersionReadInternal(version.sourceLibraryId, source.bookVersionId, identity.userId)
   } catch (err) {
     // Permission and topology denials are the verdict; anything else (a
     // database or system failure) must not masquerade as "source gone".
@@ -229,6 +237,20 @@ export async function resolveSourceRead(
     throw err
   }
   return { ...verdict, readable: true }
+}
+
+export async function resolveSourceRead(
+  version: { sourceLibraryId: string | null; sourceLibraryBookVersionId: string | null },
+  identity: RequestIdentity,
+): Promise<SourceReadVerdict> {
+  return resolveSourceReadVerdict(version, identity)
+}
+
+export function resolveSourceReadSync(
+  version: { sourceLibraryId: string | null; sourceLibraryBookVersionId: string | null },
+  identity: RequestIdentity,
+): SourceReadVerdict {
+  return resolveSourceReadVerdict(version, identity)
 }
 
 /** The caller's private-library row for one BookVersion, if any. */
@@ -262,6 +284,15 @@ export async function sourceStillReadable(userId: string, bookVersionId: string)
     { userId },
   )
   return verdict.readable
+}
+
+export function sourceStillReadableSync(userId: string, bookVersionId: string): boolean {
+  const link = getPrivateLink(userId, bookVersionId)
+  if (!link || link.kind !== 'shared') return true
+  return resolveSourceReadSync(
+    { sourceLibraryId: link.sourceLibraryId, sourceLibraryBookVersionId: link.sourceLibraryBookVersionId },
+    { userId },
+  ).readable
 }
 
 /**

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm'
 import type { ExtractTablesWithRelations } from 'drizzle-orm'
 import type { RunResult } from 'better-sqlite3'
 import type { SQLiteTransaction } from 'drizzle-orm/sqlite-core'
@@ -7,11 +7,12 @@ import { normalizeAiCitationMarkers } from '@bookdock/shared'
 import type { AiCitation, AiGenerationDiagnostics, AiGenerationRunRes, AiGenerationState, AiGenerationTerminalReason, AiGenerationUsage, AiNormalizedEvent } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { aiGenerationRuns, aiMessageEvents, aiMessages, aiThreads, books, libraries, libraryBookVersions } from '../../db/schema'
+import { aiGenerationRuns, aiMessageEvents, aiMessages, aiThreads } from '../../db/schema'
 import type * as dbSchema from '../../db/schema'
 import { createId } from '../../lib/id'
 import { log } from '../../lib/logger'
 import { AppError } from '../../middleware/error'
+import { assertReadableBookSync } from '../books/books.service'
 
 export const AI_GENERATION_ACTIVE_STATES = ['preparing', 'requesting', 'streaming', 'waiting_tool'] as const
 export const AI_GENERATION_TERMINAL_STATES = ['completed', 'failed', 'cancelled', 'interrupted'] as const
@@ -181,18 +182,13 @@ function ownedRun(userId: string, runId: string) {
   )).get()
   if (!thread) throw new AppError('AI_RUN_NOT_FOUND', 'AI generation run not found')
 
-  const book = getDb().select({ id: books.id }).from(books).where(and(
-    eq(books.id, thread.bookId),
-    eq(books.userId, userId),
-    isNull(books.deletedAt),
-  )).get()
-  if (!book) {
-    // Version-native books have no legacy row: readability is the private library.
-    const library = getDb().select({ id: libraries.id }).from(libraries)
-      .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
-    const version = library && getDb().select({ id: libraryBookVersions.id }).from(libraryBookVersions)
-      .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, thread.bookId))).get()
-    if (!version) throw new AppError('AI_RUN_NOT_FOUND', 'AI generation run not found')
+  try {
+    assertReadableBookSync(userId, thread.bookId)
+  } catch (error) {
+    if (error instanceof AppError && error.code === 'BOOK_NOT_FOUND') {
+      throw new AppError('AI_RUN_NOT_FOUND', 'AI generation run not found')
+    }
+    throw error
   }
   return row
 }

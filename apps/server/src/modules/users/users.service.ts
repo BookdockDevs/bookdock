@@ -42,6 +42,7 @@ export function listUsers(): AdminUserRes[] {
       role: users.role,
       disabled: users.disabled,
       createdAt: users.createdAt,
+      avatarKey: users.avatarKey,
       bookCount: count(books.id),
     })
     .from(users)

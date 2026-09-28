@@ -13,6 +13,7 @@ import { createId } from '../../lib/id'
 import { errorHandler } from '../../middleware/error'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
+import { uploadBook } from '../books/books.service'
 import librariesRoutes from './libraries.routes'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -132,6 +133,39 @@ describe('libraries routes', () => {
         method: 'POST', body: new FormData(),
       })
       expect(missingFile.status).toBe(400)
+    })
+
+    it('publishes a private A through the dedicated snapshot route', async () => {
+      const source = await uploadBook(ownerId, new File(['第一章\n私库内容'], 'private.txt', { type: 'text/plain' }))
+      const ownerApp = createApp({ id: ownerId })
+      const published = await ownerApp.request(`/api/v1/libraries/${libraryId}/books/from-private`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId: source.book.id }),
+      })
+      expect(published.status).toBe(201)
+      const body = await published.json() as { data: { libraryBookId: string; versionLinkId: string; bookVersionId: string; duplicated: boolean } }
+      expect(body.data).toMatchObject({ duplicated: false })
+
+      const repeated = await ownerApp.request(`/api/v1/libraries/${libraryId}/books/from-private`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId: source.book.id }),
+      })
+      expect(repeated.status).toBe(200)
+      expect((await repeated.json()).data).toMatchObject({
+        libraryBookId: body.data.libraryBookId,
+        versionLinkId: body.data.versionLinkId,
+        bookVersionId: body.data.bookVersionId,
+        duplicated: true,
+      })
+
+      const member = await createApp({ id: memberId }).request(`/api/v1/libraries/${libraryId}/books/from-private`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId: source.book.id }),
+      })
+      expect(member.status).toBe(403)
     })
 
     it('lists the catalog and edits work and version metadata', async () => {

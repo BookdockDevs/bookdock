@@ -82,8 +82,8 @@ export interface ReadingRecord {
 }
 
 /**
- * Per-book reading-setting overrides (F1 layering). Stored as
- * `books.meta.viewSettings`; only the first-batch core typography keys are
+ * Per-book reading-setting overrides (F1 layering). Stored in the user-scoped
+ * reader-book settings namespace; only the first-batch core typography keys are
  * supported so far. Dual-backing keys (pageWidth/horizontalPadding/
  * verticalPadding) carry both the flat value and the mode-specific backing,
  * mirroring the global ui.store model.

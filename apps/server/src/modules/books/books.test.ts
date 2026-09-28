@@ -50,6 +50,7 @@ import {
   removeBookCover,
   cleanupStagedUpload,
 } from './books.service'
+import { getReaderBookSettings, updateReaderBookSettings } from './reader-settings.service'
 import { createTocRule } from '../toc-rules/toc-rules.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -1017,7 +1018,7 @@ describe('books ownership', () => {
   })
 })
 
-describe('updateBook viewSettings (per-book reading settings)', () => {
+describe('reader settings (per-book reading settings)', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
   let book: ReturnType<typeof seedBook>
@@ -1037,30 +1038,31 @@ describe('updateBook viewSettings (per-book reading settings)', () => {
     return row.meta as Record<string, unknown>
   }
 
-  it('stores the diff under meta.viewSettings, shallow-merging across calls', async () => {
-    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 24 } })
-    expect(metaOf().viewSettings).toEqual({ fontSize: 24 })
-
-    await updateBook(ownerId, book.id, { viewSettings: { lineHeight: 2.2 } })
-    expect(metaOf().viewSettings).toEqual({ fontSize: 24, lineHeight: 2.2 })
-
-    // Same key overwrites, others survive
-    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 28, pageWidth: 900, scrollPageWidth: 900 } })
-    expect(metaOf().viewSettings).toEqual({ fontSize: 28, lineHeight: 2.2, pageWidth: 900, scrollPageWidth: 900 })
-  })
-
-  it('keeps unrelated meta keys when writing viewSettings', async () => {
-    await updateBook(ownerId, book.id, { bookmeta: { publisher: 'ACME' } })
-    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 20 } })
-    const meta = metaOf()
-    expect(meta.viewSettings).toEqual({ fontSize: 20 })
-    expect(meta.bookmeta).toEqual({ publisher: 'ACME' })
-  })
-
-  it('clears the whole override with null so the book falls back to global', async () => {
-    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 24, lineHeight: 2.2 } })
-    await updateBook(ownerId, book.id, { viewSettings: null })
+  it('stores user settings separately from the content revision', () => {
+    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { fontSize: 24 } })).toEqual({ viewSettings: { fontSize: 24 } })
+    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { lineHeight: 2.2 } })).toEqual({ viewSettings: { fontSize: 24, lineHeight: 2.2 } })
+    expect(updateReaderBookSettings(ownerId, book.id, { boundPresetId: 'preset-a' })).toEqual({
+      viewSettings: { fontSize: 24, lineHeight: 2.2 },
+      boundPresetId: 'preset-a',
+    })
     expect(metaOf().viewSettings).toBeUndefined()
+    expect(metaOf().boundPresetId).toBeUndefined()
+  })
+
+  it('migrates legacy A/C settings and removes them from revision metadata', () => {
+    db.update(schema.contentRevisions).set({ meta: { viewSettings: { fontSize: 20 }, boundPresetId: 'preset-old', bookmeta: { publisher: 'ACME' } } })
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).run()
+    expect(getReaderBookSettings(ownerId, book.id)).toEqual({ viewSettings: { fontSize: 20 }, boundPresetId: 'preset-old' })
+    const meta = metaOf()
+    expect(meta.bookmeta).toEqual({ publisher: 'ACME' })
+    expect(meta.viewSettings).toBeUndefined()
+    expect(meta.boundPresetId).toBeUndefined()
+  })
+
+  it('clears each user-level setting without touching content metadata', () => {
+    updateReaderBookSettings(ownerId, book.id, { viewSettings: { fontSize: 24 }, boundPresetId: 'preset-a' })
+    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: null, boundPresetId: null })).toEqual({})
+    expect(metaOf()).toEqual({})
   })
 })
 
@@ -1093,60 +1095,18 @@ describe('updateBook coverPaletteId (pinned placeholder cover palette)', () => {
   })
 
   it('keeps unrelated meta keys when pinning a palette', async () => {
-    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 20 } })
+    db.update(schema.contentRevisions).set({ meta: { bookmeta: { publisher: 'ACME' } } })
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).run()
     await updateBook(ownerId, book.id, { coverPaletteId: 'teal' })
     const meta = metaOf()
     expect(meta.coverPaletteId).toBe('teal')
-    expect(meta.viewSettings).toEqual({ fontSize: 20 })
+    expect(meta.bookmeta).toEqual({ publisher: 'ACME' })
   })
 
   it('removes the key with null so the cover falls back to the id hash', async () => {
     await updateBook(ownerId, book.id, { coverPaletteId: 'rose' })
     await updateBook(ownerId, book.id, { coverPaletteId: null })
     expect(metaOf().coverPaletteId).toBeUndefined()
-  })
-})
-
-describe('updateBook boundPresetId (per-book preset binding)', () => {
-  let db: ReturnType<typeof createTestDb>
-  let ownerId: string
-  let book: ReturnType<typeof seedBook>
-
-  beforeEach(() => {
-    db = createTestDb()
-    vi.spyOn(client, 'getDb').mockReturnValue(db)
-    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
-    ownerId = seedUser(db, 'owner')
-    book = seedBook(db, ownerId)
-  })
-
-  function metaOf() {
-    const row = db.select({ meta: schema.contentRevisions.meta }).from(schema.contentRevisions)
-      .where(eq(schema.contentRevisions.bookVersionId, book.id))
-      .orderBy(desc(schema.contentRevisions.revisionNo)).all().at(0)!
-    return row.meta as Record<string, unknown>
-  }
-
-  it('stores the binding under meta.boundPresetId and overwrites it', async () => {
-    await updateBook(ownerId, book.id, { boundPresetId: 'preset-a' })
-    expect(metaOf().boundPresetId).toBe('preset-a')
-
-    await updateBook(ownerId, book.id, { boundPresetId: 'preset-b' })
-    expect(metaOf().boundPresetId).toBe('preset-b')
-  })
-
-  it('keeps unrelated meta keys when writing boundPresetId', async () => {
-    await updateBook(ownerId, book.id, { viewSettings: { fontSize: 20 } })
-    await updateBook(ownerId, book.id, { boundPresetId: 'preset-a' })
-    const meta = metaOf()
-    expect(meta.boundPresetId).toBe('preset-a')
-    expect(meta.viewSettings).toEqual({ fontSize: 20 })
-  })
-
-  it('clears the binding with null so the book falls back to the device chain', async () => {
-    await updateBook(ownerId, book.id, { boundPresetId: 'preset-a' })
-    await updateBook(ownerId, book.id, { boundPresetId: null })
-    expect(metaOf().boundPresetId).toBeUndefined()
   })
 })
 

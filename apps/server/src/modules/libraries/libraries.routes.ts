@@ -16,6 +16,7 @@ import {
   membershipManageSchema,
   membershipRoleSchema,
   ownershipTransferSchema,
+  publishPrivateBookSchema,
   tagCreateSchema,
   tagReorderSchema,
   tagUpdateSchema,
@@ -46,6 +47,7 @@ import {
   updateCatalogVersion,
 } from './catalog.service'
 import { addToPrivateLibrary } from './collect.service'
+import { publishPrivateBook } from './publish.service'
 import { uploadCatalogBook } from '../books/books.service'
 
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
@@ -232,6 +234,17 @@ librariesRoutes.get('/:id/books/:bookId', async (c) => {
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const book = await getCatalogBook(user.id, c.req.param('id'), c.req.param('bookId'))
   return c.json({ data: book })
+})
+
+librariesRoutes.post('/:id/books/from-private', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = publishPrivateBookSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  const result = await publishPrivateBook(user.id, c.req.param('id'), parsed.data)
+  return c.json({ data: result }, result.duplicated ? 200 : 201)
 })
 
 librariesRoutes.post('/:id/books', async (c) => {

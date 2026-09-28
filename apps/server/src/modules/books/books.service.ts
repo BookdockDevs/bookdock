@@ -1,13 +1,14 @@
 import type { Readable } from 'node:stream'
 
-import { eq, lt, desc, asc, and, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
+import { eq, lt, desc, asc, and, or, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
 import JSZip from 'jszip'
 import sharp from 'sharp'
 import { getDb } from '../../db/client'
 import {
   blobs, books, annotations, bookTags, bookVersions, bookStates, contentRevisions, libraries, libraryBooks,
   libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
-  users as usersTable, tocRules,
+  libraryMemberships, users as usersTable, tocRules,
+  highlights, ideas, bookmarks, aiThreads, textReplacements,
 } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
@@ -24,7 +25,7 @@ import {
 import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
-import { assertMutableContent, ensurePrivateLibrary, requireLibraryManager, sourceStillReadable } from '../libraries/library-access'
+import { assertMutableContent, ensurePrivateLibrary, requireLibraryManager, sourceStillReadable, sourceStillReadableSync } from '../libraries/library-access'
 import { libraryOrderBy } from '../libraries/library-query'
 import { resolveSharedVersionRead } from '../libraries/library-access'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
@@ -34,7 +35,9 @@ import { countWords } from '../../lib/word-count'
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { coverThumbnailKey } from '../../lib/cover'
 import { log } from '../../lib/logger'
-import type { AppendContentCandidate, AppendContentPreviewRes, BookFormat, BookMetadata, CoverPaletteId, Chapter, TocPreviewChapter, TocPreviewRes, TocRulePattern, TrashSettings, ViewSettings } from '@bookdock/shared'
+import type { AppendContentCandidate, AppendContentPreviewRes, BookFormat, BookMetadata, CoverPaletteId, Chapter, TocPreviewChapter, TocPreviewRes, TocRulePattern, TrashSettings } from '@bookdock/shared'
+
+import { getReaderBookSettings } from './reader-settings.service'
 
 /**
  * The effective TOC preset for a book: the pinned rule id in books.meta
@@ -237,6 +240,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     kind: libraryBookVersions.kind,
     // Extracted, not the whole meta column: list payloads must stay chapter-free.
     coverPaletteId: sql<CoverPaletteId | null>`${revMeta('$.coverPaletteId')}`,
+    coverPaletteKey: sql<string | null>`${revMeta('$.coverPaletteKey')}`,
   }).from(libraryBookVersions)
     .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
     .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
@@ -292,7 +296,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
       )).all().map((row) => row.id),
   )
   const data = rows.map(({
-    libraryBookId: _libraryBookId, kind: _kind,
+    libraryBookId: _libraryBookId,
     sourceLibraryId, sourceLibraryBookVersionId, ...b
   }) => ({
     ...b,
@@ -317,6 +321,8 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
 export function stripMetaChapters<T extends { meta: Record<string, unknown> }>(book: T): T {
   const meta = { ...book.meta }
   delete meta.chapters
+  delete meta.viewSettings
+  delete meta.boundPresetId
   return { ...book, meta }
 }
 
@@ -794,6 +800,43 @@ export async function assertReadableBook(userId: string | null, bookId: string):
 }
 
 /**
+ * Synchronous ownership/readability precheck for synchronous user-data flows
+ * such as AI session and generation persistence. The content routes still use
+ * assertReadableBook for the full visibility/source verdict.
+ */
+export function assertReadableBookSync(userId: string, bookId: string): void {
+  const db = getDb()
+  const privateLibrary = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  if (privateLibrary) {
+    const privateLink = db.select({ libraryBookId: libraryBookVersions.libraryBookId }).from(libraryBookVersions)
+      .where(and(
+        eq(libraryBookVersions.libraryId, privateLibrary.id),
+        eq(libraryBookVersions.bookVersionId, bookId),
+      )).get()
+    if (privateLink) {
+      const work = db.select({ deletedAt: libraryBooks.deletedAt }).from(libraryBooks)
+        .where(eq(libraryBooks.id, privateLink.libraryBookId)).get()
+      if (work && !work.deletedAt && sourceStillReadableSync(userId, bookId)) return
+    }
+  }
+  const candidates = db.select({ libraryId: libraryBookVersions.libraryId }).from(libraryBookVersions)
+    .where(and(eq(libraryBookVersions.bookVersionId, bookId), eq(libraryBookVersions.status, 'published'))).all()
+  for (const candidate of candidates) {
+    const library = db.select({ id: libraries.id, userId: libraries.userId, type: libraries.type, visibility: libraries.visibility })
+      .from(libraries).where(eq(libraries.id, candidate.libraryId)).get()
+    if (!library || library.type === 'private') continue
+    if (library.visibility === 'public' || library.userId === userId) return
+    const membership = db.select({ userId: libraryMemberships.userId }).from(libraryMemberships).where(and(
+      eq(libraryMemberships.libraryId, library.id),
+      eq(libraryMemberships.userId, userId),
+    )).get()
+    if (membership) return
+  }
+  throw new AppError('BOOK_NOT_FOUND')
+}
+
+/**
  * The shared-library read verdict for a version nobody collected, or null when
  * no library the caller may read publishes it. The verdict is the single
  * shared-library read decision, so a non-member only reaches a published version
@@ -842,6 +885,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
   // Guests create no server-side reading state; there is nothing to load.
   const state = userId === null ? undefined : db.select().from(bookStates)
     .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
+  const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
   return {
     id: bookId,
     userId,
@@ -854,7 +898,8 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     coverKey: link.coverKey ?? work.coverKey,
     contentHash: hashFromBlobKey(revision.blobKey),
     size: bv.size,
-    meta: (revision.meta ?? {}) as Record<string, unknown>,
+    meta: revisionMeta,
+    coverPaletteKey: typeof revisionMeta.coverPaletteKey === 'string' ? revisionMeta.coverPaletteKey : bookId,
     createdAt: work.createdAt,
     updatedAt: work.updatedAt,
     readStatus: state?.readStatus ?? 'reading',
@@ -863,6 +908,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     lastReadAt: state?.lastReadAt ?? null,
     deletedAt: null,
     shelfId: null,
+    readerSettings: getReaderBookSettings(userId, bookId),
     // Present so the UI can offer "add to my library" and hide the actions
     // that would write library-owned content.
     source: {
@@ -948,6 +994,7 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     contentHash: hashFromBlobKey(revision.blobKey),
     size: bv.size,
     meta,
+    coverPaletteKey: typeof revisionMeta.coverPaletteKey === 'string' ? revisionMeta.coverPaletteKey : bookId,
     createdAt: lb.createdAt,
     updatedAt: lb.updatedAt,
     readStatus: state?.readStatus ?? 'reading',
@@ -956,6 +1003,7 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     lastReadAt: state?.lastReadAt ?? null,
     deletedAt: lb.deletedAt ?? null,
     shelfId: lb.categoryId,
+    readerSettings: getReaderBookSettings(userId, bookId),
     source: lbv.sourceLibraryId
       ? {
           libraryId: lbv.sourceLibraryId,
@@ -1837,7 +1885,7 @@ export async function getBookEpubBuffer(userId: string | null, bookId: string): 
   return bufferFromStream(await storage.get(book.filePath))
 }
 
-export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata; viewSettings?: ViewSettings | null; boundPresetId?: string | null; tocRuleId?: string | null; coverPaletteId?: CoverPaletteId | null }) {
+export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata; tocRuleId?: string | null; coverPaletteId?: CoverPaletteId | null }) {
   const db = getDb()
   const { libraryBookId, libraryBookVersionId, kind } = resolveLibraryBook(userId, bookId)
   const now = Date.now()
@@ -1845,8 +1893,7 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
   // touch its own card (status, pin, title, author). The content-immutable
   // boundary is the same one append/re-toc obey.
   if (kind === 'shared' && (
-    data.bookmeta !== undefined || data.viewSettings !== undefined || data.boundPresetId !== undefined
-    || data.tocRuleId !== undefined || data.coverPaletteId !== undefined
+    data.bookmeta !== undefined || data.tocRuleId !== undefined || data.coverPaletteId !== undefined
   )) {
     assertMutableContent(kind)
   }
@@ -1883,26 +1930,6 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
   let touchedMeta = false
   if (data.bookmeta !== undefined) {
     baseMeta.bookmeta = data.bookmeta
-    touchedMeta = true
-  }
-  if (data.viewSettings !== undefined) {
-    // Diff semantics: shallow-merge into the existing per-book overrides;
-    // null removes the whole override so the book falls back to global.
-    if (data.viewSettings === null) {
-      delete baseMeta.viewSettings
-    } else {
-      baseMeta.viewSettings = { ...((baseMeta.viewSettings as ViewSettings | undefined) ?? {}), ...data.viewSettings }
-    }
-    touchedMeta = true
-  }
-  if (data.boundPresetId !== undefined) {
-    // Binding semantics mirror viewSettings: null removes the key so the book
-    // falls back to the device resolution chain.
-    if (data.boundPresetId === null) {
-      delete baseMeta.boundPresetId
-    } else {
-      baseMeta.boundPresetId = data.boundPresetId
-    }
     touchedMeta = true
   }
   if (data.tocRuleId !== undefined) {
@@ -2259,7 +2286,7 @@ export async function purgeAllExpiredTrash() {
   }
 }
 
-export async function deleteBook(userId: string, bookId: string) {
+export async function deleteBook(userId: string, bookId: string, opts?: { deleteUserData?: boolean }) {
   const db = getDb()
   const storage = getStorage()
   // Removing your own card never requires the source to still be readable:
@@ -2297,6 +2324,17 @@ export async function deleteBook(userId: string, bookId: string) {
     tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
+    if (opts?.deleteUserData) {
+      for (const versionId of versionIds) {
+        tx.delete(highlights).where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, versionId))).run()
+        tx.delete(ideas).where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, versionId))).run()
+        tx.delete(bookmarks).where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, versionId))).run()
+        tx.delete(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, versionId))).run()
+        tx.delete(aiThreads).where(and(eq(aiThreads.userId, userId), or(eq(aiThreads.bookVersionId, versionId), eq(aiThreads.bookId, versionId)))).run()
+        tx.delete(textReplacements).where(and(eq(textReplacements.userId, userId), or(eq(textReplacements.bookVersionId, versionId), eq(textReplacements.bookId, versionId)))).run()
+        tx.delete(settings).where(and(eq(settings.userId, userId), eq(settings.key, `reader.book:${versionId}`))).run()
+      }
+    }
     for (const versionId of versionIds) {
       const stillListed = tx.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
         .where(eq(libraryBookVersions.bookVersionId, versionId)).get()
@@ -2336,6 +2374,13 @@ export async function deleteBook(userId: string, bookId: string) {
   for (const versionId of removedVersionIds) {
     await deleteProgressFile(userId, versionId)
   }
+  if (opts?.deleteUserData) {
+    for (const versionId of versionIds) {
+      if (!removedVersionIds.includes(versionId)) {
+        await deleteProgressFile(userId, versionId).catch(() => undefined)
+      }
+    }
+  }
   for (const coverKey of coverKeys) {
     // Covers are only referenced from the new model; legacy rows freeze.
     const coverRefs = db.select({ count: sql<number>`count(*)` }).from(libraryBooks)
@@ -2354,7 +2399,7 @@ export async function deleteBook(userId: string, bookId: string) {
   return book
 }
 
-function resolveLibraryBook(userId: string, bookId: string): { libraryId: string; libraryBookId: string; libraryBookVersionId: string; kind: string } {
+export function resolveLibraryBook(userId: string, bookId: string): { libraryId: string; libraryBookId: string; libraryBookVersionId: string; kind: string } {
   const db = getDb()
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()

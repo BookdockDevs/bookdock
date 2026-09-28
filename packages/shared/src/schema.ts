@@ -764,6 +764,11 @@ export const viewSettingsSchema = z.object({
   pageVerticalPadding: z.number().min(0).max(120).optional(),
 })
 
+export const readerBookSettingsSchema = z.object({
+  viewSettings: viewSettingsSchema.nullable().optional(),
+  boundPresetId: z.string().nullable().optional(),
+})
+
 export const systemUpdateStartSchema = z.object({
   // Must equal what the server's own update check reported; the client cannot
   // pick an arbitrary version to download.
@@ -778,10 +783,6 @@ export const bookUpdateSchema = z.object({
   title: z.string().min(1).max(500).optional(),
   author: z.string().max(500).optional(),
   bookmeta: bookMetadataSchema.optional(),
-  // null clears the per-book overrides (fall back to global)
-  viewSettings: viewSettingsSchema.nullable().optional(),
-  // null removes the preset binding (fall back to the device resolution chain)
-  boundPresetId: z.string().nullable().optional(),
   // null removes the pinned TOC rule and restores automatic selection
   tocRuleId: z.string().nullable().optional(),
   // null clears the pinned placeholder-cover palette (falls back to the id hash)

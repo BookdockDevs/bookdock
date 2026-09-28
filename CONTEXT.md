@@ -50,6 +50,23 @@ _Avoid_: reparsing when the user-facing result is a new chapter structure.
 A chapter explicitly labeled “Prologue,” or preliminary content before the first TOC title that has not yet been assigned to another chapter. It is not present in every book.
 _Avoid_: assuming every book has a prologue.
 
+## Library Concepts
+
+**Private A entry**:
+A book entry in the user's private library whose content is owned and editable by that user. It is the only private-library entry that may be published to a shared library in the current capability.
+_Avoid_: treating every private-library card as an A entry; a collected B and a localized C have different ownership semantics.
+
+**Publish snapshot**:
+An action that publishes the current content of a private A entry into a shared library while keeping the private entry. The shared entry is an independent content version with the same underlying file content; later changes or deletion of the private entry do not change or remove the shared entry.
+_Avoid_: transfer, move, or synchronization when describing this action.
+
+**Shared content source**:
+The content version owned by a shared library itself. It is not a private B reference: its source-library identity is empty, and another user may read it or collect it as a B into their private library.
+_Avoid_: calling a shared library's own content a B entry.
+
+**Cover-palette identity**:
+The stable key used to derive an automatic placeholder-cover color. It begins as the immutable book-version identity and is carried into a published snapshot so the same coverless book keeps its default color across the private and shared cards. It is separate from a user-pinned `coverPaletteId`.
+
 ## Reader Concepts
 
 **EPUB format**:

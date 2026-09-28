@@ -3,21 +3,10 @@ import { and, eq, isNull, or } from 'drizzle-orm'
 import { compileReplacementRegex, type TextReplacementRes, type ReplacementCreateReq, type ReplacementOverrideReq, type ReplacementUpdateReq } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { books, bookVersions, libraries, libraryBookVersions, textReplacementOverrides, textReplacements } from '../../db/schema'
+import { bookVersions, textReplacementOverrides, textReplacements } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { AppError } from '../../middleware/error'
-
-function assertBookAccessible(userId: string, bookId: string) {
-  const db = getDb()
-  const legacy = db.select({ id: books.id }).from(books).where(and(eq(books.id, bookId), eq(books.userId, userId))).get()
-  if (legacy) return
-  // Version-native books have no legacy row: existence is the private library.
-  const library = db.select({ id: libraries.id }).from(libraries)
-    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
-  const version = library && db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
-    .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
-  if (!version) throw new AppError('BOOK_NOT_FOUND')
-}
+import { assertReadableBook } from '../books/books.service'
 
 type ReplacementRow = typeof textReplacements.$inferSelect
 type ReplacementOverrideRow = typeof textReplacementOverrides.$inferSelect
@@ -70,6 +59,7 @@ export async function listReplacements(userId: string, bookId?: string) {
     const rows = await db.select().from(textReplacements).where(eq(textReplacements.userId, userId)).all()
     return rows.map((row) => toRes(row))
   }
+  await assertReadableBook(userId, bookId)
   // Book view: user-global pattern rules (per-book state comes from overrides)
   // plus everything scoped to this book (book-scoped patterns, point patches)
   const rows = await db.select().from(textReplacements).where(
@@ -104,7 +94,7 @@ export async function createReplacement(userId: string, data: ReplacementCreateR
   // Null bookId = user-global pattern rule; set = book-scoped pattern or point patch
   const bookId = data.bookId ?? null
   if (bookId) {
-    assertBookAccessible(userId, bookId)
+    await assertReadableBook(userId, bookId)
   }
   const now = Date.now()
   const version = bookId
@@ -160,7 +150,7 @@ export async function updateReplacement(userId: string, replacementId: string, d
   }
   if (data.bookId !== undefined) {
     if (data.bookId !== null) {
-      assertBookAccessible(userId, data.bookId)
+      await assertReadableBook(userId, data.bookId)
     }
     patch.bookId = data.bookId
   }
@@ -178,7 +168,8 @@ export async function updateReplacement(userId: string, replacementId: string, d
 
 export async function deleteReplacement(userId: string, replacementId: string) {
   const db = getDb()
-  getOwnedReplacement(userId, replacementId)
+  const existing = getOwnedReplacement(userId, replacementId)
+  if (existing.bookId) await assertReadableBook(userId, existing.bookId)
   db.delete(textReplacements).where(eq(textReplacements.id, replacementId)).run()
 }
 
@@ -191,7 +182,7 @@ export async function setReplacementOverride(userId: string, replacementId: stri
   if (existing.matchType === 'point' || existing.bookId) {
     throw new AppError('VALIDATION_ERROR', 'per-book overrides only apply to global pattern rules')
   }
-  assertBookAccessible(userId, data.bookId)
+  await assertReadableBook(userId, data.bookId)
 
   if (data.enabled === null) {
     db.delete(textReplacementOverrides).where(

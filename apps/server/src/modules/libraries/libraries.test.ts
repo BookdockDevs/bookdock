@@ -145,6 +145,10 @@ describe('libraries service', () => {
     expect(await relationOf(bobId, pubId)).toBe('owner')
     // Carol joined nothing, so every shared library is an outsider's.
     expect(await relationOf(carolId, pubId)).toBe('non-member')
+    const passLibId = seedLibrary(aliceId, { visibility: 'password', accessPasswordHash: 'hash' })
+    const carolList = await listLibraries({ userId: carolId, isGuest: false })
+    expect(carolList.find((l) => l.id === passLibId)?.relation).toBe('non-member')
+    expect(carolList.find((l) => l.id === passLibId)?.visibility).toBe('password')
     // Alice owns both shared libraries she can see, and her private one.
     expect(await relationOf(aliceId, sharedId)).toBe('owner')
     const aliceList = await listLibraries({ userId: aliceId, isGuest: false })
@@ -302,9 +306,9 @@ describe('libraries service', () => {
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
 
     const listed = await listMembers(aliceId, sharedId)
-    expect(listed.owner).toEqual({ id: aliceId, username: 'alice' })
+    expect(listed.owner).toEqual({ id: aliceId, username: 'alice', avatarKey: null, createdAt: expect.any(Number) })
     // Names travel with the rows; a member list without them is unusable.
-    expect(listed.members).toEqual([expect.objectContaining({ userId: bobId, username: 'bob', role: 'member' })])
+    expect(listed.members).toEqual([expect.objectContaining({ userId: bobId, username: 'bob', role: 'member', avatarKey: null })])
   })
 
   it('enforces owner/admin/member management boundaries', async () => {

@@ -178,6 +178,7 @@ export type {
   BookMetadata,
   BookMeta,
   BookDetailRes,
+  ReaderBookSettings,
   Chapter,
   ChapterListRes,
   UploadBookRes,
@@ -290,6 +291,7 @@ export {
   bookMembershipSchema,
   bookMetadataSchema,
   viewSettingsSchema,
+  readerBookSettingsSchema,
   bookUpdateSchema,
   systemUpdateStartSchema,
 } from './schema'
@@ -340,6 +342,8 @@ export type {
   CatalogVersionUpdateReq,
   CollectBookReq,
   CollectBookRes,
+  PublishPrivateBookReq,
+  PublishPrivateBookRes,
   BookSourceInfo,
 } from './library'
 
@@ -362,6 +366,7 @@ export {
   catalogVersionMoveSchema,
   catalogSimilarQuerySchema,
   collectBookSchema,
+  publishPrivateBookSchema,
 } from './library'
 
 export { getAiModelCapabilityFlags, isAiEmbeddingModel } from './ai-models'

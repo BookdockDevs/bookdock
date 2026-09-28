@@ -75,10 +75,34 @@ Conventions:
 - `TocRule(id, userId, seedKey?, name, enabled, sortOrder, patterns, createdAt, updatedAt)` — user-owned TXT chapter presets; `seedKey` identifies product-provided presets for safe backfill and restore, while `patterns` stores one configured level per array position. TXT scanning compacts unobserved levels to contiguous output depth for the current book, so a missing parent pattern cannot force all matched child headings to remain nested.
 - `books.meta.tocExcludedChapterIds` — per-book TOC boundary overrides. These stable `ch-<offset>` ids suppress selected detected boundaries without changing the global preset; rebuilding merges the suppressed boundary's text into the preceding chapter, with the synthetic leading `序章` handled as a merge into the first real chapter. `tocExcludedLeadingText` preserves that leading text's source order across EPUB recovery.
 - EPUB uploads preserve the source TOC hierarchy when the EPUB has an NCX or EPUB3 navigation document: parsed chapter levels are persisted in `books.meta.chapters[].level`, and the Legado projection derives its supported volume markers from those levels. Legacy EPUB rows are upgraded lazily on their first chapter-list read by re-parsing the stored EPUB once; the migration only changes derived chapter metadata and never rewrites book content.
-- `books.meta.coverPaletteId` — user-pinned placeholder-cover palette, validated against shared `COVER_PALETTE_IDS` (Morandi tones). Unset falls back to a deterministic hash of the immutable `books.id`, so renaming never repaints the cover; the pin is decorative and ignored while a real `coverKey` image exists. The list endpoint extracts the key via `json_extract` into `BookListItem.coverPaletteId` so grid cards render the pinned color without shipping full meta. Picking happens in the edit dialog's cover overlay (palette popover) and saves through `bookUpdateSchema` with the rest of the draft; there is no in-UI revert-to-auto.
+- `coverPaletteId` — user-pinned placeholder-cover palette, validated against shared `COVER_PALETTE_IDS` (Morandi tones). In the versioned library model, an unset palette falls back to a deterministic hash of a stable cover-palette key, initially the immutable `bookVersion.id`; snapshot publishes carry that key forward so a new published `BookVersion` does not repaint the same coverless book. The key is not a library work/card id. Shared-library cards and collected private references therefore keep the same color. The pin is decorative and ignored while a real `coverKey` image exists. Legacy `books.meta` and current revision metadata are both exposed through `BookListItem.coverPaletteId` so grid cards do not need full metadata. Picking happens in the edit dialog's cover overlay (palette popover) and saves through `bookUpdateSchema` with the rest of the draft; there is no in-UI revert-to-auto.
 - Book covers retain their original blob. `GET /books/:id/cover` serves a cached, at-most-480px WebP thumbnail by default; `?size=original` serves the source image, and `?download=1` adds an attachment filename. Missing thumbnails are generated on demand for older books, while SVG covers remain in their original format. A thumbnail is deleted only when its original cover blob has no remaining book references.
 - TXT append is a two-step preview/commit flow. The preview parses the candidate text with the book's effective TOC rule, predicts a continuation point from the last 1–3 existing chapter nodes (including volume/chapter hierarchy), and returns every candidate boundary so the user can override the prediction. Commit accepts the selected normalized-text offset, discards only the candidate prefix before that boundary, then rebuilds the derived EPUB; the existing prefix remains byte-for-byte structurally stable so its CFI, bookmarks, and annotations stay valid. On success, the web mutation updates and invalidates both the library detail cache and the reader's `['book', bookId]` cache so a subsequent reader entry uses the new `updatedAt`-versioned file URL immediately.
 - `ReadingRecord(id, userId, bookId, date, durationSeconds)` — per-day per-book accumulated reading seconds; `date` is the client-local calendar day `YYYY-MM-DD` (sessions bucket to the start-day)
+
+### Shared-library publishing boundary
+
+Publishing is a snapshot action, not a transfer. An owner or admin of a shared
+library may publish one private A entry from their own private library. The
+private entry remains intact, while the target library receives a new
+`BookVersion` and first `ContentRevision` that reuse the source revision's
+content Blob. The new shared-library link is `kind: personal`, because A/B/C
+describes private-library entries; its `sourceLibraryId` and
+`sourceLibraryBookVersionId` remain empty because the shared library owns this
+content directly.
+
+The source must be a non-trashed private A entry with a current revision and
+content file. Target categories and tags are always resolved in the target
+shared library. Publishing the same current content into the same target
+library is idempotent and returns the existing work/version link; it does not
+create another shared card. Private shelves, tags, progress, annotations,
+bookmarks, and reader settings are never copied.
+
+The current transition model keeps `library_books.user_id` as the actor that
+wrote a shared-library catalog row, including a publish action. It is not an
+ACL field: shared-library authorization continues to use the library owner and
+membership role. A future contributor/reviewer model may split this into
+explicit creator and submitter fields.
 
 Reading position fields live in the `books` row; progress history and interval data live in storage files under `DATA_DIR`.
 
@@ -308,7 +332,7 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | `ai_chunks_fts` | chunkId, userId, bookId, chapterIndex, chapterTitle, text | SQLite FTS5 derived index; synchronized by `ai_chunks` triggers and never used without ownership filters |
 | `libraries` | id, userId (= owner, tenant key), type (private\|shared), name, description, visibility (public\|password\|private)?, accessPasswordHash?, createdAt, updatedAt | one Private Library per real user (no membership rows); Shared Libraries carry an owner and optional memberships; `user_id` holds the owner so the per-user scoping rule needs no second column, exposed on the wire as `ownerUserId`; `access_password_hash` holds the scrypt hash of a password-visibility library's access password (never exposed through contracts, cleared when visibility leaves `password`) |
 | `library_memberships` | id, libraryId FK (cascade), userId FK (cascade), role (admin\|member), createdAt, updatedAt | unique (libraryId, userId); shared libraries only, never for private ones |
-| `library_books` | id, libraryId FK (cascade), userId (= owner), categoryId? FK (SET NULL), title, author, description, coverKey?, createdAt, updatedAt | library-scoped work entry holding default metadata; needs ≥1 version to be valid |
+| `library_books` | id, libraryId FK (cascade), userId, categoryId? FK (SET NULL), title, author, description, coverKey?, createdAt, updatedAt | library-scoped work entry holding default metadata; private rows use the owner and shared rows currently retain the writing actor for transition compatibility; ACL never trusts this field; needs ≥1 version to be valid |
 | `library_book_versions` | id, libraryId FK, libraryBookId FK (cascade), bookVersionId FK (restrict), kind (personal\|shared\|local), status, name, nullable metadata overrides, sourceLibraryId?, sourceLibraryBookVersionId?, pinnedRevisionId?, pinnedAt?, createdAt, updatedAt | null override = inherit the work default; source ids are plain text (no FK) so provenance survives source deletion; pinnedAt carries the legacy sort-first pin |
 | `book_versions` | id (text PK, reuses the legacy book id for migrated A entries), format, size, guestReadable, createdAt, updatedAt | stable content identity shared across libraries; never merged by content hash; `guest_readable` is the version-level anonymous switch and only takes effect inside a public library on a guest-enabled instance |
 | `content_revisions` | id, bookVersionId FK (cascade), revisionNo, blobKey, size, wordCount?, chapterCount, createdAt | append-only history; unique (bookVersionId, revisionNo); readers and B pins resolve through these rows |

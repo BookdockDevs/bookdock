@@ -30,6 +30,19 @@ function createTestDb() {
   return db
 }
 
+function mirrorPrivateBook(db: ReturnType<typeof createTestDb>, userId: string, bookIds: string[]) {
+  const now = Date.now()
+  const libraryId = `private-${userId}`
+  db.insert(schema.libraries).values({ id: libraryId, userId, type: 'private', name: 'Private', description: '', visibility: null, createdAt: now, updatedAt: now }).run()
+  for (const bookId of bookIds) {
+    db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 100, createdAt: now, updatedAt: now }).run()
+    db.insert(schema.contentRevisions).values({ id: `revision-${bookId}`, bookVersionId: bookId, revisionNo: 1, blobKey: `books/test/${bookId}.txt`, size: 100, chapterCount: 0, meta: {}, createdAt: now }).run()
+    const libraryBookId = `library-book-${bookId}`
+    db.insert(schema.libraryBooks).values({ id: libraryBookId, libraryId, userId, title: 'Test Book', author: 'Author', description: '', coverKey: null, createdAt: now, updatedAt: now }).run()
+    db.insert(schema.libraryBookVersions).values({ id: `link-${bookId}`, libraryId, libraryBookId, bookVersionId: bookId, kind: 'personal', status: 'published', createdAt: now, updatedAt: now }).run()
+  }
+}
+
 describe('replacements service', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
@@ -78,6 +91,7 @@ describe('replacements service', () => {
     insertBook(bookId, ownerId, 'Test Book')
     otherBookId = createId('book')
     insertBook(otherBookId, ownerId, 'Other Book')
+    mirrorPrivateBook(db, ownerId, [bookId, otherBookId])
   })
 
   it('creates a pattern replacement as user-global and lists it with effective fields for a book', async () => {
@@ -113,9 +127,8 @@ describe('replacements service', () => {
   it('binds the version for scoped rules once the book migrated', async () => {
     const before = await createReplacement(ownerId, { bookId, pattern: 'before' })
     expect(db.select({ bookVersionId: schema.textReplacements.bookVersionId }).from(schema.textReplacements).where(eq(schema.textReplacements.id, before.id)).get())
-      .toEqual({ bookVersionId: null })
+      .toEqual({ bookVersionId: bookId })
 
-    db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 100, createdAt: 1, updatedAt: 1 }).run()
     const after = await createReplacement(ownerId, { bookId, pattern: 'after' })
     expect(db.select({ bookVersionId: schema.textReplacements.bookVersionId }).from(schema.textReplacements).where(eq(schema.textReplacements.id, after.id)).get())
       .toEqual({ bookVersionId: bookId })
@@ -309,6 +322,7 @@ describe('replacement overrides', () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }).run()
+    mirrorPrivateBook(db, ownerId, [bookId])
   })
 
   it('upserts an override and repeated puts with the same value are idempotent', async () => {

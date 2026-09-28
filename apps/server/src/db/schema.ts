@@ -529,7 +529,7 @@ export const contentRevisions = sqliteTable('content_revisions', {
   size: integer('size').notNull(),
   wordCount: integer('word_count'),
   chapterCount: integer('chapter_count').notNull().default(0),
-  // Full BookMeta shape (chapters, embedded metadata, reader prefs, TOC pins):
+  // Full content metadata shape (chapters, embedded metadata, TOC pins):
   // the revision that produced the content owns its derived data. Readers
   // prefer this over the frozen legacy books.meta fallback.
   meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),

@@ -1,7 +1,7 @@
 import type { AccessTokenDuration, AccessTokenPermission } from './access-tokens'
 import type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
-import type { BookSourceInfo } from './library'
+import type { BookSourceInfo, LibraryVersionKind } from './library'
 import type { AnnotationStyle, AnnotationType, TocRulePattern, ReplacementMatchType, ReplacementScope, ViewSettings } from './domain'
 
 export interface ApiResponse<T> {
@@ -263,6 +263,7 @@ export interface AdminUserRes {
   disabled: boolean
   createdAt: number
   bookCount: number
+  avatarKey?: string | null
 }
 
 /** Instance ownership no longer moves through PATCH (4.9) — it is a transfer. */
@@ -1153,12 +1154,16 @@ export interface BookListItem {
   deletedAt?: number | null
   /** Single-shelf membership; null = uncategorized. Drives drag-to-shelf no-op checks. */
   shelfId: string | null
+  /** Private-library entry kind; A is personal, B is shared, C is local. */
+  kind?: LibraryVersionKind
   /** Resolved shelf name (null when uncategorized); list view info line only */
   shelfName?: string | null
   /** Tag names attached to the book; list view info line only */
   tags?: string[]
-  /** Pinned placeholder-cover palette picked by the user; absent = auto id-hash palette */
+  /** Pinned placeholder-cover palette picked by the user; absent = automatic stable-key palette */
   coverPaletteId?: CoverPaletteId | null
+  /** Stable key for the automatic placeholder-cover palette. */
+  coverPaletteKey?: string | null
   /**
    * 7.7: the shared library this card was collected from. Null for A (own
    * upload) and C (forked). Its presence means the content stays
@@ -1219,10 +1224,9 @@ export interface BookMeta {
   fileName?: string
   /** Total word count of the book (sum of chapter word counts) */
   wordCount?: number
-  /** Per-book reading-setting overrides (F1), see ViewSettings */
+  /** @deprecated Legacy migration input; current responses expose readerSettings instead. */
   viewSettings?: ViewSettings
-  /** Reading preset bound to this book (reading-profile id); a dangling id
-   * (preset deleted) falls back to the device resolution chain */
+  /** @deprecated Legacy migration input; current responses expose readerSettings instead. */
   boundPresetId?: string
   /** TOC rule pinned to this book (id); dangling id falls back to auto-scoring
    * then the built-in default patterns. `tocRuleAuto` records that the pin was
@@ -1240,9 +1244,16 @@ export interface BookMeta {
   tocExcludedLeadingText?: string
 }
 
+/** User-scoped reading preferences for one BookVersion. */
+export interface ReaderBookSettings {
+  viewSettings?: ViewSettings
+  boundPresetId?: string
+}
+
 export interface BookDetailRes extends BookListItem {
   filePath: string
   meta: BookMeta
+  readerSettings: ReaderBookSettings
 }
 
 export interface Chapter {

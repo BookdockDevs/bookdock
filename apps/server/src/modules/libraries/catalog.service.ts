@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import {
@@ -9,6 +9,7 @@ import {
   libraryBookVersions,
   libraryCategories,
   libraryTags,
+  libraries,
 } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { assertLibraryBrowsable, deleteOrphanedBookVersions, requireLibraryManager } from './library-access'
@@ -70,9 +71,14 @@ function toCatalogVersion(
   work: typeof libraryBooks.$inferSelect,
   link: typeof libraryBookVersions.$inferSelect,
   facts: { versions: Map<string, typeof bookVersions.$inferSelect>; revisions: Map<string, typeof contentRevisions.$inferSelect> },
+  collectedVersionIds?: ReadonlySet<string>,
 ): CatalogVersion {
   const version = facts.versions.get(link.bookVersionId)
   const revision = facts.revisions.get(link.bookVersionId)
+  // Publication metadata travels with the version; only these two keys are
+  // exposed - the revision meta also carries internal pipeline state
+  // (chapters, toc scoring) that is not catalog business.
+  const revisionMeta = (revision?.meta ?? {}) as { bookmeta?: CatalogVersion['effective']['bookmeta']; fileName?: unknown; coverPaletteKey?: unknown }
   return {
     id: link.id,
     libraryBookId: link.libraryBookId,
@@ -91,11 +97,16 @@ function toCatalogVersion(
       author: link.author ?? work.author,
       description: link.description ?? work.description,
       coverKey: link.coverKey ?? work.coverKey,
+      coverPaletteKey: typeof revisionMeta.coverPaletteKey === 'string' ? revisionMeta.coverPaletteKey : null,
+      bookmeta: revisionMeta.bookmeta ?? {},
+      fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
     },
+    collected: collectedVersionIds?.has(link.bookVersionId) ?? false,
     format: version?.format ?? 'epub',
     size: version?.size ?? 0,
     chapterCount: revision?.chapterCount ?? 0,
     wordCount: revision?.wordCount ?? null,
+    pinnedAt: link.pinnedAt ?? null,
     createdAt: link.createdAt,
     updatedAt: link.updatedAt,
   }
@@ -106,6 +117,7 @@ function toCatalogBook(
   links: typeof libraryBookVersions.$inferSelect[],
   tags: CatalogBookTag[] = [],
   facts?: { versions: Map<string, typeof bookVersions.$inferSelect>; revisions: Map<string, typeof contentRevisions.$inferSelect> },
+  collectedVersionIds?: ReadonlySet<string>,
 ): CatalogBook {
   const resolved = facts ?? { versions: new Map(), revisions: new Map() }
   return {
@@ -117,10 +129,24 @@ function toCatalogBook(
     description: work.description,
     coverKey: work.coverKey,
     tags,
-    versions: links.map((link) => toCatalogVersion(work, link, resolved)),
+    versions: links.map((link) => toCatalogVersion(work, link, resolved, collectedVersionIds)),
     createdAt: work.createdAt,
     updatedAt: work.updatedAt,
   }
+}
+
+function getCollectedVersionIds(actorId: string, versionIds: string[]) {
+  const db = getDb()
+  if (versionIds.length === 0) return new Set<string>()
+  const privateLibrary = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, actorId), eq(libraries.type, 'private'))).get()
+  if (!privateLibrary) return new Set<string>()
+  return new Set(db.select({ bookVersionId: libraryBookVersions.bookVersionId })
+    .from(libraryBookVersions)
+    .where(and(
+      eq(libraryBookVersions.libraryId, privateLibrary.id),
+      inArray(libraryBookVersions.bookVersionId, versionIds),
+    )).all().map((row) => row.bookVersionId))
 }
 
 /**
@@ -246,7 +272,9 @@ export async function listCatalogBooks(
         INNER JOIN book_versions bv ON bv.id = v.book_version_id
         WHERE v.library_book_id = ${libraryBooks.id} AND v.status = 'published'), 0)`
   const works = db.select().from(libraryBooks).where(where)
-    .orderBy(...libraryOrderBy(params.sortBy, params.sortOrder, {
+    // A manager's pin sorts the work first for everyone in the library, the
+    // same sort-first rule private cards use. One pinned version pins the work.
+    .orderBy(asc(sql`(SELECT max(v.pinned_at) FROM library_book_versions v WHERE v.library_book_id = ${libraryBooks.id}) IS NULL`), ...libraryOrderBy(params.sortBy, params.sortOrder, {
       title: libraryBooks.title,
       author: libraryBooks.author,
       size: sizeColumn,
@@ -258,6 +286,7 @@ export async function listCatalogBooks(
     .where(inArray(libraryBookVersions.libraryBookId, works.map((w) => w.id)))
     .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all()
   const facts = loadVersionFacts([...new Set(links.map((link) => link.bookVersionId))])
+  const collectedVersionIds = getCollectedVersionIds(actorId, [...new Set(links.map((link) => link.bookVersionId))])
   const tagMap = tagNamesByWork(db, works.map((w) => w.id))
   return {
     items: works.map((work) => toCatalogBook(
@@ -265,6 +294,7 @@ export async function listCatalogBooks(
       links.filter((link) => link.libraryBookId === work.id && (includeUnlisted || link.status === 'published')),
       tagMap.get(work.id) ?? [],
       facts,
+      collectedVersionIds,
     )),
     total,
     page,
@@ -281,11 +311,13 @@ export async function getCatalogBook(actorId: string, libraryId: string, library
     .where(eq(libraryBookVersions.libraryBookId, work.id))
     .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all()
   const facts = loadVersionFacts(links.map((link) => link.bookVersionId))
+  const collectedVersionIds = getCollectedVersionIds(actorId, links.map((link) => link.bookVersionId))
   return toCatalogBook(
     work,
     links.filter((link) => includeUnlisted || link.status === 'published'),
     tagNamesByWork(db, [work.id]).get(work.id) ?? [],
     facts,
+    collectedVersionIds,
   )
 }
 
@@ -337,6 +369,7 @@ export async function updateCatalogVersion(
   if (patch.author !== undefined) updates.author = patch.author
   if (patch.description !== undefined) updates.description = patch.description
   if (patch.status !== undefined) updates.status = patch.status
+  if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? Date.now() : null
   db.update(libraryBookVersions).set(updates).where(eq(libraryBookVersions.id, link.id)).run()
   const book = await getCatalogBook(actorId, libraryId, libraryBookId)
   const updated = book.versions.find((v) => v.id === link.id)
@@ -390,6 +423,7 @@ export async function findSimilarWorks(
   const links = candidates.length === 0 ? [] : db.select().from(libraryBookVersions)
     .where(inArray(libraryBookVersions.libraryBookId, candidates.map((c) => c.work.id))).all()
   const facts = loadVersionFacts([...new Set(links.map((link) => link.bookVersionId))])
+  const collectedVersionIds = getCollectedVersionIds(actorId, [...new Set(links.map((link) => link.bookVersionId))])
   const includeUnlisted = await isLibraryManager(actorId, libraryId)
   const visibleLinks = (workId: string) => links.filter(
     (link) => link.libraryBookId === workId && (includeUnlisted || link.status === 'published'),
@@ -397,7 +431,7 @@ export async function findSimilarWorks(
   return candidates
     .filter(({ work }) => includeUnlisted || visibleLinks(work.id).length > 0)
     .map(({ work, score }) => ({
-      ...toCatalogBook(work, visibleLinks(work.id), [], facts),
+      ...toCatalogBook(work, visibleLinks(work.id), [], facts, collectedVersionIds),
       matchScore: score,
     }))
 }

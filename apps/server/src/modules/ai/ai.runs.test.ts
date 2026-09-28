@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createTestDb } from '../../__tests__/setup'
 import { getDb } from '../../db/client'
-import { aiGenerationRuns, aiMessageEvents, aiMessages, aiThreads, books, users } from '../../db/schema'
+import { aiGenerationRuns, aiMessageEvents, aiMessages, aiThreads, books, bookVersions, contentRevisions, libraryBooks, libraryBookVersions, libraries, users } from '../../db/schema'
 
 vi.mock('../../db/client', () => ({ getDb: vi.fn() }))
 
@@ -20,6 +20,12 @@ describe('AI generation run service', () => {
       { id: 'book-1', userId: 'user-1', title: 'Book 1', format: 'txt', filePath: '/book-1.txt', size: 10, createdAt: 1, updatedAt: 1 },
       { id: 'book-2', userId: 'user-2', title: 'Book 2', format: 'txt', filePath: '/book-2.txt', size: 10, createdAt: 1, updatedAt: 1 },
     ]).run()
+    const now = Date.now()
+    db.insert(libraries).values({ id: 'private-user-1', userId: 'user-1', type: 'private', name: 'Private', description: '', visibility: null, createdAt: now, updatedAt: now }).run()
+    db.insert(bookVersions).values({ id: 'book-1', format: 'txt', size: 10, createdAt: now, updatedAt: now }).run()
+    db.insert(contentRevisions).values({ id: 'revision-book-1', bookVersionId: 'book-1', revisionNo: 1, blobKey: '/book-1.txt', size: 10, chapterCount: 0, meta: {}, createdAt: now }).run()
+    db.insert(libraryBooks).values({ id: 'library-book-1', libraryId: 'private-user-1', userId: 'user-1', title: 'Book', author: '', description: '', coverKey: null, createdAt: now, updatedAt: now }).run()
+    db.insert(libraryBookVersions).values({ id: 'link-book-1', libraryId: 'private-user-1', libraryBookId: 'library-book-1', bookVersionId: 'book-1', kind: 'personal', status: 'published', createdAt: now, updatedAt: now }).run()
     db.insert(aiThreads).values({ id: 'thread-1', userId: 'user-1', bookId: 'book-1', title: 'Thread', settings: null, createdAt: 1, updatedAt: 1 }).run()
   })
 

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import type { BookFormat, ReadStatus } from './constants'
+import type { BookMetadata } from './contract'
 
 /**
  * Target library/city model (library-design-v1 v1.4).
@@ -98,13 +99,14 @@ export interface LibraryMemberEntry {
   id: string
   userId: string
   username: string
+  avatarKey?: string | null
   role: MembershipRole
   createdAt: number
   updatedAt: number
 }
 
 export interface LibraryMembersRes {
-  owner: { id: string; username: string } | null
+  owner: { id: string; username: string; avatarKey?: string | null; createdAt?: number } | null
   members: LibraryMemberEntry[]
 }
 
@@ -186,11 +188,21 @@ export interface CatalogVersion {
     author: string
     description: string
     coverKey: string | null
+    /** Stable key used for the automatic placeholder-cover palette. */
+    coverPaletteKey?: string | null
+    /** Parsed publication metadata of this version's latest revision. */
+    bookmeta: BookMetadata
+  /** Original uploaded file name, surviving later title edits. */
+  fileName: string | null
   }
+  /** Whether this version already has a B entry in the current user's private library. */
+  collected?: boolean
   format: BookFormat
   size: number
   chapterCount: number
   wordCount: number | null
+  /** Library-wide sort-first pin, manager-only. Null when not pinned. */
+  pinnedAt: number | null
   createdAt: number
   updatedAt: number
 }
@@ -259,6 +271,8 @@ export const catalogVersionUpdateSchema = z.object({
   author: z.string().trim().max(300).nullable().optional(),
   description: z.string().max(4000).nullable().optional(),
   status: libraryVersionStatusSchema.optional(),
+  /** Library-wide sort-first pin; manager-only like every other version write. */
+  pinned: z.boolean().optional(),
 })
 
 export type CatalogVersionUpdateReq = z.infer<typeof catalogVersionUpdateSchema>
@@ -349,6 +363,22 @@ export interface CollectBookRes {
   alreadyExists: boolean
   sourceLibraryId: string
   sourceLibraryBookVersionId: string
+}
+
+/** Publish a private A entry into a managed shared library as an independent snapshot. */
+export const publishPrivateBookSchema = z.object({
+  bookId: z.string().min(1).max(128),
+  categoryId: z.string().min(1).max(128).optional(),
+  tagIds: z.array(z.string().min(1).max(128)).optional(),
+})
+
+export type PublishPrivateBookReq = z.infer<typeof publishPrivateBookSchema>
+
+export interface PublishPrivateBookRes {
+  libraryBookId: string
+  versionLinkId: string
+  bookVersionId: string
+  duplicated: boolean
 }
 
 /** Where a private card came from (7.7). Null for A and C. */

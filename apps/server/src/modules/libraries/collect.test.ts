@@ -15,7 +15,7 @@ import { createId } from '../../lib/id'
 import { readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
-import { getActiveBook, getBook, reTocBook, appendTxtBookContent, resetBookMetadata, updateBook, uploadBook, deleteBook, updateBookCover, removeBookCover } from '../books/books.service'
+import { assertReadableBookSync, getActiveBook, getBook, reTocBook, appendTxtBookContent, resetBookMetadata, updateBook, uploadBook, deleteBook, updateBookCover, removeBookCover } from '../books/books.service'
 import { uploadCatalogBook } from '../books/books.service'
 import { addMember, createLibrary, deleteLibrary } from './libraries.service'
 import { updateCatalogVersion } from './catalog.service'
@@ -23,6 +23,7 @@ import { addToPrivateLibrary, describeCollectSource } from './collect.service'
 import { sourceStillReadable } from './library-access'
 import { createAnnotation, listAnnotations } from '../annotations/annotations.service'
 import { addReadingTime } from '../reading-records/reading-records.service'
+import { updateReaderBookSettings } from '../books/reader-settings.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -197,12 +198,15 @@ describe('add-to-private (7.x)', () => {
     const city = await seedCityBook()
     await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
     expect(await sourceStillReadable(memberId, city.bookVersionId)).toBe(true)
+    expect(() => assertReadableBookSync(memberId, city.bookVersionId)).not.toThrow()
     expect((await getActiveBook(memberId, city.bookVersionId)).id).toBe(city.bookVersionId)
 
     // Losing membership closes the content while the card stays put.
     await addMember(ownerId, libraryId, { userId: memberId, role: 'member' })
     await updateCatalogVersion(ownerId, libraryId, city.libraryBookId, city.versionLinkId!, { status: 'unlisted' })
     expect(await sourceStillReadable(memberId, city.bookVersionId)).toBe(false)
+    expect(() => assertReadableBookSync(memberId, city.bookVersionId))
+      .toThrowError(expect.objectContaining({ code: 'BOOK_NOT_FOUND' }))
     await expect(getActiveBook(memberId, city.bookVersionId)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
     // The private row keeps naming its source.
     expect(await describeCollectSource(memberId, city.bookVersionId)).toMatchObject({
@@ -421,16 +425,16 @@ describe('add-to-private (7.x)', () => {
     }).run()).not.toThrow()
   })
 
-  it('refuses revision-bound display edits on a B but keeps private ones', async () => {
+  it('keeps reader settings user-scoped while refusing shared content edits on a B', async () => {
     const city = await seedCityBook()
     await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
     const revisionBefore = db.select().from(schema.contentRevisions)
       .where(eq(schema.contentRevisions.bookVersionId, city.bookVersionId)).get()!
 
-    // viewSettings/bookmeta/palette live on the shared revision: a B must not
-    // touch them, while title/author stay private-local.
-    await expect(updateBook(memberId, city.bookVersionId, { viewSettings: { fontSize: 20 } as never }))
-      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    // Reader settings belong to the member, while palette/content edits remain
+    // on the shared revision and are still forbidden for a B.
+    expect(updateReaderBookSettings(memberId, city.bookVersionId, { viewSettings: { fontSize: 20 } }))
+      .toEqual({ viewSettings: { fontSize: 20 } })
     await expect(updateBook(memberId, city.bookVersionId, { coverPaletteId: 'warm' as never }))
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
     expect(db.select().from(schema.contentRevisions)
@@ -536,5 +540,61 @@ describe('add-to-private (7.x)', () => {
     expect(renamed.title).toBe('我的三体')
     const cityWork = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, city.libraryBookId)).get()!
     expect(cityWork.title).toBe('三体')
+  })
+
+  it('uncollecting a book retains user reading state and notes by default, but deletes them when deleteUserData is true', async () => {
+    const city = await seedCityBook()
+    await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
+
+    // Seed user reading state and highlight
+    db.update(schema.bookStates).set({ percent: 50, readStatus: 'reading' })
+      .where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, city.bookVersionId))).run()
+    db.insert(schema.highlights).values({
+      id: 'hl-test-1',
+      userId: memberId,
+      bookVersionId: city.bookVersionId,
+      cfiRange: 'epubcfi(/6/2!/4/2)',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }).run()
+
+    // 1. Uncollect without deleteUserData
+    await deleteBook(memberId, city.bookVersionId)
+
+    // Private row is gone
+    const privateLib = db.select({ id: schema.libraries.id }).from(schema.libraries)
+      .where(and(eq(schema.libraries.userId, memberId), eq(schema.libraries.type, 'private'))).get()!
+    const link = db.select().from(schema.libraryBookVersions)
+      .where(and(eq(schema.libraryBookVersions.libraryId, privateLib.id), eq(schema.libraryBookVersions.bookVersionId, city.bookVersionId))).get()
+    expect(link).toBeUndefined()
+
+    // But reading state & highlights are still preserved
+    const state = db.select().from(schema.bookStates)
+      .where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, city.bookVersionId))).get()
+    expect(state).toBeDefined()
+    expect(state!.percent).toBe(50)
+    const hl = db.select().from(schema.highlights)
+      .where(and(eq(schema.highlights.userId, memberId), eq(schema.highlights.bookVersionId, city.bookVersionId))).get()
+    expect(hl).toBeDefined()
+
+    // 2. Re-collect and verify reading state is preserved
+    await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
+    const recollectedState = db.select().from(schema.bookStates)
+      .where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, city.bookVersionId))).get()
+    expect(recollectedState!.percent).toBe(50)
+
+    // 3. Uncollect with deleteUserData: true
+    await deleteBook(memberId, city.bookVersionId, { deleteUserData: true })
+
+    const deletedState = db.select().from(schema.bookStates)
+      .where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, city.bookVersionId))).get()
+    expect(deletedState).toBeUndefined()
+    const deletedHl = db.select().from(schema.highlights)
+      .where(and(eq(schema.highlights.userId, memberId), eq(schema.highlights.bookVersionId, city.bookVersionId))).get()
+    expect(deletedHl).toBeUndefined()
+
+    // City book in shared library is untouched
+    const cityWork = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, city.libraryBookId)).get()
+    expect(cityWork).toBeDefined()
   })
 })

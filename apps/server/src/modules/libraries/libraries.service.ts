@@ -137,10 +137,15 @@ export async function listLibraries(identity: LibraryIdentity) {
       memberLibraryIds.length > 0
         ? or(
           eq(libraries.userId, identity.userId),
-          eq(libraries.visibility, 'public'),
           inArray(libraries.id, memberLibraryIds),
+          eq(libraries.visibility, 'public'),
+          eq(libraries.visibility, 'password'),
         )
-        : or(eq(libraries.userId, identity.userId), eq(libraries.visibility, 'public')),
+        : or(
+          eq(libraries.userId, identity.userId),
+          eq(libraries.visibility, 'public'),
+          eq(libraries.visibility, 'password'),
+        ),
     ))
     .orderBy(desc(libraries.updatedAt)).all()
   const ownPrivate = db.select().from(libraries)
@@ -263,15 +268,24 @@ export async function listMembers(actorId: string, libraryId: string): Promise<L
   const owner = db.select().from(users).where(eq(users.id, library.userId)).get()
   const rows = db.select().from(libraryMemberships).where(eq(libraryMemberships.libraryId, libraryId))
     .orderBy(desc(libraryMemberships.createdAt)).all()
-  // Usernames travel with the rows: a member list without them is unusable.
-  const usernames = new Map(
-    db.select({ id: users.id, username: users.username }).from(users)
-      .where(inArray(users.id, rows.map((row) => row.userId))).all()
-      .map((row) => [row.id, row.username]),
+  // User profiles travel with the rows: a member list without them is unusable.
+  const memberUsers = new Map(
+    rows.length > 0
+      ? db.select({ id: users.id, username: users.username, avatarKey: users.avatarKey }).from(users)
+          .where(inArray(users.id, rows.map((row) => row.userId))).all()
+          .map((row) => [row.id, row])
+      : [],
   )
   return {
-    owner: owner ? { id: owner.id, username: owner.username } : null,
-    members: rows.map((row) => ({ ...toMembershipRes(row), username: usernames.get(row.userId) ?? '' })),
+    owner: owner ? { id: owner.id, username: owner.username, avatarKey: owner.avatarKey, createdAt: library.createdAt } : null,
+    members: rows.map((row) => {
+      const u = memberUsers.get(row.userId)
+      return {
+        ...toMembershipRes(row),
+        username: u?.username ?? '',
+        avatarKey: u?.avatarKey ?? null,
+      }
+    }),
   }
 }
 

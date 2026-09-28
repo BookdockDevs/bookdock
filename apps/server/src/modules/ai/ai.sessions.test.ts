@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 
 import { createTestDb } from '../../__tests__/setup'
 import { getDb } from '../../db/client'
-import { aiMessageEvents, aiMessages, aiThreads, books, bookVersions, users } from '../../db/schema'
+import { aiMessageEvents, aiMessages, aiThreads, books, bookVersions, contentRevisions, libraryBooks, libraryBookVersions, libraries, users } from '../../db/schema'
 
 vi.mock('../../db/client', () => ({ getDb: vi.fn() }))
 
@@ -21,6 +21,16 @@ describe('AI session service', () => {
       { id: 'book-1', userId: 'user-1', title: 'Book 1', format: 'txt', filePath: '/book-1.txt', size: 10, createdAt: 1, updatedAt: 1 },
       { id: 'book-2', userId: 'user-2', title: 'Book 2', format: 'txt', filePath: '/book-2.txt', size: 10, createdAt: 1, updatedAt: 1 },
     ]).run()
+    for (const [userId, bookId] of [['user-1', 'book-1'], ['user-2', 'book-2']] as const) {
+      const now = Date.now()
+      const libraryId = `private-${userId}`
+      const libraryBookId = `library-book-${bookId}`
+      db.insert(libraries).values({ id: libraryId, userId, type: 'private', name: 'Private', description: '', visibility: null, createdAt: now, updatedAt: now }).run()
+      db.insert(bookVersions).values({ id: bookId, format: 'txt', size: 10, createdAt: now, updatedAt: now }).run()
+      db.insert(contentRevisions).values({ id: `revision-${bookId}`, bookVersionId: bookId, revisionNo: 1, blobKey: `/book-${bookId}.txt`, size: 10, chapterCount: 0, meta: {}, createdAt: now }).run()
+      db.insert(libraryBooks).values({ id: libraryBookId, libraryId, userId, title: 'Book', author: '', description: '', coverKey: null, createdAt: now, updatedAt: now }).run()
+      db.insert(libraryBookVersions).values({ id: `link-${bookId}`, libraryId, libraryBookId, bookVersionId: bookId, kind: 'personal', status: 'published', createdAt: now, updatedAt: now }).run()
+    }
   })
 
   it('creates, lists, restores, renames, and deletes a book-scoped thread', () => {
@@ -216,12 +226,7 @@ describe('AI session service', () => {
     expect(() => saveAiMessage('user-2', thread.id, { role: 'user', content: '越权写入' })).toThrow('AI thread not found')
   })
 
-  it('binds the version when the book already migrated, stays unbound otherwise', () => {
-    const plain = createAiThread('user-1', { bookId: 'book-1' })
-    expect(getDb().select({ bookVersionId: aiThreads.bookVersionId }).from(aiThreads).where(eq(aiThreads.id, plain.id)).get())
-      .toEqual({ bookVersionId: null })
-
-    getDb().insert(bookVersions).values({ id: 'book-1', format: 'txt', size: 10, createdAt: 1, updatedAt: 1 }).run()
+  it('binds the version in the current library model', () => {
     const bound = createAiThread('user-1', { bookId: 'book-1' })
     expect(getDb().select({ bookVersionId: aiThreads.bookVersionId }).from(aiThreads).where(eq(aiThreads.id, bound.id)).get())
       .toEqual({ bookVersionId: 'book-1' })

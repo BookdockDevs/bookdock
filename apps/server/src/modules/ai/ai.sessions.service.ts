@@ -4,9 +4,10 @@ import { AI_DEFAULT_READING_SCOPE, AI_TOOL_NAMES, normalizeAiCitationMarkers, no
 import type { AiCitation, AiContextReceipt, AiHistoryMessage, AiMessageEventRes, AiMessageRevisionRes, AiReadingScope, AiRetryRecipe, AiThreadCreateReq, AiThreadDetailRes, AiThreadListReq, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, AiToolName } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { aiMessageEvents, aiMessages, aiThreads, books, bookVersions, libraries, libraryBookVersions } from '../../db/schema'
+import { aiMessageEvents, aiMessages, aiThreads, bookVersions } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { AppError } from '../../middleware/error'
+import { assertReadableBookSync } from '../books/books.service'
 import { getLatestAiGenerationRun } from './ai.runs.service'
 
 const DEFAULT_THREAD_TITLE = '新对话'
@@ -42,19 +43,7 @@ function normalizeThreadSettings(value: unknown): AiThreadSettings {
 }
 
 function assertBookOwnership(userId: string, bookId: string) {
-  const db = getDb()
-  const book = db.select({ id: books.id }).from(books).where(and(
-    eq(books.id, bookId),
-    eq(books.userId, userId),
-    isNull(books.deletedAt),
-  )).get()
-  if (book) return
-  // Version-native books have no legacy row: ownership is the private library.
-  const library = db.select({ id: libraries.id }).from(libraries)
-    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
-  const version = library && db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
-    .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
-  if (!version) throw new AppError('BOOK_NOT_FOUND')
+  assertReadableBookSync(userId, bookId)
 }
 
 function titleFromPrompt(prompt: string) {

@@ -1,9 +1,10 @@
 import { Hono, type Context } from 'hono'
-import { appendContentSchema, paginationSchema, bookMembershipSchema, bookFormatSchema, bookUpdateSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
+import { appendContentSchema, paginationSchema, bookMembershipSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
   deleteBook,
+  resolveLibraryBook,
   trashBook,
   restoreBook,
   emptyTrash,
@@ -27,7 +28,9 @@ import {
   previewBookToc,
   previewAppendTxtBookContent,
   appendTxtBookContent,
+  assertReadableBook,
 } from './books.service'
+import { updateReaderBookSettings } from './reader-settings.service'
 import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { getStorage } from '../../storage'
@@ -290,6 +293,20 @@ booksRoutes.get('/:id/chapters', async (c) => {
   return c.json({ data: chapters })
 })
 
+booksRoutes.patch('/:id/reader-settings', async (c) => {
+  const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') {
+    throw new AppError('FORBIDDEN', 'Guest sessions cannot save reader settings')
+  }
+  const id = c.req.param('id')
+  await assertReadableBook(user.id, id)
+  const parsed = readerBookSettingsSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    throw new AppError('VALIDATION_ERROR', 'Invalid reader settings', parsed.error.flatten())
+  }
+  return c.json({ data: updateReaderBookSettings(user.id, id, parsed.data) })
+})
+
 booksRoutes.patch('/:id', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
@@ -352,8 +369,16 @@ booksRoutes.delete('/:id', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
   // With trash disabled, deletion is immediate and unrecoverable.
-  if (isTrashEnabled(user.id)) await trashBook(user.id, id)
-  else await deleteBook(user.id, id)
+  const deleteUserData = c.req.query('deleteUserData') === 'true'
+  const bookInfo = resolveLibraryBook(user.id, id)
+  const isCollected = bookInfo.kind === 'shared'
+
+  if (isCollected) {
+    await deleteBook(user.id, id, { deleteUserData })
+  } else if (isTrashEnabled(user.id)) {
+    await trashBook(user.id, id)
+  }
+  else await deleteBook(user.id, id, { deleteUserData })
   return c.json({ data: null })
 })
 
@@ -368,7 +393,8 @@ booksRoutes.post('/:id/restore', async (c) => {
 booksRoutes.delete('/:id/permanent', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
-  await deleteBook(user.id, id)
+  const deleteUserData = c.req.query('deleteUserData') === 'true'
+  await deleteBook(user.id, id, { deleteUserData })
   return c.json({ data: null })
 })
 

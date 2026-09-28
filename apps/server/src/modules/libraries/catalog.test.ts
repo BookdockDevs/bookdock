@@ -16,6 +16,7 @@ import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
 import { uploadCatalogBook } from '../books/books.service'
 import { createLibrary } from './libraries.service'
+import { addToPrivateLibrary } from './collect.service'
 import { resolveSharedVersionRead, resolveSourceRead } from './library-access'
 import {
   deleteCatalogVersion,
@@ -203,6 +204,35 @@ describe('shared library catalog', () => {
     const hidden = await uploadCatalogBook(hiddenId, ownerId, txtFile('h.txt', 'x'), { title: 'Secret' })
     await expect(getCatalogBook(outsiderId, hiddenId, hidden.libraryBookId))
       .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
+  })
+
+  it('marks a catalog version already collected by the current user', async () => {
+    const source = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'x'), { title: 'Already Mine' })
+    const privateLibraryId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: privateLibraryId, userId: ownerId, type: 'private', name: 'owner',
+      description: '', visibility: null, createdAt: 1, updatedAt: 1,
+    }).run()
+
+    await addToPrivateLibrary(ownerId, libraryId, source.versionLinkId!)
+
+    expect((await getCatalogBook(ownerId, libraryId, source.libraryBookId)).versions[0]?.collected).toBe(true)
+    expect((await getCatalogBook(memberId, libraryId, source.libraryBookId)).versions[0]?.collected).toBe(false)
+  })
+
+  it('pins a work first for everyone, manager-only', async () => {
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'x'), { title: 'Alpha' })
+    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'y'), { title: 'Beta' })
+    // Reading is not curating: a plain member cannot pin.
+    await expect(updateCatalogVersion(memberId, libraryId, second.libraryBookId, second.versionLinkId!, { pinned: true }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    const pinned = await updateCatalogVersion(ownerId, libraryId, second.libraryBookId, second.versionLinkId!, { pinned: true })
+    expect(pinned.pinnedAt).not.toBeNull()
+    // The pin sorts first for every reader, not just the manager who set it.
+    expect((await listCatalogBooks(memberId, libraryId, {})).items.map((work) => work.id))
+      .toEqual([second.libraryBookId, first.libraryBookId])
+    const unpinned = await updateCatalogVersion(adminId, libraryId, second.libraryBookId, second.versionLinkId!, { pinned: false })
+    expect(unpinned.pinnedAt).toBeNull()
   })
 
   it('filters and orders the catalog by the same vocabulary as a private list', async () => {
