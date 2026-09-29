@@ -18,6 +18,7 @@ import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NO
 import { sortSidebarItems } from '../sort-modes'
 import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleShelfHidden, useToggleTagPin, useToggleTagHidden, useTrashEnabled, useLibraryPrefs, useHiddenLibraries, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import HiddenIndicator from './HiddenIndicator'
 import LibraryDetailsDialog from './LibraryDetailsDialog'
 import ShelfDialog from './ShelfDialog'
 import TagDialog from './TagDialog'
@@ -854,6 +855,7 @@ function NavItem({
   active = false,
   activeVariant = 'primary',
   icon,
+  badge,
   onClick,
   onPointerEnter,
   // dnd-kit's attributes/listeners. NavItem renders its own button rather than
@@ -868,6 +870,8 @@ function NavItem({
   active?: boolean
   activeVariant?: 'primary' | 'scope'
   icon?: React.ReactNode
+  /** Trailing mark inside the label run (the taxonomy hidden badge). */
+  badge?: React.ReactNode
   onClick: () => void
   onPointerEnter?: () => void
   dragHandleProps?: Record<string, unknown>
@@ -905,22 +909,25 @@ function NavItem({
         )}
         <span className="truncate">{label}</span>
       </span>
-      {count !== undefined && count > 0 && (
-        <span
-          className={cn(
-            'ml-2 shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums transition-all',
-            hasMenu && 'group-hover:opacity-0',
-            countHidden && 'opacity-0',
-            active
-              ? activeVariant === 'scope'
-                ? 'bg-stone-200/80 text-stone-700 dark:bg-stone-700/50 dark:text-stone-300'
-                : 'bg-stone-100 text-stone-700 dark:bg-stone-700/60 dark:text-stone-200'
-              : 'text-stone-400 bg-stone-200/40 group-hover:bg-stone-200/70 group-hover:text-stone-600 dark:text-stone-400 dark:bg-stone-900/60 dark:group-hover:bg-stone-800/70 dark:group-hover:text-stone-300',
-          )}
-        >
-          {count}
-        </span>
-      )}
+      <span className="flex shrink-0 items-center gap-1.5">
+        {badge}
+        {count !== undefined && (
+          <span
+            className={cn(
+              'rounded-full px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums transition-all',
+              hasMenu && 'group-hover:opacity-0',
+              countHidden && 'opacity-0',
+              active
+                ? activeVariant === 'scope'
+                  ? 'bg-stone-200/80 text-stone-700 dark:bg-stone-700/50 dark:text-stone-300'
+                  : 'bg-stone-100 text-stone-700 dark:bg-stone-700/60 dark:text-stone-200'
+                : 'text-stone-400 bg-stone-200/40 group-hover:bg-stone-200/70 group-hover:text-stone-600 dark:text-stone-400 dark:bg-stone-900/60 dark:group-hover:bg-stone-800/70 dark:group-hover:text-stone-300',
+            )}
+          >
+            {count}
+          </span>
+        )}
+      </span>
     </button>
   )
 }
@@ -1023,7 +1030,7 @@ function ShelfItem({
         transform: CSS.Transform.toString(transform),
         transition: settling ? 'transform 120ms ease-out' : transition,
       }}
-      className={cn('group relative', isDragging && 'z-10 opacity-60', shelf.hidden && 'opacity-60')}
+      className={cn('group relative', isDragging && 'z-10 opacity-60')}
       {...attributes}
       {...listeners}
       onContextMenu={!readOnly ? (e) => {
@@ -1037,6 +1044,7 @@ function ShelfItem({
         label={shelf.name}
         count={shelf.bookCount}
         countHidden={!readOnly && menu.open}
+        badge={shelf.hidden ? <HiddenIndicator kind="work" /> : undefined}
         hasMenu={!readOnly}
         active={active || dropHint}
         icon={
@@ -1187,7 +1195,7 @@ function TagItem({
         transform: CSS.Transform.toString(transform),
         transition: settling ? 'transform 120ms ease-out' : transition,
       }}
-      className={cn('group relative', isDragging && 'z-10 opacity-60', tag.hidden && 'opacity-60')}
+      className={cn('group relative', isDragging && 'z-10 opacity-60')}
       {...attributes}
       {...listeners}
       onContextMenu={!readOnly ? (e) => {
@@ -1202,6 +1210,7 @@ function TagItem({
         count={tag.bookCount}
         countHidden={!readOnly && menu.open}
         hasMenu={!readOnly}
+        badge={tag.hidden ? <HiddenIndicator kind="work" /> : undefined}
         active={active}
         icon={
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

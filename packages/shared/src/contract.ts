@@ -1214,6 +1214,12 @@ export interface BookListItem {
   collected?: boolean
   /** Work-level hide; private vault rows surface only with showHidden. */
   hidden?: boolean
+  /**
+   * Effective hide: direct hide or hidden through a hidden shelf/tag.
+   * Badge on this, never on `hidden` alone — otherwise works hidden through
+   * taxonomy would surface in reveal mode with no mark.
+   */
+  effectiveHidden: boolean
 }
 
 export interface BookContributor {

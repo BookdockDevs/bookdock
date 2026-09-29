@@ -94,6 +94,11 @@ describe('CatalogCard', () => {
     expect(screen.getByRole('img', { name: '含隐藏版本' })).toBeInTheDocument()
   })
 
+  it('badges taxonomy-hidden works without the direct flag', () => {
+    renderCard(work({ hidden: false, effectiveHidden: true }))
+    expect(screen.getByRole('img', { name: '作品已隐藏' })).toBeInTheDocument()
+  })
+
   it('draws its cover with the shared cover component and endpoint', () => {
     const { container } = renderRow(
       <CatalogCard

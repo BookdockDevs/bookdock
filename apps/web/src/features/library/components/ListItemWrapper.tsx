@@ -139,7 +139,7 @@ function ListItemContent({ book }: { book: BookListItem }) {
         <span className="truncate font-serif text-sm font-medium text-stone-900 dark:text-stone-100">
           {book.title}
         </span>
-        {book.hidden && <HiddenIndicator kind="private" overlay />}
+        {(book.hidden || book.effectiveHidden) && <HiddenIndicator kind="private" overlay />}
         {book.pinnedAt && (
           <UnpinButton
             bookId={book.id}

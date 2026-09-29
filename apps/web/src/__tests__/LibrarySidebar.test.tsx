@@ -51,8 +51,8 @@ vi.mock('@/features/auth/AccountMenu', () => ({
 }))
 
 
-interface ShelfItemData { id: string; name: string; bookCount: number; pinned?: boolean }
-interface TagItemData { id: string; name: string; bookCount: number; pinned?: boolean }
+interface ShelfItemData { id: string; name: string; bookCount: number; pinned?: boolean; hidden?: boolean }
+interface TagItemData { id: string; name: string; bookCount: number; pinned?: boolean; hidden?: boolean }
 
 function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1, trashEnabled = true }: { shelves?: ShelfItemData[]; tags?: TagItemData[]; uncategorizedTotal?: number; trashEnabled?: boolean } = {}) {
   ;(libraryHooks.useShelves as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -161,6 +161,28 @@ describe('LibrarySidebar', () => {
 
     expect(screen.getByText('Favorites')).toBeInTheDocument()
     expect(screen.getByText('回收站')).toBeInTheDocument()
+  })
+
+  it('badges hidden shelves and tags instead of dimming them', () => {
+    mockHooks({
+      shelves: [{ id: 'shelf-1', name: 'Vault', bookCount: 2, hidden: true }],
+      tags: [{ id: 'tag-1', name: 'Secret', bookCount: 1, hidden: true }],
+    })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+
+    expect(screen.getByText('Vault')).toBeInTheDocument()
+    expect(screen.getByText('Secret')).toBeInTheDocument()
+    expect(screen.getAllByRole('img', { name: '作品已隐藏' })).toHaveLength(2)
+  })
+
+  it('keeps a zero-count pill so the badge column never shifts', () => {
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Empty', bookCount: 0 }] })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+
+    expect(screen.getByText('Empty')).toBeInTheDocument()
+    expect(screen.getByText('0')).toBeInTheDocument()
   })
 
   it('reserves menu space on mobile while keeping desktop counts aligned to the row edge', () => {

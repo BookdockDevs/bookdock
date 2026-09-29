@@ -373,7 +373,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
                   </button>
                 )
               )}
-              <div className="flex shrink-0 items-center gap-2">
+              <div className={`flex shrink-0 items-center gap-2 ${confirmReset || !isLibraryOwned ? '' : 'ml-auto'}`}>
                 <Button variant="secondary" onClick={discardEdit} disabled={saving}>
                   {_('library.cancel')}
                 </Button>

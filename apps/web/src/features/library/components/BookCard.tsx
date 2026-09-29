@@ -86,7 +86,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
             <TrashInfo book={book} variant="pill" />
           </div>
         ) : undefined}
-        coverBadge={book.hidden ? <HiddenIndicator kind="private" overlay /> : undefined}
+        coverBadge={book.hidden || book.effectiveHidden ? <HiddenIndicator kind="private" overlay /> : undefined}
         infoFooter={book.sourceUnavailable ? (
           <div className="mt-0.5 flex items-center gap-1">
             <p className="truncate text-[11px] text-amber-600 dark:text-amber-400">

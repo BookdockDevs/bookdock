@@ -38,6 +38,11 @@ describe('BookCard', () => {
     expect(screen.getByText('Author Name')).toBeInTheDocument()
   })
 
+  it('badges taxonomy-hidden books without the direct flag', () => {
+    render(<BookCard book={{ ...baseBook, hidden: false, effectiveHidden: true }} />)
+    expect(screen.getByRole('img', { name: 'library.hiddenPrivateStatus' })).toBeInTheDocument()
+  })
+
   it('marks a collected card whose source is gone', () => {
     const { rerender } = render(
       <BookCard book={{ ...baseBook, source: { libraryId: 'lib1', libraryBookVersionId: 'lbv1', libraryName: null } }} />,

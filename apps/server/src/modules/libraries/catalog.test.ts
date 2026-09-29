@@ -881,8 +881,8 @@ describe('shared library catalog', () => {
     ]).run()
     const tagId = seedTag(libraryId, 'Secret')
     db.update(schema.libraryTags).set({ hidden: true }).where(eq(schema.libraryTags.id, tagId)).run()
-    await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '第一章\n甲'), { title: 'InHiddenChild', categoryId: childId })
-    await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', '第一章\n乙'), { title: 'TaggedSecret', tagIds: [tagId] })
+    const inHiddenChild = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '第一章\n甲'), { title: 'InHiddenChild', categoryId: childId })
+    const taggedSecret = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', '第一章\n乙'), { title: 'TaggedSecret', tagIds: [tagId] })
     await uploadCatalogBook(libraryId, ownerId, txtFile('c.txt', '第一章\n丙'), { title: 'Plain' })
 
     // The hidden subtree hides its descendants' works even though the child
@@ -899,6 +899,18 @@ describe('shared library catalog', () => {
     expect(ownerCategories.find((c) => c.name === 'Vault')?.hidden).toBe(true)
     expect((await listLibraryTags(memberId, libraryId)).map((t) => t.name)).not.toContain('Secret')
     expect((await listLibraryTags(ownerId, libraryId)).find((t) => t.name === 'Secret')?.hidden).toBe(true)
+
+    // Managers see taxonomy-hidden works marked effectiveHidden (direct flag
+    // stays false); members never receive the rows at all.
+    for (const created of [inHiddenChild, taggedSecret]) {
+      const detail = await getCatalogBook(ownerId, libraryId, created.libraryBookId)
+      expect(detail.hidden).toBe(false)
+      expect(detail.effectiveHidden).toBe(true)
+      await expect(getCatalogBook(memberId, libraryId, created.libraryBookId))
+        .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
+    }
+    expect((await listCatalogBooks(ownerId, libraryId)).items.find((b) => b.title === 'InHiddenChild')?.effectiveHidden).toBe(true)
+    expect((await listCatalogBooks(ownerId, libraryId)).items.find((b) => b.title === 'Plain')?.effectiveHidden).toBe(false)
   })
 
   it('browses by search and category and pages the catalog', async () => {    const categoryId = createId('cat')
@@ -960,6 +972,26 @@ describe('shared library catalog', () => {
     // Suggestions are a read for anyone who can browse, and a manager-only write follows.
     await uploadCatalogBook(libraryId, adminId, txtFile('e.txt', '戊'), { title: '三体（英译）' })
     expect(await findSimilarWorks(memberId, libraryId, { title: '三体' })).toHaveLength(3)
+  })
+
+  it('withholds hidden works from similar suggestions for non-managers', async () => {
+    // A directly hidden work with published versions: the version filter
+    // alone cannot catch it, only the work-level gate can.
+    const hidden = await uploadCatalogBook(libraryId, ownerId, txtFile('h1.txt', '甲'), { title: '机密三体' })
+    await uploadCatalogBook(libraryId, ownerId, txtFile('h2.txt', '乙'), {
+      libraryBookId: hidden.libraryBookId, name: '第二版',
+    })
+    await updateCatalogBook(ownerId, libraryId, hidden.libraryBookId, { hidden: true })
+    expect((await getCatalogBook(ownerId, libraryId, hidden.libraryBookId)).versions.map((v) => v.status))
+      .toEqual(['published', 'published'])
+    await uploadCatalogBook(libraryId, ownerId, txtFile('v.txt', '丙'), { title: '三体公开版' })
+
+    expect((await findSimilarWorks(memberId, libraryId, { title: '三体' })).map((w) => w.title))
+      .toEqual(['三体公开版'])
+    // Managers still get the hint, badged.
+    const managerHits = await findSimilarWorks(ownerId, libraryId, { title: '三体' })
+    expect(managerHits.map((w) => w.title).sort()).toEqual(['三体公开版', '机密三体'].sort())
+    expect(managerHits.find((w) => w.title === '机密三体')?.hidden).toBe(true)
   })
 
   it('moves a misfiled version without touching its content identity', async () => {

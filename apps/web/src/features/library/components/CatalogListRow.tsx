@@ -74,7 +74,7 @@ export default function CatalogListRow({
           <span className="truncate font-serif text-sm font-medium text-stone-900 dark:text-stone-100">
             {work.title}
           </span>
-          {(work.hidden || (work.versions.length === 1 && first?.status === 'unlisted')) && <HiddenIndicator kind="work" overlay />}
+          {(work.hidden || work.effectiveHidden === true || (work.versions.length === 1 && first?.status === 'unlisted')) && <HiddenIndicator kind="work" overlay />}
           {work.versions.length > 1 && work.versions.some((version) => version.status === 'unlisted') && <HiddenIndicator kind="versions" overlay />}
           {isPinned && (
             canManage ? (

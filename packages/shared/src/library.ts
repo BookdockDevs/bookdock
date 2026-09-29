@@ -294,6 +294,11 @@ export interface CatalogBook {
   meta: Record<string, unknown>
   /** Work-level hide; managers see hidden works badged, members never see them. */
   hidden: boolean
+  /**
+   * Effective hide: direct hide or hidden through a hidden category/tag.
+   * Badge on this, never on `hidden` alone. Members never receive such rows.
+   */
+  effectiveHidden: boolean
   /** Shared-library home pin. Every version of this work shares one card. */
   pinnedAt: number | null
   /**

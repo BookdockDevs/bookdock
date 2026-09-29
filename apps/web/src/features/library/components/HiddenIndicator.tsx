@@ -23,9 +23,9 @@ export default function HiddenIndicator({ kind, overlay = false }: HiddenIndicat
       title={label}
       className={overlay
         ? 'inline-flex h-7 w-7 shrink-0 cursor-default items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm'
-        : 'inline-flex h-5 w-5 shrink-0 items-center justify-center text-amber-600 dark:text-amber-400'}
+        : 'inline-flex h-4 w-4 shrink-0 items-center justify-center text-stone-400 dark:text-stone-500'}
     >
-      <svg width={overlay ? 14 : 13} height={overlay ? 14 : 13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <svg width={overlay ? 14 : 12} height={overlay ? 14 : 12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         {kind !== 'versions' ? (
           <>
             <path d="M10.7 5.1A11 11 0 0 1 12 5c7 0 10 7 10 7a13.3 13.3 0 0 1-3.1 4" />

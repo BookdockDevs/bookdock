@@ -14,10 +14,12 @@ import { versionOrdinal, versionTabLabel } from '../book-row'
 import {
   useLibraryCategories,
   useLibraryTags,
+  useRemoveCatalogBookCover,
   useRemoveCatalogVersionCover,
   useResetCatalogVersionMetadata,
   useUpdateCatalogBook,
   useUpdateCatalogVersion,
+  useUploadCatalogBookCover,
   useUploadCatalogVersionCover,
 } from '../hooks'
 import BookCover from './BookCover'
@@ -138,6 +140,8 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
   const _ = useTranslation()
   const updateBook = useUpdateCatalogBook()
   const updateVersion = useUpdateCatalogVersion()
+  const uploadWorkCover = useUploadCatalogBookCover()
+  const removeWorkCover = useRemoveCatalogBookCover()
   const uploadVersionCover = useUploadCatalogVersionCover()
   const removeVersionCover = useRemoveCatalogVersionCover()
   const resetVersionMetadata = useResetCatalogVersionMetadata()
@@ -162,6 +166,41 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
   // Default version
   const initialDefaultId = work.defaultVersionLinkId || work.versions[0]?.id || null
   const [defaultVersionLinkId, setDefaultVersionLinkId] = useState<string | null>(initialDefaultId)
+
+  // Work cover editing (mirrors the per-version cover drafts below)
+  const [workCoverFile, setWorkCoverFile] = useState<File | null>(null)
+  const [workCoverPreviewUrl, setWorkCoverPreviewUrl] = useState<string | null>(null)
+  const [workCoverRemovalPending, setWorkCoverRemovalPending] = useState(false)
+  const workCoverInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!workCoverFile) {
+      setWorkCoverPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(workCoverFile)
+    setWorkCoverPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [workCoverFile])
+
+  function handleWorkCoverFilePicked(file: File) {
+    if (workCoverPreviewUrl) {
+      URL.revokeObjectURL(workCoverPreviewUrl)
+    }
+    const preview = URL.createObjectURL(file)
+    setWorkCoverFile(file)
+    setWorkCoverPreviewUrl(preview)
+    setWorkCoverRemovalPending(false)
+  }
+
+  function handleWorkRemoveCover() {
+    if (workCoverPreviewUrl) {
+      URL.revokeObjectURL(workCoverPreviewUrl)
+    }
+    setWorkCoverFile(null)
+    setWorkCoverPreviewUrl(null)
+    setWorkCoverRemovalPending(Boolean(work.coverKey))
+  }
 
   // ------------------------------------------------------------- Per-version drafts
   const [drafts, setDrafts] = useState<Record<string, VersionDraft>>(() => {
@@ -202,6 +241,8 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
   const saving =
     updateBook.isPending ||
     updateVersion.isPending ||
+    uploadWorkCover.isPending ||
+    removeWorkCover.isPending ||
     uploadVersionCover.isPending ||
     removeVersionCover.isPending ||
     resetVersionMetadata.isPending
@@ -277,6 +318,14 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
 
       if (Object.keys(bookPatch).length > 0) {
         requests.push(updateBook.mutateAsync({ libraryId, libraryBookId: work.id, patch: bookPatch }))
+      }
+
+      // Work cover changes ride the same save: upload wins over removal, and
+      // removal only fires against a stored cover.
+      if (workCoverFile) {
+        requests.push(uploadWorkCover.mutateAsync({ libraryId, libraryBookId: work.id, file: workCoverFile }))
+      } else if (workCoverRemovalPending && work.coverKey) {
+        requests.push(removeWorkCover.mutateAsync({ libraryId, libraryBookId: work.id }))
       }
 
       // 2. Version patches
@@ -434,6 +483,90 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
 
           {/* Tab 1: Work info (Abstract intellectual creation) */}
           <section className={cn('flex flex-col gap-4', activeTab !== 'work' && 'hidden')}>
+            {/* Work cover: the row-level artwork every version inherits unless
+                it carries its own. Same overlay pattern as the version slot. */}
+            <div className="flex items-center gap-4">
+              <div className="w-24 shrink-0">
+                <div className="group relative">
+                  <BookCover
+                    book={{
+                      id: work.versions[0]?.bookVersionId ?? work.id,
+                      title: work.title,
+                      format: work.versions[0]?.format ?? 'epub',
+                      coverKey: workCoverRemovalPending
+                        ? null
+                        : (workCoverFile ? null : work.coverKey),
+                      coverPaletteKey: work.versions[0]?.effective.coverPaletteKey
+                        ?? work.versions[0]?.bookVersionId
+                        ?? work.id,
+                    }}
+                    coverSrc={
+                      workCoverRemovalPending
+                        ? null
+                        : workCoverFile
+                          ? workCoverPreviewUrl
+                          : ((work.coverKey || work.versions[0]?.format === 'epub') && work.versions[0]
+                            ? `/api/v1/books/${work.versions[0].bookVersionId}/cover?size=thumb`
+                            : null)
+                    }
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl bg-black/45 transition-opacity opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                    <button
+                      type="button"
+                      onClick={() => !saving && workCoverInputRef.current?.click()}
+                      disabled={saving}
+                      title={_('library.changeCover')}
+                      aria-label={_('library.changeCover')}
+                      className="flex h-7 w-7 items-center justify-center rounded-md bg-black/40 text-white/90 transition-colors hover:bg-black/60 disabled:opacity-50"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <circle cx="9" cy="9" r="2" />
+                        <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+                      </svg>
+                    </button>
+                    {!workCoverRemovalPending && (workCoverFile || work.coverKey) && (
+                      <button
+                        type="button"
+                        onClick={handleWorkRemoveCover}
+                        disabled={saving}
+                        title={_('library.removeCover')}
+                        aria-label={_('library.removeCover')}
+                        className="flex h-7 w-7 items-center justify-center rounded-md bg-black/40 text-white/90 transition-colors hover:bg-black/60 disabled:opacity-50"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 6h18" />
+                          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                          <line x1="10" y1="11" x2="10" y2="17" />
+                          <line x1="14" y1="11" x2="14" y2="17" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    ref={workCoverInputRef}
+                    data-testid="work-cover-input"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                    className="hidden"
+                    disabled={saving}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) {
+                        handleWorkCoverFilePicked(file)
+                      }
+                      e.target.value = ''
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-stone-500 dark:text-stone-400">{_('library.cover')}</p>
+                <p className="mt-0.5 truncate text-sm text-stone-700 dark:text-stone-200">{work.title}</p>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
                 <span className={labelClass}>
@@ -573,6 +706,7 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
                   </div>
                   <input
                     ref={coverInputRef}
+                    data-testid="version-cover-input"
                     type="file"
                     accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
                     className="hidden"

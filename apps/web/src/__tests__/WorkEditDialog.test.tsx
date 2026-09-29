@@ -10,6 +10,8 @@ const HOOKS = vi.hoisted(() => ({
   useLibraryTags: vi.fn(),
   useUpdateCatalogBook: vi.fn(),
   useUpdateCatalogVersion: vi.fn(),
+  useUploadCatalogBookCover: vi.fn(),
+  useRemoveCatalogBookCover: vi.fn(),
   useUploadCatalogVersionCover: vi.fn(),
   useRemoveCatalogVersionCover: vi.fn(),
   useResetCatalogVersionMetadata: vi.fn(),
@@ -43,6 +45,8 @@ function work(overrides: Partial<CatalogBook> = {}): CatalogBook {
 describe('WorkEditDialog', () => {
   const updateBook = vi.fn()
   const updateVersion = vi.fn()
+  const uploadWorkCover = vi.fn()
+  const removeWorkCover = vi.fn()
   const uploadVersionCover = vi.fn()
   const removeVersionCover = vi.fn()
   const resetVersionMetadata = vi.fn()
@@ -54,6 +58,8 @@ describe('WorkEditDialog', () => {
     HOOKS.useLibraryTags.mockReturnValue({ data: { data: [{ id: 't1', name: 'classic' }, { id: 't2', name: 'new' }] } })
     HOOKS.useUpdateCatalogBook.mockReturnValue({ mutateAsync: updateBook, isPending: false })
     HOOKS.useUpdateCatalogVersion.mockReturnValue({ mutateAsync: updateVersion, isPending: false })
+    HOOKS.useUploadCatalogBookCover.mockReturnValue({ mutateAsync: uploadWorkCover, isPending: false })
+    HOOKS.useRemoveCatalogBookCover.mockReturnValue({ mutateAsync: removeWorkCover, isPending: false })
     HOOKS.useUploadCatalogVersionCover.mockReturnValue({ mutateAsync: uploadVersionCover, isPending: false })
     HOOKS.useRemoveCatalogVersionCover.mockReturnValue({ mutateAsync: removeVersionCover, isPending: false })
     HOOKS.useResetCatalogVersionMetadata.mockReturnValue({ mutateAsync: resetVersionMetadata, isPending: false })
@@ -180,7 +186,7 @@ describe('WorkEditDialog', () => {
     fireEvent.click(versionTab)
 
     const file = new File(['fake-cover-bytes'], 'cover.png', { type: 'image/png' })
-    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    const fileInput = screen.getByTestId('version-cover-input') as HTMLInputElement
     expect(fileInput).toBeTruthy()
 
     fireEvent.change(fileInput, { target: { files: [file] } })
@@ -192,6 +198,35 @@ describe('WorkEditDialog', () => {
       versionLinkId: 'lbv1',
       file,
     }))
+  })
+
+  it('uploads a work cover from the work tab', async () => {
+    renderDialog()
+
+    const file = new File(['fake-work-cover'], 'work-cover.png', { type: 'image/png' })
+    const fileInput = screen.getByTestId('work-cover-input') as HTMLInputElement
+    fireEvent.change(fileInput, { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(uploadWorkCover).toHaveBeenCalledWith({
+      libraryId: 'lib_city',
+      libraryBookId: 'lb1',
+      file,
+    }))
+    expect(removeWorkCover).not.toHaveBeenCalled()
+  })
+
+  it('removes the work cover from the work tab', async () => {
+    renderDialog(work({ coverKey: 'blobs/work-cover.jpg' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '移除封面' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(removeWorkCover).toHaveBeenCalledWith({
+      libraryId: 'lib_city',
+      libraryBookId: 'lb1',
+    }))
+    expect(uploadWorkCover).not.toHaveBeenCalled()
   })
 
   it('removes an existing version cover image', async () => {

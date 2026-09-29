@@ -129,6 +129,9 @@ function toCatalogBook(
   tags: CatalogBookTag[] = [],
   facts?: { versions: Map<string, typeof bookVersions.$inferSelect>; revisions: Map<string, typeof contentRevisions.$inferSelect> },
   collectedVersionIds?: ReadonlySet<string>,
+  // Managers receive hidden rows; members only ever see visible works, so
+  // their effective flag stays false without paying for a taxonomy load.
+  managerView = false,
 ): CatalogBook {
   const resolved = facts ?? { versions: new Map(), revisions: new Map() }
   // Default display version leads: cards, rows and the detail dialog read
@@ -154,6 +157,8 @@ function toCatalogBook(
     // Work-level hide; members never receive hidden works (filtered above),
     // managers receive them badged.
     hidden: work.hidden,
+    // Effective hide for badging taxonomy-hidden works managers can still see.
+    effectiveHidden: managerView && isWorkEffectivelyHidden(getDb(), work.libraryId, work),
     pinnedAt: work.pinnedAt ?? null,
     defaultVersionLinkId: work.defaultVersionLinkId ?? null,
     tags,
@@ -329,6 +334,7 @@ export async function listCatalogBooks(
       tagMap.get(work.id) ?? [],
       facts,
       collectedVersionIds,
+      includeUnlisted,
     )),
     total,
     page,
@@ -357,6 +363,7 @@ export async function getCatalogBook(actorId: string, libraryId: string, library
     tagNamesByWork(db, [work.id]).get(work.id) ?? [],
     facts,
     collectedVersionIds,
+    includeUnlisted,
   )
 }
 
@@ -717,9 +724,13 @@ export async function findSimilarWorks(
     (link) => link.libraryBookId === workId && (includeUnlisted || link.status === 'published'),
   )
   return candidates
-    .filter(({ work }) => includeUnlisted || visibleLinks(work.id).length > 0)
+    // Hidden works read as NOT_FOUND for non-managers — the same verdict as
+    // the detail gate. Without this, a hidden work with published versions
+    // would leak its title and description through suggestions.
+    .filter(({ work }) => (includeUnlisted || visibleLinks(work.id).length > 0)
+      && (includeUnlisted || !isWorkEffectivelyHidden(db, libraryId, work)))
     .map(({ work, score }) => ({
-      ...toCatalogBook(work, visibleLinks(work.id), [], facts, collectedVersionIds),
+      ...toCatalogBook(work, visibleLinks(work.id), [], facts, collectedVersionIds, includeUnlisted),
       matchScore: score,
     }))
 }

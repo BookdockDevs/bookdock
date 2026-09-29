@@ -41,8 +41,10 @@ export default function CatalogCard({
   const updateWork = useUpdateCatalogBook()
   const first = book.versions[0]
   const isPinned = Boolean(book.pinnedAt)
-  const isWorkHidden = book.hidden || (book.versions.length === 1 && first?.status === 'unlisted')
   const hasHiddenVersions = book.versions.length > 1 && book.versions.some((version) => version.status === 'unlisted')
+  // Badging follows the effective flag so taxonomy-hidden works carry the
+  // mark; management (menu labels, click-through) stays on the direct flag.
+  const isEffectivelyHidden = book.hidden || book.effectiveHidden === true
 
   return (
     <>
@@ -88,9 +90,9 @@ export default function CatalogCard({
           e.stopPropagation()
           menu.openFromEvent(e)
         }}
-        coverBadge={(isWorkHidden || hasHiddenVersions) ? (
+        coverBadge={(isEffectivelyHidden || hasHiddenVersions) ? (
           <>
-            {isWorkHidden && <HiddenIndicator kind="work" overlay />}
+            {isEffectivelyHidden && <HiddenIndicator kind="work" overlay />}
             {hasHiddenVersions && <HiddenIndicator kind="versions" overlay />}
           </>
         ) : undefined}

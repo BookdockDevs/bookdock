@@ -301,6 +301,14 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   // the source library and of the pinned source version, still published.
   // Losing library membership is not part of this flag; the read path stays the
   // authority for that.
+  //
+  // Effective-hidden marks ride the same batching: without reveal every
+  // returned row is visible by construction, so taxonomy loads only then.
+  const taxonomy = showHidden && !trash ? loadLibraryHiddenTaxonomy(db, library.id) : null
+  const hiddenTagNames = taxonomy && taxonomy.hiddenTagIds.length > 0
+    ? new Set(db.select({ name: libraryTags.name }).from(libraryTags)
+      .where(inArray(libraryTags.id, taxonomy.hiddenTagIds)).all().map((row) => row.name))
+    : null
   const sourceIds = [...new Set(rows.flatMap((row) => (row.sourceLibraryId ? [row.sourceLibraryId] : [])))]
   const sourceLinkIds = [...new Set(rows.flatMap((row) => (row.sourceLibraryBookVersionId ? [row.sourceLibraryBookVersionId] : [])))]
   const sourceNameById = new Map(
@@ -326,6 +334,11 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     ...b,
     authors: versionAuthors ?? workAuthors ?? [],
     tags: tagsByBook.get(_libraryBookId) ?? [],
+    // Effective hide for badging: without reveal every row here is visible
+    // by construction, so this only ever fires in reveal mode.
+    effectiveHidden: taxonomy !== null && (b.hidden
+      || (b.shelfId !== null && taxonomy.hiddenCategoryIds.includes(b.shelfId))
+      || (hiddenTagNames !== null && tagsByBook.get(_libraryBookId)?.some((name) => hiddenTagNames.has(name)) === true)),
     // 7.7: a B carries its single source; A/C rows report null.
     source: sourceLibraryId
       ? {
@@ -923,6 +936,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     deletedAt: null,
     shelfId: null,
     hidden: work.hidden,
+    effectiveHidden: isWorkEffectivelyHidden(db, granted.library.id, work),
     readerSettings: getReaderBookSettings(userId, bookId),
     // Present so the UI can offer "add to my library" and hide the actions
     // that would write library-owned content.
@@ -1026,6 +1040,7 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     shelfId: lb.categoryId,
     // Work-level hide; surfaced so the vault reveal mode can badge the row.
     hidden: lb.hidden,
+    effectiveHidden: isWorkEffectivelyHidden(db, library.id, lb),
     readerSettings: getReaderBookSettings(userId, bookId),
     source: lbv.sourceLibraryId
       ? {

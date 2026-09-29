@@ -139,7 +139,7 @@ export default function BookCoverEditor({
         <input
           ref={coverInputRef}
           type="file"
-          accept="image/png,image/jpeg,image/webp"
+          accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
           className="hidden"
           disabled={saving}
           onChange={(e) => {

@@ -53,6 +53,7 @@ import {
   cleanupStagedUpload,
 } from './books.service'
 import { getReaderBookSettings, updateReaderBookSettings } from './reader-settings.service'
+import { createShelf, updateShelf } from '../shelves/shelves.service'
 import { createTocRule } from '../toc-rules/toc-rules.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -751,6 +752,25 @@ describe('private vault (hidden works)', () => {
     // Unhiding restores the default list without touching anything else.
     await updateBook(ownerId, hiddenBook.id, { hidden: false })
     expect((await listBooks(ownerId, 1, 20)).data.map((b) => b.id).sort()).toEqual([hiddenBook.id, shown.id].sort())
+  })
+
+  it('marks taxonomy-hidden works effectiveHidden in reveal mode', async () => {
+    const shelf = await createShelf(ownerId, 'Vault')
+    const shelved = seedBook(db, ownerId, { title: 'Shelved' })
+    const work = libraryBookOf(db, shelved.id)!
+    db.update(schema.libraryBooks).set({ categoryId: shelf.id })
+      .where(eq(schema.libraryBooks.id, work.id)).run()
+    await updateShelf(ownerId, shelf.id, { hidden: true })
+
+    // Excluded by default, like a directly hidden work.
+    expect((await listBooks(ownerId, 1, 20)).data.map((b) => b.id)).not.toContain(shelved.id)
+    // Revealed with the effective mark; the direct flag stays false.
+    const revealed = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, true)
+    const row = revealed.data.find((b) => b.id === shelved.id)
+    expect(row?.hidden).toBe(false)
+    expect(row?.effectiveHidden).toBe(true)
+    // Detail agrees with the list.
+    expect((await getActiveBook(ownerId, shelved.id, { showHidden: true })).effectiveHidden).toBe(true)
   })
 })
 

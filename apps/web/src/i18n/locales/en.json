@@ -586,6 +586,7 @@
     "lessMetadata": "Collapse",
     "changeCover": "Change Cover",
     "removeCover": "Remove Cover",
+    "cover": "Cover",
     "coverPalette": "Cover Palette",
     "copyCover": "Copy Cover",
     "downloadCover": "Download Cover",
