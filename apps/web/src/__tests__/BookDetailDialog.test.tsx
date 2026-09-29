@@ -808,7 +808,8 @@ describe('BookDetailDialog shared work mode', () => {
   function catalogWork(overrides: Partial<CatalogBook> = {}): CatalogBook {
     return {
       id: 'lb1', libraryId: 'lib_city', categoryId: null, title: 'City Book', author: 'Someone',
-      description: 'A tale', coverKey: null, hidden: false, tags: [{ id: 't1', name: 'classic' }],
+      description: 'A tale', coverKey: null, hidden: false, effectiveHidden: false,
+      tags: [{ id: 't1', name: 'classic' }],
       versions: [catalogVersion()], createdAt: 1710000000000, updatedAt: 1710000000000, ...overrides,
     }
   }
@@ -862,11 +863,34 @@ describe('BookDetailDialog shared work mode', () => {
     expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', author: 'Someone' } })
   })
 
-  it('manages through publish toggle and delete', () => {
+  it('manages through the hide toggle and delete', () => {
+    // A one-version work reads its control as a work-level switch, so hiding it
+    // needs no confirmation: the version layer is never written.
     renderWorkDialog(catalogWork(), { canManage: true })
+    fireEvent.click(screen.getByRole('button', { name: '版本显示中，点击隐藏' }))
+    expect(updateCatalogBookMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ libraryId: 'lib_city', libraryBookId: 'lb1', patch: { hidden: true } }),
+      expect.anything(),
+    )
+    cleanup()
 
-    // Single published version: unlisting breaks collected B cards, so it
-    // confirms first.
+    // Deleting the last version removes the whole work: confirmed.
+    renderWorkDialog(catalogWork(), { canManage: true })
+    fireEvent.click(screen.getByLabelText('删除'))
+    expect(deleteCatalogVersionMutate).not.toHaveBeenCalled()
+    const deleteDialog = screen.getByRole('alertdialog')
+    expect(within(deleteDialog).getByText(/删除后整个作品会被移除/)).toBeInTheDocument()
+    fireEvent.click(within(deleteDialog).getByRole('button', { name: '删除' }))
+    expect(deleteCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1' })
+  })
+
+  it('confirms before hiding the last published version of a many-version work', () => {
+    // The other version is already hidden, so hiding this one leaves the work
+    // with no published version and breaks every collected B at once.
+    renderWorkDialog(catalogWork({
+      versions: [catalogVersion(), catalogVersion({ id: 'lbv2', bookVersionId: 'v2', status: 'unlisted' })],
+    }), { canManage: true })
+
     fireEvent.click(screen.getByRole('button', { name: '版本显示中，点击隐藏' }))
     expect(updateCatalogVersionMutate).not.toHaveBeenCalled()
     const unlistDialog = screen.getByRole('alertdialog')
@@ -878,27 +902,15 @@ describe('BookDetailDialog shared work mode', () => {
       }),
       expect.anything(),
     )
-    // Deleting the last version removes the whole work: also confirmed.
-    fireEvent.click(screen.getByLabelText('删除'))
-    expect(deleteCatalogVersionMutate).not.toHaveBeenCalled()
-    const deleteDialog = screen.getByRole('alertdialog')
-    expect(within(deleteDialog).getByText(/删除后整个作品会被移除/)).toBeInTheDocument()
-    fireEvent.click(within(deleteDialog).getByRole('button', { name: '删除' }))
-    expect(deleteCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1' })
+    // With several versions the control is a version control, not a work one.
+    expect(updateCatalogBookMutate).not.toHaveBeenCalled()
   })
 
-  it('shows the single-version visibility state through its version control', () => {
-    renderWorkDialog(catalogWork({ hidden: true }), { canManage: true })
+  it('shows a directly hidden one-version work as hidden, and only for managers', () => {
+    renderWorkDialog(catalogWork({ hidden: true, effectiveHidden: true }), { canManage: true })
     expect(screen.getByRole('button', { name: '版本已隐藏，点击显示' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '版本已隐藏，点击显示' }))
-    expect(updateCatalogVersionMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        patch: { status: 'published' },
-      }),
-      expect.anything(),
-    )
     cleanup()
-    renderWorkDialog(catalogWork({ hidden: true }))
+    renderWorkDialog(catalogWork({ hidden: true, effectiveHidden: true }))
     expect(screen.queryByRole('button', { name: '版本已隐藏，点击显示' })).not.toBeInTheDocument()
   })
 
@@ -982,11 +994,48 @@ describe('BookDetailDialog shared work mode', () => {
     expect(screen.getByRole('tab', { name: /版本 1/ })).toBeInTheDocument()
   })
 
-  it('locks reading and download on an unlisted version', () => {
+  it('locks reading and download on a hidden version for members', () => {
     renderWorkDialog(catalogWork({ versions: [catalogVersion({ status: 'unlisted' })] }), { canManage: false })
 
     expect(screen.getByRole('button', { name: '开始阅读' })).toBeDisabled()
     expect(screen.queryByLabelText('下载')).toBeNull()
+  })
+
+  it('keeps a hidden version readable and collectable for managers', () => {
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ status: 'unlisted' })] }), { canManage: true })
+
+    // Hiding is a member-facing switch; the curator keeps full access.
+    expect(screen.getByRole('button', { name: '开始阅读' })).not.toBeDisabled()
+    expect(screen.getByLabelText('下载')).toBeInTheDocument()
+  })
+
+  it('keeps the hide icon but makes it inert for a taxonomy-derived hide', () => {
+    // A hidden category sets effectiveHidden without the direct flag, so there
+    // is no work-level action to take: same icon, disabled, and the tooltip
+    // explains where the hide actually lives.
+    renderWorkDialog(catalogWork({ hidden: false, effectiveHidden: true }), { canManage: true })
+
+    const icon = screen.getByLabelText('作品已隐藏')
+    expect(icon).toBeDisabled()
+    expect(icon).toHaveAttribute('title', '此作品所属分类或标签被隐藏')
+    expect(screen.queryByLabelText('版本显示中，点击隐藏')).toBeNull()
+    expect(screen.queryByLabelText('版本已隐藏，点击显示')).toBeNull()
+    // Reading is untouched: the curator still reads what they hid.
+    expect(screen.getByRole('button', { name: '开始阅读' })).not.toBeDisabled()
+  })
+
+  it('reads the direct work hide as a work-level control on a one-version work', () => {
+    renderWorkDialog(catalogWork({ hidden: true, effectiveHidden: true }), { canManage: true })
+
+    expect(screen.getByLabelText('版本已隐藏，点击显示')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('版本已隐藏，点击显示'))
+    // The action must land on the work, not on the version: writing the
+    // version left the work badged while the button claimed it was shown.
+    expect(updateCatalogBookMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ libraryBookId: 'lb1', patch: { hidden: false } }),
+      expect.anything(),
+    )
+    expect(updateCatalogVersionMutate).not.toHaveBeenCalled()
   })
 
   it('shows the version publication metadata like a private book', () => {

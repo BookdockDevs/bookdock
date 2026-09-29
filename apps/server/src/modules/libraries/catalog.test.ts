@@ -661,10 +661,12 @@ describe('shared library catalog', () => {
     }
     await expectReadable()
     await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, { status: 'unlisted' })
-    // Unlisted is not "hidden from the owner": it leaves the public read
-    // boundary entirely, for members and anonymous readers alike.
+    // Hiding is a member-facing switch: it leaves the public read boundary for
+    // members and anonymous readers, but the curator keeps their own copy.
     await expect(resolveSharedVersionRead(libraryId, created.bookVersionId, memberId))
       .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    await expect(resolveSharedVersionRead(libraryId, created.bookVersionId, ownerId))
+      .resolves.toMatchObject({ relation: 'owner' })
     await expect(resolveSharedVersionRead(libraryId, created.bookVersionId, null))
       .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
     // A B pointing at it keeps its provenance and simply becomes unreadable.
@@ -676,11 +678,14 @@ describe('shared library catalog', () => {
     await expectReadable()
   })
 
-  it('keeps single-version work and version visibility in sync', async () => {
+  it('keeps work and version visibility independent at any version count', async () => {
     await uploadCatalogBook(libraryId, ownerId, txtFile('v.txt', '第一章\n甲'), { title: 'Visible' })
     const hiddenWork = await uploadCatalogBook(libraryId, ownerId, txtFile('h.txt', '第一章\n乙'), { title: 'Hidden' })
     await updateCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId, { hidden: true })
-    expect((await getCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId)).versions[0].status).toBe('unlisted')
+    // The work flag no longer writes the version: hiding one layer must not
+    // silently close the other, or a one-version work would behave unlike a
+    // many-version one.
+    expect((await getCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId)).versions[0].status).toBe('published')
 
     // Managers see hidden rows badged; members see neither the work nor its count.
     expect((await listCatalogBooks(ownerId, libraryId)).total).toBe(2)
@@ -688,21 +693,23 @@ describe('shared library catalog', () => {
     const memberView = await listCatalogBooks(memberId, libraryId)
     expect(memberView.total).toBe(1)
     expect(memberView.items.map((b) => b.title)).toEqual(['Visible'])
-    // Detail and the read boundary agree with the list.
+    // Detail and the read boundary agree with the list for members...
     await expect(getCatalogBook(memberId, libraryId, hiddenWork.libraryBookId))
       .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
     await expect(resolveSharedVersionRead(libraryId, hiddenWork.bookVersionId, memberId))
       .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    // ...while the owner keeps reading what they hid.
     await expect(resolveSharedVersionRead(libraryId, hiddenWork.bookVersionId, ownerId))
-      .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
-    // Either endpoint restores both flags for a one-version work.
+      .resolves.toMatchObject({ relation: 'owner' })
     await updateCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId, { hidden: false })
-    expect((await getCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId)).versions[0].status).toBe('published')
     expect((await listCatalogBooks(memberId, libraryId)).total).toBe(2)
+    // The reverse direction is independent too.
     await updateCatalogVersion(ownerId, libraryId, hiddenWork.libraryBookId, hiddenWork.versionLinkId!, { status: 'unlisted' })
-    expect((await getCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId)).hidden).toBe(true)
-    await updateCatalogVersion(ownerId, libraryId, hiddenWork.libraryBookId, hiddenWork.versionLinkId!, { status: 'published' })
     expect((await getCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId)).hidden).toBe(false)
+    await expect(resolveSharedVersionRead(libraryId, hiddenWork.bookVersionId, ownerId))
+      .resolves.toMatchObject({ relation: 'owner' })
+    await expect(resolveSharedVersionRead(libraryId, hiddenWork.bookVersionId, memberId))
+      .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
   })
 
   it('merges work meta over the revision bookmeta, manager-only', async () => {

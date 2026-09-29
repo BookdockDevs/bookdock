@@ -152,17 +152,30 @@ when `!work.hidden AND !categoryEffectiveHidden AND !anyTagHidden AND
 version.status = 'published'`:
 
 - `library_book_versions.status` (`published|unlisted`) is the version-level
-  hide. Managers always see unlisted versions (badged); everyone else gets
-  `NOT_FOUND`, never metadata. The UI word is 隐藏/显示 everywhere; 下架 is
+  hide. Managers always see and read unlisted versions (badged); everyone else
+  gets `NOT_FOUND`, never metadata. The UI word is 隐藏/显示 everywhere; 下架 is
   retired vocabulary for the same flag.
-- `library_books.hidden` is the work-level hide, covering all its versions.
-  For a one-version shared work, a visibility change through either the work
-  or version endpoint updates both flags in one transaction, so its home menu
-  and detail control have the same effect. With multiple versions, work and
-  version visibility remain independent. The shared catalog marks a hidden
-  work and, for multi-version works, the presence of hidden versions in both
-  grid and list views. Detail controls only the selected version; private
-  library cards each represent one version and mark their own hidden state.
+- `library_books.hidden` is the work-level hide, covering all its versions. It
+  is independent of the version flag at every version count: neither endpoint
+  writes the other, so a one-version work behaves exactly like a many-version
+  one. The shared catalog marks a hidden work and, for multi-version works, the
+  presence of hidden versions in both grid and list views; private library
+  cards each represent one version and mark their own hidden state.
+- The two hides resolve at read time into one effective state, and every
+  surface that shows a hide indicator must read that same state. A work is
+  effectively hidden when `work.hidden` is set, when
+  `isWorkEffectivelyHidden` resolves true through a hidden category or tag, or
+  when its selected version is unlisted. The catalog exposes the taxonomy
+  verdict as `CatalogBook.effectiveHidden`, and every list, row, card and detail
+  surface keys its indicator off `work.hidden || work.effectiveHidden` rather
+  than the direct flag alone — a list that badged a work the detail dialog
+  called visible is the same bug in two places.
+- A visibility control must act on the layer it names. For a one-version work
+  the detail dialog hides or shows the work; with several versions it acts on
+  the selected version only. A taxonomy-derived hide has no work-level flag to
+  clear, so the dialog keeps the same hide icon, disabled, and puts the reason
+  in its tooltip — it must not grow a second control shape for this state, and
+  it must not offer an action that would write the wrong layer.
 - `library_categories.hidden` / `library_tags.hidden` are persistent taxonomy
   hides: hiding a category hides its whole subtree (children inherit from any
   hidden ancestor) and every work filed under it; hiding a tag hides every work
@@ -170,7 +183,11 @@ version.status = 'published'`:
   hidden category behaves as a private section. No bulk backfill is needed
   because the rule is evaluated at read time.
 - Shared libraries are asymmetric: owners/admins always see hidden rows
-  (badged), members never do. Private libraries are symmetric (vault): the
+  (badged), members never do. The exemption is symmetric across all three
+  levels — a work hidden directly, hidden through its category or tag, or
+  through an unlisted version is listed and readable for a manager, and absent
+  for a member. The badge still marks it; the exemption is behavioural, not
+  visual. Private libraries are symmetric (vault): the
   owner also excludes hidden rows by default and reveals them with an explicit
   `showHidden` list toggle; the dedicated vault entry UX is deferred. Legado
   explore intentionally does not filter hidden rows (owner-scoped personal

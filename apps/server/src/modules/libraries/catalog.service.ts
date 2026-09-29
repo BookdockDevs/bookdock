@@ -401,15 +401,6 @@ export async function updateCatalogBook(actorId: string, libraryId: string, libr
   db.transaction((tx) => {
     tx.update(libraryBooks).set(updates).where(eq(libraryBooks.id, work.id)).run()
     if (patch.tagIds !== undefined) setWorkTags(tx, libraryId, work.id, patch.tagIds)
-    if (patch.hidden !== undefined) {
-      const links = tx.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
-        .where(eq(libraryBookVersions.libraryBookId, work.id)).all()
-      if (links.length === 1) {
-        tx.update(libraryBookVersions)
-          .set({ status: patch.hidden ? 'unlisted' : 'published', updatedAt: updates.updatedAt })
-          .where(eq(libraryBookVersions.id, links[0].id)).run()
-      }
-    }
   })
   return getCatalogBook(actorId, libraryId, work.id)
 }
@@ -530,7 +521,9 @@ export async function updateCatalogVersion(
 ) {
   const db = getDb()
   await requireLibraryManager(actorId, libraryId)
-  const work = getWork(libraryId, libraryBookId)
+  // getVersionLink already scopes the lookup to this library and work, so it
+  // also proves the work exists here; no separate work read is needed now that
+  // a version patch no longer writes the work row.
   const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
   const updates: Partial<typeof libraryBookVersions.$inferInsert> = { updatedAt: Date.now() }
   if (patch.name !== undefined) updates.name = patch.name
@@ -558,15 +551,6 @@ export async function updateCatalogVersion(
   if (patch.meta !== undefined) updates.meta = patch.meta ?? {}
   db.transaction((tx) => {
     tx.update(libraryBookVersions).set(updates).where(eq(libraryBookVersions.id, link.id)).run()
-    if (patch.status !== undefined) {
-      const links = tx.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
-        .where(eq(libraryBookVersions.libraryBookId, work.id)).all()
-      if (links.length === 1) {
-        tx.update(libraryBooks)
-          .set({ hidden: patch.status === 'unlisted', updatedAt: updates.updatedAt })
-          .where(eq(libraryBooks.id, work.id)).run()
-      }
-    }
   })
   const book = await getCatalogBook(actorId, libraryId, libraryBookId)
   const updated = book.versions.find((v) => v.id === link.id)

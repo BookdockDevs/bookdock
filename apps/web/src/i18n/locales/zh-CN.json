@@ -159,6 +159,8 @@
     "privateHiddenAction": "书籍已隐藏，点击显示",
     "versionVisibleAction": "版本显示中，点击隐藏",
     "versionHiddenAction": "版本已隐藏，点击显示",
+    "taxonomyHiddenAction": "作品已隐藏",
+    "taxonomyHiddenHint": "此作品所属分类或标签被隐藏",
     "catalogVersions": "版本",
     "versionFallback": "版本 {{n}}",
     "versionCount": "{{count}} 个版本",

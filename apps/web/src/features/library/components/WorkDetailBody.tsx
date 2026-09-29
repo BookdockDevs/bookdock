@@ -18,7 +18,7 @@ import { formatBytes, formatDate } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover } from '../book-row'
 import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../download'
-import { useCollectBook, useUpdateCatalogVersion } from '../hooks'
+import { useCollectBook, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
 import BookCover from './BookCover'
 import { copyText, formatLanguage, isMachineIdentifier, middleTruncate } from './book-detail/types'
 import { ActionIcon, FilterChip, GroupLabel } from './book-detail/ui'
@@ -52,6 +52,7 @@ export default function WorkDetailBody({
   const selected = work.versions.find((v) => v.id === selectedId) ?? work.versions[0]
   const collect = useCollectBook()
   const updateVersion = useUpdateCatalogVersion()
+  const updateWork = useUpdateCatalogBook()
   const [collectedIds, setCollectedIds] = useState<Record<string, boolean>>({})
   const isCollected = selected ? (collectedIds[selected.id] || selected.collected === true) : false
   const [copyingCover, setCopyingCover] = useState(false)
@@ -83,7 +84,17 @@ export default function WorkDetailBody({
   }, [work.versions, selectedId])
 
   const hasCoverImage = Boolean(work.coverKey || selected?.format === 'epub')
-  const selectedHidden = selected?.status === 'unlisted' || (work.versions.length === 1 && work.hidden)
+  // The two hides resolve independently (see the Hidden boundary in
+  // architecture.md), so the dialog must not collapse them into one flag: the
+  // list badges a work the dialog called visible when it keyed off `work.hidden`
+  // alone, because a category- or tag-derived hide never sets that flag.
+  const workHidden = work.hidden || work.effectiveHidden === true
+  // A taxonomy-derived hide has no work flag to clear, so the control is
+  // read-only: offering an action here would write the version layer instead.
+  const taxonomyHidden = !work.hidden && work.effectiveHidden === true
+  const singleVersion = work.versions.length === 1
+  const versionHidden = selected?.status === 'unlisted'
+  const selectedHidden = versionHidden || (singleVersion && workHidden)
   // Hidden is a listing switch for ordinary readers; managers keep reading,
   // downloading and editing the work as if it were merely delisted.
   const readable = Boolean(selected) && (canManage || !selectedHidden)
@@ -177,6 +188,22 @@ export default function WorkDetailBody({
 
   function togglePublish() {
     if (!selected) return
+    // A one-version work has no version-level meaning to toggle: the control
+    // reads as a work-level switch, so it must write library_books.hidden.
+    // Writing the version here left the work badged as hidden while the button
+    // reported it as shown.
+    if (singleVersion && !taxonomyHidden) {
+      const showing = workHidden
+      updateWork.mutate({
+        libraryId: library.id,
+        libraryBookId: work.id,
+        patch: { hidden: !showing },
+      }, {
+        onSuccess: () => notify.success(showing ? _('library.catalogShowWork') : _('library.catalogHideWork')),
+        onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogHideWork')),
+      })
+      return
+    }
     // Unlisting the last published version breaks every collected B at once:
     // confirm that case, republishing stays one click.
     if (!selectedHidden
@@ -184,7 +211,7 @@ export default function WorkDetailBody({
       setConfirmUnlist(true)
       return
     }
-    const publishing = selectedHidden
+    const publishing = versionHidden
     updateVersion.mutate({
       libraryId: library.id,
       libraryBookId: work.id,
@@ -199,6 +226,8 @@ export default function WorkDetailBody({
   function runConfirmedUnlist() {
     if (!selected) return
     setConfirmUnlist(false)
+    // The confirm dialog only opens on the version layer, so it can only ever
+    // write a version; a one-version work never reaches it.
     updateVersion.mutate({
       libraryId: library.id,
       libraryBookId: work.id,
@@ -461,11 +490,26 @@ export default function WorkDetailBody({
                 </ActionIcon>
               )}
               {canManage && (
-                selectedHidden ? (
+                taxonomyHidden ? (
+                  // The hide came from a hidden category or tag, so there is no
+                  // work-level action to take. Keep the same eye icon, just
+                  // inert, and let the tooltip say why.
+                  <ActionIcon
+                    secondary
+                    label={_('library.taxonomyHiddenAction')}
+                    title={_('library.taxonomyHiddenHint')}
+                    disabled
+                  >
+                    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                    <line x1="2" x2="22" y1="2" y2="22" />
+                  </ActionIcon>
+                ) : selectedHidden ? (
                   <ActionIcon
                     secondary
                     label={_('library.versionHiddenAction')}
-                    disabled={updateVersion.isPending}
+                    disabled={updateVersion.isPending || updateWork.isPending}
                     onClick={togglePublish}
                   >
                     <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
@@ -477,7 +521,7 @@ export default function WorkDetailBody({
                   <ActionIcon
                     secondary
                     label={_('library.versionVisibleAction')}
-                    disabled={updateVersion.isPending}
+                    disabled={updateVersion.isPending || updateWork.isPending}
                     onClick={togglePublish}
                   >
                     <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />

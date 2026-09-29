@@ -113,6 +113,7 @@ describe('shared version reads', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
   let memberId: string
+  let adminId: string
   let outsiderId: string
   let libraryId: string
 
@@ -121,8 +122,9 @@ describe('shared version reads', () => {
     vi.spyOn(client, 'getDb').mockReturnValue(db)
     ownerId = createId('user')
     memberId = createId('user')
+    adminId = createId('user')
     outsiderId = createId('user')
-    for (const [id, username] of [[ownerId, 'owner'], [memberId, 'member'], [outsiderId, 'outsider']] as const) {
+    for (const [id, username] of [[ownerId, 'owner'], [memberId, 'member'], [adminId, 'admin'], [outsiderId, 'outsider']] as const) {
       db.insert(schema.users).values({ id, username, createdAt: 1 }).run()
     }
     db.insert(schema.instance).values({
@@ -136,6 +138,9 @@ describe('shared version reads', () => {
     }).run()
     db.insert(schema.libraryMemberships).values({
       id: createId('m'), libraryId, userId: memberId, role: 'member', createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.libraryMemberships).values({
+      id: createId('m'), libraryId, userId: adminId, role: 'admin', createdAt: 1, updatedAt: 1,
     }).run()
     db.insert(schema.bookVersions).values({ id: 'v1', format: 'txt', size: 5, createdAt: 1, updatedAt: 1 }).run()
     db.insert(schema.libraryBooks).values({ id: 'wb', libraryId, userId: ownerId, title: 'W', createdAt: 1, updatedAt: 1 }).run()
@@ -151,8 +156,26 @@ describe('shared version reads', () => {
     db.update(schema.libraryBookVersions).set({ status: 'unlisted' }).where(eq(schema.libraryBookVersions.id, 'lv1')).run()
     await expect(resolveSharedVersionRead(libraryId, 'v1', memberId))
       .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    // Hiding is a member-facing switch, not a read ban: the curator keeps
+    // reading what they hid.
     await expect(resolveSharedVersionRead(libraryId, 'v1', ownerId))
+      .resolves.toMatchObject({ relation: 'owner' })
+    await expect(resolveSharedVersionRead(libraryId, 'v1', adminId))
+      .resolves.toMatchObject({ relation: 'admin' })
+  })
+
+  it('keeps reading an effectively hidden work available to its managers', async () => {
+    db.insert(schema.libraryCategories).values({
+      id: 'cat1', libraryId, userId: ownerId, name: 'Hidden shelf',
+      sortOrder: 0, pinned: false, hidden: true, createdAt: 1, updatedAt: 1,
+    }).run()
+    db.update(schema.libraryBooks).set({ categoryId: 'cat1' }).where(eq(schema.libraryBooks.id, 'wb')).run()
+    await expect(resolveSharedVersionRead(libraryId, 'v1', memberId))
       .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    await expect(resolveSharedVersionRead(libraryId, 'v1', ownerId))
+      .resolves.toMatchObject({ relation: 'owner' })
+    await expect(resolveSharedVersionRead(libraryId, 'v1', adminId))
+      .resolves.toMatchObject({ relation: 'admin' })
   })
 
   it('lets authenticated non-members read public scope without the guest switch', async () => {

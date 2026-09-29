@@ -92,19 +92,23 @@ export function ActionIcon({
   secondary = false,
   disabled = false,
   onClick,
+  title,
   children,
 }: {
   label: string
   danger?: boolean
   secondary?: boolean
   disabled?: boolean
-  onClick: () => void
+  /** Omitted for an inert icon; `title` then carries the explanation. */
+  onClick?: () => void
+  /** Hover explanation; defaults to the label. */
+  title?: string
   children: ReactNode
 }) {
   return (
     <button
       type="button"
-      title={label}
+      title={title ?? label}
       aria-label={label}
       disabled={disabled}
       onClick={onClick}

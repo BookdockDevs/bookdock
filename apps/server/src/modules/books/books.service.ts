@@ -846,18 +846,33 @@ export function assertReadableBookSync(userId: string, bookId: string): void {
       if (work && !work.deletedAt && sourceStillReadableSync(userId, bookId)) return
     }
   }
+  // No status filter here: a hidden version is still readable by the library's
+  // managers, so the verdict belongs to resolveSharedVersionRead, which knows
+  // the caller's relation. Filtering to published here refused managers too.
   const candidates = db.select({ libraryId: libraryBookVersions.libraryId }).from(libraryBookVersions)
-    .where(and(eq(libraryBookVersions.bookVersionId, bookId), eq(libraryBookVersions.status, 'published'))).all()
+    .where(eq(libraryBookVersions.bookVersionId, bookId)).all()
   for (const candidate of candidates) {
     const library = db.select({ id: libraries.id, userId: libraries.userId, type: libraries.type, visibility: libraries.visibility })
       .from(libraries).where(eq(libraries.id, candidate.libraryId)).get()
     if (!library || library.type === 'private') continue
-    if (library.visibility === 'public' || library.userId === userId) return
-    const membership = db.select({ userId: libraryMemberships.userId }).from(libraryMemberships).where(and(
-      eq(libraryMemberships.libraryId, library.id),
+    const membership = db.select({ role: libraryMemberships.role }).from(libraryMemberships).where(and(
+      eq(libraryMemberships.libraryId, candidate.libraryId),
       eq(libraryMemberships.userId, userId),
     )).get()
-    if (membership) return
+    // Managers clear the hide boundary the same way owners do; a hidden version
+    // is still theirs to read. Note the manager test comes first: a member of a
+    // public library is not a manager, and must not inherit that exemption just
+    // because the library happens to be public.
+    if (library.userId === userId || membership?.role === 'admin') return
+    // Everyone else is bound by visibility AND by the version status, so a
+    // public member and a public outsider read the same published set.
+    if (library.visibility !== 'public' && !membership) continue
+    const link = db.select({ status: libraryBookVersions.status }).from(libraryBookVersions)
+      .where(and(
+        eq(libraryBookVersions.libraryId, candidate.libraryId),
+        eq(libraryBookVersions.bookVersionId, bookId),
+      )).get()
+    if (link?.status === 'published') return
   }
   throw new AppError('BOOK_NOT_FOUND')
 }
@@ -873,10 +888,7 @@ async function resolveLibraryReadGrant(userId: string | null, bookId: string) {
   const db = getDb()
   const candidates = db.select({ libraryId: libraryBookVersions.libraryId })
     .from(libraryBookVersions)
-    .where(and(
-      eq(libraryBookVersions.bookVersionId, bookId),
-      eq(libraryBookVersions.status, 'published'),
-    )).all()
+    .where(eq(libraryBookVersions.bookVersionId, bookId)).all()
   for (const candidate of candidates) {
     try {
       return await resolveSharedVersionRead(candidate.libraryId, bookId, userId)

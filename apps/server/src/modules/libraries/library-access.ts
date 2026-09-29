@@ -152,8 +152,11 @@ export async function getLibraryBookVersion(libraryId: string, versionId: string
  * confirms existence, and never metadata about other libraries.
  *
  * - Private libraries never enter here (owner-only resolvePrivateBook path).
- * - Members read published versions; unlisted versions disappear from direct
- *   reads (pinned B reads bypass through Phase 7, not here).
+ * - Owners and admins read every version of their own libraries, hidden ones
+ *   included: hiding is a member-facing switch, not a read ban. Members read
+ *   published versions of non-hidden works; an unlisted version or an
+ *   effectively hidden work disappears from their direct reads (pinned B reads
+ *   bypass through Phase 7, not here).
  * - Authenticated non-members read published versions of public libraries,
  *   independent of the instance guest switch.
  * - Guests additionally need the instance guest switch and this listing's own
@@ -190,10 +193,12 @@ function resolveSharedVersionReadInternal(
   const link = db.select().from(libraryBookVersions)
     .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.bookVersionId, bookVersionId))).get()
   if (!link) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
-  if (link.status !== 'published') throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
-  // Hidden works close the same gate for everyone below manager: the work row
-  // carries the flag, so look it up (owners and admins always pass).
-  if (relation !== 'owner' && relation !== 'admin') {
+  const manager = relation === 'owner' || relation === 'admin'
+  // Both hides bind members only. A manager curates a library and must keep
+  // reading, downloading and collecting what they hid, so neither the version
+  // status nor the effective work hide closes the gate for them.
+  if (!manager) {
+    if (link.status !== 'published') throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
     const work = db.select().from(libraryBooks).where(eq(libraryBooks.id, link.libraryBookId)).get()
     if (!work || isWorkEffectivelyHidden(db, libraryId, work)) {
       throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')

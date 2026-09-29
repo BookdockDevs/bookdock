@@ -7,9 +7,12 @@ All notable changes to Bookdock are documented here.
 ### Highlights
 
 - Bookmark and idea annotations recovered their full content after the library-model migration: bookmarks show their saved excerpts again, and ideas keep their colors and styles.
+- Hiding a book in a shared library now only hides it from ordinary members. Library owners and admins keep reading, downloading and collecting whatever they hid, whether the hide came from the work, from one of its versions, or from its category or tags.
 
 ### Fixed
 
+- A shared-library work hidden through its category or tags is no longer reported as visible inside its own detail dialog. The hide control there is now inert and explains in its tooltip that the hide belongs to the category or tag, instead of offering a toggle that would have changed the wrong layer.
+- Hiding a one-version work no longer silently hides its version too, so a work behaves the same whether it has one version or several, and the detail dialog's hide control now changes the layer it describes.
 - Retrying a failed in-panel update now follows the latest release instead of replaying a stale target, and the update dialog no longer shows duplicate banners or Close buttons.
 - Server-sent update progress details are localized instead of leaking English action strings.
 - Bookmark renames persist, and bookmark/idea reads return the stored snippet, title, color, style, and chapter reference.

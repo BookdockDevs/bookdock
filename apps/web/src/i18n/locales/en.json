@@ -161,6 +161,8 @@
     "privateHiddenAction": "Book hidden, click to show",
     "versionVisibleAction": "Version visible, click to hide",
     "versionHiddenAction": "Version hidden, click to show",
+    "taxonomyHiddenAction": "Work hidden",
+    "taxonomyHiddenHint": "Hidden through its category or tag",
     "catalogVersions": "Versions",
     "versionFallback": "Version {{n}}",
     "versionCount": "{{count}} versions",

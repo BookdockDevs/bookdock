@@ -186,12 +186,16 @@ describe('add-to-private (7.x)', () => {
     expect((await getBook(memberId, city.bookVersionId)).source?.libraryId).toBe(libraryId)
   })
 
-  it('refuses to collect an unlisted version', async () => {
+  it('refuses to collect a hidden version, but not for the library managers', async () => {
     const city = await seedCityBook()
     await addMember(ownerId, libraryId, { userId: memberId, role: 'member' })
     await updateCatalogVersion(ownerId, libraryId, city.libraryBookId, city.versionLinkId!, { status: 'unlisted' })
     await expect(addToPrivateLibrary(memberId, libraryId, city.versionLinkId!))
       .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    // The hide exists to keep members out, so it must not stop the curator
+    // from pulling their own version into their private library.
+    const collected = await addToPrivateLibrary(ownerId, libraryId, city.versionLinkId!)
+    expect(collected.alreadyExists).toBe(false)
   })
 
   it('re-checks the source on every read and keeps the card when it fails', async () => {
