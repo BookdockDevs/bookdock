@@ -230,12 +230,16 @@ export interface InstanceInfoRes {
   allowRegistration: boolean
   allowGuestAccess: boolean
   uploadMaxBytes: number
+  allowUserCreateLibrary: boolean
+  allowUserUpload: boolean
 }
 
 export interface UpdateInstanceReq {
   allowRegistration?: boolean
   allowGuestAccess?: boolean
   uploadMaxBytes?: number
+  allowUserCreateLibrary?: boolean
+  allowUserUpload?: boolean
 }
 
 export interface RegisterReq {
@@ -306,6 +310,21 @@ export interface LibrarySettings {
   tagSort?: LibrarySortPreference
   bookSort?: { field: BookSortPrefField; dir?: 'asc' | 'desc' }
   view?: 'grid' | 'list'
+  /**
+   * Joined shared libraries this user removed from their own sidebar. A view
+   * preference, not an ACL: the API keeps listing them (and Settings keeps
+   * offering a way back), so a stale or copied id costs nothing. The personal
+   * library is never listed here — it stays on the sidebar.
+   */
+  hiddenLibraryIds?: string[]
+  /**
+   * The reader's manual sidebar order, by library id. Per-user on purpose: the
+   * libraries table is shared, so a global sort column would move the sidebar
+   * for everyone. Ids the order does not mention keep the server's join-time
+   * order and land at the bottom, and ids it names but the reader no longer
+   * belongs to are ignored.
+   */
+  libraryOrder?: string[]
 }
 
 export interface IntegrationsSettings {

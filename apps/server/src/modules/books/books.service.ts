@@ -2,7 +2,6 @@ import type { Readable } from 'node:stream'
 
 import { eq, lt, desc, asc, and, or, sql, inArray, isNull, isNotNull, type SQL } from 'drizzle-orm'
 import JSZip from 'jszip'
-import sharp from 'sharp'
 import { getDb } from '../../db/client'
 import {
   blobs, books, annotations, bookTags, bookVersions, bookStates, contentRevisions, libraries, libraryBooks,
@@ -26,6 +25,7 @@ import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { assertMutableContent, ensurePrivateLibrary, requireLibraryManager, sourceStillReadable, sourceStillReadableSync } from '../libraries/library-access'
+import { assertUserUploadAllowed } from '../auth/auth.service'
 import { libraryOrderBy, isWorkEffectivelyHidden, loadLibraryHiddenTaxonomy, workHiddenExclusion } from '../libraries/library-query'
 import { resolveSharedVersionRead } from '../libraries/library-access'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
@@ -33,9 +33,9 @@ import { sha256 } from '../../lib/hash'
 import { normalizeBookTitle } from '../../lib/book-title'
 import { countWords } from '../../lib/word-count'
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
-import { coverThumbnailKey } from '../../lib/cover'
+import { coverThumbnailKey, detectImageExtension, blobKey, generateCoverThumbnail } from '../../lib/cover'
 import { log } from '../../lib/logger'
-import { normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BookFormat, type BookMetadata, type CoverPaletteId, type Chapter, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
+import { normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type CoverPaletteId, type Chapter, type LibraryVersionKind, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
 
 import { getReaderBookSettings } from './reader-settings.service'
 
@@ -351,35 +351,6 @@ export function stripMetaChapters<T extends { meta: Record<string, unknown> }>(b
   return { ...book, meta }
 }
 
-function detectImageExtension(buffer: Buffer): string | null {
-  if (buffer.length < 4) return null
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'png'
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpg'
-  if (buffer.length >= 6 && (buffer.toString('ascii', 0, 6) === 'GIF87a' || buffer.toString('ascii', 0, 6) === 'GIF89a')) return 'gif'
-  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'webp'
-  const header = buffer.toString('utf8', 0, Math.min(buffer.length, 4096)).replace(/^\uFEFF/, '')
-  if (/<svg(?:\s|>)/i.test(header)) return 'svg'
-  return null
-}
-
-function blobKey(hash: string, ext: string): string {
-  return `blobs/${hash.slice(0, 2)}/${hash}${ext}`
-}
-
-export async function generateCoverThumbnail(buffer: Buffer, ext?: string | null): Promise<Buffer | null> {
-  const actualExt = ext || detectImageExtension(buffer)
-  if (actualExt === 'svg') return buffer
-  try {
-    return await sharp(buffer)
-      .resize({ width: 480, withoutEnlargement: true })
-      .webp({ quality: 80 })
-      .toBuffer()
-  } catch (err) {
-    log('warn', 'cover_thumbnail_failed', { error: err })
-    return null
-  }
-}
-
 export async function bufferFromStream(stream: Readable): Promise<Buffer> {
   const chunks: Buffer[] = []
   for await (const chunk of stream) {
@@ -584,6 +555,7 @@ export async function uploadBook(
   membership?: { shelfId?: string | null; tagIds?: string[] },
   opts?: { normalizeTitle?: boolean },
 ) {
+  assertUserUploadAllowed(userId)
   const db = getDb()
   const library = { id: ensurePrivateLibrary(db, userId) }
   const tagIds = [...new Set(membership?.tagIds ?? [])]
@@ -1365,6 +1337,7 @@ export async function previewAppendTxtBookContent(userId: string, bookId: string
 }
 
 export async function appendTxtBookContent(userId: string, bookId: string, appendedText: string, startOffset?: number) {
+  assertUserUploadAllowed(userId)
   assertMutableContent(resolveLibraryBook(userId, bookId).kind)
   const prepared = await prepareTxtAppend(userId, bookId, appendedText, startOffset)
   const db = getDb()
@@ -2542,4 +2515,73 @@ export async function getBookTags(userId: string, bookId: string) {
     .where(eq(libraryBookTags.libraryBookId, libraryBookId))
     .all()
   return rows.map((r) => r.tagId)
+}
+
+export function getPrivateBatchSelection(userId: string, ids: string[]): BatchSelectionItem[] {
+  const db = getDb()
+  const libraryId = ensurePrivateLibrary(db, userId)
+  const uniqueIds = [...new Set(ids)]
+  const rows = db.select({
+    id: libraryBookVersions.bookVersionId,
+    libraryBookId: libraryBooks.id,
+    categoryId: libraryBooks.categoryId,
+    hidden: libraryBooks.hidden,
+    pinnedAt: libraryBookVersions.pinnedAt,
+    kind: libraryBookVersions.kind,
+  }).from(libraryBookVersions)
+    .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+    .where(and(eq(libraryBooks.libraryId, libraryId), inArray(libraryBookVersions.bookVersionId, uniqueIds))).all()
+  if (rows.length !== uniqueIds.length) throw new AppError('BOOK_NOT_FOUND')
+  const tags = db.select().from(libraryBookTags)
+    .where(inArray(libraryBookTags.libraryBookId, rows.map((row) => row.libraryBookId))).all()
+  const tagIdsByWork = new Map<string, string[]>()
+  for (const tag of tags) {
+    const tagIds = tagIdsByWork.get(tag.libraryBookId) ?? []
+    tagIds.push(tag.tagId)
+    tagIdsByWork.set(tag.libraryBookId, tagIds)
+  }
+  const byId = new Map(rows.map((row) => [row.id, {
+    id: row.id,
+    categoryId: row.categoryId,
+    tagIds: tagIdsByWork.get(row.libraryBookId) ?? [],
+    hidden: row.hidden,
+    pinnedAt: row.pinnedAt,
+    versionCount: 1,
+    kind: row.kind as LibraryVersionKind,
+  }]))
+  return ids.map((id) => byId.get(id)!).filter(Boolean)
+}
+
+export function organizePrivateBatch(userId: string, input: BatchOrganizeReq) {
+  const db = getDb()
+  const libraryId = ensurePrivateLibrary(db, userId)
+  const ids = [...new Set(input.ids)]
+  const rows = db.select({ id: libraryBookVersions.bookVersionId, libraryBookId: libraryBooks.id })
+    .from(libraryBookVersions).innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+    .where(and(eq(libraryBooks.libraryId, libraryId), inArray(libraryBookVersions.bookVersionId, ids))).all()
+  if (rows.length !== ids.length) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  if (input.categoryId !== undefined && input.categoryId !== null && !db.select({ id: libraryCategories.id }).from(libraryCategories)
+    .where(and(eq(libraryCategories.id, input.categoryId), eq(libraryCategories.libraryId, libraryId))).get()) throw new AppError('SHELF_NOT_FOUND')
+  const addTagIds = [...new Set(input.addTagIds)]
+  const removeTagIds = [...new Set(input.removeTagIds)]
+  if (addTagIds.some((id) => removeTagIds.includes(id))) throw new AppError('VALIDATION_ERROR', 'Conflicting tag changes')
+  const touchedTagIds = [...addTagIds, ...removeTagIds]
+  if (touchedTagIds.length > 0) {
+    const found = db.select({ id: libraryTags.id }).from(libraryTags)
+      .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, touchedTagIds))).all()
+    if (found.length !== touchedTagIds.length) throw new AppError('TAG_NOT_FOUND')
+  }
+  const workIds = rows.map((row) => row.libraryBookId)
+  const now = Date.now()
+  db.transaction((tx) => {
+    if (input.categoryId !== undefined) tx.update(libraryBooks)
+      .set({ categoryId: input.categoryId, updatedAt: now })
+      .where(inArray(libraryBooks.id, workIds)).run()
+    for (const tagId of removeTagIds) tx.delete(libraryBookTags)
+      .where(and(inArray(libraryBookTags.libraryBookId, workIds), eq(libraryBookTags.tagId, tagId))).run()
+    for (const tagId of addTagIds) tx.insert(libraryBookTags)
+      .values(workIds.map((libraryBookId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
+    for (const tagId of touchedTagIds) tx.update(libraryTags).set({ updatedAt: now }).where(eq(libraryTags.id, tagId)).run()
+  })
+  return { count: ids.length }
 }

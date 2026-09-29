@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 
 import {
   catalogBookUpdateSchema,
+  batchOrganizeSchema,
+  batchSelectionSchema,
   catalogSimilarQuerySchema,
   catalogUploadSchema,
   catalogVersionMoveSchema,
@@ -12,6 +14,7 @@ import {
   categoryUpdateSchema,
   libraryCreateSchema,
   libraryJoinSchema,
+  libraryInviteTokenSchema,
   libraryUpdateSchema,
   membershipManageSchema,
   membershipRoleSchema,
@@ -25,13 +28,18 @@ import {
 import {
   addMember,
   createLibrary,
+  createLibraryInvite,
   deleteLibrary,
   getLibrary,
+  getLibraryInviteStatus,
   getRelation,
   joinLibrary,
+  joinLibraryByInvite,
   listLibraries,
   listMembers,
+  previewLibraryInvite,
   removeMember,
+  revokeLibraryInvite,
   setMemberRole,
   setVersionGuestReadable,
   transferLibraryOwnership,
@@ -39,16 +47,25 @@ import {
 } from './libraries.service'
 import {
   deleteCatalogVersion,
+  deleteCatalogBook,
   findSimilarWorks,
   getCatalogBook,
   listCatalogBooks,
   moveCatalogVersion,
+  removeCatalogBookCover,
+  removeCatalogVersionCover,
+  resetCatalogVersionMetadata,
   updateCatalogBook,
+  updateCatalogBookCover,
   updateCatalogVersion,
+  updateCatalogVersionCover,
+  getCatalogBatchSelection,
+  organizeCatalogBatch,
 } from './catalog.service'
 import { addToPrivateLibrary } from './collect.service'
 import { publishPrivateBook } from './publish.service'
 import { uploadCatalogBook } from '../books/books.service'
+import { AppError } from '../../middleware/error'
 
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { isTitleNormalizeEnabled } from '../settings/settings.service'
@@ -86,6 +103,22 @@ librariesRoutes.post('/', async (c) => {
   return c.json({ data: library }, 201)
 })
 
+librariesRoutes.post('/invites/preview', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest') === true) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = libraryInviteTokenSchema.safeParse(await c.req.json().catch(() => ({})))
+  if (!parsed.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid invitation' } }, 400)
+  return c.json({ data: previewLibraryInvite(user.id, parsed.data.token) })
+})
+
+librariesRoutes.post('/invites/join', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest') === true) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = libraryInviteTokenSchema.safeParse(await c.req.json().catch(() => ({})))
+  if (!parsed.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid invitation' } }, 400)
+  return c.json({ data: joinLibraryByInvite(user.id, parsed.data.token) }, 201)
+})
+
 librariesRoutes.get('/:id', async (c) => {
   const user = c.get('user')
   const library = await getLibrary({ userId: user?.id ?? null, isGuest: c.get('guest') === true }, c.req.param('id'))
@@ -107,6 +140,24 @@ librariesRoutes.post('/:id/join', async (c) => {
   }
   const result = await joinLibrary(user.id, c.req.param('id'), parsed.data.accessPassword)
   return c.json({ data: result }, 201)
+})
+
+librariesRoutes.get('/:id/invite', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest') === true) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  return c.json({ data: getLibraryInviteStatus(user.id, c.req.param('id')) })
+})
+
+librariesRoutes.post('/:id/invite', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest') === true) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  return c.json({ data: createLibraryInvite(user.id, c.req.param('id')) }, 201)
+})
+
+librariesRoutes.delete('/:id/invite', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest') === true) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  return c.json({ data: revokeLibraryInvite(user.id, c.req.param('id')) })
 })
 
 librariesRoutes.patch('/:id', async (c) => {
@@ -292,6 +343,28 @@ librariesRoutes.post('/:id/books', async (c) => {
   }, 201)
 })
 
+librariesRoutes.post('/:id/books/batch/selection', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role === 'guest') throw new AppError('FORBIDDEN')
+  const parsed = batchSelectionSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid selection', parsed.error.flatten())
+  return c.json({ data: await getCatalogBatchSelection(user.id, c.req.param('id'), parsed.data.ids) })
+})
+
+librariesRoutes.patch('/:id/books/batch/organize', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role === 'guest') throw new AppError('FORBIDDEN')
+  const parsed = batchOrganizeSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid batch organization', parsed.error.flatten())
+  return c.json({ data: await organizeCatalogBatch(user.id, c.req.param('id'), parsed.data) })
+})
+
+librariesRoutes.delete('/:id/books/:bookId', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role === 'guest') throw new AppError('FORBIDDEN')
+  return c.json({ data: await deleteCatalogBook(user.id, c.req.param('id'), c.req.param('bookId')) })
+})
+
 librariesRoutes.patch('/:id/books/:bookId', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
@@ -300,6 +373,25 @@ librariesRoutes.patch('/:id/books/:bookId', async (c) => {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'empty patch' : parsed.error.flatten() } }, 400)
   }
   const book = await updateCatalogBook(user.id, c.req.param('id'), c.req.param('bookId'), parsed.data)
+  return c.json({ data: book })
+})
+
+librariesRoutes.put('/:id/books/:bookId/cover', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const body = await c.req.parseBody()
+  const file = body['file']
+  if (!file || !(file instanceof File)) {
+    throw new AppError('VALIDATION_ERROR', 'File is required')
+  }
+  const book = await updateCatalogBookCover(user.id, c.req.param('id'), c.req.param('bookId'), file)
+  return c.json({ data: book })
+})
+
+librariesRoutes.delete('/:id/books/:bookId/cover', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const book = await removeCatalogBookCover(user.id, c.req.param('id'), c.req.param('bookId'))
   return c.json({ data: book })
 })
 
@@ -334,6 +426,34 @@ librariesRoutes.delete('/:id/books/:bookId/versions/:versionLinkId', async (c) =
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const result = await deleteCatalogVersion(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'))
   return c.json({ data: result })
+})
+
+librariesRoutes.put('/:id/books/:bookId/versions/:versionLinkId/cover', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const body = await c.req.parseBody()
+  const file = body['file']
+  if (!file || !(file instanceof File)) {
+    throw new AppError('VALIDATION_ERROR', 'File is required')
+  }
+  const version = await updateCatalogVersionCover(
+    user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'), file,
+  )
+  return c.json({ data: version })
+})
+
+librariesRoutes.delete('/:id/books/:bookId/versions/:versionLinkId/cover', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const version = await removeCatalogVersionCover(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'))
+  return c.json({ data: version })
+})
+
+librariesRoutes.post('/:id/books/:bookId/versions/:versionLinkId/reset-metadata', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const book = await resetCatalogVersionMetadata(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'))
+  return c.json({ data: book })
 })
 
 // -------------------------------------------------------------- Collect (7.x)

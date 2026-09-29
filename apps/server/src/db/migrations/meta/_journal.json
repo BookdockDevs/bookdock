@@ -155,6 +155,55 @@
       "when": 1790720000000,
       "tag": "0022_book_authors",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1790721000000,
+      "tag": "0023_private_library_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790722000000,
+      "tag": "0024_library_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790800000000,
+      "tag": "0025_library_books_meta",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790801000000,
+      "tag": "0026_library_book_versions_meta",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790802000000,
+      "tag": "0027_library_books_default_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1790803000000,
+      "tag": "0028_shared_work_pin",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1790804000000,
+      "tag": "0029_instance_upload_create_switches",
+      "breakpoints": true
     }
   ]
 }

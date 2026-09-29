@@ -123,6 +123,7 @@ describe('Settings routes - Library preferences', () => {
       normalizeTitle: false,
       shelfSort: { mode: 'name', dir: 'asc' },
       view: 'list',
+      hiddenLibraryIds: ['lib-keep'],
     })
 
     const app = createApp()
@@ -144,6 +145,24 @@ describe('Settings routes - Library preferences', () => {
       tagSort: { mode: 'bookCount', dir: 'desc' },
       bookSort: { field: 'title', dir: 'asc' },
       view: 'list',
+      hiddenLibraryIds: ['lib-keep'],
+    })
+  })
+
+  it('stores the hidden-library list the sidebar sends', async () => {
+    vi.mocked(settingsService.getLibrarySettings).mockReturnValue({ view: 'grid' })
+
+    const app = createApp()
+    const res = await app.request('http://test/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ library: { hiddenLibraryIds: ['lib-a', 'lib-b'] } }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(settingsService.updateLibrarySettings).toHaveBeenCalledWith('u1', {
+      view: 'grid',
+      hiddenLibraryIds: ['lib-a', 'lib-b'],
     })
   })
 })

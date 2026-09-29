@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono'
-import { appendContentSchema, paginationSchema, bookMembershipSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
+import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, paginationSchema, bookMembershipSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
@@ -29,6 +29,8 @@ import {
   previewAppendTxtBookContent,
   appendTxtBookContent,
   assertReadableBook,
+  getPrivateBatchSelection,
+  organizePrivateBatch,
 } from './books.service'
 import { updateReaderBookSettings } from './reader-settings.service'
 import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
@@ -41,6 +43,22 @@ import { exportEpubBook, exportTxtBook } from './txt-export'
 
 const booksRoutes = new Hono()
 const appendOptionsSchema = appendContentSchema.pick({ startOffset: true })
+
+booksRoutes.post('/batch/selection', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest') || user.role === 'guest') throw new AppError('FORBIDDEN')
+  const parsed = batchSelectionSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid selection', parsed.error.flatten())
+  return c.json({ data: getPrivateBatchSelection(user.id, parsed.data.ids) })
+})
+
+booksRoutes.patch('/batch/organize', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest') || user.role === 'guest') throw new AppError('FORBIDDEN')
+  const parsed = batchOrganizeSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid batch organization', parsed.error.flatten())
+  return c.json({ data: organizePrivateBatch(user.id, parsed.data) })
+})
 
 // Download filenames keep word chars plus CJK punctuation/ideographs, '_' else.
 function safeFileBase(title: string): string {

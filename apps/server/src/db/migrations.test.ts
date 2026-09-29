@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { describe, expect, it } from 'vitest'
 
 import * as schema from './schema'
-import { reconcileConsolidatedMigrationLedger, repairBookmarkFields, repairIdeaStyle, repairLegacyTextReplacementSchema, repairLibraryBooksDeletedAt, retargetBookIdReferences } from './client'
+import { reconcileConsolidatedMigrationLedger, repairBookmarkFields, repairIdeaStyle, repairLegacyTextReplacementSchema, repairLibraryBooksDeletedAt, repairLibraryInvitesSchema, retargetBookIdReferences } from './client'
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
 const baselineFile = path.join(migrationsDir, '0000_baseline.sql')
@@ -22,6 +23,7 @@ const librarySortTimestampsMigrationFile = path.join(migrationsDir, '0007_librar
 const libraryFoundationMigrationFile = path.join(migrationsDir, '0008_library_foundation.sql')
 const readingEntitiesMigrationFile = path.join(migrationsDir, '0009_reading_entities.sql')
 const listingGuestReadableMigrationFile = path.join(migrationsDir, '0020_listing_guest_readable.sql')
+const sharedWorkPinMigrationFile = path.join(migrationsDir, '0028_shared_work_pin.sql')
 
 function applyBaseline(sqlite: Database.Database) {
   const sql = fs.readFileSync(baselineFile, 'utf8')
@@ -572,6 +574,84 @@ describe('library book trash column repair', () => {
   })
 })
 
+describe('library invite schema repair', () => {
+  function legacyDb() {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    sqlite.exec(`
+      CREATE TABLE users (id TEXT PRIMARY KEY NOT NULL, username TEXT NOT NULL);
+      CREATE TABLE libraries (
+        id TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        visibility TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE library_invites (
+        id TEXT PRIMARY KEY NOT NULL,
+        library_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX library_invites_token_hash_unique ON library_invites (token_hash);
+      INSERT INTO users VALUES ('u1', 'alice');
+      INSERT INTO libraries VALUES ('lib_priv', 'u1', 'shared', 'Secret', '', 'private', 1, 1);
+      INSERT INTO libraries VALUES ('lib_open', 'u1', 'shared', 'Open', '', 'public', 1, 1);
+      INSERT INTO libraries VALUES ('lib_personal', 'u1', 'private', '', '', NULL, 1, 1);
+      INSERT INTO library_invites VALUES ('lbi_old', 'lib_open', 'u1', 'deadbeef', 1);
+    `)
+    return sqlite
+  }
+
+  it('adopts the pre-rename token_hash column and re-issues unusable codes', () => {
+    const sqlite = legacyDb()
+    const db = drizzle(sqlite, { schema })
+    const columns = () => (sqlite.prepare('PRAGMA table_info(library_invites)').all() as { name: string }[]).map((c) => c.name)
+    const rows = () => sqlite.prepare('SELECT library_id, token, revoked_at FROM library_invites ORDER BY library_id').all() as
+      { library_id: string; token: string; revoked_at: number | null }[]
+
+    expect(columns()).toContain('token_hash')
+    repairLibraryInvitesSchema(db)
+
+    // The pre-rename column becomes `token` and gains the revocation marker.
+    expect(columns()).toContain('token')
+    expect(columns()).not.toContain('token_hash')
+    expect(columns()).toContain('revoked_at')
+
+    const after = rows()
+    // The private shared library gains a code; the public one keeps its row.
+    expect(after.map((r) => r.library_id)).toEqual(['lib_open', 'lib_priv'])
+    // The pre-rename hash could never be handed out, so it is replaced.
+    expect(after.every((r) => /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{16}$/.test(r.token))).toBe(true)
+    // A personal library never gets one.
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM library_invites WHERE library_id = ?').get('lib_personal')).toEqual({ count: 0 })
+
+    // Idempotent: a healed database keeps exactly the same codes.
+    const settled = JSON.stringify(rows())
+    repairLibraryInvitesSchema(db)
+    expect(JSON.stringify(rows())).toBe(settled)
+
+    sqlite.close()
+  })
+
+  it('leaves an already current code untouched', () => {
+    const sqlite = legacyDb()
+    const db = drizzle(sqlite, { schema })
+    repairLibraryInvitesSchema(db)
+    const first = sqlite.prepare('SELECT token FROM library_invites WHERE library_id = ?').get('lib_priv') as { token: string }
+
+    repairLibraryInvitesSchema(db)
+    const second = sqlite.prepare('SELECT token FROM library_invites WHERE library_id = ?').get('lib_priv') as { token: string }
+    expect(second.token).toBe(first.token)
+
+    sqlite.close()
+  })
+})
+
 describe('text replacement migration', () => {
   it('renames replacement tables and preserves existing rules and overrides', () => {
     const sqlite = new Database(':memory:')
@@ -669,9 +749,7 @@ describe('text replacement migration', () => {
     expect(sqlite.prepare('SELECT replacement_id, enabled FROM text_replacement_overrides WHERE id = ?').get('o1'))
       .toEqual({ replacement_id: 'r1', enabled: 0 })
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
-      // Journal holds baseline + 0001..0013 + 0015..0022 (0014 was abandoned
-      // for the client-side repair); reconcile rewrites the ledger to match it.
-      .toEqual({ count: 22 })
+      .toEqual({ count: readMigrationFiles({ migrationsFolder: migrationsDir }).length })
 
     sqlite.close()
   })
@@ -780,6 +858,31 @@ describe('listing guest readability migration', () => {
     const columns = sqlite.prepare("PRAGMA table_info('book_versions')").all() as { name: string }[]
     expect(columns.map((column) => column.name)).not.toContain('guest_readable')
 
+    sqlite.close()
+  })
+})
+
+describe('shared work pin migration', () => {
+  it('copies any shared version pin to its work and leaves private work pins empty', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.exec(`
+      CREATE TABLE libraries (id TEXT PRIMARY KEY, type TEXT NOT NULL);
+      CREATE TABLE library_books (id TEXT PRIMARY KEY, library_id TEXT NOT NULL);
+      CREATE TABLE library_book_versions (id TEXT PRIMARY KEY, library_book_id TEXT NOT NULL, pinned_at INTEGER);
+      INSERT INTO libraries VALUES ('shared', 'shared'), ('private', 'private');
+      INSERT INTO library_books VALUES ('shared-work', 'shared'), ('private-work', 'private');
+      INSERT INTO library_book_versions VALUES
+        ('shared-v1', 'shared-work', 10), ('shared-v2', 'shared-work', 20),
+        ('private-v1', 'private-work', 30);
+    `)
+    const migration = fs.readFileSync(sharedWorkPinMigrationFile, 'utf8')
+    for (const statement of migration.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
+      sqlite.exec(statement)
+    }
+    expect(sqlite.prepare('SELECT pinned_at AS pinnedAt FROM library_books WHERE id = ?').get('shared-work'))
+      .toEqual({ pinnedAt: 20 })
+    expect(sqlite.prepare('SELECT pinned_at AS pinnedAt FROM library_books WHERE id = ?').get('private-work'))
+      .toEqual({ pinnedAt: null })
     sqlite.close()
   })
 })

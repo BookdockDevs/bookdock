@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, isNull, ne } from 'drizzle-orm'
+import { and, asc, count, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 
 import { normalizeUsername } from '@bookdock/shared'
 import type { AdminUserRes, UpdateUserReq } from '@bookdock/shared'
@@ -52,6 +52,15 @@ export function listUsers(): AdminUserRes[] {
     // listing it only confuses user management.
     .where(ne(users.role, 'guest'))
     .groupBy(users.id)
+    .orderBy(
+      sql`CASE ${users.role}
+        WHEN 'owner' THEN 0
+        WHEN 'admin' THEN 1
+        WHEN 'member' THEN 2
+        ELSE 3
+      END ASC`,
+      asc(users.createdAt),
+    )
     .all()
   // One extra query for the delete guard: an account owning shared libraries
   // cannot be deleted until they are transferred or deleted.
@@ -136,7 +145,7 @@ export async function createUser(username: string, password: string): Promise<Ad
       throw err
     }
     tx.insert(libraries).values({
-      id: createId('lib'), userId: id, type: 'private', name: username,
+      id: createId('lib'), userId: id, type: 'private', name: '',
       description: '', visibility: null, createdAt: now, updatedAt: now,
     }).run()
   })

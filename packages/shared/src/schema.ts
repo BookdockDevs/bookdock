@@ -203,6 +203,8 @@ export const settingsUpdateSchema = z.object({
       dir: z.enum(['asc', 'desc']).optional(),
     }).optional(),
     view: z.enum(['grid', 'list']).optional(),
+    hiddenLibraryIds: z.array(z.string().max(64)).max(200).optional(),
+    libraryOrder: z.array(z.string().max(64)).max(500).optional(),
   }).optional(),
   integrations: z.object({
     legado: z.object({
@@ -671,6 +673,8 @@ export const updateInstanceSchema = z.object({
   // Effective book-upload cap in bytes. Range keeps the value sane (below 5MB
   // nothing uploads, above 10GB the disk watermark question reopens).
   uploadMaxBytes: z.number().int().min(5 * 1024 * 1024).max(10 * 1024 * 1024 * 1024).optional(),
+  allowUserCreateLibrary: z.boolean().optional(),
+  allowUserUpload: z.boolean().optional(),
 })
 
 export const updateUserSchema = z.object({

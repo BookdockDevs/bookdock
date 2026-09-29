@@ -1,11 +1,13 @@
-import { and, desc, eq, inArray, or } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 
 import { normalizeUsername } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { ideas, libraries, libraryBooks, libraryBookVersions, libraryMemberships, users } from '../../db/schema'
+import { ideas, libraries, libraryBooks, libraryBookVersions, libraryInvites, libraryMemberships, users } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { hashPassword, verifyPassword } from '../../lib/password'
+import { assertUserCreateLibraryAllowed } from '../auth/auth.service'
+import { generateLibraryInviteToken } from '../../lib/token'
 import { AppError } from '../../middleware/error'
 import { assertSharedLibraryVisible, deleteOrphanedBookVersions } from './library-access'
 import type {
@@ -24,7 +26,7 @@ export interface LibraryIdentity {
   isGuest: boolean
 }
 
-function toLibraryRes(row: typeof libraries.$inferSelect): Library {
+function toLibraryRes(row: typeof libraries.$inferSelect, isOwner?: boolean): Library {
   return {
     id: row.id,
     type: row.type,
@@ -32,9 +34,78 @@ function toLibraryRes(row: typeof libraries.$inferSelect): Library {
     name: row.name,
     description: row.description,
     visibility: row.visibility,
+    accessPassword: isOwner ? (row.accessPassword ?? null) : undefined,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
+}
+
+interface LibraryListStats {
+  memberCount: number
+  workCount: number
+}
+
+/**
+ * Head counts for the list rows, in two grouped queries rather than one per
+ * library. Member count is the membership rows plus the owner, who holds none of
+ * his own — a private library is always just its owner. Work count is what the
+ * reader can actually open: trash never counts, and a plain member does not get
+ * hidden works or all-unlisted works counted, so the number matches the catalog
+ * they are about to open. A private library is its reader's, so it always counts
+ * in full. Hidden categories and tags are a listing concern and do not subtract.
+ */
+function libraryListStats(
+  identity: LibraryIdentity,
+  rows: (typeof libraries.$inferSelect)[],
+  memberships: Map<string, LibraryMembership>,
+): Map<string, LibraryListStats> {
+  const db = getDb()
+  const stats = new Map<string, LibraryListStats>()
+  if (rows.length === 0) return stats
+  const shared = rows.filter((row) => row.type === 'shared')
+  // Every row starts at one member: the private library has no membership rows
+  // at all, and a shared library always counts its owner.
+  for (const row of rows) stats.set(row.id, { memberCount: 1, workCount: 0 })
+
+  const sharedIds = shared.map((row) => row.id)
+  if (sharedIds.length > 0) {
+    for (const row of db.select({
+      libraryId: libraryMemberships.libraryId,
+      count: sql<number>`count(*)`,
+    }).from(libraryMemberships).where(inArray(libraryMemberships.libraryId, sharedIds)).groupBy(libraryMemberships.libraryId).all()) {
+      const entry = stats.get(row.libraryId)
+      if (entry) entry.memberCount += row.count
+    }
+  }
+
+  // A private library belongs to its reader, so it is always managed: its hidden
+  // and unlisted works are the reader's own.
+  const managedIds = rows
+    .filter((row) => row.type === 'private' || (() => {
+      const relation = resolveRelation(row, identity.userId ? memberships.get(row.id) : undefined, identity)
+      return relation === 'owner' || relation === 'admin'
+    })())
+    .map((row) => row.id)
+  for (const row of db.select({
+    libraryId: libraryBooks.libraryId,
+    count: sql<number>`count(*)`,
+  }).from(libraryBooks).where(and(
+    inArray(libraryBooks.libraryId, rows.map((row) => row.id)),
+    isNull(libraryBooks.deletedAt),
+    or(
+      inArray(libraryBooks.libraryId, managedIds),
+      and(
+        eq(libraryBooks.hidden, false),
+        sql`EXISTS (SELECT 1 FROM library_book_versions AS visible_version
+          WHERE visible_version.library_book_id = ${libraryBooks.id}
+            AND visible_version.status = 'published')`,
+      ),
+    ),
+  )).groupBy(libraryBooks.libraryId).all()) {
+    const entry = stats.get(row.libraryId)
+    if (entry) entry.workCount = row.count
+  }
+  return stats
 }
 
 /**
@@ -44,12 +115,21 @@ function toLibraryRes(row: typeof libraries.$inferSelect): Library {
  * whole list are read in one query; the relation itself is the same
  * resolveRelation the single-library path uses, so the two cannot disagree.
  */
-function toLibraryListRes(identity: LibraryIdentity, rows: (typeof libraries.$inferSelect)[], memberships: Map<string, LibraryMembership>): LibraryListItem[] {
+function toLibraryListRes(
+  identity: LibraryIdentity,
+  rows: (typeof libraries.$inferSelect)[],
+  memberships: Map<string, LibraryMembership>,
+  stats: Map<string, LibraryListStats>,
+  ownerNames: Map<string, string>,
+): LibraryListItem[] {
   return rows.map((row) => {
-    const library = toLibraryRes(row)
-    if (row.type === 'private') return { ...library, relation: 'owner' as const }
+    const isOwner = Boolean(identity.userId && row.userId === identity.userId)
+    const library = toLibraryRes(row, isOwner)
+    const count = stats.get(row.id) ?? { memberCount: 1, workCount: 0 }
+    const ownerUsername = ownerNames.get(row.userId) ?? ''
+    if (row.type === 'private') return { ...library, relation: 'owner' as const, ...count, ownerUsername }
     const membership = identity.userId ? memberships.get(row.id) : undefined
-    return { ...library, relation: resolveRelation(row, membership, identity) }
+    return { ...library, relation: resolveRelation(row, membership, identity), ...count, ownerUsername }
   })
 }
 
@@ -119,13 +199,30 @@ function findUserIdByUsername(username: string | undefined): string {
   throw new AppError('USER_NOT_FOUND', 'User not found')
 }
 
+/**
+ * Default sidebar order: when *this* reader joined, oldest first, so a library
+ * keeps its place instead of jumping around. An owner holds no membership row,
+ * so their entry date is the library's own creation. A manual drag overrides
+ * this on the client; anything the manual order does not mention simply follows
+ * it, which is how a newly joined library lands at the bottom.
+ */
+function byJoinTime(
+  rows: (typeof libraries.$inferSelect)[],
+  memberships: Map<string, LibraryMembership>,
+): (typeof libraries.$inferSelect)[] {
+  const joinedAt = (row: typeof libraries.$inferSelect) => memberships.get(row.id)?.createdAt ?? row.createdAt
+  return [...rows].sort((a, b) => (
+    joinedAt(a) - joinedAt(b) || a.createdAt - b.createdAt || a.id.localeCompare(b.id)
+  ))
+}
+
 export async function listLibraries(identity: LibraryIdentity) {
   const db = getDb()
   if (!identity.userId || identity.isGuest) {
     const rows = db.select().from(libraries)
       .where(and(eq(libraries.type, 'shared'), eq(libraries.visibility, 'public')))
       .orderBy(desc(libraries.updatedAt)).all()
-    return toLibraryListRes(identity, rows, new Map())
+    return toLibraryListRes(identity, byJoinTime(rows, new Map()), new Map(), libraryListStats(identity, rows, new Map()), ownerNamesOf(rows))
   }
   const memberRows = db.select().from(libraryMemberships)
     .where(eq(libraryMemberships.userId, identity.userId)).all()
@@ -151,7 +248,17 @@ export async function listLibraries(identity: LibraryIdentity) {
   const ownPrivate = db.select().from(libraries)
     .where(and(eq(libraries.type, 'private'), eq(libraries.userId, identity.userId)))
     .orderBy(desc(libraries.updatedAt)).all()
-  return toLibraryListRes(identity, [...ownPrivate, ...shared], memberships)
+  const ordered = [...ownPrivate, ...byJoinTime(shared, memberships)]
+  return toLibraryListRes(identity, ordered, memberships, libraryListStats(identity, ordered, memberships), ownerNamesOf(ordered))
+}
+
+/** Owner display names for the list rows, read in one query for all of them. */
+function ownerNamesOf(rows: (typeof libraries.$inferSelect)[]) {
+  const ids = [...new Set(rows.map((row) => row.userId))]
+  if (ids.length === 0) return new Map<string, string>()
+  const db = getDb()
+  return new Map(db.select({ id: users.id, username: users.username }).from(users)
+    .where(inArray(users.id, ids)).all().map((row) => [row.id, row.username]))
 }
 
 export async function getLibrary(identity: LibraryIdentity, libraryId: string) {
@@ -168,11 +275,13 @@ export async function getLibrary(identity: LibraryIdentity, libraryId: string) {
     // Discoverable metadata only; content gating is enforced per request.
     assertSharedLibraryVisible(library, relation)
   }
-  return toLibraryRes(library)
+  const isOwner = Boolean(identity.userId && library.userId === identity.userId)
+  return toLibraryRes(library, isOwner)
 }
 
 export async function createLibrary(identity: LibraryIdentity, data: LibraryCreateReq) {
   const userId = requireUserId(identity)
+  assertUserCreateLibraryAllowed(userId)
   if (data.visibility === 'password' && !data.accessPassword) {
     throw new AppError('VALIDATION_ERROR', 'Password libraries require an access password')
   }
@@ -184,23 +293,38 @@ export async function createLibrary(identity: LibraryIdentity, data: LibraryCrea
     name: data.name,
     description: data.description ?? '',
     visibility: data.visibility ?? 'private',
+    accessPassword: data.visibility === 'password' && data.accessPassword ? data.accessPassword : null,
     accessPasswordHash: data.visibility === 'password' && data.accessPassword
       ? await hashPassword(data.accessPassword)
       : null,
     createdAt: now,
     updatedAt: now,
   }
-  getDb().insert(libraries).values(row).run()
-  return toLibraryRes(row)
+  getDb().transaction((tx) => {
+    tx.insert(libraries).values(row).run()
+    if (row.visibility === 'private') {
+      tx.insert(libraryInvites).values({
+        id: createId('lbi'), libraryId: row.id, userId,
+        token: generateLibraryInviteToken(), createdAt: now,
+      }).run()
+    }
+  })
+  return toLibraryRes(row, true)
 }
 
 export async function updateLibrary(userId: string, libraryId: string, data: LibraryUpdateReq) {
   const db = getDb()
   const library = getLibraryRow(libraryId)
-  if (library.type === 'private' || library.userId !== userId) {
+  if (library.userId !== userId) {
     throw new AppError('FORBIDDEN', 'Only the library owner can change its settings')
   }
-  if (data.visibility === 'password' && !data.accessPassword && !library.accessPasswordHash) {
+  if (library.type === 'private' && (
+    data.name === undefined || data.description !== undefined
+    || data.visibility !== undefined || data.accessPassword !== undefined
+  )) {
+    throw new AppError('VALIDATION_ERROR', 'Only the private library name can be changed')
+  }
+  if (data.visibility === 'password' && !data.accessPassword && !library.accessPassword && !library.accessPasswordHash) {
     throw new AppError('VALIDATION_ERROR', 'Password libraries require an access password')
   }
   const patch: Partial<typeof libraries.$inferInsert> = { updatedAt: Date.now() }
@@ -209,25 +333,39 @@ export async function updateLibrary(userId: string, libraryId: string, data: Lib
   if (data.visibility !== undefined) {
     patch.visibility = data.visibility
     if (data.visibility === 'password') {
-      patch.accessPasswordHash = data.accessPassword
-        ? await hashPassword(data.accessPassword)
-        : (library.accessPasswordHash ?? null)
-      if (!patch.accessPasswordHash) {
+      if (data.accessPassword !== undefined) {
+        patch.accessPassword = data.accessPassword
+        patch.accessPasswordHash = data.accessPassword ? await hashPassword(data.accessPassword) : null
+      } else {
+        patch.accessPassword = library.accessPassword ?? null
+        patch.accessPasswordHash = library.accessPasswordHash ?? null
+      }
+      if (!patch.accessPassword && !patch.accessPasswordHash) {
         throw new AppError('VALIDATION_ERROR', 'Password libraries require an access password')
       }
     } else {
+      patch.accessPassword = null
       patch.accessPasswordHash = null
     }
   } else if (data.accessPassword !== undefined) {
-    // Password rotation without a visibility change; only meaningful on
-    // password libraries, cleared nowhere else.
     if (library.visibility !== 'password') {
       throw new AppError('VALIDATION_ERROR', 'Only password libraries have an access password')
     }
+    patch.accessPassword = data.accessPassword
     patch.accessPasswordHash = data.accessPassword ? await hashPassword(data.accessPassword) : library.accessPasswordHash
   }
-  db.update(libraries).set(patch).where(eq(libraries.id, libraryId)).run()
-  return toLibraryRes(db.select().from(libraries).where(eq(libraries.id, libraryId)).get()!)
+  db.transaction((tx) => {
+    tx.update(libraries).set(patch).where(eq(libraries.id, libraryId)).run()
+    if (library.visibility === 'private' && data.visibility && data.visibility !== 'private') {
+      tx.delete(libraryInvites).where(eq(libraryInvites.libraryId, libraryId)).run()
+    } else if (library.type === 'shared' && library.visibility !== 'private' && data.visibility === 'private') {
+      tx.insert(libraryInvites).values({
+        id: createId('lbi'), libraryId, userId,
+        token: generateLibraryInviteToken(), createdAt: Date.now(),
+      }).run()
+    }
+  })
+  return toLibraryRes(db.select().from(libraries).where(eq(libraries.id, libraryId)).get()!, true)
 }
 
 export async function deleteLibrary(userId: string, libraryId: string) {
@@ -267,7 +405,14 @@ export async function listMembers(actorId: string, libraryId: string): Promise<L
   }
   const owner = db.select().from(users).where(eq(users.id, library.userId)).get()
   const rows = db.select().from(libraryMemberships).where(eq(libraryMemberships.libraryId, libraryId))
-    .orderBy(desc(libraryMemberships.createdAt)).all()
+    .orderBy(
+      sql`CASE ${libraryMemberships.role}
+        WHEN 'admin' THEN 0
+        WHEN 'member' THEN 1
+        ELSE 2
+      END ASC`,
+      asc(libraryMemberships.createdAt),
+    ).all()
   // User profiles travel with the rows: a member list without them is unusable.
   const memberUsers = new Map(
     rows.length > 0
@@ -380,7 +525,11 @@ export async function joinLibrary(userId: string, libraryId: string, accessPassw
   if (library.visibility === 'public') {
     // Open libraries admit members freely; the invite-only path stays admin-driven.
   } else if (library.visibility === 'password') {
-    if (!accessPassword || !library.accessPasswordHash || !(await verifyPassword(accessPassword, library.accessPasswordHash))) {
+    const matches = accessPassword && (
+      (library.accessPassword && accessPassword === library.accessPassword)
+      || (library.accessPasswordHash && (await verifyPassword(accessPassword, library.accessPasswordHash)))
+    )
+    if (!matches) {
       throw new AppError('INVALID_LIBRARY_PASSWORD', 'Wrong access password')
     }
   } else {
@@ -393,6 +542,99 @@ export async function joinLibrary(userId: string, libraryId: string, accessPassw
   }
   db.insert(libraryMemberships).values(row).run()
   return { membership: toMembershipRes(row), relation: 'member' as const }
+}
+
+export function getLibraryInviteStatus(actorId: string, libraryId: string) {
+  const library = getLibraryRow(libraryId)
+  if (library.type !== 'shared' || library.visibility !== 'private') {
+    throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  }
+  const relation = resolveRelation(library, membershipOf(libraryId, actorId), { userId: actorId, isGuest: false })
+  if (relation !== 'owner' && relation !== 'admin') throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  const invite = getDb().select({ createdAt: libraryInvites.createdAt, token: libraryInvites.token, revokedAt: libraryInvites.revokedAt }).from(libraryInvites)
+    .where(eq(libraryInvites.libraryId, libraryId)).get()
+  return { active: Boolean(invite && !invite.revokedAt), createdAt: invite?.createdAt ?? null, token: invite && !invite.revokedAt ? invite.token : null }
+}
+
+export function createLibraryInvite(actorId: string, libraryId: string) {
+  const library = getLibraryRow(libraryId)
+  if (library.type !== 'shared' || library.visibility !== 'private') {
+    throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  }
+  const relation = resolveRelation(library, membershipOf(libraryId, actorId), { userId: actorId, isGuest: false })
+  if (relation !== 'owner' && relation !== 'admin') throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  const token = generateLibraryInviteToken()
+  const now = Date.now()
+  getDb().transaction((tx) => {
+    tx.delete(libraryInvites).where(eq(libraryInvites.libraryId, libraryId)).run()
+    tx.insert(libraryInvites).values({
+      id: createId('lbi'), libraryId, userId: library.userId,
+      token, createdAt: now,
+    }).run()
+  })
+  return { token, createdAt: now }
+}
+
+export function revokeLibraryInvite(actorId: string, libraryId: string) {
+  const library = getLibraryRow(libraryId)
+  if (library.type !== 'shared' || library.visibility !== 'private') {
+    throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  }
+  const relation = resolveRelation(library, membershipOf(libraryId, actorId), { userId: actorId, isGuest: false })
+  if (relation !== 'owner' && relation !== 'admin') throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  getDb().update(libraryInvites).set({ revokedAt: Date.now() }).where(eq(libraryInvites.libraryId, libraryId)).run()
+  return { active: false, createdAt: null, token: null }
+}
+
+export function previewLibraryInvite(userId: string, token: string) {
+  const db = getDb()
+  const invite = db.select().from(libraryInvites)
+    .where(and(eq(libraryInvites.token, token), isNull(libraryInvites.revokedAt))).get()
+  if (!invite) throw new AppError('LIBRARY_NOT_FOUND', 'Invitation not found')
+  const library = getLibraryRow(invite.libraryId)
+  if (library.type !== 'shared' || library.visibility !== 'private') {
+    throw new AppError('LIBRARY_NOT_FOUND', 'Invitation not found')
+  }
+  const membership = membershipOf(library.id, userId)
+  // Same reader-scoped counts the library list rows carry, so what an invitee is
+  // told about the library matches what a member sees.
+  const stats = libraryListStats(
+    { userId, isGuest: false },
+    [library],
+    new Map(membership ? [[library.id, membership]] : []),
+  ).get(library.id)
+  return {
+    libraryId: library.id,
+    name: library.name,
+    description: library.description,
+    relation: resolveRelation(library, membership, { userId, isGuest: false }),
+    memberCount: stats?.memberCount ?? 1,
+    workCount: stats?.workCount ?? 0,
+  }
+}
+
+export function joinLibraryByInvite(userId: string, token: string) {
+  getTargetUser(userId)
+  const db = getDb()
+  return db.transaction((tx) => {
+    const invite = tx.select().from(libraryInvites)
+      .where(and(eq(libraryInvites.token, token), isNull(libraryInvites.revokedAt))).get()
+    if (!invite) throw new AppError('LIBRARY_NOT_FOUND', 'Invitation not found')
+    const library = tx.select().from(libraries).where(eq(libraries.id, invite.libraryId)).get()
+    if (!library || library.type !== 'shared' || library.visibility !== 'private') {
+      throw new AppError('LIBRARY_NOT_FOUND', 'Invitation not found')
+    }
+    if (library.userId === userId) return { libraryId: library.id, relation: 'owner' as const }
+    const existing = tx.select().from(libraryMemberships)
+      .where(and(eq(libraryMemberships.libraryId, library.id), eq(libraryMemberships.userId, userId))).get()
+    if (existing) return { libraryId: library.id, relation: existing.role }
+    const now = Date.now()
+    tx.insert(libraryMemberships).values({
+      id: createId('lbm'), libraryId: library.id, userId,
+      role: 'member', createdAt: now, updatedAt: now,
+    }).run()
+    return { libraryId: library.id, relation: 'member' as const }
+  })
 }
 
 export async function setVersionGuestReadable(actorId: string, libraryId: string, bookVersionId: string, readable: boolean) {
@@ -437,6 +679,7 @@ export async function transferLibraryOwnership(actorId: string, libraryId: strin
     if (!fresh || fresh.userId !== actorId) throw new AppError('FORBIDDEN', 'Only the library owner can transfer it')
     tx.delete(libraryMemberships).where(eq(libraryMemberships.id, membership.id)).run()
     tx.update(libraries).set({ userId: targetId, updatedAt: now }).where(eq(libraries.id, libraryId)).run()
+    tx.update(libraryInvites).set({ userId: targetId }).where(eq(libraryInvites.libraryId, libraryId)).run()
     tx.insert(libraryMemberships).values({
       id: createId('lbm'), libraryId, userId: actorId, role: 'admin',
       createdAt: now, updatedAt: now,

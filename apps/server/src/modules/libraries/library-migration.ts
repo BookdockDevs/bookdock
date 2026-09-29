@@ -67,7 +67,7 @@ export async function migratePrivateLibraries(): Promise<LibraryMigrationReport>
         libraryId = createId('lib')
         db.insert(libraries).values({
           id: libraryId, userId: user.id, type: 'private',
-          name: user.username, description: '', visibility: null,
+          name: '', description: '', visibility: null,
           createdAt: startedAt, updatedAt: startedAt,
         }).run()
         report.librariesCreated += 1

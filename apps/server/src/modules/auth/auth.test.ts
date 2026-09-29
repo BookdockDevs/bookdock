@@ -221,7 +221,10 @@ describe('auth module', () => {
   describe('instance settings', () => {
     it('reports initialized=false without an instance row', async () => {
       const info = getInstanceInfo()
-      expect(info).toEqual({ initialized: false, allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: config.uploadMaxBytes })
+      expect(info).toEqual({
+        initialized: false, allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: config.uploadMaxBytes,
+        allowUserCreateLibrary: true, allowUserUpload: true,
+      })
     })
 
     it('falls back to the env upload cap and honors the instance override', async () => {
@@ -238,6 +241,16 @@ describe('auth module', () => {
       expect(info.allowRegistration).toBe(true)
       expect(info.allowGuestAccess).toBe(true)
       expect(getInstanceInfo().allowRegistration).toBe(true)
+    })
+
+    it('updates the operator-run city switches', async () => {
+      await seedInstance(db, {})
+      expect(getInstanceInfo().allowUserCreateLibrary).toBe(true)
+      expect(getInstanceInfo().allowUserUpload).toBe(true)
+      const info = updateInstanceSettings({ allowUserCreateLibrary: false, allowUserUpload: false })
+      expect(info.allowUserCreateLibrary).toBe(false)
+      expect(info.allowUserUpload).toBe(false)
+      expect(getInstanceInfo().allowUserCreateLibrary).toBe(false)
     })
 
     it('reports initialized=true once the instance row exists', async () => {
@@ -453,7 +466,7 @@ describe('auth module', () => {
       expect(getInstanceInfo().initialized).toBe(true)
       const libraries = db.select().from(schema.libraries).where(eq(schema.libraries.userId, result.user.id)).all()
       expect(libraries).toHaveLength(1)
-      expect(libraries[0]).toMatchObject({ type: 'private' })
+      expect(libraries[0]).toMatchObject({ type: 'private', name: '' })
       const instanceRow = db.select().from(schema.instance).all()
       expect(instanceRow).toHaveLength(1)
       expect(instanceRow[0]?.ownerUserId).toBe(result.user.id)

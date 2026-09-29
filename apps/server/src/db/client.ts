@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { fileURLToPath } from 'node:url'
+import { generateLibraryInviteToken, isLibraryInviteToken } from '../lib/token'
 import * as schema from './schema'
 import { config } from '../config'
 
@@ -68,6 +69,52 @@ export function repairLegacyTextReplacementSchema(db: ReturnType<typeof drizzle<
   }
 }
 
+export function repairLibraryInvitesSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
+  const tables = new Set(
+    (db.all(sql.raw('SELECT name FROM sqlite_master WHERE type = \'table\'')) as Array<{ name: string }>).map(({ name }) => name),
+  )
+  if (!tables.has('libraries')) return
+
+  db.transaction((tx) => {
+    tx.run(sql.raw(`CREATE TABLE IF NOT EXISTS "library_invites" (
+      "id" TEXT PRIMARY KEY NOT NULL,
+      "library_id" TEXT NOT NULL REFERENCES "libraries"("id") ON DELETE CASCADE,
+      "user_id" TEXT NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "token" TEXT NOT NULL,
+      "created_at" INTEGER NOT NULL,
+      "revoked_at" INTEGER
+    )`))
+    const columns = tx.all(sql.raw('PRAGMA table_info("library_invites")')) as Array<{ name: string }>
+    if (columns.some(({ name }) => name === 'token_hash') && !columns.some(({ name }) => name === 'token')) {
+      tx.run(sql.raw('ALTER TABLE "library_invites" RENAME COLUMN "token_hash" TO "token"'))
+      // Earlier local builds stored only a hash, so those links cannot be recovered.
+      tx.run(sql.raw('UPDATE "library_invites" SET "token" = lower(hex(randomblob(32)))'))
+    }
+    if (!columns.some(({ name }) => name === 'revoked_at')) {
+      tx.run(sql.raw('ALTER TABLE "library_invites" ADD COLUMN "revoked_at" INTEGER'))
+    }
+    tx.run(sql.raw('CREATE UNIQUE INDEX IF NOT EXISTS "library_invites_library_unique" ON "library_invites" ("library_id")'))
+    tx.run(sql.raw('CREATE UNIQUE INDEX IF NOT EXISTS "library_invites_token_unique" ON "library_invites" ("token")'))
+    tx.run(sql.raw(`INSERT INTO "library_invites" ("id", "library_id", "user_id", "token", "created_at")
+      SELECT 'lbi_' || lower(hex(randomblob(12))), "libraries"."id", "libraries"."user_id",
+        lower(hex(randomblob(32))), CAST(strftime('%s', 'now') AS INTEGER) * 1000
+      FROM "libraries"
+      WHERE "libraries"."type" = 'shared' AND "libraries"."visibility" = 'private'
+        AND NOT EXISTS (SELECT 1 FROM "library_invites" WHERE "library_invites"."library_id" = "libraries"."id")`))
+  })
+
+  // Invitation codes are 16-character Crockford base32, which SQLite cannot
+  // produce, so every row whose token is not already in the current format is
+  // re-issued here: the codes just backfilled, the ones inherited from the
+  // pre-rename `token_hash` column, and the 64-hex links handed out before
+  // this shape existed. Owners copy the link again; the old one stops working.
+  for (const row of db.all(sql.raw('SELECT "id", "token" FROM "library_invites"')) as Array<{ id: string; token: string }>) {
+    if (!isLibraryInviteToken(row.token)) {
+      db.run(sql`UPDATE "library_invites" SET "token" = ${generateLibraryInviteToken()} WHERE "id" = ${row.id}`)
+    }
+  }
+}
+
 export function reconcileConsolidatedMigrationLedger(
   db: ReturnType<typeof drizzle<typeof schema>>,
   migrationsFolder: string,
@@ -125,6 +172,11 @@ export async function runMigrations(hooks?: RunMigrationsHooks) {
   // Resolved relative to this module so it works from src/ (dev) and the
   // bundled dist/ (production); the build copies migrations next to the bundle.
   const migrationsFolder = fileURLToPath(new URL('./migrations', import.meta.url))
+  // Before migrate(): a database that already carries an early `library_invites`
+  // table would otherwise make 0024's CREATE TABLE abort the whole boot, and no
+  // repair running afterwards could rescue it. Both this repair and 0024 are
+  // idempotent, so whichever gets there first wins.
+  repairLibraryInvitesSchema(db)
   migrate(db, { migrationsFolder })
   repairLegacyTextReplacementSchema(db)
 
@@ -167,6 +219,18 @@ export async function runMigrations(hooks?: RunMigrationsHooks) {
     if (!workColumns.some((column) => column.name === 'authors')) {
       db.run(sql.raw('ALTER TABLE "library_books" ADD COLUMN "authors" TEXT NOT NULL DEFAULT \'[]\''))
     }
+    // 0025 work meta: same ledger-ahead hazard as the flags above.
+    if (!workColumns.some((column) => column.name === 'meta')) {
+      db.run(sql.raw(`ALTER TABLE "library_books" ADD COLUMN "meta" TEXT NOT NULL DEFAULT '{}'`))
+    }
+    // 0027 default display version.
+    if (!workColumns.some((column) => column.name === 'default_version_link_id')) {
+      db.run(sql.raw('ALTER TABLE "library_books" ADD COLUMN "default_version_link_id" TEXT REFERENCES "library_book_versions"("id") ON DELETE SET NULL'))
+    }
+    if (!workColumns.some((column) => column.name === 'pinned_at')) {
+      db.run(sql.raw('ALTER TABLE "library_books" ADD COLUMN "pinned_at" INTEGER'))
+      db.run(sql.raw(`UPDATE "library_books" SET "pinned_at" = (SELECT MAX(v.pinned_at) FROM "library_book_versions" v WHERE v.library_book_id = "library_books".id) WHERE library_id IN (SELECT id FROM libraries WHERE type = 'shared')`))
+    }
     db.run(sql.raw(`UPDATE "library_books" SET "authors" = json_array("author") WHERE ("authors" IS NULL OR "authors" = '[]') AND "author" IS NOT NULL AND "author" <> ''`))
   }
   const versionColumns = db.all(sql.raw('PRAGMA table_info(library_book_versions)')) as Array<{ name: string }>
@@ -174,12 +238,31 @@ export async function runMigrations(hooks?: RunMigrationsHooks) {
     if (!versionColumns.some((column) => column.name === 'authors')) {
       db.run(sql.raw('ALTER TABLE "library_book_versions" ADD COLUMN "authors" TEXT'))
     }
+    // 0026 version meta: same ledger-ahead hazard as the work meta above.
+    if (!versionColumns.some((column) => column.name === 'meta')) {
+      db.run(sql.raw(`ALTER TABLE "library_book_versions" ADD COLUMN "meta" TEXT NOT NULL DEFAULT '{}'`))
+    }
     db.run(sql.raw(`UPDATE "library_book_versions" SET "authors" = json_array("author") WHERE "authors" IS NULL AND "author" IS NOT NULL AND "author" <> ''`))
   }
 
   repairLibraryBooksDeletedAt(db)
   repairBookmarkFields(db)
   repairIdeaStyle(db)
+  const libColumns = db.all(sql.raw('PRAGMA table_info("libraries")')) as Array<{ name: string }>
+  if (libColumns.length > 0 && !libColumns.some((c) => c.name === 'access_password')) {
+    db.run(sql.raw('ALTER TABLE "libraries" ADD COLUMN "access_password" TEXT'))
+  }
+  // 0029 operator switches: same ledger-ahead hazard as above; both default
+  // open so existing instances keep their behavior.
+  const instanceColumns = db.all(sql.raw('PRAGMA table_info("instance")')) as Array<{ name: string }>
+  if (instanceColumns.length > 0) {
+    if (!instanceColumns.some((c) => c.name === 'allow_user_create_library')) {
+      db.run(sql.raw('ALTER TABLE "instance" ADD COLUMN "allow_user_create_library" INTEGER NOT NULL DEFAULT 1'))
+    }
+    if (!instanceColumns.some((c) => c.name === 'allow_user_upload')) {
+      db.run(sql.raw('ALTER TABLE "instance" ADD COLUMN "allow_user_upload" INTEGER NOT NULL DEFAULT 1'))
+    }
+  }
   await hooks?.beforeRetarget?.()
   retargetBookIdReferences(db)
 

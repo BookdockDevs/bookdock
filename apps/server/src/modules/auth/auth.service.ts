@@ -29,6 +29,10 @@ export interface InstanceSettings {
   allowGuestAccess: boolean
   /** Owner-set upload cap override; undefined = follow the UPLOAD_MAX_BYTES env default */
   uploadMaxBytes?: number
+  /** Ordinary members may open new shared libraries; the instance owner always bypasses */
+  allowUserCreateLibrary: boolean
+  /** Ordinary members may upload files to their private library; the instance owner always bypasses */
+  allowUserUpload: boolean
 }
 
 export interface SessionIdentity {
@@ -79,6 +83,24 @@ export function isInstanceOwner(userId: string): boolean {
   return row.ownerUserId === userId
 }
 
+/**
+ * Operator-run city gates: ordinary members lose the action while the switch
+ * is off; the instance owner always bypasses. Shared-library managers keep
+ * their curation path — catalog uploads already require a manager seat, so
+ * only private uploads, TXT appends and library creation check here.
+ */
+export function assertUserUploadAllowed(userId: string): void {
+  if (!getInstanceSettings().allowUserUpload && !isInstanceOwner(userId)) {
+    throw new AppError('FORBIDDEN', 'Uploads are disabled by the instance owner')
+  }
+}
+
+export function assertUserCreateLibraryAllowed(userId: string): void {
+  if (!getInstanceSettings().allowUserCreateLibrary && !isInstanceOwner(userId)) {
+    throw new AppError('FORBIDDEN', 'Library creation is disabled by the instance owner')
+  }
+}
+
 export function getInstanceSettings(): InstanceSettings {
   if (instanceCache && Date.now() - instanceCache.at < INSTANCE_CACHE_TTL) {
     return instanceCache.value
@@ -89,6 +111,10 @@ export function getInstanceSettings(): InstanceSettings {
     allowRegistration: row?.allowRegistration === true,
     allowGuestAccess: row?.allowGuestAccess === true,
     uploadMaxBytes: typeof row?.uploadMaxBytes === 'number' && row.uploadMaxBytes > 0 ? row.uploadMaxBytes : undefined,
+    // Absent on pre-0029 rows (and in tests seeding the row by hand): an
+    // unset switch reads as open, so existing instances keep their behavior.
+    allowUserCreateLibrary: row?.allowUserCreateLibrary !== false,
+    allowUserUpload: row?.allowUserUpload !== false,
   }
   instanceCache = { value, at: Date.now() }
   return value
@@ -112,6 +138,8 @@ export function updateInstanceSettings(patch: UpdateInstanceReq): InstanceInfoRe
   if (patch.allowRegistration !== undefined) updates.allowRegistration = patch.allowRegistration
   if (patch.allowGuestAccess !== undefined) updates.allowGuestAccess = patch.allowGuestAccess
   if (patch.uploadMaxBytes !== undefined) updates.uploadMaxBytes = patch.uploadMaxBytes
+  if (patch.allowUserCreateLibrary !== undefined) updates.allowUserCreateLibrary = patch.allowUserCreateLibrary
+  if (patch.allowUserUpload !== undefined) updates.allowUserUpload = patch.allowUserUpload
   db.update(instance).set(updates).where(eq(instance.id, INSTANCE_ID)).run()
   resetInstanceCache()
   return getInstanceInfo()
@@ -169,10 +197,10 @@ function toAuthPayload(user: { id: string; username: string; role: string }) {
   return { id: user.id, username: user.username, role: user.role }
 }
 
-function createPrivateLibrary(tx: Pick<ReturnType<typeof getDb>, 'insert'>, userId: string, username: string) {
+function createPrivateLibrary(tx: Pick<ReturnType<typeof getDb>, 'insert'>, userId: string) {
   const now = Date.now()
   tx.insert(libraries).values({
-    id: createId('lib'), userId, type: 'private', name: username,
+    id: createId('lib'), userId, type: 'private', name: '',
     description: '', visibility: null, createdAt: now, updatedAt: now,
   }).run()
 }
@@ -223,7 +251,7 @@ export async function register(username: string, password: string) {
       if (isUsernameUniqueConstraint(err)) throw new AppError('USERNAME_TAKEN', 'Username is already taken')
       throw err
     }
-    createPrivateLibrary(tx, id, username)
+    createPrivateLibrary(tx, id)
   })
   const user = db.select().from(users).where(eq(users.id, id)).get()
   if (!user) throw new AppError('INTERNAL_ERROR', 'Failed to create user')
@@ -296,7 +324,7 @@ export async function setupUser(username: string, password: string) {
       if (isUsernameUniqueConstraint(err)) throw new AppError('USERNAME_TAKEN', 'Username is already taken')
       throw err
     }
-    createPrivateLibrary(tx, id, username)
+    createPrivateLibrary(tx, id)
     tx.insert(instance).values({
       id: INSTANCE_ID, ownerUserId: id,
       allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: null,

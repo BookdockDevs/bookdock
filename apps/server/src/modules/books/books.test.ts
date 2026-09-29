@@ -36,6 +36,8 @@ import {
   setBookShelf,
   getBookShelf,
   getBookTags,
+  getPrivateBatchSelection,
+  organizePrivateBatch,
   uploadBook,
   migrateTxtArtifacts,
   reTocBook,
@@ -287,6 +289,31 @@ describe('uploadBook dedup flag', () => {
     const second = await uploadBook(ownerId, file)
     expect(second.duplicated).toBe(true)
     expect(second.book.id).toBe(first.book.id)
+  })
+
+  it('refuses private uploads and appends for members when the instance switch is off', async () => {
+    db.insert(schema.instance).values({
+      id: 'instance', ownerUserId: ownerId, allowRegistration: false, allowGuestAccess: false,
+      uploadMaxBytes: null, allowUserCreateLibrary: true, allowUserUpload: false,
+      createdAt: 1, updatedAt: 1,
+    }).run()
+    resetInstanceCache()
+    try {
+      const memberId = createId('user')
+      db.insert(schema.users).values({
+        id: memberId, username: 'member', passwordHash: null, role: 'member', createdAt: Date.now(),
+      }).run()
+      const file = new File(['第一章\n甲'], 'a.txt', { type: 'text/plain' })
+      await expect(uploadBook(memberId, file)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      await expect(appendTxtBookContent(memberId, 'whatever', '续写'))
+        .rejects.toMatchObject({ code: 'FORBIDDEN' })
+      // The instance owner always bypasses the switch.
+      const { book } = await uploadBook(ownerId, file)
+      expect(book.title).toBeTruthy()
+      await expect(appendTxtBookContent(ownerId, book.id, '\n第二章\n乙')).resolves.toBeDefined()
+    } finally {
+      resetInstanceCache()
+    }
   })
 
   it('keeps uppercase TXT uploads on the TXT pipeline', async () => {
@@ -1641,6 +1668,40 @@ describe('book shelf membership (single shelf)', () => {
     const byNone = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, 'none')
     expect(byNone.total).toBe(1)
     expect(byNone.data[0].id).toBe(uncategorized.id)
+  })
+})
+
+describe('private batch organization', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'batch-owner')
+  })
+
+  it('adds and removes selected tags while preserving each book\'s other tags', async () => {
+    const first = seedBook(db, ownerId)
+    const second = seedBook(db, ownerId)
+    const tagA = createId('tag')
+    const tagB = createId('tag')
+    db.insert(schema.tags).values([
+      { id: tagA, userId: ownerId, name: 'A' },
+      { id: tagB, userId: ownerId, name: 'B' },
+    ]).run()
+    mirrorTag(db, ownerId, tagA)
+    mirrorTag(db, ownerId, tagB)
+    linkLibraryTag(db, first.id, tagA)
+    linkLibraryTag(db, first.id, tagB)
+    const ids = [first.id, second.id]
+    expect(getPrivateBatchSelection(ownerId, ids).map((item) => item.tagIds.sort())).toEqual([[tagA, tagB].sort(), []])
+    organizePrivateBatch(ownerId, { ids, addTagIds: [tagA], removeTagIds: [tagB] })
+    expect(await getBookTags(ownerId, first.id)).toEqual([tagA])
+    expect(await getBookTags(ownerId, second.id)).toEqual([tagA])
+    const stranger = seedUser(db, 'stranger')
+    expect(() => organizePrivateBatch(stranger, { ids, addTagIds: [], removeTagIds: [] }))
+      .toThrowError(/Book not found/i)
   })
 })
 

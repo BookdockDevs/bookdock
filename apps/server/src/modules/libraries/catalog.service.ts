@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import {
+  blobs,
   bookVersions,
   contentRevisions,
   libraryBooks,
@@ -12,6 +13,10 @@ import {
   libraries,
 } from '../../db/schema'
 import { AppError } from '../../middleware/error'
+import { getStorage } from '../../storage'
+import { getParser } from '../../formats/registry'
+import { blobKey, coverThumbnailKey, detectImageExtension, generateCoverThumbnail } from '../../lib/cover'
+import { sha256 } from '../../lib/hash'
 import { assertLibraryBrowsable, deleteOrphanedBookVersions, isLibraryManager, requireLibraryManager } from './library-access'
 import {
   isWorkEffectivelyHidden,
@@ -32,6 +37,8 @@ import {
   type CatalogListRes,
   type CatalogVersion,
   type CatalogVersionUpdateReq,
+  type BatchOrganizeReq,
+  type BatchSelectionItem,
 } from '@bookdock/shared'
 
 /**
@@ -82,6 +89,8 @@ function toCatalogVersion(
     authors: link.authors,
     description: link.description,
     coverKey: link.coverKey,
+    // Raw override layer for editors; consumers read `effective`.
+    meta: (link.meta ?? {}) as Record<string, unknown>,
     // Inheritance (5.3): a null override reads the work default, and the
     // resolved value is never written back onto the version row.
     effective: {
@@ -91,7 +100,14 @@ function toCatalogVersion(
       description: link.description ?? work.description,
       coverKey: link.coverKey ?? work.coverKey,
       coverPaletteKey: typeof revisionMeta.coverPaletteKey === 'string' ? revisionMeta.coverPaletteKey : null,
-      bookmeta: revisionMeta.bookmeta ?? {},
+      // Version wins over work wins over parsed file: a version with its own
+      // publication metadata is a distinct edition, and clearing an override
+      // layer reveals the one beneath it.
+      bookmeta: {
+        ...(revisionMeta.bookmeta ?? {}),
+        ...((work.meta ?? {}) as Record<string, unknown>),
+        ...((link.meta ?? {}) as Record<string, unknown>),
+      },
       fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
     },
     collected: collectedVersionIds?.has(link.bookVersionId) ?? false,
@@ -102,7 +118,6 @@ function toCatalogVersion(
     size: version?.size ?? 0,
     chapterCount: revision?.chapterCount ?? 0,
     wordCount: revision?.wordCount ?? null,
-    pinnedAt: link.pinnedAt ?? null,
     createdAt: link.createdAt,
     updatedAt: link.updatedAt,
   }
@@ -116,6 +131,15 @@ function toCatalogBook(
   collectedVersionIds?: ReadonlySet<string>,
 ): CatalogBook {
   const resolved = facts ?? { versions: new Map(), revisions: new Map() }
+  // Default display version leads: cards, rows and the detail dialog read
+  // versions[0], so reordering here moves every surface at once. A default
+  // invisible to this viewer (unlisted for members) or gone entirely simply
+  // keeps the existing order — never an empty slot, never a leak.
+  const ordered = [...links]
+  if (work.defaultVersionLinkId) {
+    const at = ordered.findIndex((link) => link.id === work.defaultVersionLinkId)
+    if (at > 0) ordered.unshift(...ordered.splice(at, 1))
+  }
   return {
     id: work.id,
     libraryId: work.libraryId,
@@ -125,11 +149,15 @@ function toCatalogBook(
     authors: work.authors ?? [],
     description: work.description,
     coverKey: work.coverKey,
+    // Raw override layer for editors; consumers read each version's `effective`.
+    meta: (work.meta ?? {}) as Record<string, unknown>,
     // Work-level hide; members never receive hidden works (filtered above),
     // managers receive them badged.
     hidden: work.hidden,
+    pinnedAt: work.pinnedAt ?? null,
+    defaultVersionLinkId: work.defaultVersionLinkId ?? null,
     tags,
-    versions: links.map((link) => toCatalogVersion(work, link, resolved, collectedVersionIds)),
+    versions: ordered.map((link) => toCatalogVersion(work, link, resolved, collectedVersionIds)),
     createdAt: work.createdAt,
     updatedAt: work.updatedAt,
   }
@@ -279,8 +307,8 @@ export async function listCatalogBooks(
         WHERE v.library_book_id = ${libraryBooks.id} AND v.status = 'published'), 0)`
   const works = db.select().from(libraryBooks).where(where)
     // A manager's pin sorts the work first for everyone in the library, the
-    // same sort-first rule private cards use. One pinned version pins the work.
-    .orderBy(asc(sql`(SELECT max(v.pinned_at) FROM library_book_versions v WHERE v.library_book_id = ${libraryBooks.id}) IS NULL`), ...libraryOrderBy(params.sortBy, params.sortOrder, {
+    // same sort-first rule private cards use, at the shared work's display unit.
+    .orderBy(asc(sql`${libraryBooks.pinnedAt} IS NULL`), ...libraryOrderBy(params.sortBy, params.sortOrder, {
       title: libraryBooks.title,
       author: libraryBooks.author,
       size: sizeColumn,
@@ -342,6 +370,17 @@ export async function updateCatalogBook(actorId: string, libraryId: string, libr
   if (patch.author !== undefined) updates.author = patch.author
   if (patch.description !== undefined) updates.description = patch.description
   if (patch.hidden !== undefined) updates.hidden = patch.hidden
+  if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? Date.now() : null
+  if (patch.meta !== undefined) updates.meta = patch.meta
+  if (patch.defaultVersionLinkId !== undefined) {
+    // The default must be a version of this work: getVersionLink scopes the
+    // lookup to this library and work, so a foreign id reads as NOT_FOUND
+    // instead of leaking another work's existence.
+    if (patch.defaultVersionLinkId !== null) {
+      getVersionLink(libraryId, libraryBookId, patch.defaultVersionLinkId)
+    }
+    updates.defaultVersionLinkId = patch.defaultVersionLinkId
+  }
   if (patch.categoryId !== undefined) {
     if (patch.categoryId !== null) {
       const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
@@ -355,7 +394,118 @@ export async function updateCatalogBook(actorId: string, libraryId: string, libr
   db.transaction((tx) => {
     tx.update(libraryBooks).set(updates).where(eq(libraryBooks.id, work.id)).run()
     if (patch.tagIds !== undefined) setWorkTags(tx, libraryId, work.id, patch.tagIds)
+    if (patch.hidden !== undefined) {
+      const links = tx.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+        .where(eq(libraryBookVersions.libraryBookId, work.id)).all()
+      if (links.length === 1) {
+        tx.update(libraryBookVersions)
+          .set({ status: patch.hidden ? 'unlisted' : 'published', updatedAt: updates.updatedAt })
+          .where(eq(libraryBookVersions.id, links[0].id)).run()
+      }
+    }
   })
+  return getCatalogBook(actorId, libraryId, work.id)
+}
+
+export async function getCatalogBatchSelection(actorId: string, libraryId: string, ids: string[]): Promise<BatchSelectionItem[]> {
+  await requireLibraryManager(actorId, libraryId)
+  const db = getDb()
+  const uniqueIds = [...new Set(ids)]
+  const works = db.select().from(libraryBooks)
+    .where(and(eq(libraryBooks.libraryId, libraryId), inArray(libraryBooks.id, uniqueIds))).all()
+  if (works.length !== uniqueIds.length) throw new AppError('LIBRARY_BOOK_NOT_FOUND')
+  const links = db.select({ libraryBookId: libraryBookVersions.libraryBookId }).from(libraryBookVersions)
+    .where(inArray(libraryBookVersions.libraryBookId, uniqueIds)).all()
+  const tags = db.select().from(libraryBookTags)
+    .where(inArray(libraryBookTags.libraryBookId, uniqueIds)).all()
+  const versionCounts = new Map<string, number>()
+  const tagIdsByWork = new Map<string, string[]>()
+  for (const link of links) versionCounts.set(link.libraryBookId, (versionCounts.get(link.libraryBookId) ?? 0) + 1)
+  for (const tag of tags) {
+    const tagIds = tagIdsByWork.get(tag.libraryBookId) ?? []
+    tagIds.push(tag.tagId)
+    tagIdsByWork.set(tag.libraryBookId, tagIds)
+  }
+  const byId = new Map(works.map((work) => [work.id, {
+    id: work.id,
+    categoryId: work.categoryId,
+    tagIds: tagIdsByWork.get(work.id) ?? [],
+    hidden: work.hidden,
+    pinnedAt: work.pinnedAt,
+    versionCount: versionCounts.get(work.id) ?? 0,
+  }]))
+  return ids.map((id) => byId.get(id)!).filter(Boolean)
+}
+
+export async function organizeCatalogBatch(actorId: string, libraryId: string, input: BatchOrganizeReq) {
+  await requireLibraryManager(actorId, libraryId)
+  const db = getDb()
+  const ids = [...new Set(input.ids)]
+  const works = db.select({ id: libraryBooks.id }).from(libraryBooks)
+    .where(and(eq(libraryBooks.libraryId, libraryId), inArray(libraryBooks.id, ids))).all()
+  if (works.length !== ids.length) throw new AppError('LIBRARY_BOOK_NOT_FOUND')
+  if (input.categoryId !== undefined && input.categoryId !== null && !db.select({ id: libraryCategories.id }).from(libraryCategories)
+    .where(and(eq(libraryCategories.id, input.categoryId), eq(libraryCategories.libraryId, libraryId))).get()) throw new AppError('CATEGORY_NOT_FOUND')
+  const addTagIds = [...new Set(input.addTagIds)]
+  const removeTagIds = [...new Set(input.removeTagIds)]
+  if (addTagIds.some((id) => removeTagIds.includes(id))) throw new AppError('VALIDATION_ERROR', 'Conflicting tag changes')
+  const touchedTagIds = [...addTagIds, ...removeTagIds]
+  if (touchedTagIds.length > 0) {
+    const found = db.select({ id: libraryTags.id }).from(libraryTags)
+      .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, touchedTagIds))).all()
+    if (found.length !== touchedTagIds.length) throw new AppError('TAG_NOT_FOUND')
+  }
+  const now = Date.now()
+  db.transaction((tx) => {
+    if (input.categoryId !== undefined) tx.update(libraryBooks)
+      .set({ categoryId: input.categoryId, updatedAt: now }).where(inArray(libraryBooks.id, ids)).run()
+    for (const tagId of removeTagIds) tx.delete(libraryBookTags)
+      .where(and(inArray(libraryBookTags.libraryBookId, ids), eq(libraryBookTags.tagId, tagId))).run()
+    for (const tagId of addTagIds) tx.insert(libraryBookTags)
+      .values(ids.map((libraryBookId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
+  })
+  return { count: ids.length }
+}
+
+/**
+ * Work cover management: the work row owns its coverKey and versions inherit
+ * it through the null-override rule, so one write re-covers every version.
+ * Manager-only like every other catalog write; mirrors the private-book cover
+ * flow (5MB cap, content-hash key, derived thumbnail).
+ */
+export async function updateCatalogBookCover(actorId: string, libraryId: string, libraryBookId: string, file: File) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  const work = getWork(libraryId, libraryBookId)
+  const buffer = Buffer.from(await file.arrayBuffer())
+  if (buffer.length > 5 * 1024 * 1024) throw new AppError('UPLOAD_TOO_LARGE')
+  const ext = detectImageExtension(buffer)
+  if (!ext) throw new AppError('UNSUPPORTED_FORMAT', 'Cover must be a PNG, JPEG, GIF, SVG or WebP image')
+  const storage = getStorage()
+  const coverKey = blobKey(sha256(buffer), `.cover.${ext}`)
+  await storage.put(coverKey, buffer)
+  const thumb = await generateCoverThumbnail(buffer, ext)
+  if (thumb) {
+    await storage.put(coverThumbnailKey(coverKey), thumb)
+  }
+  const now = Date.now()
+  try {
+    db.insert(blobs).values({ key: coverKey, size: buffer.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+    db.update(libraryBooks).set({ coverKey, updatedAt: now }).where(eq(libraryBooks.id, work.id)).run()
+  } catch (err) {
+    for (const key of [coverKey, coverThumbnailKey(coverKey)]) {
+      if (await storage.exists(key)) await storage.delete(key)
+    }
+    throw err
+  }
+  return getCatalogBook(actorId, libraryId, work.id)
+}
+
+export async function removeCatalogBookCover(actorId: string, libraryId: string, libraryBookId: string) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  const work = getWork(libraryId, libraryBookId)
+  db.update(libraryBooks).set({ coverKey: null, updatedAt: Date.now() }).where(eq(libraryBooks.id, work.id)).run()
   return getCatalogBook(actorId, libraryId, work.id)
 }
 
@@ -373,7 +523,7 @@ export async function updateCatalogVersion(
 ) {
   const db = getDb()
   await requireLibraryManager(actorId, libraryId)
-  getWork(libraryId, libraryBookId)
+  const work = getWork(libraryId, libraryBookId)
   const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
   const updates: Partial<typeof libraryBookVersions.$inferInsert> = { updatedAt: Date.now() }
   if (patch.name !== undefined) updates.name = patch.name
@@ -396,12 +546,123 @@ export async function updateCatalogVersion(
   }
   if (patch.description !== undefined) updates.description = patch.description
   if (patch.status !== undefined) updates.status = patch.status
-  if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? Date.now() : null
-  db.update(libraryBookVersions).set(updates).where(eq(libraryBookVersions.id, link.id)).run()
+  // Version meta replaces wholesale like the work meta; null clears the
+  // override back to inheriting the work default.
+  if (patch.meta !== undefined) updates.meta = patch.meta ?? {}
+  db.transaction((tx) => {
+    tx.update(libraryBookVersions).set(updates).where(eq(libraryBookVersions.id, link.id)).run()
+    if (patch.status !== undefined) {
+      const links = tx.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+        .where(eq(libraryBookVersions.libraryBookId, work.id)).all()
+      if (links.length === 1) {
+        tx.update(libraryBooks)
+          .set({ hidden: patch.status === 'unlisted', updatedAt: updates.updatedAt })
+          .where(eq(libraryBooks.id, work.id)).run()
+      }
+    }
+  })
   const book = await getCatalogBook(actorId, libraryId, libraryBookId)
   const updated = book.versions.find((v) => v.id === link.id)
   if (!updated) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
   return updated
+}
+
+/**
+ * Version cover management: a version with its own coverKey is a distinct
+ * edition on the shelf; clearing it reveals the work cover. Manager-only like
+ * every other catalog write; mirrors the work-cover flow (5MB cap,
+ * content-hash key, derived thumbnail).
+ */
+export async function updateCatalogVersionCover(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+  file: File,
+) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  getWork(libraryId, libraryBookId)
+  const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
+  const buffer = Buffer.from(await file.arrayBuffer())
+  if (buffer.length > 5 * 1024 * 1024) throw new AppError('UPLOAD_TOO_LARGE')
+  const ext = detectImageExtension(buffer)
+  if (!ext) throw new AppError('UNSUPPORTED_FORMAT', 'Cover must be a PNG, JPEG, GIF, SVG or WebP image')
+  const storage = getStorage()
+  const coverKey = blobKey(sha256(buffer), `.cover.${ext}`)
+  await storage.put(coverKey, buffer)
+  const thumb = await generateCoverThumbnail(buffer, ext)
+  if (thumb) {
+    await storage.put(coverThumbnailKey(coverKey), thumb)
+  }
+  const now = Date.now()
+  try {
+    db.insert(blobs).values({ key: coverKey, size: buffer.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+    db.update(libraryBookVersions).set({ coverKey, updatedAt: now }).where(eq(libraryBookVersions.id, link.id)).run()
+  } catch (err) {
+    for (const key of [coverKey, coverThumbnailKey(coverKey)]) {
+      if (await storage.exists(key)) await storage.delete(key)
+    }
+    throw err
+  }
+  const book = await getCatalogBook(actorId, libraryId, libraryBookId)
+  const updated = book.versions.find((v) => v.id === link.id)
+  if (!updated) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+  return updated
+}
+
+export async function removeCatalogVersionCover(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  getWork(libraryId, libraryBookId)
+  const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
+  db.update(libraryBookVersions).set({ coverKey: null, updatedAt: Date.now() })
+    .where(eq(libraryBookVersions.id, link.id)).run()
+  const book = await getCatalogBook(actorId, libraryId, libraryBookId)
+  const updated = book.versions.find((v) => v.id === link.id)
+  if (!updated) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+  return updated
+}
+
+/**
+ * Version metadata reset: clears every version-level override (title, author,
+ * description, cover, meta) so the version inherits the work default again,
+ * and restores the latest revision's parsed bookmeta from the stored file —
+ * the catalog half of the private resetBookMetadata.
+ */
+export async function resetCatalogVersionMetadata(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  getWork(libraryId, libraryBookId)
+  const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
+  const latestRevision = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, link.bookVersionId))
+    .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  // The stored content is always EPUB bytes (TXT is converted at upload), so
+  // the blob key itself selects the parser. A missing blob skips the
+  // bookmeta restore but still clears the overrides.
+  if (latestRevision && await getStorage().exists(latestRevision.blobKey)) {
+    const parser = getParser(latestRevision.blobKey, '')
+    if (!parser) throw new AppError('UNSUPPORTED_FORMAT')
+    const parsed = await parser.parse(await getStorage().get(latestRevision.blobKey))
+    const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
+    db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+  }
+  db.update(libraryBookVersions).set({
+    title: null, author: null, authors: null, description: null, coverKey: null, meta: {},
+    updatedAt: Date.now(),
+  }).where(eq(libraryBookVersions.id, link.id)).run()
+  return getCatalogBook(actorId, libraryId, libraryBookId)
 }
 
 function getVersionLink(libraryId: string, libraryBookId: string, versionLinkId: string) {
@@ -508,6 +769,29 @@ export async function moveCatalogVersion(
  * point at the source by plain text, so a deleted source keeps its provenance
  * and simply becomes unreadable.
  */
+export async function deleteCatalogBook(actorId: string, libraryId: string, libraryBookId: string) {
+  await requireLibraryManager(actorId, libraryId)
+  const db = getDb()
+  const work = getWork(libraryId, libraryBookId)
+  const links = db.select().from(libraryBookVersions)
+    .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.libraryBookId, libraryBookId))).all()
+  const orphanedVersionIds: string[] = []
+  db.transaction((tx) => {
+    tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
+    tx.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
+    tx.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
+    for (const link of links) {
+      const stillListed = tx.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+        .where(eq(libraryBookVersions.bookVersionId, link.bookVersionId)).get()
+      if (!stillListed) orphanedVersionIds.push(link.bookVersionId)
+    }
+  })
+  const coverKeys = [work.coverKey, ...links.map((link) => link.coverKey)]
+    .filter((key): key is string => key !== null)
+  await deleteOrphanedBookVersions([...new Set(orphanedVersionIds)], { coverKeys: [...new Set(coverKeys)] })
+  return { id: libraryBookId, versionCount: links.length }
+}
+
 export async function deleteCatalogVersion(
   actorId: string,
   libraryId: string,

@@ -58,6 +58,8 @@ settingsRoutes.put('/', async (c) => {
       tagSort: library.tagSort ?? current.tagSort,
       bookSort: library.bookSort ?? current.bookSort,
       view: library.view ?? current.view,
+      hiddenLibraryIds: library.hiddenLibraryIds ?? current.hiddenLibraryIds,
+      libraryOrder: library.libraryOrder ?? current.libraryOrder,
     }
     updateLibrarySettings(user.id, merged)
   }

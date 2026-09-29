@@ -11,18 +11,24 @@ import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
+import { resetInstanceCache } from '../auth/auth.service'
 import { listLibraryCategories } from '../shelves/shelves.service'
 import { resolveSharedVersionRead } from './library-access'
 import {
   addMember,
   createLibrary,
+  createLibraryInvite,
   deleteLibrary,
   getLibrary,
+  getLibraryInviteStatus,
   getRelation,
   joinLibrary,
+  joinLibraryByInvite,
   listLibraries,
   listMembers,
+  previewLibraryInvite,
   removeMember,
+  revokeLibraryInvite,
   setMemberRole,
   setVersionGuestReadable,
   transferLibraryOwnership,
@@ -78,6 +84,59 @@ describe('libraries service', () => {
     sharedId = seedLibrary(aliceId)
   })
 
+  it('mints the invitation on creation and on switching to private, without a generate call', async () => {
+    const created = await createLibrary({ userId: bobId, isGuest: false }, { name: 'Circle' })
+    expect(created.visibility).toBe('private')
+    expect(getLibraryInviteStatus(bobId, created.id)).toMatchObject({ active: true })
+    expect(getLibraryInviteStatus(bobId, created.id).token)
+      .toMatch(/^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{16}$/)
+
+    const open = await createLibrary({ userId: bobId, isGuest: false }, { name: 'Open', visibility: 'public' })
+    expect(() => getLibraryInviteStatus(bobId, open.id)).toThrowError(expect.objectContaining({ code: 'LIBRARY_NOT_FOUND' }))
+
+    await updateLibrary(bobId, open.id, { visibility: 'private' })
+    expect(getLibraryInviteStatus(bobId, open.id)).toMatchObject({ active: true })
+    // One row per library: the automatic path never stacks a second code.
+    expect(db.select().from(schema.libraryInvites).all()).toHaveLength(2)
+  })
+
+  it('keeps a private invitation visible to managers until they revoke or replace it', async () => {
+    expect(getLibraryInviteStatus(aliceId, sharedId)).toMatchObject({ active: false, token: null })
+    const first = createLibraryInvite(aliceId, sharedId)
+    // The code is short enough to read aloud and retyped from a screenshot.
+    expect(first.token).toMatch(/^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{16}$/)
+    expect(getLibraryInviteStatus(aliceId, sharedId).token).toBe(first.token)
+    expect(() => getLibraryInviteStatus(bobId, sharedId)).toThrowError(expect.objectContaining({ code: 'LIBRARY_NOT_FOUND' }))
+    expect(previewLibraryInvite(bobId, first.token)).toMatchObject({ name: 'City', relation: 'non-member' })
+    // The invitee is told the same head counts a member sees on the row.
+    expect(previewLibraryInvite(bobId, first.token)).toMatchObject({ memberCount: 1, workCount: 0 })
+    const second = createLibraryInvite(aliceId, sharedId)
+    expect(second.token).not.toBe(first.token)
+    expect(() => previewLibraryInvite(bobId, first.token)).toThrowError(expect.objectContaining({ code: 'LIBRARY_NOT_FOUND' }))
+    expect(joinLibraryByInvite(bobId, second.token)).toEqual({ libraryId: sharedId, relation: 'member' })
+    expect(joinLibraryByInvite(bobId, second.token)).toEqual({ libraryId: sharedId, relation: 'member' })
+    expect(db.select().from(schema.libraryMemberships).where(eq(schema.libraryMemberships.libraryId, sharedId)).all()).toHaveLength(1)
+    await removeMember(aliceId, sharedId, bobId)
+    expect(joinLibraryByInvite(bobId, second.token)).toEqual({ libraryId: sharedId, relation: 'member' })
+    revokeLibraryInvite(aliceId, sharedId)
+    expect(() => joinLibraryByInvite(carolId, second.token)).toThrowError(expect.objectContaining({ code: 'LIBRARY_NOT_FOUND' }))
+  })
+
+  it('invalidates the invitation when a library leaves private visibility', async () => {
+    const invite = createLibraryInvite(aliceId, sharedId)
+    await updateLibrary(aliceId, sharedId, { visibility: 'public' })
+    expect(() => previewLibraryInvite(bobId, invite.token)).toThrowError(expect.objectContaining({ code: 'LIBRARY_NOT_FOUND' }))
+    expect(db.select().from(schema.libraryInvites).all()).toHaveLength(0)
+  })
+
+  it('keeps the link under the new owner after a library transfer', async () => {
+    const invite = createLibraryInvite(aliceId, sharedId)
+    await addMember(aliceId, sharedId, { userId: bobId, role: 'member' })
+    await transferLibraryOwnership(aliceId, sharedId, bobId)
+    expect(getLibraryInviteStatus(bobId, sharedId).token).toBe(invite.token)
+    expect(previewLibraryInvite(carolId, invite.token).libraryId).toBe(sharedId)
+  })
+
   it('creates shared libraries and refuses guests', async () => {
     const created = await createLibrary({ userId: bobId, isGuest: false }, { name: 'Club' })
     expect(created).toMatchObject({ type: 'shared', ownerUserId: bobId, visibility: 'private' })
@@ -97,6 +156,24 @@ describe('libraries service', () => {
     expect(stored.accessPasswordHash).not.toContain('s3cret')
   })
 
+  it('refuses library creation for members when the instance switch is off', async () => {
+    db.insert(schema.instance).values({
+      id: 'instance', ownerUserId: aliceId, allowRegistration: false, allowGuestAccess: false,
+      uploadMaxBytes: null, allowUserCreateLibrary: false, allowUserUpload: true,
+      createdAt: 1, updatedAt: 1,
+    }).run()
+    resetInstanceCache()
+    try {
+      await expect(createLibrary({ userId: bobId, isGuest: false }, { name: 'Nope' }))
+        .rejects.toMatchObject({ code: 'FORBIDDEN' })
+      // The instance owner always bypasses the switch.
+      const created = await createLibrary({ userId: aliceId, isGuest: false }, { name: 'Owner City' })
+      expect(created).toMatchObject({ type: 'shared', ownerUserId: aliceId })
+    } finally {
+      resetInstanceCache()
+    }
+  })
+
   it('lists only discoverable libraries per identity', async () => {
     const pubId = seedLibrary(bobId, { visibility: 'public', name: 'Open' })
     db.insert(schema.libraryMemberships).values({
@@ -112,6 +189,103 @@ describe('libraries service', () => {
     expect(carol.map((l) => l.id)).toEqual([pubId])
     const guest = await listLibraries({ userId: null, isGuest: true })
     expect(guest.map((l) => l.id)).toEqual([pubId])
+  })
+
+  it('reports a wrong access password as its own error code, not a generic failure', async () => {
+    const locked = await createLibrary(
+      { userId: bobId, isGuest: false },
+      { name: 'Locked', visibility: 'password', accessPassword: 's3cret' },
+    )
+    await expect(joinLibrary(aliceId, locked.id, 'nope')).rejects.toMatchObject({ code: 'INVALID_LIBRARY_PASSWORD' })
+    // The right password still works, so the check is the password and not a lockout.
+    await expect(joinLibrary(aliceId, locked.id, 's3cret')).resolves.toMatchObject({ relation: 'member' })
+  })
+
+  it('orders shared libraries by when this reader joined, oldest first', async () => {
+    const joined = (libraryId: string, at: number) => {
+      db.insert(schema.libraryMemberships).values({
+        id: createId('lbm'), libraryId, userId: aliceId, role: 'member', createdAt: at, updatedAt: at,
+      }).run()
+    }
+    // Created out of order, and joined out of order too: the point is that the
+    // reader's own membership time wins over the library's creation time.
+    const early = seedLibrary(bobId, { name: 'Joined early', createdAt: 100, updatedAt: 1 })
+    const later = seedLibrary(bobId, { name: 'Joined later', createdAt: 200, updatedAt: 1 })
+    seedLibrary(aliceId, { name: 'Mine', createdAt: 300, updatedAt: 1 })
+    joined(early, 500)
+    joined(later, 900)
+    // Editing settings bumps updatedAt; that must not move a row.
+    await updateLibrary(bobId, early, { description: 'touched' })
+
+    const rows = (await listLibraries({ userId: aliceId, isGuest: false })).filter((l) => l.type === 'shared')
+    // 'City' is the shared fixture from beforeEach (created at 1, so it leads).
+    // 'Mine' has no membership row, so its date is its own creation (300),
+    // landing between the two joins (500, 900).
+    expect(rows.map((l) => l.name)).toEqual(['City', 'Mine', 'Joined early', 'Joined later'])
+  })
+
+  it('counts members and works per row, without leaking hidden works to a member', async () => {
+    const work = (id: string, libraryId: string, overrides: Partial<typeof schema.libraryBooks.$inferInsert> = {}) => {
+      db.insert(schema.libraryBooks).values({
+        id, libraryId, userId: aliceId, title: id, author: 'a', description: '',
+        createdAt: 1, updatedAt: 1, ...overrides,
+      }).run()
+    }
+    const version = (id: string, libraryId: string, libraryBookId: string, status: 'published' | 'unlisted' = 'published') => {
+      db.insert(schema.bookVersions).values({ id, format: 'txt', size: 1, createdAt: 1, updatedAt: 1 }).run()
+      db.insert(schema.libraryBookVersions).values({
+        id: `lbv_${id}`, libraryId, libraryBookId, bookVersionId: id, kind: 'shared',
+        status, createdAt: 1, updatedAt: 1,
+      }).run()
+    }
+
+    work('w1', sharedId)
+    version('v1', sharedId, 'w1')
+    work('w2', sharedId)
+    version('v2', sharedId, 'w2', 'unlisted')
+    work('w3', sharedId, { hidden: true })
+    version('v3', sharedId, 'w3')
+    work('w4', sharedId, { deletedAt: 2 })
+    version('v4', sharedId, 'w4')
+    work('w5', sharedId)
+    version('v5', sharedId, 'w5')
+
+    const owned = await listLibraries({ userId: aliceId, isGuest: false })
+    const ownRow = owned.find((l) => l.id === sharedId)!
+    // The owner manages the library, so hidden and unlisted works are theirs to see.
+    expect(ownRow.workCount).toBe(4)
+    expect(ownRow.memberCount).toBe(1)
+    expect(ownRow.ownerUsername).toBe('alice')
+
+    db.insert(schema.libraryMemberships).values({
+      id: createId('lbm'), libraryId: sharedId, userId: bobId, role: 'member', createdAt: 1, updatedAt: 1,
+    }).run()
+    const member = await listLibraries({ userId: bobId, isGuest: false })
+    const memberRow = member.find((l) => l.id === sharedId)!
+    // A plain member sees only what the catalog would list for them, and the
+    // owner is not a membership row, so 1 membership + the owner = 2.
+    expect(memberRow.workCount).toBe(2)
+    expect(memberRow.memberCount).toBe(2)
+  })
+
+  it('counts the personal library as one member and all of its own works', async () => {
+    const privateId = db.select({ id: schema.libraries.id }).from(schema.libraries)
+      .where(and(eq(schema.libraries.userId, aliceId), eq(schema.libraries.type, 'private'))).get()!.id
+    const work = (id: string, overrides: Partial<typeof schema.libraryBooks.$inferInsert> = {}) => {
+      db.insert(schema.libraryBooks).values({
+        id, libraryId: privateId, userId: aliceId, title: id, author: 'a', description: '',
+        createdAt: 1, updatedAt: 1, ...overrides,
+      }).run()
+    }
+    work('p1')
+    work('p2', { hidden: true })
+    work('p3', { deletedAt: 2 })
+
+    const row = (await listLibraries({ userId: aliceId, isGuest: false })).find((l) => l.id === privateId)!
+    // A one-person library is always its reader's, so hidden works count and
+    // only the trash does not. It holds no membership rows, so one member.
+    expect(row.workCount).toBe(2)
+    expect(row.memberCount).toBe(1)
   })
 
   /**
@@ -464,6 +638,20 @@ describe('libraries service', () => {
     expect((await addMember(carolId, carolLibraryId, { userId: bobId, role: 'admin' })).role).toBe('admin')
     // Neither seat implies the other: the library owner cannot touch the instance.
     expect((await listMembers(carolId, carolLibraryId)).owner.id).toBe(carolId)
+  })
+
+  it('lets an owner rename only their own private library', async () => {
+    const privateId = db.select({ id: schema.libraries.id }).from(schema.libraries)
+      .where(and(eq(schema.libraries.userId, aliceId), eq(schema.libraries.type, 'private'))).get()!.id
+    await expect(updateLibrary(bobId, privateId, { name: 'Hijacked' }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(updateLibrary(aliceId, privateId, { visibility: 'public' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(updateLibrary(aliceId, privateId, { name: 'Mine', description: 'Shared' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    const renamed = await updateLibrary(aliceId, privateId, { name: 'Mine' })
+    expect(renamed).toMatchObject({ name: 'Mine', type: 'private', visibility: null })
+    expect((await listLibraries({ userId: aliceId, isGuest: false }))[0].name).toBe('Mine')
   })
 
   it('grants shared membership no reach into private libraries', async () => {

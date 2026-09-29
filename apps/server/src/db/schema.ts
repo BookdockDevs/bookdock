@@ -435,6 +435,7 @@ export const libraries = sqliteTable('libraries', {
   name: text('name').notNull(),
   description: text('description').notNull().default(''),
   visibility: text('visibility', { enum: ['public', 'password', 'private'] }),
+  accessPassword: text('access_password'),
   // Scrypt hash for password-visibility libraries; null otherwise. Never
   // exposed through shared contracts.
   accessPasswordHash: text('access_password_hash'),
@@ -478,6 +479,19 @@ export const libraryBooks = sqliteTable('library_books', {
   // Work-level hide (see Hidden boundary in architecture.md): excluded from
   // reads unless the viewer may see hidden rows, never deleted.
   hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
+  // Shared-library home cards represent works; private cards keep their pin on the version link.
+  pinnedAt: integer('pinned_at'),
+  // Default display version: the version cards, rows and the detail dialog
+  // lead with. Null = oldest upload first. Plain text on purpose like the
+  // source ids below: a schema-level references() back into
+  // library_book_versions would close a type-inference cycle between the two
+  // tables. The database-level FOREIGN KEY in migration 0027 still clears
+  // this to NULL when the referenced version row goes.
+  defaultVersionLinkId: text('default_version_link_id'),
+  // Work-level publication metadata overrides (publisher, language, ISBN,
+  // subjects, series): rarely-queried fields live in JSON, mirroring
+  // books.meta; effective.bookmeta merges these over the parsed revision meta.
+  meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
 }, (table) => ({
   libraryIdx: index('library_books_library_idx').on(table.libraryId, table.updatedAt),
   categoryIdx: index('library_books_category_idx').on(table.categoryId),
@@ -490,6 +504,17 @@ export const bookVersions = sqliteTable('book_versions', {
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 })
+
+export const libraryInvites = sqliteTable('library_invites', {
+  id: text('id').primaryKey(),
+  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  token: text('token').notNull().unique(),
+  createdAt: integer('created_at').notNull(),
+  revokedAt: integer('revoked_at'),
+}, (table) => ({
+  libraryUnique: uniqueIndex('library_invites_library_unique').on(table.libraryId),
+}))
 
 export const libraryBookVersions = sqliteTable('library_book_versions', {
   id: text('id').primaryKey(),
@@ -507,6 +532,11 @@ export const libraryBookVersions = sqliteTable('library_book_versions', {
   authors: text('authors', { mode: 'json' }).$type<string[] | null>(),
   description: text('description'),
   coverKey: text('cover_key'),
+  // Version-level publication metadata overrides (publisher, language, ISBN,
+  // subjects, series): {} = inherit the work default, mirroring the
+  // title/author/description override rule; effective.bookmeta merges these
+  // over the work-level overrides and the parsed revision meta.
+  meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
   sourceLibraryId: text('source_library_id'),
   sourceLibraryBookVersionId: text('source_library_book_version_id'),
   pinnedRevisionId: text('pinned_revision_id').references(() => contentRevisions.id),
@@ -607,6 +637,10 @@ export const instance = sqliteTable('instance', {
   allowRegistration: integer('allow_registration', { mode: 'boolean' }).notNull().default(false),
   allowGuestAccess: integer('allow_guest_access', { mode: 'boolean' }).notNull().default(false),
   uploadMaxBytes: integer('upload_max_bytes'),
+  // Operator-run city switches; both default open. The instance owner always
+  // bypasses them (see isInstanceOwner + the upload/create gates).
+  allowUserCreateLibrary: integer('allow_user_create_library', { mode: 'boolean' }).notNull().default(true),
+  allowUserUpload: integer('allow_user_upload', { mode: 'boolean' }).notNull().default(true),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 })

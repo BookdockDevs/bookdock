@@ -5,8 +5,14 @@ import type { BookMetadata } from './contract'
 
 /**
  * Target library/city model (library-design-v1 v1.4).
- * Wire shapes only: password hashes, access passwords and session tokens
+ * Wire shapes only: session tokens, scrypt password hashes and API tokens
  * never cross this boundary; they stay server-internal.
+ *
+ * One deliberate exception: a password-visibility library's access password is
+ * stored and returned in plaintext (`accessPassword`), and only ever to the
+ * library owner. The owner has to be able to read it back to re-share it, which
+ * a hash cannot do, so the contract carries it. Members and guests never see
+ * the field — the server omits it for anyone who is not the owner.
  */
 
 // ---------------------------------------------------------------- Library
@@ -25,6 +31,7 @@ export interface Library {
   description: string
   /** Null for private libraries, which sit outside the visibility system. */
   visibility: LibraryVisibility | null
+  accessPassword?: string | null
   createdAt: number
   updatedAt: number
 }
@@ -47,10 +54,22 @@ export const libraryRelationSchema = z.enum(['owner', 'admin', 'member', 'non-me
 
 /**
  * A library as the reader sees it in a list. The relation travels with the row
- * so a sidebar can offer "join" or "manage" without a request per library.
+ * so a sidebar can offer "join" or "manage" without a request per library, and
+ * the head counts let a list or a details panel describe a library without a
+ * second round-trip.
  */
 export interface LibraryListItem extends Library {
   relation: LibraryRelation
+  /** Membership rows plus the owner, who holds none of his own. */
+  memberCount: number
+  /**
+   * Works this reader can actually open here: trashed works never count, and for
+   * a plain member hidden works and works without a published version are left
+   * out so the number matches the catalog they are about to open. Hidden
+   * categories and tags are a listing concern and do not subtract.
+   */
+  workCount: number
+  ownerUsername: string
 }
 
 export const libraryCreateSchema = z.object({
@@ -78,6 +97,30 @@ export const libraryJoinSchema = z.object({
 })
 
 export type LibraryJoinReq = z.infer<typeof libraryJoinSchema>
+
+export const libraryInviteTokenSchema = z.object({
+  // 16-character Crockford base32 (I/L/O/U excluded so a code read off a
+  // screenshot or retyped by hand cannot be mistyped into an invalid one).
+  token: z.string().regex(/^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{16}$/),
+})
+
+export type LibraryInviteTokenReq = z.infer<typeof libraryInviteTokenSchema>
+
+export interface LibraryInviteStatus {
+  active: boolean
+  createdAt: number | null
+  token: string | null
+}
+
+export interface LibraryInvitePreview {
+  libraryId: string
+  name: string
+  description: string
+  relation: LibraryRelation
+  /** Head counts, scoped to the reader exactly like the library list rows. */
+  memberCount: number
+  workCount: number
+}
 
 /**
  * Adding a member. The target is an existing account, given either by id or by
@@ -192,6 +235,12 @@ export interface CatalogVersion {
   authors: string[] | null
   description: string | null
   coverKey: string | null
+  /**
+   * Raw version-level publication metadata overrides (what the manager wrote,
+   * not the merged view). Empty = inherit the work default. Editors must
+   * round-trip unknown keys through this object; consumers display `effective`.
+   */
+  meta: Record<string, unknown>
   effective: {
     title: string
     author: string
@@ -218,8 +267,6 @@ export interface CatalogVersion {
   size: number
   chapterCount: number
   wordCount: number | null
-  /** Library-wide sort-first pin, manager-only. Null when not pinned. */
-  pinnedAt: number | null
   createdAt: number
   updatedAt: number
 }
@@ -239,8 +286,21 @@ export interface CatalogBook {
   authors: string[]
   description: string
   coverKey: string | null
+  /**
+   * Raw work-level publication metadata overrides (what the manager wrote,
+   * not the merged view). Empty = nothing overridden. Editors must
+   * round-trip unknown keys through this object; consumers display `effective`.
+   */
+  meta: Record<string, unknown>
   /** Work-level hide; managers see hidden works badged, members never see them. */
   hidden: boolean
+  /** Shared-library home pin. Every version of this work shares one card. */
+  pinnedAt: number | null
+  /**
+   * Default display version: cards, rows and the detail dialog lead with this
+   * version instead of the oldest upload. Null = oldest first.
+   */
+  defaultVersionLinkId: string | null
   /**
    * The work's own tags in the library's taxonomy. Carries the name, not just
    * the id, so a catalog card can render them without a second lookup.
@@ -257,6 +317,30 @@ export interface CatalogListRes {
   page: number
   pageSize: number
 }
+
+export interface BatchSelectionItem {
+  id: string
+  categoryId: string | null
+  tagIds: string[]
+  hidden: boolean
+  pinnedAt: number | null
+  /** Private-library entries have one version; shared works may have several. */
+  versionCount: number
+  /** Present only for private-library entries. */
+  kind?: LibraryVersionKind
+}
+
+export const batchSelectionSchema = z.object({
+  ids: z.array(z.string().min(1).max(128)).min(1).max(2000),
+})
+
+export const batchOrganizeSchema = batchSelectionSchema.extend({
+  categoryId: z.string().min(1).max(128).nullable().optional(),
+  addTagIds: z.array(z.string().min(1).max(128)).default([]),
+  removeTagIds: z.array(z.string().min(1).max(128)).default([]),
+})
+
+export type BatchOrganizeReq = z.infer<typeof batchOrganizeSchema>
 
 /** Multipart placement fields; everything is optional and library-scoped. */
 /** Full author list for uploads and edits: trimmed, 1–100 chars each, max 10. */
@@ -303,6 +387,14 @@ export const catalogBookUpdateSchema = z.object({
   tagIds: z.array(z.string().min(1).max(128)).optional(),
   /** Work-level hide; manager-only like every other catalog write. */
   hidden: z.boolean().optional(),
+  pinned: z.boolean().optional(),
+  /** Work-level publication metadata overrides (publisher, language, ISBN, subjects, series). */
+  meta: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Default display version: must belong to this work; null clears back to
+   * oldest-first. Manager-only like every other catalog write.
+   */
+  defaultVersionLinkId: z.string().min(1).max(128).nullable().optional(),
 })
 
 export type CatalogBookUpdateReq = z.infer<typeof catalogBookUpdateSchema>
@@ -315,8 +407,12 @@ export const catalogVersionUpdateSchema = z.object({
   authors: authorListSchema.nullable().optional(),
   description: z.string().max(4000).nullable().optional(),
   status: libraryVersionStatusSchema.optional(),
-  /** Library-wide sort-first pin; manager-only like every other version write. */
-  pinned: z.boolean().optional(),
+  /**
+   * Version-level publication metadata overrides (publisher, language, ISBN,
+   * subjects, series). Replaces the whole override object; null clears it
+   * back to inheriting the work default.
+   */
+  meta: z.record(z.string(), z.unknown()).nullable().optional(),
 })
 
 export type CatalogVersionUpdateReq = z.infer<typeof catalogVersionUpdateSchema>

@@ -22,12 +22,20 @@ import { addToPrivateLibrary } from './collect.service'
 import { resolveSharedVersionRead, resolveSourceRead } from './library-access'
 import {
   deleteCatalogVersion,
+  deleteCatalogBook,
   findSimilarWorks,
   getCatalogBook,
+  getCatalogBatchSelection,
   listCatalogBooks,
   moveCatalogVersion,
+  organizeCatalogBatch,
+  removeCatalogBookCover,
+  removeCatalogVersionCover,
+  resetCatalogVersionMetadata,
   updateCatalogBook,
+  updateCatalogBookCover,
   updateCatalogVersion,
+  updateCatalogVersionCover,
 } from './catalog.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -226,15 +234,54 @@ describe('shared library catalog', () => {
     const first = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'x'), { title: 'Alpha' })
     const second = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'y'), { title: 'Beta' })
     // Reading is not curating: a plain member cannot pin.
-    await expect(updateCatalogVersion(memberId, libraryId, second.libraryBookId, second.versionLinkId!, { pinned: true }))
+    await expect(updateCatalogBook(memberId, libraryId, second.libraryBookId, { pinned: true }))
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
-    const pinned = await updateCatalogVersion(ownerId, libraryId, second.libraryBookId, second.versionLinkId!, { pinned: true })
+    const pinned = await updateCatalogBook(ownerId, libraryId, second.libraryBookId, { pinned: true })
     expect(pinned.pinnedAt).not.toBeNull()
     // The pin sorts first for every reader, not just the manager who set it.
     expect((await listCatalogBooks(memberId, libraryId, {})).items.map((work) => work.id))
       .toEqual([second.libraryBookId, first.libraryBookId])
-    const unpinned = await updateCatalogVersion(adminId, libraryId, second.libraryBookId, second.versionLinkId!, { pinned: false })
+    const unpinned = await updateCatalogBook(adminId, libraryId, second.libraryBookId, { pinned: false })
     expect(unpinned.pinnedAt).toBeNull()
+  })
+
+  it('keeps a shared pin on the work when its default version changes', async () => {
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'a'), { title: 'Alpha' })
+    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'b'), {
+      libraryBookId: first.libraryBookId,
+    })
+    await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { pinned: true })
+    await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { defaultVersionLinkId: second.versionLinkId! })
+    const work = await getCatalogBook(memberId, libraryId, first.libraryBookId)
+    expect(work.pinnedAt).not.toBeNull()
+    expect(work.versions[0]?.id).toBe(second.versionLinkId)
+    expect(work.versions.some((version) => 'pinnedAt' in version)).toBe(false)
+  })
+
+  it('organizes selected works by tag delta without replacing unrelated tags', async () => {
+    const tagA = seedTag(libraryId, 'A')
+    const tagB = seedTag(libraryId, 'B')
+    const tagC = seedTag(libraryId, 'C')
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'a'), { title: 'Alpha', tagIds: [tagA, tagB] })
+    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'b'), { title: 'Beta', tagIds: [tagC] })
+    const ids = [first.libraryBookId, second.libraryBookId]
+    await expect(getCatalogBatchSelection(memberId, libraryId, ids)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect((await getCatalogBatchSelection(ownerId, libraryId, ids)).map((row) => row.tagIds.sort()))
+      .toEqual([[tagA, tagB].sort(), [tagC]])
+    await organizeCatalogBatch(ownerId, libraryId, { ids, addTagIds: [tagA], removeTagIds: [tagB] })
+    expect((await getCatalogBook(ownerId, libraryId, first.libraryBookId)).tags.map((tag) => tag.id)).toEqual([tagA])
+    expect((await getCatalogBook(ownerId, libraryId, second.libraryBookId)).tags.map((tag) => tag.id).sort()).toEqual([tagA, tagC].sort())
+    await expect(organizeCatalogBatch(ownerId, libraryId, { ids, addTagIds: [tagA], removeTagIds: [tagA] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+  })
+
+  it('deletes every version of one selected shared work', async () => {
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'a'), { title: 'Alpha' })
+    await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'b'), { libraryBookId: first.libraryBookId })
+    expect((await getCatalogBatchSelection(ownerId, libraryId, [first.libraryBookId]))[0]?.versionCount).toBe(2)
+    await expect(deleteCatalogBook(memberId, libraryId, first.libraryBookId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect((await deleteCatalogBook(ownerId, libraryId, first.libraryBookId)).versionCount).toBe(2)
+    expect((await listCatalogBooks(ownerId, libraryId, {})).items).toHaveLength(0)
   })
 
   it('filters and orders the catalog by the same vocabulary as a private list', async () => {
@@ -575,6 +622,11 @@ describe('shared library catalog', () => {
     })
     await updateCatalogVersion(ownerId, libraryId, first.libraryBookId, second.versionLinkId!, { author: '隐藏作者' })
     await updateCatalogVersion(ownerId, libraryId, first.libraryBookId, second.versionLinkId!, { status: 'unlisted' })
+    expect((await getCatalogBook(ownerId, libraryId, first.libraryBookId)).hidden).toBe(false)
+    await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { hidden: true })
+    expect((await getCatalogBook(ownerId, libraryId, first.libraryBookId)).versions.map((v) => v.status))
+      .toEqual(['published', 'unlisted'])
+    await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { hidden: false })
 
     // Detail: managers see both versions, members only the published one.
     expect((await getCatalogBook(ownerId, libraryId, first.libraryBookId)).versions).toHaveLength(2)
@@ -624,10 +676,11 @@ describe('shared library catalog', () => {
     await expectReadable()
   })
 
-  it('hides works from non-managers without touching versions', async () => {
+  it('keeps single-version work and version visibility in sync', async () => {
     await uploadCatalogBook(libraryId, ownerId, txtFile('v.txt', '第一章\n甲'), { title: 'Visible' })
     const hiddenWork = await uploadCatalogBook(libraryId, ownerId, txtFile('h.txt', '第一章\n乙'), { title: 'Hidden' })
     await updateCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId, { hidden: true })
+    expect((await getCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId)).versions[0].status).toBe('unlisted')
 
     // Managers see hidden rows badged; members see neither the work nor its count.
     expect((await listCatalogBooks(ownerId, libraryId)).total).toBe(2)
@@ -640,10 +693,183 @@ describe('shared library catalog', () => {
       .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
     await expect(resolveSharedVersionRead(libraryId, hiddenWork.bookVersionId, memberId))
       .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
-    expect((await resolveSharedVersionRead(libraryId, hiddenWork.bookVersionId, ownerId)).relation).toBe('owner')
-    // Unhiding restores the member view without touching versions.
+    await expect(resolveSharedVersionRead(libraryId, hiddenWork.bookVersionId, ownerId))
+      .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    // Either endpoint restores both flags for a one-version work.
     await updateCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId, { hidden: false })
+    expect((await getCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId)).versions[0].status).toBe('published')
     expect((await listCatalogBooks(memberId, libraryId)).total).toBe(2)
+    await updateCatalogVersion(ownerId, libraryId, hiddenWork.libraryBookId, hiddenWork.versionLinkId!, { status: 'unlisted' })
+    expect((await getCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId)).hidden).toBe(true)
+    await updateCatalogVersion(ownerId, libraryId, hiddenWork.libraryBookId, hiddenWork.versionLinkId!, { status: 'published' })
+    expect((await getCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId)).hidden).toBe(false)
+  })
+
+  it('merges work meta over the revision bookmeta, manager-only', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('m.txt', '第一章\n甲'), { title: 'Meta' })
+    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, {
+      meta: { publisher: 'City Press', language: 'zh' },
+    })
+    expect((await getCatalogBook(ownerId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta)
+      .toMatchObject({ publisher: 'City Press', language: 'zh' })
+    // Work meta replaces wholesale (like tagIds): unmentioned keys drop, and
+    // members read the merged result without writing it.
+    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, { meta: { publisher: 'Other Press' } })
+    expect((await getCatalogBook(memberId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta)
+      .toMatchObject({ publisher: 'Other Press' })
+    expect((await getCatalogBook(memberId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta)
+      .not.toHaveProperty('language')
+    await expect(updateCatalogBook(memberId, libraryId, created.libraryBookId, { meta: {} }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
+  it('manages the work cover, manager-only', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('c.txt', '第一章\n甲'), { title: 'Cover' })
+    const png = new File(
+      [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+      'cover.png',
+      { type: 'image/png' },
+    )
+    const covered = await updateCatalogBookCover(adminId, libraryId, created.libraryBookId, png)
+    expect(covered.coverKey).toMatch(/\.cover\.png$/)
+    expect(covered.versions[0].effective.coverKey).toBe(covered.coverKey)
+    expect(files.has(covered.coverKey!)).toBe(true)
+    await expect(updateCatalogBookCover(memberId, libraryId, created.libraryBookId, png))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(updateCatalogBookCover(
+      ownerId, libraryId, created.libraryBookId,
+      new File(['not an image'], 'cover.bin', { type: 'application/octet-stream' }),
+    )).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
+    const removed = await removeCatalogBookCover(ownerId, libraryId, created.libraryBookId)
+    expect(removed.coverKey).toBeNull()
+    await expect(removeCatalogBookCover(memberId, libraryId, created.libraryBookId))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
+  it('merges version meta over work meta and the revision bookmeta', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('v.txt', '第一章\n甲'), { title: 'Edition' })
+    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, {
+      meta: { publisher: 'Work Press', language: 'zh' },
+    })
+    await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, {
+      meta: { publisher: 'Edition Press' },
+    })
+    expect((await getCatalogBook(ownerId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta)
+      .toMatchObject({ publisher: 'Edition Press', language: 'zh' })
+    // Raw layers ride along for editors; display reads `effective`.
+    const layered = await getCatalogBook(ownerId, libraryId, created.libraryBookId)
+    expect(layered.meta).toMatchObject({ publisher: 'Work Press', language: 'zh' })
+    expect(layered.versions[0].meta).toMatchObject({ publisher: 'Edition Press' })
+    // Null clears the version override back to the work default.
+    await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, { meta: null })
+    expect((await getCatalogBook(ownerId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta)
+      .toMatchObject({ publisher: 'Work Press', language: 'zh' })
+    await expect(updateCatalogVersion(memberId, libraryId, created.libraryBookId, created.versionLinkId!, { meta: {} }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
+  it('manages version covers with work fallback, manager-only', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('vc.txt', '第一章\n甲'), { title: 'Version Cover' })
+    const workPng = new File(
+      [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01])],
+      'work-cover.png',
+      { type: 'image/png' },
+    )
+    const versionPng = new File(
+      [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x02])],
+      'version-cover.png',
+      { type: 'image/png' },
+    )
+    const workCovered = await updateCatalogBookCover(ownerId, libraryId, created.libraryBookId, workPng)
+    const covered = await updateCatalogVersionCover(adminId, libraryId, created.libraryBookId, created.versionLinkId!, versionPng)
+    expect(covered.coverKey).toMatch(/\.cover\.png$/)
+    expect(covered.coverKey).not.toBe(workCovered.coverKey)
+    expect(covered.effective.coverKey).toBe(covered.coverKey)
+    expect(files.has(covered.coverKey!)).toBe(true)
+    await expect(updateCatalogVersionCover(memberId, libraryId, created.libraryBookId, created.versionLinkId!, versionPng))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(updateCatalogVersionCover(
+      ownerId, libraryId, created.libraryBookId, created.versionLinkId!,
+      new File(['not an image'], 'cover.bin', { type: 'application/octet-stream' }),
+    )).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
+    // Clearing the version cover reveals the work cover underneath.
+    const removed = await removeCatalogVersionCover(ownerId, libraryId, created.libraryBookId, created.versionLinkId!)
+    expect(removed.coverKey).toBeNull()
+    expect(removed.effective.coverKey).toBe(workCovered.coverKey)
+    await expect(removeCatalogVersionCover(memberId, libraryId, created.libraryBookId, created.versionLinkId!))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
+  it('resets version overrides and restores the parsed bookmeta', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('r.txt', '第一章\n甲'), { title: 'Reset Me' })
+    await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, {
+      title: 'Edited Title', author: 'Edited Author', description: 'Edited desc', meta: { publisher: 'Edited Press' },
+    })
+    await updateCatalogVersionCover(
+      ownerId, libraryId, created.libraryBookId, created.versionLinkId!,
+      new File([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'cover.png', { type: 'image/png' }),
+    )
+    // Pollute the revision bookmeta to prove the reset re-parses from the file.
+    const revision = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all().at(0)!
+    db.update(schema.contentRevisions)
+      .set({ meta: { ...((revision.meta ?? {}) as Record<string, unknown>), bookmeta: { publisher: 'Bogus' } } })
+      .where(eq(schema.contentRevisions.id, revision.id)).run()
+    // Stored content is EPUB bytes (TXT is converted at upload), so the
+    // reset re-parses through an EPUB parser like the runtime does.
+    registerParser({
+      match: (fileName) => fileName.toLowerCase().endsWith('.epub'),
+      parse: async () => ({
+        meta: { title: 'Parsed', bookmeta: { publisher: 'Parsed Press' } },
+        chapters: [],
+      }),
+    })
+    const reset = await resetCatalogVersionMetadata(ownerId, libraryId, created.libraryBookId, created.versionLinkId!)
+    const version = reset.versions[0]!
+    expect(version.title).toBeNull()
+    expect(version.author).toBeNull()
+    expect(version.description).toBeNull()
+    expect(version.coverKey).toBeNull()
+    expect(version.effective.title).toBe('Reset Me')
+    expect(version.effective.bookmeta).toMatchObject({ publisher: 'Parsed Press' })
+    expect(version.effective.bookmeta).not.toMatchObject({ publisher: 'Bogus' })
+    expect(version.effective.fileName).toBe('r.txt')
+    await expect(resetCatalogVersionMetadata(memberId, libraryId, created.libraryBookId, created.versionLinkId!))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
+  it('leads with the default display version instead of the oldest upload', async () => {
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('old.txt', '第一章\n甲'), { title: 'Editions' })
+    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('new.txt', '第一章\n乙'), {
+      libraryBookId: first.libraryBookId, name: '精校版',
+    })
+    expect((await getCatalogBook(ownerId, libraryId, first.libraryBookId)).versions[0].id).toBe(first.versionLinkId)
+    await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { defaultVersionLinkId: second.versionLinkId! })
+    const detail = await getCatalogBook(ownerId, libraryId, first.libraryBookId)
+    expect(detail.defaultVersionLinkId).toBe(second.versionLinkId)
+    expect(detail.versions[0].id).toBe(second.versionLinkId)
+    // Members follow the same lead; the list agrees with the detail.
+    expect((await getCatalogBook(memberId, libraryId, first.libraryBookId)).versions[0].id).toBe(second.versionLinkId)
+    expect((await listCatalogBooks(memberId, libraryId)).items[0].versions[0].id).toBe(second.versionLinkId)
+    // Foreign and missing ids read as NOT_FOUND; members cannot write it.
+    const other = await uploadCatalogBook(libraryId, ownerId, txtFile('other.txt', '第一章\n丙'), { title: 'Other' })
+    await expect(updateCatalogBook(ownerId, libraryId, first.libraryBookId, { defaultVersionLinkId: other.versionLinkId! }))
+      .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    await expect(updateCatalogBook(ownerId, libraryId, first.libraryBookId, { defaultVersionLinkId: 'lbv_missing' }))
+      .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    await expect(updateCatalogBook(memberId, libraryId, first.libraryBookId, { defaultVersionLinkId: first.versionLinkId! }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    // Null clears back to oldest-first.
+    await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { defaultVersionLinkId: null })
+    const cleared = await getCatalogBook(ownerId, libraryId, first.libraryBookId)
+    expect(cleared.defaultVersionLinkId).toBeNull()
+    expect(cleared.versions[0].id).toBe(first.versionLinkId)
+    // Deleting the default version clears the pointer via the FK, never dangling.
+    await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { defaultVersionLinkId: second.versionLinkId! })
+    await deleteCatalogVersion(ownerId, libraryId, first.libraryBookId, second.versionLinkId!)
+    const orphaned = await getCatalogBook(ownerId, libraryId, first.libraryBookId)
+    expect(orphaned.defaultVersionLinkId).toBeNull()
+    expect(orphaned.versions).toHaveLength(1)
   })
 
   it('hides category subtrees and tagged works from non-managers', async () => {

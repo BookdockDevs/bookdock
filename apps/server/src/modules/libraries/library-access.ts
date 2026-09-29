@@ -40,7 +40,7 @@ export function ensurePrivateLibrary(db: ReturnType<typeof getDb>, userId: strin
   const now = Date.now()
   try {
     db.insert(libraries).values({
-      id, userId, type: 'private', name: userId,
+      id, userId, type: 'private', name: '',
       description: '', visibility: null, createdAt: now, updatedAt: now,
     }).run()
   } catch (err) {
