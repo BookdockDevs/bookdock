@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useCancelSystemUpdate, useStartSystemUpdate, useSystemInfo, useSystemUpdateCheck, useSystemUpdateStatus } from '@/api/hooks/useSystem'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
+import { formatDate } from '@/lib/format-date'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
 
@@ -254,7 +255,7 @@ export default function AboutSettingsSection() {
                           </div>
                           {update.publishedAt && (
                             <p className="text-[11px] text-stone-400 dark:text-stone-500">
-                              {new Date(update.publishedAt).toLocaleDateString()}
+                              {formatDate(update.publishedAt)}
                             </p>
                           )}
                         </div>

@@ -5,6 +5,7 @@ import type { UpdatePhase, UpdateStatusRes } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { getErrorKeyByCode } from '@/lib/error-message'
+import { formatDate } from '@/lib/format-date'
 
 export interface SystemUpdateDialogProps {
   isOpen: boolean
@@ -227,7 +228,7 @@ export default function SystemUpdateDialog({
                 </span>
                 {publishedAt && (
                   <span className="text-stone-400 dark:text-stone-500">
-                    ({new Date(publishedAt).toLocaleDateString()})
+                    ({formatDate(publishedAt)})
                   </span>
                 )}
               </div>

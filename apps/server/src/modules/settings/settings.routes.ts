@@ -3,17 +3,19 @@ import { settingsUpdateSchema } from '@bookdock/shared'
 import {
   getIntegrationsSettings,
   getLibrarySettings,
+  getProfileSettings,
   getSettings,
   getTrashSettings,
   updateIntegrationsSettings,
   updateLibrarySettings,
+  updateProfileSettings,
   updateSettings,
   updateTrashSettings,
 } from './settings.service'
 import { emptyTrash } from '../books/books.service'
 import { revokeLegadoAccessKey } from '../books/legado-access.service'
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
-import type { IntegrationsSettings, LibrarySettings, SettingsRes, TrashSettings } from '@bookdock/shared'
+import type { IntegrationsSettings, ProfileSettings, SettingsRes, TrashSettings } from '@bookdock/shared'
 
 const settingsRoutes = new Hono()
 
@@ -28,6 +30,7 @@ settingsRoutes.get('/', async (c) => {
       ...(data ?? {}),
       trash: getTrashSettings(user.id),
       library: getLibrarySettings(user.id),
+      profile: getProfileSettings(user.id),
       integrations: getIntegrationsSettings(user.id),
       uploadMaxBytes: effectiveUploadMaxBytes(),
     },
@@ -44,24 +47,24 @@ settingsRoutes.put('/', async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  const { trash, library, integrations, ...ui } = parsed.data
+  const { trash, library, profile, integrations, ...ui } = parsed.data
   // Merge instead of replace so partial clients (e.g. a trash-only update)
   // never wipe the reader preferences stored under the ui key
   if (Object.keys(ui).length > 0) {
     updateSettings(user.id, { ...(getSettings(user.id) ?? {}), ...ui } as SettingsRes)
   }
   if (library) {
-    const current = getLibrarySettings(user.id)
-    const merged: LibrarySettings = {
-      normalizeTitle: library.normalizeTitle ?? current.normalizeTitle,
-      shelfSort: library.shelfSort ?? current.shelfSort,
-      tagSort: library.tagSort ?? current.tagSort,
-      bookSort: library.bookSort ?? current.bookSort,
-      view: library.view ?? current.view,
-      hiddenLibraryIds: library.hiddenLibraryIds ?? current.hiddenLibraryIds,
-      libraryOrder: library.libraryOrder ?? current.libraryOrder,
+    // Spread the whole object rather than re-listing every field: a hand-written
+    // merge silently drops any field added to the contract but forgotten here.
+    updateLibrarySettings(user.id, { ...getLibrarySettings(user.id), ...library })
+  }
+  if (profile) {
+    const mergedProfile: ProfileSettings = {
+      showStats: profile.showStats ?? getProfileSettings(user.id).showStats,
+      showShowcase: profile.showShowcase ?? getProfileSettings(user.id).showShowcase,
+      isPublic: profile.isPublic ?? getProfileSettings(user.id).isPublic,
     }
-    updateLibrarySettings(user.id, merged)
+    updateProfileSettings(user.id, mergedProfile)
   }
   if (integrations) {
     const current = getIntegrationsSettings(user.id)
@@ -89,7 +92,18 @@ settingsRoutes.put('/', async (c) => {
     if (merged.enabled === false) await emptyTrash(user.id)
     updateTrashSettings(user.id, merged)
   }
-  return c.json({ data: parsed.data })
+  // Echo the merged result, not the request patch: the patch is missing every
+  // sibling the merge preserved, so echoing it tells the client less than it
+  // already knew.
+  return c.json({
+    data: {
+      ...(getSettings(user.id) ?? {}),
+      trash: getTrashSettings(user.id),
+      library: getLibrarySettings(user.id),
+      profile: getProfileSettings(user.id),
+      integrations: getIntegrationsSettings(user.id),
+    },
+  })
 })
 
 export default settingsRoutes

@@ -8,10 +8,10 @@ import Toggle from '@/components/ui/Toggle'
 import ChangePasswordDialog from '@/features/auth/ChangePasswordDialog'
 import { authErrorKey } from '@/features/auth/errors'
 import { useUpdateUsername } from '@/features/auth/hooks'
+import { useProfileSettings, useUpdateProfileSettings } from '@/features/library/hooks'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
-import { useProfilePrefs } from '../profile-prefs'
 
 interface ProfileSettingsDialogProps {
   open: boolean
@@ -25,7 +25,11 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
   const [nameDraft, setNameDraft] = useState(user?.username ?? '')
   const [nameError, setNameError] = useState<string | null>(null)
-  const { showStats, showShowcase, isPublic, setShowStats, setShowShowcase, setIsPublic } = useProfilePrefs()
+  const profile = useProfileSettings()
+  const updateProfile = useUpdateProfileSettings()
+  const showStats = profile.showStats !== false
+  const showShowcase = profile.showShowcase !== false
+  const isPublic = profile.isPublic !== false
 
   useEffect(() => {
     if (open) {
@@ -113,7 +117,7 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
                     {_('profile.settingShowStatsHint')}
                   </span>
                 </div>
-                <Toggle checked={showStats} onChange={setShowStats} ariaLabel={_('profile.settingShowStats')} />
+                <Toggle checked={showStats} onChange={(v) => updateProfile.mutate({ showStats: v })} ariaLabel={_('profile.settingShowStats')} />
               </div>
 
               <div className="flex items-center justify-between gap-4 pt-3">
@@ -125,7 +129,7 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
                     {_('profile.settingShowShowcaseHint')}
                   </span>
                 </div>
-                <Toggle checked={showShowcase} onChange={setShowShowcase} ariaLabel={_('profile.settingShowShowcase')} />
+                <Toggle checked={showShowcase} onChange={(v) => updateProfile.mutate({ showShowcase: v })} ariaLabel={_('profile.settingShowShowcase')} />
               </div>
             </div>
           </section>
@@ -146,7 +150,7 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
                   {_('profile.settingPublicProfileHint')}
                 </span>
               </div>
-              <Toggle checked={isPublic} onChange={setIsPublic} ariaLabel={_('profile.settingPublicProfile')} />
+              <Toggle checked={isPublic} onChange={(v) => updateProfile.mutate({ isPublic: v })} ariaLabel={_('profile.settingPublicProfile')} />
             </div>
           </section>
 

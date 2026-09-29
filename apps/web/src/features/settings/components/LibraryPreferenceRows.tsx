@@ -1,10 +1,9 @@
-import { LIBRARY_SORT_MODES, type LibrarySortMode } from '@bookdock/shared'
+import { LIBRARY_SORT_MODES, type LibrarySortMode, type RecentlyReadStyle } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { nextSidebarSort, sidebarSortDir, type SortDir } from '@/features/library/sort-modes'
 import { useLibraryPrefs, useUpdateLibraryPrefs } from '@/features/library/hooks'
-import { useUiStore, type RecentlyReadStyle } from '@/stores/ui.store'
 
 // N-06: default sidebar sort modes for shelves and tags. These are defaults
 // only — an explicit URL still overrides them, and a shelf/tag drag flips the
@@ -112,10 +111,8 @@ export default function LibraryPreferenceRows() {
   const prefs = useLibraryPrefs()
   const update = useUpdateLibraryPrefs()
 
-  const readingStatsEnabled = useUiStore((s) => s.readingStatsEnabled)
-  const setReadingStatsEnabled = useUiStore((s) => s.setReadingStatsEnabled)
-  const recentlyReadStyle = useUiStore((s) => s.recentlyReadStyle)
-  const setRecentlyReadStyle = useUiStore((s) => s.setRecentlyReadStyle)
+  const readingStatsEnabled = prefs?.readingStatsEnabled !== false
+  const recentlyReadStyle = prefs?.recentlyReadStyle ?? 'off'
   const shelfSort = prefs?.shelfSort
   const tagSort = prefs?.tagSort
 
@@ -142,14 +139,14 @@ export default function LibraryPreferenceRows() {
         label={_('settings.prefReadingStats')}
         hint={_('settings.prefReadingStatsHint')}
         checked={readingStatsEnabled}
-        onChange={setReadingStatsEnabled}
+        onChange={(checked) => update.mutate({ readingStatsEnabled: checked })}
       />
       <Divider />
       <SegRow
         label={_('settings.prefRecentlyRead')}
         hint={_('settings.prefRecentlyReadHint')}
         options={recentlyReadOptions}
-        onSelect={(value) => setRecentlyReadStyle(value as RecentlyReadStyle)}
+        onSelect={(value) => update.mutate({ recentlyReadStyle: value as RecentlyReadStyle })}
       />
       <Divider />
       <SegRow

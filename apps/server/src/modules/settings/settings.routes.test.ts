@@ -14,6 +14,8 @@ vi.mock('./settings.service', () => ({
   updateTrashSettings: vi.fn(),
   getLibrarySettings: vi.fn(() => ({})),
   updateLibrarySettings: vi.fn(),
+  getProfileSettings: vi.fn(() => ({})),
+  updateProfileSettings: vi.fn(),
   getIntegrationsSettings: vi.fn(() => ({})),
   updateIntegrationsSettings: vi.fn(),
   isTrashEnabled: vi.fn(() => true),
@@ -105,7 +107,7 @@ describe('Settings routes - Integrations', () => {
     const res = await app.request('http://test/api/v1/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uiTheme: 'dark' }),
+      body: JSON.stringify({ coverFit: 'full' }),
     })
 
     expect(res.status).toBe(403)
@@ -146,6 +148,49 @@ describe('Settings routes - Library preferences', () => {
       bookSort: { field: 'title', dir: 'asc' },
       view: 'list',
       hiddenLibraryIds: ['lib-keep'],
+    })
+  })
+
+  it('keeps a library field the client never sends, so a new field cannot be dropped by a stale merge', async () => {
+    // The merge spreads the stored blob rather than re-listing fields: a
+    // hand-written allowlist silently drops any field added to the contract
+    // but forgotten in the route.
+    vi.mocked(settingsService.getLibrarySettings).mockReturnValue({
+      gridCardFields: ['title', 'progress'],
+      readingStatsEnabled: false,
+      recentlyReadStyle: 'cards',
+    })
+
+    const app = createApp()
+    await app.request('http://test/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ library: { view: 'list' } }),
+    })
+
+    expect(settingsService.updateLibrarySettings).toHaveBeenCalledWith('u1', {
+      gridCardFields: ['title', 'progress'],
+      readingStatsEnabled: false,
+      recentlyReadStyle: 'cards',
+      view: 'list',
+    })
+  })
+
+  it('merges profile preferences without wiping siblings', async () => {
+    vi.mocked(settingsService.getProfileSettings).mockReturnValue({ showStats: true, isPublic: false })
+
+    const app = createApp()
+    const res = await app.request('http://test/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile: { showShowcase: false } }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(settingsService.updateProfileSettings).toHaveBeenCalledWith('u1', {
+      showStats: true,
+      showShowcase: false,
+      isPublic: false,
     })
   })
 

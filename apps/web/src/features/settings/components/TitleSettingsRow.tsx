@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { SettingsRes } from '@bookdock/shared'
 
-import { apiGet, apiPut } from '@/api/client'
+import { apiPut } from '@/api/client'
+import { fetchSettings, writeStoredSettings } from '@/lib/settings-cache'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -14,12 +15,30 @@ export default function TitleSettingsRow() {
   const queryClient = useQueryClient()
   const settingsQuery = useQuery({
     queryKey: ['settings'],
-    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
+    queryFn: fetchSettings,
   })
   const mutation = useMutation({
     mutationFn: (normalizeTitle: boolean) => apiPut('/settings', { library: { normalizeTitle } }),
+    onMutate: async (normalizeTitle) => {
+      // Optimistic like the library-prefs mutation, so the switch flips in the
+      // same frame as the click instead of waiting for a refetch.
+      await queryClient.cancelQueries({ queryKey: ['settings'] })
+      const prev = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+      if (prev) {
+        const next = { ...prev.data, library: { ...prev.data.library, normalizeTitle } }
+        queryClient.setQueryData(['settings'], { data: next })
+        writeStoredSettings(next)
+      }
+      return { prev }
+    },
+    onError: (error, _normalizeTitle, ctx) => {
+      if (ctx?.prev) {
+        queryClient.setQueryData(['settings'], ctx.prev)
+        writeStoredSettings(ctx.prev.data)
+      }
+      notify.error(getUserErrorNotification(error, 'settings.titleSettingsUpdateFailed'))
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
-    onError: (error) => notify.error(getUserErrorNotification(error, 'settings.titleSettingsUpdateFailed')),
   })
   if (settingsQuery.isError) {
     return <QueryErrorState className="py-4" isRetrying={settingsQuery.isFetching} onRetry={settingsQuery.refetch} />

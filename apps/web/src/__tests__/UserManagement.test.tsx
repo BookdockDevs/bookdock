@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import UserManagementSection from '../features/settings/components/UserManagementSection'
+import { formatDate } from '@/lib/format-date'
 import { useAdminUsers, useCreateUser, useDeleteUser, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
 import {
   useLibraries,
@@ -215,7 +216,12 @@ describe('UserManagementSection', () => {
       expect(screen.queryByText('公开')).not.toBeInTheDocument()
       expect(screen.getAllByText('alice').length).toBeGreaterThanOrEqual(1)
       const aliceRow = screen.getAllByText('alice').find((el) => el.closest('tr'))!.closest('tr')!
-      expect(within(aliceRow).getByText('2023/11/15')).toBeInTheDocument()
+      // Derived from the fixture timestamp the same way the component derives it.
+      // A literal here breaks on any machine whose timezone or default locale
+      // differs from the author's: 1700000000000 is 2023-11-14T22:13Z, so it
+      // renders as the 15th in UTC+8 and the 14th in UTC, and the display format
+      // follows the app language rather than the browser.
+      expect(within(aliceRow).getByText(formatDate(1700000000000))).toBeInTheDocument()
       expect(screen.getByText('bob')).toBeInTheDocument()
       expect(screen.getByText('carol')).toBeInTheDocument()
     })

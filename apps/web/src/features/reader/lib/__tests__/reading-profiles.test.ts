@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  CHAPTER_TITLE_DEFAULTS,
+  READING_PROFILE_DEFAULTS,
   READING_PROFILE_KEYS,
   createReadingPreset,
   deleteReadingPreset,
@@ -11,6 +11,7 @@ import {
   parseReadingConfig,
   pickReadingSnapshot,
   renameReadingPreset,
+  resolveProfileSnapshot,
   resolveSnapshot,
   serializeReadingConfig,
   type ReadingConfig,
@@ -18,7 +19,7 @@ import {
 } from '../reading-profiles'
 
 function snapshot(overrides: Record<string, unknown> = {}): ReturnType<typeof pickReadingSnapshot> {
-  return pickReadingSnapshot({ ...CHAPTER_TITLE_DEFAULTS, fontSize: 18, readingMode: 'scroll', ...overrides })
+  return pickReadingSnapshot({ ...READING_PROFILE_DEFAULTS, ...overrides })
 }
 
 function configWith(preset: ReadingPreset): ReadingConfig {
@@ -39,6 +40,47 @@ describe('reading profiles', () => {
     const cfg = configWith({ id: 'p1', name: '护眼', snapshot: snapshot({ fontSize: 22 }) })
     const raw = serializeReadingConfig(cfg)
     expect(parseReadingConfig(raw)).toEqual(cfg)
+  })
+
+  it('defaults every key, so a config predating a new one does not resolve it to undefined', () => {
+    // A config written before a key existed carries no value for it; resolving
+    // that to `undefined` used to blank the setting outright.
+    const legacy = JSON.stringify({ global: { fontSize: 20, readingMode: 'scroll' }, presets: [] })
+    const parsed = parseReadingConfig(legacy)!
+    for (const key of READING_PROFILE_KEYS) {
+      expect(parsed.global[key]).toBeDefined()
+    }
+    expect(parsed.global.fontSize).toBe(20)
+    expect(parsed.global.clickAreaMode).toBe('standard')
+    expect(parsed.global.showHeader).toBe(true)
+  })
+
+  it('backfills the mode-mirror fields from the matching backing field', () => {
+    // pageWidth/horizontalPadding/verticalPadding mirror whichever mode is
+    // active, so a scroll config missing them recovers the reader's own values
+    // rather than a page-mode zero.
+    const legacy = JSON.stringify({
+      global: { readingMode: 'scroll', scrollPageWidth: 640, scrollHorizontalPadding: 12, scrollVerticalPadding: 30 },
+      presets: [],
+    })
+    const global = parseReadingConfig(legacy)!.global
+    expect(global.pageWidth).toBe(640)
+    expect(global.horizontalPadding).toBe(12)
+    expect(global.verticalPadding).toBe(30)
+  })
+
+  it('backfills mirror fields from the page-mode backing values in page mode', () => {
+    const legacy = JSON.stringify({
+      global: { readingMode: 'page', pagePageWidth: 900, pageHorizontalPadding: 40, pageVerticalPadding: 28 },
+      presets: [],
+    })
+    const global = parseReadingConfig(legacy)!.global
+    expect(global.pageWidth).toBe(900)
+    expect(global.horizontalPadding).toBe(40)
+  })
+
+  it('prefers a stored mirror value over the backing fallback', () => {
+    expect(resolveProfileSnapshot(READING_PROFILE_DEFAULTS as never, { pageWidth: 700, scrollPageWidth: 640 }).pageWidth).toBe(700)
   })
 
   it('returns null for corrupt or missing payloads', () => {

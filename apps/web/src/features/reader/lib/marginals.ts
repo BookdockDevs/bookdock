@@ -1,4 +1,7 @@
 import i18n from 'i18next'
+
+import { formatTime } from '@/lib/format-date'
+
 import type { MarginalField } from '../types'
 
 export interface MarginalContext {
@@ -35,9 +38,6 @@ function formatFraction(fraction: number | undefined): string {
   return `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`
 }
 
-function formatTime(now: number): string {
-  return new Date(now).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
-}
 
 // Same shape as the removed bottom word-count badge: >=10000 renders as X.X万.
 export function formatWordCount(count: number | undefined): string {

@@ -6,6 +6,7 @@ import type { LibraryListItem } from '@bookdock/shared'
 import i18n from '../i18n/i18n'
 import LibrarySidebar from '../features/library/components/LibrarySidebar'
 import * as libraryHooks from '../features/library/hooks'
+import { formatDate } from '@/lib/format-date'
 
 const navSearch = vi.fn()
 
@@ -722,7 +723,7 @@ describe('LibrarySidebar', () => {
       expect(panel.getByText('12')).toBeInTheDocument()
       expect(panel.getByText('34')).toBeInTheDocument()
       expect(panel.getByText('创建于')).toBeInTheDocument()
-      expect(panel.getByText(new Date(1758000000000).toLocaleDateString())).toBeInTheDocument()
+      expect(panel.getByText(formatDate(1758000000000))).toBeInTheDocument()
     })
 
     it('keeps the personal library visible and offers no hide action for it', () => {

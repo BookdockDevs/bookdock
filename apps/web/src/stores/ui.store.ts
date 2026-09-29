@@ -10,7 +10,7 @@ import {
 } from '../lib/reading-theme'
 import {
   CONFIG_STORAGE_KEY,
-  CHAPTER_TITLE_DEFAULTS,
+  READING_PROFILE_DEFAULTS,
   READING_PROFILE_KEYS,
   createReadingPreset as createPreset,
   deleteReadingPreset as deletePreset,
@@ -22,19 +22,14 @@ import {
   resolveSnapshot,
   serializeReadingConfig,
   type ReadingConfig,
+  type ReadingSnapshot,
 } from '../features/reader/lib/reading-profiles'
+import { useProfilePrefs } from '@/features/profile/profile-prefs'
 
-export type UiTheme = 'system' | 'light' | 'dark'
 export type UiSection = 'font' | 'layout' | 'display' | 'theme'
 
 /** Cover fill mode inside the grid card: object-cover vs object-contain. */
 export type CoverFit = 'crop' | 'full'
-
-/** Recently-read strip presentation: hidden, large cover row, or card carousel. */
-export type RecentlyReadStyle = 'off' | 'covers' | 'cards'
-
-export const GRID_CARD_FIELDS = ['title', 'author', 'progress'] as const
-export type GridCardField = (typeof GRID_CARD_FIELDS)[number]
 
 /** Optional info items on the right side of a list-view row */
 export type ListInfoItem = 'progress' | 'size' | 'lastRead' | 'shelf' | 'tags' | 'createdAt'
@@ -73,7 +68,6 @@ function persistCustomThemes(themes: CustomReadingTheme[]) {
 }
 
 interface UiState {
-  uiTheme: UiTheme
   systemTheme: SystemTheme
   readingThemeMode: ReadingThemeMode
   readingThemeId: string
@@ -193,24 +187,16 @@ interface UiState {
   applyReadingResolution: () => void
 
   // Library UI prefs
-  coverText: boolean
-  gridCardFields: GridCardField[]
   coverFit: CoverFit
   gridColumns: string
-  readingStatsEnabled: boolean
-  recentlyReadStyle: RecentlyReadStyle
   listInfoItems: ListInfoItem[]
   sortBy: string
   sortOrder: 'asc' | 'desc'
   view: 'grid' | 'list'
   libraryPageSize: number
   setLibraryPageSize: (v: number) => void
-  setCoverText: (v: boolean) => void
-  setGridCardFields: (v: GridCardField[]) => void
   setCoverFit: (v: CoverFit) => void
   setGridColumns: (v: string) => void
-  setRecentlyReadStyle: (v: RecentlyReadStyle) => void
-  setReadingStatsEnabled: (v: boolean) => void
   setListInfoItems: (v: ListInfoItem[]) => void
   setSortBy: (v: string) => void
   setSortOrder: (v: 'asc' | 'desc') => void
@@ -230,7 +216,6 @@ interface UiState {
   setSidebarRememberedOpen: (v: boolean) => void
   setNavTabRemembered: (v: NavTab) => void
 
-  setUiTheme: (t: UiTheme) => void
   setSystemTheme: (t: SystemTheme) => void
   setReadingThemeMode: (mode: ReadingThemeMode) => void
   cycleReadingThemeMode: () => void
@@ -239,6 +224,12 @@ interface UiState {
   deleteCustomTheme: (id: string) => void
   /** Replace the whole list (settings sync); persists without theme side effects */
   setCustomThemes: (themes: CustomReadingTheme[]) => void
+  /**
+   * Return every server-owned preference to its built-in default. Called on
+   * logout so a shared browser never hands the next account the previous one's
+   * reading choices. Device-adaptation keys are deliberately untouched.
+   */
+  resetUserScopedPrefs: () => void
   setFontFamily: (f: FontFamily) => void
   setFontPreference: (id: string, preference: FontPreferences[string]) => void
   removeFontPreference: (id: string) => void
@@ -297,23 +288,10 @@ function getInitial<T extends string>(key: string, fallback: T): T {
   return (v as T) || fallback
 }
 
-function getInitialUiTheme(): UiTheme {
-  if (typeof window === 'undefined') return 'system'
-  const stored = localStorage.getItem('bd-ui-theme')
-  if (stored === 'system' || stored === 'dark' || stored === 'light') return stored
-  return 'system'
-}
-
 function getInitialReadingThemeMode(): ReadingThemeMode {
   if (typeof window === 'undefined') return 'system'
   const stored = localStorage.getItem(READING_THEME_MODE_KEY)
   if (isReadingThemeMode(stored)) return stored
-
-  // Preserve the old two-state appearance when upgrading a device that has
-  // already stored a concrete reading theme. New devices start in system mode.
-  const legacyTheme = localStorage.getItem('bd-read-theme')
-  if (legacyTheme === 'night') return 'dark'
-  if (legacyTheme) return 'light'
   return 'system'
 }
 
@@ -388,59 +366,7 @@ function getInitialClickAreaMode(): ClickAreaMode {
   return 'standard'
 }
 
-function initMarginalDefaultsMigration() {
-  if (typeof window === 'undefined') return
-  try {
-    if (!localStorage.getItem('bd-marginal-defaults-v2')) {
-      localStorage.setItem('bd-marginal-defaults-v2', 'true')
-      const oldHeaderCenter = localStorage.getItem('bd-header-center')
-      const oldHeaderLeft = localStorage.getItem('bd-header-left')
-      if ((!oldHeaderCenter || oldHeaderCenter === 'bookTitle') && (!oldHeaderLeft || oldHeaderLeft === 'none')) {
-        localStorage.setItem('bd-header-left', 'bookTitle')
-        localStorage.setItem('bd-header-center', 'none')
-      }
-      const oldFooterCenter = localStorage.getItem('bd-footer-center')
-      const oldFooterLeft = localStorage.getItem('bd-footer-left')
-      if ((!oldFooterCenter || oldFooterCenter === 'chapter') && (!oldFooterLeft || oldFooterLeft === 'none')) {
-        localStorage.setItem('bd-footer-left', 'chapter')
-        localStorage.setItem('bd-footer-center', 'none')
-        if (!localStorage.getItem('bd-footer-right') || localStorage.getItem('bd-footer-right') === 'none') {
-          localStorage.setItem('bd-footer-right', 'bookProgress')
-        }
-      }
-    }
-  } catch {
-    // ignore localStorage errors
-  }
-}
-initMarginalDefaultsMigration()
-
 const initialScrollPageWidth = getInitialNumber('bd-page-width', 800, 400, 1800)
-
-function getInitialCoverText(): boolean {
-  if (typeof window === 'undefined') return true
-  const stored = localStorage.getItem('bd-cover-text')
-  return stored === null ? true : stored === 'true'
-}
-
-function getInitialGridCardFields(): GridCardField[] {
-  if (typeof window === 'undefined') return ['title', 'author', 'progress']
-  try {
-    const raw = localStorage.getItem('bd-grid-card-fields')
-    if (raw === null) {
-      const oldCoverText = localStorage.getItem('bd-cover-text')
-      if (oldCoverText === 'false') {
-        return ['progress']
-      }
-      return ['title', 'author', 'progress']
-    }
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return ['title', 'author', 'progress']
-    return parsed.filter((v): v is GridCardField => (GRID_CARD_FIELDS as readonly string[]).includes(v as string))
-  } catch {
-    return ['title', 'author', 'progress']
-  }
-}
 
 function getInitialLibraryPageSize(): number {
   if (typeof window === 'undefined') return 24
@@ -455,11 +381,6 @@ function getInitialCoverFit(): CoverFit {
   return stored === 'full' ? 'full' : 'crop'
 }
 
-function getInitialRecentlyReadStyle(): RecentlyReadStyle {
-  if (typeof window === 'undefined') return 'off'
-  const stored = localStorage.getItem('bd-recently-read-style')
-  return stored === 'covers' || stored === 'cards' ? stored : 'off'
-}
 function getInitialNavTab(): NavTab {
   if (typeof window === 'undefined') return 'toc'
   const stored = localStorage.getItem('bd-reader-nav-tab')
@@ -479,7 +400,6 @@ const initialHorizontalPadding = initialReadingMode === 'page' ? initialPageHori
 const initialVerticalPadding = initialReadingMode === 'page' ? initialPageVerticalPadding : initialScrollVerticalPadding
 
 export const useUiStore = create<UiState>((set, get) => ({
-  uiTheme: getInitialUiTheme(),
   systemTheme: getEffectiveTheme(),
   readingThemeMode: getInitialReadingThemeMode(),
   readingThemeId: getInitial<string>('bd-read-theme', 'paper'),
@@ -492,10 +412,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   fontWeight: getInitialNumber('bd-font-weight', 400, 100, 900),
   lineHeight: getInitialNumber('bd-line-height', 1.8, 1.2, 2.5),
   paragraphSpacing: getInitialNumber('bd-paragraph-spacing', 0.5, 0, 3),
-  chapterTitleAlign: getInitial<ParagraphStyle['chapterTitleAlign']>('bd-chapter-title-align', CHAPTER_TITLE_DEFAULTS.chapterTitleAlign),
-  chapterTitleSize: getInitialNumber('bd-chapter-title-size', CHAPTER_TITLE_DEFAULTS.chapterTitleSize, 1, 2),
-  chapterTitleTopSpacing: getInitialNumber('bd-chapter-title-top-spacing', CHAPTER_TITLE_DEFAULTS.chapterTitleTopSpacing, 0, 6),
-  chapterTitleBottomSpacing: getInitialNumber('bd-chapter-title-bottom-spacing', CHAPTER_TITLE_DEFAULTS.chapterTitleBottomSpacing, 0, 6),
+  chapterTitleAlign: getInitial<ParagraphStyle['chapterTitleAlign']>('bd-chapter-title-align', READING_PROFILE_DEFAULTS.chapterTitleAlign),
+  chapterTitleSize: getInitialNumber('bd-chapter-title-size', READING_PROFILE_DEFAULTS.chapterTitleSize, 1, 2),
+  chapterTitleTopSpacing: getInitialNumber('bd-chapter-title-top-spacing', READING_PROFILE_DEFAULTS.chapterTitleTopSpacing, 0, 6),
+  chapterTitleBottomSpacing: getInitialNumber('bd-chapter-title-bottom-spacing', READING_PROFILE_DEFAULTS.chapterTitleBottomSpacing, 0, 6),
   letterSpacing: getInitialNumber('bd-letter-spacing', 0, -1, 3),
   indent: getInitialNumber('bd-indent', 2, 0, 4),
 
@@ -550,13 +470,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   activePresetId: getInitialActivePresetId(),
   boundPresetId: null,
 
-  coverText: getInitialCoverText(),
-  gridCardFields: getInitialGridCardFields(),
   coverFit: getInitialCoverFit(),
   gridColumns: getInitial<string>('bd-grid-columns', 'auto'),
   libraryPageSize: getInitialLibraryPageSize(),
-  readingStatsEnabled: getInitialBoolean('bd-reading-stats-enabled', true),
-  recentlyReadStyle: getInitialRecentlyReadStyle(),
   listInfoItems: getInitialListInfoItems(),
   sortBy: getInitial<string>('bd-sort-by', 'createdAt'),
   sortOrder: getInitial<string>('bd-sort-order', 'desc') === 'asc' ? ('asc' as const) : ('desc' as const),
@@ -566,27 +482,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   sidebarRememberedOpen: getInitialBoolean('bd-reader-sidebar-open', true),
   navTabRemembered: getInitialNavTab(),
 
-  setCoverText: (coverText) => {
-    setStorage('bd-cover-text', String(coverText))
-    set((state) => {
-      let next = state.gridCardFields
-      if (coverText) {
-        if (!next.includes('title')) next = [...next, 'title']
-        if (!next.includes('author')) next = [...next, 'author']
-      } else {
-        next = next.filter((f) => f !== 'title' && f !== 'author')
-      }
-      setStorage('bd-grid-card-fields', JSON.stringify(next))
-      return { coverText, gridCardFields: next }
-    })
-  },
-  setGridCardFields: (gridCardFields) => {
-    setStorage('bd-grid-card-fields', JSON.stringify(gridCardFields))
-    set({
-      gridCardFields,
-      coverText: gridCardFields.includes('title') || gridCardFields.includes('author'),
-    })
-  },
   setCoverFit: (coverFit) => {
     setStorage('bd-cover-fit', coverFit)
     set({ coverFit })
@@ -626,14 +521,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   setSidebarWidth: (sidebarWidth) => {
     setStorage('bd-sidebar-width', String(sidebarWidth))
     set({ sidebarWidth })
-  },
-  setRecentlyReadStyle: (recentlyReadStyle) => {
-    setStorage('bd-recently-read-style', recentlyReadStyle)
-    set({ recentlyReadStyle })
-  },
-  setReadingStatsEnabled: (readingStatsEnabled) => {
-    setStorage('bd-reading-stats-enabled', String(readingStatsEnabled))
-    set({ readingStatsEnabled })
   },
   setListInfoItems: (listInfoItems) => {
     setStorage('bd-list-info-items', JSON.stringify(listInfoItems))
@@ -721,10 +608,6 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ autoReadingProgressBar })
   },
 
-  setUiTheme: (uiTheme) => {
-    setStorage('bd-ui-theme', uiTheme)
-    set({ uiTheme })
-  },
   setSystemTheme: (systemTheme) => {
     set({ systemTheme })
   },
@@ -1001,6 +884,35 @@ export const useUiStore = create<UiState>((set, get) => ({
     }
     applyResolutionFlat()
   },
+  resetUserScopedPrefs: () => {
+    // Every server-owned preference returns to its built-in default so a shared
+    // browser never hands the next account the previous one's choices. The
+    // config is rewritten rather than dropped, so preset names and the active
+    // pointer survive; only the values inside each snapshot are reset.
+    const config = parseReadingConfig(get().readingConfig)
+    // Replace outright rather than backfill: this is a reset, so every key takes
+    // the built-in default, not whatever the stored snapshot happened to hold.
+    const defaults = { ...READING_PROFILE_DEFAULTS } as ReadingSnapshot
+    persistReadingConfig(config
+      ? { global: defaults, presets: config.presets.map((preset) => ({ ...preset, snapshot: defaults })) }
+      : emptyConfig(defaults))
+    useUiStore.setState({
+      fontPreferences: {},
+      fontOrder: [],
+      coverFit: 'crop',
+      readingTimerMode: 'auto',
+      manualTimerGraceMinutes: 5,
+      ttsEngine: 'system',
+      ttsServiceId: null,
+      ttsVoiceId: '',
+      ttsRate: 1,
+      ttsAutoNext: true,
+      ttsFollow: true,
+      customThemes: [],
+    })
+    applyResolutionFlat()
+    useProfilePrefs.getState().resetProfilePrefs()
+  },
 }))
 
 // Persist + publish the config; the routing subscription skips the update
@@ -1041,6 +953,9 @@ function applyResolutionFlat() {
   const snapshot = resolveSnapshot(cfg, resolvedTargetId(cfg, state))
   const flat: Record<string, unknown> = {}
   for (const key of READING_PROFILE_KEYS) {
+    // A stored value that is not a valid mode (a config written by an older
+    // build, or a hand-edited blob) keeps the device's current mode rather than
+    // blanking the theme.
     const value = key === 'readingThemeMode' && !isReadingThemeMode(snapshot[key])
       ? state.readingThemeMode
       : snapshot[key]

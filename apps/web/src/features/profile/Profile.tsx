@@ -4,13 +4,13 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
+import { useProfileSettings } from '@/features/library/hooks'
 import { useAuthStore } from '@/stores/auth.store'
 
 import ProfileAccountSection from './components/ProfileAccountSection'
 import ProfileReadingShowcase from './components/ProfileReadingShowcase'
 import ProfileSettingsDialog from './components/ProfileSettingsDialog'
 import ProfileStatsSection from './components/ProfileStatsSection'
-import { useProfilePrefs } from './profile-prefs'
 
 export default function Profile() {
   const _ = useTranslation()
@@ -19,7 +19,9 @@ export default function Profile() {
   const user = useAuthStore((s) => s.user)
   const isGuest = !user || user.role === 'guest' || user.guest === true
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const { showStats, showShowcase } = useProfilePrefs()
+  const profile = useProfileSettings()
+  const showStats = profile.showStats !== false
+  const showShowcase = profile.showShowcase !== false
   const onBack = useBackNavigation('/')
 
   useEffect(() => {

@@ -13,12 +13,53 @@
 // typography, layout (incl. per-mode backing), reading mode, chrome, margins,
 // behavior and theme references. Resource collections (custom themes, fonts)
 // are referenced by id, never snapshotted.
-export const CHAPTER_TITLE_DEFAULTS = {
-  chapterTitleAlign: 'center' as const,
+export const READING_PROFILE_DEFAULTS = {
+  readingThemeMode: 'system',
+  readingThemeId: 'paper',
+  lightReadingThemeId: 'paper',
+  fontFamily: 'serif',
+  fontSize: 18,
+  fontWeight: 400,
+  lineHeight: 1.8,
+  paragraphSpacing: 0.5,
+  chapterTitleAlign: 'center',
   chapterTitleSize: 1.5,
   chapterTitleTopSpacing: 1.5,
   chapterTitleBottomSpacing: 2.25,
-}
+  letterSpacing: 0,
+  indent: 2,
+  textAlignJustify: false,
+  overrideBookFont: false,
+  overrideBookLayout: false,
+  pageWidth: 800,
+  horizontalPadding: 0,
+  verticalPadding: 0,
+  pageColumns: 2,
+  columnGap: 5,
+  scrollPageWidth: 800,
+  scrollHorizontalPadding: 0,
+  scrollVerticalPadding: 0,
+  pagePageWidth: 0,
+  pageHorizontalPadding: 40,
+  pageVerticalPadding: 28,
+  pagePageColumns: 2,
+  columnGapPage: 5,
+  readingMode: 'scroll',
+  continuousScroll: 'off',
+  pageAnimation: true,
+  chineseConversion: 'off',
+  showHeader: true,
+  showFooter: true,
+  headerLeft: 'bookTitle',
+  headerCenter: 'none',
+  headerRight: 'none',
+  footerLeft: 'chapter',
+  footerCenter: 'none',
+  footerRight: 'bookProgress',
+  marginalFontSize: 0,
+  clickAreaMode: 'standard',
+  autoMarkSelection: false,
+} as const satisfies Record<ReadingProfileKey, unknown>
 
 export const READING_PROFILE_KEYS = [
   'readingThemeMode',
@@ -93,6 +134,37 @@ export function emptyConfig(snapshot: ReadingSnapshot): ReadingConfig {
   return { global: snapshot, presets: [] }
 }
 
+/**
+ * Fill every profile key a stored snapshot is missing, so a config written
+ * before a key existed resolves it to the built-in default instead of
+ * `undefined` (which used to blank that setting outright).
+ *
+ * `pageWidth` / `horizontalPadding` / `verticalPadding` are mirrors of whichever
+ * mode is active rather than independent values, so their fallback reads the
+ * matching mode-specific backing key out of the same snapshot — a scroll-mode
+ * config missing `pageWidth` recovers the reader's scroll width, not a
+ * page-mode zero.
+ */
+export function resolveProfileSnapshot(defaults: ReadingSnapshot, snapshot: Partial<ReadingSnapshot>): ReadingSnapshot {
+  const resolved = { ...defaults } as ReadingSnapshot
+  const src = snapshot as Record<string, unknown>
+  for (const key of READING_PROFILE_KEYS) {
+    if (src[key] !== undefined) resolved[key] = src[key]
+  }
+  const mode = (src.readingMode === 'page' ? 'page' : 'scroll') as 'scroll' | 'page'
+  const mirrorFallbacks: Array<[ReadingProfileKey, ReadingProfileKey]> = [
+    ['pageWidth', mode === 'page' ? 'pagePageWidth' : 'scrollPageWidth'],
+    ['horizontalPadding', mode === 'page' ? 'pageHorizontalPadding' : 'scrollHorizontalPadding'],
+    ['verticalPadding', mode === 'page' ? 'pageVerticalPadding' : 'scrollVerticalPadding'],
+  ]
+  for (const [mirror, backing] of mirrorFallbacks) {
+    if (src[mirror] === undefined && src[backing] !== undefined) {
+      ;(resolved as Record<string, unknown>)[mirror] = src[backing]
+    }
+  }
+  return resolved
+}
+
 export function parseReadingConfig(raw: string | null | undefined): ReadingConfig | null {
   if (!raw) return null
   try {
@@ -100,11 +172,11 @@ export function parseReadingConfig(raw: string | null | undefined): ReadingConfi
     if (!parsed || typeof parsed !== 'object') return null
     const presets = Array.isArray(parsed.presets)
       ? parsed.presets.filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string' && p.snapshot && typeof p.snapshot === 'object')
-        .map((p) => ({ ...p, snapshot: { ...CHAPTER_TITLE_DEFAULTS, ...p.snapshot } }))
+        .map((p) => ({ ...p, snapshot: resolveProfileSnapshot(READING_PROFILE_DEFAULTS, p.snapshot) }))
       : []
     const global = parsed.global && typeof parsed.global === 'object' ? parsed.global : null
     if (!global) return null
-    return { global: { ...CHAPTER_TITLE_DEFAULTS, ...global } as ReadingSnapshot, presets }
+    return { global: resolveProfileSnapshot(READING_PROFILE_DEFAULTS, global), presets }
   } catch {
     return null
   }

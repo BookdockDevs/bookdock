@@ -1,5 +1,7 @@
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
+import { formatDateTime } from '@/lib/format-date'
+
 export type AnnotationExportFormat = 'markdown' | 'text' | 'csv'
 
 export interface AnnotationExportBook {
@@ -58,7 +60,7 @@ function annotationChapterKey(annotation: AnnotationRes): string | null {
 }
 
 function dateText(timestamp: number): string {
-  return new Date(timestamp).toLocaleString()
+  return formatDateTime(timestamp)
 }
 
 function csvDate(timestamp: number): string {

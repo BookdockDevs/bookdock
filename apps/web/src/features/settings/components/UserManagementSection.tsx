@@ -19,6 +19,7 @@ import {
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
 import { getUserErrorNotification } from '@/lib/error-message'
+import { formatDate } from '@/lib/format-date'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
@@ -554,7 +555,7 @@ function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword, onDelete
           {user.disabled ? _('admin.statusDisabled') : _('admin.statusActive')}
         </span>
       </td>
-      <td className="py-3 px-3 whitespace-nowrap text-xs text-stone-400">{new Date(user.createdAt).toLocaleDateString()}</td>
+      <td className="py-3 px-3 whitespace-nowrap text-xs text-stone-400">{formatDate(user.createdAt)}</td>
       <td className="py-3 pl-3 pr-4 text-right sm:pr-6">
         <button
           ref={menu.btnRef}
@@ -1003,7 +1004,7 @@ function LibraryMembersView({
                   </td>
                   <td className="py-3 px-3 whitespace-nowrap text-xs text-stone-400">
                     {owner.createdAt || selectedLibrary?.createdAt
-                      ? new Date(owner.createdAt ?? selectedLibrary!.createdAt).toLocaleDateString()
+                      ? formatDate(owner.createdAt ?? selectedLibrary!.createdAt)
                       : '—'}
                   </td>
                   <td className="py-3 pl-3 pr-4 text-right sm:pr-6" />
@@ -1123,7 +1124,7 @@ function LibraryMemberRow({
         <RoleBadge role={member.role} />
       </td>
       <td className="py-3 px-3 whitespace-nowrap text-xs text-stone-400">
-        {new Date(member.createdAt).toLocaleDateString()}
+        {formatDate(member.createdAt)}
       </td>
       <td className="py-3 pl-3 pr-4 text-right sm:pr-6">
         {hasActions && (

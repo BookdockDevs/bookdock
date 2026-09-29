@@ -3,11 +3,12 @@ import { and, eq } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import { settings } from '../../db/schema'
 import { createId } from '../../lib/id'
-import type { IntegrationsSettings, LibrarySettings, SettingsRes, TrashSettings } from '@bookdock/shared'
+import type { IntegrationsSettings, LibrarySettings, ProfileSettings, SettingsRes, TrashSettings } from '@bookdock/shared'
 
 const UI_KEY = 'ui'
 const TRASH_KEY = 'trash'
 const LIBRARY_KEY = 'library'
+const PROFILE_KEY = 'profile'
 const INTEGRATIONS_KEY = 'integrations'
 
 const DEFAULT_TRASH: TrashSettings = { autoCleanDays: 30 }
@@ -73,6 +74,14 @@ export function isTitleNormalizeEnabled(userId: string): boolean {
 
 export function updateLibrarySettings(userId: string, value: LibrarySettings) {
   upsertValue(userId, LIBRARY_KEY, value)
+}
+
+export function getProfileSettings(userId: string): ProfileSettings {
+  return getValue<ProfileSettings>(userId, PROFILE_KEY) ?? {}
+}
+
+export function updateProfileSettings(userId: string, value: ProfileSettings) {
+  upsertValue(userId, PROFILE_KEY, value)
 }
 
 export function getIntegrationsSettings(userId: string): IntegrationsSettings {

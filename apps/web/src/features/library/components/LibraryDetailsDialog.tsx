@@ -4,6 +4,7 @@ import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { cn } from '@/lib/utils'
+import { formatDate } from '@/lib/format-date'
 
 interface LibraryDetailsDialogProps {
   library: LibraryListItem
@@ -24,7 +25,7 @@ export default function LibraryDetailsDialog({ library, onClose }: LibraryDetail
     { label: _('library.owner'), value: library.ownerUsername },
     { label: _('library.memberCountLabel'), value: String(library.memberCount) },
     { label: _('library.workCountLabel'), value: String(library.workCount) },
-    { label: _('library.createdAt'), value: new Date(library.createdAt).toLocaleDateString() },
+    { label: _('library.createdAt'), value: formatDate(library.createdAt) },
   ]
 
   return (

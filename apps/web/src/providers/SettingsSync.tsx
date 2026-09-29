@@ -17,13 +17,15 @@ const PENDING_SETTINGS_STORAGE_KEY = 'bd-settings-pending'
 // fields are deliberately excluded (intents sync, outcomes stay local):
 // preset/global edits travel inside the `readingConfig` blob, and the
 // device-local active preset (`activePresetId`) rides the BroadcastChannel
-// but never the PUT. Device-adaptation keys (toolbarLocked, sidebarWidth,
-// gridColumns, library view prefs) stay in localStorage per device.
+// but never the PUT. Library and profile preferences are not here either — they
+// ride the `library` / `profile` values in the same payload, mutated through
+// their own hooks so they get an optimistic cache merge.
+// Device-adaptation keys (toolbarLocked, sidebarWidth, gridColumns, page size,
+// and every view preference inside a reader panel) stay in localStorage per
+// device and survive logout.
 const SETTINGS_KEYS = [
-  'uiTheme',
   'fontPreferences',
   'fontOrder',
-  'coverText',
   'coverFit',
   'readingTimerMode',
   'manualTimerGraceMinutes',
@@ -152,6 +154,10 @@ export function SettingsSync() {
       mutateRef.current(pending, { onSuccess: () => clearPendingSettings(userId, pending) })
       return
     }
+    // A server-sourced apply is not a user edit: without this the subscription
+    // below reads its own state change as one, writes a pending snapshot, and
+    // PUTs the server's own values back a second later.
+    suppressSyncRef.current = true
     fetchSettings()
       .then((res) => {
         if (!res?.data) return
@@ -159,6 +165,7 @@ export function SettingsSync() {
         applySettings(res.data)
       })
       .catch(() => undefined)
+      .finally(() => { suppressSyncRef.current = false })
   }, [isGuest, queryClient, userId])
 
   useEffect(() => {

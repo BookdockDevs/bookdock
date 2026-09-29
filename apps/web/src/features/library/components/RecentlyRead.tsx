@@ -1,5 +1,5 @@
 import { useTranslation } from '@/hooks/useTranslation'
-import type { RecentlyReadStyle } from '@/stores/ui.store'
+import type { RecentlyReadStyle } from '@bookdock/shared'
 
 import RecentlyReadCards from './RecentlyReadCards'
 import RecentlyReadCovers from './RecentlyReadCovers'

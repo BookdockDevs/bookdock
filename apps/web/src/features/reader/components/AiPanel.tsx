@@ -14,6 +14,7 @@ import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
 import { preloadAiBrandIcons } from '@/lib/aiBrandIcons'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
+import { formatDate, formatDateTime, formatTime } from '@/lib/format-date'
 import { notify } from '@/lib/notifications'
 import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
@@ -1616,7 +1617,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     try {
       const title = historyThreads.find((thread) => thread.id === threadId)?.title ?? _('settings.aiServiceName')
       const userLabel = getUserDisplayName(user, _('auth.guest'))
-      const lines = [`# ${title}`, '', `${_('reader.aiExportTimestamp')}：${new Date().toLocaleString()}`, '']
+      const lines = [`# ${title}`, '', `${_('reader.aiExportTimestamp')}：${formatDateTime(new Date())}`, '']
       messages.forEach((message) => {
         lines.push(`## ${message.role === 'user' ? userLabel : _('reader.aiExportAssistant')}`, '', message.content.trim() || `（${_('reader.aiExportNoContent')}）`, '')
         if (message.context) {
@@ -2109,9 +2110,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                 const createdAt = new Date(thread.createdAt)
                 const now = new Date()
                 const isToday = createdAt.getFullYear() === now.getFullYear() && createdAt.getMonth() === now.getMonth() && createdAt.getDate() === now.getDate()
-                const timeLabel = isToday
-                  ? createdAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
-                  : createdAt.toLocaleDateString('zh-CN')
+                const timeLabel = isToday ? formatTime(createdAt) : formatDate(createdAt)
                 const isActive = thread.id === threadId
                 return (
                 <li key={thread.id} className={`group mr-1 rounded-lg p-1 transition-colors ${isActive ? 'bg-[var(--bd-read-primary)]/10' : 'hover:bg-stone-500/5'}`}>

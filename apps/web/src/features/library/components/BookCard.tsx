@@ -1,6 +1,6 @@
 import { memo } from 'react'
 
-import type { BookListItem } from '@bookdock/shared'
+import type { BookListItem, GridCardField } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
@@ -14,14 +14,11 @@ import { ContextMenuContent } from './BookContextMenu'
 import TrashInfo from './TrashInfo'
 import UnpinButton, { PinIcon } from './UnpinButton'
 
-import type { GridCardField } from '@/stores/ui.store'
-
 interface BookCardProps {
   book: BookListItem
   selected?: boolean
   selectionActive?: boolean
   gridCardFields?: GridCardField[]
-  coverText?: boolean
   readOnly?: boolean
   onToggleSelect?: (id: string, shiftKey?: boolean) => void
   onDelete?: (book: BookListItem) => void
@@ -39,7 +36,7 @@ const MENU_H = 300
  * someone owns can do: be pinned, be trashed and restored, be deleted, and open
  * the context menu whose actions all address that ownership.
  */
-const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, gridCardFields, coverText = true, readOnly = false, onToggleSelect, onDelete, onPublish, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
+const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, gridCardFields, readOnly = false, onToggleSelect, onDelete, onPublish, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
   const trashCard = Boolean(onRestore && onPermanentDelete)
@@ -63,7 +60,6 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
       <BookCardShell
         row={privateBookRow(book)}
         gridCardFields={gridCardFields}
-        coverText={coverText}
         selected={selected}
         selectionActive={selectionActive}
         onToggleSelect={onToggleSelect}

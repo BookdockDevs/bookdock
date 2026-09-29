@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn, formatAuthorList } from '@/lib/utils'
 
-import type { GridCardField } from '@/stores/ui.store'
+import type { GridCardField } from '@bookdock/shared'
 
 import type { BookRow } from '../book-row'
 import { rowCover } from '../book-row'
@@ -28,9 +28,9 @@ const DEFAULT_CARD_FIELDS: GridCardField[] = ['title', 'author', 'progress']
  */
 interface BookCardShellProps {
   row: BookRow
+  /** Which fields this card draws under the cover. Absent means all of them:
+   *  the set is the per-user preference, with no separate on/off flag beside it. */
   gridCardFields?: GridCardField[]
-  /** The trash list shows no cover text; a card normally does. */
-  coverText?: boolean
   selected?: boolean
   selectionActive?: boolean
   onToggleSelect?: (id: string, shiftKey?: boolean) => void
@@ -57,7 +57,6 @@ interface BookCardShellProps {
 export default function BookCardShell({
   row,
   gridCardFields,
-  coverText = true,
   selected = false,
   selectionActive = false,
   onToggleSelect,
@@ -85,7 +84,7 @@ export default function BookCardShell({
     }
   }
 
-  const activeFields = gridCardFields ?? (coverText ? DEFAULT_CARD_FIELDS : [])
+  const activeFields = gridCardFields ?? DEFAULT_CARD_FIELDS
   const showTitle = activeFields.includes('title')
   const authorText = formatAuthorList(row.authors, row.author ?? '')
   const showAuthor = activeFields.includes('author') && Boolean(authorText)

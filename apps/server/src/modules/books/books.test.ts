@@ -1030,7 +1030,7 @@ describe('library settings (routes)', () => {
   })
 
   it('stores library settings on their own row without touching ui', async () => {
-    await putSettings({ uiTheme: 'light' })
+    await putSettings({ coverFit: 'full' })
     await putSettings({ library: { normalizeTitle: false } })
 
     expect(libraryRow()!.value).toEqual({ normalizeTitle: false })
@@ -1039,7 +1039,7 @@ describe('library settings (routes)', () => {
       .from(schema.settings)
       .where(and(eq(schema.settings.userId, ownerId), eq(schema.settings.key, 'ui')))
       .get()
-    expect(uiRow!.value).toEqual({ uiTheme: 'light' })
+    expect(uiRow!.value).toEqual({ coverFit: 'full' })
   })
 
   it('merges partial library updates onto the stored value', async () => {

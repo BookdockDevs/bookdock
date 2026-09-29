@@ -795,6 +795,49 @@ export function useLibraryPrefs(): SettingsRes['library'] {
 }
 
 /**
+ * Per-user preferences for the owner's own profile page. Display-only: the
+ * server enforces no profile visibility, so these decide what the owner sees,
+ * not who can see them.
+ */
+export function useProfileSettings(): NonNullable<SettingsRes['profile']> {
+  const { data } = useQuery({
+    queryKey: ['settings'],
+    queryFn: fetchSettings,
+  })
+  return data?.data.profile ?? {}
+}
+
+/** Partial update of the profile blob, with the same optimistic merge the
+ *  library preferences use so a toggle lands in the same frame as the click. */
+export function useUpdateProfileSettings() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (patch: NonNullable<SettingsRes['profile']>) => apiPut('/settings', { profile: patch }),
+    onMutate: async (patch) => {
+      await queryClient.cancelQueries({ queryKey: ['settings'] })
+      const prev = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+      if (prev) {
+        const next = { ...prev.data, profile: { ...prev.data.profile, ...patch } }
+        queryClient.setQueryData(['settings'], { data: next })
+        writeStoredSettings(next)
+      }
+      return { prev }
+    },
+    onError: (error, _patch, ctx) => {
+      if (ctx?.prev) {
+        queryClient.setQueryData(['settings'], ctx.prev)
+        writeStoredSettings(ctx.prev.data)
+      }
+      notify.error(getUserErrorNotification(error, 'settings.profilePrefsUpdateFailed'))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+}
+
+/**
  * Partial update of the library settings blob with an optimistic cache merge,
  * so sort-mode flips (including the drag-to-manual switch) take effect in the
  * same frame as the reorder mutation instead of waiting for a refetch.

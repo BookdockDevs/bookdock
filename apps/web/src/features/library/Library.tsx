@@ -16,7 +16,7 @@ import {
 import { restrictToWindowEdges, snapCenterToCursor } from '@dnd-kit/modifiers'
 import { arrayMove } from '@dnd-kit/sortable'
 
-import type { BookListItem, CatalogBook, Library, LibraryListItem } from '@bookdock/shared'
+import type { BookListItem, BookSortPrefField, CatalogBook, Library, LibraryListItem, RecentlyReadStyle } from '@bookdock/shared'
 
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -96,14 +96,17 @@ export default function Library() {
   const libraryPrefs = useLibraryPrefs()
   const { isHidden: isLibraryHidden } = useHiddenLibraries()
   // Resolution chain: explicit URL > per-user server default (N-06) > device
-  // localStorage (legacy; also the only writable layer for guests). A
+  // localStorage > built-in defaults. The localStorage tier is consulted for
+  // guests only: it is the sole layer a guest can write, but a signed-in user
+  // reading it would inherit whatever the previous session on a shared browser
+  // left behind, so a guest's sort choice would become the owner's default. A
   // linked/shared URL still controls its own view.
   const serverBookSort = libraryPrefs?.bookSort
-  const defaultSortBy = serverBookSort?.field ?? sortByPref
+  const defaultSortBy = serverBookSort?.field ?? (isGuest ? sortByPref : undefined)
   const defaultSortOrder = serverBookSort
     ? (serverBookSort.dir ?? BOOK_SORT_DEFAULT_DIR[serverBookSort.field])
-    : sortOrderPref
-  const view = search.view ?? libraryPrefs?.view ?? viewPref
+    : (isGuest ? sortOrderPref : undefined)
+  const view = search.view ?? libraryPrefs?.view ?? (isGuest ? viewPref : 'grid')
   const query = search.q ?? ''
   const currentPage = search.page ?? 1
   // Trash is a private-library concept: a shared/bookmarked ?trash=1 URL must
@@ -123,8 +126,8 @@ export default function Library() {
   const trashCapBytes = useTrashCapBytes({ enabled: !isGuest })
   // The trash defaults to newest-deleted first; the library sort preference
   // is a separate concern and must not be overwritten by trash-only sorting
-  const sortBy = search.sortBy ?? (trash ? 'deletedAt' : defaultSortBy)
-  const sortOrder = search.sortOrder ?? (trash ? 'desc' : defaultSortOrder)
+  const sortBy = search.sortBy ?? (trash ? 'deletedAt' : defaultSortBy ?? 'createdAt')
+  const sortOrder = search.sortOrder ?? (trash ? 'desc' : defaultSortOrder ?? BOOK_SORT_DEFAULT_DIR[sortBy as BookSortPrefField] ?? 'desc')
   const shelfId = search.shelf ?? null
   const tagId = search.tag ?? null
   const author = search.author ?? null
@@ -148,8 +151,12 @@ export default function Library() {
       const nextStatus = 'status' in patch ? (patch.status ?? null) : readStatus
       // Mirror navSearch's sort reset so the prefetched key matches the fetch
       const crossing = nextTrash !== trash
-      const nextSortBy = crossing ? (nextTrash ? 'deletedAt' : defaultSortBy) : sortBy
-      const nextSortOrder = crossing ? (nextTrash ? 'desc' : defaultSortOrder) : sortOrder
+      // Crossing back out of trash must land on the same default the resolved
+      // `sortBy`/`sortOrder` use, or the prefetched key misses the real fetch.
+      const nextSortBy = crossing ? (nextTrash ? 'deletedAt' : (defaultSortBy ?? 'createdAt')) : sortBy
+      const nextSortOrder = crossing
+        ? (nextTrash ? 'desc' : (defaultSortOrder ?? BOOK_SORT_DEFAULT_DIR.createdAt))
+        : sortOrder
       // The hovered row names its own target: inferring from the current
       // context prefetches the wrong list when leaving it (shared -> private
       // would warm the shared catalog instead of the private books).
@@ -782,10 +789,10 @@ export default function Library() {
     }
   }, [shelfId, listLoading, total, navSearch])
 
-  const gridCardFields = useUiStore((s) => s.gridCardFields)
   const gridColumns = useUiStore((s) => s.gridColumns)
-  const recentlyReadStyle = useUiStore((s) => s.recentlyReadStyle)
-  const readingStatsEnabled = useUiStore((s) => s.readingStatsEnabled)
+  const recentlyReadStyle = libraryPrefs?.recentlyReadStyle ?? 'off'
+  const readingStatsEnabled = libraryPrefs?.readingStatsEnabled !== false
+  const gridCardFields = libraryPrefs?.gridCardFields
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [dynColumns, setDynColumns] = useState(lastKnownDynColumns)
@@ -894,7 +901,7 @@ export default function Library() {
         )}
 
         {!isGuest && !activeLibrary && readingStatsEnabled && !trash && !query && !metadataFilter && !selectionActive && <ReadingStatsCard />}
-        {!isGuest && !activeLibrary && recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <RecentlyRead style={recentlyReadStyle} />}
+        {!isGuest && !activeLibrary && recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <RecentlyRead style={recentlyReadStyle as Exclude<RecentlyReadStyle, 'off'>} />}
 
         <div
           ref={containerRef}

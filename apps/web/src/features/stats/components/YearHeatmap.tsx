@@ -4,6 +4,7 @@ import { useReadingDaily } from '@/api/hooks/reading-records'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
+import { formatMonthShort } from '@/lib/format-date'
 import { cn } from '@/lib/utils'
 
 import { heatmapWeeks } from '../date-utils'
@@ -41,7 +42,7 @@ export default function YearHeatmap({ selectedDate, onSelectDate }: YearHeatmapP
         const m = Number(firstValid.slice(5, 7)) - 1
         if (m !== prevMonth) {
           const d = new Date(year, m, 1)
-          const name = d.toLocaleDateString(undefined, { month: 'short' })
+          const name = formatMonthShort(d)
           labels.push({ weekIndex: wIdx, name })
           prevMonth = m
         }

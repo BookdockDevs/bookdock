@@ -1,7 +1,6 @@
-import type { CatalogBook } from '@bookdock/shared'
+import type { CatalogBook, GridCardField } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import type { GridCardField } from '@/stores/ui.store'
 
 import { catalogWorkRow } from '../book-row'
 

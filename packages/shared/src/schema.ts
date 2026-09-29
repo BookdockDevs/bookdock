@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERMISSIONS } from './access-tokens'
-import { BOOK_SORT_PREF_FIELDS, LIBRARY_SORT_MODES } from './contract'
+import { BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, LIBRARY_SORT_MODES, RECENTLY_READ_STYLES } from './contract'
 import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 import { authorListSchema } from './library'
@@ -27,12 +27,19 @@ export const paginationSchema = z.object({
 export const legadoSearchSchema = z.object({
   keyword: z.string().trim().max(200).default(''),
   page: z.coerce.number().int().min(1).max(1_000).default(PAGINATION.DEFAULT_PAGE),
+  /**
+   * `joined` (default) searches the private library plus every shared library
+   * the reader joined; `private` narrows to their own books. A public library
+   * they never joined stays out of the source entirely.
+   */
+  scope: z.enum(['joined', 'private']).default('joined'),
 })
 
 export const legadoExploreSchema = z.object({
   page: z.coerce.number().int().min(1).max(1_000).default(PAGINATION.DEFAULT_PAGE),
   sort: z.enum(['updated', 'added', 'title']).default('updated'),
   order: z.enum(['asc', 'desc']).optional(),
+  scope: z.enum(['joined', 'private']).default('joined'),
 })
 
 export const readingProgressUpdateSchema = z.object({
@@ -119,58 +126,18 @@ export const readingRecordHourlySchema = readingRecordRangeSchema.extend({
   bookId: z.string().min(1).optional(),
 })
 
+// Flat reading preferences are deliberately absent: they travel inside
+// `readingConfig`. The 40+ flat duplicates that used to be declared here were
+// accepted and persisted but never read back, and their bounds/enums had
+// already drifted from the client (sidebarWidth capped at 500 while the reader
+// allows 640; readingThemeId's enum rejected custom theme ids).
 export const settingsUpdateSchema = z.object({
-  uiTheme: z.enum(['system', 'light', 'dark']).optional(),
-  readingThemeId: z.enum(['paper', 'sepia', 'night', 'cream']).optional(),
-  lightReadingThemeId: z.enum(['paper', 'sepia', 'night', 'cream']).optional(),
-  // Open font id: system stack ids (serif/sans-serif/kaiti/fangsong), builtin CDN
-  // font ids, or uploaded font ids — resolved client-side against the font registry.
-  fontFamily: z.string().min(1).max(100).optional(),
   fontPreferences: z.record(z.object({
     enabled: z.boolean().optional(),
     displayName: z.string().trim().min(1).max(100).optional(),
   })).optional(),
   fontOrder: z.array(z.string().min(1).max(100)).optional(),
-  fontSize: z.number().min(12).max(64).optional(),
-  fontWeight: z.number().min(100).max(900).optional(),
-  lineHeight: z.number().min(1.2).max(2.5).optional(),
-  paragraphSpacing: z.number().min(0).max(3).optional(),
-  letterSpacing: z.number().min(-1).max(3).optional(),
-  indent: z.number().min(0).max(4).optional(),
-  pageWidth: z.number().min(0).max(1800).optional(),
-  verticalPadding: z.number().min(0).max(120).optional(),
-  horizontalPadding: z.number().min(0).max(120).optional(),
-  scrollPageWidth: z.number().min(0).max(1800).optional(),
-  scrollHorizontalPadding: z.number().min(0).max(120).optional(),
-  scrollVerticalPadding: z.number().min(0).max(120).optional(),
-  pagePageWidth: z.number().min(0).max(1800).optional(),
-  pageHorizontalPadding: z.number().min(0).max(120).optional(),
-  pageVerticalPadding: z.number().min(0).max(120).optional(),
-  textAlignJustify: z.boolean().optional(),
-  overrideBookFont: z.boolean().optional(),
-  overrideBookLayout: z.boolean().optional(),
-  coverText: z.boolean().optional(),
   coverFit: z.enum(['crop', 'full']).optional(),
-  gridColumns: z.string().optional(),
-  toolbarLocked: z.boolean().optional(),
-  sidebarWidth: z.number().min(200).max(500).optional(),
-  readingMode: z.enum(['scroll', 'page']).optional(),
-  pageColumns: z.number().int().min(1).max(3).optional(),
-  columnGap: z.number().min(0).max(15).optional(),
-  showHeader: z.boolean().optional(),
-  showFooter: z.boolean().optional(),
-  chineseConversion: z.enum(['off', 'simplified', 'traditional']).optional(),
-  continuousScroll: z.enum(['off', 'snap', 'seamless']).optional(),
-  pageAnimation: z.boolean().optional(),
-  autoMarkSelection: z.boolean().optional(),
-  clickAreaMode: clickAreaModeSchema.optional(),
-  headerLeft: marginalFieldSchema.optional(),
-  headerCenter: marginalFieldSchema.optional(),
-  headerRight: marginalFieldSchema.optional(),
-  footerLeft: marginalFieldSchema.optional(),
-  footerCenter: marginalFieldSchema.optional(),
-  footerRight: marginalFieldSchema.optional(),
-  marginalFontSize: z.number().min(0).max(24).optional(),
   readingTimerMode: z.enum(['auto', 'manual', 'off']).optional(),
   manualTimerGraceMinutes: z.union([z.literal(1), z.literal(5), z.literal(10), z.literal(30)]).optional(),
   ttsEngine: z.enum(['system', 'edge', 'service']).optional(),
@@ -205,6 +172,14 @@ export const settingsUpdateSchema = z.object({
     view: z.enum(['grid', 'list']).optional(),
     hiddenLibraryIds: z.array(z.string().max(64)).max(200).optional(),
     libraryOrder: z.array(z.string().max(64)).max(500).optional(),
+    gridCardFields: z.array(z.enum(GRID_CARD_FIELDS)).max(GRID_CARD_FIELDS.length).optional(),
+    readingStatsEnabled: z.boolean().optional(),
+    recentlyReadStyle: z.enum(RECENTLY_READ_STYLES).optional(),
+  }).optional(),
+  profile: z.object({
+    showStats: z.boolean().optional(),
+    showShowcase: z.boolean().optional(),
+    isPublic: z.boolean().optional(),
   }).optional(),
   integrations: z.object({
     legado: z.object({

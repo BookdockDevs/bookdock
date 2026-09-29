@@ -8,6 +8,7 @@ import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiStreamAiChat } from 
 import AiPanel from '../features/reader/components/AiPanel'
 import { RendererContext } from '../features/reader/hooks/useReaderApi'
 import { writeAiPanelMemory } from '../features/reader/lib/ai-panel-memory'
+import { formatTime } from '@/lib/format-date'
 import { normalizeMarkdownParagraphLines } from '../features/reader/lib/markdown'
 import { useReaderState } from '../features/reader/state/reader-state'
 import { useAuthStore } from '../stores/auth.store'
@@ -1422,7 +1423,7 @@ describe('AiPanel', () => {
     renderPanel()
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiHistory' }))
     await waitFor(() => expect(screen.getByText('解释第一章')).toBeInTheDocument())
-    expect(screen.getByText(new RegExp(`${new Date(threadStart).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })} · 2`))).toBeInTheDocument()
+    expect(screen.getByText(new RegExp(`${formatTime(threadStart)} · 2`))).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'reader.aiRename 解释第一章' })).toHaveClass('opacity-0', 'group-hover:opacity-100')
     fireEvent.click(screen.getByText('解释第一章'))
     await waitFor(() => expect(screen.getByText('服务端问题')).toBeInTheDocument())

@@ -7,8 +7,10 @@ import { useAuthStore } from '@/stores/auth.store'
 import ViewMenu from '../features/library/components/ViewMenu'
 
 const libraryPrefsMutate = vi.fn()
+let libraryPrefs: { gridCardFields?: Array<'title' | 'author' | 'progress'> } = {}
 vi.mock('../features/library/hooks', () => ({
   useUpdateLibraryPrefs: () => ({ mutate: libraryPrefsMutate }),
+  useLibraryPrefs: () => libraryPrefs,
 }))
 
 function renderMenu(props: Partial<Parameters<typeof ViewMenu>[0]> = {}) {
@@ -30,7 +32,8 @@ function renderMenu(props: Partial<Parameters<typeof ViewMenu>[0]> = {}) {
 
 beforeEach(async () => {
   localStorage.clear()
-  useUiStore.setState({ coverText: true, gridCardFields: ['title', 'author', 'progress'], libraryPageSize: 24, coverFit: 'crop', recentlyReadStyle: 'cards', sortBy: 'createdAt', sortOrder: 'desc', listInfoItems: ['progress'] })
+  libraryPrefs = { gridCardFields: ['title', 'author', 'progress'] }
+  useUiStore.setState({ libraryPageSize: 24, coverFit: 'crop', sortBy: 'createdAt', sortOrder: 'desc', listInfoItems: ['progress'] })
   await i18n.changeLanguage('zh-CN')
 })
 
@@ -90,12 +93,12 @@ describe('ViewMenu cover and card field prefs', () => {
     expect(screen.getByRole('button', { name: '完整' })).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('toggles card fields in the store and persists it', () => {
+  it('sends the card field set to the server so it follows the user', () => {
     renderMenu({ defaultTab: 'viewLayout' })
 
     fireEvent.click(screen.getByRole('button', { name: '进度' }))
-    expect(useUiStore.getState().gridCardFields).toEqual(['title', 'author'])
-    expect(localStorage.getItem('bd-grid-card-fields')).toBe(JSON.stringify(['title', 'author']))
+    expect(libraryPrefsMutate).toHaveBeenCalledWith({ gridCardFields: ['title', 'author'] })
+    expect(localStorage.getItem('bd-grid-card-fields')).toBeNull()
   })
 
   it('switches cover fit independently of card fields', () => {
@@ -103,7 +106,7 @@ describe('ViewMenu cover and card field prefs', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '书名' }))
     fireEvent.click(screen.getByRole('button', { name: '完整' }))
-    expect(useUiStore.getState().gridCardFields).toEqual(['author', 'progress'])
+    expect(libraryPrefsMutate).toHaveBeenCalledWith({ gridCardFields: ['author', 'progress'] })
     expect(useUiStore.getState().coverFit).toBe('full')
     expect(localStorage.getItem('bd-cover-fit')).toBe('full')
     expect(screen.getByRole('button', { name: '完整' })).toHaveAttribute('aria-pressed', 'true')

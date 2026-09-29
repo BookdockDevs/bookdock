@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { SettingsRes, TrashSettings } from '@bookdock/shared'
 
-import { apiGet, apiPut } from '@/api/client'
+import { apiPut } from '@/api/client'
+import { fetchSettings, writeStoredSettings } from '@/lib/settings-cache'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import Toggle from '@/components/ui/Toggle'
@@ -37,16 +38,34 @@ export default function TrashSettingsRow() {
   const [disableOpen, setDisableOpen] = useState(false)
   const settingsQuery = useQuery({
     queryKey: ['settings'],
-    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
+    queryFn: fetchSettings,
   })
   const mutation = useMutation({
     mutationFn: (trash: Partial<TrashSettings>) => apiPut('/settings', { trash }),
+    onMutate: async (trash) => {
+      // Optimistic like the library-prefs mutation, so a toggle reflects the
+      // click immediately rather than after a refetch.
+      await queryClient.cancelQueries({ queryKey: ['settings'] })
+      const prev = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+      if (prev) {
+        const next = { ...prev.data, trash: { ...prev.data.trash, ...trash } as NonNullable<SettingsRes['trash']> }
+        queryClient.setQueryData(['settings'], { data: next })
+        writeStoredSettings(next)
+      }
+      return { prev }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] })
       // Disabling permanently deletes the trash contents; refresh book lists.
       queryClient.invalidateQueries({ queryKey: ['books'] })
     },
-    onError: (error) => notify.error(getUserErrorNotification(error, 'settings.trashSettingsUpdateFailed')),
+    onError: (error, _trash, ctx) => {
+      if (ctx?.prev) {
+        queryClient.setQueryData(['settings'], ctx.prev)
+        writeStoredSettings(ctx.prev.data)
+      }
+      notify.error(getUserErrorNotification(error, 'settings.trashSettingsUpdateFailed'))
+    },
   })
 
   const trashSettings = settingsQuery.data?.data.trash

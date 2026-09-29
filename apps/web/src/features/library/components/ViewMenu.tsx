@@ -2,14 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { queryClient } from '@/lib/query-client'
+import { GRID_CARD_FIELDS, type GridCardField } from '@bookdock/shared'
+
 import {
   useUiStore,
   LIST_INFO_ITEMS,
-  GRID_CARD_FIELDS,
   LIBRARY_PAGE_SIZES,
   type CoverFit,
   type ListInfoItem,
-  type GridCardField,
 } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { cn } from '@/lib/utils'
@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils'
 import type { LibrarySearch } from '@/routes/index'
 import type { BookFormat, BookSortPrefField, ReadStatus } from '@bookdock/shared'
 
-import { useUpdateLibraryPrefs } from '../hooks'
+import { useLibraryPrefs, useUpdateLibraryPrefs } from '../hooks'
 
 interface ViewMenuProps {
   navSearch: (patch: Partial<LibrarySearch>) => void
@@ -81,6 +81,7 @@ const GRID_CARD_FIELD_LABEL_KEYS: Record<GridCardField, string> = {
   progress: 'library.gridCardProgress',
 }
 const CATALOG_GRID_CARD_FIELDS: GridCardField[] = ['title', 'author']
+const DEFAULT_GRID_CARD_FIELDS: GridCardField[] = ['title', 'author', 'progress']
 
 const LIST_INFO_LABEL_KEYS: Record<ListInfoItem, string> = {
   progress: 'library.sortBy.progress',
@@ -111,12 +112,10 @@ export default function ViewMenu({
 
   const coverFit = useUiStore((s) => s.coverFit)
   const gridColumns = useUiStore((s) => s.gridColumns)
-  const gridCardFields = useUiStore((s) => s.gridCardFields)
   const libraryPageSize = useUiStore((s) => s.libraryPageSize)
   const listInfoItems = useUiStore((s) => s.listInfoItems)
   const setCoverFit = useUiStore((s) => s.setCoverFit)
   const setGridColumns = useUiStore((s) => s.setGridColumns)
-  const setGridCardFields = useUiStore((s) => s.setGridCardFields)
   const setLibraryPageSize = useUiStore((s) => s.setLibraryPageSize)
   const setListInfoItems = useUiStore((s) => s.setListInfoItems)
   const setSortBy = useUiStore((s) => s.setSortBy)
@@ -127,6 +126,8 @@ export default function ViewMenu({
   const user = useAuthStore((s) => s.user)
   const isGuest = !user || user.guest === true || user.role === 'guest'
   const updateLibraryPrefs = useUpdateLibraryPrefs()
+  const libraryPrefs = useLibraryPrefs()
+  const gridCardFields = libraryPrefs?.gridCardFields ?? DEFAULT_GRID_CARD_FIELDS
 
   // Non-guest defaults live in per-user server settings (N-06); guests cannot
   // persist them, so they keep the device-local ui.store layer.
@@ -569,11 +570,11 @@ export default function ViewMenu({
                               type="button"
                               aria-pressed={active}
                               onClick={() =>
-                                setGridCardFields(
-                                  active
+                                updateLibraryPrefs.mutate({
+                                  gridCardFields: active
                                     ? gridCardFields.filter((f) => f !== field)
                                     : [...gridCardFields, field],
-                                )
+                                })
                               }
                               className={cn(
                                 'flex h-7 items-center justify-center rounded-lg text-xs font-medium transition-all whitespace-nowrap',

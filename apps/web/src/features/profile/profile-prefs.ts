@@ -1,58 +1,30 @@
+// The owner's own profile-page preferences. The server owns these: they live in
+// the per-user `profile` settings value and are read through
+// `useProfileSettings()`. The store here exists only so logout has something to
+// reset — a shared browser must not hand one account another's choices, and the
+// localStorage keys these used to own are cleared rather than trusted.
 import { create } from 'zustand'
+
+const STORAGE_KEY = 'bd-profile-prefs'
 
 export interface ProfilePrefs {
   showStats: boolean
   showShowcase: boolean
   isPublic: boolean
-  setShowStats: (show: boolean) => void
-  setShowShowcase: (show: boolean) => void
-  setIsPublic: (isPublic: boolean) => void
+  /** Back to the defaults; called on logout so prefs do not cross accounts. */
+  resetProfilePrefs: () => void
 }
 
-const STORAGE_KEY = 'bd-profile-prefs'
-
-interface StoredPrefs {
-  showStats?: boolean
-  showShowcase?: boolean
-  isPublic?: boolean
-}
-
-function readStoredPrefs(): StoredPrefs {
-  if (typeof window === 'undefined') return {}
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')
-  } catch {
-    return {}
-  }
-}
-
-function savePrefs(patch: StoredPrefs) {
-  if (typeof window === 'undefined') return
-  try {
-    const current = readStoredPrefs()
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, ...patch }))
-  } catch {
-    // Ignore quota or private-browsing errors
-  }
-}
-
-export const useProfilePrefs = create<ProfilePrefs>((set) => {
-  const initial = readStoredPrefs()
-  return {
-    showStats: initial.showStats ?? true,
-    showShowcase: initial.showShowcase ?? true,
-    isPublic: initial.isPublic ?? true,
-    setShowStats: (showStats) => {
-      savePrefs({ showStats })
-      set({ showStats })
-    },
-    setShowShowcase: (showShowcase) => {
-      savePrefs({ showShowcase })
-      set({ showShowcase })
-    },
-    setIsPublic: (isPublic) => {
-      savePrefs({ isPublic })
-      set({ isPublic })
-    },
-  }
-})
+export const useProfilePrefs = create<ProfilePrefs>(() => ({
+  showStats: true,
+  showShowcase: true,
+  isPublic: true,
+  resetProfilePrefs: () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+    } catch {
+      // ignore storage errors
+    }
+    useProfilePrefs.setState({ showStats: true, showShowcase: true, isPublic: true })
+  },
+}))

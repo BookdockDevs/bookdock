@@ -3,7 +3,6 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import Profile from '@/features/profile/Profile'
-import { useProfilePrefs } from '@/features/profile/profile-prefs'
 import { useAuthStore } from '@/stores/auth.store'
 import i18n from '@/i18n/i18n'
 
@@ -48,6 +47,11 @@ vi.mock('@/api/hooks/reading-records', () => ({
   })),
 }))
 
+const mockProfileMutate = vi.fn()
+let profileSettings: { showStats?: boolean; showShowcase?: boolean; isPublic?: boolean } = {}
+
+// The showcase reads books here, and the page plus its settings dialog read and
+// write the per-user profile preferences from the same module.
 vi.mock('@/features/library/hooks', () => ({
   useBooks: vi.fn(() => ({
     data: {
@@ -69,6 +73,8 @@ vi.mock('@/features/library/hooks', () => ({
     },
     isLoading: false,
   })),
+  useProfileSettings: () => profileSettings,
+  useUpdateProfileSettings: () => ({ mutate: mockProfileMutate }),
 }))
 
 const mockUpdateUsername = vi.fn().mockResolvedValue({})
@@ -101,11 +107,8 @@ describe('Profile Page', () => {
         createdAt: Date.now() - 15 * 24 * 3600 * 1000, // 15 days ago
       },
     })
-    useProfilePrefs.setState({
-      showStats: true,
-      showShowcase: true,
-      isPublic: true,
-    })
+    profileSettings = { showStats: true, showShowcase: true, isPublic: true }
+    mockProfileMutate.mockClear()
   })
 
   it('renders profile hero card with username and member days', () => {
@@ -182,24 +185,20 @@ describe('Profile Page', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(mockUpdateUsername).toHaveBeenCalledWith({ username: 'NewMaster' })
 
-    // Toggle off reading achievements
+    // Toggles now write the per-user profile blob, so the assertion is that the
+    // mutation carries the value rather than that local state changed.
     const showStatsSwitch = screen.getByRole('switch', { name: '展示阅读成就' })
     fireEvent.click(showStatsSwitch)
-    expect(screen.queryByText('阅读成就')).not.toBeInTheDocument()
+    expect(mockProfileMutate).toHaveBeenCalledWith({ showStats: false })
 
-    // Toggle off currently reading
     const showShowcaseSwitch = screen.getByRole('switch', { name: '展示在读书目' })
     fireEvent.click(showShowcaseSwitch)
-    expect(screen.queryByText('正在阅读')).not.toBeInTheDocument()
+    expect(mockProfileMutate).toHaveBeenCalledWith({ showShowcase: false })
 
-    // Toggle public profile
     const publicSwitch = screen.getByRole('switch', { name: '公开个人主页' })
     expect(publicSwitch).toBeInTheDocument()
     fireEvent.click(publicSwitch)
-    expect(useProfilePrefs.getState().isPublic).toBe(false)
-
-    // Fallback message is shown when all modules are hidden
-    expect(screen.getByText('已在主页设置中隐藏了所有公开展示模块')).toBeInTheDocument()
+    expect(mockProfileMutate).toHaveBeenCalledWith({ isPublic: false })
 
     // Trigger change password from settings dialog
     const changePasswordBtn = screen.getByRole('button', { name: '修改密码' })

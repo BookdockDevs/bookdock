@@ -304,6 +304,14 @@ export interface LibrarySortPreference {
 export const BOOK_SORT_PREF_FIELDS = ['createdAt', 'title', 'author', 'size', 'progress', 'lastReadAt'] as const
 export type BookSortPrefField = (typeof BOOK_SORT_PREF_FIELDS)[number]
 
+/** Fields a grid card can render under the cover, in render order. */
+export const GRID_CARD_FIELDS = ['title', 'author', 'progress'] as const
+export type GridCardField = (typeof GRID_CARD_FIELDS)[number]
+
+/** Recently-read strip presentation on the library home. */
+export const RECENTLY_READ_STYLES = ['off', 'covers', 'cards'] as const
+export type RecentlyReadStyle = (typeof RECENTLY_READ_STYLES)[number]
+
 export interface LibrarySettings {
   normalizeTitle?: boolean
   shelfSort?: LibrarySortPreference
@@ -325,6 +333,26 @@ export interface LibrarySettings {
    * belongs to are ignored.
    */
   libraryOrder?: string[]
+  /**
+   * Which fields a grid card renders under the cover. This is the single source
+   * of truth for card text: there is deliberately no separate "card text on/off"
+   * flag, because that pair drifted — the boolean synced while the field set did
+   * not, so the preference failed to follow the user to another device.
+   */
+  gridCardFields?: GridCardField[]
+  /** Show the reading-stats banner on the library home. */
+  readingStatsEnabled?: boolean
+  /** Recently-read shelf presentation on the library home. */
+  recentlyReadStyle?: RecentlyReadStyle
+}
+
+/** What the owner's own profile page renders. Display preferences, not access control. */
+export interface ProfileSettings {
+  showStats?: boolean
+  showShowcase?: boolean
+  /** Hides the owner's own profile sections from the owner's view. The server
+   *  enforces no profile visibility, so this is not an ACL. */
+  isPublic?: boolean
 }
 
 export interface IntegrationsSettings {
@@ -390,50 +418,17 @@ export interface AccessTokenUpdateReq {
   expiresIn?: AccessTokenDuration
 }
 
+// Reading preferences (typography, layout, margins, chrome, theme ids) are NOT
+// fields here: they travel inside `readingConfig`. The flat duplicates that used
+// to sit in this row were accepted, persisted, and then never read back, so the
+// row only carries what has a live writer.
 export interface SettingsRes {
-  uiTheme?: 'system' | 'light' | 'dark'
-  readingThemeId?: 'paper' | 'sepia' | 'night' | 'cream'
-  lightReadingThemeId?: 'paper' | 'sepia' | 'night' | 'cream'
-  /** Open font id (system stack / builtin CDN / uploaded font id), resolved client-side */
-  fontFamily?: string
   /** Per-user font visibility and display-name overrides, keyed by stable font id. */
   fontPreferences?: FontPreferences
   /** Per-user display order of stable system, builtin, and uploaded font ids. */
   fontOrder?: string[]
-  fontSize?: number
-  fontWeight?: number
-  lineHeight?: number
-  paragraphSpacing?: number
-  letterSpacing?: number
-  indent?: number
-  pageWidth?: number
-  verticalPadding?: number
-  horizontalPadding?: number
-  // Per-mode backing values for the three layout settings above; the flat
-  // fields mirror whichever readingMode is active.
-  scrollPageWidth?: number
-  scrollHorizontalPadding?: number
-  scrollVerticalPadding?: number
-  pagePageWidth?: number
-  pageHorizontalPadding?: number
-  pageVerticalPadding?: number
-  textAlignJustify?: boolean
-  overrideBookFont?: boolean
-  overrideBookLayout?: boolean
-  coverText?: boolean
+  /** Cover fill mode inside a grid card. */
   coverFit?: 'crop' | 'full'
-  gridColumns?: string
-  toolbarLocked?: boolean
-  sidebarWidth?: number
-  readingMode?: 'scroll' | 'page'
-  pageColumns?: number
-  columnGap?: number
-  showHeader?: boolean
-  showFooter?: boolean
-  chineseConversion?: 'off' | 'simplified' | 'traditional'
-  showWordCount?: boolean
-  continuousScroll?: 'off' | 'snap' | 'seamless'
-  pageAnimation?: boolean
   /** Reading-time accounting: automatic heuristics, manual timer pill, or off (no reading data) */
   readingTimerMode?: 'auto' | 'manual' | 'off'
   manualTimerGraceMinutes?: 1 | 5 | 10 | 30
@@ -445,6 +440,7 @@ export interface SettingsRes {
   ttsFollow?: boolean
   trash?: TrashSettings
   library?: LibrarySettings
+  profile?: ProfileSettings
   integrations?: IntegrationsSettings
   /**
    * Read-only instance limit (env UPLOAD_MAX_BYTES), injected by GET /settings
@@ -455,6 +451,8 @@ export interface SettingsRes {
   /**
    * Named reading-setting profiles (global config + presets + active pointer),
    * serialized as JSON by the web client and passed through by the server.
+   * This is the sole carrier of the 45 flat reading preferences — the `ui` row
+   * must not grow flat duplicates of them.
    */
   readingConfig?: string
   /**

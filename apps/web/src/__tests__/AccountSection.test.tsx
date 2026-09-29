@@ -14,6 +14,12 @@ vi.mock('@/features/auth/hooks', () => ({
   useChangePassword: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }))
 
+// The settings dialog reads and writes profile preferences through these hooks.
+vi.mock('@/features/library/hooks', () => ({
+  useProfileSettings: () => ({ showStats: true, showShowcase: true, isPublic: true }),
+  useUpdateProfileSettings: () => ({ mutate: vi.fn() }),
+}))
+
 describe('AccountSection', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')

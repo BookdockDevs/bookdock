@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 import { clearStoredSettings } from '@/lib/settings-cache'
+import { useUiStore } from './ui.store'
 
 export interface AuthUser {
   id: string
@@ -57,6 +58,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (typeof window !== 'undefined') {
       localStorage.removeItem('bd-user')
       clearStoredSettings()
+      // Every server-owned preference returns to its default. Device-adaptation
+      // keys (sidebar width, grid columns, page size, and the reader-panel view
+      // preferences) are deliberately left alone — they describe the screen, not
+      // the reader, so a shared browser keeps them across accounts.
+      useUiStore.getState().resetUserScopedPrefs()
     }
     set({ user: null })
   },
