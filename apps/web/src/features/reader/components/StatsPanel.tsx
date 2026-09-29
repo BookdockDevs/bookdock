@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { BookDetailRes, ReadingProgressRes } from '@bookdock/shared'
 
 import { apiGet } from '@/api/client'
+import { withReveal } from '@/lib/reveal-hidden'
 import { localDateString, useBookReadingRecords } from '@/api/hooks/reading-records'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -115,11 +116,11 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
   // Same query keys/fns as Reader so the existing cache entries are reused
   const bookQuery = useQuery({
     queryKey: ['book', bookId],
-    queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
+    queryFn: () => apiGet<{ data: BookDetailRes }>(withReveal(`/books/${bookId}`)),
   })
   const progressQuery = useQuery({
     queryKey: ['progress', bookId],
-    queryFn: () => apiGet<{ data: ReadingProgressRes | null }>(`/progress/${bookId}`),
+    queryFn: () => apiGet<{ data: ReadingProgressRes | null }>(withReveal(`/progress/${bookId}`)),
   })
   const totalWords = bookQuery.data?.data.meta?.wordCount
   const readFraction = progressQuery.data?.data?.readFraction

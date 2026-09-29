@@ -66,7 +66,7 @@ vi.mock('../features/library/hooks', () => ({
   useResetMetadata: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCollectBook: () => ({ mutate: collectBookMutate, isPending: false }),
   useUpdateCatalogVersion: () => ({ mutate: updateCatalogVersionMutate, isPending: false }),
-  useUpdateCatalogBook: () => ({ mutateAsync: updateCatalogBookMutate, isPending: false }),
+  useUpdateCatalogBook: () => ({ mutate: updateCatalogBookMutate, mutateAsync: updateCatalogBookMutate, isPending: false }),
   useLibraryCategories: () => ({ data: { data: [] } }),
   useLibraryTags: () => ({ data: { data: [] } }),
   useUploadBooks: () => ({
@@ -81,6 +81,7 @@ const book: BookListItem = {
   id: 'book-1',
   title: 'Test Book',
   author: 'Author',
+  authors: ['Author'],
   format: 'epub',
   coverKey: null,
   size: 100,
@@ -375,6 +376,33 @@ describe('BookDetailDialog identity chips', () => {
 
     expect(onClose).toHaveBeenCalled()
     expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { author: 'Author' } })
+  })
+
+  it('renders one filter chip per author and filters by the clicked name', () => {
+    const onClose = vi.fn()
+    render(
+      <BookDetailDialog
+        book={{ ...book, authors: ['甲', '乙'], author: '甲' }}
+        onClose={onClose}
+        onDelete={vi.fn()}
+      />,
+      { wrapper },
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '乙' }))
+
+    expect(onClose).toHaveBeenCalled()
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { author: '乙' } })
+  })
+
+  it('toggles the private work hidden from its detail actions', async () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: '隐藏作品' }))
+
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith('/books/book-1', { hidden: true })
+    })
   })
 
   it('navigates to the series filter from the series metadata link', () => {
@@ -750,7 +778,7 @@ describe('BookDetailDialog shared work mode', () => {
   function catalogWork(overrides: Partial<CatalogBook> = {}): CatalogBook {
     return {
       id: 'lb1', libraryId: 'lib_city', categoryId: null, title: 'City Book', author: 'Someone',
-      description: 'A tale', coverKey: null, tags: [{ id: 't1', name: 'classic' }],
+      description: 'A tale', coverKey: null, hidden: false, tags: [{ id: 't1', name: 'classic' }],
       versions: [catalogVersion()], createdAt: 1710000000000, updatedAt: 1710000000000, ...overrides,
     }
   }
@@ -809,11 +837,11 @@ describe('BookDetailDialog shared work mode', () => {
 
     // Single published version: unlisting breaks collected B cards, so it
     // confirms first.
-    fireEvent.click(screen.getByRole('button', { name: '下架' }))
+    fireEvent.click(screen.getByRole('button', { name: '隐藏' }))
     expect(updateCatalogVersionMutate).not.toHaveBeenCalled()
     const unlistDialog = screen.getByRole('alertdialog')
-    expect(within(unlistDialog).getByText(/下架后，已收藏的成员将无法继续阅读/)).toBeInTheDocument()
-    fireEvent.click(within(unlistDialog).getByRole('button', { name: '下架' }))
+    expect(within(unlistDialog).getByText(/隐藏后，已收藏的成员将无法继续阅读/)).toBeInTheDocument()
+    fireEvent.click(within(unlistDialog).getByRole('button', { name: '隐藏' }))
     expect(updateCatalogVersionMutate).toHaveBeenCalledWith(expect.objectContaining({
       libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { status: 'unlisted' },
     }))
@@ -824,6 +852,25 @@ describe('BookDetailDialog shared work mode', () => {
     expect(within(deleteDialog).getByText(/删除后整个作品会被移除/)).toBeInTheDocument()
     fireEvent.click(within(deleteDialog).getByRole('button', { name: '删除' }))
     expect(deleteCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1' })
+  })
+
+  it('toggles the whole work hidden without touching versions', () => {
+    renderWorkDialog(catalogWork(), { canManage: true })
+
+    fireEvent.click(screen.getByRole('button', { name: '隐藏作品' }))
+    expect(updateCatalogBookMutate).toHaveBeenCalledWith({
+      libraryId: 'lib_city', libraryBookId: 'lb1', patch: { hidden: true },
+    })
+    cleanup()
+
+    // A hidden work offers the way back and badges itself for managers.
+    renderWorkDialog(catalogWork({ hidden: true }), { canManage: true })
+    expect(screen.getByRole('button', { name: '显示作品' })).toBeInTheDocument()
+    expect(screen.getByText('已隐藏')).toBeInTheDocument()
+    // Members never reach the toggle.
+    cleanup()
+    renderWorkDialog(catalogWork({ hidden: true }))
+    expect(screen.queryByRole('button', { name: '显示作品' })).not.toBeInTheDocument()
   })
 
   it('switches the visible version from the tabs and acts on it', () => {

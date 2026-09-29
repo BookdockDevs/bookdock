@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { BASE_URL } from '@/api/client'
 import { READING_RECORDS_KEY, localDateString, useAddReadingTime } from '@/api/hooks/reading-records'
+import { withReveal } from '@/lib/reveal-hidden'
 
 const MIN_SESSION_SECONDS = 5
 const HIDDEN_GRACE_MS = 10_000
@@ -76,7 +77,7 @@ export function useReadingTimer(bookId: string | undefined) {
       if (seconds < MIN_SESSION_SECONDS) return
       const body = { bookId: id, date, durationSeconds: seconds, startedAt }
       if (useBeacon && typeof navigator.sendBeacon === 'function') {
-        navigator.sendBeacon(`${BASE_URL}/reading-records`, new Blob([JSON.stringify(body)], { type: 'application/json' }))
+        navigator.sendBeacon(withReveal(`${BASE_URL}/reading-records`), new Blob([JSON.stringify(body)], { type: 'application/json' }))
       } else {
         mutateRef.current(body)
       }

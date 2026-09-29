@@ -117,6 +117,24 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
     if (ok) onComplete()
   }
 
+  async function handleBatchHide() {
+    // Private ids are version ids, shared-library ids are work ids; each
+    // endpoint hides the caller's own row without touching anything else.
+    const ok = await runBatch(
+      (id) => libraryId
+        ? apiPatch(`/libraries/${libraryId}/books/${id}`, { hidden: true })
+        : apiPatch(`/books/${id}`, { hidden: true }),
+      'library.batchHideSucceeded',
+      'library.batchActionHide',
+    )
+    if (libraryId) {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
+    }
+    if (ok) onComplete()
+  }
+
   return (
     <>
       <div
@@ -182,6 +200,9 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
               {!libraryId && <span className="mx-1 h-4 w-px shrink-0 bg-stone-200 dark:bg-stone-700" />}
               <Button className="shrink-0 whitespace-nowrap" variant="secondary" size="sm" onClick={() => setDialog('classify')}>
                 {_('library.batchClassify')}
+              </Button>
+              <Button className="shrink-0 whitespace-nowrap" variant="ghost" size="sm" disabled={marking} onClick={() => void handleBatchHide()}>
+                {_('library.hide')}
               </Button>
               {!libraryId && (
                 <Button className="shrink-0 whitespace-nowrap" variant="danger" size="sm" onClick={() => setDialog('delete')}>

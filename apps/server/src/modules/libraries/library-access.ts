@@ -4,11 +4,12 @@ import type { LibraryRelation } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { blobKeyReferenced, deleteBlobRowIfUnreferenced } from '../../db/blob-refs'
-import { bookVersions, contentRevisions, instance, libraries, libraryBookVersions, libraryMemberships } from '../../db/schema'
+import { bookVersions, contentRevisions, instance, libraries, libraryBooks, libraryBookVersions, libraryMemberships } from '../../db/schema'
 import { coverThumbnailKey } from '../../lib/cover'
 import { AppError, isUniqueViolation } from '../../middleware/error'
 import { getStorage } from '../../storage'
 import { createId } from '../../lib/id'
+import { isWorkEffectivelyHidden } from './library-query'
 
 /**
  * Phase 1 domain permission base (1.8): identity, library membership and
@@ -118,6 +119,21 @@ export async function requireLibraryManager(actorId: string, libraryId: string):
 }
 
 /**
+ * Boolean manager check for read filtering: managers see hidden rows
+ * (badged), everyone else does not. Permission/topology denials mean "not a
+ * manager"; anything else is a real failure and must not masquerade as one.
+ */
+export async function isLibraryManager(actorId: string, libraryId: string): Promise<boolean> {
+  try {
+    await requireLibraryManager(actorId, libraryId)
+    return true
+  } catch (err) {
+    if (err instanceof AppError) return false
+    throw err
+  }
+}
+
+/**
  * Library-scoped version read: the version must belong to the library,
  * otherwise it is a NOT_FOUND (never a cross-library existence leak).
  */
@@ -175,6 +191,14 @@ function resolveSharedVersionReadInternal(
     .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.bookVersionId, bookVersionId))).get()
   if (!link) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
   if (link.status !== 'published') throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+  // Hidden works close the same gate for everyone below manager: the work row
+  // carries the flag, so look it up (owners and admins always pass).
+  if (relation !== 'owner' && relation !== 'admin') {
+    const work = db.select().from(libraryBooks).where(eq(libraryBooks.id, link.libraryBookId)).get()
+    if (!work || isWorkEffectivelyHidden(db, libraryId, work)) {
+      throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+    }
+  }
   if (relation === 'guest') {
     const settings = db.select().from(instance).get()
     // Per-listing flag: this library's own switch, never a sibling library's.

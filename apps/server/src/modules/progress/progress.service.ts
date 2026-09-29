@@ -8,11 +8,11 @@ import type { RateSample } from '@bookdock/shared'
 
 const RATE_SAMPLE_MAX = 20
 
-export async function getProgress(userId: string, bookId: string) {
+export async function getProgress(userId: string, bookId: string, showHidden = false) {
   // Readability is the shared gate, not a private-library lookup: a version read
   // in a library has no private row, and refusing it here made the reader treat
   // "no saved position" as a failure to load.
-  await assertReadableBook(userId, bookId)
+  await assertReadableBook(userId, bookId, showHidden)
   const data = await readProgressFile(userId, bookId)
   if (!data) return null
   // intervals stay server-side; clients get the precomputed union length
@@ -21,13 +21,13 @@ export async function getProgress(userId: string, bookId: string) {
   return { id: `prog-${bookId}`, userId, bookId, ...rest, readFraction }
 }
 
-export async function upsertProgress(userId: string, bookId: string, data: { cfi?: string; chapter?: string; chapterIndex?: number; percent: number; fraction?: number; segmentStartFraction?: number; sample?: RateSample }) {
+export async function upsertProgress(userId: string, bookId: string, data: { cfi?: string; chapter?: string; chapterIndex?: number; percent: number; fraction?: number; segmentStartFraction?: number; sample?: RateSample }, showHidden = false) {
   const db = getDb()
   // Reading needs no collection, and a position is the reader's own: design
   // invariant 14 files BookState by User x BookVersion, so a library read keeps
   // its place exactly like a collected one. The file is filed per user, which is
   // what makes that true for two people reading one version.
-  await assertReadableBook(userId, bookId)
+  await assertReadableBook(userId, bookId, showHidden)
 
   const now = Date.now()
   const existing = await readProgressFile(userId, bookId) as ProgressFileData | null

@@ -596,6 +596,45 @@ export const textureAwareBackground = (resolved, hasTexture) => {
     return hasTexture && isTransparent ? '' : resolved
 }
 
+// Painted book backgrounds fill their page box instead of tiling the reading
+// area: a book-declared `repeat` would otherwise tile across the whole spread,
+// wider than the reader's page-width setting. `cover` keeps the aspect ratio
+// while filling the box; plain colors are unaffected. Paginated mode only:
+// scrolled mode keeps the book background inside the document (see
+// syncDocumentBackgroundForFlow) because the iframe canvas is opaque and an
+// outer paint would be invisible.
+export const paintBookBackground = (el, bg) => {
+    el.style.background = bg
+    el.style.backgroundRepeat = 'no-repeat'
+    el.style.backgroundPosition = 'center center'
+    el.style.backgroundSize = 'cover'
+    el.style.backgroundAttachment = 'initial'
+}
+
+// Keep each loaded document's own background in sync with the active flow.
+// Paginated mode captures the book background onto outer segments, so the
+// document body stays blanked; scrolled mode restores the captured background
+// into the document itself, where it scrolls naturally at content width.
+// `docBackground` is the captured computed shorthand ('' = transparent).
+// In scrolled mode `canvasBackground` (the theme fallback) is pinned onto
+// <html> with important priority: without an html background the body
+// background propagates to the full viewport canvas and fills the whole
+// reading area instead of the page column. Runs on every background replace,
+// so flow toggles without a section reload still end in the right state.
+export const syncDocumentBackgroundForFlow = (doc, docBackground, scrolled, canvasBackground) => {
+    if (!doc?.body) return
+    const html = doc.documentElement
+    if (scrolled) {
+        if (canvasBackground && html) html.style.setProperty('background-color', canvasBackground, 'important')
+        if (!docBackground) return
+        doc.body.style.background = docBackground
+        return
+    }
+    if (html) html.style.removeProperty('background-color')
+    if (!docBackground) return
+    doc.body.style.background = 'none'
+}
+
 const makeMarginals = (length, part) => Array.from({ length }, () => {
     const div = document.createElement('div')
     const child = document.createElement('div')
@@ -1026,12 +1065,32 @@ class View {
         } else {
             const side = this.#vertical ? 'width' : 'height'
             const otherSide = this.#vertical ? 'height' : 'width'
+            // Apply the cross-axis width BEFORE measuring: the fresh iframe
+            // still has its ~300px default width, and sizing the
+            // image-background view against that undersizes the box for good
+            // (the background image is then clipped to the short view).
+            // The reads below force the reflow, so they see the final width.
+            this.#element.style.padding = '0'
+            this.#iframe.style[otherSide] = '100%'
+            this.#element.style[otherSide] = '100%'
+            // Our own floor from a previous pass must not pin the measurement:
+            // width changes (sidebar toggle, window resize) have to shrink the
+            // box again too, not just grow it.
+            const bodyEl = this.document?.body
+            if (bodyEl) {
+                bodyEl.style.removeProperty('min-height')
+                bodyEl.style.removeProperty('min-width')
+            }
             const contentSize = documentElement.getBoundingClientRect()[side]
             let expandedSize = contentSize
             // If the section has a background image, ensure the view is
-            // at least as large as the image scaled to fit the cross axis
+            // at least as large as the image scaled to fit the cross axis.
+            // The image paints at body width (background-size: 100% auto), so
+            // scale against the body — the view element is wider and would
+            // leave a blank gap below the image.
             if (this.#bgImageSize) {
-                const crossSize = this.#element.getBoundingClientRect()[otherSide]
+                const crossSize = (bodyEl?.getBoundingClientRect()?.[otherSide] ?? 0)
+                    || this.#element.getBoundingClientRect()[otherSide]
                 if (crossSize > 0) {
                     const { width: imgW, height: imgH } = this.#bgImageSize
                     const scaledSize = this.#vertical
@@ -1040,11 +1099,18 @@ class View {
                     expandedSize = Math.max(expandedSize, scaledSize)
                 }
             }
-            this.#element.style.padding = '0'
             this.#iframe.style[side] = `${expandedSize}px`
             this.#element.style[side] = `${expandedSize}px`
-            this.#iframe.style[otherSide] = '100%'
-            this.#element.style[otherSide] = '100%'
+            // A background image can exceed the text height. The in-document
+            // background paints the body box, so without this the illustration
+            // is cut off at the content height even though the view is tall
+            // enough. Only grows: min-height never shrinks real content, and
+            // re-expands converge because the floor above is cleared first.
+            if (bodyEl && expandedSize > contentSize) {
+                setStyles(bodyEl, this.#vertical
+                    ? { 'min-width': `${expandedSize}px` }
+                    : { 'min-height': `${expandedSize}px` })
+            }
             if (this.#overlayer) {
                 this.#overlayer.element.style.margin = '0'
                 this.#overlayer.element.style.left = '0'
@@ -1916,6 +1982,7 @@ export class Paginator extends HTMLElement {
         this.#background.style.background = ''
         for (const [, view] of this.#sortedViews) {
             view.element.style.background = ''
+            syncDocumentBackgroundForFlow(view.document, view.docBackground, false)
         }
         const scrollPos = Math.abs(atPosition ?? this.#renderedStart)
         const segments = computeBackgroundSegments(
@@ -1938,8 +2005,7 @@ export class Paginator extends HTMLElement {
             seg.style[sizeProp] = `${size}px`
             seg.style[crossPosProp] = '0'
             seg.style[crossSizeProp] = '100%'
-            seg.style.background = bg
-            seg.style.backgroundAttachment = 'initial'
+            paintBookBackground(seg, bg)
             this.#background.appendChild(seg)
         }
     }
@@ -1954,17 +2020,27 @@ export class Paginator extends HTMLElement {
         if (this.noBackground) return
 
         if (this.scrolled) {
-            // In scrolled mode, set background directly on each view element
-            // so it scrolls with the content. The static #background provides
-            // the fallback color for margins and gaps between views.
-            const { fallbackBg, hasTexture, resolveBackground } = this.#readBackgroundStyle(doc)
+            // In scrolled mode the book background lives inside the document
+            // itself: the iframe canvas is opaque, so an outer paint on the
+            // view element would be invisible (image-background chapters
+            // rendered blank). The canvas color comes from the paginator's own
+            // `background-color` attribute (the reader theme), never the
+            // unset `--theme-bg-color` variable, so it is always available.
+            const { hasTexture, resolveBackground } = this.#readBackgroundStyle(doc)
+            const canvasBg = this.getAttribute('background-color') ?? ''
             this.#background.style.background = ''
             this.#background.innerHTML = ''
             this.#background.style.display = ''
-            this.#background.style.background = hasTexture ? '' : fallbackBg
+            this.#background.style.background = hasTexture ? '' : canvasBg
             for (const [, view] of this.#sortedViews) {
                 const resolved = resolveBackground(view.docBackground)
-                view.element.style.background = textureAwareBackground(resolved, hasTexture)
+                syncDocumentBackgroundForFlow(
+                    view.document,
+                    textureAwareBackground(resolved, hasTexture),
+                    true,
+                    canvasBg,
+                )
+                view.element.style.background = ''
             }
             return
         }

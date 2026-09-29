@@ -16,6 +16,7 @@ import type {
 } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '@/api/client'
+import { withReveal } from '@/lib/reveal-hidden'
 
 export const READING_RECORDS_KEY = ['reading-records']
 
@@ -28,7 +29,7 @@ export function useReadingSummary() {
   const today = localDateString()
   return useQuery({
     queryKey: [...READING_RECORDS_KEY, 'summary', today],
-    queryFn: () => apiGet<{ data: ReadingRecordSummaryRes }>(`/reading-records/summary?today=${today}`),
+    queryFn: () => apiGet<{ data: ReadingRecordSummaryRes }>(withReveal(`/reading-records/summary?today=${today}`)),
   })
 }
 
@@ -43,21 +44,21 @@ function rangeQuery(from?: string, to?: string): string {
 export function useReadingDaily(from?: string, to?: string) {
   return useQuery({
     queryKey: [...READING_RECORDS_KEY, 'daily', from, to],
-    queryFn: () => apiGet<{ data: ReadingRecordDailyItem[] }>(`/reading-records/daily${rangeQuery(from, to)}`),
+    queryFn: () => apiGet<{ data: ReadingRecordDailyItem[] }>(withReveal(`/reading-records/daily${rangeQuery(from, to)}`)),
   })
 }
 
 export function useReadingByBook(from?: string, to?: string) {
   return useQuery({
     queryKey: [...READING_RECORDS_KEY, 'by-book', from, to],
-    queryFn: () => apiGet<{ data: ReadingRecordBookItem[] }>(`/reading-records/by-book${rangeQuery(from, to)}`),
+    queryFn: () => apiGet<{ data: ReadingRecordBookItem[] }>(withReveal(`/reading-records/by-book${rangeQuery(from, to)}`)),
   })
 }
 
 export function useReadingByTag(from?: string, to?: string) {
   return useQuery({
     queryKey: [...READING_RECORDS_KEY, 'by-tag', from, to],
-    queryFn: () => apiGet<{ data: ReadingRecordTagItem[] }>(`/reading-records/by-tag${rangeQuery(from, to)}`),
+    queryFn: () => apiGet<{ data: ReadingRecordTagItem[] }>(withReveal(`/reading-records/by-tag${rangeQuery(from, to)}`)),
   })
 }
 
@@ -70,14 +71,14 @@ export function useReadingHourly(from?: string, to?: string, bookId?: string) {
   params.set('tzOffset', String(tzOffset))
   return useQuery({
     queryKey: [...READING_RECORDS_KEY, 'hourly', from, to, bookId, tzOffset],
-    queryFn: () => apiGet<{ data: ReadingRecordHourlyItem[] }>(`/reading-records/hourly?${params}`),
+    queryFn: () => apiGet<{ data: ReadingRecordHourlyItem[] }>(withReveal(`/reading-records/hourly?${params}`)),
   })
 }
 
 export function useBookReadingRecords(bookId: string | undefined, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: [...READING_RECORDS_KEY, 'book', bookId],
-    queryFn: () => apiGet<{ data: ReadingRecordBookDetailRes }>(`/reading-records/book/${bookId}`),
+    queryFn: () => apiGet<{ data: ReadingRecordBookDetailRes }>(withReveal(`/reading-records/book/${bookId}`)),
     enabled: !!bookId && options.enabled !== false,
   })
 }
@@ -85,7 +86,7 @@ export function useBookReadingRecords(bookId: string | undefined, options: { ena
 export function useAddReadingTime() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: ReadingRecordCreateReq) => apiPost('/reading-records', body),
+    mutationFn: (body: ReadingRecordCreateReq) => apiPost(withReveal('/reading-records'), body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY }),
   })
 }
@@ -94,7 +95,7 @@ export function useAddReadingTime() {
 export function useAddReadingRecord(bookId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: ReadingRecordCreateReq) => apiPost('/reading-records', body),
+    mutationFn: (body: ReadingRecordCreateReq) => apiPost(withReveal('/reading-records'), body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
       queryClient.invalidateQueries({ queryKey: READING_SESSIONS_KEY })
@@ -110,7 +111,7 @@ export function useReadingDetailInfinite(bookId: string | undefined) {
   return useInfiniteQuery({
     queryKey: [...READING_RECORDS_KEY, 'detail', bookId],
     queryFn: ({ pageParam }) =>
-      apiGet<{ data: ReadingDetailItem[] }>(`/reading-records/book/${bookId}/detail?limit=${DETAIL_PAGE_SIZE}&offset=${pageParam as number}`),
+      apiGet<{ data: ReadingDetailItem[] }>(withReveal(`/reading-records/book/${bookId}/detail?limit=${DETAIL_PAGE_SIZE}&offset=${pageParam as number}`)),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) =>
       lastPage.data.length === DETAIL_PAGE_SIZE ? allPages.length * DETAIL_PAGE_SIZE : undefined,
@@ -131,12 +132,12 @@ export function usePrefetchBookReadingStats(bookId: string | undefined) {
     if (!bookId) return
     void queryClient.prefetchQuery({
       queryKey: [...READING_RECORDS_KEY, 'book', bookId],
-      queryFn: () => apiGet<{ data: ReadingRecordBookDetailRes }>(`/reading-records/book/${bookId}`),
+      queryFn: () => apiGet<{ data: ReadingRecordBookDetailRes }>(withReveal(`/reading-records/book/${bookId}`)),
     })
     void queryClient.prefetchInfiniteQuery({
       queryKey: [...READING_RECORDS_KEY, 'detail', bookId],
       queryFn: ({ pageParam }) =>
-        apiGet<{ data: ReadingDetailItem[] }>(`/reading-records/book/${bookId}/detail?limit=${DETAIL_PAGE_SIZE}&offset=${pageParam as number}`),
+        apiGet<{ data: ReadingDetailItem[] }>(withReveal(`/reading-records/book/${bookId}/detail?limit=${DETAIL_PAGE_SIZE}&offset=${pageParam as number}`)),
       initialPageParam: 0,
     })
   }, [bookId, queryClient])
@@ -153,7 +154,7 @@ export function useReadingSessionsInfinite(bookId: string | undefined) {
   return useInfiniteQuery({
     queryKey: [...READING_SESSIONS_KEY, 'infinite', bookId],
     queryFn: ({ pageParam }) =>
-      apiGet<{ data: ReadingSessionItem[] }>(`/reading-records/sessions?${params(pageParam as number)}`),
+      apiGet<{ data: ReadingSessionItem[] }>(withReveal(`/reading-records/sessions?${params(pageParam as number)}`)),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) =>
       lastPage.data.length === SESSION_PAGE_SIZE ? allPages.length * SESSION_PAGE_SIZE : undefined,

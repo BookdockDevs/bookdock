@@ -6,6 +6,7 @@ import i18n from 'i18next'
 import type { BookDetailRes, BookListItem } from '@bookdock/shared'
 
 import { useBookReplacements } from '@/api/hooks/useReplacements'
+import { apiPatch } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import MenuFlyout from '@/components/ui/MenuFlyout'
 import SmartMenu from '@/components/ui/SmartMenu'
@@ -108,6 +109,15 @@ export default function BookDetailView({
     )
   }
 
+  async function toggleHidden() {
+    try {
+      await apiPatch(`/books/${book.id}`, { hidden: !displayBook.hidden })
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+    } catch (err) {
+      notify.error(getUserErrorNotification(err, 'toast.updateBookFailed'))
+    }
+  }
+
   async function onExport(format: 'epub' | 'txt', plain: boolean) {
     setDownloadMenu(null)
     try {
@@ -199,7 +209,22 @@ export default function BookDetailView({
           <h3 className="font-serif text-xl font-semibold leading-snug text-stone-900 dark:text-stone-100">
             {displayBook.title}
           </h3>
-          {displayBook.author ? (
+          {(displayBook.authors ?? []).length > 0 ? (
+            <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-sm">
+              {(displayBook.authors ?? []).map((name, index) => (
+                <span key={`${name}-${index}`} className="flex items-center gap-x-1">
+                  {index > 0 && <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>}
+                  <button
+                    type="button"
+                    onClick={() => goToFilter({ author: name })}
+                    className="text-left text-stone-500 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-400 dark:decoration-stone-600 dark:hover:text-stone-100"
+                  >
+                    {name}
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : displayBook.author ? (
             <button
               type="button"
               onClick={() => goToFilter({ author: displayBook.author })}
@@ -317,6 +342,27 @@ export default function BookDetailView({
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
               </ActionIcon>}
+              {!readOnly && (
+                <ActionIcon
+                  secondary
+                  label={displayBook.hidden ? _('library.catalogShowWork') : _('library.catalogHideWork')}
+                  onClick={() => void toggleHidden()}
+                >
+                  {displayBook.hidden ? (
+                    <>
+                      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                      <line x1="2" x2="22" y1="2" y2="22" />
+                    </>
+                  )}
+                </ActionIcon>
+              )}
               {!readOnly && <div ref={downloadAnchorRef} className="relative">
                 <ActionIcon
                   secondary

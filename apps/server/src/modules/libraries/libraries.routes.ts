@@ -376,8 +376,8 @@ librariesRoutes.patch('/:id/categories/:categoryId', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = categoryUpdateSchema.safeParse(await c.req.json())
-  if (!parsed.success || (parsed.data.name === undefined && parsed.data.parentId === undefined && parsed.data.pinned === undefined)) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name, parentId or pinned is required' : parsed.error.flatten() } }, 400)
+  if (!parsed.success || (parsed.data.name === undefined && parsed.data.parentId === undefined && parsed.data.pinned === undefined && parsed.data.hidden === undefined)) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name, parentId, pinned or hidden is required' : parsed.error.flatten() } }, 400)
   }
   const { parentId, ...rest } = parsed.data
   const renamed = await updateLibraryCategory(user.id, c.req.param('id'), c.req.param('categoryId'), rest)
@@ -427,8 +427,8 @@ librariesRoutes.patch('/:id/tags/:tagId', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = tagUpdateSchema.safeParse(await c.req.json())
-  if (!parsed.success || (parsed.data.name === undefined && parsed.data.pinned === undefined)) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name or pinned is required' : parsed.error.flatten() } }, 400)
+  if (!parsed.success || (parsed.data.name === undefined && parsed.data.pinned === undefined && parsed.data.hidden === undefined)) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name, pinned or hidden is required' : parsed.error.flatten() } }, 400)
   }
   const tag = await updateLibraryTag(user.id, c.req.param('id'), c.req.param('tagId'), parsed.data)
   return c.json({ data: tag })

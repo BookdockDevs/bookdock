@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, CatalogBook, CatalogBookUpdateReq, CatalogListRes, CatalogVersionUpdateReq, CollectBookRes, Category, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, PublishPrivateBookRes, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
+import { withReveal } from '@/lib/reveal-hidden'
 import i18n from '@/i18n/i18n'
 import { getErrorKeyByCode, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -22,9 +23,11 @@ export interface UseBooksParams {
   format: BookFormat | null
   readStatus: ReadStatus | null
   trash: boolean
+  /** Private-vault reveal; omitted = hidden rows excluded. */
+  showHidden?: boolean
 }
 
-function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash }: UseBooksParams): string {
+function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash, showHidden }: UseBooksParams): string {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
@@ -39,6 +42,7 @@ function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, ta
   if (format) params.set('format', format)
   if (readStatus) params.set('readStatus', readStatus)
   if (trash) params.set('trash', '1')
+  if (showHidden) params.set('showHidden', '1')
   return `/books?${params.toString()}`
 }
 
@@ -48,10 +52,11 @@ export function useBooks(params: UseBooksParams, options?: { enabled?: boolean }
     queryFn: () => apiGet<BookListRes>(buildBooksPath(params)),
     enabled: options?.enabled ?? true,
     // Never show another domain's rows: trash and active lists are different
-    // queries even when the key has not caught up yet.
+    // queries even when the key has not caught up yet. Same for the vault
+    // reveal flag: a still-cached hidden-filtered page must not stand in.
     placeholderData: (prev, prevQuery) => {
       const prevParams = (prevQuery?.queryKey as unknown[])?.[1] as UseBooksParams | undefined
-      return prevParams && prevParams.trash === params.trash ? prev : undefined
+      return prevParams && prevParams.trash === params.trash && prevParams.showHidden === params.showHidden ? prev : undefined
     },
   })
 }
@@ -75,10 +80,12 @@ export interface UseInfiniteBooksParams {
   format: BookFormat | null
   readStatus: ReadStatus | null
   trash: boolean
+  /** Private-vault reveal; omitted = hidden rows excluded. */
+  showHidden?: boolean
 }
 
-function infiniteBooksFn(page: number, pageSize: number, search: string, sortBy: string, sortOrder: string, shelfId: string | null, tagId: string | null, author: string | null | undefined, series: string | null | undefined, format: BookFormat | null, readStatus: ReadStatus | null, trash: boolean) {
-  return apiGet<BookListRes>(buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash }))
+function infiniteBooksFn(page: number, pageSize: number, search: string, sortBy: string, sortOrder: string, shelfId: string | null, tagId: string | null, author: string | null | undefined, series: string | null | undefined, format: BookFormat | null, readStatus: ReadStatus | null, trash: boolean, showHidden?: boolean) {
+  return apiGet<BookListRes>(buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash, showHidden }))
 }
 
 export function useInfiniteBooks(params: UseInfiniteBooksParams, options?: { enabled?: boolean }) {
@@ -86,7 +93,7 @@ export function useInfiniteBooks(params: UseInfiniteBooksParams, options?: { ena
     queryKey: ['books', 'infinite', params],
     enabled: options?.enabled ?? true,
     queryFn: ({ pageParam }) =>
-      infiniteBooksFn(pageParam, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash),
+      infiniteBooksFn(pageParam, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash, params.showHidden),
     initialPageParam: 1,
     placeholderData: (previousData, previousQuery) => {
       const prevParams = previousQuery?.queryKey[2] as UseInfiniteBooksParams | undefined
@@ -107,7 +114,7 @@ export function prefetchInfiniteBooks(queryClient: QueryClient, params: UseInfin
   return queryClient.prefetchInfiniteQuery({
     queryKey: ['books', 'infinite', params],
     queryFn: ({ pageParam }) =>
-      infiniteBooksFn(pageParam as number, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash),
+      infiniteBooksFn(pageParam as number, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash, params.showHidden),
     initialPageParam: 1,
     getNextPageParam: (last: BookListRes) => {
       const totalPages = Math.ceil(last.total / last.pageSize)
@@ -380,7 +387,7 @@ export function useCreateLibraryCategory() {
 }
 
 export function useUpdateLibraryCategory() {
-  return useTaxonomyMutation<{ libraryId: string; categoryId: string; patch: { name?: string; pinned?: boolean } }>(
+  return useTaxonomyMutation<{ libraryId: string; categoryId: string; patch: { name?: string; pinned?: boolean; hidden?: boolean } }>(
     ({ libraryId, categoryId, patch }) => ({
       url: `/libraries/${libraryId}/categories/${categoryId}`, method: 'patch', body: patch,
     }),
@@ -400,7 +407,7 @@ export function useCreateLibraryTag() {
 }
 
 export function useUpdateLibraryTag() {
-  return useTaxonomyMutation<{ libraryId: string; tagId: string; patch: { name?: string; pinned?: boolean } }>(
+  return useTaxonomyMutation<{ libraryId: string; tagId: string; patch: { name?: string; pinned?: boolean; hidden?: boolean } }>(
     ({ libraryId, tagId, patch }) => ({
       url: `/libraries/${libraryId}/tags/${tagId}`, method: 'patch', body: patch,
     }),
@@ -1115,14 +1122,14 @@ export function useEmptyTrash() {
 export function useShelves(): QueryObserverResult<{ data: ShelfListItem[] }> {
   return useQuery({
     queryKey: ['shelves'],
-    queryFn: () => apiGet<{ data: ShelfListItem[] }>('/shelves'),
+    queryFn: () => apiGet<{ data: ShelfListItem[] }>(withReveal('/shelves')),
   })
 }
 
 export function useTags(): QueryObserverResult<{ data: TagListItem[] }> {
   return useQuery({
     queryKey: ['tags'],
-    queryFn: () => apiGet<{ data: TagListItem[] }>('/tags'),
+    queryFn: () => apiGet<{ data: TagListItem[] }>(withReveal('/tags')),
   })
 }
 
@@ -1167,6 +1174,18 @@ export function useToggleShelfPin() {
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.pinShelfFailed'))
+    },
+  })
+}
+
+export function useToggleShelfHidden() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) => apiPut(`/shelves/${id}`, { hidden }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shelves'] })
+      queryClient.invalidateQueries({ queryKey: ['books'] })
     },
   })
 }
@@ -1236,7 +1255,7 @@ export function useUpdateBook() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ bookId, ...data }: { bookId: string } & Partial<{ readStatus: string; progress: number; pinned: boolean; title: string; author: string; bookmeta: BookMetadata }>) =>
+    mutationFn: ({ bookId, ...data }: { bookId: string } & Partial<{ readStatus: string; progress: number; pinned: boolean; title: string; author: string; authors: string[]; hidden: boolean; bookmeta: BookMetadata }>) =>
       apiPatch<{ data: BookListItem }>(`/books/${bookId}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
@@ -1251,7 +1270,7 @@ export function useUpdateBook() {
 export function useBook(bookId: string | null) {
   return useQuery({
     queryKey: ['books', 'detail', bookId],
-    queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
+    queryFn: () => apiGet<{ data: BookDetailRes }>(withReveal(`/books/${bookId}`)),
     enabled: Boolean(bookId),
   })
 }
@@ -1384,6 +1403,18 @@ export function useToggleTagPin() {
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.pinTagFailed'))
+    },
+  })
+}
+
+export function useToggleTagHidden() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) => apiPut(`/tags/${id}`, { hidden }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] })
+      queryClient.invalidateQueries({ queryKey: ['books'] })
     },
   })
 }

@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, isNull, sql, type SQL, type SQLWrapper } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm'
 
-import { bookVersions, contentRevisions, libraryBookTags, libraryBooks, libraryBookVersions, libraryCategories } from '../../db/schema'
+import { bookVersions, contentRevisions, libraryBookTags, libraryBooks, libraryBookVersions, libraryCategories, libraryTags } from '../../db/schema'
+import type { getDb } from '../../db/client'
 
 /**
  * Query dimensions a library's book list can be filtered and ordered by (0.4.0).
@@ -71,6 +72,114 @@ export function tagFilter(tagId: string, libraryId: string): SQL | undefined {
 }
 
 /**
+ * Persistent-hide taxonomy snapshot for one library (see Hidden boundary in
+ * architecture.md). Category hiding propagates down: a hidden category hides
+ * its whole subtree, so the closure contains every hidden node plus all of
+ * its descendants. Tag hiding is flat: any hidden tag hides every work that
+ * carries it. Libraries are small; the walk runs in memory per request.
+ */
+export interface LibraryHiddenTaxonomy {
+  hiddenCategoryIds: string[]
+  hiddenTagIds: string[]
+}
+
+export function loadLibraryHiddenTaxonomy(
+  db: ReturnType<typeof getDb>,
+  libraryId: string,
+): LibraryHiddenTaxonomy {
+  const categories = db.select({
+    id: libraryCategories.id,
+    parentId: libraryCategories.parentId,
+    hidden: libraryCategories.hidden,
+  }).from(libraryCategories).where(eq(libraryCategories.libraryId, libraryId)).all()
+  const childrenByParent = new Map<string, string[]>()
+  for (const category of categories) {
+    if (!category.parentId) continue
+    const siblings = childrenByParent.get(category.parentId) ?? []
+    siblings.push(category.id)
+    childrenByParent.set(category.parentId, siblings)
+  }
+  const closure = new Set<string>()
+  const queue = categories.filter((category) => category.hidden).map((category) => category.id)
+  for (const id of queue) closure.add(id)
+  while (queue.length > 0) {
+    const current = queue.pop() as string
+    for (const child of childrenByParent.get(current) ?? []) {
+      if (closure.has(child)) continue
+      closure.add(child)
+      queue.push(child)
+    }
+  }
+  const tags = db.select({ id: libraryTags.id }).from(libraryTags)
+    .where(and(eq(libraryTags.libraryId, libraryId), eq(libraryTags.hidden, true))).all()
+  return { hiddenCategoryIds: [...closure], hiddenTagIds: tags.map((tag) => tag.id) }
+}
+
+/**
+ * Read-time visibility exclusion for works (see Hidden boundary). A work is
+ * listed only when it is not hidden itself, sits outside every hidden
+ * category subtree (null = uncategorized, always outside), and carries no
+ * hidden tag. Callers that may see hidden rows (shared-library managers,
+ * private owners with showHidden) skip this condition entirely.
+ *
+ * The pieces are exported separately so sidebar counts can stay consistent
+ * with the lists they annotate: a visible shelf/tag still must not count
+ * works hidden through another dimension.
+ */
+export function workDirectHiddenExclusion(): SQL {
+  return eq(libraryBooks.hidden, false)
+}
+
+export function hiddenCategoryExclusion(hiddenCategoryIds: string[]): SQL | undefined {
+  if (hiddenCategoryIds.length === 0) return undefined
+  return or(
+    isNull(libraryBooks.categoryId),
+    notInArray(libraryBooks.categoryId, hiddenCategoryIds),
+  ) as SQL
+}
+
+export function hiddenTagExclusion(hiddenTagIds: string[]): SQL | undefined {
+  if (hiddenTagIds.length === 0) return undefined
+  return sql`NOT EXISTS (
+    SELECT 1 FROM ${libraryBookTags} AS hidden_book_tag
+    INNER JOIN ${libraryTags} AS hidden_tag ON hidden_tag.id = hidden_book_tag.tag_id
+    WHERE hidden_book_tag.library_book_id = ${libraryBooks.id}
+      AND hidden_tag.id IN ${hiddenTagIds}
+  )`
+}
+
+export function workHiddenExclusion(taxonomy: LibraryHiddenTaxonomy): SQL {
+  const conditions: SQL[] = [workDirectHiddenExclusion()]
+  const category = hiddenCategoryExclusion(taxonomy.hiddenCategoryIds)
+  if (category) conditions.push(category)
+  const tag = hiddenTagExclusion(taxonomy.hiddenTagIds)
+  if (tag) conditions.push(tag)
+  return and(...conditions) as SQL
+}
+
+/**
+ * Single-work version of the exclusion above, for detail/read gates that
+ * already hold the work row. Loads the library taxonomy once per call;
+ * libraries are small and the result is not cached across requests.
+ */
+export function isWorkEffectivelyHidden(
+  db: ReturnType<typeof getDb>,
+  libraryId: string,
+  work: { id: string; categoryId: string | null; hidden: boolean },
+): boolean {
+  if (work.hidden) return true
+  const taxonomy = loadLibraryHiddenTaxonomy(db, libraryId)
+  if (work.categoryId && taxonomy.hiddenCategoryIds.includes(work.categoryId)) return true
+  if (taxonomy.hiddenTagIds.length === 0) return false
+  const tagged = db.select({ id: libraryBookTags.tagId }).from(libraryBookTags)
+    .where(and(
+      eq(libraryBookTags.libraryBookId, work.id),
+      inArray(libraryBookTags.tagId, taxonomy.hiddenTagIds),
+    )).get()
+  return !!tagged
+}
+
+/**
  * The same author drill-down the private list offers, with the same meaning: an
  * author matches on what a reader actually sees, which is the version's override
  * when it has one and the work's default otherwise. A work with several versions
@@ -89,7 +198,13 @@ export function authorFilter(author: string, libraryId: string, opts?: { publish
     WHERE filter_author_version.library_id = ${libraryId}
       AND filter_author_version.library_book_id = ${libraryBooks.id}
       ${opts?.publishedOnly ? sql`AND filter_author_version.status = 'published'` : sql``}
-      AND coalesce(filter_author_version.author, ${libraryBooks.author}) = ${author}
+      AND (
+        coalesce(filter_author_version.author, ${libraryBooks.author}) = ${author}
+        OR EXISTS (
+          SELECT 1 FROM json_each(coalesce(filter_author_version.authors, ${libraryBooks.authors}, '[]'))
+          WHERE value = ${author}
+        )
+      )
   )`
 }
 
@@ -128,6 +243,10 @@ export function versionEffectiveMatch(pattern: string, libraryId: string, opts?:
       AND (
         coalesce(q_version.title, ${libraryBooks.title}) LIKE ${pattern} ESCAPE '!'
         OR coalesce(q_version.author, ${libraryBooks.author}) LIKE ${pattern} ESCAPE '!'
+        OR EXISTS (
+          SELECT 1 FROM json_each(coalesce(q_version.authors, ${libraryBooks.authors}, '[]'))
+          WHERE value LIKE ${pattern} ESCAPE '!'
+        )
       )
   )`
 }

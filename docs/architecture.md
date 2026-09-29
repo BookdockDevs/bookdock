@@ -63,7 +63,7 @@ Conventions:
 
 **Current domain model**:
 - `User(id, username, passwordHash?, role, disabled, avatarKey?, createdAt, updatedAt?)` — `avatarKey` is the content-hash addressed avatar blob key (`<hh>/<sha256>.<ext>`, stored at `avatars/<key>`); physical file ref-checked across users before delete, same pattern as fonts/books. `GET /avatars/:key` defaults to a 256px WebP thumbnail derived from the same key (`<hh>/<sha256>.thumb.webp`, no DB column), generated on first display and cached; `?size=original` returns the untouched blob. No surface renders an avatar larger than 96 CSS px, so the thumbnail covers every one of them; undecodable bytes fall back to the original rather than failing the request. The thumbnail is deleted with the original once no user row references the key.
-- `Book(id, userId, title, author, format, filePath, coverKey?, size, meta, createdAt, updatedAt, deletedAt?, shelfId?)` — `shelfId` is the book's single shelf (FK `shelves.id`, `ON DELETE SET NULL`); `null` = 未分类 (a legitimate state). A book belongs to at most one shelf.
+- `Book(id, userId, title, author, authors, format, filePath, coverKey?, size, meta, createdAt, updatedAt, deletedAt?, shelfId?)` — `shelfId` is the book's single shelf (FK `shelves.id`, `ON DELETE SET NULL`); `null` = 未分类 (a legitimate state). A book belongs to at most one shelf. `authors` is the full author list (`string[]`, max 10); `author` mirrors `authors[0] ?? ''` as a derived-at-write scalar so sort/filter/search keep working on one indexed column, exactly like `books.title`.
 - `Shelf(id, userId, name, sortOrder, createdAt, updatedAt, pinned)` — `name` is unique per user after trimming surrounding whitespace; `updatedAt` records membership changes only, `pinned` is an orthogonal sidebar pin-to-top flag, and both are included in sidebar list responses
 - `Tag(id, userId, name, sortOrder, createdAt, updatedAt, pinned)` — user-defined order for the library sidebar; new tags are appended and the list endpoint returns this order; `name` is unique per user after trimming surrounding whitespace. `updatedAt` records membership changes only, and `pinned` is an orthogonal pin-to-top flag
 - `Settings(id, userId, key, value)` — the `ui` value may include per-user `fontPreferences` keyed by stable system/builtin/uploaded font ids and a `fontOrder` list of those ids; these preferences control display name, visibility, and display order without turning non-file fonts into database rows. The `library` value carries library-management preferences (`{ normalizeTitle?, shelfSort?, tagSort?, bookSort?, view? }`; omitted values use defaults): sidebar sort preferences support manual/name/book-count/recently-added/recently-updated modes and direction, while book-list sort/view defaults are saved per user. The library view resolves explicit URL state before server settings, legacy local storage, and built-in defaults; dragging a shelf/tag returns that sidebar to manual mode. While title normalization is on, upload/metadata reset preserves embedded title/author values and fills each missing field from the file name (`lib/book-title.ts` strips noise brackets, site suffixes and author markers, and prefers leading `《X》`), so `books.title` remains the single derived-at-write source. `GET /settings` also injects the effective instance-level `uploadMaxBytes` (owner-editable via `instance_settings`, falling back to the `UPLOAD_MAX_BYTES` env default) for client-side display and pre-check; `settingsUpdateSchema` strips it from PUT bodies so it is never persisted.
@@ -103,6 +103,31 @@ wrote a shared-library catalog row, including a publish action. It is not an
 ACL field: shared-library authorization continues to use the library owner and
 membership role. A future contributor/reviewer model may split this into
 explicit creator and submitter fields.
+
+### Hidden (visibility) boundary
+
+Hiding is a visibility switch, never deletion: hidden rows stay intact and are
+excluded from reads. Three levels compose with AND — a work is visible only
+when `!work.hidden AND !categoryEffectiveHidden AND !anyTagHidden AND
+version.status = 'published'`:
+
+- `library_book_versions.status` (`published|unlisted`) is the version-level
+  hide. Managers always see unlisted versions (badged); everyone else gets
+  `NOT_FOUND`, never metadata. The UI word is 隐藏/显示 everywhere; 下架 is
+  retired vocabulary for the same flag.
+- `library_books.hidden` is the work-level hide, covering all its versions.
+- `library_categories.hidden` / `library_tags.hidden` are persistent taxonomy
+  hides: hiding a category hides its whole subtree (children inherit from any
+  hidden ancestor) and every work filed under it; hiding a tag hides every work
+  carrying it. Works filed under/tagged later are hidden automatically, so a
+  hidden category behaves as a private section. No bulk backfill is needed
+  because the rule is evaluated at read time.
+- Shared libraries are asymmetric: owners/admins always see hidden rows
+  (badged), members never do. Private libraries are symmetric (vault): the
+  owner also excludes hidden rows by default and reveals them with an explicit
+  `showHidden` list toggle; the dedicated vault entry UX is deferred. Legado
+  explore intentionally does not filter hidden rows (owner-scoped personal
+  source); that gap is documented, not enforced.
 
 Reading position fields live in the `books` row; progress history and interval data live in storage files under `DATA_DIR`.
 
@@ -332,13 +357,13 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | `ai_chunks_fts` | chunkId, userId, bookId, chapterIndex, chapterTitle, text | SQLite FTS5 derived index; synchronized by `ai_chunks` triggers and never used without ownership filters |
 | `libraries` | id, userId (= owner, tenant key), type (private\|shared), name, description, visibility (public\|password\|private)?, accessPasswordHash?, createdAt, updatedAt | one Private Library per real user (no membership rows); Shared Libraries carry an owner and optional memberships; `user_id` holds the owner so the per-user scoping rule needs no second column, exposed on the wire as `ownerUserId`; `access_password_hash` holds the scrypt hash of a password-visibility library's access password (never exposed through contracts, cleared when visibility leaves `password`) |
 | `library_memberships` | id, libraryId FK (cascade), userId FK (cascade), role (admin\|member), createdAt, updatedAt | unique (libraryId, userId); shared libraries only, never for private ones |
-| `library_books` | id, libraryId FK (cascade), userId, categoryId? FK (SET NULL), title, author, description, coverKey?, createdAt, updatedAt | library-scoped work entry holding default metadata; private rows use the owner and shared rows currently retain the writing actor for transition compatibility; ACL never trusts this field; needs ≥1 version to be valid |
-| `library_book_versions` | id, libraryId FK, libraryBookId FK (cascade), bookVersionId FK (restrict), kind (personal\|shared\|local), status, name, nullable metadata overrides, sourceLibraryId?, sourceLibraryBookVersionId?, pinnedRevisionId?, pinnedAt?, guestReadable, createdAt, updatedAt | null override = inherit the work default; source ids are plain text (no FK) so provenance survives source deletion; pinnedAt carries the legacy sort-first pin; `guest_readable` is the per-listing anonymous switch and only takes effect inside a public library on a guest-enabled instance — one library's value never opens another library's copy of the same version |
+| `library_books` | id, libraryId FK (cascade), userId, categoryId? FK (SET NULL), title, author, authors?, description, coverKey?, hidden?, createdAt, updatedAt | library-scoped work entry holding default metadata; private rows use the owner and shared rows currently retain the writing actor for transition compatibility; ACL never trusts this field; needs ≥1 version to be valid; `hidden` is the work-level hide (see Hidden boundary); `authors` is the full author list, `author` its derived first-author mirror |
+| `library_book_versions` | id, libraryId FK, libraryBookId FK (cascade), bookVersionId FK (restrict), kind (personal\|shared\|local), status, name, nullable metadata overrides, sourceLibraryId?, sourceLibraryBookVersionId?, pinnedRevisionId?, pinnedAt?, guestReadable, createdAt, updatedAt | null override = inherit the work default; `status` (`published\|unlisted`) is the version-level hide, surfaced in UI as 隐藏/显示; source ids are plain text (no FK) so provenance survives source deletion; pinnedAt carries the legacy sort-first pin; `guest_readable` is the per-listing anonymous switch and only takes effect inside a public library on a guest-enabled instance — one library's value never opens another library's copy of the same version |
 | `book_versions` | id (text PK, reuses the legacy book id for migrated A entries), format, size, createdAt, updatedAt | stable content identity shared across libraries; never merged by content hash |
 | `content_revisions` | id, bookVersionId FK (cascade), revisionNo, blobKey, size, wordCount?, chapterCount, createdAt | append-only history; unique (bookVersionId, revisionNo); readers and B pins resolve through these rows |
 | `blobs` | key (text PK = storage key), size, kind (book\|cover), createdAt | physical-file registry; deletion only when no revision/cover references it |
-| `library_categories` | id, libraryId FK (cascade), userId, name, parentId? self-FK (SET NULL), sortOrder, pinned, createdAt, updatedAt | hierarchy allowed; sibling-name validation lives in service code, not in a DB constraint |
-| `library_tags` | id, libraryId FK (cascade), userId, name, sortOrder, pinned, createdAt, updatedAt | unique (libraryId, name) |
+| `library_categories` | id, libraryId FK (cascade), userId, name, parentId? self-FK (SET NULL), sortOrder, pinned, hidden?, createdAt, updatedAt | hierarchy allowed; sibling-name validation lives in service code, not in a DB constraint; `hidden` hides the subtree and every work under it (see Hidden boundary) |
+| `library_tags` | id, libraryId FK (cascade), userId, name, sortOrder, pinned, hidden?, createdAt, updatedAt | unique (libraryId, name); `hidden` hides every work carrying the tag (see Hidden boundary) |
 | `library_book_tags` | libraryBookId FK (cascade), tagId FK (cascade) | composite PK, M2M for the new model (`book_tags` stays for the legacy rows) |
 | `instance` | id (text PK, single fixed row), ownerUserId FK (restrict), allowRegistration, allowGuestAccess, uploadMaxBytes?, createdAt, updatedAt | exactly one row per deployment; null uploadMaxBytes = env default; replaces `instance_settings` once migrated |
 | `sessions` | id, userId FK (cascade), tokenHash (unique), createdAt, expiresAt | server-side login sessions; raw token in the cookie only; 30-day sliding expiry refreshed inside 7 days of expiry |

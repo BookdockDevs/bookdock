@@ -133,7 +133,7 @@ export async function addToPrivateLibrary(
       }
       tx.insert(libraryBooks).values({
         id: libraryBookId, libraryId: privateLibrary.id, userId, categoryId: opts?.categoryId ?? null,
-        title: version.effective.title, author: version.effective.author,
+        title: version.effective.title, author: version.effective.author, authors: version.effective.authors,
         description: version.effective.description, coverKey: version.effective.coverKey,
         createdAt: now, updatedAt: now,
       }).run()

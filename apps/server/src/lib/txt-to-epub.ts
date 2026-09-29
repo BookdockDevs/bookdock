@@ -9,6 +9,8 @@ export interface TxtToEpubChapter {
 export interface TxtToEpubMetadata {
   title: string
   author?: string
+  /** Full author list; emitted as one dc:creator per entry. */
+  authors?: string[]
   language?: string
   id?: string
 }
@@ -69,7 +71,7 @@ function buildContentOpf(
 ): string {
   const id = metadata.id ?? 'bookdock-unknown'
   const title = metadata.title || 'Untitled'
-  const author = metadata.author || 'Unknown'
+  const authors = metadata.authors?.length ? metadata.authors : [metadata.author || 'Unknown']
   const language = metadata.language || 'zh-CN'
 
   const coverMeta = cover
@@ -95,7 +97,7 @@ function buildContentOpf(
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="BookId">${escapeXml(id)}</dc:identifier>
     <dc:title>${escapeXml(title)}</dc:title>
-    <dc:creator>${escapeXml(author)}</dc:creator>
+${authors.map((author) => `    <dc:creator>${escapeXml(author)}</dc:creator>`).join('\n')}
     <dc:language>${escapeXml(language)}</dc:language>
 ${coverMeta}  </metadata>
   <manifest>

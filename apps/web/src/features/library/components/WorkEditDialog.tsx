@@ -9,6 +9,9 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
 import { useLibraryCategories, useLibraryTags, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
+import { formatAuthorList } from '@/lib/utils'
+
+import { parseAuthorList } from './book-detail/types'
 
 import { versionTabLabel } from '../book-row'
 
@@ -39,7 +42,7 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex,
   const { data: tagsData } = useLibraryTags(libraryId)
 
   const [title, setTitle] = useState(work.title)
-  const [author, setAuthor] = useState(work.author)
+  const [authorsText, setAuthorsText] = useState(formatAuthorList(work.authors, work.author))
   const [description, setDescription] = useState(work.description)
   const [categoryId, setCategoryId] = useState<string | null>(work.categoryId)
   const [tagIds, setTagIds] = useState<string[]>(work.tags.map((t) => t.id))
@@ -47,8 +50,8 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex,
   const [versionName, setVersionName] = useState(version.name)
   const [followTitle, setFollowTitle] = useState(version.title === null)
   const [overrideTitle, setOverrideTitle] = useState(version.title ?? '')
-  const [followAuthor, setFollowAuthor] = useState(version.author === null)
-  const [overrideAuthor, setOverrideAuthor] = useState(version.author ?? '')
+  const [followAuthor, setFollowAuthor] = useState(version.authors === null)
+  const [overrideAuthorsText, setOverrideAuthorsText] = useState(formatAuthorList(version.authors ?? [], version.author ?? ''))
   const [followDescription, setFollowDescription] = useState(version.description === null)
   const [overrideDescription, setOverrideDescription] = useState(version.description ?? '')
 
@@ -64,7 +67,9 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex,
     if (!name) return
     const bookPatch: CatalogBookUpdateReq = {}
     if (name !== work.title) bookPatch.title = name
-    if (author.trim() !== work.author) bookPatch.author = author.trim()
+    const wantAuthors = parseAuthorList(authorsText)
+    const initialAuthors = parseAuthorList(formatAuthorList(work.authors, work.author))
+    if (wantAuthors.join('\n') !== initialAuthors.join('\n')) bookPatch.authors = wantAuthors
     if (description !== work.description) bookPatch.description = description
     if (categoryId !== work.categoryId) bookPatch.categoryId = categoryId
     const initialTagIds = work.tags.map((t) => t.id)
@@ -75,8 +80,13 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex,
     if (versionName.trim() !== version.name) versionPatch.name = versionName.trim()
     const wantTitle = followTitle ? null : overrideTitle.trim()
     if (wantTitle !== version.title) versionPatch.title = wantTitle || null
-    const wantAuthor = followAuthor ? null : overrideAuthor.trim()
-    if (wantAuthor !== version.author) versionPatch.author = wantAuthor || null
+    if (followAuthor) {
+      if (version.authors !== null) versionPatch.authors = null
+    } else {
+      const wantAuthors = parseAuthorList(overrideAuthorsText)
+      const initialAuthors = parseAuthorList(formatAuthorList(version.authors ?? [], version.author ?? ''))
+      if (wantAuthors.join('\n') !== initialAuthors.join('\n')) versionPatch.authors = wantAuthors
+    }
     if (!followDescription && overrideDescription !== (version.description ?? '')) {
       versionPatch.description = overrideDescription
     } else if (followDescription && version.description !== null) {
@@ -160,7 +170,7 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex,
           </label>
           <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
             <span className={labelClass}>{_('library.authorLabel')}</span>
-            <input value={author} onChange={(e) => setAuthor(e.target.value)} maxLength={300} className={inputClass} />
+            <input value={authorsText} onChange={(e) => setAuthorsText(e.target.value)} maxLength={500} placeholder={_('library.authorListHint')} className={inputClass} />
           </label>
           <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
             <span className={labelClass}>{_('library.libraryDescription')}</span>
@@ -209,7 +219,7 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex,
             <input value={versionName} onChange={(e) => setVersionName(e.target.value)} maxLength={120} placeholder={fallback} className={inputClass} />
           </label>
           {overrideRow(_('library.libraryName'), followTitle, setFollowTitle, overrideTitle, setOverrideTitle, version.effective.title, 300)}
-          {overrideRow(_('library.authorLabel'), followAuthor, setFollowAuthor, overrideAuthor, setOverrideAuthor, version.effective.author, 300)}
+          {overrideRow(_('library.authorLabel'), followAuthor, setFollowAuthor, overrideAuthorsText, setOverrideAuthorsText, formatAuthorList(version.effective.authors, version.effective.author), 500)}
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <span className={labelClass}>{_('library.libraryDescription')}</span>

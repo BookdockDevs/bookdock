@@ -667,6 +667,66 @@ describe('listBooks metadata filters', () => {
   })
 })
 
+describe('multi-author metadata', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  it('stores the author list, mirrors the first author, and matches any single name', async () => {
+    const solo = seedBook(db, ownerId, { title: 'Solo', author: '单作者' })
+    const co = seedBook(db, ownerId, { title: 'Co', author: '甲' })
+    await updateBook(ownerId, co.id, { authors: ['甲', '乙'] })
+
+    const loaded = await getBook(ownerId, co.id)
+    expect(loaded.authors).toEqual(['甲', '乙'])
+    expect(loaded.author).toBe('甲')
+    // search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author
+    const byFirst = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, '甲')
+    expect(byFirst.data.map((b) => b.id).sort()).toEqual([co.id].sort())
+    const bySecond = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, '乙')
+    expect(bySecond.data.map((b) => b.id)).toEqual([co.id])
+    expect(bySecond.data[0]?.authors).toEqual(['甲', '乙'])
+    // Substring search reaches non-first authors too; solo books are untouched.
+    const searched = await listBooks(ownerId, 1, 20, '乙')
+    expect(searched.data.map((b) => b.id)).toEqual([co.id])
+    expect((await getBook(ownerId, solo.id)).authors).toEqual([])
+  })
+})
+
+describe('private vault (hidden works)', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  it('excludes hidden works from lists and reads unless revealed', async () => {
+    const shown = seedBook(db, ownerId, { title: 'Shown' })
+    const hiddenBook = seedBook(db, ownerId, { title: 'Hidden' })
+    await updateBook(ownerId, hiddenBook.id, { hidden: true })
+
+    const listed = await listBooks(ownerId, 1, 20)
+    expect(listed.data.map((b) => b.id)).toEqual([shown.id])
+    // search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series, showHidden
+    const revealed = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, true)
+    expect(revealed.data.map((b) => b.id).sort()).toEqual([hiddenBook.id, shown.id].sort())
+    expect(revealed.data.find((b) => b.id === hiddenBook.id)?.hidden).toBe(true)
+    await expect(getActiveBook(ownerId, hiddenBook.id)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
+    expect((await getActiveBook(ownerId, hiddenBook.id, { showHidden: true })).id).toBe(hiddenBook.id)
+    // Unhiding restores the default list without touching anything else.
+    await updateBook(ownerId, hiddenBook.id, { hidden: false })
+    expect((await listBooks(ownerId, 1, 20)).data.map((b) => b.id).sort()).toEqual([hiddenBook.id, shown.id].sort())
+  })
+})
+
 describe('listBooks lastReadAt sort', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string

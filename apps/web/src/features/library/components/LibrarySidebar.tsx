@@ -8,14 +8,16 @@ import { CSS } from '@dnd-kit/utilities'
 import type { LibraryListItem, LibraryRelation } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { queryClient } from '@/lib/query-client'
 import { cn } from '@/lib/utils'
+import { useUiStore } from '@/stores/ui.store'
 
 import type { LibrarySearch } from '@/routes/index'
 import SmartMenu from '@/components/ui/SmartMenu'
 import AccountMenu from '@/features/auth/AccountMenu'
 import { applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
 import { sortSidebarItems } from '../sort-modes'
-import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleTagPin, useTrashEnabled, useLibraryPrefs, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
+import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleShelfHidden, useToggleTagPin, useToggleTagHidden, useTrashEnabled, useLibraryPrefs, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import ShelfDialog from './ShelfDialog'
 import TagDialog from './TagDialog'
@@ -95,6 +97,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
   const taxonomyLoading = inLibrary
     ? (categoriesQuery.isLoading || libraryTagsQuery.isLoading)
     : (shelvesLoading || tagsLoading)
+  const revealHidden = useUiStore((s) => s.revealHidden)
   const trashEnabled = useTrashEnabled({ enabled: !readOnly && !inLibrary })
   const { data: trashData } = useBooks({
     page: 1,
@@ -124,6 +127,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
     format: null,
     readStatus: null,
     trash: false,
+    showHidden: revealHidden,
   }, { enabled: !inLibrary })
   const { data: libraryUncategorizedData, isLoading: libraryUncategorizedLoading } = useLibraryCatalog(
     activeLibraryId,
@@ -135,12 +139,14 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
   const [deleteShelfTarget, setDeleteShelfTarget] = useState<TaxonomyRow | null>(null)
   const deleteShelf = useDeleteShelf()
   const toggleShelfPin = useToggleShelfPin()
+  const toggleShelfHidden = useToggleShelfHidden()
   const updateLibraryCategory = useUpdateLibraryCategory()
   const deleteLibraryCategory = useDeleteLibraryCategory()
   const [tagDialog, setTagDialog] = useState<{ tagId?: string; initialName?: string } | null>(null)
   const [deleteTagTarget, setDeleteTagTarget] = useState<TaxonomyRow | null>(null)
   const deleteTag = useDeleteTag()
   const toggleTagPin = useToggleTagPin()
+  const toggleTagHidden = useToggleTagHidden()
   const updateLibraryTag = useUpdateLibraryTag()
   const deleteLibraryTag = useDeleteLibraryTag()
 
@@ -306,6 +312,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
                         onTogglePin={() => (activeLibraryId
                           ? updateLibraryCategory.mutate({ libraryId: activeLibraryId, categoryId: shelf.id, patch: { pinned: !shelf.pinned } })
                           : toggleShelfPin.mutate({ id: shelf.id, pinned: !shelf.pinned }))}
+                        onToggleHidden={() => (activeLibraryId
+                          ? updateLibraryCategory.mutate({ libraryId: activeLibraryId, categoryId: shelf.id, patch: { hidden: !shelf.hidden } })
+                          : toggleShelfHidden.mutate({ id: shelf.id, hidden: !shelf.hidden }))}
                       />
                     ))}
                   </SortableContext>
@@ -361,6 +370,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
                     onTogglePin={() => (activeLibraryId
                       ? updateLibraryTag.mutate({ libraryId: activeLibraryId, tagId: tag.id, patch: { pinned: !tag.pinned } })
                       : toggleTagPin.mutate({ id: tag.id, pinned: !tag.pinned }))}
+                    onToggleHidden={() => (activeLibraryId
+                      ? updateLibraryTag.mutate({ libraryId: activeLibraryId, tagId: tag.id, patch: { hidden: !tag.hidden } })
+                      : toggleTagHidden.mutate({ id: tag.id, hidden: !tag.hidden }))}
                   />
                 ))}
               </SortableContext>
@@ -386,6 +398,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
             />
           </div>
         )}
+        {!readOnly && !inLibrary && <RevealHiddenToggle />}
       </nav>
 
       <div
@@ -742,6 +755,51 @@ function NavItem({
   )
 }
 
+/**
+ * Private-vault reveal switch (device-local, placeholder for the future vault
+ * entry): when on, lists, shelves, tags and the reader carry ?showHidden=1.
+ */
+function RevealHiddenToggle() {
+  const _ = useTranslation()
+  const revealHidden = useUiStore((s) => s.revealHidden)
+  const setRevealHidden = useUiStore((s) => s.setRevealHidden)
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={revealHidden}
+      onClick={() => {
+        setRevealHidden(!revealHidden)
+        // The taxonomy/book queries keep stable keys and read the flag at
+        // fetch time, so the toggle invalidates them explicitly. The shared
+        // singleton is used instead of the hook so this row also renders
+        // outside a QueryClientProvider (e.g. in unit tests).
+        void queryClient.invalidateQueries({ queryKey: ['books'] })
+        void queryClient.invalidateQueries({ queryKey: ['shelves'] })
+        void queryClient.invalidateQueries({ queryKey: ['tags'] })
+      }}
+      className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] text-stone-500 transition-all hover:bg-stone-200/50 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/50 dark:hover:text-stone-100"
+    >
+      <span className="flex min-w-0 items-center gap-2.5">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+        <span className="truncate">{_('library.showHiddenContent')}</span>
+      </span>
+      <span className={cn(
+        'relative h-5 w-9 shrink-0 rounded-full transition-colors',
+        revealHidden ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-700',
+      )}>
+        <span className={cn(
+          'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all dark:bg-stone-900',
+          revealHidden ? 'left-[18px]' : 'left-0.5',
+        )} />
+      </span>
+    </button>
+  )
+}
+
 function UncategorizedDropTarget({
   count,
   active,
@@ -791,6 +849,7 @@ interface TaxonomyRow {
   id: string
   name: string
   pinned: boolean
+  hidden: boolean
   bookCount: number
 }
 
@@ -803,6 +862,7 @@ function ShelfItem({
   onRename,
   onDelete,
   onTogglePin,
+  onToggleHidden,
   readOnly = false,
 }: {
   shelf: TaxonomyRow
@@ -813,6 +873,7 @@ function ShelfItem({
   onRename: () => void
   onDelete: () => void
   onTogglePin: () => void
+  onToggleHidden: () => void
   readOnly?: boolean
 }) {
   const _ = useTranslation()
@@ -837,7 +898,7 @@ function ShelfItem({
         transform: CSS.Transform.toString(transform),
         transition: settling ? 'transform 120ms ease-out' : transition,
       }}
-      className={cn('group relative', isDragging && 'z-10 opacity-60')}
+      className={cn('group relative', isDragging && 'z-10 opacity-60', shelf.hidden && 'opacity-60')}
       {...attributes}
       {...listeners}
       onContextMenu={!readOnly ? (e) => {
@@ -845,6 +906,7 @@ function ShelfItem({
         e.stopPropagation()
         menu.openFromEvent(e)
       } : undefined}
+      title={shelf.hidden ? _('library.catalogUnlisted') : undefined}
     >
       <NavItem
         label={shelf.name}
@@ -906,6 +968,31 @@ function ShelfItem({
           type="button"
           onClick={() => {
             menu.close()
+            onToggleHidden()
+          }}
+          className={shelfMenuItemClass}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+            {shelf.hidden ? (
+              <>
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </>
+            ) : (
+              <>
+                <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                <line x1="2" x2="22" y1="2" y2="22" />
+              </>
+            )}
+          </svg>
+          {shelf.hidden ? _('library.show') : _('library.hide')}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            menu.close()
             onRename()
           }}
           className={shelfMenuItemClass}
@@ -946,6 +1033,7 @@ function TagItem({
   onRename,
   onDelete,
   onTogglePin,
+  onToggleHidden,
   readOnly = false,
 }: {
   tag: TaxonomyRow
@@ -956,6 +1044,7 @@ function TagItem({
   onRename: () => void
   onDelete: () => void
   onTogglePin: () => void
+  onToggleHidden: () => void
   readOnly?: boolean
 }) {
   const _ = useTranslation()
@@ -973,7 +1062,7 @@ function TagItem({
         transform: CSS.Transform.toString(transform),
         transition: settling ? 'transform 120ms ease-out' : transition,
       }}
-      className={cn('group relative', isDragging && 'z-10 opacity-60')}
+      className={cn('group relative', isDragging && 'z-10 opacity-60', tag.hidden && 'opacity-60')}
       {...attributes}
       {...listeners}
       onContextMenu={!readOnly ? (e) => {
@@ -981,6 +1070,7 @@ function TagItem({
         e.stopPropagation()
         menu.openFromEvent(e)
       } : undefined}
+      title={tag.hidden ? _('library.catalogUnlisted') : undefined}
     >
       <NavItem
         label={tag.name}
@@ -1038,6 +1128,31 @@ function TagItem({
             <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
           </svg>
           {tag.pinned ? _('library.unpin') : _('library.pin')}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            menu.close()
+            onToggleHidden()
+          }}
+          className={shelfMenuItemClass}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+            {tag.hidden ? (
+              <>
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </>
+            ) : (
+              <>
+                <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                <line x1="2" x2="22" y1="2" y2="22" />
+              </>
+            )}
+          </svg>
+          {tag.hidden ? _('library.show') : _('library.hide')}
         </button>
         <button
           type="button"

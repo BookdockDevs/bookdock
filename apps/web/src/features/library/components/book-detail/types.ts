@@ -4,7 +4,11 @@ import { notify } from '@/lib/notifications'
 
 export interface MetaDraft {
   title: string
-  author: string
+  /**
+   * Raw editable author text; multiple authors are separated with 、 , ， ；
+   * or ; and split on save. The server derives the first-author mirror.
+   */
+  authors: string
   publisher: string
   published: string
   isbn: string
@@ -18,9 +22,10 @@ export interface MetaDraft {
 }
 
 export function draftFrom(book: BookListItem, bookmeta?: BookMetadata): MetaDraft {
+  const authors = (book.authors ?? []).map((name) => name.trim()).filter(Boolean)
   return {
     title: book.title,
-    author: book.author,
+    authors: authors.length > 0 ? authors.join('、') : book.author,
     publisher: bookmeta?.publisher ?? '',
     published: bookmeta?.published ?? '',
     isbn: bookmeta?.isbn ?? '',
@@ -35,6 +40,13 @@ export function draftFrom(book: BookListItem, bookmeta?: BookMetadata): MetaDraf
 
 // identifier is intentionally not part of the draft: it stays read-only and
 // is never written back on save.
+/**
+ * Split editable author text into a list. Accepts CJK and ASCII separators;
+ * empty segments are dropped, order is preserved, capped at 10.
+ */
+export function parseAuthorList(text: string): string[] {
+  return [...new Set(text.split(/[,，、；;]/).map((name) => name.trim()).filter(Boolean))].slice(0, 10)
+}
 export function draftToBookmeta(draft: MetaDraft): BookMetadata {
   const bookmeta: BookMetadata = {}
   if (draft.publisher.trim()) bookmeta.publisher = draft.publisher.trim()

@@ -1,10 +1,11 @@
-import { eq, and, inArray, isNull, sql, asc, ne } from 'drizzle-orm'
+import { eq, and, inArray, isNull, notInArray, sql, asc, ne, type SQL } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import { libraries, libraryBooks, libraryBookVersions, libraryCategories } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
-import { ensurePrivateLibrary, requireLibraryManager, assertLibraryBrowsable } from '../libraries/library-access'
+import { ensurePrivateLibrary, isLibraryManager, requireLibraryManager, assertLibraryBrowsable } from '../libraries/library-access'
+import { hiddenTagExclusion, loadLibraryHiddenTaxonomy, workDirectHiddenExclusion } from '../libraries/library-query'
 
 function privateLibraryId(userId: string): string | null {
   const db = getDb()
@@ -16,10 +17,24 @@ function requirePrivateLibrary(userId: string): string {
   return ensurePrivateLibrary(getDb(), userId)
 }
 
-export async function listShelves(userId: string) {
+export async function listShelves(userId: string, showHidden = false) {
   const db = getDb()
   const libraryId = privateLibraryId(userId)
   if (!libraryId) return []
+  // Private vault: hidden shelves stay out unless the owner reveals them.
+  // Counts mirror the book list: works hidden directly or through a hidden
+  // tag are not counted (the shelf itself is visible here, so the category
+  // dimension cannot hide anything counted under it).
+  const taxonomy = showHidden ? null : loadLibraryHiddenTaxonomy(db, libraryId)
+  const countExtra: SQL[] = []
+  if (taxonomy) {
+    countExtra.push(workDirectHiddenExclusion())
+    const tag = hiddenTagExclusion(taxonomy.hiddenTagIds)
+    if (tag) countExtra.push(tag)
+  }
+  const shelfFilter = taxonomy && taxonomy.hiddenCategoryIds.length > 0
+    ? notInArray(libraryCategories.id, taxonomy.hiddenCategoryIds)
+    : undefined
   const rows = db
     .select({
       id: libraryCategories.id,
@@ -29,11 +44,12 @@ export async function listShelves(userId: string) {
       createdAt: libraryCategories.createdAt,
       updatedAt: libraryCategories.updatedAt,
       pinned: libraryCategories.pinned,
+      hidden: libraryCategories.hidden,
       bookCount: sql<number>`count(${libraryBooks.id})`,
     })
     .from(libraryCategories)
-    .leftJoin(libraryBooks, and(eq(libraryCategories.id, libraryBooks.categoryId), isNull(libraryBooks.deletedAt)))
-    .where(eq(libraryCategories.libraryId, libraryId))
+    .leftJoin(libraryBooks, and(eq(libraryCategories.id, libraryBooks.categoryId), isNull(libraryBooks.deletedAt), ...countExtra))
+    .where(shelfFilter ? and(eq(libraryCategories.libraryId, libraryId), shelfFilter) : eq(libraryCategories.libraryId, libraryId))
     .groupBy(libraryCategories.id)
     .orderBy(asc(libraryCategories.sortOrder), asc(libraryCategories.createdAt))
     .all()
@@ -62,9 +78,9 @@ export async function createShelf(userId: string, name: string) {
       .get()
     const sortOrder = (max?.max ?? -1) + 1
     tx.insert(libraryCategories).values({
-      id, libraryId, userId, name, parentId: null, sortOrder, pinned: false, createdAt: now, updatedAt: now,
+      id, libraryId, userId, name, parentId: null, sortOrder, pinned: false, hidden: false, createdAt: now, updatedAt: now,
     }).run()
-    return { id, userId, name, sortOrder, createdAt: now, updatedAt: now, pinned: false, bookCount: 0 }
+    return { id, userId, name, sortOrder, createdAt: now, updatedAt: now, pinned: false, hidden: false, bookCount: 0 }
   })
 }
 
@@ -89,7 +105,7 @@ export async function reorderShelves(userId: string, shelfIds: string[]) {
   })
 }
 
-export async function updateShelf(userId: string, shelfId: string, patch: { name?: string; pinned?: boolean }) {
+export async function updateShelf(userId: string, shelfId: string, patch: { name?: string; pinned?: boolean; hidden?: boolean }) {
   const db = getDb()
   const libraryId = requirePrivateLibrary(userId)
   return db.transaction((tx) => {
@@ -197,6 +213,7 @@ function toCategoryRes(row: typeof libraryCategories.$inferSelect) {
     parentId: row.parentId,
     sortOrder: row.sortOrder,
     pinned: row.pinned,
+    hidden: row.hidden,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     bookCount,
@@ -219,6 +236,21 @@ function getLibraryCategory(libraryId: string, categoryId: string) {
 export async function listLibraryCategories(actorId: string, libraryId: string) {
   const db = getDb()
   await assertLibraryBrowsable(actorId, libraryId)
+  // Shared asymmetry: managers always see hidden rows (badged); members never
+  // do. Counts mirror what each viewer can list: hidden works are excluded
+  // for members through every dimension except the category itself (a hidden
+  // category never reaches a member's list in the first place).
+  const manager = await isLibraryManager(actorId, libraryId)
+  const taxonomy = manager ? null : loadLibraryHiddenTaxonomy(db, libraryId)
+  const countExtra: SQL[] = []
+  if (taxonomy) {
+    countExtra.push(workDirectHiddenExclusion())
+    const tag = hiddenTagExclusion(taxonomy.hiddenTagIds)
+    if (tag) countExtra.push(tag)
+  }
+  const rowFilter = taxonomy && taxonomy.hiddenCategoryIds.length > 0
+    ? notInArray(libraryCategories.id, taxonomy.hiddenCategoryIds)
+    : undefined
   // Counts ride along in the same grouped query: one query for N rows, not
   // N+1. Single-row call sites (create, rename, delete) keep toCategoryRes.
   return db
@@ -230,13 +262,14 @@ export async function listLibraryCategories(actorId: string, libraryId: string) 
       parentId: libraryCategories.parentId,
       sortOrder: libraryCategories.sortOrder,
       pinned: libraryCategories.pinned,
+      hidden: libraryCategories.hidden,
       createdAt: libraryCategories.createdAt,
       updatedAt: libraryCategories.updatedAt,
       bookCount: sql<number>`count(${libraryBooks.id})`,
     })
     .from(libraryCategories)
-    .leftJoin(libraryBooks, and(eq(libraryCategories.id, libraryBooks.categoryId), isNull(libraryBooks.deletedAt)))
-    .where(eq(libraryCategories.libraryId, libraryId))
+    .leftJoin(libraryBooks, and(eq(libraryCategories.id, libraryBooks.categoryId), isNull(libraryBooks.deletedAt), ...countExtra))
+    .where(rowFilter ? and(eq(libraryCategories.libraryId, libraryId), rowFilter) : eq(libraryCategories.libraryId, libraryId))
     .groupBy(libraryCategories.id)
     .orderBy(asc(libraryCategories.sortOrder), asc(libraryCategories.createdAt))
     .all()
@@ -256,14 +289,14 @@ export async function createLibraryCategory(actorId: string, libraryId: string, 
     const row = {
       id: createId('cat'), libraryId, userId: actorId, name: data.name,
       parentId: data.parentId ?? null, sortOrder: (max?.max ?? -1) + 1,
-      pinned: false, createdAt: now, updatedAt: now,
+      pinned: false, hidden: false, createdAt: now, updatedAt: now,
     }
     tx.insert(libraryCategories).values(row).run()
     return toCategoryRes(row)
   })
 }
 
-export async function updateLibraryCategory(actorId: string, libraryId: string, categoryId: string, patch: { name?: string; pinned?: boolean }) {
+export async function updateLibraryCategory(actorId: string, libraryId: string, categoryId: string, patch: { name?: string; pinned?: boolean; hidden?: boolean }) {
   const db = getDb()
   await requireLibraryManager(actorId, libraryId)
   return db.transaction((tx) => {

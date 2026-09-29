@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router'
 import type { CatalogBook } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { formatAuthorList } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover } from '../book-row'
 import type { BookDragPayload } from '../dnd'
@@ -105,7 +106,7 @@ export default function CatalogListRow({
           )}
         </div>
         {work.author && (
-          <div className="mt-0.5 truncate text-xs text-stone-500 dark:text-stone-400">{work.author}</div>
+          <div className="mt-0.5 truncate text-xs text-stone-500 dark:text-stone-400">{formatAuthorList(work.authors, work.author)}</div>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-3">

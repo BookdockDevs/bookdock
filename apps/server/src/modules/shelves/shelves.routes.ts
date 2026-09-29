@@ -23,7 +23,9 @@ const shelvesRoutes = new Hono()
 
 shelvesRoutes.get('/', async (c) => {
   const user = c.get('user')
-  const items = await listShelves(user.id)
+  // Guests never reveal the vault, even with the query flag.
+  const showHidden = c.get('guest') !== true && c.req.query('showHidden') === '1'
+  const items = await listShelves(user.id, showHidden)
   return c.json({ data: items } satisfies { data: ShelfListItem[] })
 })
 
@@ -55,8 +57,8 @@ shelvesRoutes.put('/:id', async (c) => {
   const shelfId = c.req.param('id')
   const body = await c.req.json()
   const parsed = shelfUpdateSchema.safeParse(body)
-  if (!parsed.success || (parsed.data.name === undefined && parsed.data.pinned === undefined)) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name or pinned is required' : parsed.error.flatten() } }, 400)
+  if (!parsed.success || (parsed.data.name === undefined && parsed.data.pinned === undefined && parsed.data.hidden === undefined)) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name, pinned or hidden is required' : parsed.error.flatten() } }, 400)
   }
   const shelf = await updateShelf(user.id, shelfId, parsed.data)
   return c.json({ data: shelf })

@@ -1090,6 +1090,8 @@ export interface ShelfListItem {
   updatedAt: number
   /** Pin-to-top flag; pinned items lead every sort mode. */
   pinned: boolean
+  /** Persistent hide: hides every work filed under this shelf. */
+  hidden: boolean
   bookCount: number
 }
 
@@ -1100,6 +1102,7 @@ export interface ShelfCreateReq {
 export interface ShelfUpdateReq {
   name?: string
   pinned?: boolean
+  hidden?: boolean
 }
 
 /** Full ordered shelf id list; the server rewrites each shelf's sortOrder to its index. */
@@ -1117,6 +1120,8 @@ export interface TagListItem {
   updatedAt: number
   /** Pin-to-top flag; pinned items lead every sort mode. */
   pinned: boolean
+  /** Persistent hide: hides every work carrying this tag. */
+  hidden: boolean
   bookCount: number
 }
 
@@ -1127,6 +1132,7 @@ export interface TagCreateReq {
 export interface TagUpdateReq {
   name?: string
   pinned?: boolean
+  hidden?: boolean
 }
 
 /** Full ordered tag id list; the server rewrites each tag's sortOrder to its index. */
@@ -1143,7 +1149,10 @@ export interface BookMembershipReq {
 export interface BookListItem {
   id: string
   title: string
+  /** Derived first-author mirror of `authors`; sort/filter/search use this. */
   author: string
+  /** Full author list, max 10. */
+  authors: string[]
   format: BookFormat
   coverKey: string | null
   size: number
@@ -1184,6 +1193,8 @@ export interface BookListItem {
    * and content-editing affordances and offers "add to my library" instead.
    */
   collected?: boolean
+  /** Work-level hide; private vault rows surface only with showHidden. */
+  hidden?: boolean
 }
 
 export interface BookContributor {

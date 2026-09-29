@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 import { apiPost, apiPut } from '@/api/client'
+import { withReveal } from '@/lib/reveal-hidden'
 import { READING_RECORDS_KEY, READING_SESSIONS_KEY, localDateString } from '@/api/hooks/reading-records'
 import { queryClient } from '@/lib/query-client'
 import { useUiStore } from '@/stores/ui.store'
@@ -82,14 +83,14 @@ async function writeTermination(session: ManualSession) {
   const endCfi = session.lastCfi
   const date = localDateString(new Date(session.startedAt))
   if (session.startFraction !== null) {
-    await apiPut(`/progress/${session.bookId}`, {
+    await apiPut(withReveal(`/progress/${session.bookId}`), {
       percent: Number(((endFraction ?? 0) * 100).toFixed(2)),
       fraction: endFraction ?? 0,
       segmentStartFraction: session.startFraction,
       ...(endCfi ? { cfi: endCfi } : {}),
     }).catch(() => undefined)
   }
-  await apiPost('/reading-records', {
+  await apiPost(withReveal('/reading-records'), {
     bookId: session.bookId,
     date,
     durationSeconds,

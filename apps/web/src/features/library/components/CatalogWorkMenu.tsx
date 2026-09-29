@@ -4,6 +4,7 @@ import type { CatalogBook } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
+import { formatAuthorList } from '@/lib/utils'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
@@ -58,7 +59,7 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
       <SmartMenu triggerRef={triggerRef} innerRef={innerRef} position={position} onClose={onClose} width={width}>
       <MenuHeader
         title={work.title}
-        subtitle={[work.author, first?.format].filter(Boolean).join(' · ')}
+        subtitle={[formatAuthorList(work.authors, work.author), first?.format].filter(Boolean).join(' · ')}
       />
       <MenuItem
         label={_('library.details')}

@@ -48,6 +48,6 @@ describe('VersionTabs', () => {
         onSelect={vi.fn()}
       />,
     )
-    expect(screen.getByText('已下架')).toBeInTheDocument()
+    expect(screen.getByText('已隐藏')).toBeInTheDocument()
   })
 })

@@ -120,12 +120,12 @@ export async function searchAnnotations(userId: string, bookId: string, query: s
   ]
 }
 
-export async function createAnnotation(userId: string, bookId: string, data: AnnotationCreateReq) {
+export async function createAnnotation(userId: string, bookId: string, data: AnnotationCreateReq, showHidden = false) {
   const db = getDb()
   // Reading data belongs to User x BookVersion, not to a private card: anyone
   // with read rights may annotate, with or without collecting first. Guests
   // never reach here (mutations are guest-refused at the guard).
-  await assertReadableBook(userId, bookId)
+  await assertReadableBook(userId, bookId, showHidden)
   const now = Date.now()
   if (data.type === 'highlight') {
     // A soft-deleted highlight at this CFI is restored instead of forked.

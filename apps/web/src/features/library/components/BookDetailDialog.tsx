@@ -20,7 +20,7 @@ import BookClassificationEditor from './book-detail/BookClassificationEditor'
 import BookCoverEditor from './book-detail/BookCoverEditor'
 import BookDetailView from './book-detail/BookDetailView'
 import BookMetaForm from './book-detail/BookMetaForm'
-import { draftFrom, draftToBookmeta, type MetaDraft } from './book-detail/types'
+import { draftFrom, draftToBookmeta, parseAuthorList, type MetaDraft } from './book-detail/types'
 import TocRulePicker from './TocRulePicker'
 import WorkDetailBody from './WorkDetailBody'
 
@@ -163,10 +163,12 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
     if (!title) return
     setSaving(true)
     try {
+      const authors = parseAuthorList(draft.authors)
       const requests: Promise<unknown>[] = [
         apiPatch(`/books/${book.id}`, {
           title,
-          author: draft.author.trim(),
+          author: authors[0] ?? '',
+          authors,
           bookmeta: draftToBookmeta(draft),
           coverPaletteId: draft.coverPaletteId,
         }),

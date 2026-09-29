@@ -90,6 +90,17 @@ describe('SelectionBar', () => {
       expect(screen.queryByText('library.permanentDelete')).toBeNull()
       expect(screen.getByText('library.batchClassify')).toBeInTheDocument()
     })
+
+    it('hides the selected works through the catalog endpoint', async () => {
+      const onComplete = vi.fn()
+      render(<SelectionBar selectedIds={['lb1', 'lb2']} onClear={vi.fn()} onComplete={onComplete} libraryId="lib-1" />, { wrapper })
+
+      fireEvent.click(screen.getByText('library.hide'))
+
+      await waitFor(() => expect(onComplete).toHaveBeenCalled())
+      expect(apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/lb1', { hidden: true })
+      expect(apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/lb2', { hidden: true })
+    })
   })
 
   it('applies batch read status to every selected book and clears selection', async () => {
@@ -154,6 +165,17 @@ describe('SelectionBar', () => {
     await waitFor(() => expect(onClear).toHaveBeenCalled())
     expect(apiDelete).toHaveBeenCalledTimes(2)
     expect(apiDelete).toHaveBeenCalledWith('/books/a')
+  })
+
+  it('batch hide patches every selected book and clears selection', async () => {
+    const onClear = vi.fn()
+    render(<SelectionBar selectedIds={['a', 'b']} onClear={onClear} />, { wrapper })
+
+    fireEvent.click(screen.getByText('library.hide'))
+
+    await waitFor(() => expect(onClear).toHaveBeenCalled())
+    expect(apiPatch).toHaveBeenCalledWith('/books/a', { hidden: true })
+    expect(apiPatch).toHaveBeenCalledWith('/books/b', { hidden: true })
   })
 
   it('opens classify dialog', () => {

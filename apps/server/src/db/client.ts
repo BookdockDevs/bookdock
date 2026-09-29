@@ -151,6 +151,32 @@ export async function runMigrations(hooks?: RunMigrationsHooks) {
     db.run(sql.raw('ALTER TABLE "legado_access_keys" ADD COLUMN "encrypted_token" TEXT'))
   }
 
+  // 0021 hide flags: same ledger-ahead hazard as deleted_at above — a local
+  // database can record the migration while the column is physically absent.
+  for (const table of ['library_books', 'library_categories', 'library_tags']) {
+    const columns = db.all(sql.raw(`PRAGMA table_info("${table}")`)) as Array<{ name: string }>
+    if (columns.length > 0 && !columns.some((column) => column.name === 'hidden')) {
+      db.run(sql.raw(`ALTER TABLE "${table}" ADD COLUMN "hidden" INTEGER NOT NULL DEFAULT 0`))
+    }
+  }
+
+  // 0022 author lists: same hazard. Backfill mirrors the migration (single
+  // author becomes one element); fresh defaults already apply to new rows.
+  const workColumns = db.all(sql.raw('PRAGMA table_info(library_books)')) as Array<{ name: string }>
+  if (workColumns.length > 0) {
+    if (!workColumns.some((column) => column.name === 'authors')) {
+      db.run(sql.raw('ALTER TABLE "library_books" ADD COLUMN "authors" TEXT NOT NULL DEFAULT \'[]\''))
+    }
+    db.run(sql.raw(`UPDATE "library_books" SET "authors" = json_array("author") WHERE ("authors" IS NULL OR "authors" = '[]') AND "author" IS NOT NULL AND "author" <> ''`))
+  }
+  const versionColumns = db.all(sql.raw('PRAGMA table_info(library_book_versions)')) as Array<{ name: string }>
+  if (versionColumns.length > 0) {
+    if (!versionColumns.some((column) => column.name === 'authors')) {
+      db.run(sql.raw('ALTER TABLE "library_book_versions" ADD COLUMN "authors" TEXT'))
+    }
+    db.run(sql.raw(`UPDATE "library_book_versions" SET "authors" = json_array("author") WHERE "authors" IS NULL AND "author" IS NOT NULL AND "author" <> ''`))
+  }
+
   repairLibraryBooksDeletedAt(db)
   repairBookmarkFields(db)
   repairIdeaStyle(db)

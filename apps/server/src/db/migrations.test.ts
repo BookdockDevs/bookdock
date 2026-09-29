@@ -669,9 +669,9 @@ describe('text replacement migration', () => {
     expect(sqlite.prepare('SELECT replacement_id, enabled FROM text_replacement_overrides WHERE id = ?').get('o1'))
       .toEqual({ replacement_id: 'r1', enabled: 0 })
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get())
-      // Journal holds baseline + 0001..0013 + 0015..0020 (0014 was abandoned
+      // Journal holds baseline + 0001..0013 + 0015..0022 (0014 was abandoned
       // for the client-side repair); reconcile rewrites the ledger to match it.
-      .toEqual({ count: 20 })
+      .toEqual({ count: 22 })
 
     sqlite.close()
   })

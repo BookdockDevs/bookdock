@@ -20,6 +20,8 @@ export interface BookRow {
   id: string
   title: string
   author: string | null
+  /** Full author list for display; `author` stays the first-author mirror. */
+  authors: string[]
   format: BookFormat
   /**
    * Explicit artwork URL. Undefined means "ask the cover endpoint for this
@@ -63,6 +65,7 @@ export function privateBookRow(book: BookListItem): BookRow {
     id: book.id,
     title: book.title,
     author: book.author ?? null,
+    authors: book.authors ?? [],
     format: book.format,
     coverSrc: undefined,
     coverKey: book.coverKey ?? null,
@@ -93,6 +96,7 @@ export function catalogWorkRow(work: CatalogBook): BookRow {
     id: work.id,
     title: work.title,
     author: work.author ?? null,
+    authors: work.authors ?? [],
     format: first?.format ?? 'epub',
     coverSrc: first && mayHaveArtwork ? `/api/v1/books/${first.bookVersionId}/cover?size=thumb` : null,
     coverKey: work.coverKey ?? null,

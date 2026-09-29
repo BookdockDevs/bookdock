@@ -49,8 +49,9 @@ export default function BookMetaForm({ draft, onChange, identifier, coverSlot }:
             <Field label={_('library.sortBy.author')}>
               <input
                 type="text"
-                value={draft.author}
-                onChange={(e) => update('author', e.target.value)}
+                value={draft.authors}
+                onChange={(e) => update('authors', e.target.value)}
+                placeholder={_('library.authorListHint')}
                 className={inputClass}
               />
             </Field>

@@ -16,6 +16,8 @@ import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
 import { uploadCatalogBook } from '../books/books.service'
 import { createLibrary } from './libraries.service'
+import { listLibraryCategories } from '../shelves/shelves.service'
+import { listLibraryTags } from '../tags/tags.service'
 import { addToPrivateLibrary } from './collect.service'
 import { resolveSharedVersionRead, resolveSourceRead } from './library-access'
 import {
@@ -367,6 +369,26 @@ describe('shared library catalog', () => {
     expect((await listCatalogBooks(ownerId, libraryId, { search: '查无此文' })).total).toBe(0)
   })
 
+  it('stores version author-list overrides and matches every credited name', async () => {
+    const work = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '第一章\n甲'), {
+      title: '合著作品', authors: ['甲', '乙'],
+    })
+    // The work default resolves both names through inheritance.
+    expect((await getCatalogBook(ownerId, libraryId, work.libraryBookId)).authors).toEqual(['甲', '乙'])
+    expect((await listCatalogBooks(memberId, libraryId, { author: '乙' })).total).toBe(1)
+    // A version override replaces the whole list and mirrors the first name.
+    const updated = await updateCatalogVersion(ownerId, libraryId, work.libraryBookId, work.versionLinkId!, { authors: ['丙', '丁'] })
+    expect(updated.authors).toEqual(['丙', '丁'])
+    expect(updated.author).toBe('丙')
+    expect(updated.effective.authors).toEqual(['丙', '丁'])
+    expect((await listCatalogBooks(memberId, libraryId, { author: '丁' })).total).toBe(1)
+    expect((await listCatalogBooks(memberId, libraryId, { author: '甲' })).total).toBe(0)
+    // Null clears the override back to the work default.
+    const cleared = await updateCatalogVersion(ownerId, libraryId, work.libraryBookId, work.versionLinkId!, { authors: null })
+    expect(cleared.authors).toBeNull()
+    expect(cleared.effective.authors).toEqual(['甲', '乙'])
+  })
+
   /**
    * A catalog work has no series column - its title and author are curated
    * fields - but the versions it manages are real BookVersions whose parsed
@@ -600,6 +622,57 @@ describe('shared library catalog', () => {
     // Republishing restores the same content identity.
     await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, { status: 'published' })
     await expectReadable()
+  })
+
+  it('hides works from non-managers without touching versions', async () => {
+    await uploadCatalogBook(libraryId, ownerId, txtFile('v.txt', '第一章\n甲'), { title: 'Visible' })
+    const hiddenWork = await uploadCatalogBook(libraryId, ownerId, txtFile('h.txt', '第一章\n乙'), { title: 'Hidden' })
+    await updateCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId, { hidden: true })
+
+    // Managers see hidden rows badged; members see neither the work nor its count.
+    expect((await listCatalogBooks(ownerId, libraryId)).total).toBe(2)
+    expect((await listCatalogBooks(ownerId, libraryId)).items.find((b) => b.title === 'Hidden')?.hidden).toBe(true)
+    const memberView = await listCatalogBooks(memberId, libraryId)
+    expect(memberView.total).toBe(1)
+    expect(memberView.items.map((b) => b.title)).toEqual(['Visible'])
+    // Detail and the read boundary agree with the list.
+    await expect(getCatalogBook(memberId, libraryId, hiddenWork.libraryBookId))
+      .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
+    await expect(resolveSharedVersionRead(libraryId, hiddenWork.bookVersionId, memberId))
+      .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+    expect((await resolveSharedVersionRead(libraryId, hiddenWork.bookVersionId, ownerId)).relation).toBe('owner')
+    // Unhiding restores the member view without touching versions.
+    await updateCatalogBook(ownerId, libraryId, hiddenWork.libraryBookId, { hidden: false })
+    expect((await listCatalogBooks(memberId, libraryId)).total).toBe(2)
+  })
+
+  it('hides category subtrees and tagged works from non-managers', async () => {
+    const parentId = createId('cat')
+    const childId = createId('cat')
+    db.insert(schema.libraryCategories).values([
+      { id: parentId, libraryId, userId: ownerId, name: 'Vault', parentId: null, sortOrder: 0, pinned: false, hidden: true, createdAt: 1, updatedAt: 1 },
+      { id: childId, libraryId, userId: ownerId, name: 'Vault Child', parentId: parentId, sortOrder: 1, pinned: false, hidden: false, createdAt: 1, updatedAt: 1 },
+    ]).run()
+    const tagId = seedTag(libraryId, 'Secret')
+    db.update(schema.libraryTags).set({ hidden: true }).where(eq(schema.libraryTags.id, tagId)).run()
+    await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '第一章\n甲'), { title: 'InHiddenChild', categoryId: childId })
+    await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', '第一章\n乙'), { title: 'TaggedSecret', tagIds: [tagId] })
+    await uploadCatalogBook(libraryId, ownerId, txtFile('c.txt', '第一章\n丙'), { title: 'Plain' })
+
+    // The hidden subtree hides its descendants' works even though the child
+    // row itself is not flagged; any hidden tag hides its works the same way.
+    expect((await listCatalogBooks(memberId, libraryId)).total).toBe(1)
+    expect((await listCatalogBooks(memberId, libraryId)).items.map((b) => b.title)).toEqual(['Plain'])
+    expect((await listCatalogBooks(ownerId, libraryId)).total).toBe(3)
+    // Taxonomy lists follow the same asymmetry: managers see hidden rows
+    // badged, members never see them.
+    const memberCategories = await listLibraryCategories(memberId, libraryId)
+    expect(memberCategories.map((c) => c.name)).not.toContain('Vault')
+    expect(memberCategories.map((c) => c.name)).not.toContain('Vault Child')
+    const ownerCategories = await listLibraryCategories(ownerId, libraryId)
+    expect(ownerCategories.find((c) => c.name === 'Vault')?.hidden).toBe(true)
+    expect((await listLibraryTags(memberId, libraryId)).map((t) => t.name)).not.toContain('Secret')
+    expect((await listLibraryTags(ownerId, libraryId)).find((t) => t.name === 'Secret')?.hidden).toBe(true)
   })
 
   it('browses by search and category and pages the catalog', async () => {    const categoryId = createId('cat')

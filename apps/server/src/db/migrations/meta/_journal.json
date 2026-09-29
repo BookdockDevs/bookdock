@@ -141,6 +141,20 @@
       "when": 1790500000000,
       "tag": "0020_listing_guest_readable",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790710000000,
+      "tag": "0021_taxonomy_hidden",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790720000000,
+      "tag": "0022_book_authors",
+      "breakpoints": true
     }
   ]
 }

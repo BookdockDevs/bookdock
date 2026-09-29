@@ -18,7 +18,7 @@ import { formatBytes, formatDate } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover } from '../book-row'
 import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../download'
-import { useCollectBook, useUpdateCatalogVersion } from '../hooks'
+import { useCollectBook, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
 import BookCover from './BookCover'
 import { copyText, formatLanguage, isMachineIdentifier, middleTruncate } from './book-detail/types'
 import { ActionIcon, FilterChip, GroupLabel } from './book-detail/ui'
@@ -52,6 +52,7 @@ export default function WorkDetailBody({
   const selected = work.versions.find((v) => v.id === selectedId) ?? work.versions[0]
   const collect = useCollectBook()
   const updateVersion = useUpdateCatalogVersion()
+  const updateWork = useUpdateCatalogBook()
   const [collectedIds, setCollectedIds] = useState<Record<string, boolean>>({})
   const isCollected = selected ? (collectedIds[selected.id] || selected.collected === true) : false
   const [copyingCover, setCopyingCover] = useState(false)
@@ -200,6 +201,14 @@ export default function WorkDetailBody({
     })
   }
 
+  function toggleWorkHidden() {
+    updateWork.mutate({
+      libraryId: library.id,
+      libraryBookId: work.id,
+      patch: { hidden: !work.hidden },
+    })
+  }
+
   function collectSelected() {
     if (!selected) return
     collect.mutate({ libraryId: library.id, versionLinkId: selected.id }, {
@@ -298,7 +307,27 @@ export default function WorkDetailBody({
           <h3 className="font-serif text-xl font-semibold leading-snug text-stone-900 dark:text-stone-100">
             {selected.effective.title}
           </h3>
-          {selected.effective.author ? (
+          {work.hidden && (
+            <span className="mt-1 inline-flex w-fit items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+              {_('library.catalogUnlisted')}
+            </span>
+          )}
+          {(selected.effective.authors ?? []).length > 0 ? (
+            <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-sm">
+              {(selected.effective.authors ?? []).map((name, index) => (
+                <span key={`${name}-${index}`} className="flex items-center gap-x-1">
+                  {index > 0 && <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>}
+                  <button
+                    type="button"
+                    onClick={() => goToFilter({ author: name })}
+                    className="text-left text-stone-500 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-400 dark:decoration-stone-600 dark:hover:text-stone-100"
+                  >
+                    {name}
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : selected.effective.author ? (
             <button
               type="button"
               onClick={() => goToFilter({ author: selected.effective.author })}
@@ -461,6 +490,27 @@ export default function WorkDetailBody({
                     <line x1="2" x2="22" y1="2" y2="22" />
                   </ActionIcon>
                 )
+              )}
+              {canManage && (
+                <ActionIcon
+                  secondary
+                  label={work.hidden ? _('library.catalogShowWork') : _('library.catalogHideWork')}
+                  onClick={toggleWorkHidden}
+                >
+                  {work.hidden ? (
+                    <>
+                      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                      <line x1="2" x2="22" y1="2" y2="22" />
+                    </>
+                  )}
+                </ActionIcon>
               )}
               {canManage && (
                 <div className="ml-auto">

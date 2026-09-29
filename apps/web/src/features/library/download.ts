@@ -1,7 +1,8 @@
 import { ApiError, BASE_URL } from '@/api/client'
+import { withReveal } from '@/lib/reveal-hidden'
 
 export async function downloadBook(bookId: string, title: string) {
-  const res = await fetch(`${BASE_URL}/books/${bookId}/file`)
+  const res = await fetch(withReveal(`${BASE_URL}/books/${bookId}/file`))
   if (!res.ok) {
     throw new ApiError(res.status === 404 ? 'BOOK_NOT_FOUND' : 'DOWNLOAD_FAILED', 'Book download failed')
   }
@@ -25,7 +26,7 @@ async function downloadExport(
   endpoint: string,
   fileName: string,
 ) {
-  const res = await fetch(`${BASE_URL}/books/${bookId}/${endpoint}`)
+  const res = await fetch(withReveal(`${BASE_URL}/books/${bookId}/${endpoint}`))
   if (!res.ok) {
     throw new ApiError(res.status === 404 ? 'BOOK_NOT_FOUND' : 'EXPORT_FAILED', 'Book export failed')
   }

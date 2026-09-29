@@ -1,6 +1,6 @@
 import type { Readable } from 'node:stream'
 
-import { eq, lt, desc, asc, and, or, sql, inArray, isNull, isNotNull } from 'drizzle-orm'
+import { eq, lt, desc, asc, and, or, sql, inArray, isNull, isNotNull, type SQL } from 'drizzle-orm'
 import JSZip from 'jszip'
 import sharp from 'sharp'
 import { getDb } from '../../db/client'
@@ -26,7 +26,7 @@ import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { assertMutableContent, ensurePrivateLibrary, requireLibraryManager, sourceStillReadable, sourceStillReadableSync } from '../libraries/library-access'
-import { libraryOrderBy } from '../libraries/library-query'
+import { libraryOrderBy, isWorkEffectivelyHidden, loadLibraryHiddenTaxonomy, workHiddenExclusion } from '../libraries/library-query'
 import { resolveSharedVersionRead } from '../libraries/library-access'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { sha256 } from '../../lib/hash'
@@ -35,7 +35,7 @@ import { countWords } from '../../lib/word-count'
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { coverThumbnailKey } from '../../lib/cover'
 import { log } from '../../lib/logger'
-import type { AppendContentCandidate, AppendContentPreviewRes, BookFormat, BookMetadata, CoverPaletteId, Chapter, TocPreviewChapter, TocPreviewRes, TocRulePattern, TrashSettings } from '@bookdock/shared'
+import { normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BookFormat, type BookMetadata, type CoverPaletteId, type Chapter, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
 
 import { getReaderBookSettings } from './reader-settings.service'
 
@@ -126,7 +126,7 @@ export function scoreTocRules(userId: string, sample: string): typeof tocRules.$
   return pickedId ? rules.find((r) => r.id === pickedId) ?? null : null
 }
 
-export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean, author?: string, series?: string) {
+export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean, author?: string, series?: string, showHidden?: boolean) {
   const db = getDb()
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
@@ -143,6 +143,11 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     eq(libraryBooks.userId, userId),
     trash ? isNotNull(libraryBooks.deletedAt) : isNull(libraryBooks.deletedAt),
   ]
+  // Private vault: hidden works stay out of the list unless the owner reveals
+  // them explicitly; trash rows are never hidden-filtered (Phase 3 owns trash).
+  if (!showHidden && !trash) {
+    conditions.push(workHiddenExclusion(loadLibraryHiddenTaxonomy(db, library.id)))
+  }
   if (search) {
     // Escape LIKE wildcards so user input is matched literally. The escape
     // char is '!' (backslash would be mangled by drizzle's sql template) and
@@ -166,6 +171,10 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     conditions.push(sql`(
       ${effTitle} LIKE ${pattern} ESCAPE '!'
       OR ${effAuthor} LIKE ${pattern} ESCAPE '!'
+      OR EXISTS (
+        SELECT 1 FROM json_each(coalesce(${libraryBookVersions.authors}, ${libraryBooks.authors}, '[]'))
+        WHERE value LIKE ${pattern} ESCAPE '!'
+      )
       OR ${bookVersions.format} LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.description')} LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.series')} LIKE ${pattern} ESCAPE '!'
@@ -195,7 +204,15 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     conditions.push(sql`${libraryBooks.id} IN ${sub}`)
   }
   if (author) {
-    conditions.push(eq(effAuthor, author))
+    // A single author matches the first-author mirror or any list element,
+    // so clicking one chip of a multi-author book finds the book.
+    conditions.push(or(
+      eq(effAuthor, author),
+      sql`EXISTS (
+        SELECT 1 FROM json_each(coalesce(${libraryBookVersions.authors}, ${libraryBooks.authors}, '[]'))
+        WHERE value = ${author}
+      )`,
+    ) as SQL)
   }
   if (series) {
     conditions.push(sql`${revMeta('$.bookmeta.series')} = ${series}`)
@@ -222,6 +239,10 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     libraryBookId: libraryBooks.id,
     title: effTitle,
     author: effAuthor,
+    // Effective author list for display chips; resolved in JS to keep the
+    // JSON-column typing (a SQL coalesce would return the raw JSON string).
+    versionAuthors: libraryBookVersions.authors,
+    workAuthors: libraryBooks.authors,
     format: bookVersions.format,
     coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey})`,
     size: bookVersions.size,
@@ -234,6 +255,8 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     deletedAt: libraryBooks.deletedAt,
     shelfId: libraryBooks.categoryId,
     shelfName: libraryCategories.name,
+    // Work-level hide; surfaced so the vault reveal mode can badge rows.
+    hidden: libraryBooks.hidden,
     // 7.7: a B carries its single source; A/C rows resolve to null.
     sourceLibraryId: libraryBookVersions.sourceLibraryId,
     sourceLibraryBookVersionId: libraryBookVersions.sourceLibraryBookVersionId,
@@ -297,9 +320,11 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   )
   const data = rows.map(({
     libraryBookId: _libraryBookId,
+    versionAuthors, workAuthors,
     sourceLibraryId, sourceLibraryBookVersionId, ...b
   }) => ({
     ...b,
+    authors: versionAuthors ?? workAuthors ?? [],
     tags: tagsByBook.get(_libraryBookId) ?? [],
     // 7.7: a B carries its single source; A/C rows report null.
     source: sourceLibraryId
@@ -416,6 +441,10 @@ async function materializeUpload(userId: string, file: File, buffer: Buffer, ver
   }
   // File names of web-novels often carry the author where metadata has none.
   if (!author && derived?.author) author = derived.author
+  // Multi-author: parsed creators win; the file-name fallback is a single name.
+  const parsedAuthors = (parsed.meta.authors ?? []).map((name) => name.trim()).filter(Boolean).slice(0, 10)
+  const authors = parsedAuthors.length > 0 ? parsedAuthors : author.trim() ? [author.trim()] : []
+  if (authors.length > 0) author = authors[0]!
 
   let coverKey: string | null = null
   if (parsed.meta.cover) {
@@ -474,7 +503,7 @@ async function materializeUpload(userId: string, file: File, buffer: Buffer, ver
       return normalized.slice(c.contentStartOffset ?? c.startOffset, c.endOffset)
     }
     const epubBuffer = await convertTxtToEpub(
-      { title, author: author || undefined, id: versionId },
+      { title, author: author || undefined, authors, id: versionId },
       epubChapters,
       contentFor,
     )
@@ -506,6 +535,7 @@ async function materializeUpload(userId: string, file: File, buffer: Buffer, ver
     meta,
     title,
     author,
+    authors,
     coverKey,
     coverSize: parsed.meta.cover?.length ?? null,
     description: typeof parsed.meta.bookmeta?.description === 'string' ? parsed.meta.bookmeta.description : '',
@@ -582,7 +612,7 @@ export async function uploadBook(
         .onConflictDoNothing()
         .run()
     }
-    return { book: stripMetaChapters(await resolvePrivateBook(userId, duplicate.versionId, { allowDeleted: true })), duplicated: true }
+    return { book: stripMetaChapters(await resolvePrivateBook(userId, duplicate.versionId, { allowDeleted: true, showHidden: true })), duplicated: true }
   }
 
   const upload = await materializeUpload(userId, file, buffer, versionId, opts)
@@ -604,7 +634,7 @@ export async function uploadBook(
       }
       tx.insert(libraryBooks).values({
         id: libraryBookId, libraryId: library.id, userId, categoryId: membership?.shelfId ?? null,
-        title: upload.title, author: upload.author, description: upload.description,
+        title: upload.title, author: upload.author, authors: upload.authors, description: upload.description,
         coverKey: upload.coverKey, createdAt: now, updatedAt: now,
       }).run()
       tx.insert(libraryBookVersions).values({
@@ -626,7 +656,7 @@ export async function uploadBook(
     await cleanupStagedUpload(upload)
     throw err
   }
-  return { book: stripMetaChapters(await resolvePrivateBook(userId, versionId, { allowDeleted: true })), duplicated: false }
+  return { book: stripMetaChapters(await resolvePrivateBook(userId, versionId, { allowDeleted: true, showHidden: true })), duplicated: false }
 }
 
 /**
@@ -648,6 +678,7 @@ export async function uploadCatalogBook(
     name?: string
     title?: string
     author?: string
+    authors?: string[]
     normalizeTitle?: boolean
   },
 ) {
@@ -708,9 +739,13 @@ export async function uploadCatalogBook(
         tx.insert(blobs).values({ key: upload.coverKey, size: upload.coverSize, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
       }
       if (!targetLibraryBookId) {
+        // Explicit author input wins; otherwise the parsed upload stands.
+        const workAuthors = opts?.authors !== undefined || opts?.author !== undefined
+          ? normalizeAuthors({ author: opts?.author, authors: opts?.authors })
+          : { author: upload.author, authors: upload.authors }
         tx.insert(libraryBooks).values({
           id: libraryBookId, libraryId, userId, categoryId: opts?.categoryId ?? null,
-          title: opts?.title ?? upload.title, author: opts?.author ?? upload.author,
+          title: opts?.title ?? upload.title, author: workAuthors.author, authors: workAuthors.authors,
           description: upload.description, coverKey: upload.coverKey, createdAt: now, updatedAt: now,
         }).run()
       }
@@ -719,6 +754,7 @@ export async function uploadCatalogBook(
         name: opts?.name ?? '',
         title: targetLibraryBookId ? upload.title : null,
         author: targetLibraryBookId ? upload.author : null,
+        authors: targetLibraryBookId ? (upload.authors.length > 0 ? upload.authors : null) : null,
         coverKey: targetLibraryBookId ? upload.coverKey : null,
         createdAt: now, updatedAt: now,
       }).run()
@@ -736,12 +772,12 @@ export async function uploadCatalogBook(
   return { bookVersionId: versionId, libraryBookId, versionLinkId: linkId, duplicated: false }
 }
 
-export async function getBook(userId: string | null, bookId: string) {
-  return resolvePrivateBook(userId, bookId, { allowDeleted: true })
+export async function getBook(userId: string | null, bookId: string, opts?: { showHidden?: boolean }) {
+  return resolvePrivateBook(userId, bookId, { allowDeleted: true, showHidden: opts?.showHidden })
 }
 
-export async function getActiveBook(userId: string | null, bookId: string) {
-  return resolvePrivateBook(userId, bookId, { allowDeleted: false })
+export async function getActiveBook(userId: string | null, bookId: string, opts?: { showHidden?: boolean }) {
+  return resolvePrivateBook(userId, bookId, { allowDeleted: false, showHidden: opts?.showHidden })
 }
 
 /**
@@ -768,7 +804,7 @@ export async function getActiveBook(userId: string | null, bookId: string) {
  * so additionally needs a materialized revision; the two agree on who may read
  * what, and both live here so that stays reviewable in one place.
  */
-export async function assertReadableBook(userId: string | null, bookId: string): Promise<'private' | 'library'> {
+export async function assertReadableBook(userId: string | null, bookId: string, showHidden = false): Promise<'private' | 'library'> {
   const db = getDb()
   // Anonymous guests own no private library: they only ever reach the shared
   // verdict below, which applies the guest triple gate.
@@ -784,9 +820,14 @@ export async function assertReadableBook(userId: string | null, bookId: string):
     const lbv = db.select().from(libraryBookVersions)
       .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
     if (lbv) {
-      const lb = db.select({ deletedAt: libraryBooks.deletedAt }).from(libraryBooks)
+      const lb = db.select().from(libraryBooks)
         .where(eq(libraryBooks.id, lbv.libraryBookId)).get()
       if (!lb || lb.deletedAt) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+      // Private vault: hidden works read as NOT_FOUND unless the owner
+      // reveals them with showHidden (lists, detail and content agree).
+      if (!showHidden && isWorkEffectivelyHidden(db, library.id, lb)) {
+        throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+      }
       // A collected B only while its source is still readable (7.2/7.3), the
       // same rule the read core applies.
       if (lbv.kind === 'shared' && !(await sourceStillReadable(userId, bookId))) {
@@ -893,6 +934,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     // catalog shows, so a library read and the catalog card agree.
     title: link.title ?? work.title,
     author: link.author ?? work.author,
+    authors: link.authors ?? work.authors ?? [],
     format: bv.format,
     filePath: revision.blobKey,
     coverKey: link.coverKey ?? work.coverKey,
@@ -908,6 +950,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     lastReadAt: state?.lastReadAt ?? null,
     deletedAt: null,
     shelfId: null,
+    hidden: work.hidden,
     readerSettings: getReaderBookSettings(userId, bookId),
     // Present so the UI can offer "add to my library" and hide the actions
     // that would write library-owned content.
@@ -938,7 +981,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
  * never be written to from here. A collected B keeps taking the private branch,
  * which is what preserves its pinned revision and source gate.
  */
-export async function resolvePrivateBook(userId: string | null, bookId: string, opts?: { allowDeleted?: boolean; skipSourceCheck?: boolean }) {
+export async function resolvePrivateBook(userId: string | null, bookId: string, opts?: { allowDeleted?: boolean; skipSourceCheck?: boolean; showHidden?: boolean }) {
   const db = getDb()
   // Anonymous guests own no private rows: straight to the shared verdict,
   // which applies the guest triple gate (instance switch + public + version).
@@ -954,6 +997,11 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
   const lb = db.select().from(libraryBooks).where(eq(libraryBooks.id, lbv.libraryBookId)).get()
   if (!lb) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   if (lb.deletedAt && !opts?.allowDeleted) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  // Private vault (same rule as assertReadableBook): owner-verified writes
+  // pass showHidden explicitly; casual reads need the reveal flag.
+  if (!opts?.showHidden && isWorkEffectivelyHidden(db, library.id, lb)) {
+    throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  }
   const bv = db.select().from(bookVersions).where(eq(bookVersions.id, bookId)).get()
   if (!bv) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   // (7.2/7.3) A B reads its pinned revision and only while its source is still
@@ -988,6 +1036,7 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     userId,
     title: lbv.title ?? lb.title,
     author: lbv.author ?? lb.author,
+    authors: lbv.authors ?? lb.authors ?? [],
     format: bv.format,
     filePath: revision.blobKey,
     coverKey: lbv.coverKey ?? lb.coverKey,
@@ -1003,6 +1052,8 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     lastReadAt: state?.lastReadAt ?? null,
     deletedAt: lb.deletedAt ?? null,
     shelfId: lb.categoryId,
+    // Work-level hide; surfaced so the vault reveal mode can badge the row.
+    hidden: lb.hidden,
     readerSettings: getReaderBookSettings(userId, bookId),
     source: lbv.sourceLibraryId
       ? {
@@ -1044,8 +1095,8 @@ export function getBookMembership(userId: string, bookId: string, shelfId: strin
   return { shelfName, tags: tagRows.map((tag) => tag.name) }
 }
 
-export async function getBookChapters(userId: string | null, bookId: string) {
-  const book = await getActiveBook(userId, bookId)
+export async function getBookChapters(userId: string | null, bookId: string, opts?: { showHidden?: boolean }) {
+  const book = await getActiveBook(userId, bookId, opts)
   const existingChapters = (book.meta?.chapters ?? []) as Chapter[]
   if (book.format !== 'epub' || book.meta?.epubTocLevelVersion === EPUB_TOC_LEVEL_VERSION) {
     return existingChapters
@@ -1211,7 +1262,7 @@ function resolveAppendStartOffset(
 async function prepareTxtAppend(userId: string, bookId: string, appendedText: string, requestedStartOffset?: number): Promise<PreparedTxtAppend> {
   if (!appendedText.trim()) throw new AppError('VALIDATION_ERROR', 'Append content is required')
 
-  const book = await getActiveBook(userId, bookId)
+  const book = await getActiveBook(userId, bookId, { showHidden: true })
   if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'Appending content only supports txt books')
 
   const normalized = await getOrRecoverTxtNormalized(book)
@@ -1318,7 +1369,7 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
   const prepared = await prepareTxtAppend(userId, bookId, appendedText, startOffset)
   const db = getDb()
   const storage = getStorage()
-  const book = await getActiveBook(userId, bookId)
+  const book = await getActiveBook(userId, bookId, { showHidden: true })
   const meta: Record<string, unknown> = {
     ...book.meta,
     chapters: prepared.metaChapters,
@@ -1407,7 +1458,7 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
     }
   }
 
-  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, showHidden: true }))
 }
 
 const LEGACY_TXT_FONT_DECLARATION = /font-family\s*:\s*"Noto Serif SC"\s*,\s*"Source Han Serif SC"\s*,\s*"SimSun"\s*,\s*serif\s*;/i
@@ -1478,7 +1529,7 @@ async function rebuildTocBook(
   requestedExcludedChapterIds: string[] = [],
 ): Promise<string> {
   const storage = getStorage()
-  const book = await getBook(userId, bookId)
+  const book = await getBook(userId, bookId, { showHidden: true })
   if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'Re-TOC only supports txt books')
 
   const normalized = await getOrRecoverTxtNormalized(book)
@@ -1697,7 +1748,7 @@ export async function reTocBook(
 ): Promise<string> {
   const db = getDb()
   assertMutableContent(resolveLibraryBook(userId, bookId).kind)
-  const book = await getBook(userId, bookId)
+  const book = await getBook(userId, bookId, { showHidden: true })
   if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'Re-TOC only supports txt books')
   const storedExcludedChapterIds = (book.meta as { tocExcludedChapterIds?: string[] }).tocExcludedChapterIds ?? []
   const effectiveExcludedChapterIds = excludedChapterIds ?? storedExcludedChapterIds
@@ -1763,7 +1814,7 @@ export async function previewBookToc(
   options: PreviewBookTocOptions = {},
 ): Promise<TocPreviewRes> {
   const db = getDb()
-  const book = await getBook(userId, bookId)
+  const book = await getBook(userId, bookId, { showHidden: true })
   if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'TOC preview only supports txt books')
 
   const normalized = await getOrRecoverTxtNormalized(book)
@@ -1850,23 +1901,23 @@ export async function previewBookToc(
   }
 }
 
-export async function getBookContent(userId: string | null, bookId: string): Promise<string> {
-  const book = await getActiveBook(userId, bookId)
+export async function getBookContent(userId: string | null, bookId: string, opts?: { showHidden?: boolean }): Promise<string> {
+  const book = await getActiveBook(userId, bookId, opts)
   if (book.format !== 'txt') {
     throw new AppError('UNSUPPORTED_FORMAT', 'Content endpoint only supports txt')
   }
   return getOrRecoverTxtNormalized(book)
 }
 
-export async function getBookChapterContent(userId: string | null, bookId: string, chapterIndex: number) {
-  const book = await getActiveBook(userId, bookId)
-  const chapters = await getBookChapters(userId, bookId)
+export async function getBookChapterContent(userId: string | null, bookId: string, chapterIndex: number, opts?: { showHidden?: boolean }) {
+  const book = await getActiveBook(userId, bookId, opts)
+  const chapters = await getBookChapters(userId, bookId, opts)
   const chapter = chapters[chapterIndex]
   if (!chapter) throw new AppError('VALIDATION_ERROR', 'Chapter index is out of range')
 
   const content = book.format === 'txt'
-    ? getTxtChapterContent(await getBookContent(userId, bookId), chapter).trim()
-    : await extractEpubChapterText(await getBookEpubBuffer(userId, bookId), chapterIndex)
+    ? getTxtChapterContent(await getBookContent(userId, bookId, opts), chapter).trim()
+    : await extractEpubChapterText(await getBookEpubBuffer(userId, bookId, opts), chapterIndex)
 
   return {
     id: chapter.id,
@@ -1878,14 +1929,14 @@ export async function getBookChapterContent(userId: string | null, bookId: strin
   }
 }
 
-export async function getBookEpubBuffer(userId: string | null, bookId: string): Promise<Buffer> {
+export async function getBookEpubBuffer(userId: string | null, bookId: string, opts?: { showHidden?: boolean }): Promise<Buffer> {
   const storage = getStorage()
-  const book = await getActiveBook(userId, bookId)
+  const book = await getActiveBook(userId, bookId, opts)
   if (!(await storage.exists(book.filePath))) throw new AppError('BOOK_FILE_MISSING')
   return bufferFromStream(await storage.get(book.filePath))
 }
 
-export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; bookmeta?: BookMetadata; tocRuleId?: string | null; coverPaletteId?: CoverPaletteId | null }) {
+export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; authors?: string[]; hidden?: boolean; bookmeta?: BookMetadata; tocRuleId?: string | null; coverPaletteId?: CoverPaletteId | null }) {
   const db = getDb()
   const { libraryBookId, libraryBookVersionId, kind } = resolveLibraryBook(userId, bookId)
   const now = Date.now()
@@ -1917,10 +1968,16 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
   if (data.pinned !== undefined) {
     db.update(libraryBookVersions).set({ pinnedAt: data.pinned ? now : null }).where(eq(libraryBookVersions.id, libraryBookVersionId)).run()
   }
-  if (data.title || data.author !== undefined) {
+  if (data.title || data.author !== undefined || data.authors !== undefined || data.hidden !== undefined) {
+    const normalized = data.authors !== undefined || data.author !== undefined
+      ? normalizeAuthors({ author: data.author, authors: data.authors })
+      : null
     db.update(libraryBooks).set({
       ...(data.title ? { title: data.title } : {}),
-      ...(data.author !== undefined ? { author: data.author } : {}),
+      ...(normalized ? { author: normalized.author, authors: normalized.authors } : {}),
+      // Card-local vault flag: hiding a collected B only hides the caller's
+      // own card, never the shared source (same boundary as title/pin).
+      ...(data.hidden !== undefined ? { hidden: data.hidden } : {}),
       updatedAt: now,
     }).where(eq(libraryBooks.id, libraryBookId)).run()
   }
@@ -1958,14 +2015,14 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
   if (touchedMeta && latestRevision) {
     db.update(contentRevisions).set({ meta: baseMeta }).where(eq(contentRevisions.id, latestRevision.id)).run()
   }
-  if (data.title || data.author !== undefined || touchedMeta || data.pinned !== undefined || data.readStatus !== undefined || data.progress !== undefined) {
+  if (data.title || data.author !== undefined || data.authors !== undefined || data.hidden !== undefined || touchedMeta || data.pinned !== undefined || data.readStatus !== undefined || data.progress !== undefined) {
     db.update(libraryBooks).set({ updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
   }
   // Card-local fields stay editable on a B whose source died (title, pin,
   // state): the card is retained by design, only its content reads are
   // blocked. skipSourceCheck keeps the write-then-throw split from turning an
   // applied edit into a NOT_FOUND.
-  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true }))
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true, showHidden: true }))
 }
 
 export async function updateBookCover(userId: string, bookId: string, file: File) {
@@ -2004,14 +2061,14 @@ export async function updateBookCover(userId: string, bookId: string, file: File
       db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
     }
   }
-  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true }))
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true, showHidden: true }))
 }
 
 export async function getBookCover(userId: string | null, bookId: string): Promise<{ coverKey: string } | null> {
   const db = getDb()
   // Deleted rows stay cover-readable on purpose: the trash list renders
   // covers (greyed out). Chapters/content/epub stay active-gated.
-  const book = await getBook(userId, bookId)
+  const book = await getBook(userId, bookId, { showHidden: true })
   const storage = getStorage()
   if (book.coverKey && await storage.exists(book.coverKey)) return { coverKey: book.coverKey }
   if (book.format !== 'epub' || book.meta?.coverSuppressed === true) return null
@@ -2118,7 +2175,7 @@ export async function removeBookCover(userId: string, bookId: string) {
       db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
     }
   }
-  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true }))
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true, showHidden: true }))
 }
 
 export async function resetBookMetadata(userId: string, bookId: string, opts?: { normalizeTitle?: boolean }) {
@@ -2127,7 +2184,7 @@ export async function resetBookMetadata(userId: string, bookId: string, opts?: {
   // city's own revision.
   const { libraryBookId, kind } = resolveLibraryBook(userId, bookId)
   assertMutableContent(kind)
-  const book = await getBook(userId, bookId)
+  const book = await getBook(userId, bookId, { showHidden: true })
   const storage = getStorage()
   const parser = getParser(book.filePath, '')
   if (!parser) throw new AppError('UNSUPPORTED_FORMAT')
@@ -2150,13 +2207,18 @@ export async function resetBookMetadata(userId: string, bookId: string, opts?: {
   if (!author && derived?.author) {
     author = derived.author
   }
+  const resetAuthors = normalizeAuthors({
+    authors: parsed.meta.authors?.length ? parsed.meta.authors : undefined,
+    author,
+  })
   const now = Date.now()
   db.update(libraryBooks).set({
     title: title || book.title,
-    author,
+    author: resetAuthors.author,
+    authors: resetAuthors.authors,
     updatedAt: now,
   }).where(eq(libraryBooks.id, libraryBookId)).run()
-  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true }))
+  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, showHidden: true }))
 }
 
 export async function trashBook(userId: string, bookId: string) {
@@ -2300,7 +2362,7 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
   // Removing your own card never requires the source to still be readable:
   // an unreadable B (unlisted source, lost membership, deleted library) is
   // exactly the card you most need to remove. The route discards this value.
-  const book = await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true })
+  const book = await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true, showHidden: true })
   const { libraryBookId } = resolveLibraryBook(userId, bookId)
 
   // Legacy rows mirror the old delete path; the tables themselves freeze.

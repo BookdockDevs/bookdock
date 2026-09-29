@@ -18,6 +18,16 @@ export function formatDate(ts: number): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+/**
+ * Single-line author display for list rows: the full list joined, falling
+ * back to the first-author mirror for rows that predate the authors column.
+ */
+export function formatAuthorList(authors: string[] | undefined, author: string): string {
+  const list = (authors ?? []).map((name) => name.trim()).filter(Boolean)
+  if (list.length > 0) return list.join('、')
+  return author
+}
+
 export function blendColors(hex1: string, hex2: string, ratio: number): string {
   const r1 = Number.parseInt(hex1.slice(1, 3), 16)
   const g1 = Number.parseInt(hex1.slice(3, 5), 16)

@@ -202,6 +202,18 @@ describe('epub metadata extraction', () => {
     expect(parsed.meta.bookmeta?.seriesIndex).toBe(2.2)
   })
 
+  it('collects every author-role creator into the author list', async () => {
+    const buffer = await buildEpub(`
+    <dc:title>合著</dc:title>
+    <dc:creator opf:role="aut">甲</dc:creator>
+    <dc:creator opf:role="aut">乙</dc:creator>
+    <dc:creator opf:role="trl">译者</dc:creator>`)
+
+    const parsed = await parseEpubBuffer(buffer)
+    expect(parsed.meta.authors).toEqual(['甲', '乙'])
+    expect(parsed.meta.author).toBe('甲')
+  })
+
   it('keeps OPF refinement and contributor metadata', async () => {
     const buffer = await buildEpub(`
     <dc:title id="main" opf:file-as="Main title">主标题</dc:title>

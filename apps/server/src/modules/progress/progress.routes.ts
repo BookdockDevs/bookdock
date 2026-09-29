@@ -10,7 +10,7 @@ progressRoutes.get('/:bookId', async (c) => {
     return c.json({ data: null })
   }
   const bookId = c.req.param('bookId')
-  const progress = await getProgress(user.id, bookId)
+  const progress = await getProgress(user.id, bookId, c.req.query('showHidden') === '1')
   return c.json({ data: progress })
 })
 
@@ -22,7 +22,7 @@ progressRoutes.put('/:bookId', async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  const progress = await upsertProgress(user.id, bookId, parsed.data)
+  const progress = await upsertProgress(user.id, bookId, parsed.data, c.req.query('showHidden') === '1')
   return c.json({ data: progress })
 })
 

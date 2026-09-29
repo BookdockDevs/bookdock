@@ -13,10 +13,12 @@ describe('foliate paginator renderer contract', () => {
   let snapWheelStep: typeof import('../../public/foliate-js/paginator.js').snapWheelStep
   let resolvePaginatedColumnCount: typeof import('../../public/foliate-js/paginator.js').resolvePaginatedColumnCount
   let getVisibleRange: typeof import('../../public/foliate-js/paginator.js').getVisibleRange
+  let paintBookBackground: typeof import('../../public/foliate-js/paginator.js').paintBookBackground
+  let syncDocumentBackgroundForFlow: typeof import('../../public/foliate-js/paginator.js').syncDocumentBackgroundForFlow
 
   beforeAll(async () => {
     vi.stubGlobal('ResizeObserver', ResizeObserverStub)
-    ;({ Paginator, getDocumentBackground, continuousScrollTrimBefore, snapWheelStep, resolvePaginatedColumnCount, getVisibleRange } = await import('../../public/foliate-js/paginator.js'))
+    ;({ Paginator, getDocumentBackground, continuousScrollTrimBefore, snapWheelStep, resolvePaginatedColumnCount, getVisibleRange, paintBookBackground, syncDocumentBackgroundForFlow } = await import('../../public/foliate-js/paginator.js'))
   })
 
   it('supports preload and continuous-scroll controls', () => {
@@ -88,6 +90,35 @@ describe('foliate paginator renderer contract', () => {
     doc.defaultView.getComputedStyle = vi.fn(element => element === doc.body ? bodyStyle : rootStyle)
 
     expect(getDocumentBackground(doc)).toContain('rgb(12, 34, 56)')
+  })
+
+  it('paints book backgrounds as a page fill instead of a tiling spread', () => {
+    const el = document.createElement('div')
+    paintBookBackground(el, 'rgb(20, 20, 20) url(bg.jpg) repeat scroll 0% 0%')
+
+    expect(el.style.background).toContain('bg.jpg')
+    expect(el.style.backgroundRepeat).toBe('no-repeat')
+    expect(el.style.backgroundPosition).toBe('center center')
+    expect(el.style.backgroundSize).toBe('cover')
+  })
+
+  it('syncs document backgrounds with the active flow', () => {
+    const paginated = { body: document.createElement('body'), documentElement: document.createElement('html') }
+    syncDocumentBackgroundForFlow(paginated as unknown as Document, 'rgb(1, 2, 3) url(bg.jpg)', false, '#fff')
+    expect(paginated.body.style.background).toBe('none')
+    expect(paginated.documentElement.style.backgroundColor).toBe('')
+
+    const scrolled = { body: document.createElement('body'), documentElement: document.createElement('html') }
+    syncDocumentBackgroundForFlow(scrolled as unknown as Document, 'rgb(1, 2, 3) url(bg.jpg)', true, 'rgb(9, 9, 9)')
+    expect(scrolled.body.style.background).toContain('bg.jpg')
+    // The pinned canvas keeps the body background inside the page column
+    // instead of propagating it to the full viewport.
+    expect(scrolled.documentElement.style.backgroundColor).toBe('rgb(9, 9, 9)')
+
+    const transparent = { body: document.createElement('body'), documentElement: document.createElement('html') }
+    syncDocumentBackgroundForFlow(transparent as unknown as Document, '', true, 'rgb(9, 9, 9)')
+    expect(transparent.body.style.background).toBe('')
+    expect(transparent.documentElement.style.backgroundColor).toBe('rgb(9, 9, 9)')
   })
 
   it('bounds the continuous-scroll window without trimming the active section', () => {

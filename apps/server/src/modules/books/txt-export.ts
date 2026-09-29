@@ -89,8 +89,8 @@ export async function extractReplacedChapters(
 }
 
 // Ownership + TXT-only gate shared by both export variants.
-async function getExportableTxtBook(userId: string, bookId: string) {
-  const book = await getActiveBook(userId, bookId)
+async function getExportableTxtBook(userId: string, bookId: string, opts?: { showHidden?: boolean }) {
+  const book = await getActiveBook(userId, bookId, opts)
   if (book.format !== 'txt') {
     throw new AppError('UNSUPPORTED_FORMAT', 'Exports are only supported for TXT books')
   }
@@ -99,8 +99,8 @@ async function getExportableTxtBook(userId: string, bookId: string) {
 
 // Load the rules and read the stored EPUB for an export. `plain` skips the
 // rule query entirely — the 原文 variant never applies replacements.
-async function loadExportInput(userId: string, bookId: string, plain: boolean) {
-  const book = await getExportableTxtBook(userId, bookId)
+async function loadExportInput(userId: string, bookId: string, plain: boolean, opts?: { showHidden?: boolean }) {
+  const book = await getExportableTxtBook(userId, bookId, opts)
   const rules: ExportRule[] = plain ? [] : await loadEffectiveBookReplacementRules(userId, bookId)
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) {
@@ -122,8 +122,9 @@ export async function exportTxtBook(
   userId: string,
   bookId: string,
   plain = false,
+  opts?: { showHidden?: boolean },
 ): Promise<{ text: string; title: string; edited: boolean }> {
-  const { book, rules, buffer } = await loadExportInput(userId, bookId, plain)
+  const { book, rules, buffer } = await loadExportInput(userId, bookId, plain, opts)
   const chapters = await extractReplacedChapters(buffer, rules)
   return { text: assembleTxt(chapters), title: book.title, edited: rules.some((r) => r.effectiveEnabled) }
 }
@@ -138,8 +139,9 @@ export async function exportEpubBook(
   userId: string,
   bookId: string,
   plain = false,
+  opts?: { showHidden?: boolean },
 ): Promise<{ buffer: Buffer; title: string; edited: boolean }> {
-  const { book, rules, buffer } = await loadExportInput(userId, bookId, plain)
+  const { book, rules, buffer } = await loadExportInput(userId, bookId, plain, opts)
   const chapters = await extractReplacedChapters(buffer, rules)
 
   // A missing or unreadable cover never fails the export (silent degradation).

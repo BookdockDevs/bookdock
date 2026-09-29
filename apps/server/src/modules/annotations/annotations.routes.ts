@@ -27,7 +27,7 @@ annotationRoutes.post('/book/:bookId', async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  const annotation = await createAnnotation(user.id, bookId, parsed.data)
+  const annotation = await createAnnotation(user.id, bookId, parsed.data, c.req.query('showHidden') === '1')
   return c.json({ data: annotation }, 201)
 })
 

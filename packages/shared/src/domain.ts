@@ -14,7 +14,10 @@ export interface Book {
   id: string
   userId: string
   title: string
+  /** Derived first-author mirror of `authors` (`authors[0] ?? ''`); queries use this. */
   author: string
+  /** Full author list, max 10. */
+  authors: string[]
   format: BookFormat
   filePath: string
   coverKey: string | null

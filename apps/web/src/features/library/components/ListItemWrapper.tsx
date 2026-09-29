@@ -5,6 +5,7 @@ import type { BookListItem } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
+import { formatAuthorList } from '@/lib/utils'
 
 import type { BookDragPayload } from '../dnd'
 import BookCover from './BookCover'
@@ -147,7 +148,7 @@ function ListItemContent({ book }: { book: BookListItem }) {
         )}
       </div>
       {book.author && (
-        <div className="mt-0.5 truncate text-xs text-stone-500 dark:text-stone-400">{book.author}</div>
+        <div className="mt-0.5 truncate text-xs text-stone-500 dark:text-stone-400">{formatAuthorList(book.authors, book.author)}</div>
       )}
     </div>
   )

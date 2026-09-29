@@ -115,6 +115,8 @@ interface UiState {
   textAlignJustify: boolean
   overrideBookFont: boolean
   overrideBookLayout: boolean
+  /** Private-vault reveal (device-local, never synced): hidden rows included. */
+  revealHidden: boolean
   readingMode: ReadingMode
   showHeader: boolean
   showFooter: boolean
@@ -257,6 +259,7 @@ interface UiState {
   setTextAlignJustify: (v: boolean) => void
   setOverrideBookFont: (v: boolean) => void
   setOverrideBookLayout: (v: boolean) => void
+  setRevealHidden: (v: boolean) => void
   setReadingMode: (m: ReadingMode) => void
   setPageColumns: (n: number) => void
   setColumnGap: (n: number) => void
@@ -514,6 +517,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   textAlignJustify: getInitialBoolean('bd-text-align-justify', false),
   overrideBookFont: getInitialBoolean('bd-override-book-font', false),
   overrideBookLayout: getInitialBoolean('bd-override-book-layout', false),
+  revealHidden: getInitialBoolean('bd-reveal-hidden', false),
   readingMode: initialReadingMode,
   showHeader: getInitialBoolean('bd-show-header', true),
   showFooter: getInitialBoolean('bd-show-footer', true),
@@ -884,6 +888,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setOverrideBookLayout: (overrideBookLayout) => {
     setStorage('bd-override-book-layout', String(overrideBookLayout))
     set({ overrideBookLayout })
+  },
+  setRevealHidden: (revealHidden) => {
+    setStorage('bd-reveal-hidden', String(revealHidden))
+    set({ revealHidden })
   },
   setReadingMode: (readingMode) => {
     const s = get()

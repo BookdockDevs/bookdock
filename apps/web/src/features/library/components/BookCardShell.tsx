@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { cn } from '@/lib/utils'
+import { cn, formatAuthorList } from '@/lib/utils'
 
 import type { GridCardField } from '@/stores/ui.store'
 
@@ -84,7 +84,8 @@ export default function BookCardShell({
 
   const activeFields = gridCardFields ?? (coverText ? DEFAULT_CARD_FIELDS : [])
   const showTitle = activeFields.includes('title')
-  const showAuthor = activeFields.includes('author') && Boolean(row.author)
+  const authorText = formatAuthorList(row.authors, row.author ?? '')
+  const showAuthor = activeFields.includes('author') && Boolean(authorText)
   const showProgress = activeFields.includes('progress') && !trashCard && row.progress != null && row.progress > 0
   const progressText = showProgress ? `${Math.min(100, Math.round(row.progress!))}%` : null
   const hasSubtitle = showAuthor || Boolean(progressText)
@@ -141,7 +142,7 @@ export default function BookCardShell({
           )}
           {hasSubtitle && (
             <p className="mt-0.5 flex items-center truncate text-xs text-stone-500 dark:text-stone-400">
-              {showAuthor && <span className="truncate">{row.author}</span>}
+              {showAuthor && <span className="truncate">{authorText}</span>}
               {showAuthor && progressText && <span className="mx-1 shrink-0 text-stone-300 dark:text-stone-600">·</span>}
               {progressText && (
                 <span className="shrink-0 font-medium font-mono text-[11px] text-stone-500 dark:text-stone-400">

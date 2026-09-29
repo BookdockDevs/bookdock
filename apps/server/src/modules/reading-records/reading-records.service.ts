@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNotNull, isNull, lte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, notInArray, or, sql, type SQL } from 'drizzle-orm'
 
 import type {
   ReadingDetailItem,
@@ -19,15 +19,46 @@ import { createId } from '../../lib/id'
 import { unionLength } from '../../lib/intervals'
 import { mergeProgressInterval, readProgressFile } from '../../lib/progress-file'
 import { assertReadableBook } from '../books/books.service'
+import { loadLibraryHiddenTaxonomy } from '../libraries/library-query'
 import { AppError } from '../../middleware/error'
+
+/**
+ * Version ids hidden from the owner's default stats views (private vault).
+ * Aggregates exclude these rows unless the caller reveals them; per-book
+ * endpoints keep their own assertReadableBook flag instead.
+ */
+function hiddenBookVersionIds(db: ReturnType<typeof getDb>, userId: string): string[] {
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  if (!library) return []
+  const taxonomy = loadLibraryHiddenTaxonomy(db, library.id)
+  const hiddenWorkConditions: SQL[] = [eq(libraryBooks.hidden, true)]
+  if (taxonomy.hiddenCategoryIds.length > 0) {
+    hiddenWorkConditions.push(inArray(libraryBooks.categoryId, taxonomy.hiddenCategoryIds))
+  }
+  if (taxonomy.hiddenTagIds.length > 0) {
+    hiddenWorkConditions.push(sql`EXISTS (
+      SELECT 1 FROM ${libraryBookTags} AS stats_hidden_tag
+      INNER JOIN ${libraryTags} AS stats_hidden_name ON stats_hidden_name.id = stats_hidden_tag.tag_id
+      WHERE stats_hidden_tag.library_book_id = ${libraryBooks.id}
+        AND stats_hidden_tag.tag_id IN ${taxonomy.hiddenTagIds}
+    )`)
+  }
+  const works = db.select({ id: libraryBooks.id }).from(libraryBooks)
+    .where(and(eq(libraryBooks.libraryId, library.id), or(...hiddenWorkConditions))).all()
+  if (works.length === 0) return []
+  return db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+    .where(inArray(libraryBookVersions.libraryBookId, works.map((w) => w.id)))
+    .all().map((row) => row.bookVersionId)
+}
 
 function versionIdIfMigrated(bookId: string): string | null {
   const db = getDb()
   return db.select({ id: bookVersions.id }).from(bookVersions).where(eq(bookVersions.id, bookId)).get()?.id ?? null
 }
 
-export async function addReadingTime(userId: string, body: ReadingRecordCreateReq) {
-  await assertReadableBook(userId, body.bookId)
+export async function addReadingTime(userId: string, body: ReadingRecordCreateReq, showHidden = false) {
+  await assertReadableBook(userId, body.bookId, showHidden)
   const db = getDb()
   // New rows bind the version when the book already migrated; history keeps
   // flowing through bookId either way (0.3 id reuse).
@@ -103,17 +134,19 @@ function weekStart(date: string): string {
   return shiftDays(date, -((dow + 6) % 7))
 }
 
-async function computeTotalWordsRead(userId: string): Promise<number> {
+async function computeTotalWordsRead(userId: string, showHidden = false): Promise<number> {
   const db = getDb()
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
   if (!library) return 0
+  const skips = showHidden ? new Set<string>() : new Set(hiddenBookVersionIds(db, userId))
   const versions = db.select({ versionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
     .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
     .where(and(eq(libraryBookVersions.libraryId, library.id), isNull(libraryBooks.deletedAt)))
     .all()
   let total = 0
   for (const { versionId } of versions) {
+    if (skips.has(versionId)) continue
     const revision = db.select({ wordCount: contentRevisions.wordCount }).from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, versionId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
     const wordCount = revision?.wordCount
@@ -125,18 +158,20 @@ async function computeTotalWordsRead(userId: string): Promise<number> {
   return Math.round(total)
 }
 
-export async function getSummary(userId: string, today: string): Promise<ReadingRecordSummaryRes> {
+export async function getSummary(userId: string, today: string, showHidden = false): Promise<ReadingRecordSummaryRes> {
   const db = getDb()
+  const hiddenIds = showHidden ? [] : hiddenBookVersionIds(db, userId)
+  const visibleRecords = hiddenIds.length > 0 ? notInArray(readingRecords.bookId, hiddenIds) : undefined
   const totals = db.select({
     totalSeconds: sql<number>`coalesce(sum(${readingRecords.durationSeconds}), 0)`,
     totalBooks: sql<number>`count(distinct ${readingRecords.bookId})`,
     totalDays: sql<number>`count(distinct ${readingRecords.date})`,
-  }).from(readingRecords).where(eq(readingRecords.userId, userId)).get()!
+  }).from(readingRecords).where(and(eq(readingRecords.userId, userId), visibleRecords)).get()!
   const todayRow = db.select({
     todaySeconds: sql<number>`coalesce(sum(${readingRecords.durationSeconds}), 0)`,
-  }).from(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.date, today))).get()!
+  }).from(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.date, today), visibleRecords)).get()!
   const dates = db.selectDistinct({ date: readingRecords.date }).from(readingRecords)
-    .where(eq(readingRecords.userId, userId)).orderBy(readingRecords.date).all()
+    .where(and(eq(readingRecords.userId, userId), visibleRecords)).orderBy(readingRecords.date).all()
     .map((r) => r.date)
   const streak = computeStreak(dates, today)
 
@@ -150,7 +185,7 @@ export async function getSummary(userId: string, today: string): Promise<Reading
     date: readingRecords.date,
     durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
   }).from(readingRecords)
-    .where(and(eq(readingRecords.userId, userId), gte(readingRecords.date, prevMonthStart)))
+    .where(and(eq(readingRecords.userId, userId), gte(readingRecords.date, prevMonthStart), visibleRecords))
     .groupBy(readingRecords.date)
     .all()
   let weekSeconds = 0
@@ -164,7 +199,7 @@ export async function getSummary(userId: string, today: string): Promise<Reading
     else if (row.date >= prevWeekStart) prevWeekSeconds += row.durationSeconds
   }
 
-  const totalWordsRead = await computeTotalWordsRead(userId)
+  const totalWordsRead = await computeTotalWordsRead(userId, showHidden)
   return {
     ...totals,
     todaySeconds: todayRow.todaySeconds,
@@ -178,29 +213,31 @@ export async function getSummary(userId: string, today: string): Promise<Reading
   }
 }
 
-function rangeConditions(userId: string, range: { from?: string; to?: string }) {
+function rangeConditions(userId: string, range: { from?: string; to?: string }, hiddenIds: string[] = []) {
   return and(
     eq(readingRecords.userId, userId),
     range.from ? gte(readingRecords.date, range.from) : undefined,
     range.to ? lte(readingRecords.date, range.to) : undefined,
+    hiddenIds.length > 0 ? notInArray(readingRecords.bookId, hiddenIds) : undefined,
   )
 }
 
-export async function getDaily(userId: string, range: { from?: string; to?: string }): Promise<ReadingRecordDailyItem[]> {
+export async function getDaily(userId: string, range: { from?: string; to?: string }, showHidden = false): Promise<ReadingRecordDailyItem[]> {
   const db = getDb()
   return db.select({
     date: readingRecords.date,
     durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
   }).from(readingRecords)
-    .where(rangeConditions(userId, range))
+    .where(rangeConditions(userId, range, showHidden ? [] : hiddenBookVersionIds(db, userId)))
     .groupBy(readingRecords.date)
     .orderBy(readingRecords.date)
     .all()
 }
 
 /** Hour-of-day distribution from session detail rows; tzOffset is minutes behind UTC (Date#getTimezoneOffset). */
-export async function getHourly(userId: string, range: { from?: string; to?: string; bookId?: string }, tzOffset: number): Promise<ReadingRecordHourlyItem[]> {
+export async function getHourly(userId: string, range: { from?: string; to?: string; bookId?: string }, tzOffset: number, showHidden = false): Promise<ReadingRecordHourlyItem[]> {
   const db = getDb()
+  const hiddenIds = showHidden ? [] : hiddenBookVersionIds(db, userId)
   const hour = sql<number>`cast(strftime('%H', ${readingSessions.startedAt} / 1000 - ${tzOffset} * 60, 'unixepoch') as integer)`
   return db.select({
     hour,
@@ -213,13 +250,14 @@ export async function getHourly(userId: string, range: { from?: string; to?: str
       range.from ? gte(readingSessions.date, range.from) : undefined,
       range.to ? lte(readingSessions.date, range.to) : undefined,
       range.bookId ? eq(readingSessions.bookId, range.bookId) : undefined,
+      hiddenIds.length > 0 ? notInArray(readingSessions.bookId, hiddenIds) : undefined,
     ))
     .groupBy(hour)
     .orderBy(hour)
     .all()
 }
 
-export async function getByBook(userId: string, range: { from?: string; to?: string }): Promise<ReadingRecordBookItem[]> {
+export async function getByBook(userId: string, range: { from?: string; to?: string }, showHidden = false): Promise<ReadingRecordBookItem[]> {
   const db = getDb()
   return db.select({
     bookId: readingRecords.bookId,
@@ -235,14 +273,14 @@ export async function getByBook(userId: string, range: { from?: string; to?: str
     .leftJoin(bookStates, and(eq(bookStates.bookVersionId, readingRecords.bookId), eq(bookStates.userId, userId)))
     .leftJoin(libraryBookVersions, eq(libraryBookVersions.bookVersionId, readingRecords.bookId))
     .leftJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
-    .where(rangeConditions(userId, range))
+    .where(rangeConditions(userId, range, showHidden ? [] : hiddenBookVersionIds(db, userId)))
     .groupBy(readingRecords.bookId)
     .orderBy(desc(sql`sum(${readingRecords.durationSeconds})`))
     .all()
 }
 
-export async function getBookRecords(userId: string, bookId: string): Promise<ReadingRecordBookDetailRes> {
-  await assertReadableBook(userId, bookId)
+export async function getBookRecords(userId: string, bookId: string, showHidden = false): Promise<ReadingRecordBookDetailRes> {
+  await assertReadableBook(userId, bookId, showHidden)
   const db = getDb()
   const total = db.select({
     totalSeconds: sql<number>`coalesce(sum(${readingRecords.durationSeconds}), 0)`,
@@ -326,8 +364,8 @@ export function getSessionOrThrow(userId: string, sessionId: string): SessionRow
   return row
 }
 
-export async function listSessions(userId: string, bookId: string, limit: number, offset: number): Promise<ReadingSessionItem[]> {
-  await assertReadableBook(userId, bookId)
+export async function listSessions(userId: string, bookId: string, limit: number, offset: number, showHidden = false): Promise<ReadingSessionItem[]> {
+  await assertReadableBook(userId, bookId, showHidden)
   const db = getDb()
   // Manual sessions only: auto-mode blocks are heuristic fragments without
   // exact bounds and are immutable — they never appear in the session list.
@@ -396,8 +434,8 @@ export async function deleteSession(userId: string, sessionId: string): Promise<
  * retroactive entries never double-count; days fully covered by manual
  * sessions produce no auto row.
  */
-export async function getBookDetail(userId: string, bookId: string, limit: number, offset: number): Promise<ReadingDetailItem[]> {
-  await assertReadableBook(userId, bookId)
+export async function getBookDetail(userId: string, bookId: string, limit: number, offset: number, showHidden = false): Promise<ReadingDetailItem[]> {
+  await assertReadableBook(userId, bookId, showHidden)
   const db = getDb()
   const manualRows = db.select().from(readingSessions)
     .where(and(
@@ -430,7 +468,7 @@ export async function getBookDetail(userId: string, bookId: string, limit: numbe
 }
 
 /** Reading time grouped by tag; untagged books are excluded (no 'uncategorized' bucket) */
-export async function getByTag(userId: string, range: { from?: string; to?: string }): Promise<ReadingRecordTagItem[]> {
+export async function getByTag(userId: string, range: { from?: string; to?: string }, showHidden = false): Promise<ReadingRecordTagItem[]> {
   const db = getDb()
   return db.select({
     tagId: libraryBookTags.tagId,
@@ -440,7 +478,7 @@ export async function getByTag(userId: string, range: { from?: string; to?: stri
     .innerJoin(libraryBookVersions, eq(readingRecords.bookId, libraryBookVersions.bookVersionId))
     .innerJoin(libraryBookTags, eq(libraryBookTags.libraryBookId, libraryBookVersions.libraryBookId))
     .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
-    .where(rangeConditions(userId, range))
+    .where(rangeConditions(userId, range, showHidden ? [] : hiddenBookVersionIds(db, userId)))
     .groupBy(libraryBookTags.tagId, libraryTags.name)
     .orderBy(desc(sql`sum(${readingRecords.durationSeconds})`))
     .all()

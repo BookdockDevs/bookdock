@@ -125,9 +125,14 @@ export interface LibraryBook {
   /** Null = uncategorized; a real state, not a special category. */
   categoryId: string | null
   title: string
+  /** Derived first-author mirror of `authors`; sort/filter/search use this. */
   author: string
+  /** Full author list, max 10. */
+  authors: string[]
   description: string
   coverKey: string | null
+  /** Work-level hide (see Hidden boundary in architecture.md). */
+  hidden: boolean
   createdAt: number
   updatedAt: number
 }
@@ -144,6 +149,8 @@ export interface LibraryBookVersion {
   /** Null = inherit the LibraryBook default; never a copied value. */
   title: string | null
   author: string | null
+  /** Full author list override (null = inherit). */
+  authors: string[] | null
   description: string | null
   coverKey: string | null
   /** B only: the single source city/version this reference is bound to. */
@@ -181,11 +188,15 @@ export interface CatalogVersion {
   /** Null when the version inherits the work defaults. */
   title: string | null
   author: string | null
+  /** Full author list override (null = inherit). */
+  authors: string[] | null
   description: string | null
   coverKey: string | null
   effective: {
     title: string
     author: string
+    /** Resolved full author list. */
+    authors: string[]
     description: string
     coverKey: string | null
     /** Stable key used for the automatic placeholder-cover palette. */
@@ -224,8 +235,12 @@ export interface CatalogBook {
   categoryId: string | null
   title: string
   author: string
+  /** Full author list, max 10. */
+  authors: string[]
   description: string
   coverKey: string | null
+  /** Work-level hide; managers see hidden works badged, members never see them. */
+  hidden: boolean
   /**
    * The work's own tags in the library's taxonomy. Carries the name, not just
    * the id, so a catalog card can render them without a second lookup.
@@ -244,6 +259,24 @@ export interface CatalogListRes {
 }
 
 /** Multipart placement fields; everything is optional and library-scoped. */
+/** Full author list for uploads and edits: trimmed, 1–100 chars each, max 10. */
+export const authorListSchema = z.array(z.string().trim().min(1).max(100)).max(10)
+
+export const MAX_AUTHORS = 10
+
+/**
+ * Author normalization for writes (multi-author): `authors` is the source of
+ * truth, `author` mirrors `authors[0] ?? ''` as a derived-at-write scalar so
+ * sort/filter/search keep working on one column. Either side may be omitted:
+ * an explicit `authors` wins, otherwise a lone `author` becomes one element.
+ */
+export function normalizeAuthors(input?: { author?: string | null; authors?: string[] | null }): { author: string; authors: string[] } {
+  const authors = [...new Set((input?.authors ?? []).map((name) => name.trim()).filter(Boolean))].slice(0, MAX_AUTHORS)
+  if (authors.length > 0) return { author: authors[0]!, authors }
+  const single = (input?.author ?? '').trim()
+  return single ? { author: single, authors: [single] } : { author: '', authors: [] }
+}
+
 export const catalogUploadSchema = z.object({
   /** Existing work to attach this version to (5.2); omit to create one. */
   libraryBookId: z.string().min(1).max(128).optional(),
@@ -255,6 +288,7 @@ export const catalogUploadSchema = z.object({
   /** Work defaults; omitted fields fall back to the parsed file metadata. */
   title: z.string().trim().min(1).max(300).optional(),
   author: z.string().trim().max(300).optional(),
+  authors: authorListSchema.optional(),
 })
 
 export type CatalogUploadReq = z.infer<typeof catalogUploadSchema>
@@ -262,10 +296,13 @@ export type CatalogUploadReq = z.infer<typeof catalogUploadSchema>
 export const catalogBookUpdateSchema = z.object({
   title: z.string().trim().min(1).max(300).optional(),
   author: z.string().trim().max(300).optional(),
+  authors: authorListSchema.optional(),
   description: z.string().max(4000).optional(),
   categoryId: z.string().min(1).max(128).nullable().optional(),
   /** Replaces the work's whole tag set; every id must belong to this library. */
   tagIds: z.array(z.string().min(1).max(128)).optional(),
+  /** Work-level hide; manager-only like every other catalog write. */
+  hidden: z.boolean().optional(),
 })
 
 export type CatalogBookUpdateReq = z.infer<typeof catalogBookUpdateSchema>
@@ -275,6 +312,7 @@ export const catalogVersionUpdateSchema = z.object({
   name: z.string().trim().max(120).optional(),
   title: z.string().trim().min(1).max(300).nullable().optional(),
   author: z.string().trim().max(300).nullable().optional(),
+  authors: authorListSchema.nullable().optional(),
   description: z.string().max(4000).nullable().optional(),
   status: libraryVersionStatusSchema.optional(),
   /** Library-wide sort-first pin; manager-only like every other version write. */
@@ -329,6 +367,8 @@ export interface Category {
   parentId: string | null
   sortOrder: number
   pinned: boolean
+  /** Persistent taxonomy hide: hides the subtree and every work under it. */
+  hidden: boolean
   createdAt: number
   updatedAt: number
   /** Works filed under this category, trashed works excluded. */
@@ -342,6 +382,8 @@ export interface LibraryTag {
   name: string
   sortOrder: number
   pinned: boolean
+  /** Persistent taxonomy hide: hides every work carrying the tag. */
+  hidden: boolean
   createdAt: number
   updatedAt: number
   /** Works carrying this tag, trashed works excluded. */

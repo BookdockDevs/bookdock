@@ -3,11 +3,12 @@ import { useQuery } from '@tanstack/react-query'
 import type { ChapterListRes } from '@bookdock/shared'
 
 import { apiGet } from '@/api/client'
+import { withReveal } from '@/lib/reveal-hidden'
 
 export function useBookChapters(bookId: string, enabled = true) {
   return useQuery({
     queryKey: ['chapters', bookId],
-    queryFn: () => apiGet<ChapterListRes>(`/books/${bookId}/chapters`),
+    queryFn: () => apiGet<ChapterListRes>(withReveal(`/books/${bookId}/chapters`)),
     enabled: enabled && Boolean(bookId),
   })
 }

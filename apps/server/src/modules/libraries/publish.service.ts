@@ -82,6 +82,7 @@ export async function publishPrivateBook(
 
   const sourceTitle = sourceLink.title ?? sourceWork.title
   const sourceAuthor = sourceLink.author ?? sourceWork.author
+  const sourceAuthors = sourceLink.authors ?? sourceWork.authors ?? []
   const sourceDescription = sourceLink.description ?? sourceWork.description
   const sourceCoverKey = sourceLink.coverKey ?? sourceWork.coverKey
   const sourceMeta = (sourceRevision.meta ?? {}) as Record<string, unknown>
@@ -156,6 +157,7 @@ export async function publishPrivateBook(
       categoryId: opts.categoryId ?? null,
       title: sourceTitle,
       author: sourceAuthor,
+      authors: sourceAuthors,
       description: sourceDescription,
       coverKey: sourceCoverKey,
       createdAt: now,

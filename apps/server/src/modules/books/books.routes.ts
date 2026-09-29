@@ -47,6 +47,12 @@ function safeFileBase(title: string): string {
   return title.replace(/[^\w\u3000-\u303f\uff00-\uffef\u4e00-\u9fa5-]/g, '_')
 }
 
+// Private-vault reveal: the owner passes ?showHidden=1 to see hidden rows;
+// guests (requestUserId null) can never reveal.
+function requestShowHidden(c: Context): boolean {
+  return requestUserId(c) !== null && c.req.query('showHidden') === '1'
+}
+
 async function parseAppendRequest(c: Context): Promise<{ text: string; startOffset?: number }> {
   const maxBytes = effectiveUploadMaxBytes()
   const contentType = c.req.header('content-type') ?? ''
@@ -105,7 +111,7 @@ booksRoutes.get('/', async (c) => {
     await purgeExpiredTrash(user.id, trashSettings.autoCleanDays)
     await purgeTrashToCapacity(user.id, trashSettings.maxTrashBytes ?? 0)
   }
-  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series)
+  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series, requestShowHidden(c))
   return c.json(result)
 })
 
@@ -164,7 +170,7 @@ booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
   if ((c.get('guest') || user.role === 'guest') && c.req.query('reader') !== '1') {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
   }
-  const book = await getActiveBook(requestUserId(c), id)
+  const book = await getActiveBook(requestUserId(c), id, { showHidden: requestShowHidden(c) })
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) {
     throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
@@ -213,8 +219,8 @@ booksRoutes.get('/:id/content', async (c) => {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
   }
   const id = c.req.param('id')
-  await getActiveBook(user.id, id)
-  const content = await getBookContent(user.id, id)
+  await getActiveBook(user.id, id, { showHidden: requestShowHidden(c) })
+  const content = await getBookContent(user.id, id, { showHidden: requestShowHidden(c) })
   return c.newResponse(content)
 })
 
@@ -224,7 +230,7 @@ booksRoutes.get('/:id/epub', async (c) => {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
   }
   const id = c.req.param('id')
-  const book = await getActiveBook(user.id, id)
+  const book = await getActiveBook(user.id, id, { showHidden: requestShowHidden(c) })
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) {
     throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
@@ -249,7 +255,7 @@ booksRoutes.get('/:id/export.txt', async (c) => {
   }
   const id = c.req.param('id')
   const plain = c.req.query('plain') === '1'
-  const { text, title, edited } = await exportTxtBook(user.id, id, plain)
+  const { text, title, edited } = await exportTxtBook(user.id, id, plain, { showHidden: requestShowHidden(c) })
   const fileName = plain || !edited ? `${safeFileBase(title)}.txt` : `${safeFileBase(title)}.校订版.txt`
   return c.newResponse(new TextEncoder().encode(text), 200, {
     'Content-Type': 'text/plain; charset=utf-8',
@@ -270,7 +276,7 @@ booksRoutes.get('/:id/export.epub', async (c) => {
   }
   const id = c.req.param('id')
   const plain = c.req.query('plain') === '1'
-  const { buffer, title, edited } = await exportEpubBook(user.id, id, plain)
+  const { buffer, title, edited } = await exportEpubBook(user.id, id, plain, { showHidden: requestShowHidden(c) })
   const fileName = plain || !edited ? `${safeFileBase(title)}.epub` : `${safeFileBase(title)}-校订版.epub`
   return c.newResponse(new Uint8Array(buffer), 200, {
     'Content-Type': 'application/epub+zip',
@@ -281,15 +287,15 @@ booksRoutes.get('/:id/export.epub', async (c) => {
 
 booksRoutes.get('/:id', async (c) => {
   const id = c.req.param('id')
-  const book = await getActiveBook(requestUserId(c), id)
+  const book = await getActiveBook(requestUserId(c), id, { showHidden: requestShowHidden(c) })
   return c.json({ data: stripMetaChapters(book) })
 })
 
 booksRoutes.get('/:id/chapters', async (c) => {
   const readerId = requestUserId(c)
   const id = c.req.param('id')
-  await getActiveBook(readerId, id)
-  const chapters = await getBookChapters(readerId, id)
+  await getActiveBook(readerId, id, { showHidden: requestShowHidden(c) })
+  const chapters = await getBookChapters(readerId, id, { showHidden: requestShowHidden(c) })
   return c.json({ data: chapters })
 })
 
@@ -299,7 +305,7 @@ booksRoutes.patch('/:id/reader-settings', async (c) => {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot save reader settings')
   }
   const id = c.req.param('id')
-  await assertReadableBook(user.id, id)
+  await assertReadableBook(user.id, id, requestShowHidden(c))
   const parsed = readerBookSettingsSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid reader settings', parsed.error.flatten())
@@ -354,7 +360,7 @@ booksRoutes.post('/:id/re-toc', async (c) => {
     throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
   await reTocBook(user.id, id, parsed.data.tocRuleId, parsed.data.customPatterns, parsed.data.excludedChapterIds)
-  const book = await getActiveBook(user.id, id)
+  const book = await getActiveBook(user.id, id, { showHidden: true })
   return c.json({ data: stripMetaChapters(book) })
 })
 
@@ -413,7 +419,7 @@ booksRoutes.get('/:id/cover', async (c) => {
     'Cache-Control': 'private, immutable, max-age=31536000',
   }
   if (download) {
-    const book = await getActiveBook(readerId, id)
+    const book = await getActiveBook(readerId, id, { showHidden: requestShowHidden(c) })
     const safeTitle = (book.title || 'cover').replace(/[\\/:*?"<>|]/g, '_').trim()
     const filename = `${safeTitle}-cover.${cover.ext}`
     headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`

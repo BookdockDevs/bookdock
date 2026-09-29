@@ -24,11 +24,13 @@ vi.mock('../features/library/hooks', () => ({
   useRenameShelf: vi.fn(),
   useDeleteShelf: vi.fn(),
   useToggleShelfPin: vi.fn(),
+  useToggleShelfHidden: vi.fn(),
   useReorderShelves: vi.fn(),
   useCreateTag: vi.fn(),
   useRenameTag: vi.fn(),
   useDeleteTag: vi.fn(),
   useToggleTagPin: vi.fn(),
+  useToggleTagHidden: vi.fn(),
   useLibraryCategories: vi.fn(),
   useLibraryTags: vi.fn(),
   useLibraryCatalog: vi.fn(),
@@ -66,11 +68,13 @@ function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1, trashEnabl
   ;(libraryHooks.useRenameShelf as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useDeleteShelf as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
   ;(libraryHooks.useToggleShelfPin as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
+  ;(libraryHooks.useToggleShelfHidden as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useReorderShelves as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useCreateTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useRenameTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useDeleteTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
   ;(libraryHooks.useToggleTagPin as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
+  ;(libraryHooks.useToggleTagHidden as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useUpdateLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useDeleteLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
   ;(libraryHooks.useUpdateLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })

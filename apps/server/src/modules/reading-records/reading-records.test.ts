@@ -163,6 +163,20 @@ describe('reading-records service', () => {
       .rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
   })
 
+  it('excludes hidden books from aggregates unless revealed', async () => {
+    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 60 })
+    await addReadingTime(ownerId, { bookId: book2Id, date: '2026-07-30', durationSeconds: 90 })
+    const work2 = db.select({ id: schema.libraryBooks.id }).from(schema.libraryBooks)
+      .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
+      .where(eq(schema.libraryBookVersions.bookVersionId, book2Id)).get()!
+    db.update(schema.libraryBooks).set({ hidden: true }).where(eq(schema.libraryBooks.id, work2.id)).run()
+
+    expect((await getSummary(ownerId, '2026-07-30')).totalSeconds).toBe(60)
+    expect((await getSummary(ownerId, '2026-07-30', true)).totalSeconds).toBe(150)
+    expect((await getByBook(ownerId, {})).map((b) => b.bookId)).toEqual([bookId])
+    expect((await getByBook(ownerId, {}, true)).map((b) => b.bookId).sort()).toEqual([bookId, book2Id].sort())
+  })
+
   it('summarizes totals, today and streaks', async () => {
     await addReadingTime(ownerId, { bookId, date: '2026-07-29', durationSeconds: 100 })
     await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 200 })

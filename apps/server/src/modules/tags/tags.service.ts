@@ -1,10 +1,11 @@
-import { eq, and, inArray, isNull, sql, asc, ne } from 'drizzle-orm'
+import { eq, and, inArray, isNull, notInArray, sql, asc, ne, type SQL } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import { libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryTags } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
-import { ensurePrivateLibrary, requireLibraryManager, assertLibraryBrowsable } from '../libraries/library-access'
+import { ensurePrivateLibrary, isLibraryManager, requireLibraryManager, assertLibraryBrowsable } from '../libraries/library-access'
+import { hiddenCategoryExclusion, loadLibraryHiddenTaxonomy, workDirectHiddenExclusion } from '../libraries/library-query'
 
 function privateLibraryId(userId: string): string | null {
   const db = getDb()
@@ -16,10 +17,24 @@ function requirePrivateLibrary(userId: string): string {
   return ensurePrivateLibrary(getDb(), userId)
 }
 
-export async function listTags(userId: string) {
+export async function listTags(userId: string, showHidden = false) {
   const db = getDb()
   const libraryId = privateLibraryId(userId)
   if (!libraryId) return []
+  // Private vault: hidden tags stay out unless the owner reveals them.
+  // Counts mirror the book list: works hidden directly or filed under a
+  // hidden category are not counted (the tag itself is visible here, so the
+  // tag dimension cannot hide anything counted under it).
+  const taxonomy = showHidden ? null : loadLibraryHiddenTaxonomy(db, libraryId)
+  const countExtra: SQL[] = []
+  if (taxonomy) {
+    countExtra.push(workDirectHiddenExclusion())
+    const category = hiddenCategoryExclusion(taxonomy.hiddenCategoryIds)
+    if (category) countExtra.push(category)
+  }
+  const tagFilter = taxonomy && taxonomy.hiddenTagIds.length > 0
+    ? notInArray(libraryTags.id, taxonomy.hiddenTagIds)
+    : undefined
   const rows = db
     .select({
       id: libraryTags.id,
@@ -29,12 +44,13 @@ export async function listTags(userId: string) {
       createdAt: libraryTags.createdAt,
       updatedAt: libraryTags.updatedAt,
       pinned: libraryTags.pinned,
+      hidden: libraryTags.hidden,
       bookCount: sql<number>`count(${libraryBooks.id})`,
     })
     .from(libraryTags)
     .leftJoin(libraryBookTags, eq(libraryTags.id, libraryBookTags.tagId))
-    .leftJoin(libraryBooks, and(eq(libraryBooks.id, libraryBookTags.libraryBookId), isNull(libraryBooks.deletedAt)))
-    .where(eq(libraryTags.libraryId, libraryId))
+    .leftJoin(libraryBooks, and(eq(libraryBooks.id, libraryBookTags.libraryBookId), isNull(libraryBooks.deletedAt), ...countExtra))
+    .where(tagFilter ? and(eq(libraryTags.libraryId, libraryId), tagFilter) : eq(libraryTags.libraryId, libraryId))
     .groupBy(libraryTags.id)
     .orderBy(asc(libraryTags.sortOrder), asc(libraryTags.name))
     .all()
@@ -60,8 +76,8 @@ export async function createTag(userId: string, name: string) {
       .where(eq(libraryTags.libraryId, libraryId))
       .get()
     const sortOrder = (max?.max ?? -1) + 1
-    tx.insert(libraryTags).values({ id, libraryId, userId, name, sortOrder, pinned: false, createdAt: now, updatedAt: now }).run()
-    return { id, userId, name, sortOrder, createdAt: now, updatedAt: now, pinned: false, bookCount: 0 }
+    tx.insert(libraryTags).values({ id, libraryId, userId, name, sortOrder, pinned: false, hidden: false, createdAt: now, updatedAt: now }).run()
+    return { id, userId, name, sortOrder, createdAt: now, updatedAt: now, pinned: false, hidden: false, bookCount: 0 }
   })
 }
 
@@ -84,7 +100,7 @@ export async function reorderTags(userId: string, tagIds: string[]) {
   })
 }
 
-export async function updateTag(userId: string, tagId: string, patch: { name?: string; pinned?: boolean }) {
+export async function updateTag(userId: string, tagId: string, patch: { name?: string; pinned?: boolean; hidden?: boolean }) {
   const db = getDb()
   const libraryId = requirePrivateLibrary(userId)
   return db.transaction((tx) => {
@@ -190,6 +206,7 @@ function toLibraryTagRes(row: typeof libraryTags.$inferSelect) {
     name: row.name,
     sortOrder: row.sortOrder,
     pinned: row.pinned,
+    hidden: row.hidden,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     bookCount,
@@ -203,6 +220,19 @@ function toLibraryTagRes(row: typeof libraryTags.$inferSelect) {
 export async function listLibraryTags(actorId: string, libraryId: string) {
   const db = getDb()
   await assertLibraryBrowsable(actorId, libraryId)
+  // Shared asymmetry: managers always see hidden rows (badged); members never
+  // do. Counts mirror what each viewer can list (see listLibraryCategories).
+  const manager = await isLibraryManager(actorId, libraryId)
+  const taxonomy = manager ? null : loadLibraryHiddenTaxonomy(db, libraryId)
+  const countExtra: SQL[] = []
+  if (taxonomy) {
+    countExtra.push(workDirectHiddenExclusion())
+    const category = hiddenCategoryExclusion(taxonomy.hiddenCategoryIds)
+    if (category) countExtra.push(category)
+  }
+  const rowFilter = taxonomy && taxonomy.hiddenTagIds.length > 0
+    ? notInArray(libraryTags.id, taxonomy.hiddenTagIds)
+    : undefined
   // Counts ride along in the same grouped query: one query for N rows, not
   // N+1. Single-row call sites keep toLibraryTagRes.
   return db
@@ -213,14 +243,15 @@ export async function listLibraryTags(actorId: string, libraryId: string) {
       name: libraryTags.name,
       sortOrder: libraryTags.sortOrder,
       pinned: libraryTags.pinned,
+      hidden: libraryTags.hidden,
       createdAt: libraryTags.createdAt,
       updatedAt: libraryTags.updatedAt,
       bookCount: sql<number>`count(${libraryBooks.id})`,
     })
     .from(libraryTags)
     .leftJoin(libraryBookTags, eq(libraryTags.id, libraryBookTags.tagId))
-    .leftJoin(libraryBooks, and(eq(libraryBooks.id, libraryBookTags.libraryBookId), isNull(libraryBooks.deletedAt)))
-    .where(eq(libraryTags.libraryId, libraryId))
+    .leftJoin(libraryBooks, and(eq(libraryBooks.id, libraryBookTags.libraryBookId), isNull(libraryBooks.deletedAt), ...countExtra))
+    .where(rowFilter ? and(eq(libraryTags.libraryId, libraryId), rowFilter) : eq(libraryTags.libraryId, libraryId))
     .groupBy(libraryTags.id)
     .orderBy(asc(libraryTags.sortOrder), asc(libraryTags.name))
     .all()
@@ -238,14 +269,14 @@ export async function createLibraryTag(actorId: string, libraryId: string, name:
     const now = Date.now()
     const row = {
       id: createId('tag'), libraryId, userId: actorId, name,
-      sortOrder: (max?.max ?? -1) + 1, pinned: false, createdAt: now, updatedAt: now,
+      sortOrder: (max?.max ?? -1) + 1, pinned: false, hidden: false, createdAt: now, updatedAt: now,
     }
     tx.insert(libraryTags).values(row).run()
     return toLibraryTagRes(row)
   })
 }
 
-export async function updateLibraryTag(actorId: string, libraryId: string, tagId: string, patch: { name?: string; pinned?: boolean }) {
+export async function updateLibraryTag(actorId: string, libraryId: string, tagId: string, patch: { name?: string; pinned?: boolean; hidden?: boolean }) {
   const db = getDb()
   await requireLibraryManager(actorId, libraryId)
   return db.transaction((tx) => {

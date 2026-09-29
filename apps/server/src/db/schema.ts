@@ -466,12 +466,18 @@ export const libraryBooks = sqliteTable('library_books', {
   categoryId: text('category_id').references(() => libraryCategories.id, { onDelete: 'set null' }),
   title: text('title').notNull(),
   author: text('author').notNull().default(''),
+  // Full author list (max 10); `author` above mirrors authors[0] ?? '' as a
+  // derived-at-write scalar for sort/filter/search (see architecture.md).
+  authors: text('authors', { mode: 'json' }).$type<string[]>().notNull().default([]),
   description: text('description').notNull().default(''),
   coverKey: text('cover_key'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
   // Soft delete carried over from books.deletedAt; trash behavior cuts over in Phase 3.
   deletedAt: integer('deleted_at'),
+  // Work-level hide (see Hidden boundary in architecture.md): excluded from
+  // reads unless the viewer may see hidden rows, never deleted.
+  hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
 }, (table) => ({
   libraryIdx: index('library_books_library_idx').on(table.libraryId, table.updatedAt),
   categoryIdx: index('library_books_category_idx').on(table.categoryId),
@@ -497,6 +503,8 @@ export const libraryBookVersions = sqliteTable('library_book_versions', {
   // Null = inherit the LibraryBook default; never a copied value.
   title: text('title'),
   author: text('author'),
+  // Full author list override (null = inherit); mirrors the work rule above.
+  authors: text('authors', { mode: 'json' }).$type<string[] | null>(),
   description: text('description'),
   coverKey: text('cover_key'),
   sourceLibraryId: text('source_library_id'),
@@ -556,6 +564,9 @@ export const libraryCategories = sqliteTable('library_categories', {
   sortOrder: integer('sort_order').notNull().default(0),
   // Sidebar pin-to-top flag, orthogonal to every sort mode (mirrors shelves.pinned).
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+  // Persistent taxonomy hide (see Hidden boundary): hides the subtree and
+  // every work filed under it; evaluated at read time.
+  hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
@@ -570,6 +581,9 @@ export const libraryTags = sqliteTable('library_tags', {
   name: text('name').notNull(),
   sortOrder: integer('sort_order').notNull().default(0),
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+  // Persistent taxonomy hide (see Hidden boundary): hides every work carrying
+  // the tag; evaluated at read time.
+  hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({

@@ -20,7 +20,7 @@ import type { BookListItem, CatalogBook, Library, LibraryListItem } from '@bookd
 
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
-import { formatBytes } from '@/lib/utils'
+import { formatAuthorList, formatBytes } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 
@@ -84,6 +84,7 @@ export default function Library() {
   const isGuest = !user || user.guest === true || user.role === 'guest'
   const sortByPref = useUiStore((s) => s.sortBy)
   const sortOrderPref = useUiStore((s) => s.sortOrder)
+  const revealHidden = useUiStore((s) => s.revealHidden)
   const libraryPrefs = useLibraryPrefs()
   // Resolution chain: explicit URL > per-user server default (N-06) > device
   // localStorage (legacy; also the only writable layer for guests). A
@@ -171,9 +172,10 @@ export default function Library() {
         format,
         readStatus: nextStatus,
         trash: nextTrash,
+        showHidden: revealHidden,
       })
     },
-    [queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, tagId, format, readStatus, pageSize, activeLibrary, author, series],
+    [queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, tagId, format, readStatus, pageSize, activeLibrary, author, series, revealHidden],
   )
 
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -440,6 +442,7 @@ export default function Library() {
     format,
     readStatus,
     trash,
+    showHidden: revealHidden,
     // Server rejects trash queries while the feature is off; the redirect
     // effect below swaps the URL out before the next render settles.
   }, { enabled: (!trash || trashEnabled) && !activeLibrary })
@@ -1486,7 +1489,7 @@ function TrashListRow({ book, selected, selectionActive, onToggleSelect, onResto
         </div>
         <div className="mt-1 flex items-center gap-2">
           {book.author && (
-            <span className="truncate text-xs text-stone-500 dark:text-stone-400">{book.author}</span>
+            <span className="truncate text-xs text-stone-500 dark:text-stone-400">{formatAuthorList(book.authors, book.author)}</span>
           )}
           <TrashInfo book={book} className="shrink-0" />
         </div>

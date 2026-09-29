@@ -6,6 +6,8 @@ export interface ParsedBook {
   meta: {
     title: string
     author?: string
+    /** Full author list, max 10; `author` mirrors authors[0]. */
+    authors?: string[]
     cover?: Buffer
     bookmeta?: BookMetadata
   }

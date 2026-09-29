@@ -4,6 +4,7 @@ import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERM
 import { BOOK_SORT_PREF_FIELDS, LIBRARY_SORT_MODES } from './contract'
 import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
+import { authorListSchema } from './library'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
 
@@ -696,12 +697,14 @@ export const shelfCreateSchema = z.object({ name: z.string().trim().min(1).max(1
 export const shelfUpdateSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   pinned: z.boolean().optional(),
+  hidden: z.boolean().optional(),
 })
 export const shelfReorderSchema = z.object({ shelfIds: z.array(z.string().min(1)) })
 export const tagCreateSchema = z.object({ name: z.string().trim().min(1).max(100) })
 export const tagUpdateSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   pinned: z.boolean().optional(),
+  hidden: z.boolean().optional(),
 })
 export const tagReorderSchema = z.object({ tagIds: z.array(z.string().min(1)) })
 export const categoryCreateSchema = z.object({
@@ -712,6 +715,7 @@ export const categoryUpdateSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   parentId: z.string().min(1).nullable().optional(),
   pinned: z.boolean().optional(),
+  hidden: z.boolean().optional(),
 })
 export const categoryReorderSchema = z.object({ categoryIds: z.array(z.string().min(1)) })
 export const bookMembershipSchema = z.object({
@@ -782,6 +786,8 @@ export const bookUpdateSchema = z.object({
   pinned: z.boolean().optional(),
   title: z.string().min(1).max(500).optional(),
   author: z.string().max(500).optional(),
+  authors: authorListSchema.optional(),
+  hidden: z.boolean().optional(),
   bookmeta: bookMetadataSchema.optional(),
   // null removes the pinned TOC rule and restores automatic selection
   tocRuleId: z.string().nullable().optional(),

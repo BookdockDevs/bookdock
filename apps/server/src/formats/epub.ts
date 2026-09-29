@@ -344,7 +344,18 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
     const directRole = getRole(elem)?.toLowerCase()
     return directRole === 'aut' || directRole === 'author' || refinedValues(elem, 'role').some((value) => /^(aut|author)$/i.test(value))
   })
-  const author = getTextContent(roleCreator ?? firstElement(creatorElements)) || undefined
+  // Multi-author: every creator with an author role counts, in document
+  // order; without role markup every creator counts. The primary `author`
+  // stays the first entry (derived-at-write mirror for sort/filter).
+  const authorRoleElements = creatorElements.filter((elem) => {
+    const directRole = getRole(elem)?.toLowerCase()
+    return directRole === 'aut' || directRole === 'author' || refinedValues(elem, 'role').some((value) => /^(aut|author)$/i.test(value))
+  })
+  const authorElements = creatorElements.some((elem) => getRole(elem))
+    ? authorRoleElements
+    : creatorElements
+  const authors = [...new Set(authorElements.map(getTextContent).filter(Boolean))].slice(0, 10)
+  const author = (authors[0] ?? getTextContent(roleCreator ?? firstElement(creatorElements))) || undefined
   const authorSortAs = roleCreator
     ? getNamespacedAttribute(roleCreator, 'http://www.idpf.org/2007/opf', 'file-as', 'opf:file-as') ?? undefined
     : undefined
@@ -675,6 +686,7 @@ export async function parseEpubBuffer(buffer: Buffer): Promise<ParsedBook> {
     meta: {
       title: title || '',
       author,
+      authors: authors.length > 0 ? authors : undefined,
       cover,
       bookmeta: Object.keys(bookmeta).length > 0 ? bookmeta : undefined,
     },

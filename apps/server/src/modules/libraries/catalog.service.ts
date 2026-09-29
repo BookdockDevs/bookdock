@@ -12,22 +12,26 @@ import {
   libraries,
 } from '../../db/schema'
 import { AppError } from '../../middleware/error'
-import { assertLibraryBrowsable, deleteOrphanedBookVersions, requireLibraryManager } from './library-access'
+import { assertLibraryBrowsable, deleteOrphanedBookVersions, isLibraryManager, requireLibraryManager } from './library-access'
 import {
+  isWorkEffectivelyHidden,
   likePattern,
   libraryOrderBy,
+  loadLibraryHiddenTaxonomy,
   sharedListConditions,
   taxonomyNameMatch,
   versionEffectiveMatch,
+  workHiddenExclusion,
   type LibraryListQuery,
 } from './library-query'
-import type {
-  CatalogBook,
-  CatalogBookTag,
-  CatalogBookUpdateReq,
-  CatalogListRes,
-  CatalogVersion,
-  CatalogVersionUpdateReq,
+import {
+  normalizeAuthors,
+  type CatalogBook,
+  type CatalogBookTag,
+  type CatalogBookUpdateReq,
+  type CatalogListRes,
+  type CatalogVersion,
+  type CatalogVersionUpdateReq,
 } from '@bookdock/shared'
 
 /**
@@ -37,19 +41,6 @@ import type {
  * lives in books.service so uploads and reads share one materialization path.
  */
 export const CATALOG_PAGE_SIZE = 24
-
-/** Managers see unlisted versions in the catalog; everyone else does not. */
-async function isLibraryManager(actorId: string, libraryId: string): Promise<boolean> {
-  try {
-    await requireLibraryManager(actorId, libraryId)
-    return true
-  } catch (err) {
-    // Permission and topology denials mean "not a manager"; anything else (a
-    // database or system failure) must not masquerade as an ordinary reader.
-    if (err instanceof AppError) return false
-    throw err
-  }
-}
 
 function getWork(libraryId: string, libraryBookId: string) {
   const db = getDb()
@@ -88,6 +79,7 @@ function toCatalogVersion(
     name: link.name,
     title: link.title,
     author: link.author,
+    authors: link.authors,
     description: link.description,
     coverKey: link.coverKey,
     // Inheritance (5.3): a null override reads the work default, and the
@@ -95,6 +87,7 @@ function toCatalogVersion(
     effective: {
       title: link.title ?? work.title,
       author: link.author ?? work.author,
+      authors: link.authors ?? work.authors ?? [],
       description: link.description ?? work.description,
       coverKey: link.coverKey ?? work.coverKey,
       coverPaletteKey: typeof revisionMeta.coverPaletteKey === 'string' ? revisionMeta.coverPaletteKey : null,
@@ -129,8 +122,12 @@ function toCatalogBook(
     categoryId: work.categoryId,
     title: work.title,
     author: work.author,
+    authors: work.authors ?? [],
     description: work.description,
     coverKey: work.coverKey,
+    // Work-level hide; members never receive hidden works (filtered above),
+    // managers receive them badged.
+    hidden: work.hidden,
     tags,
     versions: links.map((link) => toCatalogVersion(work, link, resolved, collectedVersionIds)),
     createdAt: work.createdAt,
@@ -255,6 +252,12 @@ export async function listCatalogBooks(
     )`)
   }
   filters.push(...sharedListConditions({ page, pageSize, ...params }, libraryId, { publishedOnly: !includeUnlisted }))
+  // Hidden works are invisible to non-managers, with the same no-leak rule
+  // as unlisted-only works below (name, count and metadata stay hidden).
+  // Managers always see hidden rows, badged by toCatalogBook.
+  if (!includeUnlisted) {
+    filters.push(workHiddenExclusion(loadLibraryHiddenTaxonomy(db, libraryId)))
+  }
   // A work with only unlisted versions is invisible to non-managers: without
   // this, it would still occupy total/items with an empty version list and
   // leak the hidden version's name, count and metadata.
@@ -310,6 +313,11 @@ export async function getCatalogBook(actorId: string, libraryId: string, library
   await assertLibraryBrowsable(actorId, libraryId)
   const includeUnlisted = await isLibraryManager(actorId, libraryId)
   const work = getWork(libraryId, libraryBookId)
+  // Hidden works read as NOT_FOUND for non-managers (same verdict as an
+  // unlisted-only work); managers always see them, badged.
+  if (!includeUnlisted && isWorkEffectivelyHidden(db, libraryId, work)) {
+    throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
+  }
   const links = db.select().from(libraryBookVersions)
     .where(eq(libraryBookVersions.libraryBookId, work.id))
     .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all()
@@ -333,6 +341,7 @@ export async function updateCatalogBook(actorId: string, libraryId: string, libr
   if (patch.title !== undefined) updates.title = patch.title
   if (patch.author !== undefined) updates.author = patch.author
   if (patch.description !== undefined) updates.description = patch.description
+  if (patch.hidden !== undefined) updates.hidden = patch.hidden
   if (patch.categoryId !== undefined) {
     if (patch.categoryId !== null) {
       const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
@@ -369,7 +378,22 @@ export async function updateCatalogVersion(
   const updates: Partial<typeof libraryBookVersions.$inferInsert> = { updatedAt: Date.now() }
   if (patch.name !== undefined) updates.name = patch.name
   if (patch.title !== undefined) updates.title = patch.title
-  if (patch.author !== undefined) updates.author = patch.author
+  if (patch.author !== undefined || patch.authors !== undefined) {
+    // Version overrides follow the same mirror rule as works: an explicit
+    // authors list wins, otherwise a lone author becomes one element, and
+    // null clears the override back to inheritance.
+    if (patch.authors === null || (patch.authors === undefined && patch.author === null)) {
+      updates.author = null
+      updates.authors = null
+    } else {
+      const normalized = normalizeAuthors({
+        author: patch.author === null ? undefined : patch.author,
+        authors: patch.authors === null ? undefined : patch.authors,
+      })
+      updates.author = normalized.author
+      updates.authors = normalized.authors
+    }
+  }
   if (patch.description !== undefined) updates.description = patch.description
   if (patch.status !== undefined) updates.status = patch.status
   if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? Date.now() : null

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { AnnotationRes, AnnotationCreateReq, AnnotationUpdateReq } from '@bookdock/shared'
 
 import { apiGet, apiPost, apiPut, apiDelete } from '@/api/client'
+import { withReveal } from '@/lib/reveal-hidden'
 
 import { cfiRangesOverlap, loadCfiModule } from '../lib/cfi-overlap'
 
@@ -11,7 +12,7 @@ type AnnotationsCache = { data: AnnotationRes[] }
 export function useAnnotations(bookId: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['annotations', bookId],
-    queryFn: () => apiGet<AnnotationsCache>(`/annotations/book/${bookId}`),
+    queryFn: () => apiGet<AnnotationsCache>(withReveal(`/annotations/book/${bookId}`)),
     enabled: !!bookId && options.enabled !== false,
   })
 }
@@ -21,7 +22,7 @@ export function useCreateAnnotation(bookId: string) {
   const key = ['annotations', bookId] as const
   return useMutation({
     mutationFn: (body: AnnotationCreateReq) =>
-      apiPost<{ data: AnnotationRes }>(`/annotations/book/${bookId}`, body),
+      apiPost<{ data: AnnotationRes }>(withReveal(`/annotations/book/${bookId}`), body),
     onMutate: async (body) => {
       await queryClient.cancelQueries({ queryKey: key })
       const previous = queryClient.getQueryData<AnnotationsCache>(key)

@@ -9,6 +9,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { withReveal } from '@/lib/reveal-hidden'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 
@@ -230,7 +231,7 @@ export default function Reader() {
 
   const bookQuery = useQuery({
     queryKey: ['book', id],
-    queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${id}`),
+    queryFn: () => apiGet<{ data: BookDetailRes }>(withReveal(`/books/${id}`)),
     enabled: !!id,
   })
   usePageTitle(bookQuery.data?.data?.title ?? _('reader.loading'))
@@ -300,7 +301,7 @@ export default function Reader() {
   // the PATCH itself is debounced and diffs are merged while pending.
   const saveViewSettingsMutation = useMutation({
     mutationFn: (viewSettings: ViewSettings | null) =>
-      apiPatch<{ data: ReaderBookSettings }>(`/books/${id}/reader-settings`, { viewSettings }),
+      apiPatch<{ data: ReaderBookSettings }>(withReveal(`/books/${id}/reader-settings`), { viewSettings }),
     onMutate: (viewSettings) => {
       queryClient.setQueryData(['book', id], (old: { data: BookDetailRes } | undefined) => {
         if (!old?.data) return old
@@ -340,7 +341,7 @@ export default function Reader() {
   const boundPresetId = bookQuery.data?.data?.readerSettings?.boundPresetId ?? null
   const bindPresetMutation = useMutation({
     mutationFn: (presetId: string | null) =>
-      apiPatch<{ data: ReaderBookSettings }>(`/books/${id}/reader-settings`, { boundPresetId: presetId }),
+      apiPatch<{ data: ReaderBookSettings }>(withReveal(`/books/${id}/reader-settings`), { boundPresetId: presetId }),
     onMutate: (presetId) => {
       queryClient.setQueryData(['book', id], (old: { data: BookDetailRes } | undefined) => {
         if (!old?.data) return old
@@ -429,14 +430,14 @@ export default function Reader() {
     queryKey: ['progress', id, isGuest ? 'guest' : 'user'],
     queryFn: () => isGuest
       ? Promise.resolve({ data: getGuestProgress(id) })
-      : apiGet<{ data: ReadingProgressRes | null }>(`/progress/${id}`),
+      : apiGet<{ data: ReadingProgressRes | null }>(withReveal(`/progress/${id}`)),
     enabled: !!id,
   })
 
   const progressMutation = useMutation({
     mutationFn: async (body: ReadingProgressUpdateReq) => {
       if (isGuest) return { data: saveGuestProgress(id, body) }
-      return apiPut<{ data: ReadingProgressRes | null }>(`/progress/${id}`, body)
+      return apiPut<{ data: ReadingProgressRes | null }>(withReveal(`/progress/${id}`), body)
     },
     onSuccess: (result) => {
       // The next reader entry latches initialCfi from this cache. If it holds
@@ -547,7 +548,7 @@ export default function Reader() {
   // div, which React replaces when bookQuery resolves, leaving the view
   // appended to a detached subtree (iframe never loads -> first-open hang).
   const contentUrl = id && bookQuery.data?.data
-    ? `/api/v1/books/${id}/file?reader=1&v=${bookQuery.data.data.updatedAt}`
+    ? withReveal(`/api/v1/books/${id}/file?reader=1&v=${bookQuery.data.data.updatedAt}`)
     : ''
 
   // Latch initialCfi at first resolve: later refetches of ['progress'] (e.g.
