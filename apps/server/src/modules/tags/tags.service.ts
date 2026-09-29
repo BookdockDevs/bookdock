@@ -5,7 +5,7 @@ import { libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryT
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { ensurePrivateLibrary, isLibraryManager, requireLibraryManager, assertLibraryBrowsable } from '../libraries/library-access'
-import { hiddenCategoryExclusion, loadLibraryHiddenTaxonomy, workDirectHiddenExclusion } from '../libraries/library-query'
+import { hiddenCategoryExclusion, hiddenTagExclusion, loadLibraryHiddenTaxonomy, workDirectHiddenExclusion } from '../libraries/library-query'
 
 function privateLibraryId(userId: string): string | null {
   const db = getDb()
@@ -22,15 +22,18 @@ export async function listTags(userId: string, showHidden = false) {
   const libraryId = privateLibraryId(userId)
   if (!libraryId) return []
   // Private vault: hidden tags stay out unless the owner reveals them.
-  // Counts mirror the book list: works hidden directly or filed under a
-  // hidden category are not counted (the tag itself is visible here, so the
-  // tag dimension cannot hide anything counted under it).
+  // Counts mirror the book list, so a sibling's count drops when a work is
+  // hidden through *any* dimension: directly, through a hidden category, or
+  // through another hidden tag. Excluding only the first two left a tag's
+  // capsule disagreeing with the list it counts.
   const taxonomy = showHidden ? null : loadLibraryHiddenTaxonomy(db, libraryId)
   const countExtra: SQL[] = []
   if (taxonomy) {
     countExtra.push(workDirectHiddenExclusion())
     const category = hiddenCategoryExclusion(taxonomy.hiddenCategoryIds)
     if (category) countExtra.push(category)
+    const tag = hiddenTagExclusion(taxonomy.hiddenTagIds)
+    if (tag) countExtra.push(tag)
   }
   const tagFilter = taxonomy && taxonomy.hiddenTagIds.length > 0
     ? notInArray(libraryTags.id, taxonomy.hiddenTagIds)
@@ -229,6 +232,8 @@ export async function listLibraryTags(actorId: string, libraryId: string) {
     countExtra.push(workDirectHiddenExclusion())
     const category = hiddenCategoryExclusion(taxonomy.hiddenCategoryIds)
     if (category) countExtra.push(category)
+    const tag = hiddenTagExclusion(taxonomy.hiddenTagIds)
+    if (tag) countExtra.push(tag)
   }
   const rowFilter = taxonomy && taxonomy.hiddenTagIds.length > 0
     ? notInArray(libraryTags.id, taxonomy.hiddenTagIds)

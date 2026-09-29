@@ -52,3 +52,34 @@ export function libraryUrlCorrection(params: {
   }
   return patch
 }
+
+/**
+ * The URL changes needed when a filter's own row is no longer reachable.
+ *
+ * A shelf or tag can leave the sidebar while the URL still names it: hiding it,
+ * unhiding it, or deleting it. The server then keeps filtering by an id the
+ * reader can no longer see or click, so the list sits at zero with no way out
+ * except editing the URL by hand. Clearing the filter is the only honest state,
+ * and it is the same class of dead end as the others this file already covers.
+ *
+ * Callers must only pass id lists that have actually loaded: an empty list from
+ * a query still in flight would clear a perfectly valid filter.
+ *
+ * `none` is the virtual uncategorized row and is never in the shelf list, so it
+ * is exempt rather than treated as vanished.
+ */
+export function vanishedFilterCorrection(params: {
+  shelfId: string | null
+  tagId: string | null
+  shelfIds: string[]
+  tagIds: string[]
+}): Partial<LibrarySearch> {
+  const patch: Partial<LibrarySearch> = {}
+  if (params.shelfId && params.shelfId !== 'none' && !params.shelfIds.includes(params.shelfId)) {
+    patch.shelf = undefined
+  }
+  if (params.tagId && !params.tagIds.includes(params.tagId)) {
+    patch.tag = undefined
+  }
+  return patch
+}

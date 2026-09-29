@@ -239,7 +239,8 @@ export async function listLibraryCategories(actorId: string, libraryId: string) 
   // Shared asymmetry: managers always see hidden rows (badged); members never
   // do. Counts mirror what each viewer can list: hidden works are excluded
   // for members through every dimension except the category itself (a hidden
-  // category never reaches a member's list in the first place).
+  // category never reaches a member's list in the first place). A hidden tag
+  // on the work hides it here too, which is what listTags also applies.
   const manager = await isLibraryManager(actorId, libraryId)
   const taxonomy = manager ? null : loadLibraryHiddenTaxonomy(db, libraryId)
   const countExtra: SQL[] = []

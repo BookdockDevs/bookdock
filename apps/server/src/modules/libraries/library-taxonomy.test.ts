@@ -303,6 +303,36 @@ describe('library taxonomy (11.5)', () => {
       expect(listed.find((t) => t.id === modern.id)?.bookCount).toBe(1)
     })
 
+    it('drops a sibling count when a work is hidden through any dimension', async () => {
+      const adult = await createLibraryTag(ownerId, cityId, 'Adult')
+      const name = await createLibraryTag(ownerId, cityId, 'Author')
+      const secret = await createLibraryCategory(ownerId, cityId, { name: 'Secret' })
+      const kept = seedWork(cityId, { title: 'Kept' })
+      const hidden = seedWork(cityId, { title: 'Hidden' })
+      db.insert(schema.libraryBookTags).values([
+        { libraryBookId: kept, tagId: name.id },
+        { libraryBookId: hidden, tagId: name.id },
+        { libraryBookId: hidden, tagId: adult.id },
+      ]).run()
+
+      // A manager sees hidden rows, so nothing is excluded for them.
+      const asOwner = await listLibraryTags(ownerId, cityId)
+      expect(asOwner.find((t) => t.id === name.id)?.bookCount).toBe(2)
+
+      // Hiding one tag closes every work carrying it, and the sibling tag's
+      // capsule has to follow the list it counts, not just its own dimension.
+      await updateLibraryTag(ownerId, cityId, adult.id, { hidden: true })
+      const asMember = await listLibraryTags(memberId, cityId)
+      expect(asMember.find((t) => t.id === name.id)?.bookCount).toBe(1)
+      // The hidden tag itself drops out of the member's sidebar entirely.
+      expect(asMember.find((t) => t.id === adult.id)).toBeUndefined()
+
+      // A work hidden through a hidden category is excluded from a tag count too.
+      db.update(schema.libraryBooks).set({ categoryId: secret.id }).where(eq(schema.libraryBooks.id, kept)).run()
+      await updateLibraryCategory(ownerId, cityId, secret.id, { hidden: true })
+      expect((await listLibraryTags(memberId, cityId)).find((t) => t.id === name.id)?.bookCount).toBe(0)
+    })
+
     it('scopes each category to its own library, and leaves uncategorized work uncounted', async () => {
       const mine = await createLibraryCategory(ownerId, cityId, { name: 'Mine' })
       const theirs = await createLibraryCategory(ownerId, otherCityId, { name: 'Theirs' })

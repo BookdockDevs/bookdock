@@ -41,6 +41,7 @@ import CatalogUploadSheet from './components/CatalogUploadSheet'
 import LibraryManageDialog from './components/LibraryManageDialog'
 import BookDetailDialog from './components/BookDetailDialog'
 import PublishBookDialog from './components/PublishBookDialog'
+import EmptyFilter from './components/EmptyFilter'
 import EmptyLibrary from './components/EmptyLibrary'
 import JoinLibraryDialog from './components/JoinLibraryDialog'
 import LibraryDiscoveryDialog from './components/LibraryDiscoveryDialog'
@@ -56,7 +57,7 @@ import TrashInfo from './components/TrashInfo'
 import UploadSheet from './components/UploadSheet'
 import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
 import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-row'
-import { libraryUrlCorrection } from './library-filters'
+import { libraryUrlCorrection, vanishedFilterCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
 import { useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
 
@@ -635,8 +636,14 @@ export default function Library() {
             ? _('library.seriesFilterTitle', { name: metadataFilter.value })
             : (activeShelfName ?? activeTagName ?? activeLibrary?.name ?? privateLibraryName)
 
-  const readStatusName = readStatus === 'wishlist'
-    ? _('library.readStatusWishlist')
+  // Any narrowed view. An empty list under a filter is not an empty library, and
+  // the upload invitation is the wrong thing to offer someone who is looking at a
+  // shelf that simply holds nothing they asked for.
+  const hasActiveFilter = Boolean(
+    shelfId || tagId || query || author || series || format || readStatus,
+  )
+
+  const readStatusName = readStatus === 'wishlist'    ? _('library.readStatusWishlist')
     : readStatus === 'reading'
       ? _('library.readStatusReading')
       : readStatus === 'idle'
@@ -729,6 +736,21 @@ export default function Library() {
     })
   }, [navSearch])
 
+  // One navigation that drops every narrowing dimension, so the reader lands on
+  // the whole library rather than on the next filter they happen to have.
+  const clearActiveFilters = useCallback(() => {
+    void navSearch({
+      q: undefined,
+      shelf: undefined,
+      tag: undefined,
+      author: undefined,
+      series: undefined,
+      format: undefined,
+      status: undefined,
+      page: undefined,
+    })
+  }, [navSearch])
+
   // A shared/bookmarked ?trash=1 URL must not dead-end when the feature is
   // switched off (e.g. in another tab): bounce back to the plain library.
   useEffect(() => {
@@ -768,6 +790,28 @@ export default function Library() {
       navSearch({ page: totalPages === 1 ? undefined : totalPages })
     }
   }, [total, currentPage, totalPages, navSearch])
+
+  // A shelf or tag can leave the sidebar while the URL still names it - hidden
+  // again, unhidden, or deleted - and the server would keep filtering by an id
+  // the reader can no longer see or click. That leaves the list at zero with no
+  // way out. Wait for the taxonomy to actually load first: an in-flight query
+  // reports an empty list and would clear a valid filter.
+  const taxonomyLoading = activeLibrary
+    ? libraryCategoriesQuery.isLoading || libraryTagsQuery.isLoading
+    : shelvesQuery.isLoading || tagsQuery.isLoading
+  const taxonomyFailed = activeLibrary
+    ? libraryCategoriesQuery.isError || libraryTagsQuery.isError
+    : shelvesQuery.isError || tagsQuery.isError
+  useEffect(() => {
+    if (taxonomyLoading || taxonomyFailed) return
+    const patch = vanishedFilterCorrection({
+      shelfId,
+      tagId,
+      shelfIds: shelves.map((shelf) => shelf.id),
+      tagIds: tags.map((tag) => tag.id),
+    })
+    if (Object.keys(patch).length > 0) navSearch(patch)
+  }, [taxonomyLoading, taxonomyFailed, shelfId, tagId, shelves, tags, navSearch])
 
   // Uncategorized is a virtual view: staying on it after the last book is
   // moved/deleted away is a dead end, so leave back to all books. A view
@@ -931,7 +975,11 @@ export default function Library() {
               </button>
             </div>
           ) : isEmpty ? (
-            trash ? <EmptyTrash /> : <EmptyLibrary canUpload={canUpload} />
+            trash
+              ? <EmptyTrash />
+              : hasActiveFilter
+                ? <EmptyFilter onClear={clearActiveFilters} />
+                : <EmptyLibrary canUpload={canUpload} />
           ) : activeLibrary ? (
             view === 'list' ? (
               /* List view draws rows, not cards: the same data, the same
