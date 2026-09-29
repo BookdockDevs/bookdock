@@ -172,15 +172,15 @@ describe('bookmark cards', () => {
     expect(screen.getByText('很短的书签').className).toContain('line-clamp-4')
   })
 
-  it('labels the chapter in a flat list so a position is recognizable', () => {
+  it('labels the chapter in time sort so a position is recognizable via chapter header', () => {
     const { container } = renderOne({ text: LONG, chapter: '第三章' })
-    expect(container.querySelector('span[title="第三章"]')?.textContent).toBe('第三章')
+    expect(container.querySelector('button[title="第三章"]')?.textContent).toBe('第三章')
   })
 
   it('drops the per-card chapter when the list is already grouped by it', () => {
     const { container } = renderOne({ text: LONG, chapter: '第三章' }, 'chapter')
     // The group header carries it instead, so repeating it per card is noise.
-    expect(container.querySelector('span[title="第三章"]')).toBeNull()
+    expect(container.querySelector('.group\\/time')?.closest('div')?.querySelector('span[title="第三章"]')).toBeNull()
     expect(screen.getByText('第三章')).toBeTruthy()
   })
 })
@@ -272,9 +272,10 @@ describe('NotesPanel', () => {
     expect(display).toHaveBeenCalledWith('cfi:4')
   })
 
-  it('renders a flat time-sorted list without chapter headers', () => {
+  it('groups consecutive notes by chapter under time sort', () => {
     const { container } = renderPanel(vi.fn(), 'time-desc')
-    expect(container.querySelector('.font-semibold')).toBeNull()
+    const headers = Array.from(container.querySelectorAll('button.font-semibold')).map((el) => el.textContent)
+    expect(headers).toEqual(['reader.uncategorized', '第二章', '第一章', '第二章', '第一章'])
     const first = container.querySelector('ul li')
     expect(first?.textContent).toContain('无章节划线')
   })

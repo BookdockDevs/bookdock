@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { BookListItem, CatalogBook } from '@bookdock/shared'
 
 import { getCoverPalette } from '../components/cover-palettes'
-import { catalogWorkRow, privateBookRow, versionTabLabel } from '../book-row'
+import { catalogWorkRow, privateBookRow, versionOrdinal, versionTabLabel } from '../book-row'
 
 function version(): CatalogBook['versions'][number] {
   return {
@@ -45,5 +45,26 @@ describe('versionTabLabel', () => {
     expect(versionTabLabel('精校版', '第1版')).toBe('精校版')
     expect(versionTabLabel('', '第1版')).toBe('第1版')
     expect(versionTabLabel('   ', '第2版')).toBe('第2版')
+  })
+})
+
+describe('versionOrdinal', () => {
+  const versions = [
+    { id: 'v1', createdAt: 100 },
+    { id: 'v2', createdAt: 200 },
+    { id: 'v3', createdAt: 300 },
+  ]
+
+  it('numbers by creation order regardless of display order', () => {
+    // A default-first display order must not renumber unnamed versions.
+    const reordered = [versions[2]!, versions[0]!, versions[1]!]
+    expect(versionOrdinal(reordered, 'v1')).toBe(1)
+    expect(versionOrdinal(reordered, 'v2')).toBe(2)
+    expect(versionOrdinal(reordered, 'v3')).toBe(3)
+  })
+
+  it('breaks createdAt ties by id', () => {
+    expect(versionOrdinal([{ id: 'b', createdAt: 5 }, { id: 'a', createdAt: 5 }], 'a')).toBe(1)
+    expect(versionOrdinal([{ id: 'b', createdAt: 5 }, { id: 'a', createdAt: 5 }], 'b')).toBe(2)
   })
 })

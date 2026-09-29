@@ -60,6 +60,19 @@ describe('Library list row', () => {
     expect(container.querySelector('.bg-blue-500')).toBeNull()
   })
 
+  it('marks a revealed hidden private version', () => {
+    render(
+      <ListItemWrapper
+        book={{ ...book, hidden: true }}
+        selection={new Set()}
+        selectionActive={false}
+        onToggleSelect={vi.fn()}
+        onShowDetails={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('img', { name: '书籍已隐藏' })).toBeInTheDocument()
+  })
+
   it('shows the progress text by default', () => {
     renderRow()
 

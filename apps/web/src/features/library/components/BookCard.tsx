@@ -8,6 +8,7 @@ import SmartMenu from '@/components/ui/SmartMenu'
 
 import { privateBookRow } from '../book-row'
 import BookCardShell from './BookCardShell'
+import HiddenIndicator from './HiddenIndicator'
 import { useContextMenu } from './use-context-menu'
 import { ContextMenuContent } from './BookContextMenu'
 import TrashInfo from './TrashInfo'
@@ -85,12 +86,13 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
             <TrashInfo book={book} variant="pill" />
           </div>
         ) : undefined}
+        coverBadge={book.hidden ? <HiddenIndicator kind="private" overlay /> : undefined}
         infoFooter={book.sourceUnavailable ? (
-          /* 7.7: a collected card whose source is gone says so here; the
-             reader is the authority, this just avoids a dead click. */
-          <p className="mt-0.5 truncate text-[11px] text-amber-600 dark:text-amber-400">
-            {_('library.sourceUnavailable')}
-          </p>
+          <div className="mt-0.5 flex items-center gap-1">
+            <p className="truncate text-[11px] text-amber-600 dark:text-amber-400">
+              {_('library.sourceUnavailable')}
+            </p>
+          </div>
         ) : undefined}
         menu={showMenu ? (
           <button

@@ -60,6 +60,20 @@ export function versionTabLabel(name: string, fallback: string): string {
   return name.trim() ? name : fallback
 }
 
+/**
+ * Stable 1-based number of one version inside its work, by creation order
+ * (oldest = 1). Display order puts the default version first, so numbering by
+ * position would rename every unnamed version the moment a default is set;
+ * creation order never moves, which is what "版本1/版本2" always meant.
+ */
+export function versionOrdinal(versions: { id: string; createdAt: number }[], versionId: string): number {
+  const ranked = [...versions].sort((a, b) =>
+    a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const at = ranked.findIndex((v) => v.id === versionId)
+  if (at >= 0) return at + 1
+  return versions.findIndex((v) => v.id === versionId) + 1
+}
+
 export function privateBookRow(book: BookListItem): BookRow {
   return {
     id: book.id,

@@ -18,7 +18,7 @@ import { formatBytes, formatDate } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover } from '../book-row'
 import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../download'
-import { useCollectBook, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
+import { useCollectBook, useUpdateCatalogVersion } from '../hooks'
 import BookCover from './BookCover'
 import { copyText, formatLanguage, isMachineIdentifier, middleTruncate } from './book-detail/types'
 import { ActionIcon, FilterChip, GroupLabel } from './book-detail/ui'
@@ -52,7 +52,6 @@ export default function WorkDetailBody({
   const selected = work.versions.find((v) => v.id === selectedId) ?? work.versions[0]
   const collect = useCollectBook()
   const updateVersion = useUpdateCatalogVersion()
-  const updateWork = useUpdateCatalogBook()
   const [collectedIds, setCollectedIds] = useState<Record<string, boolean>>({})
   const isCollected = selected ? (collectedIds[selected.id] || selected.collected === true) : false
   const [copyingCover, setCopyingCover] = useState(false)
@@ -84,7 +83,10 @@ export default function WorkDetailBody({
   }, [work.versions, selectedId])
 
   const hasCoverImage = Boolean(work.coverKey || selected?.format === 'epub')
-  const readable = selected?.status === 'published'
+  const selectedHidden = selected?.status === 'unlisted' || (work.versions.length === 1 && work.hidden)
+  // Hidden is a listing switch for ordinary readers; managers keep reading,
+  // downloading and editing the work as if it were merely delisted.
+  const readable = Boolean(selected) && (canManage || !selectedHidden)
   const canDownload = canCollect && readable && Boolean(selected)
 
   // The edited-export menu is the only consumer: skip the request for guests,
@@ -177,16 +179,20 @@ export default function WorkDetailBody({
     if (!selected) return
     // Unlisting the last published version breaks every collected B at once:
     // confirm that case, republishing stays one click.
-    if (selected.status !== 'unlisted'
+    if (!selectedHidden
       && !work.versions.some((v) => v.id !== selected.id && v.status === 'published')) {
       setConfirmUnlist(true)
       return
     }
+    const publishing = selectedHidden
     updateVersion.mutate({
       libraryId: library.id,
       libraryBookId: work.id,
       versionLinkId: selected.id,
-      patch: { status: selected.status === 'unlisted' ? 'published' : 'unlisted' },
+      patch: { status: publishing ? 'published' : 'unlisted' },
+    }, {
+      onSuccess: () => notify.success(publishing ? _('library.catalogShowWork') : _('library.catalogHideWork')),
+      onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogHideWork')),
     })
   }
 
@@ -198,14 +204,9 @@ export default function WorkDetailBody({
       libraryBookId: work.id,
       versionLinkId: selected.id,
       patch: { status: 'unlisted' },
-    })
-  }
-
-  function toggleWorkHidden() {
-    updateWork.mutate({
-      libraryId: library.id,
-      libraryBookId: work.id,
-      patch: { hidden: !work.hidden },
+    }, {
+      onSuccess: () => notify.success(_('library.catalogHideWork')),
+      onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogHideWork')),
     })
   }
 
@@ -236,7 +237,7 @@ export default function WorkDetailBody({
   if (selected?.effective.fileName) {
     metaRows.push({ label: _('library.originalFile'), value: selected.effective.fileName, copyable: true })
   }
-  metaRows.push({ label: _('library.addedAt'), value: formatDate(work.createdAt) })
+  if (selected) metaRows.push({ label: _('library.addedAt'), value: formatDate(selected.createdAt) })
   const rawIdentifier = bookmeta?.isbn || bookmeta?.identifier || ''
   if (rawIdentifier && (bookmeta?.isbn || !isMachineIdentifier(rawIdentifier))) {
     metaRows.push({ label: bookmeta?.isbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true })
@@ -307,11 +308,6 @@ export default function WorkDetailBody({
           <h3 className="font-serif text-xl font-semibold leading-snug text-stone-900 dark:text-stone-100">
             {selected.effective.title}
           </h3>
-          {work.hidden && (
-            <span className="mt-1 inline-flex w-fit items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
-              {_('library.catalogUnlisted')}
-            </span>
-          )}
           {(selected.effective.authors ?? []).length > 0 ? (
             <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-sm">
               {(selected.effective.authors ?? []).map((name, index) => (
@@ -349,10 +345,6 @@ export default function WorkDetailBody({
             </div>
           )}
 
-          <div className="mt-3">
-            <VersionTabs versions={work.versions} selectedId={selected.id} onSelect={setSelectedId} />
-          </div>
-
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button
               size="sm"
@@ -378,6 +370,16 @@ export default function WorkDetailBody({
                   <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
                   <line x1="12" y1="7" x2="12" y2="13" />
                   <line x1="9" y1="10" x2="15" y2="10" />
+                </ActionIcon>
+              )}
+              {canManage && (
+                <ActionIcon
+                  secondary
+                  label={_('library.editWork')}
+                  onClick={() => setEditOpen(true)}
+                >
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                 </ActionIcon>
               )}
               {canDownload && (
@@ -450,16 +452,6 @@ export default function WorkDetailBody({
               {canManage && (
                 <ActionIcon
                   secondary
-                  label={_('library.editWork')}
-                  onClick={() => setEditOpen(true)}
-                >
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                </ActionIcon>
-              )}
-              {canManage && (
-                <ActionIcon
-                  secondary
                   label={_('library.uploadNewVersion')}
                   onClick={() => setUploadOpen(true)}
                 >
@@ -469,19 +461,11 @@ export default function WorkDetailBody({
                 </ActionIcon>
               )}
               {canManage && (
-                selected.status === 'unlisted' ? (
+                selectedHidden ? (
                   <ActionIcon
                     secondary
-                    label={_('library.catalogPublish')}
-                    onClick={togglePublish}
-                  >
-                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </ActionIcon>
-                ) : (
-                  <ActionIcon
-                    secondary
-                    label={_('library.catalogUnlist')}
+                    label={_('library.versionHiddenAction')}
+                    disabled={updateVersion.isPending}
                     onClick={togglePublish}
                   >
                     <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
@@ -489,28 +473,17 @@ export default function WorkDetailBody({
                     <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
                     <line x1="2" x2="22" y1="2" y2="22" />
                   </ActionIcon>
+                ) : (
+                  <ActionIcon
+                    secondary
+                    label={_('library.versionVisibleAction')}
+                    disabled={updateVersion.isPending}
+                    onClick={togglePublish}
+                  >
+                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </ActionIcon>
                 )
-              )}
-              {canManage && (
-                <ActionIcon
-                  secondary
-                  label={work.hidden ? _('library.catalogShowWork') : _('library.catalogHideWork')}
-                  onClick={toggleWorkHidden}
-                >
-                  {work.hidden ? (
-                    <>
-                      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </>
-                  ) : (
-                    <>
-                      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
-                      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-                      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
-                      <line x1="2" x2="22" y1="2" y2="22" />
-                    </>
-                  )}
-                </ActionIcon>
               )}
               {canManage && (
                 <div className="ml-auto">
@@ -521,6 +494,12 @@ export default function WorkDetailBody({
               )}
             </div>
           </div>
+
+          {work.versions.length > 1 && (
+            <div className="mt-3.5">
+              <VersionTabs versions={work.versions} selectedId={selected.id} onSelect={setSelectedId} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -606,6 +585,7 @@ export default function WorkDetailBody({
           libraryId={library.id}
           libraryBookId={work.id}
           workTitle={work.title}
+          nextVersionIndex={work.versions.length + 1}
           onUploadedVersion={(ids) => {
             if (ids.length > 0) pendingSelectRef.current = ids
           }}

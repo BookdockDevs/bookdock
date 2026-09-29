@@ -168,4 +168,81 @@ describe('NotesFilterPanel', () => {
     fireEvent.click(resetBtn)
     expect(mockOnReset).toHaveBeenCalled()
   })
+
+  it('remembers direction when switching between chapter and time dimensions', () => {
+    const { rerender } = renderPanel({ sort: 'time-asc' })
+
+    // Time is currently time-asc (earliest first)
+    expect(screen.getByTitle('reader.sortTimeAsc')).toBeInTheDocument()
+
+    // Switch to chapter sort
+    fireEvent.click(screen.getByTitle('reader.sortChapter'))
+    expect(mockOnSortChange).toHaveBeenCalledWith('chapter')
+
+    // Rerender with chapter active
+    rerender(
+      <NotesFilterPanel
+        open={true}
+        anchorRef={anchorRef}
+        onClose={mockOnClose}
+        displayTypes={new Set<ItemKind>(['highlight', 'idea', 'bookmark'])}
+        onToggleType={mockOnToggleType}
+        sort="chapter"
+        onSortChange={mockOnSortChange}
+        styleFilter={new Set<AnnotationStyle>()}
+        colorFilter={new Set<string>()}
+        onToggleStyle={mockOnToggleStyle}
+        onToggleColor={mockOnToggleColor}
+        onReset={mockOnReset}
+        hasActiveFilter={false}
+      />,
+    )
+
+    // Inactive time button should still reflect time-asc
+    const timeBtn = screen.getByTitle('reader.sortTimeAsc')
+    expect(timeBtn).toBeInTheDocument()
+
+    // Clicking time button should restore time-asc, not time-desc
+    mockOnSortChange.mockClear()
+    fireEvent.click(timeBtn)
+    expect(mockOnSortChange).toHaveBeenCalledWith('time-asc')
+  })
+
+  it('dims style and color sections when highlight type is not selected', () => {
+    const { rerender } = renderPanel({
+      displayTypes: new Set<ItemKind>(['idea', 'bookmark']),
+    })
+
+    const styleHeading = screen.getByText('annotation.filterStyle')
+    const styleSection = styleHeading.closest('div.transition-opacity')
+    expect(styleSection).toHaveClass('opacity-35')
+    expect(styleSection).toHaveClass('pointer-events-none')
+
+    const colorHeading = screen.getByText('annotation.filterColor')
+    const colorSection = colorHeading.closest('div.transition-opacity')
+    expect(colorSection).toHaveClass('opacity-35')
+    expect(colorSection).toHaveClass('pointer-events-none')
+
+    // Rerender with highlight enabled
+    rerender(
+      <NotesFilterPanel
+        open={true}
+        anchorRef={anchorRef}
+        onClose={mockOnClose}
+        displayTypes={new Set<ItemKind>(['highlight', 'idea'])}
+        onToggleType={mockOnToggleType}
+        sort="chapter"
+        onSortChange={mockOnSortChange}
+        styleFilter={new Set<AnnotationStyle>()}
+        colorFilter={new Set<string>()}
+        onToggleStyle={mockOnToggleStyle}
+        onToggleColor={mockOnToggleColor}
+        onReset={mockOnReset}
+        hasActiveFilter={false}
+      />,
+    )
+
+    expect(styleSection).not.toHaveClass('opacity-35')
+    expect(styleSection).not.toHaveClass('pointer-events-none')
+  })
 })

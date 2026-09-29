@@ -32,7 +32,7 @@ export default function InstanceSettingsSection() {
   }
   if (!instance) return null
 
-  function toggle(key: 'allowRegistration' | 'allowGuestAccess', value: boolean) {
+  function toggle(key: 'allowRegistration' | 'allowGuestAccess' | 'allowUserCreateLibrary' | 'allowUserUpload', value: boolean) {
     updateInstance.mutate(
       { [key]: value },
       { onError: (error) => notify.error(getUserErrorNotification(error, 'settings.instanceSettingsUpdateFailed')) },
@@ -57,6 +57,18 @@ export default function InstanceSettingsSection() {
         hint={_('admin.allowGuestAccessHint')}
         checked={instance.allowGuestAccess}
         onChange={(v) => toggle('allowGuestAccess', v)}
+      />
+      <ToggleRow
+        label={_('admin.allowUserCreateLibrary')}
+        hint={_('admin.allowUserCreateLibraryHint')}
+        checked={instance.allowUserCreateLibrary !== false}
+        onChange={(v) => toggle('allowUserCreateLibrary', v)}
+      />
+      <ToggleRow
+        label={_('admin.allowUserUpload')}
+        hint={_('admin.allowUserUploadHint')}
+        checked={instance.allowUserUpload !== false}
+        onChange={(v) => toggle('allowUserUpload', v)}
       />
     </SettingsCard>
   )

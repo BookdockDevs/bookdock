@@ -8,9 +8,10 @@ import { formatAuthorList } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover } from '../book-row'
 import type { BookDragPayload } from '../dnd'
-import { useLibraryCategories, useUpdateCatalogVersion } from '../hooks'
+import { useLibraryCategories, useUpdateCatalogBook } from '../hooks'
 
 import BookCover from './BookCover'
+import HiddenIndicator from './HiddenIndicator'
 import CatalogWorkMenu from './CatalogWorkMenu'
 import ListItemInfo from './ListItemInfo'
 import { SelectionCheck } from './RowChrome'
@@ -40,10 +41,10 @@ export default function CatalogListRow({
 }: CatalogListRowProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
-  const updateVersion = useUpdateCatalogVersion()
+  const updateWork = useUpdateCatalogBook()
   const row = catalogWorkRow(work)
   const first = work.versions[0]
-  const isPinned = Boolean(first?.pinnedAt)
+  const isPinned = Boolean(work.pinnedAt)
   // A work's category is the shelf column of this row; the name resolves
   // through the same cached taxonomy query the sidebar reads.
   const { data: categoriesData } = useLibraryCategories(work.libraryId)
@@ -73,6 +74,8 @@ export default function CatalogListRow({
           <span className="truncate font-serif text-sm font-medium text-stone-900 dark:text-stone-100">
             {work.title}
           </span>
+          {(work.hidden || (work.versions.length === 1 && first?.status === 'unlisted')) && <HiddenIndicator kind="work" overlay />}
+          {work.versions.length > 1 && work.versions.some((version) => version.status === 'unlisted') && <HiddenIndicator kind="versions" overlay />}
           {isPinned && (
             canManage ? (
               <button
@@ -80,11 +83,9 @@ export default function CatalogListRow({
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  if (!first) return
-                  updateVersion.mutate({
+                  updateWork.mutate({
                     libraryId: work.libraryId,
                     libraryBookId: work.id,
-                    versionLinkId: first.id,
                     patch: { pinned: false },
                   })
                 }}
@@ -123,11 +124,6 @@ export default function CatalogListRow({
         {row.format && (
           <span className="rounded border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500">
             {row.format}
-          </span>
-        )}
-        {work.versions.length > 1 && (
-          <span className="rounded border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500">
-            {_('library.versionCount', { count: work.versions.length })}
           </span>
         )}
       </div>
@@ -181,6 +177,14 @@ export default function CatalogListRow({
             if (e.ctrlKey || e.metaKey || e.shiftKey) {
               e.preventDefault()
               onToggleSelect(work.id, e.shiftKey)
+              return
+            }
+            if (work.hidden || first.status === 'unlisted') {
+              // Managers keep reading hidden works like delisted ones; only
+              // ordinary readers fall through to the detail dialog.
+              if (canManage) return
+              e.preventDefault()
+              onShowDetails(work)
             }
           }}
           className={`group flex w-full items-center gap-3.5 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
@@ -204,7 +208,7 @@ export default function CatalogListRow({
           work={work}
           canManage={canManage}
           canCollect={canCollect && first?.collected !== true}
-          canDownload={canCollect && first?.status === 'published'}
+          canDownload={canCollect && (canManage || first?.status === 'published')}
           onShowDetails={() => { menu.close(); onShowDetails(work) }}
         />
       )}

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useToastStore } from '@/stores/toast.store'
 
-import { useUploadBooks } from '../features/library/hooks'
+import { extractVersionNameFromFileName, useUploadBooks } from '../features/library/hooks'
 
 function wrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -436,5 +436,31 @@ describe('useUploadBooks', () => {
     })
     expect(FakeXHR.instances).toHaveLength(4)
     expect(result.current.items.every((i) => i.status !== 'error')).toBe(true)
+  })
+
+  it('extracts version names from brackets in filenames', () => {
+    expect(extractVersionNameFromFileName('诡秘之主 [精校全本].epub')).toBe('精校全本')
+    expect(extractVersionNameFromFileName('道诡异仙(校对版).txt')).toBe('校对版')
+    expect(extractVersionNameFromFileName('剑来【插图版】.epub')).toBe('插图版')
+    expect(extractVersionNameFromFileName('雪中悍刀行[无删减].txt')).toBe('无删减')
+    expect(extractVersionNameFromFileName('凡人修仙传 (精修).epub')).toBe('精修')
+    expect(extractVersionNameFromFileName('庆余年 [完结].txt')).toBe('完结')
+    expect(extractVersionNameFromFileName('Book [v2.0].epub')).toBe('v2.0')
+    expect(extractVersionNameFromFileName('[日] 东野圭吾 - 白夜行.epub')).toBeUndefined()
+    expect(extractVersionNameFromFileName('少年的你和她们.txt')).toBeUndefined()
+  })
+
+  it('pre-populates versionName when uploading files with versionNameMode', () => {
+    const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
+
+    act(() => {
+      result.current.addFiles([
+        new File([], '诡秘之主 [精校全本].epub'),
+        new File([], '少年的你和她们.txt'),
+      ], { versionNameMode: true })
+    })
+
+    expect(result.current.items[0]?.versionName).toBe('精校全本')
+    expect(result.current.items[1]?.versionName).toBeUndefined()
   })
 })

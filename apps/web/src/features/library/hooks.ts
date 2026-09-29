@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, CatalogBook, CatalogBookUpdateReq, CatalogListRes, CatalogVersionUpdateReq, CollectBookRes, Category, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, PublishPrivateBookRes, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
+import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, CatalogBook, CatalogBookUpdateReq, CatalogListRes, CatalogVersion, CatalogVersionUpdateReq, CollectBookRes, Category, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, PublishPrivateBookRes, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import { withReveal } from '@/lib/reveal-hidden'
@@ -200,7 +200,10 @@ export function useUploadSettings() {
     queryKey: ['settings'],
     queryFn: fetchSettings,
   })
-  return { maxBytes: data?.data.uploadMaxBytes }
+  return {
+    maxBytes: data?.data.uploadMaxBytes,
+    normalizeTitle: data?.data.library?.normalizeTitle !== false,
+  }
 }
 
 /** Trash feature switch; respects user settings, cached settings, and stays disabled while loading without cache. */
@@ -622,6 +625,28 @@ export function useUpdateCatalogBook() {
   })
 }
 
+export function useUploadCatalogBookCover() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, libraryBookId, file }: { libraryId: string; libraryBookId: string; file: File }) =>
+      apiUpload<{ data: CatalogBook }>(`/libraries/${libraryId}/books/${libraryBookId}/cover`, file, 'PUT'),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+    },
+  })
+}
+
+export function useRemoveCatalogBookCover() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, libraryBookId }: { libraryId: string; libraryBookId: string }) =>
+      apiDelete<{ data: CatalogBook }>(`/libraries/${libraryId}/books/${libraryBookId}/cover`),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+    },
+  })
+}
+
 function useCatalogVersionMutation<TVars extends { libraryId: string; libraryBookId: string }>(
   build: (vars: TVars) => { url: string; method: 'patch' | 'delete'; body?: unknown },
 ) {
@@ -681,6 +706,39 @@ export function useDeleteCatalogVersion() {
     url: `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}`,
     method: 'delete',
   }))
+}
+
+export function useUploadCatalogVersionCover() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, libraryBookId, versionLinkId, file }: { libraryId: string; libraryBookId: string; versionLinkId: string; file: File }) =>
+      apiUpload<{ data: CatalogVersion }>(`/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/cover`, file, 'PUT'),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+    },
+  })
+}
+
+export function useRemoveCatalogVersionCover() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, libraryBookId, versionLinkId }: { libraryId: string; libraryBookId: string; versionLinkId: string }) =>
+      apiDelete<{ data: CatalogVersion }>(`/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/cover`),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+    },
+  })
+}
+
+export function useResetCatalogVersionMetadata() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, libraryBookId, versionLinkId }: { libraryId: string; libraryBookId: string; versionLinkId: string }) =>
+      apiPost<{ data: CatalogBook }>(`/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/reset-metadata`),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+    },
+  })
 }
 
 /**
@@ -771,11 +829,48 @@ export function useUpdateLibraryPrefs() {
   })
 }
 
+/**
+ * Which libraries this user has removed from their own sidebar. Reads through
+ * the same settings query as the sort preferences, so the optimistic merge above
+ * makes a hide/unhide land in the same frame as the click. The library itself
+ * is untouched — this only decides whether the sidebar offers it.
+ */
+export function useHiddenLibraries() {
+  const hidden = useLibraryPrefs()?.hiddenLibraryIds
+  const update = useUpdateLibraryPrefs()
+
+  return {
+    hiddenIds: hidden,
+    isHidden: (libraryId: string) => hidden?.includes(libraryId) ?? false,
+    setHidden: (libraryId: string, next: boolean) => {
+      const current = hidden ?? []
+      if (current.includes(libraryId) === next) return
+      update.mutate({
+        hiddenLibraryIds: next ? [...current, libraryId] : current.filter((id) => id !== libraryId),
+      })
+    },
+  }
+}
+
 export const UPLOAD_ACCEPTED_EXTENSIONS = ['.epub', '.txt']
 
 export function isAcceptedUploadFile(file: File): boolean {
   const name = file.name.toLowerCase()
   return UPLOAD_ACCEPTED_EXTENSIONS.some((ext) => name.endsWith(ext))
+}
+
+export function extractVersionNameFromFileName(filename: string): string | undefined {
+  const base = filename.replace(/\.[^.]+$/, '')
+  const matches = Array.from(base.matchAll(/[[(（【]([^\])）】]+)[\])）】]/g))
+  if (matches.length === 0) return undefined
+  const versionKeywordRegex = /(?:校|版|插图|完结|精|无删减|修|全本|第.+版|v\d+|ver)/i
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const content = matches[i][1].trim()
+    if (versionKeywordRegex.test(content)) {
+      return content
+    }
+  }
+  return undefined
 }
 
 const UPLOAD_CONCURRENCY = 3
@@ -936,7 +1031,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
   }, [items, queryClient, target])
 
   const addFiles = useCallback(
-    (files: FileList | File[], opts?: { autoStart?: boolean; maxBytes?: number } & UploadAssignment) => {
+    (files: FileList | File[], opts?: { autoStart?: boolean; maxBytes?: number; versionNameMode?: boolean } & UploadAssignment) => {
       const list = Array.from(files)
       const accepted = list.filter(isAcceptedUploadFile)
       const oversized = opts?.maxBytes ? accepted.filter((f) => f.size > opts.maxBytes!) : []
@@ -966,6 +1061,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
           progress: 0,
           shelfId: opts?.shelfId,
           tagIds: opts?.tagIds,
+          ...(opts?.versionNameMode ? { versionName: extractVersionNameFromFileName(file.name) } : {}),
         })),
         ]
       })

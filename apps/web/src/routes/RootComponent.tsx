@@ -6,11 +6,17 @@ import { AppShell } from '@/components/layout/AppShell'
 import { Button } from '@/components/ui/Button'
 import { apiGet, UNAUTHORIZED_EVENT } from '@/api/client'
 import { useInstanceInfo, ME_QUERY_KEY } from '@/features/auth/hooks'
+import { libraryInviteParam, PENDING_INVITE_KEY } from '@/features/library/invite-link'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
 import type { MeRes } from '@bookdock/shared'
 
 const PUBLIC_PATHS = ['/login', '/register', '/setup', ...(import.meta.env.DEV ? ['/dev/update-preview'] : [])]
+
+/** `/library/+<code>` carries its own code, so it is public by prefix. */
+function isPublicPath(pathname: string) {
+  return PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/library/')
+}
 
 export function RootComponent() {
   const _ = useTranslation()
@@ -23,8 +29,9 @@ export function RootComponent() {
   const pathname = location.pathname
   const isUpdatePreview = import.meta.env.DEV && pathname === '/dev/update-preview'
   const isLegadoLogin = pathname === '/login' && new URLSearchParams(window.location.search).get('legado') === '1'
-  const isPublic = PUBLIC_PATHS.includes(pathname)
-  const shouldProbeSession = pathname === '/login' || !isPublic
+  const isPublic = isPublicPath(pathname)
+  const isLibraryInvite = pathname.startsWith('/library/')
+  const shouldProbeSession = pathname === '/login' || isLibraryInvite || !isPublic
 
   const instanceQuery = useInstanceInfo()
   const instance = instanceQuery.data?.data
@@ -43,7 +50,7 @@ export function RootComponent() {
 
   useEffect(() => {
     const onUnauthorized = () => {
-      if (PUBLIC_PATHS.includes(window.location.pathname) || recoveringUnauthorizedSession.current) return
+      if (PUBLIC_PATHS.includes(window.location.pathname) || window.location.pathname.startsWith('/library/') || recoveringUnauthorizedSession.current) return
       // Several requests can fail together; only the fresh session probe may finish recovery.
       recoveringUnauthorizedSession.current = true
       queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== 'auth' })
@@ -79,9 +86,19 @@ export function RootComponent() {
         if (isLegadoLogin) {
           window.location.assign('/')
         } else {
-          navigate({ to: '/', replace: true })
+          const pending = sessionStorage.getItem(PENDING_INVITE_KEY)
+          navigate(pending
+            ? { to: '/library/$token', params: { token: libraryInviteParam(pending) }, replace: true }
+            : { to: '/', replace: true })
         }
       } else clearAuth()
+      return
+    }
+    if (isLibraryInvite) {
+      if (meQuery.isPending || meQuery.isFetching) return
+      const me = meQuery.isError ? undefined : meQuery.data?.data
+      if (me) setAuth(me)
+      else clearAuth()
       return
     }
     if (isPublic) return
@@ -97,7 +114,7 @@ export function RootComponent() {
     clearAuth()
     // No session: guests pass through only when guest access is enabled.
     if (!instance.allowGuestAccess) navigate({ to: '/login' })
-  }, [instance, pathname, isPublic, isLegadoLogin, meQuery.isPending, meQuery.isFetching, meQuery.isError, meQuery.data, navigate, setAuth, clearAuth])
+  }, [instance, pathname, isPublic, isLibraryInvite, isLegadoLogin, meQuery.isPending, meQuery.isFetching, meQuery.isError, meQuery.data, navigate, setAuth, clearAuth])
 
   if (instanceQuery.isError && !instance && !isUpdatePreview) {
     return (

@@ -6,9 +6,10 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { cn } from '@/lib/utils'
 
 import { useDeleteCatalogVersion } from '../hooks'
-import { versionTabLabel } from '../book-row'
+import { versionOrdinal, versionTabLabel } from '../book-row'
 
 /**
  * The single delete entry for catalog versions, wherever it opens from. One
@@ -29,8 +30,8 @@ interface DeleteVersionsDialogProps {
   onDeleted: (workDeleted: boolean) => void
 }
 
-function labelOf(version: CatalogVersion, fallback: (n: number) => string, index: number): string {
-  return `${versionTabLabel(version.name, fallback(index + 1))} · ${version.format.toUpperCase()}`
+function labelOf(versions: CatalogVersion[], version: CatalogVersion, fallback: (n: number) => string): string {
+  return `${versionTabLabel(version.name, fallback(versionOrdinal(versions, version.id)))} · ${version.format.toUpperCase()}`
 }
 
 export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, onClose, onDeleted }: DeleteVersionsDialogProps) {
@@ -65,7 +66,7 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
   const consequence = !multi || removesWork
     ? _('library.catalogDeleteLastVersionConfirm', { work: work.title })
     : _('library.catalogDeleteVersionConfirm', {
-      name: checkedVersions.map((v) => labelOf(v, fallback, versions.indexOf(v))).join('、'),
+      name: checkedVersions.map((v) => labelOf(versions, v, fallback)).join('、'),
     })
 
   return (
@@ -74,25 +75,43 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
       message={(
         <div className="flex flex-col gap-3">
           {multi && (
-            <div className="flex flex-col gap-1.5">
-              {versions.map((version, index) => (
-                <label key={version.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={checked.includes(version.id)}
-                    onChange={() => toggle(version.id)}
-                    className="h-4 w-4 accent-stone-900 dark:accent-stone-100"
-                  />
-                  <span className="min-w-0 flex-1 truncate">
-                    {labelOf(version, fallback, index)}
-                    {version.status === 'unlisted' && (
-                      <span className="ml-1.5 text-xs text-amber-600 dark:text-amber-400">
-                        {_('library.catalogUnlisted')}
-                      </span>
-                    )}
-                  </span>
-                </label>
-              ))}
+            <div className="flex flex-col gap-2">
+              <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-0.5">
+                {versions.map((version) => {
+                  const isChecked = checked.includes(version.id)
+                  return (
+                    <label
+                      key={version.id}
+                      className={cn(
+                        'flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-2.5 text-sm transition-all select-none',
+                        isChecked
+                          ? 'border-stone-900/40 bg-stone-50/80 dark:border-stone-700 dark:bg-stone-800/60'
+                          : 'border-stone-200/70 bg-white hover:border-stone-300 hover:bg-stone-50/40 dark:border-stone-800 dark:bg-stone-900/60 dark:hover:border-stone-700',
+                      )}
+                    >
+                      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggle(version.id)}
+                          className="h-4 w-4 shrink-0 rounded accent-stone-900 dark:accent-stone-100"
+                        />
+                        <span className="truncate font-medium text-stone-800 dark:text-stone-200">
+                          {versionTabLabel(version.name, fallback(versionOrdinal(versions, version.id)))}
+                        </span>
+                        <span className="inline-flex shrink-0 items-center rounded-md bg-stone-100 px-1.5 py-0.5 text-[11px] font-medium text-stone-500 uppercase dark:bg-stone-800 dark:text-stone-400">
+                          {version.format}
+                        </span>
+                        {version.status === 'unlisted' && (
+                          <span className="shrink-0 text-xs text-amber-600 dark:text-amber-400">
+                            {_('library.catalogUnlisted')}
+                          </span>
+                        )}
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
               <p className="text-xs text-stone-400">
                 {_('library.catalogDeleteVersionsSelected', { count: checkedVersions.length })}
               </p>

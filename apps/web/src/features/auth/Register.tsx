@@ -4,6 +4,7 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
+import { libraryInviteParam, PENDING_INVITE_KEY } from '@/features/library/invite-link'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { authErrorKey } from './errors'
@@ -51,7 +52,10 @@ export default function Register() {
 
     try {
       await register.mutateAsync({ username: normalizedUsername, password })
-      navigate({ to: '/' })
+      const pending = sessionStorage.getItem(PENDING_INVITE_KEY)
+      navigate(pending
+        ? { to: '/library/$token', params: { token: libraryInviteParam(pending) } }
+        : { to: '/' })
     } catch (err) {
       setError(_(authErrorKey(err)))
     }

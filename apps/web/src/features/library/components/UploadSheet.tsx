@@ -13,6 +13,13 @@ interface UploadSheetProps {
   open: boolean
   onClose: () => void
   shelfId?: string
+  /**
+   * Explicit name of the shelf or category in context. If omitted, looked up
+   * from shelfId in the private library's shelves.
+   */
+  shelfName?: string
+  /** Whether the destination is a category (shared library) or a shelf (private). */
+  isCategory?: boolean
   tagId?: string
   /**
    * Where the files go. Omitted means the reader's own library, which is the
@@ -28,6 +35,8 @@ interface UploadSheetProps {
   versionNameMode?: boolean
   /** One-line context under the dropzone, e.g. which work new versions join. */
   contextNote?: string
+  /** Optional hover title for contextNote */
+  contextTitle?: string
   /** Fired once per settle cycle with the ids the server answered. */
   onUploaded?: (ids: string[]) => void
 }
@@ -56,19 +65,34 @@ function hasFiles(e: { dataTransfer: DataTransfer | null }): boolean {
   return Boolean(e.dataTransfer?.types.includes('Files'))
 }
 
-export default function UploadSheet({ open, onClose, shelfId, tagId, target, versionNameMode = false, contextNote, onUploaded }: UploadSheetProps) {
+export default function UploadSheet({
+  open,
+  onClose,
+  shelfId,
+  shelfName: propShelfName,
+  isCategory = false,
+  tagId,
+  target,
+  versionNameMode = false,
+  contextNote,
+  contextTitle,
+  onUploaded,
+}: UploadSheetProps) {
   const _ = useTranslation()
   const [dragOver, setDragOver] = useState(false)
   const [includeCurrentTag, setIncludeCurrentTag] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
-  const { items, addFiles, startUpload, retry, retryAll, abortAll, pruneSettled, isUploading, clearQueue, patchItem } = useUploadBooks(target)
+  const { items, addFiles, startUpload, retry, retryAll, abortAll, pruneSettled, isUploading, clearQueue } = useUploadBooks(target)
   const reportedRef = useRef('')
-  const { maxBytes } = useUploadSettings()
+  const { maxBytes, normalizeTitle } = useUploadSettings()
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()
 
-  const shelfName = shelfId ? shelvesData?.data.find((shelf) => shelf.id === shelfId)?.name : undefined
+  const shelfName = propShelfName ?? (shelfId ? shelvesData?.data.find((shelf) => shelf.id === shelfId)?.name : undefined)
+  const contextTooltip = isCategory
+    ? _('library.uploadCategoryContext', { name: shelfName ?? '' })
+    : _('library.uploadShelfContext', { name: shelfName ?? '' })
   const tagName = tagId ? tagsData?.data.find((tag) => tag.id === tagId)?.name : undefined
   const assignment: UploadAssignment = {
     shelfId,
@@ -102,7 +126,14 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target, ver
     if (!hasFiles(e)) return
     e.preventDefault()
     setDragOver(false)
-    if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files, { autoStart: true, maxBytes, ...assignment })
+    if (e.dataTransfer?.files?.length) {
+      addFiles(e.dataTransfer.files, {
+        autoStart: true,
+        maxBytes,
+        ...(versionNameMode && normalizeTitle ? { versionNameMode: true } : {}),
+        ...assignment,
+      })
+    }
   }
 
   const hasPending = items.some((it) => it.status === 'pending')
@@ -140,7 +171,51 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target, ver
 
   return (
     <Modal
-      title={_('library.upload')}
+      title={(
+        <div className="flex items-center gap-2">
+          <span>{_('library.upload')}</span>
+          {shelfName && (
+            <span
+              title={contextTooltip}
+              className="inline-flex max-w-[180px] items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-normal text-stone-600 dark:bg-stone-800 dark:text-stone-300"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+              <span className="truncate">{shelfName}</span>
+              <span className="sr-only">{contextTooltip}</span>
+            </span>
+          )}
+          {tagName && (
+            <label
+              className={`inline-flex max-w-[160px] cursor-pointer items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-normal transition-colors ${
+                includeCurrentTag
+                  ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
+                  : 'border border-dashed border-stone-300 text-stone-500 hover:border-stone-400 dark:border-stone-700 dark:text-stone-400'
+              }`}
+              title={_('library.uploadTagContext', { name: tagName })}
+            >
+              <input
+                type="checkbox"
+                checked={includeCurrentTag}
+                onChange={(e) => setIncludeCurrentTag(e.target.checked)}
+                className="sr-only"
+                aria-label={_('library.uploadTagContext', { name: tagName })}
+              />
+              <span className="text-[11px] opacity-70">#</span>
+              <span className="truncate">{tagName}</span>
+            </label>
+          )}
+          {contextNote && (
+            <span
+              className="inline-flex max-w-[200px] items-center rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-normal text-stone-600 dark:bg-stone-800 dark:text-stone-300"
+              title={contextTitle ?? contextNote}
+            >
+              <span className="truncate">{contextNote}</span>
+            </span>
+          )}
+        </div>
+      )}
       onClose={handleClose}
       // The default reads "cancel", which now collides with the footer's
       // cancel-upload: here closing the window is not cancelling anything.
@@ -167,55 +242,45 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target, ver
           setDragOver(false)
         }}
         className={
-          'flex h-60 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed text-center transition-colors duration-150 ' +
+          'group flex h-60 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed text-center transition-all duration-150 ' +
           (dragOver
-            ? 'border-stone-400 bg-stone-100/70 dark:border-stone-500 dark:bg-stone-800/40'
-            : 'border-stone-300 dark:border-stone-700')
+            ? 'border-stone-500 bg-stone-100/80 dark:border-stone-400 dark:bg-stone-800/60'
+            : 'border-stone-300 hover:border-stone-400 hover:bg-stone-50/50 dark:border-stone-700 dark:hover:border-stone-600 dark:hover:bg-stone-800/30')
         }
       >
-        <svg
-          width="32"
-          height="32"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="text-stone-400 dark:text-stone-500"
-        >
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="17 8 12 3 7 8" />
-          <line x1="12" y1="3" x2="12" y2="15" />
-        </svg>
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-stone-100 text-stone-500 transition-transform duration-200 group-hover:scale-105 dark:bg-stone-800 dark:text-stone-400">
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+        </div>
         <div>
           <p className="text-sm font-medium text-stone-700 dark:text-stone-300">{_('library.uploadHint')}</p>
-          <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('library.uploadFormats')}</p>
+          <div className="mt-2 flex items-center justify-center gap-1.5">
+            <span className="rounded-md bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+              EPUB
+            </span>
+            <span className="rounded-md bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+              TXT
+            </span>
+          </div>
           {maxBytes && (
-            <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">
+            <p className="mt-1.5 text-xs text-stone-400 dark:text-stone-500">
               {_('library.uploadMaxSize', { size: formatBytes(maxBytes) })}
             </p>
           )}
         </div>
       </div>
-
-      {(shelfName || tagName || contextNote) && (
-        <div className="mt-3 space-y-2 rounded-xl bg-stone-50 px-3.5 py-2.5 text-xs text-stone-600 dark:bg-stone-800/50 dark:text-stone-300">
-          {shelfName && <p>{_('library.uploadShelfContext', { name: shelfName })}</p>}
-          {contextNote && <p>{contextNote}</p>}
-          {tagName && (
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={includeCurrentTag}
-                onChange={(e) => setIncludeCurrentTag(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-stone-300 accent-stone-900 dark:border-stone-600 dark:accent-stone-100"
-              />
-              <span>{_('library.uploadTagContext', { name: tagName })}</span>
-            </label>
-          )}
-        </div>
-      )}
 
       {items.length > 0 && (
         <ul className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">
@@ -227,28 +292,24 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target, ver
                 key={item.id}
                 className="flex items-center gap-3 rounded-xl bg-stone-50 px-3 py-2 text-xs dark:bg-stone-800/60"
               >
-                <span className="shrink-0 text-stone-400">
+                <span className="shrink-0">
                   {item.status === 'success' ? (
-                    <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600 dark:text-emerald-400">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
                   ) : item.status === 'duplicate' ? (
-                    <span className="text-amber-600 dark:text-amber-400">↺</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600 dark:text-amber-400">
+                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                      <path d="M3 3v5h5" />
+                    </svg>
                   ) : item.status === 'error' ? (
-                    <span className="text-red-600 dark:text-red-400">✕</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
                   ) : null}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-stone-700 dark:text-stone-300">{item.name}</span>
-                {versionNameMode && item.status === 'pending' && (
-                  <input
-                    type="text"
-                    value={item.versionName ?? ''}
-                    onChange={(e) => patchItem(item.id, { versionName: e.target.value })}
-                    maxLength={120}
-                    placeholder={_('library.versionNamePlaceholder')}
-                    aria-label={_('library.versionName')}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-28 shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs outline-none placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:placeholder:text-stone-500"
-                  />
-                )}
                 {item.status === 'error' ? (
                   <>
                     {note && <span className="shrink-0 text-xs text-red-600 dark:text-red-400">{note}</span>}
@@ -276,9 +337,9 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target, ver
                 )}
                 {(item.status === 'uploading' || item.status === 'processing') && (
                   <span className="w-24 shrink-0">
-                    <span className="block h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800">
+                    <span className="block h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700">
                       <span
-                        className="block h-full rounded-full bg-stone-500 transition-all duration-200"
+                        className="block h-full rounded-full bg-stone-800 transition-all duration-200 dark:bg-stone-200"
                         style={{ width: `${item.progress}%` }}
                       />
                     </span>
@@ -323,7 +384,13 @@ export default function UploadSheet({ open, onClose, shelfId, tagId, target, ver
         className="hidden"
         onChange={(e) => {
           // Picker-selected files wait for an explicit upload click
-          if (e.target.files?.length) addFiles(e.target.files, { maxBytes, ...assignment })
+          if (e.target.files?.length) {
+            addFiles(e.target.files, {
+              maxBytes,
+              ...(versionNameMode && normalizeTitle ? { versionNameMode: true } : {}),
+              ...assignment,
+            })
+          }
           e.target.value = ''
         }}
       />

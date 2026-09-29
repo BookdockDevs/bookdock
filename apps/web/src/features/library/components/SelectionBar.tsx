@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-
-import type { ReadStatus } from '@bookdock/shared'
-
-import { apiDelete, apiPatch, apiPost, apiPut } from '@/api/client'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import type { BatchSelectionItem, ReadStatus } from '@bookdock/shared'
+import { apiDelete, apiPatch, apiPost } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -16,14 +14,10 @@ interface SelectionBarProps {
   selectedIds: string[]
   onClear: () => void
   onComplete?: () => void
+  onRetainSelection?: (ids: string[]) => void
   trash?: boolean
+  trashEnabled?: boolean
   elevated?: boolean
-  /**
-   * The shared library whose works are selected, or undefined for the reader's
-   * own library. A work can be filed and tagged - that is the same operation a
-   * book can - so the bar is the same bar with the same classify action; what it
-   * cannot offer is everything that needs the reader to own the row.
-   */
   libraryId?: string
 }
 
@@ -35,15 +29,45 @@ const BATCH_STATUS_ACTIONS: { value: ReadStatus; labelKey: string }[] = [
   { value: 'abandoned', labelKey: 'library.markAbandoned' },
 ]
 
-export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, trash = false, elevated = false, libraryId }: SelectionBarProps) {
+async function settleBatch(ids: string[], action: (id: string) => Promise<unknown>) {
+  const results: PromiseSettledResult<unknown>[] = new Array(ids.length)
+  let cursor = 0
+  await Promise.all(Array.from({ length: Math.min(8, ids.length) }, async () => {
+    while (cursor < ids.length) {
+      const index = cursor++
+      try {
+        results[index] = { status: 'fulfilled', value: await action(ids[index]) }
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason }
+      }
+    }
+  }))
+  return results
+}
+
+export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, onRetainSelection, trash = false, trashEnabled = true, elevated = false, libraryId }: SelectionBarProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   // Trash is a private-library state. The caller already forces it off in a
   // shared library, but a stale prop must never flip this bar into offering
   // restore/permanent-delete for work ids against private endpoints.
   const effectiveTrash = trash && !libraryId
-  const [dialog, setDialog] = useState<'classify' | 'delete' | 'permanent' | null>(null)
+  const [dialog, setDialog] = useState<'organize' | 'delete' | 'permanent' | null>(null)
+  const [menu, setMenu] = useState<'status' | 'more' | null>(null)
   const [marking, setMarking] = useState(false)
+  const selectionQuery = useQuery({
+    queryKey: ['batch-selection', libraryId ?? 'private', [...selectedIds].sort().join('|')],
+    queryFn: () => apiPost<{ data: BatchSelectionItem[] }>(
+      libraryId ? `/libraries/${libraryId}/books/batch/selection` : '/books/batch/selection',
+      { ids: selectedIds },
+    ),
+    enabled: !effectiveTrash && selectedIds.length > 0,
+  })
+  const selectionItems = selectionQuery.data?.data ?? []
+  const selectionReady = effectiveTrash || (selectionQuery.isSuccess && selectionItems.length === selectedIds.length)
+  const allPinned = selectionReady && selectionItems.every((item) => Boolean(item.pinnedAt))
+  const allHidden = selectionReady && selectionItems.every((item) => item.hidden)
+  const barRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
@@ -65,6 +89,24 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
     return () => observer.disconnect()
   }, [updateScrollState, selectedIds.length, effectiveTrash])
 
+  useEffect(() => {
+    if (!menu) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!barRef.current?.contains(event.target as Node)) setMenu(null)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.stopImmediatePropagation()
+      setMenu(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [menu])
+
   async function runBatch(
     action: (bookId: string) => Promise<unknown>,
     successKey: string,
@@ -72,14 +114,20 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
     ids = selectedIds,
   ) {
     setMarking(true)
-    const results = await Promise.allSettled(ids.map(action))
+    const results = await settleBatch(ids, action)
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
     void queryClient.invalidateQueries({ queryKey: ['books'] })
+    if (libraryId) {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
+    }
     if (failed === 0) {
       notify.success({ key: successKey, params: { count: succeeded } })
     } else {
       const failedIds = ids.filter((_, index) => results[index]?.status === 'rejected')
+      onRetainSelection?.(failedIds)
       notify.warning(
         { key: 'library.batchPartial', params: { action: _(actionKey), succeeded, failed } },
         {
@@ -117,13 +165,13 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
     if (ok) onComplete()
   }
 
-  async function handleBatchHide() {
+  async function handleBatchHide(hidden: boolean) {
     // Private ids are version ids, shared-library ids are work ids; each
     // endpoint hides the caller's own row without touching anything else.
     const ok = await runBatch(
       (id) => libraryId
-        ? apiPatch(`/libraries/${libraryId}/books/${id}`, { hidden: true })
-        : apiPatch(`/books/${id}`, { hidden: true }),
+        ? apiPatch(`/libraries/${libraryId}/books/${id}`, { hidden })
+        : apiPatch(`/books/${id}`, { hidden }),
       'library.batchHideSucceeded',
       'library.batchActionHide',
     )
@@ -132,6 +180,17 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
       void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
     }
+    if (ok) onComplete()
+  }
+
+  async function handleBatchPin(pinned: boolean) {
+    const ok = await runBatch(
+      (id) => libraryId
+        ? apiPatch(`/libraries/${libraryId}/books/${id}`, { pinned })
+        : apiPatch(`/books/${id}`, { pinned }),
+      'library.batchSucceeded',
+      pinned ? 'library.pin' : 'library.unpin',
+    )
     if (ok) onComplete()
   }
 
@@ -145,7 +204,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
             : 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))] sm:bottom-5',
         )}
       >
-        <div className="pointer-events-auto relative flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] items-center rounded-2xl border border-stone-200/80 bg-white/95 shadow-xl shadow-stone-900/8 backdrop-blur-md animate-selection-bar-in sm:w-auto sm:max-w-none dark:border-stone-700 dark:bg-stone-900/95">
+        <div ref={barRef} className="pointer-events-auto relative flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] items-center rounded-2xl border border-stone-200/80 bg-white/95 shadow-xl shadow-stone-900/8 backdrop-blur-md animate-selection-bar-in sm:w-auto sm:max-w-none dark:border-stone-700 dark:bg-stone-900/95">
           {/* Left fade shadow */}
           <div
             data-testid="selection-bar-fade-left"
@@ -183,32 +242,18 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
             </>
           ) : (
             <>
-              {/* Read status belongs to books someone owns, so a shared
-                  library's selection offers only what a work can answer. */}
-              {!libraryId && BATCH_STATUS_ACTIONS.map((action) => (
-                <Button
-                  key={action.value}
-                  className="shrink-0 whitespace-nowrap"
-                  variant="ghost"
-                  size="sm"
-                  disabled={marking}
-                  onClick={() => void handleBatchStatus(action.value)}
-                >
-                  {_(action.labelKey)}
-                </Button>
-              ))}
-              {!libraryId && <span className="mx-1 h-4 w-px shrink-0 bg-stone-200 dark:bg-stone-700" />}
-              <Button className="shrink-0 whitespace-nowrap" variant="secondary" size="sm" onClick={() => setDialog('classify')}>
-                {_('library.batchClassify')}
+              <Button className="shrink-0 whitespace-nowrap" variant="secondary" size="sm" disabled={marking || !selectionReady} onClick={() => setDialog('organize')}>
+                {_('library.batchOrganize')}
               </Button>
-              <Button className="shrink-0 whitespace-nowrap" variant="ghost" size="sm" disabled={marking} onClick={() => void handleBatchHide()}>
-                {_('library.hide')}
+              {!libraryId && <Button className="hidden shrink-0 whitespace-nowrap md:inline-flex" variant="ghost" size="sm" disabled={marking} onClick={() => setMenu(menu === 'status' ? null : 'status')}>
+                {_('library.readStatusLabel')}
+              </Button>}
+              <Button className="hidden shrink-0 whitespace-nowrap md:inline-flex" variant="ghost" size="sm" disabled={marking || !selectionReady} onClick={() => void handleBatchPin(!allPinned)}>
+                {_(allPinned ? 'library.unpin' : 'library.pin')}
               </Button>
-              {!libraryId && (
-                <Button className="shrink-0 whitespace-nowrap" variant="danger" size="sm" onClick={() => setDialog('delete')}>
-                  {_('library.batchDelete')}
-                </Button>
-              )}
+              <Button className="shrink-0 whitespace-nowrap" variant="ghost" size="sm" disabled={marking || !selectionReady} onClick={() => setMenu(menu === 'more' ? null : 'more')}>
+                {_('library.moreActions')}
+              </Button>
             </>
           )}
           <button
@@ -222,12 +267,35 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
             </svg>
           </button>
           </div>
+          {selectionQuery.isError && !effectiveTrash && (
+            <div role="alert" className="absolute bottom-full left-2 mb-2 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 shadow dark:bg-red-950 dark:text-red-200">
+              <span>{_('library.batchSelectionFailed')}</span>
+              <button type="button" onClick={() => void selectionQuery.refetch()} className="underline">{_('library.batchSelectionRetry')}</button>
+            </div>
+          )}
+          {menu && !effectiveTrash && (
+            <div className="absolute bottom-full right-2 mb-2 min-w-36 rounded-xl border border-stone-200 bg-white p-1 shadow-xl dark:border-stone-700 dark:bg-stone-900">
+              {menu === 'status' ? BATCH_STATUS_ACTIONS.map((action) => (
+                <button key={action.value} type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 dark:hover:bg-stone-800" onClick={() => { setMenu(null); void handleBatchStatus(action.value) }}>
+                  {_(action.labelKey)}
+                </button>
+              )) : (
+                <>
+                  {!libraryId && <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 md:hidden dark:hover:bg-stone-800" onClick={() => setMenu('status')}>{_('library.readStatusLabel')}</button>}
+                  <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 md:hidden dark:hover:bg-stone-800" onClick={() => { setMenu(null); void handleBatchPin(!allPinned) }}>{_(allPinned ? 'library.unpin' : 'library.pin')}</button>
+                  <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 dark:hover:bg-stone-800" onClick={() => { setMenu(null); void handleBatchHide(!allHidden) }}>{_(allHidden ? 'library.show' : 'library.hide')}</button>
+                  <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40" onClick={() => { setMenu(null); setDialog('delete') }}>{_('library.batchDelete')}</button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {dialog === 'classify' && (
+      {dialog === 'organize' && (
         <BatchClassifyDialog
           ids={selectedIds}
+          items={selectionItems}
           libraryId={libraryId}
           onClose={() => setDialog(null)}
           onDone={onComplete}
@@ -237,6 +305,10 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
       {dialog === 'delete' && (
         <BatchDeleteDialog
           ids={selectedIds}
+          items={selectionItems}
+          libraryId={libraryId}
+          trashEnabled={trashEnabled}
+          onRetainSelection={onRetainSelection}
           onClose={() => setDialog(null)}
           onDone={onComplete}
         />
@@ -245,6 +317,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
       {dialog === 'permanent' && (
         <BatchPermanentDeleteDialog
           ids={selectedIds}
+          onRetainSelection={onRetainSelection}
           onClose={() => setDialog(null)}
           onDone={onComplete}
         />
@@ -253,13 +326,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
   )
 }
 
-/**
- * Filing a selection under a category and a set of tags. One dialog for both
- * libraries: a private library's shelf is a shared library's category, the rows
- * are the same shape, and the work is the same - what changes is which list is
- * read and which endpoint each row is written to.
- */
-function BatchClassifyDialog({ ids, libraryId, onClose, onDone }: { ids: string[]; libraryId?: string; onClose: () => void; onDone: () => void }) {
+function BatchClassifyDialog({ ids, items, libraryId, onClose, onDone }: { ids: string[]; items: BatchSelectionItem[]; libraryId?: string; onClose: () => void; onDone: () => void }) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const { data: shelvesData } = useShelves()
@@ -269,59 +336,49 @@ function BatchClassifyDialog({ ids, libraryId, onClose, onDone }: { ids: string[
   const [activeTab, setActiveTab] = useState<'shelves' | 'tags'>('shelves')
   // undefined = untouched (no shelf PUT), null = move out of shelf (uncategorized)
   const [selectedShelf, setSelectedShelf] = useState<string | null | undefined>(undefined)
-  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
+  const [tagChanges, setTagChanges] = useState<Record<string, boolean>>({})
+  const [saving, setSaving] = useState(false)
 
   const shelves = libraryId ? (libraryCategories?.data ?? []) : (shelvesData?.data ?? [])
   const tags = libraryId ? (libraryTags?.data ?? []) : (tagsData?.data ?? [])
+  const initialCategory = items.every((item) => item.categoryId === items[0]?.categoryId) ? items[0]?.categoryId : undefined
 
   async function handleApply() {
-    const tagIds = Array.from(selectedTags)
-    const results = await Promise.allSettled(ids.map((id) =>
-      libraryId
-        ? apiPatch(`/libraries/${libraryId}/books/${id}`, {
-          ...(selectedShelf !== undefined ? { categoryId: selectedShelf } : {}),
-          ...(tagIds.length > 0 ? { tagIds } : {}),
-        })
-        : Promise.all([
-          selectedShelf !== undefined ? apiPut(`/books/${id}/shelves`, { shelfId: selectedShelf }) : Promise.resolve(),
-          tagIds.length > 0 ? apiPut(`/books/${id}/tags`, { tagIds }) : Promise.resolve(),
-        ]),
-    ))
-    const failed = results.filter((r) => r.status === 'rejected').length
-    const succeeded = results.length - failed
-    if (libraryId) {
-      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
-      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
-      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
-    } else {
+    setSaving(true)
+    try {
+      await apiPatch(libraryId ? `/libraries/${libraryId}/books/batch/organize` : '/books/batch/organize', {
+        ids,
+        ...(selectedShelf !== undefined ? { categoryId: selectedShelf } : {}),
+        addTagIds: Object.keys(tagChanges).filter((id) => tagChanges[id]),
+        removeTagIds: Object.keys(tagChanges).filter((id) => !tagChanges[id]),
+      })
       void queryClient.invalidateQueries({ queryKey: ['books'] })
       void queryClient.invalidateQueries({ queryKey: ['shelves'] })
       void queryClient.invalidateQueries({ queryKey: ['tags'] })
-    }
-    if (failed === 0) {
-      notify.success({ key: 'library.batchClassifySucceeded', params: { count: succeeded } })
-    } else {
-      notify.warning({
-        key: 'library.batchPartial',
-        params: { action: _('library.batchActionClassify'), succeeded, failed },
-      })
-    }
-    if (failed === 0) {
+      if (libraryId) {
+        void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
+        void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
+        void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
+      }
+      notify.success({ key: 'library.batchClassifySucceeded', params: { count: ids.length } })
       onDone()
       onClose()
+    } catch {
+      notify.error(_('library.batchOrganizeFailed'))
+      setSaving(false)
     }
   }
 
-  const showSave = selectedShelf !== undefined || selectedTags.size > 0
+  const showSave = selectedShelf !== undefined || Object.keys(tagChanges).length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4">
       <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
         <h2 className="mb-4 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
-          {_('library.batchClassify')}
+          {_('library.batchOrganize')}
         </h2>
         <p className="mb-4 text-sm text-stone-500">
-          {_('library.batchClassifyConfirm', { count: ids.length })}
+          {_('library.batchOrganizeConfirm', { count: ids.length })}
         </p>
 
         <div className="mb-4 flex rounded-lg border border-stone-200 p-0.5 dark:border-stone-800">
@@ -355,7 +412,7 @@ function BatchClassifyDialog({ ids, libraryId, onClose, onDone }: { ids: string[
           <div className="flex max-h-60 flex-col gap-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
             <ShelfRadio
               label={_('library.uncategorized')}
-              checked={selectedShelf === null}
+              checked={selectedShelf === null || (selectedShelf === undefined && initialCategory === null)}
               onChange={() => setSelectedShelf(null)}
             />
             {shelves.map((shelf) => (
@@ -363,7 +420,7 @@ function BatchClassifyDialog({ ids, libraryId, onClose, onDone }: { ids: string[
                 key={shelf.id}
                 label={shelf.name}
                 count={shelf.bookCount}
-                checked={selectedShelf === shelf.id}
+                checked={selectedShelf === shelf.id || (selectedShelf === undefined && initialCategory === shelf.id)}
                 onChange={() => setSelectedShelf(shelf.id)}
               />
             ))}
@@ -372,7 +429,10 @@ function BatchClassifyDialog({ ids, libraryId, onClose, onDone }: { ids: string[
           <div className="py-4 text-center text-sm text-stone-400">{_('library.noTags')}</div>
         ) : (
           <div className="flex max-h-60 flex-col gap-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
-            {tags.map((tag) => (
+            {tags.map((tag) => {
+              const count = items.filter((item) => item.tagIds.includes(tag.id)).length
+              const state = tagChanges[tag.id] === undefined ? (count === 0 ? 'none' : count === ids.length ? 'all' : 'mixed') : (tagChanges[tag.id] ? 'all' : 'none')
+              return (
               <label
                 key={tag.id}
                 className="flex cursor-pointer items-center justify-between rounded-lg px-2 py-2 hover:bg-stone-50 dark:hover:bg-stone-800"
@@ -380,26 +440,22 @@ function BatchClassifyDialog({ ids, libraryId, onClose, onDone }: { ids: string[
                 <span className="flex items-center gap-2 text-sm text-stone-700 dark:text-stone-200">
                   <input
                     type="checkbox"
-                    checked={selectedTags.has(tag.id)}
-                    onChange={() => {
-                      const next = new Set(selectedTags)
-                      if (next.has(tag.id)) next.delete(tag.id)
-                      else next.add(tag.id)
-                      setSelectedTags(next)
-                    }}
+                    checked={state === 'all'}
+                    ref={(node) => { if (node) node.indeterminate = state === 'mixed' }}
+                    onChange={() => setTagChanges((previous) => ({ ...previous, [tag.id]: state !== 'all' }))}
                     className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-500 dark:border-stone-700"
                   />
                   <span className="truncate">{tag.name}</span>
                 </span>
-                <span className="text-xs text-stone-400">{tag.bookCount}</span>
+                <span className="text-xs text-stone-400">{state === 'all' ? ids.length : state === 'none' ? 0 : count}/{ids.length}</span>
               </label>
-            ))}
+            )})}
           </div>
         )}
 
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>{_('library.cancel')}</Button>
-          <Button disabled={!showSave} onClick={handleApply}>{_('library.save')}</Button>
+          <Button disabled={!showSave || saving} onClick={() => void handleApply()}>{_('library.save')}</Button>
         </div>
       </div>
     </div>
@@ -423,19 +479,39 @@ function ShelfRadio({ label, count, checked, onChange }: { label: string; count?
   )
 }
 
-function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: () => void; onDone: () => void }) {
+function BatchDeleteDialog({ ids, items, libraryId, trashEnabled, onRetainSelection, onClose, onDone }: {
+  ids: string[]
+  items: BatchSelectionItem[]
+  libraryId?: string
+  trashEnabled: boolean
+  onRetainSelection?: (ids: string[]) => void
+  onClose: () => void
+  onDone: () => void
+}) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const [deleting, setDeleting] = useState(false)
+  const [deleteUserData, setDeleteUserData] = useState(false)
+  const collectedCount = items.filter((item) => item.kind === 'shared').length
+  const ownedCount = libraryId ? 0 : items.length - collectedCount
+  const versionCount = items.reduce((total, item) => total + item.versionCount, 0)
 
   async function handleDelete() {
     setDeleting(true)
-    const results = await Promise.allSettled(ids.map((id) => apiDelete(`/books/${id}`)))
+    const byId = new Map(items.map((item) => [item.id, item]))
+    const results = await settleBatch(ids, (id) => libraryId
+      ? apiDelete(`/libraries/${libraryId}/books/${id}`)
+      : apiDelete(`/books/${id}${byId.get(id)?.kind === 'shared' && deleteUserData ? '?deleteUserData=true' : ''}`))
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
     void queryClient.invalidateQueries({ queryKey: ['books'] })
     void queryClient.invalidateQueries({ queryKey: ['shelves'] })
     void queryClient.invalidateQueries({ queryKey: ['tags'] })
+    if (libraryId) {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
+    }
     if (failed === 0) {
       notify.success({ key: 'library.batchDeleteSucceeded', params: { count: succeeded } })
     } else {
@@ -443,19 +519,37 @@ function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: (
         key: 'library.batchPartial',
         params: { action: _('library.batchActionDelete'), succeeded, failed },
       })
+      onRetainSelection?.(ids.filter((_, index) => results[index]?.status === 'rejected'))
     }
     if (failed === 0) {
       onDone()
       onClose()
     } else {
-      setDeleting(false)
+      onClose()
     }
   }
 
   return (
     <ConfirmDialog
       title={_('library.batchDelete')}
-      message={_('library.batchDeleteConfirm', { count: ids.length })}
+      message={
+        <div className="space-y-2">
+          {libraryId ? (
+            <p>{_('library.batchDeleteSharedConfirm', { count: ids.length, versions: versionCount })}</p>
+          ) : (
+            <>
+              {ownedCount > 0 && <p>{_(trashEnabled ? 'library.batchDeleteOwnedTrash' : 'library.batchDeleteOwnedPermanent', { count: ownedCount })}</p>}
+              {collectedCount > 0 && <p>{_('library.batchDeleteCollected', { count: collectedCount })}</p>}
+              {collectedCount > 0 && (
+                <label className="flex items-start gap-2 text-xs">
+                  <input type="checkbox" checked={deleteUserData} onChange={(event) => setDeleteUserData(event.target.checked)} />
+                  {_('library.clearUserDataOnRemove')}
+                </label>
+              )}
+            </>
+          )}
+        </div>
+      }
       confirmLabel={_('library.batchDelete')}
       confirmVariant="danger"
       confirmDisabled={deleting}
@@ -465,14 +559,14 @@ function BatchDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: (
   )
 }
 
-function BatchPermanentDeleteDialog({ ids, onClose, onDone }: { ids: string[]; onClose: () => void; onDone: () => void }) {
+function BatchPermanentDeleteDialog({ ids, onRetainSelection, onClose, onDone }: { ids: string[]; onRetainSelection?: (ids: string[]) => void; onClose: () => void; onDone: () => void }) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const [deleting, setDeleting] = useState(false)
 
   async function handleDelete() {
     setDeleting(true)
-    const results = await Promise.allSettled(ids.map((id) => apiDelete(`/books/${id}/permanent`)))
+    const results = await settleBatch(ids, (id) => apiDelete(`/books/${id}/permanent`))
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
     void queryClient.invalidateQueries({ queryKey: ['books'] })
@@ -488,7 +582,8 @@ function BatchPermanentDeleteDialog({ ids, onClose, onDone }: { ids: string[]; o
       onDone()
       onClose()
     } else {
-      setDeleting(false)
+      onRetainSelection?.(ids.filter((_, index) => results[index]?.status === 'rejected'))
+      onClose()
     }
   }
 

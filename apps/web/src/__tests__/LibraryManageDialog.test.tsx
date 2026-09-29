@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import LibraryManageDialog from '../features/library/components/LibraryManageDialog'
 import type { Library } from '@bookdock/shared'
 
 const HOOKS = vi.hoisted(() => ({
   useUpdateLibrary: vi.fn(),
-  useDeleteLibrary: vi.fn(),
 }))
 vi.mock('../features/library/hooks', () => HOOKS)
 vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }))
@@ -20,13 +19,11 @@ const LIBRARY: Library = {
 
 describe('LibraryManageDialog', () => {
   const onClose = vi.fn()
-  const onDeleted = vi.fn()
 
   beforeEach(async () => {
     vi.clearAllMocks()
     await i18n.changeLanguage('zh-CN')
     HOOKS.useUpdateLibrary.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    HOOKS.useDeleteLibrary.mockReturnValue({ mutate: vi.fn(), isPending: false })
   })
 
   function renderDialog(isOwner = true) {
@@ -35,15 +32,14 @@ describe('LibraryManageDialog', () => {
         library={LIBRARY}
         isOwner={isOwner}
         onClose={onClose}
-        onDeleted={onDeleted}
       />,
     )
   }
 
-  it('renders library settings and delete button for owner without member section', () => {
+  it('renders library settings for owner without member section or delete button', () => {
     renderDialog()
     expect(screen.getByLabelText('名称')).toHaveValue('City')
-    expect(screen.getByRole('button', { name: '删除书库' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除书库' })).not.toBeInTheDocument()
     expect(screen.queryByText('成员')).not.toBeInTheDocument()
     expect(screen.queryByText('危险区域')).not.toBeInTheDocument()
   })
@@ -62,29 +58,24 @@ describe('LibraryManageDialog', () => {
     )
   })
 
-  it('sends a new access password only when one was typed', () => {
+  it('requires a 4+ char password when visibility is password', () => {
     renderDialog()
     fireEvent.click(screen.getByRole('radio', { name: '密码' }))
+    // Empty password cannot be saved
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+
+    // Too short password cannot be saved
+    fireEvent.change(screen.getByLabelText('访问密码'), { target: { value: '123' } })
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+
+    // 4+ chars password enables save and sends the password
+    fireEvent.change(screen.getByLabelText('访问密码'), { target: { value: 'pass123' } })
+    expect(screen.getByRole('button', { name: '保存' })).not.toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    // Empty means "keep the current password", so it is sent as null.
     expect(HOOKS.useUpdateLibrary().mutate).toHaveBeenCalledWith(
-      expect.objectContaining({ patch: expect.objectContaining({ visibility: 'password', accessPassword: null }) }),
+      expect.objectContaining({ patch: expect.objectContaining({ visibility: 'password', accessPassword: 'pass123' }) }),
       expect.any(Object),
     )
-  })
-
-  it('states that deleting a library leaves collected copies unreadable in confirmation dialog', () => {
-    renderDialog()
-    fireEvent.click(screen.getByRole('button', { name: '删除书库' }))
-    const dialog = screen.getByRole('alertdialog')
-    expect(within(dialog).getByText(/保留自己的书卡，但无法再阅读/)).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: '删除书库' }))
-    expect(HOOKS.useDeleteLibrary().mutate).toHaveBeenCalledWith({ libraryId: 'lib_city' }, expect.any(Object))
-  })
-
-  it('hides delete button when isOwner is false', () => {
-    renderDialog(false)
-    expect(screen.queryByRole('button', { name: '删除书库' })).not.toBeInTheDocument()
   })
 
   it('shows admins a read-only notice instead of the settings form', () => {

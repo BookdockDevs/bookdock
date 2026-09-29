@@ -6,10 +6,11 @@ import type { GridCardField } from '@/stores/ui.store'
 import { catalogWorkRow } from '../book-row'
 
 import BookCardShell from './BookCardShell'
+import HiddenIndicator from './HiddenIndicator'
 import { useContextMenu } from './use-context-menu'
 import CatalogWorkMenu from './CatalogWorkMenu'
 import { PinIcon } from './UnpinButton'
-import { useUpdateCatalogVersion } from '../hooks'
+import { useUpdateCatalogBook } from '../hooks'
 
 /**
  * A work in a shared library, drawn by the same card as a private book.
@@ -37,12 +38,14 @@ export default function CatalogCard({
 }: CatalogCardProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
-  const updateVersion = useUpdateCatalogVersion()
+  const updateWork = useUpdateCatalogBook()
   const first = book.versions[0]
-  const isPinned = Boolean(first?.pinnedAt)
+  const isPinned = Boolean(book.pinnedAt)
+  const isWorkHidden = book.hidden || (book.versions.length === 1 && first?.status === 'unlisted')
+  const hasHiddenVersions = book.versions.length > 1 && book.versions.some((version) => version.status === 'unlisted')
 
   return (
-    <div className="flex flex-col gap-2">
+    <>
       <BookCardShell
         row={catalogWorkRow(book)}
         gridCardFields={gridCardFields}
@@ -57,11 +60,9 @@ export default function CatalogCard({
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  if (!first) return
-                  updateVersion.mutate({
+                  updateWork.mutate({
                     libraryId: book.libraryId,
                     libraryBookId: book.id,
-                    versionLinkId: first.id,
                     patch: { pinned: false },
                   })
                 }}
@@ -87,6 +88,12 @@ export default function CatalogCard({
           e.stopPropagation()
           menu.openFromEvent(e)
         }}
+        coverBadge={(isWorkHidden || hasHiddenVersions) ? (
+          <>
+            {isWorkHidden && <HiddenIndicator kind="work" overlay />}
+            {hasHiddenVersions && <HiddenIndicator kind="versions" overlay />}
+          </>
+        ) : undefined}
         menu={(
           <button
             ref={menu.btnRef}
@@ -117,15 +124,10 @@ export default function CatalogCard({
           work={book}
           canManage={canManage}
           canCollect={canCollect && first?.collected !== true}
-          canDownload={canCollect && book.versions[0]?.status === 'published'}
+          canDownload={canCollect && (canManage || book.versions[0]?.status === 'published')}
           onShowDetails={() => { menu.close(); onShowDetails(book) }}
         />
       )}
-      {book.versions.length > 1 && (
-        <p className="px-0.5 text-[11px] text-stone-400 dark:text-stone-500">
-          {_('library.versionCount', { count: book.versions.length })}
-        </p>
-      )}
-    </div>
+    </>
   )
 }

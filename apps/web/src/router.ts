@@ -1,6 +1,7 @@
 import { createRouter } from '@tanstack/react-router'
 import { rootRoute } from './routes/__root'
 import { indexRoute } from './routes/index'
+import { libraryInviteRoute } from './routes/library.$token'
 import { loginRoute } from './routes/login'
 import { profileRoute } from './routes/profile'
 import { registerRoute } from './routes/register'
@@ -12,6 +13,7 @@ import { updatePreviewRoute } from './routes/update-preview'
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  libraryInviteRoute,
   profileRoute,
   loginRoute,
   registerRoute,

@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
-import type { UploadTarget } from '../hooks'
+import { useLibraryCategories, type UploadTarget } from '../hooks'
 import UploadSheet from './UploadSheet'
 
 interface CatalogUploadSheetProps {
@@ -17,6 +17,7 @@ interface CatalogUploadSheetProps {
    */
   libraryBookId?: string
   workTitle?: string
+  nextVersionIndex?: number
   /** Fired with the new version link ids once the queue settles. */
   onUploadedVersion?: (versionLinkIds: string[]) => void
   onClose: () => void
@@ -32,8 +33,20 @@ interface CatalogUploadSheetProps {
  * label. Filing it as a new version of an existing work picked elsewhere is a
  * separate UI decision, not a dropdown bolted onto this window.
  */
-export default function CatalogUploadSheet({ open, libraryId, categoryId, libraryBookId, workTitle, onUploadedVersion, onClose }: CatalogUploadSheetProps) {
+export default function CatalogUploadSheet({
+  open,
+  libraryId,
+  categoryId,
+  libraryBookId,
+  workTitle,
+  nextVersionIndex,
+  onUploadedVersion,
+  onClose,
+}: CatalogUploadSheetProps) {
   const _ = useTranslation()
+  const { data: categoriesData } = useLibraryCategories(libraryId, { enabled: Boolean(open && categoryId) })
+  const categoryName = categoryId ? categoriesData?.data.find((c) => c.id === categoryId)?.name : undefined
+
   // Memoized because the upload queue keys its scheduler and its settlement
   // effect on the target's identity; a fresh object each render would restart
   // both. The category rides along for the same reason: switching categories
@@ -60,13 +73,23 @@ export default function CatalogUploadSheet({ open, libraryId, categoryId, librar
 
   if (!open) return null
 
+  const versionContextNote = libraryBookId
+    ? (_('library.versionFallback', { n: nextVersionIndex ?? 2 }) as string)
+    : undefined
+  const versionContextTitle = libraryBookId && workTitle
+    ? (_('library.uploadToWorkHint', { name: workTitle }) as string)
+    : undefined
+
   return (
     <UploadSheet
       open
       onClose={onClose}
+      shelfName={categoryName}
+      isCategory
       target={target}
       versionNameMode={Boolean(libraryBookId)}
-      contextNote={libraryBookId && workTitle ? _('library.uploadToWorkHint', { name: workTitle }) : undefined}
+      contextNote={versionContextNote}
+      contextTitle={versionContextTitle}
       onUploaded={onUploadedVersion}
     />
   )

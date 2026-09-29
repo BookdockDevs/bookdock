@@ -62,7 +62,7 @@ export default function LibraryCreateDialog({ onClose, onCreated }: LibraryCreat
   const createLibrary = useCreateLibrary()
 
   const dirty = name.trim() !== '' || description !== '' || password !== ''
-  const canSubmit = name.trim().length > 0 && (visibility !== 'password' || password.length >= 4)
+  const canSubmit = name.trim().length > 0 && (visibility !== 'password' || password.trim().length >= 4)
 
   function reset() {
     setName('')
@@ -87,7 +87,9 @@ export default function LibraryCreateDialog({ onClose, onCreated }: LibraryCreat
         name: name.trim(),
         description,
         visibility,
-        ...(visibility === 'password' ? { accessPassword: password } : {}),
+        // The gate counts trimmed length, so send the trimmed value: join
+        // trims before comparing and a padded password could never match.
+        ...(visibility === 'password' ? { accessPassword: password.trim() } : {}),
       },
     }, {
       onSuccess: (res) => {
@@ -107,10 +109,10 @@ export default function LibraryCreateDialog({ onClose, onCreated }: LibraryCreat
     hint: string
   }> = [
     {
-      value: 'private',
-      icon: LockIcon,
-      label: _('library.visibilityPrivate'),
-      hint: _('library.visibilityHintPrivate'),
+      value: 'public',
+      icon: GlobeIcon,
+      label: _('library.visibilityPublic'),
+      hint: _('library.visibilityHintPublic'),
     },
     {
       value: 'password',
@@ -119,10 +121,10 @@ export default function LibraryCreateDialog({ onClose, onCreated }: LibraryCreat
       hint: _('library.visibilityHintPassword'),
     },
     {
-      value: 'public',
-      icon: GlobeIcon,
-      label: _('library.visibilityPublic'),
-      hint: _('library.visibilityHintPublic'),
+      value: 'private',
+      icon: LockIcon,
+      label: _('library.visibilityPrivate'),
+      hint: _('library.visibilityHintPrivate'),
     },
   ]
 
@@ -153,7 +155,6 @@ export default function LibraryCreateDialog({ onClose, onCreated }: LibraryCreat
               aria-label={_('library.libraryName')}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. 个人藏书、小说精选"
               maxLength={64}
               autoFocus
               className="rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900/80 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200"
@@ -195,6 +196,7 @@ export default function LibraryCreateDialog({ onClose, onCreated }: LibraryCreat
                       value={opt.value}
                       checked={selected}
                       onChange={() => setVisibility(opt.value)}
+                      aria-label={opt.label}
                       className="sr-only"
                     />
                     <div>
@@ -232,17 +234,23 @@ export default function LibraryCreateDialog({ onClose, onCreated }: LibraryCreat
           {visibility === 'password' && (
             <div className="rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
               <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
-                <span className="font-medium">{_('library.libraryAccessPassword')}</span>
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-xs text-stone-600 dark:text-stone-300">{_('library.libraryAccessPassword')}</span>
+                  {password.trim().length > 0 && password.trim().length < 4 && (
+                    <span className="text-xs font-medium text-red-500">
+                      {_('library.libraryAccessPasswordMinHint')}
+                    </span>
+                  )}
+                </div>
                 <input
-                  type="password"
+                  type="text"
                   aria-label={_('library.libraryAccessPassword')}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="至少 4 位访问密码"
-                  autoComplete="new-password"
-                  className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200"
+                  placeholder={_('library.libraryAccessPasswordPlaceholder')}
+                  autoComplete="off"
+                  className="font-mono tracking-wider rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200"
                 />
-                <span className="text-xs text-stone-400">{_('library.libraryAccessPasswordHint')}</span>
               </label>
             </div>
           )}

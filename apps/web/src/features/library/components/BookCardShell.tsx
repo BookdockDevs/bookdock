@@ -44,6 +44,8 @@ interface BookCardShellProps {
   onPermanentDelete?: () => void
   /** Rendered under the cover, absolutely positioned (the trash pills). */
   coverOverlay?: ReactNode
+  /** Bottom-left badge on the cover (the hidden mark lives here, not below the card). */
+  coverBadge?: ReactNode
   /** Rendered under the title (a collected card whose source is gone says so). */
   infoFooter?: ReactNode
   /** The overflow menu, anchored by the row that owns it. */
@@ -64,6 +66,7 @@ export default function BookCardShell({
   onRestore,
   onPermanentDelete,
   coverOverlay,
+  coverBadge,
   infoFooter,
   menu,
   onContextMenu,
@@ -116,6 +119,11 @@ export default function BookCardShell({
         {selectable && selectionActive && <SelectionCheckOverlay selected={selected} />}
         {showMenu && <div className="absolute right-1.5 top-1.5 z-10 transition-opacity duration-150 opacity-100 md:opacity-0 md:group-hover:opacity-100">{menu}</div>}
         {coverOverlay}
+        {coverBadge && (
+          <div className="absolute bottom-1.5 left-1.5 z-10 flex items-center gap-1">
+            {coverBadge}
+          </div>
+        )}
         {trashCard && !selectionActive && (
           <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2.5 rounded-b-xl bg-gradient-to-t from-black/75 via-black/45 to-transparent p-2.5 pt-8 opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
             <OverlayAction

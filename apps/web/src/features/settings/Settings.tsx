@@ -103,8 +103,10 @@ export default function Settings() {
       label: _('settings.library'),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="3" width="7" height="18" rx="1" />
-          <rect x="14" y="3" width="7" height="18" rx="1" />
+          <path d="m16 6 4 14" />
+          <path d="M12 6v14" />
+          <path d="M8 8v12" />
+          <path d="M4 4v16" />
         </svg>
       ),
     },
@@ -226,6 +228,7 @@ export default function Settings() {
                 />
               ) : (
                 <>
+                  <LibraryManagementSection />
                   <SettingsCard
                     icon={<UploadBoxIcon className="h-5 w-5" />}
                     iconBgClass="bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
@@ -234,7 +237,6 @@ export default function Settings() {
                     <TitleSettingsRow />
                     {isOwner && <UploadSettingsSection />}
                   </SettingsCard>
-                  <LibraryManagementSection />
                   <TrashSettingsRow />
                 </>
               )}

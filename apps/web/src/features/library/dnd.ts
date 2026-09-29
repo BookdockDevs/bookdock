@@ -40,3 +40,20 @@ export function applyTagOrder<T extends { id: string }>(base: T[], override: str
     .filter((tag): tag is T => Boolean(tag))
   return ordered.length === base.length ? ordered : base
 }
+
+/**
+ * The reader's manual library order, merged over the server's join-time order.
+ *
+ * Unlike applyShelfOrder this is incremental, not all-or-nothing: a library the
+ * order does not mention — joined after the last drag — keeps its base order and
+ * lands at the bottom, which is the same "new entries go last" rule shelves get
+ * from max(sortOrder) + 1. Ids the reader has since left are dropped.
+ */
+export function applyLibraryOrder<T extends { id: string }>(base: T[], order: string[] | null | undefined): T[] {
+  if (!order || order.length === 0) return base
+  const byId = new Map(base.map((library) => [library.id, library]))
+  const placed = order.map((id) => byId.get(id)).filter((library): library is T => Boolean(library))
+  if (placed.length === 0) return base
+  const seen = new Set(placed.map((library) => library.id))
+  return [...placed, ...base.filter((library) => !seen.has(library.id))]
+}

@@ -1,298 +1,171 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
-import { useToastStore } from '@/stores/toast.store'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { BatchSelectionItem } from '@bookdock/shared'
 
 import SelectionBar from '../features/library/components/SelectionBar'
 
 const apiPatch = vi.fn()
-const apiPut = vi.fn()
 const apiPost = vi.fn()
 const apiDelete = vi.fn()
+let selectionItems: BatchSelectionItem[] = []
+let tags: { id: string; name: string; bookCount: number }[] = []
+let categories: { id: string; name: string; bookCount: number }[] = []
 
 vi.mock('@/api/client', () => ({
   apiPatch: (...args: unknown[]) => apiPatch(...args),
-  apiPut: (...args: unknown[]) => apiPut(...args),
   apiPost: (...args: unknown[]) => apiPost(...args),
   apiDelete: (...args: unknown[]) => apiDelete(...args),
 }))
 
-let mockShelves: { id: string; name: string; bookCount: number }[] = []
-let mockLibraryCategories: { id: string; name: string; bookCount: number }[] = []
-
 vi.mock('../features/library/hooks', () => ({
-  useShelves: () => ({ data: { data: mockShelves } }),
-  useTags: () => ({ data: { data: [] } }),
-  useLibraryCategories: () => ({ data: { data: mockLibraryCategories } }),
-  useLibraryTags: () => ({ data: { data: [] } }),
+  useShelves: () => ({ data: { data: categories } }),
+  useTags: () => ({ data: { data: tags } }),
+  useLibraryCategories: () => ({ data: { data: categories } }),
+  useLibraryTags: () => ({ data: { data: tags } }),
 }))
 
 function wrapper({ children }: { children: ReactNode }) {
-  return <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+  return <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>
+}
+
+function item(id: string, overrides: Partial<BatchSelectionItem> = {}): BatchSelectionItem {
+  return { id, categoryId: null, tagIds: [], hidden: false, pinnedAt: null, versionCount: 1, kind: 'personal', ...overrides }
+}
+
+async function clickReady(name: string) {
+  const button = screen.getByRole('button', { name })
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.click(button)
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useToastStore.getState().clearToasts()
-  mockShelves = []
-  mockLibraryCategories = []
-  apiPatch.mockResolvedValue({})
-  apiPut.mockResolvedValue({})
-  apiPost.mockResolvedValue({})
-  apiDelete.mockResolvedValue({})
+  selectionItems = []
+  tags = []
+  categories = []
+  apiPatch.mockResolvedValue({ data: null })
+  apiDelete.mockResolvedValue({ data: null })
+  apiPost.mockImplementation((_url: string, body: { ids: string[] }) => Promise.resolve({
+    data: body.ids.map((id) => selectionItems.find((row) => row.id === id)),
+  }))
 })
 
 describe('SelectionBar', () => {
-  /**
-   * A shared library's selection is the same bar with the same classify action;
-   * what it cannot offer is everything that needs the reader to own the row.
-   */
-  describe('shared library scope', () => {
-    it('offers classify and nothing that needs ownership', () => {
-      render(<SelectionBar selectedIds={['lb1']} onClear={vi.fn()} libraryId="lib-1" />, { wrapper })
-
-      expect(screen.getByText('library.batchClassify')).toBeInTheDocument()
-      expect(screen.queryByText('library.markFinished')).toBeNull()
-      expect(screen.queryByText('library.batchDelete')).toBeNull()
-    })
-
-    it('files the selected works under a category of that library', async () => {
-      mockLibraryCategories = [{ id: 'cat-1', name: '科幻', bookCount: 2 }]
-      const onComplete = vi.fn()
-      render(<SelectionBar selectedIds={['lb1', 'lb2']} onClear={vi.fn()} onComplete={onComplete} libraryId="lib-1" />, { wrapper })
-
-      fireEvent.click(screen.getByText('library.batchClassify'))
-      fireEvent.click(screen.getByText('科幻'))
-      fireEvent.click(screen.getByText('library.save'))
-
-      await waitFor(() => expect(onComplete).toHaveBeenCalled())
-      expect(apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/lb1', { categoryId: 'cat-1' })
-      expect(apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/lb2', { categoryId: 'cat-1' })
-      // The private endpoints are never touched from a shared library.
-      expect(apiPut).not.toHaveBeenCalled()
-    })
-
-    it('names the taxonomy 分类 rather than 书架', () => {
-      mockLibraryCategories = [{ id: 'cat-1', name: '科幻', bookCount: 1 }]
-      render(<SelectionBar selectedIds={['lb1']} onClear={vi.fn()} libraryId="lib-1" />, { wrapper })
-
-      fireEvent.click(screen.getByText('library.batchClassify'))
-      expect(screen.getByText('library.categories')).toBeInTheDocument()
-      expect(screen.queryByText('library.shelves')).toBeNull()
-    })
-
-    it('never offers trash actions for a shared selection, even with a stale trash flag', () => {
-      render(<SelectionBar selectedIds={['lb1']} onClear={vi.fn()} libraryId="lib-1" trash />, { wrapper })
-
-      expect(screen.queryByText('library.restore')).toBeNull()
-      expect(screen.queryByText('library.permanentDelete')).toBeNull()
-      expect(screen.getByText('library.batchClassify')).toBeInTheDocument()
-    })
-
-    it('hides the selected works through the catalog endpoint', async () => {
-      const onComplete = vi.fn()
-      render(<SelectionBar selectedIds={['lb1', 'lb2']} onClear={vi.fn()} onComplete={onComplete} libraryId="lib-1" />, { wrapper })
-
-      fireEvent.click(screen.getByText('library.hide'))
-
-      await waitFor(() => expect(onComplete).toHaveBeenCalled())
-      expect(apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/lb1', { hidden: true })
-      expect(apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/lb2', { hidden: true })
-    })
-  })
-
-  it('applies batch read status to every selected book and clears selection', async () => {
-    const onClear = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b', 'c']} onClear={onClear} />, { wrapper })
-
-    fireEvent.click(screen.getByText('library.markFinished'))
-
-    await waitFor(() => expect(onClear).toHaveBeenCalled())
-    expect(apiPatch).toHaveBeenCalledTimes(3)
-    expect(apiPatch).toHaveBeenCalledWith('/books/a', { readStatus: 'finished' })
-    expect(apiPatch).toHaveBeenCalledWith('/books/c', { readStatus: 'finished' })
-  })
-
-  it('uses the completion callback after a successful batch action', async () => {
-    const onClear = vi.fn()
+  it('organizes works through the shared library in one request', async () => {
+    selectionItems = [item('w1', { kind: undefined }), item('w2', { kind: undefined })]
+    categories = [{ id: 'c1', name: '科幻', bookCount: 2 }]
     const onComplete = vi.fn()
-    render(<SelectionBar selectedIds={['a']} onClear={onClear} onComplete={onComplete} />, { wrapper })
+    render(<SelectionBar selectedIds={['w1', 'w2']} libraryId="lib1" onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
 
-    fireEvent.click(screen.getByText('library.markFinished'))
+    await clickReady('library.batchOrganize')
+    fireEvent.click(screen.getByText('科幻'))
+    fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
-    expect(onClear).not.toHaveBeenCalled()
-  })
-
-  it('keeps selection and shows a summary toast when some updates fail', async () => {
-    apiPatch.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce({})
-    const onClear = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b', 'c']} onClear={onClear} />, { wrapper })
-
-    fireEvent.click(screen.getByText('library.markFinished'))
-
-    await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(3))
-    await waitFor(() => {
-      const toasts = useToastStore.getState().toasts
-      expect(toasts.some((t) => (
-        typeof t.message !== 'string'
-        && t.message.key === 'library.batchPartial'
-        && t.type === 'warning'
-        && t.message.params?.action === 'library.batchActionStatus'
-      ))).toBe(true)
+    expect(apiPatch).toHaveBeenCalledWith('/libraries/lib1/books/batch/organize', {
+      ids: ['w1', 'w2'], categoryId: 'c1', addTagIds: [], removeTagIds: [],
     })
-    expect(onClear).not.toHaveBeenCalled()
-
-    const partialToast = useToastStore.getState().toasts.find((toast) => (
-      typeof toast.message !== 'string' && toast.message.key === 'library.batchPartial'
-    ))
-    expect(partialToast?.action?.label).toBe('library.batchRetryFailed')
-    act(() => partialToast?.action?.onClick())
-    await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(4))
-    await waitFor(() => expect(onClear).toHaveBeenCalledTimes(1))
   })
 
-  it('batch delete calls the api per book and clears selection', async () => {
-    const onClear = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={onClear} />, { wrapper })
+  it('adds a partially present tag to all selected entries without changing other tags', async () => {
+    selectionItems = [item('a', { tagIds: ['t1', 'other'] }), item('b', { tagIds: [] })]
+    tags = [{ id: 't1', name: '科幻', bookCount: 1 }]
+    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} />, { wrapper })
 
-    fireEvent.click(screen.getByText('library.batchDelete'))
-    const deleteButtons = screen.getAllByRole('button', { name: 'library.batchDelete' })
-    fireEvent.click(deleteButtons[deleteButtons.length - 1])
+    await clickReady('library.batchOrganize')
+    fireEvent.click(screen.getByText('library.tags'))
+    const checkbox = screen.getByRole('checkbox') as HTMLInputElement
+    expect(checkbox.indeterminate).toBe(true)
+    fireEvent.click(checkbox)
+    fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
 
-    await waitFor(() => expect(onClear).toHaveBeenCalled())
-    expect(apiDelete).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
+      ids: ['a', 'b'], addTagIds: ['t1'], removeTagIds: [],
+    }))
+  })
+
+  it('removes a tag only when every selected entry has it', async () => {
+    selectionItems = [item('a', { tagIds: ['t1'] }), item('b', { tagIds: ['t1'] })]
+    tags = [{ id: 't1', name: '科幻', bookCount: 2 }]
+    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} />, { wrapper })
+
+    await clickReady('library.batchOrganize')
+    fireEvent.click(screen.getByText('library.tags'))
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
+
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
+      ids: ['a', 'b'], addTagIds: [], removeTagIds: ['t1'],
+    }))
+  })
+
+  it('keeps reading status in a private-library menu', async () => {
+    selectionItems = [item('a'), item('b')]
+    const onComplete = vi.fn()
+    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.readStatusLabel' }))
+    fireEvent.click(screen.getByRole('button', { name: 'library.markFinished' }))
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled())
+    expect(apiPatch).toHaveBeenCalledWith('/books/a', { readStatus: 'finished' })
+    expect(apiPatch).toHaveBeenCalledWith('/books/b', { readStatus: 'finished' })
+  })
+
+  it('pins a shared work instead of a version', async () => {
+    selectionItems = [item('w1', { kind: undefined })]
+    render(<SelectionBar selectedIds={['w1']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
+
+    await clickReady('library.pin')
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/libraries/lib1/books/w1', { pinned: true }))
+  })
+
+  it('uses one Delete action but explains and applies private A/B effects separately', async () => {
+    selectionItems = [item('a'), item('b', { kind: 'shared' })]
+    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} />, { wrapper })
+
+    await clickReady('library.moreActions')
+    fireEvent.click(screen.getByRole('button', { name: 'library.batchDelete' }))
+    const dialog = screen.getByRole('alertdialog')
+    expect(within(dialog).getByText('library.batchDeleteOwnedTrash')).toBeInTheDocument()
+    expect(within(dialog).getByText('library.batchDeleteCollected')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('checkbox'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'library.batchDelete' }))
+
+    await waitFor(() => expect(apiDelete).toHaveBeenCalledTimes(2))
     expect(apiDelete).toHaveBeenCalledWith('/books/a')
+    expect(apiDelete).toHaveBeenCalledWith('/books/b?deleteUserData=true')
   })
 
-  it('batch hide patches every selected book and clears selection', async () => {
-    const onClear = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={onClear} />, { wrapper })
+  it('counts all versions in shared-work deletion confirmation', async () => {
+    selectionItems = [item('w1', { kind: undefined, versionCount: 3 })]
+    render(<SelectionBar selectedIds={['w1']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
 
-    fireEvent.click(screen.getByText('library.hide'))
-
-    await waitFor(() => expect(onClear).toHaveBeenCalled())
-    expect(apiPatch).toHaveBeenCalledWith('/books/a', { hidden: true })
-    expect(apiPatch).toHaveBeenCalledWith('/books/b', { hidden: true })
+    await clickReady('library.moreActions')
+    fireEvent.click(screen.getByRole('button', { name: 'library.batchDelete' }))
+    expect(screen.getByText('library.batchDeleteSharedConfirm')).toBeInTheDocument()
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'library.batchDelete' }))
+    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/libraries/lib1/books/w1'))
   })
 
-  it('opens classify dialog', () => {
-    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
-    fireEvent.click(screen.getByText('library.batchClassify'))
-    expect(screen.getByText('library.batchClassifyConfirm')).toBeInTheDocument()
+  it('keeps only failed identities selected after a partial update', async () => {
+    selectionItems = [item('a'), item('b')]
+    apiPatch.mockImplementation((url: string) => url === '/books/b' ? Promise.reject(new Error('failed')) : Promise.resolve({ data: null }))
+    const onRetainSelection = vi.fn()
+    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} onRetainSelection={onRetainSelection} />, { wrapper })
+
+    await clickReady('library.pin')
+    await waitFor(() => expect(onRetainSelection).toHaveBeenCalledWith(['b']))
   })
 
-  it('shows the uncategorized option when no user shelves exist', () => {
-    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
-    fireEvent.click(screen.getByText('library.batchClassify'))
-
-    expect(screen.getByText('library.uncategorized')).toBeInTheDocument()
-    expect(screen.queryByText('library.noShelves')).toBeNull()
-  })
-
-  it('moves selected books into a single shelf', async () => {
-    mockShelves = [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }]
-    const onClear = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={onClear} />, { wrapper })
-
-    fireEvent.click(screen.getByText('library.batchClassify'))
-    fireEvent.click(screen.getByText('Favorites'))
-    fireEvent.click(screen.getByText('library.save'))
-
-    await waitFor(() => expect(onClear).toHaveBeenCalled())
-    expect(apiPut).toHaveBeenCalledWith('/books/a/shelves', { shelfId: 'shelf-1' })
-    expect(apiPut).toHaveBeenCalledWith('/books/b/shelves', { shelfId: 'shelf-1' })
-  })
-
-  it('moves selected books out of shelves via the uncategorized option', async () => {
-    mockShelves = [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }]
-    const onClear = vi.fn()
-    render(<SelectionBar selectedIds={['a']} onClear={onClear} />, { wrapper })
-
-    fireEvent.click(screen.getByText('library.batchClassify'))
-    fireEvent.click(screen.getByText('library.uncategorized'))
-    fireEvent.click(screen.getByText('library.save'))
-
-    await waitFor(() => expect(onClear).toHaveBeenCalled())
-    expect(apiPut).toHaveBeenCalledWith('/books/a/shelves', { shelfId: null })
-  })
-
-  it('clears selection via clear button', () => {
-    const onClear = vi.fn()
-    render(<SelectionBar selectedIds={['a']} onClear={onClear} />, { wrapper })
-    screen.getByRole('button', { name: 'library.clearSelection' }).click()
-    expect(onClear).toHaveBeenCalled()
-  })
-
-  it('trash mode shows restore/permanent actions instead of library batch actions', () => {
+  it('keeps trash actions separate from ordinary selection actions', () => {
     render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} trash />, { wrapper })
-    expect(screen.getByText('library.restore')).toBeTruthy()
-    expect(screen.getByText('library.permanentDelete')).toBeTruthy()
-    expect(screen.queryByText('library.batchClassify')).toBeNull()
-    expect(screen.queryByText('library.batchDelete')).toBeNull()
-  })
-
-  it('trash mode batch restore calls the restore api per book and clears selection', async () => {
-    const onClear = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={onClear} trash />, { wrapper })
-
-    fireEvent.click(screen.getByText('library.restore'))
-
-    await waitFor(() => expect(onClear).toHaveBeenCalled())
-    expect(apiPost).toHaveBeenCalledTimes(2)
-    expect(apiPost).toHaveBeenCalledWith('/books/a/restore')
-    expect(apiPost).toHaveBeenCalledWith('/books/b/restore')
-  })
-
-  it('trash mode batch permanent delete confirms then calls the permanent api per book', async () => {
-    const onClear = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={onClear} trash />, { wrapper })
-
-    fireEvent.click(screen.getByText('library.permanentDelete'))
-    expect(screen.getByText('library.batchPermanentDeleteConfirm')).toBeTruthy()
-    expect(apiDelete).not.toHaveBeenCalled()
-
-    const confirmButtons = screen.getAllByRole('button', { name: 'library.permanentDelete' })
-    fireEvent.click(confirmButtons[confirmButtons.length - 1])
-
-    await waitFor(() => expect(onClear).toHaveBeenCalled())
-    expect(apiDelete).toHaveBeenCalledTimes(2)
-    expect(apiDelete).toHaveBeenCalledWith('/books/a/permanent')
-  })
-
-  it('renders fade shadow elements and updates opacity on scroll', () => {
-    const { container } = render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} />, { wrapper })
-
-    const leftFade = screen.getByTestId('selection-bar-fade-left')
-    const rightFade = screen.getByTestId('selection-bar-fade-right')
-
-    expect(leftFade).toBeInTheDocument()
-    expect(rightFade).toBeInTheDocument()
-    expect(leftFade.className).toContain('opacity-0')
-
-    const barContainer = container.querySelector('.animate-selection-bar-in')
-    expect(barContainer).toBeInTheDocument()
-
-    const scroller = leftFade.parentElement?.querySelector('.overflow-x-auto')
-    expect(scroller).toBeInTheDocument()
-
-    if (scroller) {
-      Object.defineProperty(scroller, 'scrollLeft', { value: 50, writable: true, configurable: true })
-      Object.defineProperty(scroller, 'scrollWidth', { value: 300, writable: true, configurable: true })
-      Object.defineProperty(scroller, 'clientWidth', { value: 100, writable: true, configurable: true })
-
-      fireEvent.scroll(scroller)
-
-      expect(leftFade.className).toContain('opacity-100')
-      expect(rightFade.className).toContain('opacity-100')
-
-      Object.defineProperty(scroller, 'scrollLeft', { value: 200, writable: true, configurable: true })
-      fireEvent.scroll(scroller)
-
-      expect(leftFade.className).toContain('opacity-100')
-      expect(rightFade.className).toContain('opacity-0')
-    }
+    expect(screen.getByRole('button', { name: 'library.restore' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'library.permanentDelete' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'library.batchOrganize' })).toBeNull()
   })
 })

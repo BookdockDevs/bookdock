@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import UploadSheet from '../features/library/components/UploadSheet'
 import type { UploadItem } from '../features/library/hooks'
 
@@ -22,11 +22,12 @@ vi.mock('@tanstack/react-router', () => ({
 const mockUseUploadBooks = vi.fn()
 const mockUseShelves = vi.fn()
 const mockUseTags = vi.fn()
+const mockUseUploadSettings = vi.fn()
 vi.mock('../features/library/hooks', () => ({
   useUploadBooks: (...args: unknown[]) => mockUseUploadBooks(...args),
   useShelves: (...args: unknown[]) => mockUseShelves(...args),
   useTags: (...args: unknown[]) => mockUseTags(...args),
-  useUploadSettings: () => ({ maxBytes: undefined }),
+  useUploadSettings: () => mockUseUploadSettings(),
 }))
 
 function uploadOverrides(overrides: Partial<ReturnType<typeof defaultUpload>> = {}) {
@@ -49,6 +50,7 @@ describe('UploadSheet', () => {
     mockUseShelves.mockReturnValue({ data: { data: [] } })
     mockUseTags.mockReturnValue({ data: { data: [] } })
     mockUseUploadBooks.mockReturnValue(defaultUpload())
+    mockUseUploadSettings.mockReturnValue({ maxBytes: undefined, normalizeTitle: true })
   })
 
   it('clicking drop zone triggers hidden file input', () => {
@@ -148,29 +150,33 @@ describe('UploadSheet', () => {
     expect(addFiles).toHaveBeenCalledWith(expect.anything(), { maxBytes: undefined, shelfId: undefined, tagIds: [] })
   })
 
-  it('renders per-file version name inputs only in version-name mode for pending items', () => {
-    const patchItem = vi.fn()
-    mockUseUploadBooks.mockReturnValue(uploadOverrides({
-      items: makeItems([{ status: 'pending' }, { status: 'uploading', progress: 10 }]),
-      patchItem,
-      isUploading: true,
-    }))
+  it('enables version extraction on drop only when both versionNameMode and normalizeTitle are active', () => {
+    const addFiles = vi.fn()
+    mockUseUploadBooks.mockReturnValue(uploadOverrides({ addFiles }))
     render(<UploadSheet open onClose={vi.fn()} versionNameMode />)
-    const inputs = screen.getAllByPlaceholderText('library.versionNamePlaceholder')
-    expect(inputs).toHaveLength(1)
-    fireEvent.change(inputs[0]!, { target: { value: '精校版' } })
-    expect(patchItem).toHaveBeenCalledWith('up-0', { versionName: '精校版' })
-  })
+    const dropZone = screen.getByText('library.uploadHint').parentElement!.parentElement!
+    fireEvent.drop(dropZone, fileDropData([new File([], 'book.epub')]))
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ autoStart: true, versionNameMode: true }))
 
-  it('hides version name inputs outside version-name mode', () => {
-    mockUseUploadBooks.mockReturnValue(uploadOverrides({ items: makeItems([{ status: 'pending' }]) }))
-    render(<UploadSheet open onClose={vi.fn()} />)
-    expect(screen.queryByPlaceholderText('library.versionNamePlaceholder')).toBeNull()
+    addFiles.mockClear()
+    cleanup()
+    mockUseUploadSettings.mockReturnValue({ maxBytes: undefined, normalizeTitle: false })
+    render(<UploadSheet open onClose={vi.fn()} versionNameMode />)
+    const newDropZone = screen.getByText('library.uploadHint').parentElement!.parentElement!
+    fireEvent.drop(newDropZone, fileDropData([new File([], 'book.epub')]))
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), expect.not.objectContaining({ versionNameMode: true }))
   })
 
   it('shows the context note when provided', () => {
     render(<UploadSheet open onClose={vi.fn()} contextNote="joining work" />)
     expect(screen.getByText('joining work')).toBeInTheDocument()
+  })
+
+  it('shows context title as tooltip on context note when provided', () => {
+    render(<UploadSheet open onClose={vi.fn()} contextNote="版本 2" contextTitle="将作为「某作品」的新版本上传" />)
+    const note = screen.getByText('版本 2')
+    expect(note).toBeInTheDocument()
+    expect(note.parentElement).toHaveAttribute('title', '将作为「某作品」的新版本上传')
   })
 
   it('reports settled successes once', () => {

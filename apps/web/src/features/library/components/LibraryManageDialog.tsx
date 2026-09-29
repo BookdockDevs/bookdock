@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react'
 import type { Library, LibraryVisibility } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
-import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -11,27 +10,14 @@ import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
 import {
-  useDeleteLibrary,
   useUpdateLibrary,
 } from '../hooks'
+import LibraryInvitePanel from './LibraryInvitePanel'
 
 interface LibraryManageDialogProps {
   library: Library
-  /** Settings and deletion are owner-only; the backend rejects managers. */
   isOwner: boolean
   onClose: () => void
-  onDeleted: () => void
-}
-
-type Danger = 'delete' | null
-
-function SettingsIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  )
 }
 
 function LockIcon({ className }: { className?: string }) {
@@ -71,16 +57,14 @@ function GlobeIcon({ className }: { className?: string }) {
  * members' collected copies in place but unreadable, and that must never
  * happen by surprise.
  */
-export default function LibraryManageDialog({ library, isOwner, onClose, onDeleted }: LibraryManageDialogProps) {
+export default function LibraryManageDialog({ library, isOwner, onClose }: LibraryManageDialogProps) {
   const _ = useTranslation()
   const [name, setName] = useState(library.name)
   const [description, setDescription] = useState(library.description)
   const [visibility, setVisibility] = useState<LibraryVisibility>(library.visibility ?? 'private')
-  const [password, setPassword] = useState('')
-  const [danger, setDanger] = useState<Danger>(null)
+  const [password, setPassword] = useState(library.accessPassword ?? '')
 
   const updateLibrary = useUpdateLibrary()
-  const deleteLibrary = useDeleteLibrary()
 
   // Settings are edited from the library we were handed; keep them in sync when
   // another surface (another tab) changed it.
@@ -88,28 +72,34 @@ export default function LibraryManageDialog({ library, isOwner, onClose, onDelet
     setName(library.name)
     setDescription(library.description)
     setVisibility(library.visibility ?? 'private')
+    setPassword(library.accessPassword ?? '')
   }, [library])
 
-  const settingsChanged = name !== library.name
+  const passwordChanged = visibility === 'password' && password.trim() !== (library.accessPassword ?? '')
+  const settingsChanged = name.trim() !== library.name
     || description !== library.description
     || visibility !== (library.visibility ?? 'private')
+    || passwordChanged
+
+  const isPasswordValid = visibility !== 'password' || password.trim().length >= 4
+  const canSave = settingsChanged && name.trim().length > 0 && isPasswordValid && !updateLibrary.isPending
 
   function reportError(err: unknown, fallback: string) {
     notify.error(getUserErrorNotification(err, fallback))
   }
 
   function handleSave() {
+    if (!canSave) return
     updateLibrary.mutate({
       libraryId: library.id,
       patch: {
         name: name.trim(),
         description,
         visibility,
-        ...(visibility === 'password' ? { accessPassword: password.length >= 4 ? password : null } : {}),
+        ...(visibility === 'password' ? { accessPassword: password.trim() } : {}),
       },
     }, {
       onSuccess: () => {
-        setPassword('')
         notify.success(_('library.librarySettingsSaved'))
       },
       onError: (err) => reportError(err, 'library.librarySettingsSaveFailed'),
@@ -120,108 +110,82 @@ export default function LibraryManageDialog({ library, isOwner, onClose, onDelet
     value: LibraryVisibility
     icon: typeof LockIcon
     label: string
+    hint: string
   }> = [
     {
-      value: 'private',
-      icon: LockIcon,
-      label: _('library.visibilityPrivate'),
+      value: 'public',
+      icon: GlobeIcon,
+      label: _('library.visibilityPublic'),
+      hint: _('library.visibilityHintPublic'),
     },
     {
       value: 'password',
       icon: KeyIcon,
       label: _('library.visibilityPassword'),
+      hint: _('library.visibilityHintPassword'),
     },
     {
-      value: 'public',
-      icon: GlobeIcon,
-      label: _('library.visibilityPublic'),
+      value: 'private',
+      icon: LockIcon,
+      label: _('library.visibilityPrivate'),
+      hint: _('library.visibilityHintPrivate'),
     },
   ]
 
   return (
     <>
       <Modal
-        title={_('library.manageLibrary')}
+        title={`${_('library.manageLibrary')}「${library.name}」`}
         onClose={onClose}
         closeLabel={_('library.close')}
-        size="wide"
         footer={
-          <div className="flex w-full items-center justify-between">
-            <div className="flex items-center gap-3">
-              {isOwner && (
-                <button
-                  type="button"
-                  disabled={deleteLibrary.isPending}
-                  onClick={() => setDanger('delete')}
-                  className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300 cursor-pointer"
-                >
-                  {_('library.deleteLibrary')}
-                </button>
-              )}
-              {settingsChanged ? (
-                <span className="inline-flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                  {_('library.unsavedChanges')}
-                </span>
-              ) : null}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" onClick={onClose}>
-                {_('library.close')}
+          <div className="flex w-full items-center justify-end gap-2.5">
+            <Button variant="secondary" onClick={onClose}>
+              {_('library.cancel')}
+            </Button>
+            {isOwner && (
+              <Button
+                disabled={!canSave}
+                onClick={handleSave}
+              >
+                {_('library.save')}
               </Button>
-              {isOwner && (
-                <Button
-                  disabled={!settingsChanged || name.trim().length === 0 || updateLibrary.isPending}
-                  onClick={handleSave}
-                >
-                  {_('library.save')}
-                </Button>
-              )}
-            </div>
+            )}
           </div>
         }
       >
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4">
           {/* Library settings are owner-only (the backend rejects managers
               with FORBIDDEN): admins see why the form is absent instead of a
               save button that can never succeed. */}
           {isOwner ? (
-            <section className="flex flex-col gap-3 rounded-2xl border border-stone-200/80 bg-stone-50/30 p-4 dark:border-stone-800 dark:bg-stone-800/20">
-              <div className="flex items-center gap-2 pb-1 border-b border-stone-100 dark:border-stone-800">
-                <div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">
-                  <SettingsIcon className="h-3.5 w-3.5" />
-                </div>
-                <h3 className="text-sm font-semibold text-stone-800 dark:text-stone-200">
-                  {_('library.librarySettings')}
-                </h3>
-              </div>
-
+            <>
               <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
-                <span className="font-medium text-xs text-stone-500 dark:text-stone-400">{_('library.libraryName')}</span>
+                <span className="font-medium text-xs text-stone-600 dark:text-stone-300">{_('library.libraryName')}</span>
                 <input
                   aria-label={_('library.libraryName')}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   maxLength={64}
-                  className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200"
+                  className="rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900/80 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200"
                 />
               </label>
 
               <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
-                <span className="font-medium text-xs text-stone-500 dark:text-stone-400">{_('library.libraryDescription')}</span>
+                <span className="font-medium text-xs text-stone-600 dark:text-stone-300">{_('library.libraryDescription')}</span>
                 <textarea
                   aria-label={_('library.libraryDescription')}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   maxLength={2000}
-                  rows={2}
-                  className="resize-y rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200"
+                  rows={3}
+                  className="resize-y rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900/80 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200"
                 />
               </label>
 
-              <div className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
-                <span className="font-medium text-xs text-stone-500 dark:text-stone-400">{_('library.libraryVisibility')}</span>
-                <div className="grid grid-cols-3 gap-2">
+              <div className="flex flex-col gap-2 text-sm text-stone-700 dark:text-stone-300">
+                <span className="font-medium text-xs text-stone-600 dark:text-stone-300">{_('library.libraryVisibility')}</span>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                   {visibilityOptions.map((opt) => {
                     const Icon = opt.icon
                     const selected = visibility === opt.value
@@ -229,10 +193,10 @@ export default function LibraryManageDialog({ library, isOwner, onClose, onDelet
                       <label
                         key={opt.value}
                         className={cn(
-                          'flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border py-2 px-3 text-xs font-medium transition-all select-none',
+                          'group relative flex cursor-pointer flex-col justify-between rounded-xl border p-3.5 transition-all select-none',
                           selected
-                            ? 'border-stone-900 bg-stone-900 text-white shadow-xs dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900'
-                            : 'border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-600',
+                            ? 'border-stone-900 bg-stone-50/70 shadow-xs ring-1 ring-stone-900 dark:border-stone-100 dark:bg-stone-800/60 dark:ring-stone-100'
+                            : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50/30 dark:border-stone-700/80 dark:bg-stone-900/60 dark:hover:border-stone-600',
                         )}
                       >
                         <input
@@ -241,10 +205,35 @@ export default function LibraryManageDialog({ library, isOwner, onClose, onDelet
                           value={opt.value}
                           checked={selected}
                           onChange={() => setVisibility(opt.value)}
+                          aria-label={opt.label}
                           className="sr-only"
                         />
-                        <Icon className="h-3.5 w-3.5" />
-                        <span>{opt.label}</span>
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <div className={cn(
+                              'flex h-7 w-7 items-center justify-center rounded-lg transition-colors',
+                              selected
+                                ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
+                                : 'bg-stone-100 text-stone-500 group-hover:text-stone-700 dark:bg-stone-800 dark:text-stone-400',
+                            )}>
+                              <Icon className="h-4 w-4" />
+                            </div>
+                            <div className={cn(
+                              'h-4 w-4 rounded-full border flex items-center justify-center transition-colors',
+                              selected
+                                ? 'border-stone-900 bg-stone-900 dark:border-stone-100 dark:bg-stone-100'
+                                : 'border-stone-300 dark:border-stone-600',
+                            )}>
+                              {selected && <div className="h-1.5 w-1.5 rounded-full bg-white dark:bg-stone-900" />}
+                            </div>
+                          </div>
+                          <span className="mt-2.5 block text-sm font-semibold text-stone-900 dark:text-stone-100">
+                            {opt.label}
+                          </span>
+                        </div>
+                        <span className="mt-1 block text-xs leading-relaxed text-stone-400 dark:text-stone-400">
+                          {opt.hint}
+                        </span>
                       </label>
                     )
                   })}
@@ -252,48 +241,38 @@ export default function LibraryManageDialog({ library, isOwner, onClose, onDelet
               </div>
 
               {visibility === 'password' && (
-                <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
-                  <span className="font-medium text-xs text-stone-500 dark:text-stone-400">{_('library.libraryAccessPassword')}</span>
-                  <input
-                    type="password"
-                    aria-label={_('library.libraryAccessPassword')}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="new-password"
-                    placeholder={_('library.libraryAccessPasswordKeep')}
-                    className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200"
-                  />
-                  <span className="text-xs text-stone-400">{_('library.libraryAccessPasswordHint')}</span>
-                </label>
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
+                  <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-xs text-stone-600 dark:text-stone-300">{_('library.libraryAccessPassword')}</span>
+                      {password.trim().length > 0 && password.trim().length < 4 && (
+                        <span className="text-xs font-medium text-red-500">
+                          {_('library.libraryAccessPasswordMinHint')}
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      aria-label={_('library.libraryAccessPassword')}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={_('library.libraryAccessPasswordPlaceholder')}
+                      autoComplete="off"
+                      className="font-mono tracking-wider rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200"
+                    />
+                  </label>
+                </div>
               )}
-            </section>
+            </>
           ) : (
-            <p className="rounded-2xl border border-stone-200/80 bg-stone-50/30 p-4 text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-800/20 dark:text-stone-400">
+            <p className="rounded-xl border border-stone-200/80 bg-stone-50/50 p-4 text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-800/30 dark:text-stone-400">
               {_('library.settingsOwnerOnly')}
             </p>
           )}
+          {library.visibility === 'private' && <LibraryInvitePanel key={library.id} libraryId={library.id} />}
         </div>
       </Modal>
 
-      {danger === 'delete' && (
-        <ConfirmDialog
-          title={_('library.deleteLibrary')}
-          message={_('library.deleteLibraryConfirm', { name: library.name })}
-          confirmLabel={_('library.deleteLibrary')}
-          onClose={() => setDanger(null)}
-          onConfirm={() => {
-            setDanger(null)
-            deleteLibrary.mutate({ libraryId: library.id }, {
-              onSuccess: () => {
-                notify.success(_('library.deleteLibrarySuccess', { name: library.name }))
-                onClose()
-                onDeleted()
-              },
-              onError: (err) => reportError(err, 'library.deleteLibraryFailed'),
-            })
-          }}
-        />
-      )}
     </>
   )
 }

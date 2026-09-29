@@ -21,16 +21,17 @@ export function MenuDivider() {
   return <div className="mx-2 my-1 border-t border-stone-100 dark:border-stone-800" />
 }
 
-export function MenuItem({ icon, label, onClick }: { icon?: ReactNode; label: string; onClick: () => void }) {
+export function MenuItem({ icon, label, onClick, disabled = false }: { icon?: ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={(e) => {
         e.preventDefault()
         e.stopPropagation()
         onClick()
       }}
-      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-stone-700 transition-colors hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
+      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-stone-700 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-200 dark:hover:bg-stone-800"
     >
       {icon && (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">

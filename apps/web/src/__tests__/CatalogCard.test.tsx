@@ -8,6 +8,7 @@ import type { CatalogBook } from '@bookdock/shared'
 
 const HOOKS = vi.hoisted(() => ({
   useUpdateCatalogVersion: vi.fn(),
+  useUpdateCatalogBook: vi.fn(),
   useMoveCatalogVersion: vi.fn(),
   useDeleteCatalogVersion: vi.fn(),
   useCollectBook: vi.fn(),
@@ -32,7 +33,7 @@ function version(overrides: Partial<CatalogBook['versions'][number]> = {}): Cata
 function work(overrides: Partial<CatalogBook> = {}): CatalogBook {
   return {
     id: 'lb1', libraryId: 'lib_city', categoryId: null, title: 'City Book', author: 'Someone',
-    description: '', coverKey: null, tags: [], versions: [version()], createdAt: 1, updatedAt: 1, ...overrides,
+    description: '', coverKey: null, pinnedAt: null, tags: [], versions: [version()], createdAt: 1, updatedAt: 1, ...overrides,
   }
 }
 
@@ -42,11 +43,13 @@ function renderRow(element: ReactElement) {
 
 function renderCard(book: CatalogBook, { canManage = false, canCollect = true } = {}) {
   const updateVersion = vi.fn()
+  const updateBook = vi.fn()
   const moveVersion = vi.fn()
   const deleteVersion = vi.fn()
   const collect = vi.fn()
   const onShowDetails = vi.fn()
   HOOKS.useUpdateCatalogVersion.mockReturnValue({ mutate: updateVersion })
+  HOOKS.useUpdateCatalogBook.mockReturnValue({ mutate: updateBook })
   HOOKS.useMoveCatalogVersion.mockReturnValue({ mutate: moveVersion })
   HOOKS.useDeleteCatalogVersion.mockReturnValue({ mutate: deleteVersion, mutateAsync: deleteVersion })
   HOOKS.useCollectBook.mockReturnValue({ mutate: collect, isPending: false })
@@ -58,7 +61,7 @@ function renderCard(book: CatalogBook, { canManage = false, canCollect = true } 
       onShowDetails={onShowDetails}
     />,
   )
-  return { container, updateVersion, moveVersion, deleteVersion, collect, onShowDetails }
+  return { container, updateVersion, updateBook, moveVersion, deleteVersion, collect, onShowDetails }
 }
 
 /** Opens the row's overflow menu, the way a reader does. */
@@ -80,6 +83,15 @@ describe('CatalogCard', () => {
     expect(screen.getByText('Someone')).toBeInTheDocument()
     expect(screen.queryByText('1 个版本')).toBeNull()
     expect(screen.queryByText(/^\d+%$/)).toBeNull()
+  })
+
+  it('shows independent work and hidden-version indicators on a multi-version card', () => {
+    renderCard(work({
+      hidden: true,
+      versions: [version(), version({ id: 'lbv2', bookVersionId: 'v2', status: 'unlisted' })],
+    }))
+    expect(screen.getByRole('img', { name: '作品已隐藏' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '含隐藏版本' })).toBeInTheDocument()
   })
 
   it('draws its cover with the shared cover component and endpoint', () => {
@@ -179,11 +191,11 @@ describe('CatalogCard', () => {
     expect(screen.queryByText('加入我的书库')).not.toBeInTheDocument()
   })
 
-  it('badges multi-version works and stays quiet for single versions', () => {
+  it('does not display version count for single or multi-version works', () => {
     renderCard(work())
     expect(screen.queryByText(/个版本/)).not.toBeInTheDocument()
     renderCard(work({ versions: [version(), version({ id: 'lbv2', bookVersionId: 'v2' })] }))
-    expect(screen.getByText('2 个版本')).toBeInTheDocument()
+    expect(screen.queryByText(/个版本/)).not.toBeInTheDocument()
   })
 
   it('withholds download for an unlisted version the server would refuse', () => {
@@ -194,11 +206,11 @@ describe('CatalogCard', () => {
   })
 
   it('pins and deletes through the manager-only items', () => {
-    const { container, updateVersion, deleteVersion } = renderCard(work(), { canManage: true })
+    const { container, updateBook, deleteVersion } = renderCard(work(), { canManage: true })
     openMenu(container)
     fireEvent.click(screen.getByText('置顶'))
-    expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({
-      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { pinned: true },
+    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({
+      libraryId: 'lib_city', libraryBookId: 'lb1', patch: { pinned: true },
     }))
     // Deleting the last version removes the whole work: confirmed first.
     openMenu(container)
@@ -230,10 +242,10 @@ describe('CatalogCard', () => {
   })
 
   it('offers unpin when the work is already pinned', () => {
-    const { container, updateVersion } = renderCard(work({ versions: [version({ pinnedAt: 99 })] }), { canManage: true })
+    const { container, updateBook } = renderCard(work({ pinnedAt: 99 }), { canManage: true })
     openMenu(container)
     fireEvent.click(screen.getByText('取消置顶'))
-    expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
+    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
   })
 
   it('offers no read-status item, because a work has none', () => {
@@ -245,15 +257,15 @@ describe('CatalogCard', () => {
   })
 
   it('renders unpin button on the card for managers when pinned', () => {
-    const { updateVersion } = renderCard(work({ versions: [version({ pinnedAt: 99 })] }), { canManage: true })
+    const { updateBook } = renderCard(work({ pinnedAt: 99 }), { canManage: true })
     const unpinBtn = screen.getByLabelText('取消置顶')
     expect(unpinBtn).toBeInTheDocument()
     fireEvent.click(unpinBtn)
-    expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
+    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
   })
 
   it('renders read-only pin indicator on the card for members without unpin affordance', () => {
-    renderCard(work({ versions: [version({ pinnedAt: 99 })] }), { canManage: false })
+    renderCard(work({ pinnedAt: 99 }), { canManage: false })
     expect(screen.getByLabelText('置顶')).toBeInTheDocument()
     expect(screen.queryByLabelText('取消置顶')).toBeNull()
   })

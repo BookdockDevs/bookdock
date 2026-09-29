@@ -203,3 +203,65 @@ describe('ViewMenu columns segmented control', () => {
     expect(screen.queryByRole('button', { name: '自适应' })).toBeNull()
   })
 })
+
+describe('ViewMenu hidden-content reveal', () => {
+  function signIn() {
+    useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+  }
+
+  it('toggles the reveal flag for signed-in private libraries', () => {
+    signIn()
+    try {
+      useUiStore.setState({ revealHidden: false })
+      renderMenu()
+
+      const toggle = screen.getByRole('switch', { name: '显示隐藏内容' })
+      expect(toggle).toHaveAttribute('aria-checked', 'false')
+      fireEvent.click(toggle)
+      expect(useUiStore.getState().revealHidden).toBe(true)
+      expect(toggle).toHaveAttribute('aria-checked', 'true')
+    } finally {
+      useAuthStore.setState({ user: null })
+      useUiStore.setState({ revealHidden: false })
+    }
+  })
+
+  it('stays out of the filter indicator and reset, like sort order', () => {
+    signIn()
+    try {
+      useUiStore.setState({ revealHidden: true })
+      renderMenu()
+
+      // No blue dot on the menu button: a standing preference, not a filter.
+      expect(screen.getByRole('button', { name: '视图菜单' }).querySelector('.bg-blue-500')).toBeNull()
+    } finally {
+      useAuthStore.setState({ user: null })
+      useUiStore.setState({ revealHidden: false })
+    }
+  })
+
+  it('hides the switch for guests, shared libraries and trash', () => {
+    renderMenu()
+    expect(screen.queryByRole('switch', { name: '显示隐藏内容' })).toBeNull()
+  })
+
+  it('hides the switch in catalog mode even when signed in', () => {
+    signIn()
+    try {
+      renderMenu({ catalogMode: true })
+      expect(screen.queryByRole('switch', { name: '显示隐藏内容' })).toBeNull()
+    } finally {
+      useAuthStore.setState({ user: null })
+    }
+  })
+
+  it('hides the switch in trash even when signed in', () => {
+    signIn()
+    try {
+      renderMenu({ trash: true })
+      expect(screen.queryByRole('switch', { name: '显示隐藏内容' })).toBeNull()
+    } finally {
+      useAuthStore.setState({ user: null })
+    }
+  })
+})

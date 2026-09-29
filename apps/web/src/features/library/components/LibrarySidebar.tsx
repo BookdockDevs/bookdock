@@ -8,19 +8,20 @@ import { CSS } from '@dnd-kit/utilities'
 import type { LibraryListItem, LibraryRelation } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { queryClient } from '@/lib/query-client'
 import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 
 import type { LibrarySearch } from '@/routes/index'
 import SmartMenu from '@/components/ui/SmartMenu'
 import AccountMenu from '@/features/auth/AccountMenu'
-import { applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
+import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
 import { sortSidebarItems } from '../sort-modes'
-import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleShelfHidden, useToggleTagPin, useToggleTagHidden, useTrashEnabled, useLibraryPrefs, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
+import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleShelfHidden, useToggleTagPin, useToggleTagHidden, useTrashEnabled, useLibraryPrefs, useHiddenLibraries, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import LibraryDetailsDialog from './LibraryDetailsDialog'
 import ShelfDialog from './ShelfDialog'
 import TagDialog from './TagDialog'
+import PrivateLibraryRenameDialog from './PrivateLibraryRenameDialog'
 import { useContextMenu } from './use-context-menu'
 
 interface LibrarySidebarProps {
@@ -143,6 +144,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
   const updateLibraryCategory = useUpdateLibraryCategory()
   const deleteLibraryCategory = useDeleteLibraryCategory()
   const [tagDialog, setTagDialog] = useState<{ tagId?: string; initialName?: string } | null>(null)
+  const [renamePrivateTarget, setRenamePrivateTarget] = useState<LibraryListItem | null>(null)
   const [deleteTagTarget, setDeleteTagTarget] = useState<TaxonomyRow | null>(null)
   const deleteTag = useDeleteTag()
   const toggleTagPin = useToggleTagPin()
@@ -242,6 +244,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
         <LibrarySection
           libraries={libraries ?? []}
           activeLibraryId={activeLibraryId}
+          isFilterActive={Boolean(shelfId || tagId || trash)}
           onSelect={onSelectLibrary}
           onSelectPrivate={() => {
             // One navigation, not two: the second would be built from the URL
@@ -252,6 +255,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
           }}
           onPrefetchPrivate={() => onPrefetchNavigation?.({ shelf: undefined, tag: undefined, status: undefined, trash: undefined }, null)}
           onManage={onManageLibrary}
+          onRenamePrivate={setRenamePrivateTarget}
           onJoin={onJoinLibrary}
           onExplore={onExploreLibraries}
           disabled={readOnly}
@@ -398,7 +402,6 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
             />
           </div>
         )}
-        {!readOnly && !inLibrary && <RevealHiddenToggle />}
       </nav>
 
       <div
@@ -467,6 +470,13 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
         onClose={() => setTagDialog(null)}
       />
 
+      {renamePrivateTarget && (
+        <PrivateLibraryRenameDialog
+          library={libraries?.find((library) => library.id === renamePrivateTarget.id) ?? renamePrivateTarget}
+          onClose={() => setRenamePrivateTarget(null)}
+        />
+      )}
+
       {deleteShelfTarget && (
         <ConfirmDialog
           title={_(inLibrary ? 'library.deleteCategory' : 'library.deleteShelf')}
@@ -513,10 +523,7 @@ export default LibrarySidebar
  * list so that switching libraries feels like picking a shelf: the rows below
  * it - categories and tags - then describe whichever library is in context.
  *
- * The private row is labelled "all books" while it is the only library, because
- * that is what it shows; once a shared library exists, "all books" would be a
- * lie (it would be one of several), so it becomes "my library". A library is
- * renamed through its own management dialog, not from here.
+ * The private row uses its persisted name or the localized default.
  */
 function CompassIcon({ className }: { className?: string }) {
   return (
@@ -527,16 +534,79 @@ function CompassIcon({ className }: { className?: string }) {
   )
 }
 
+const MENU_ICON = 'shrink-0 text-stone-400'
+
+function InfoIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={MENU_ICON} aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </svg>
+  )
+}
+
+function GearIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={MENU_ICON} aria-hidden="true">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+function PencilIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={MENU_ICON} aria-hidden="true">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  )
+}
+
+function JoinIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={MENU_ICON} aria-hidden="true">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="8.5" cy="7" r="4" />
+      <line x1="20" y1="8" x2="20" y2="14" />
+      <line x1="23" y1="11" x2="17" y2="11" />
+    </svg>
+  )
+}
+
+function EyeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={MENU_ICON} aria-hidden="true">
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+function EyeOffIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={MENU_ICON} aria-hidden="true">
+      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+      <line x1="2" y1="2" x2="22" y2="22" />
+    </svg>
+  )
+}
+
 function LibrarySection({
-  libraries, activeLibraryId, onSelect, onSelectPrivate, onPrefetchPrivate, onManage, onJoin, onExplore, disabled,
+  libraries, activeLibraryId, isFilterActive = false, onSelect, onSelectPrivate, onPrefetchPrivate, onManage, onRenamePrivate, onJoin, onExplore, disabled,
 }: {
   libraries: LibraryListItem[]
   activeLibraryId: string | null
+  isFilterActive?: boolean
   onSelect?: (libraryId: string | null) => void
   /** Leaving library context also drops shelf/tag/status filters, as before. */
   onSelectPrivate?: () => void
   onPrefetchPrivate?: () => void
   onManage?: (library: LibraryListItem) => void
+  onRenamePrivate?: (library: LibraryListItem) => void
   onJoin?: (library: LibraryListItem) => void
   onExplore?: () => void
   disabled?: boolean
@@ -545,40 +615,88 @@ function LibrarySection({
   // Only libraries the reader belongs to are listed here: discoverable but
   // unjoined libraries live in the settings library list's future discovery
   // home, not in the daily switching rows.
-  const shared = libraries.filter((library) => library.type === 'shared'
-    && (library.relation === 'owner' || library.relation === 'admin' || library.relation === 'member'))
+  const prefs = useLibraryPrefs()
+  const { isHidden } = useHiddenLibraries()
+  const [detailsTarget, setDetailsTarget] = useState<LibraryListItem | null>(null)
+  const shared = useMemo(() => applyLibraryOrder(
+    libraries.filter((library) => library.type === 'shared'
+      && (library.relation === 'owner' || library.relation === 'admin' || library.relation === 'member')
+      && !isHidden(library.id)),
+    prefs?.libraryOrder,
+  ), [libraries, isHidden, prefs?.libraryOrder])
+  const privateLibrary = libraries.find((library) => library.type === 'private')
   if (shared.length === 0 && !onExplore) return null
   const privateActive = activeLibraryId === null
+  const activeVariant: 'primary' | 'scope' = isFilterActive ? 'scope' : 'primary'
 
   return (
     <>
-      {/* This row IS the old "all books" entry: while it is the only library it
-          shows everything, and once a shared library exists "all books" would be
-          a lie, so the same row is named "my library". */}
-      <NavItem
-        label={_(shared.length > 0 ? 'library.myLibrary' : 'library.allBooks')}
-        active={privateActive}
-        icon={
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M2 3h6a4 4 0 0 1 4 4v14a4 4 0 0 0-3-3H2z" />
-            <path d="M22 3h-6a4 4 0 0 0-4 4v14a4 4 0 0 1 3-3h7z" />
-          </svg>
-        }
-        onClick={onSelectPrivate ?? (() => onSelect?.(null))}
-        onPointerEnter={onPrefetchPrivate}
-      />
-      {shared.map((library) => (
+      {privateLibrary && !disabled ? (
         <LibraryRow
-          key={library.id}
-          library={library}
-          active={activeLibraryId === library.id}
-          disabled={disabled}
-          relation={library.relation}
-          onSelect={() => onSelect?.(library.id)}
-          onManage={onManage ? () => onManage(library) : undefined}
-          onJoin={onJoin ? () => onJoin(library) : undefined}
+          library={privateLibrary}
+          active={privateActive}
+          activeVariant={privateActive ? activeVariant : 'primary'}
+          onSelect={onSelectPrivate ?? (() => onSelect?.(null))}
+          onPointerEnter={onPrefetchPrivate}
+          onRename={onRenamePrivate ? () => onRenamePrivate(privateLibrary) : undefined}
         />
-      ))}
+      ) : (
+        <NavItem
+          label={privateLibrary?.name || _(disabled ? 'library.allBooks' : 'library.myLibrary')}
+          active={privateActive}
+          activeVariant={privateActive ? activeVariant : 'primary'}
+          icon={
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a4 4 0 0 0-3-3H2z" />
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a4 4 0 0 1 3-3h7z" />
+            </svg>
+          }
+          onClick={onSelectPrivate ?? (() => onSelect?.(null))}
+          onPointerEnter={onPrefetchPrivate}
+        />
+      )}
+      {shared.length > 1 ? (
+        <SortableContext items={shared.map((library) => library.id)} strategy={verticalListSortingStrategy}>
+          {shared.map((library) => {
+            const isActive = activeLibraryId === library.id
+            return (
+              <LibraryRow
+                key={library.id}
+                library={library}
+                active={isActive}
+                activeVariant={isActive ? activeVariant : 'primary'}
+                disabled={disabled}
+                relation={library.relation}
+                onSelect={() => onSelect?.(library.id)}
+                onManage={onManage ? () => onManage(library) : undefined}
+                onJoin={onJoin ? () => onJoin(library) : undefined}
+                onShowDetails={() => setDetailsTarget(library)}
+              />
+            )
+          })}
+        </SortableContext>
+      ) : (
+        shared.map((library) => {
+          const isActive = activeLibraryId === library.id
+          return (
+            <LibraryRow
+              key={library.id}
+              library={library}
+              active={isActive}
+              activeVariant={isActive ? activeVariant : 'primary'}
+              disabled={disabled}
+              relation={library.relation}
+              onSelect={() => onSelect?.(library.id)}
+              onManage={onManage ? () => onManage(library) : undefined}
+              onJoin={onJoin ? () => onJoin(library) : undefined}
+              onShowDetails={() => setDetailsTarget(library)}
+            />
+          )
+        })
+      )}
+      {detailsTarget && (
+        <LibraryDetailsDialog library={detailsTarget} onClose={() => setDetailsTarget(null)} />
+      )}
       {onExplore && (
         <button
           type="button"
@@ -595,32 +713,59 @@ function LibrarySection({
 }
 
 function LibraryRow({
-  library, active, disabled, relation, onSelect, onManage, onJoin,
+  library, active, activeVariant = 'primary', disabled, relation, onSelect, onPointerEnter, onManage, onRename, onJoin, onShowDetails,
 }: {
   library: LibraryListItem
   active: boolean
+  activeVariant?: 'primary' | 'scope'
   disabled?: boolean
   relation?: LibraryRelation
   onSelect: () => void
+  onPointerEnter?: () => void
   onManage?: () => void
+  onRename?: () => void
   onJoin?: () => void
+  onShowDetails?: () => void
 }) {
   const _ = useTranslation()
   const menu = useContextMenu()
+  const { isHidden, setHidden } = useHiddenLibraries()
   // What a row's menu offers follows from the reader's relation to that
   // library: a non-member can only be let in, a member has nothing to do here,
-  // and only an owner or admin has settings to change. The menu itself always
-  // exists, because the library's name and visibility are worth seeing either
-  // way.
+  // and only an owner or admin has settings to change. The private owner can
+  // rename the private library from the same menu — and nothing else, since a
+  // one-person library has no roster or owner worth reporting. Hiding is a
+  // per-user view preference, so every joined shared library offers it
+  // regardless of relation; the personal library is the one row that stays,
+  // since it is the way back to your own books.
   const joinable = relation === 'non-member' && (library.visibility === 'public' || library.visibility === 'password')
-  const canManageRow = relation === 'owner' || relation === 'admin'
+  const canManageRow = library.type === 'shared' && (relation === 'owner' || relation === 'admin')
+  const displayName = library.name || _('library.myLibrary')
+  const hidden = isHidden(library.id)
   const menuItems = [
-    joinable && onJoin ? { key: 'join', label: _('library.joinLibrary'), run: onJoin } : null,
-    canManageRow && onManage ? { key: 'manage', label: _('library.manageLibrary'), run: onManage } : null,
+    onShowDetails ? { key: 'details', label: _('library.viewDetails'), icon: <InfoIcon />, run: onShowDetails } : null,
+    joinable && onJoin ? { key: 'join', label: _('library.joinLibrary'), icon: <JoinIcon />, run: onJoin } : null,
+    canManageRow && onManage ? { key: 'manage', label: _('library.manageLibrary'), icon: <GearIcon />, run: onManage } : null,
+    library.type === 'private' && onRename ? { key: 'rename', label: _('library.rename'), icon: <PencilIcon />, run: onRename } : null,
+    library.type === 'shared'
+      ? { key: 'hidden', label: hidden ? _('library.show') : _('library.hide'), icon: hidden ? <EyeIcon /> : <EyeOffIcon />, run: () => setHidden(library.id, !hidden) }
+      : null,
   ].filter((item) => item !== null)
+  // Joined shared libraries are the reader's to arrange, so they take the same
+  // sortable treatment as shelf and tag rows; the personal library is pinned to
+  // the top by design and never moves.
+  const sortable = library.type === 'shared' && !disabled
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: library.id,
+    data: { type: 'library' },
+    disabled: !sortable,
+    animateLayoutChanges: () => false,
+  })
   return (
     <div
-      className="group relative"
+      ref={setNodeRef}
+      style={{ transform: transform ? `translate3d(0, ${transform.y}px, 0)` : undefined, transition }}
+      className={cn('group relative', isDragging && 'relative z-20 opacity-70')}
       onContextMenu={!disabled ? (e) => {
         e.preventDefault()
         e.stopPropagation()
@@ -628,19 +773,27 @@ function LibraryRow({
       } : undefined}
     >
       <NavItem
-        label={library.name}
+        label={displayName}
         active={active}
+        activeVariant={activeVariant}
         countHidden={!disabled && menu.open}
         hasMenu={!disabled}
-        icon={
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        dragHandleProps={sortable ? { ...attributes, ...listeners } : undefined}
+        icon={library.type === 'private' ? (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a4 4 0 0 0-3-3H2z" />
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a4 4 0 0 1 3-3h7z" />
+          </svg>
+        ) : (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
             <circle cx="9" cy="7" r="4" />
             <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
             <path d="M16 3.13a4 4 0 0 1 0 7.75" />
           </svg>
-        }
+        )}
         onClick={onSelect}
+        onPointerEnter={onPointerEnter}
       />
       {!disabled && (
         <div className="absolute right-2 top-1/2 -translate-y-1/2">
@@ -664,12 +817,12 @@ function LibraryRow({
             </svg>
           </button>
           {menu.open && (
-            <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, 186)} onClose={menu.close} width={152}>
+            <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, 258)} onClose={menu.close} width={152}>
               <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
-                <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{library.name}</p>
-                <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">
+                <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{displayName}</p>
+                {library.type === 'shared' && <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">
                   {_(`library.visibility${library.visibility === 'public' ? 'Public' : library.visibility === 'password' ? 'Password' : 'Private'}`)}
-                </p>
+                </p>}
               </div>
               {menuItems.map((item) => (
                 <button
@@ -681,6 +834,7 @@ function LibraryRow({
                   }}
                   className={cn(libraryMenuItemClass, 'w-full text-left')}
                 >
+                  {item.icon}
                   {item.label}
                 </button>
               ))}
@@ -698,29 +852,39 @@ function NavItem({
   countHidden = false,
   hasMenu = false,
   active = false,
+  activeVariant = 'primary',
   icon,
   onClick,
   onPointerEnter,
+  // dnd-kit's attributes/listeners. NavItem renders its own button rather than
+  // spreading unknown props, so a draggable row has to hand them over explicitly
+  // — dropping them here silently disables dragging.
+  dragHandleProps,
 }: {
   label: string
   count?: number
   countHidden?: boolean
   hasMenu?: boolean
   active?: boolean
+  activeVariant?: 'primary' | 'scope'
   icon?: React.ReactNode
   onClick: () => void
   onPointerEnter?: () => void
+  dragHandleProps?: Record<string, unknown>
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       onPointerEnter={onPointerEnter}
+      {...dragHandleProps}
       className={cn(
         'flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] transition-all',
         hasMenu && 'pr-10 md:pr-3',
         active
-          ? 'bg-white font-medium text-stone-900 shadow-sm ring-1 ring-stone-200/70 dark:bg-stone-800 dark:text-stone-50 dark:ring-stone-700/60 dark:shadow-xs'
+          ? activeVariant === 'scope'
+            ? 'bg-stone-200/50 font-medium text-stone-900 hover:bg-stone-200/75 dark:bg-stone-800/50 dark:text-stone-100 dark:hover:bg-stone-800/75'
+            : 'bg-white font-medium text-stone-900 shadow-sm ring-1 ring-stone-200/70 dark:bg-stone-800 dark:text-stone-50 dark:ring-stone-700/60 dark:shadow-xs'
           : 'text-stone-500 hover:bg-stone-200/50 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/50 dark:hover:text-stone-100',
       )}
     >
@@ -729,7 +893,11 @@ function NavItem({
           <span
             className={cn(
               'shrink-0 transition-colors',
-              active ? 'text-stone-700 dark:text-stone-200' : 'text-stone-400 dark:text-stone-500',
+              active
+                ? activeVariant === 'scope'
+                  ? 'text-stone-600 dark:text-stone-300'
+                  : 'text-stone-700 dark:text-stone-200'
+                : 'text-stone-400 dark:text-stone-500',
             )}
           >
             {icon}
@@ -744,58 +912,15 @@ function NavItem({
             hasMenu && 'group-hover:opacity-0',
             countHidden && 'opacity-0',
             active
-              ? 'bg-stone-100 text-stone-700 dark:bg-stone-700/60 dark:text-stone-200'
+              ? activeVariant === 'scope'
+                ? 'bg-stone-200/80 text-stone-700 dark:bg-stone-700/50 dark:text-stone-300'
+                : 'bg-stone-100 text-stone-700 dark:bg-stone-700/60 dark:text-stone-200'
               : 'text-stone-400 bg-stone-200/40 group-hover:bg-stone-200/70 group-hover:text-stone-600 dark:text-stone-400 dark:bg-stone-900/60 dark:group-hover:bg-stone-800/70 dark:group-hover:text-stone-300',
           )}
         >
           {count}
         </span>
       )}
-    </button>
-  )
-}
-
-/**
- * Private-vault reveal switch (device-local, placeholder for the future vault
- * entry): when on, lists, shelves, tags and the reader carry ?showHidden=1.
- */
-function RevealHiddenToggle() {
-  const _ = useTranslation()
-  const revealHidden = useUiStore((s) => s.revealHidden)
-  const setRevealHidden = useUiStore((s) => s.setRevealHidden)
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={revealHidden}
-      onClick={() => {
-        setRevealHidden(!revealHidden)
-        // The taxonomy/book queries keep stable keys and read the flag at
-        // fetch time, so the toggle invalidates them explicitly. The shared
-        // singleton is used instead of the hook so this row also renders
-        // outside a QueryClientProvider (e.g. in unit tests).
-        void queryClient.invalidateQueries({ queryKey: ['books'] })
-        void queryClient.invalidateQueries({ queryKey: ['shelves'] })
-        void queryClient.invalidateQueries({ queryKey: ['tags'] })
-      }}
-      className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] text-stone-500 transition-all hover:bg-stone-200/50 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/50 dark:hover:text-stone-100"
-    >
-      <span className="flex min-w-0 items-center gap-2.5">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-        <span className="truncate">{_('library.showHiddenContent')}</span>
-      </span>
-      <span className={cn(
-        'relative h-5 w-9 shrink-0 rounded-full transition-colors',
-        revealHidden ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-700',
-      )}>
-        <span className={cn(
-          'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all dark:bg-stone-900',
-          revealHidden ? 'left-[18px]' : 'left-0.5',
-        )} />
-      </span>
     </button>
   )
 }

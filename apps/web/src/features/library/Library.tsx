@@ -24,11 +24,14 @@ import { formatAuthorList, formatBytes } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 
+import { ApiError } from '@/api/client'
+import { notify } from '@/lib/notifications'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 
 import { indexRoute, type LibrarySearch } from '@/routes/index'
 
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { useInstanceInfo } from '@/features/auth/hooks'
 import BookCard from './components/BookCard'
 import BookCover from './components/BookCover'
 import BookGrid from './components/BookGrid'
@@ -51,11 +54,11 @@ import RecentlyRead from './components/RecentlyRead'
 import SelectionBar from './components/SelectionBar'
 import TrashInfo from './components/TrashInfo'
 import UploadSheet from './components/UploadSheet'
-import { applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
+import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
 import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-row'
 import { libraryUrlCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
-import { useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
+import { useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
 
 
 function estimateDynColumns(): number {  if (typeof window === 'undefined') return 4
@@ -82,10 +85,16 @@ export default function Library() {
   const pageSize = libraryPageSize || 24
   const user = useAuthStore((s) => s.user)
   const isGuest = !user || user.guest === true || user.role === 'guest'
+  // Private-surface upload gate: the instance switch closes it for ordinary
+  // members (fail-open while the instance query loads; the server enforces).
+  const { data: instanceData } = useInstanceInfo()
+  const userUploadAllowed = instanceData?.data.allowUserUpload !== false
+    || (user?.role === 'owner' && user.guest !== true)
   const sortByPref = useUiStore((s) => s.sortBy)
   const sortOrderPref = useUiStore((s) => s.sortOrder)
   const revealHidden = useUiStore((s) => s.revealHidden)
   const libraryPrefs = useLibraryPrefs()
+  const { isHidden: isLibraryHidden } = useHiddenLibraries()
   // Resolution chain: explicit URL > per-user server default (N-06) > device
   // localStorage (legacy; also the only writable layer for guests). A
   // linked/shared URL still controls its own view.
@@ -103,6 +112,9 @@ export default function Library() {
   const requestedLibraryId = !isGuest ? (search.libraryId ?? null) : null
   const { data: librariesData } = useLibraries({ enabled: !isGuest })
   const libraries = useMemo(() => librariesData?.data ?? [], [librariesData])
+  const privateLibraryName = isGuest
+    ? _('library.allBooks')
+    : (libraries.find((library) => library.type === 'private')?.name || _('library.myLibrary'))
   const activeLibrary = requestedLibraryId
     ? (libraries.find((library) => library.id === requestedLibraryId && library.type === 'shared') ?? null)
     : null
@@ -203,6 +215,7 @@ export default function Library() {
   const emptyTrash = useEmptyTrash()
 
   function toggleSelect(id: string, index?: number, shiftKey?: boolean) {
+    if (activeLibrary && !isLibraryManager) return
     const anchor = lastSelectIndexRef.current
     if (shiftKey && index !== undefined && anchor !== null && anchor !== index) {
       const [from, to] = anchor < index ? [anchor, index] : [index, anchor]
@@ -290,7 +303,7 @@ export default function Library() {
   const updateLibraryPrefs = useUpdateLibraryPrefs()
   // Which drag is in flight: drives the manual autoscroll (page for book
   // drags, sidebar nav for shelf/tag drags) and the overlay shape.
-  const [dragKind, setDragKind] = useState<'book' | 'shelf' | 'tag' | null>(null)
+  const [dragKind, setDragKind] = useState<'book' | 'shelf' | 'tag' | 'library' | null>(null)
   // The shelf row that was just released: its transform reset gets a short
   // transition so it glides from the release position into its slot instead
   // of snapping (a snapped reset reads as a flicker).
@@ -314,7 +327,7 @@ export default function Library() {
       setDragKind('book')
     } else {
       const dragType = (payload as { type?: unknown } | null)?.type
-      setDragKind(dragType === 'tag' ? 'tag' : 'shelf')
+      setDragKind(dragType === 'tag' ? 'tag' : dragType === 'library' ? 'library' : 'shelf')
     }
   }
 
@@ -359,6 +372,25 @@ export default function Library() {
       return
     }
     const dragType = (payload as { type?: unknown } | null)?.type
+    if (dragType === 'library') {
+      // The reader's own sidebar order. There is no endpoint for it — it lives
+      // in the per-user settings blob, whose optimistic merge reorders the
+      // sidebar in the same frame, so no settle/override state is needed here.
+      // The starting sequence has to be what the sidebar is showing, not the
+      // server's join order: reordering from the raw list would drop whatever
+      // the reader had already arranged.
+      const ordered = applyLibraryOrder(
+        libraries.filter((library) => library.type === 'shared'
+          && (library.relation === 'owner' || library.relation === 'admin' || library.relation === 'member')
+          && !isLibraryHidden(library.id)),
+        libraryPrefs?.libraryOrder,
+      ).map((library) => library.id)
+      const oldIndex = ordered.indexOf(String(active.id))
+      const newIndex = ordered.indexOf(String(over.id))
+      if (oldIndex < 0 || newIndex < 0) return
+      updateLibraryPrefs.mutate({ libraryOrder: arrayMove(ordered, oldIndex, newIndex) })
+      return
+    }
     if (dragType === 'tag') {
       const ordered = tags.map((tag) => tag.id)
       const oldIndex = ordered.indexOf(String(active.id))
@@ -507,6 +539,14 @@ export default function Library() {
   const listError = activeLibrary ? catalogQuery.isError : isError
   const listFetching = activeLibrary ? catalogQuery.isFetching : isFetching
   const listRefetch = activeLibrary ? catalogQuery.refetch : refetch
+  // The library is gone but the URL (or a stale list cache) still names it:
+  // leaving/deleting resolves in the list a beat after the catalog 403s, and
+  // a resurrected ?libraryId= (back button, bookmark) never resolves at all.
+  // Either way the list endpoint answers LIBRARY_NOT_FOUND, which is the
+  // stale-library case, not a retryable list failure.
+  const catalogGone = activeLibrary !== null
+    && catalogQuery.error instanceof ApiError
+    && catalogQuery.error.code === 'LIBRARY_NOT_FOUND'
 
   const libraryRelation = libraryRelationQuery.data?.data.relation
   const isLibraryManager = libraryRelation === 'owner' || libraryRelation === 'admin'
@@ -524,8 +564,10 @@ export default function Library() {
   // One upload surface per context. A reader may always upload to their own
   // library; a shared library accepts files only from those who curate it, and
   // the drop-anywhere shortcut has to obey the same rule or a file would be
-  // dragged in and silently refused.
-  const canUpload = !isGuest && (activeLibrary ? isLibraryManager : true)
+  // dragged in and silently refused. The instance upload switch only closes
+  // the private surface for ordinary members — managers keep curating their
+  // libraries, and the server enforces all of this regardless.
+  const canUpload = !isGuest && (activeLibrary ? isLibraryManager : userUploadAllowed)
   const setUploadOpenIfAllowed = useCallback((open: boolean) => {
     if (canUpload) setUploadOpen(open)
   }, [canUpload])
@@ -584,7 +626,7 @@ export default function Library() {
         ? _('library.authorFilterTitle', { name: metadataFilter.value })
           : metadataFilter?.kind === 'series'
             ? _('library.seriesFilterTitle', { name: metadataFilter.value })
-            : (activeShelfName ?? activeTagName ?? activeLibrary?.name ?? _('library.allBooks'))
+            : (activeShelfName ?? activeTagName ?? activeLibrary?.name ?? privateLibraryName)
 
   const readStatusName = readStatus === 'wishlist'
     ? _('library.readStatusWishlist')
@@ -687,6 +729,23 @@ export default function Library() {
       navSearch({ trash: undefined })
     }
   }, [trash, trashEnabled, navSearch])
+
+  // The server confirmed this library is no longer visible (left, deleted,
+  // access revoked): bounce to the first available library instead of
+  // stranding the reader on a dead URL. Local-only staleness (libraryStale)
+  // stays manual — the list cache can lag right after joining, and bouncing
+  // there would evict a library the reader legitimately just entered.
+  const catalogGoneRedirectedRef = useRef(false)
+  useEffect(() => {
+    if (!catalogGone) {
+      catalogGoneRedirectedRef.current = false
+      return
+    }
+    if (catalogGoneRedirectedRef.current) return
+    catalogGoneRedirectedRef.current = true
+    notify.info(_('library.libraryUnavailable'))
+    handleSwitchLibrary(null)
+  }, [catalogGone, handleSwitchLibrary, _])
 
   // A shared library's catalog cannot honour the reading-state dimensions, so
   // the URL is corrected rather than quietly ignored (see library-filters for
@@ -826,7 +885,7 @@ export default function Library() {
           onResetMetadataFilter={metadataFilter ? () => navSearch({ author: undefined, series: undefined }) : undefined}
         />
 
-        {(shelvesQuery.isError || tagsQuery.isError) && (
+        {(shelvesQuery.isError || tagsQuery.isError) && !catalogGone && (
           <QueryErrorState
             className="py-4"
             isRetrying={shelvesQuery.isFetching || tagsQuery.isFetching}
@@ -843,14 +902,17 @@ export default function Library() {
         >
           {listLoading ? (
             <InitialLoading view={view} columns={columns} />
-          ) : listError && rows.length === 0 ? (
+          ) : listError && rows.length === 0 && !catalogGone ? (
             <QueryErrorState isRetrying={listFetching} onRetry={() => void listRefetch()} />
-          ) : libraryStale ? (
+          ) : libraryStale || catalogGone ? (
             /* A ?libraryId= for a library this reader can no longer see is
                reported where any other list problem is reported - inside the
                list, with the header, sidebar and paging still around it - rather
                than by replacing the page. The one thing worth saying out loud is
-               why the list is empty, and how to get somewhere else. */
+               why the list is empty, and how to get somewhere else. catalogGone
+               is the same case arriving through the catalog instead of the
+               list: the URL (or a not-yet-refreshed list cache) still names a
+               library the server already refuses. */
             <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
               <p className="text-sm text-stone-500 dark:text-stone-400">{_('library.libraryUnavailable')}</p>
               <button
@@ -1021,14 +1083,15 @@ export default function Library() {
       </>
       </main>
 
-      {/* The same selection bar in either library. What a shared library's
-          selection offers is what a work can answer: file it and tag it. */}
-      {!isGuest && selection.size > 0 && (
+      {/* Shared selections contain work ids; private selections contain version ids. */}
+      {!isGuest && (!activeLibrary || isLibraryManager) && selection.size > 0 && (
         <SelectionBar
           selectedIds={Array.from(selection)}
           onClear={clearSelection}
           onComplete={completeBatchAction}
+          onRetainSelection={(ids) => { setSelection(new Set(ids)); lastSelectIndexRef.current = null }}
           trash={trash}
+          trashEnabled={trashEnabled}
           elevated={totalPages > 1}
           libraryId={activeLibrary?.id}
         />
@@ -1040,7 +1103,6 @@ export default function Library() {
         <JoinLibraryDialog
           open
           libraryId={joinTarget.id}
-          libraryName={joinTarget.name}
           needsPassword={joinTarget.visibility === 'password'}
           onClose={() => setJoinTarget(null)}
         />
@@ -1065,10 +1127,6 @@ export default function Library() {
           library={manageTarget}
           isOwner={manageRelation === 'owner'}
           onClose={() => setManageTarget(null)}
-          onDeleted={() => {
-            setManageTarget(null)
-            void navSearch({ libraryId: undefined })
-          }}
         />
       )}
 
@@ -1092,7 +1150,10 @@ export default function Library() {
       <BookDetailDialog
         book={detailTarget}
         work={activeLibrary && workDetail ? {
-          work: workDetail,
+          // Live row from the catalog query, not the click-time snapshot: menu
+          // toggles and version uploads invalidate the catalog, and the open
+          // dialog must follow without closing and reopening.
+          work: catalogWorks.find((w) => w.id === workDetail.id) ?? workDetail,
           library: activeLibrary,
           canManage: isLibraryManager,
           canCollect: libraryRelation !== 'guest',
@@ -1394,6 +1455,14 @@ function DraggableWorkCard({
             if (e.ctrlKey || e.metaKey || e.shiftKey) {
               e.preventDefault()
               onToggleSelect(work.id, e.shiftKey)
+              return
+            }
+            if (work.hidden || work.versions[0]?.status === 'unlisted') {
+              // Managers keep reading hidden works like delisted ones; only
+              // ordinary readers fall through to the detail dialog.
+              if (canManage) return
+              e.preventDefault()
+              onShowDetails(work)
             }
           }}
           className="block rounded-xl"

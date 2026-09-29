@@ -34,20 +34,33 @@ describe('VersionTabs', () => {
         onSelect={onSelect}
       />,
     )
-    expect(screen.getByRole('tab', { name: /第1版/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: /版本 1/ })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tab', { name: /修订版/ })).toHaveAttribute('aria-selected', 'false')
     fireEvent.click(screen.getByRole('tab', { name: /修订版/ }))
     expect(onSelect).toHaveBeenCalledWith('lbv2')
   })
 
-  it('flags unlisted versions without hiding them', () => {
+  it('keeps unlisted versions selectable without a second status badge', () => {
     render(
       <VersionTabs
         versions={[version(), version({ id: 'lbv2', bookVersionId: 'v2', status: 'unlisted' })]}
         selectedId="lbv1"
         onSelect={vi.fn()}
+      />
+    )
+    expect(screen.getByRole('tab', { name: /版本 2/ })).toBeInTheDocument()
+    expect(screen.queryByText('已隐藏')).not.toBeInTheDocument()
+  })
+
+  it('does not display format badges in the tabs', () => {
+    render(
+      <VersionTabs
+        versions={[version({ format: 'epub' }), version({ id: 'lbv2', bookVersionId: 'v2', format: 'txt' })]}
+        selectedId="lbv1"
+        onSelect={vi.fn()}
       />,
     )
-    expect(screen.getByText('已隐藏')).toBeInTheDocument()
+    expect(screen.queryByText('EPUB')).not.toBeInTheDocument()
+    expect(screen.queryByText('TXT')).not.toBeInTheDocument()
   })
 })

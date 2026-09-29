@@ -14,6 +14,9 @@ const baseLibrary = {
   ownerUserId: 'u1',
   createdAt: 1,
   updatedAt: 2,
+  memberCount: 3,
+  workCount: 7,
+  ownerUsername: 'u1',
 }
 
 const mockLibraries = [
@@ -53,6 +56,15 @@ const mockLibraries = [
     visibility: null,
     relation: 'owner' as const,
   },
+  {
+    ...baseLibrary,
+    id: 'lib-invite-1',
+    type: 'shared' as const,
+    name: 'Invite Only Club',
+    description: 'Reachable through its invitation link',
+    visibility: 'private' as const,
+    relation: 'owner' as const,
+  },
 ]
 
 describe('LibraryDiscoveryDialog', () => {
@@ -78,7 +90,7 @@ describe('LibraryDiscoveryDialog', () => {
     })
   })
 
-  it('renders discoverable libraries and skips private personal libraries', () => {
+  it('renders discoverable libraries and skips private ones, personal or invite-only', () => {
     render(
       <LibraryDiscoveryDialog
         open
@@ -92,6 +104,7 @@ describe('LibraryDiscoveryDialog', () => {
     expect(screen.getByText('Secret Society')).toBeInTheDocument()
     expect(screen.getByText('Club Already Joined')).toBeInTheDocument()
     expect(screen.queryByText('My Personal Library')).toBeNull()
+    expect(screen.queryByText('Invite Only Club')).toBeNull()
   })
 
   it('filters libraries based on search input', () => {
@@ -104,7 +117,7 @@ describe('LibraryDiscoveryDialog', () => {
       />,
     )
 
-    const searchInput = screen.getByPlaceholderText('搜索书库名称或描述...')
+    const searchInput = screen.getByPlaceholderText('搜索书库名称或简介...')
     fireEvent.change(searchInput, { target: { value: 'Secret' } })
 
     expect(screen.getByText('Secret Society')).toBeInTheDocument()
@@ -122,8 +135,8 @@ describe('LibraryDiscoveryDialog', () => {
       />,
     )
 
-    const joinButton = screen.getByRole('button', { name: '加入书库' })
-    fireEvent.click(joinButton)
+    const joinButtons = screen.getAllByRole('button', { name: '加入' })
+    fireEvent.click(joinButtons[0])
 
     expect(mutateJoin).toHaveBeenCalledWith(
       { libraryId: 'lib-pub-1' },
@@ -141,15 +154,15 @@ describe('LibraryDiscoveryDialog', () => {
       />,
     )
 
-    const pwdButton = screen.getByRole('button', { name: '输密加入' })
-    fireEvent.click(pwdButton)
+    const joinButtons = screen.getAllByRole('button', { name: '加入' })
+    fireEvent.click(joinButtons[1])
 
     expect(onJoinWithPassword).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'lib-pwd-1', name: 'Secret Society' }),
     )
   })
 
-  it('shows joined status and allows entering an already joined library', () => {
+  it('shows entered button and allows entering an already joined library', () => {
     render(
       <LibraryDiscoveryDialog
         open
@@ -159,7 +172,7 @@ describe('LibraryDiscoveryDialog', () => {
       />,
     )
 
-    expect(screen.getByText('已加入')).toBeInTheDocument()
+    expect(screen.queryByText('已加入')).toBeNull()
     const enterButton = screen.getByRole('button', { name: '进入' })
     fireEvent.click(enterButton)
 
@@ -177,9 +190,55 @@ describe('LibraryDiscoveryDialog', () => {
       />,
     )
 
-    const searchInput = screen.getByPlaceholderText('搜索书库名称或描述...')
+    const searchInput = screen.getByPlaceholderText('搜索书库名称或简介...')
     fireEvent.change(searchInput, { target: { value: 'NonexistentLibraryName' } })
 
     expect(screen.getByText('暂无可探索的书库')).toBeInTheDocument()
+  })
+
+  it('renders book and member counts with tooltips on library cards', () => {
+    render(
+      <LibraryDiscoveryDialog
+        open
+        onClose={onClose}
+        onSelectLibrary={onSelectLibrary}
+        onJoinWithPassword={onJoinWithPassword}
+      />,
+    )
+
+    expect(screen.getAllByTitle('作品').length).toBeGreaterThan(0)
+    expect(screen.getAllByTitle('成员').length).toBeGreaterThan(0)
+  })
+
+  it('opens details dialog when clicking a library card', () => {
+    render(
+      <LibraryDiscoveryDialog
+        open
+        onClose={onClose}
+        onSelectLibrary={onSelectLibrary}
+        onJoinWithPassword={onJoinWithPassword}
+      />,
+    )
+
+    const card = screen.getByText('Open Books').closest('[role="button"]')!
+    fireEvent.click(card)
+
+    expect(screen.getByText('书库详情')).toBeInTheDocument()
+  })
+
+  it('opens details dialog when right-clicking a library card', () => {
+    render(
+      <LibraryDiscoveryDialog
+        open
+        onClose={onClose}
+        onSelectLibrary={onSelectLibrary}
+        onJoinWithPassword={onJoinWithPassword}
+      />,
+    )
+
+    const card = screen.getByText('Secret Society').closest('[role="button"]')!
+    fireEvent.contextMenu(card)
+
+    expect(screen.getByText('书库详情')).toBeInTheDocument()
   })
 })

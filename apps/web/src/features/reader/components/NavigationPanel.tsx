@@ -91,13 +91,13 @@ interface VolumeHeaderItemProps {
   isExpanded: boolean
   isVolume: boolean
   isStuck: boolean
-  itemRef: (el: HTMLButtonElement | null) => void
+  onRegisterItemRef: (index: number, el: HTMLButtonElement | null) => void
   onItemClick: (node: TocNode) => void
   onExpanderClick: (e: React.MouseEvent, index: number) => void
   t: (key: string) => string
 }
 
-function VolumeHeaderItem({
+const VolumeHeaderItem = memo(function VolumeHeaderItem({
   node,
   isCurrent,
   isFlashing,
@@ -105,12 +105,15 @@ function VolumeHeaderItem({
   isExpanded,
   isVolume,
   isStuck,
-  itemRef,
+  onRegisterItemRef,
   onItemClick,
   onExpanderClick,
   t,
 }: VolumeHeaderItemProps) {
   const isStickyVolume = isVolume && isExpanded
+  const handleRef = useCallback((el: HTMLButtonElement | null) => {
+    onRegisterItemRef(node.index, el)
+  }, [node.index, onRegisterItemRef])
 
   return (
     <div
@@ -121,7 +124,7 @@ function VolumeHeaderItem({
       style={isStickyVolume ? { backgroundColor: 'var(--bd-read-bg)' } : undefined}
     >
       <button
-        ref={itemRef}
+        ref={handleRef}
         onClick={() => onItemClick(node)}
         className={cn(
           'group flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-sm transition-colors',
@@ -174,7 +177,7 @@ function VolumeHeaderItem({
       )}
     </div>
   )
-}
+})
 
 interface NavigationPanelProps {
   bookId: string
@@ -398,8 +401,30 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       : -1
   }, [currentChapter, currentChapterHref, currentChapterIndex, pendingNavigationHref, tree])
 
+  const handleRegisterItemRef = useCallback((index: number, el: HTMLButtonElement | null) => {
+    if (el) itemRefs.current.set(index, el)
+    else itemRefs.current.delete(index)
+  }, [])
+
+  const handleRegisterVolumeLiRef = useCallback((index: number, el: HTMLLIElement | null) => {
+    if (el) volumeLiRefs.current.set(index, el)
+    else volumeLiRefs.current.delete(index)
+  }, [])
+
+  const scrollDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const stuckVolumeRaf = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (scrollDebounceTimer.current) clearTimeout(scrollDebounceTimer.current)
+    if (stuckVolumeRaf.current !== null) cancelAnimationFrame(stuckVolumeRaf.current)
+  }, [])
+
   useImperativeHandle(ref, () => ({
     saveScroll: () => {
+      if (scrollDebounceTimer.current) {
+        clearTimeout(scrollDebounceTimer.current)
+        scrollDebounceTimer.current = null
+      }
       const container = listRef.current
       if (container && tab !== 'ai') {
         savedScrollTop.current[tab] = container.scrollTop
@@ -495,7 +520,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
 
   // Auto-expand path to current chapter when it changes or the panel opens.
   useEffect(() => {
-    if (currentIndex < 0) return
+    if (!open || tab !== 'toc' || currentIndex < 0) return
     const next = new Set<number>()
     let node: TocNode | undefined = tree[currentIndex]
     while (node) {
@@ -513,7 +538,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     })
   }, [currentIndex, tree, open, tab])
 
-  function goTo(href: string) {
+  const goTo = useCallback((href: string) => {
     setPendingNavigationHref(href)
     // Clicks can land while the book is still mounting — queue the jump for
     // Reader instead of dropping it. The directory keeps the clicked item
@@ -521,20 +546,21 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     if (renderer) void renderer.display(href)
     else setPendingTocHref(href)
     if (!locked) onClose?.()
-  }
+  }, [locked, onClose, renderer, setPendingNavigationHref, setPendingTocHref])
 
-  function handleItemClick(node: TocNode) {
+  const handleItemClick = useCallback((node: TocNode) => {
     goTo(node.href)
-    if (node.children.length > 0 && collapsed.has(node.index)) {
+    if (node.children.length > 0) {
       setCollapsed((prev) => {
+        if (!prev.has(node.index)) return prev
         const next = new Set(prev)
         next.delete(node.index)
         return next
       })
     }
-  }
+  }, [goTo])
 
-  function handleExpanderClick(e: React.MouseEvent, index: number) {
+  const handleExpanderClick = useCallback((e: React.MouseEvent, index: number) => {
     e.stopPropagation()
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -542,7 +568,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       else next.add(index)
       return next
     })
-  }
+  }, [])
 
   function toggleAllCollapse() {
     if (allParentCollapsed) {
@@ -586,19 +612,34 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     setStuckVolumeIndex((prev) => (prev !== activeStuckIndex ? activeStuckIndex : prev))
   }, [tab, searchExpanded, volumeIndices, collapsed])
 
+  const scheduleUpdateStuckVolume = useCallback(() => {
+    if (stuckVolumeRaf.current !== null) return
+    stuckVolumeRaf.current = requestAnimationFrame(() => {
+      stuckVolumeRaf.current = null
+      updateStuckVolume()
+    })
+  }, [updateStuckVolume])
+
   // Remember each scrollable side page independently so switching tabs does not
   // move the user to a different position when they return.
   function handleScroll() {
     const container = listRef.current
     if (container && open && tab !== 'ai' && !(tab === 'toc' && searchExpanded)) {
-      rememberSidebarScroll(tab, container.scrollTop, tab === 'toc' ? currentIndex : undefined)
-      if (tab === 'toc') updateStuckVolume()
+      savedScrollTop.current[tab] = container.scrollTop
+      if (scrollDebounceTimer.current) clearTimeout(scrollDebounceTimer.current)
+      scrollDebounceTimer.current = setTimeout(() => {
+        rememberSidebarScroll(tab, container.scrollTop, tab === 'toc' ? currentIndex : undefined)
+      }, 150)
+      if (tab === 'toc') scheduleUpdateStuckVolume()
     }
   }
 
   useEffect(() => {
     if (tab === 'toc' && open && !searchExpanded) {
-      updateStuckVolume()
+      const timer = setTimeout(() => {
+        updateStuckVolume()
+      }, 220)
+      return () => clearTimeout(timer)
     }
   }, [tab, open, searchExpanded, updateStuckVolume])
 
@@ -762,13 +803,13 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
               key={index}
               ref={
                 isVolume
-                  ? (el) => {
-                      if (el) volumeLiRefs.current.set(index, el)
-                      else volumeLiRefs.current.delete(index)
-                    }
+                  ? (el) => handleRegisterVolumeLiRef(index, el)
                   : undefined
               }
-              className={cn(isVolume && 'mt-1.5 first:mt-0')}
+              className={cn(
+                isVolume && 'mt-1.5 first:mt-0',
+                !isVolume && '[content-visibility:auto] [contain-intrinsic-size:0_36px]',
+              )}
             >
               <VolumeHeaderItem
                 node={node}
@@ -778,10 +819,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                 isExpanded={isExpanded}
                 isVolume={isVolume}
                 isStuck={isVolume && isExpanded && stuckVolumeIndex === index}
-                itemRef={(el) => {
-                  if (el) itemRefs.current.set(index, el)
-                  else itemRefs.current.delete(index)
-                }}
+                onRegisterItemRef={handleRegisterItemRef}
                 onItemClick={handleItemClick}
                 onExpanderClick={handleExpanderClick}
                 t={_}

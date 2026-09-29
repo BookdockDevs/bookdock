@@ -100,26 +100,47 @@ export function NotesFilterPanel({
     }
   }, [open, anchorRef, onClose])
 
+  const [chapterSort, setChapterSort] = useState<'chapter' | 'chapter-desc'>(() => {
+    return sort === 'chapter-desc' ? 'chapter-desc' : 'chapter'
+  })
+  const [timeSort, setTimeSort] = useState<'time-desc' | 'time-asc'>(() => {
+    return sort === 'time-asc' ? 'time-asc' : 'time-desc'
+  })
+
+  useEffect(() => {
+    if (sort === 'chapter' || sort === 'chapter-desc') {
+      setChapterSort(sort)
+    } else {
+      setTimeSort(sort)
+    }
+  }, [sort])
+
   const isChapter = sort === 'chapter' || sort === 'chapter-desc'
-  const isChapterDesc = sort === 'chapter-desc'
   const isTime = sort === 'time-desc' || sort === 'time-asc'
-  const isTimeAsc = sort === 'time-asc'
 
   function handleChapterSort() {
     if (isChapter) {
-      onSortChange(isChapterDesc ? 'chapter' : 'chapter-desc')
+      const next = chapterSort === 'chapter' ? 'chapter-desc' : 'chapter'
+      setChapterSort(next)
+      onSortChange(next)
     } else {
-      onSortChange('chapter')
+      onSortChange(chapterSort)
     }
   }
 
   function handleTimeSort() {
     if (isTime) {
-      onSortChange(isTimeAsc ? 'time-desc' : 'time-asc')
+      const next = timeSort === 'time-desc' ? 'time-asc' : 'time-desc'
+      setTimeSort(next)
+      onSortChange(next)
     } else {
-      onSortChange('time-desc')
+      onSortChange(timeSort)
     }
   }
+
+  const isChapterDesc = chapterSort === 'chapter-desc'
+  const isTimeAsc = timeSort === 'time-asc'
+  const hasHighlightType = displayTypes.has('highlight')
 
   const isFiltered = displayTypes.size < 3 || hasActiveFilter
 
@@ -173,7 +194,7 @@ export function NotesFilterPanel({
       </div>
 
       {/* 划线类型 */}
-      <div>
+      <div className={cn('transition-opacity duration-150', !hasHighlightType && 'opacity-35 pointer-events-none')}>
         <div className="mb-1.5 text-[11px] font-semibold text-[var(--bd-read-sub)] tracking-wide">
           {_('annotation.filterStyle')}
         </div>
@@ -201,7 +222,7 @@ export function NotesFilterPanel({
       </div>
 
       {/* 划线颜色 */}
-      <div>
+      <div className={cn('transition-opacity duration-150', !hasHighlightType && 'opacity-35 pointer-events-none')}>
         <div className="mb-1.5 text-[11px] font-semibold text-[var(--bd-read-sub)] tracking-wide">
           {_('annotation.filterColor')}
         </div>
@@ -253,7 +274,7 @@ export function NotesFilterPanel({
             <span className="truncate">
               {isChapterDesc ? _('reader.sortChapterReverse') : _('reader.sortChapter')}
             </span>
-            <span className={cn('shrink-0 transition-transform duration-200', isChapter && isChapterDesc && 'rotate-180')}>
+            <span className={cn('shrink-0 transition-transform duration-200', isChapterDesc && 'rotate-180')}>
               <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={isChapter ? 'text-current' : 'opacity-40'}>
                 <path d="M12 5v14M19 12l-7 7-7-7" />
               </svg>
@@ -273,7 +294,7 @@ export function NotesFilterPanel({
             <span className="truncate">
               {isTimeAsc ? _('reader.sortTimeAsc') : _('reader.sortTimeDesc')}
             </span>
-            <span className={cn('shrink-0 transition-transform duration-200', isTime && isTimeAsc && 'rotate-180')}>
+            <span className={cn('shrink-0 transition-transform duration-200', isTimeAsc && 'rotate-180')}>
               <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={isTime ? 'text-current' : 'opacity-40'}>
                 <path d="M12 5v14M19 12l-7 7-7-7" />
               </svg>

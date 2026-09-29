@@ -10,6 +10,7 @@ import type { CatalogBook } from '@bookdock/shared'
 
 const HOOKS = vi.hoisted(() => ({
   useUpdateCatalogVersion: vi.fn(),
+  useUpdateCatalogBook: vi.fn(),
   useDeleteCatalogVersion: vi.fn(),
   useLibraryCategories: vi.fn(),
   useCollectBook: vi.fn(),
@@ -43,7 +44,7 @@ function version(overrides: Partial<CatalogBook['versions'][number]> = {}): Cata
 function work(overrides: Partial<CatalogBook> = {}): CatalogBook {
   return {
     id: 'lb1', libraryId: 'lib_city', categoryId: null, title: 'City Book', author: 'Someone',
-    description: '', coverKey: null, tags: [], versions: [version()], createdAt: 1, updatedAt: 1, ...overrides,
+    description: '', coverKey: null, pinnedAt: null, tags: [], versions: [version()], createdAt: 1, updatedAt: 1, ...overrides,
   }
 }
 
@@ -51,9 +52,11 @@ function renderRow(target: CatalogBook, opts: { selectionActive?: boolean; selec
   const onToggleSelect = vi.fn()
   const onShowDetails = vi.fn()
   const updateVersion = vi.fn()
+  const updateBook = vi.fn()
   const deleteVersion = vi.fn()
   const collect = vi.fn()
   HOOKS.useUpdateCatalogVersion.mockReturnValue({ mutate: updateVersion })
+  HOOKS.useUpdateCatalogBook.mockReturnValue({ mutate: updateBook })
   HOOKS.useDeleteCatalogVersion.mockReturnValue({ mutate: deleteVersion })
   HOOKS.useLibraryCategories.mockReturnValue({ data: { data: [{ id: 'cat-1', name: '小说分类' }] }, isLoading: false })
   HOOKS.useCollectBook.mockReturnValue({ mutate: collect, isPending: false })
@@ -72,7 +75,7 @@ function renderRow(target: CatalogBook, opts: { selectionActive?: boolean; selec
       />
     </DndContext>,
   )
-  return { onToggleSelect, onShowDetails, updateVersion, deleteVersion, collect }
+  return { onToggleSelect, onShowDetails, updateVersion, updateBook, deleteVersion, collect }
 }
 
 /**
@@ -97,9 +100,26 @@ describe('CatalogListRow', () => {
     expect(onToggleSelect).not.toHaveBeenCalled()
   })
 
-  it('shows a version count for works with several versions', () => {
+  it('does not show a version count for works regardless of version count', () => {
     renderRow(work({ versions: [version(), version({ id: 'lbv2', bookVersionId: 'v2' })] }))
-    expect(screen.getByText('2 个版本')).toBeInTheDocument()
+    expect(screen.queryByText(/个版本/)).not.toBeInTheDocument()
+  })
+
+  it('distinguishes a hidden work from a work containing hidden versions', () => {
+    renderRow(work({
+      hidden: true,
+      versions: [version(), version({ id: 'lbv2', bookVersionId: 'v2', status: 'unlisted' })],
+    }))
+    expect(screen.getByRole('img', { name: '作品已隐藏' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '含隐藏版本' })).toBeInTheDocument()
+  })
+
+  it('uses one work indicator for a single hidden version', () => {
+    const { onShowDetails } = renderRow(work({ versions: [version({ status: 'unlisted' })] }))
+    expect(screen.getByRole('img', { name: '作品已隐藏' })).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: '含隐藏版本' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('City Book'))
+    expect(onShowDetails).toHaveBeenCalledOnce()
   })
 
   it('toggles selection instead of navigating in selection mode', () => {
@@ -136,11 +156,11 @@ describe('CatalogListRow', () => {
   })
 
   it('pins through the manager-only menu item', () => {
-    const { updateVersion } = renderRow(work(), { canManage: true })
+    const { updateBook } = renderRow(work(), { canManage: true })
     fireEvent.contextMenu(screen.getByText('City Book'))
     fireEvent.click(screen.getByText('置顶'))
-    expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({
-      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { pinned: true },
+    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({
+      libraryId: 'lib_city', libraryBookId: 'lb1', patch: { pinned: true },
     }))
   })
 
@@ -157,16 +177,32 @@ describe('CatalogListRow', () => {
   })
 
   it('renders unpin button in title for managers when pinned', () => {
-    const { updateVersion } = renderRow(work({ versions: [version({ pinnedAt: 99 })] }), { canManage: true })
+    const { updateBook } = renderRow(work({ pinnedAt: 99 }), { canManage: true })
     const unpinBtn = screen.getByLabelText('取消置顶')
     expect(unpinBtn).toBeInTheDocument()
     fireEvent.click(unpinBtn)
-    expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
+    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
   })
 
   it('renders read-only pin indicator in title for members without unpin affordance', () => {
-    renderRow(work({ versions: [version({ pinnedAt: 99 })] }), { canManage: false })
+    renderRow(work({ pinnedAt: 99 }), { canManage: false })
     expect(screen.getByLabelText('置顶')).toBeInTheDocument()
     expect(screen.queryByLabelText('取消置顶')).toBeNull()
+  })
+
+  it('toggles work hidden through the manager menu', () => {
+    const { updateBook } = renderRow(work({ hidden: false }), { canManage: true })
+    fireEvent.contextMenu(screen.getByText('City Book'))
+    fireEvent.click(screen.getByText('隐藏作品'))
+    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({
+      libraryId: 'lib_city', libraryBookId: 'lb1', patch: { hidden: true },
+    }), expect.any(Object))
+  })
+
+  it('shows a single hidden version through the work menu', () => {
+    const { updateBook } = renderRow(work({ versions: [version({ status: 'unlisted' })] }), { canManage: true })
+    fireEvent.contextMenu(screen.getByText('City Book'))
+    fireEvent.click(screen.getByText('显示作品'))
+    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { hidden: false } }), expect.any(Object))
   })
 })

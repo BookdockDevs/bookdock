@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { forwardRef, useImperativeHandle } from 'react'
 
 import { useReaderState } from '../features/reader/state/reader-state'
@@ -125,6 +125,22 @@ describe('ReaderSidebar on pointer devices', () => {
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
   })
 
+  it('summons the floating dock across its projected footprint', () => {
+    const { container } = renderSidebar(false)
+    const sidebar = outerEl(container)
+    const hoverZone = screen.getByTestId('reader-floating-hover-zone')
+
+    expect(sidebar).toHaveClass('overflow-visible', 'pointer-events-none')
+    expect(hoverZone).toHaveClass('pointer-events-auto', 'w-[70px]', 'h-[332px]')
+
+    fireEvent.pointerEnter(hoverZone, { clientX: 60, clientY: 80 })
+    expect(dockEl(container)).toHaveClass('opacity-100')
+
+    fireEvent.pointerLeave(sidebar)
+    fireEvent.pointerEnter(hoverZone, { clientX: 71, clientY: 80 })
+    expect(dockEl(container)).toHaveClass('opacity-0')
+  })
+
   it('honors the persisted toolbar lock', () => {
     act(() => useUiStore.setState({ toolbarLocked: true }))
     const { container } = renderSidebar(false)
@@ -204,7 +220,7 @@ describe('ReaderSidebar on pointer devices', () => {
     expect(outerEl(container)).toHaveClass('-mr-2')
   })
 
-  it('does not flash as floating dock when closing unpinned sidebar', () => {
+  it('does not flash as floating dock when closing unpinned sidebar', async () => {
     act(() => useReaderState.setState({ sidebarOpen: true }))
     const { container } = renderSidebar(false)
     const dock = dockEl(container)
@@ -218,6 +234,8 @@ describe('ReaderSidebar on pointer devices', () => {
     expect(outerEl(container)).toHaveClass('overflow-hidden')
     expect(outerEl(container)).not.toHaveClass('-mr-2')
     expect(outerEl(container).style.width).toBe('8px')
+
+    await waitFor(() => expect(outerEl(container)).toHaveClass('overflow-visible'))
   })
 })
 

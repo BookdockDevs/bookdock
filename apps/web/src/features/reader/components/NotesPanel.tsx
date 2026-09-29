@@ -364,51 +364,68 @@ export const NotesPanel = memo(function NotesPanel({
     })
   }
 
-  /** Chapter-grouped view, or null when a flat time-sorted list should render */
+  const isChapterSort = sort === 'chapter' || sort === 'chapter-desc'
+
+  /** Grouped view: either by book chapter order or consecutive chapters in time order */
   const groups = useMemo(() => {
-    if (sort !== 'chapter' && sort !== 'chapter-desc') return null
-    const byChapter = new Map<string, { chapter: string; chapterHref: string | null; list: AnnotationRes[] }>()
-    for (const a of items) {
+    if (isChapterSort) {
+      const byChapter = new Map<string, { chapter: string; chapterHref: string | null; list: AnnotationRes[] }>()
+      for (const a of items) {
+        const chapter = a.chapter || _('reader.uncategorized')
+        const chapterHref = a.chapterHref ?? null
+        const key = chapterHref ? `href:${chapterHref}` : `label:${chapter}`
+        const group = byChapter.get(key)
+        if (group) group.list.push(a)
+        else byChapter.set(key, { chapter, chapterHref, list: [a] })
+      }
+      const lookupChapter = buildChapterOrderLookup(chapterOrder)
+      const orderIndex = (group: { chapter: string; chapterHref: string | null }) => {
+        const i = lookupChapter(group.chapter, group.chapterHref)
+        return i < 0 ? chapterOrder.length : i
+      }
+      const reverse = sort === 'chapter-desc'
+      const compareItems = (a: AnnotationRes, b: AnnotationRes) =>
+        compareCfiPosition(a.cfiRange, b.cfiRange)
+        || compareCfiPosition(a.cfiRange, b.cfiRange, true)
+        || a.createdAt - b.createdAt
+        || a.id.localeCompare(b.id)
+      return Array.from(byChapter.entries())
+        .map(([key, group]) => ({
+          key,
+          ...group,
+          list: group.list.sort((a, b) => (reverse ? -1 : 1) * compareItems(a, b)),
+        }))
+        .sort((g1, g2) => {
+          const a = orderIndex(g1)
+          const b = orderIndex(g2)
+          const aUnknown = a === chapterOrder.length
+          const bUnknown = b === chapterOrder.length
+          if (aUnknown !== bUnknown) return aUnknown ? 1 : -1
+          return (reverse ? -1 : 1) * (a - b)
+        })
+    }
+
+    // Time sort: sort by time, then group consecutive items belonging to the same chapter
+    const sorted = [...items].sort((a, b) => (sort === 'time-asc' ? a.createdAt - b.createdAt : b.createdAt - a.createdAt))
+    const timeGroups: { key: string; chapter: string; chapterHref: string | null; list: AnnotationRes[] }[] = []
+    let counter = 0
+    for (const a of sorted) {
       const chapter = a.chapter || _('reader.uncategorized')
       const chapterHref = a.chapterHref ?? null
-      const key = chapterHref ? `href:${chapterHref}` : `label:${chapter}`
-      const group = byChapter.get(key)
-      if (group) group.list.push(a)
-      else byChapter.set(key, { chapter, chapterHref, list: [a] })
+      const last = timeGroups[timeGroups.length - 1]
+      if (last && last.chapter === chapter && last.chapterHref === chapterHref) {
+        last.list.push(a)
+      } else {
+        timeGroups.push({
+          key: `time-group-${counter++}-${chapterHref ?? chapter}`,
+          chapter,
+          chapterHref,
+          list: [a],
+        })
+      }
     }
-    const lookupChapter = buildChapterOrderLookup(chapterOrder)
-    const orderIndex = (group: { chapter: string; chapterHref: string | null }) => {
-      const i = lookupChapter(group.chapter, group.chapterHref)
-      return i < 0 ? chapterOrder.length : i
-    }
-    const reverse = sort === 'chapter-desc'
-    // Same start position (a bookmark on a highlight's first char): order by
-    // range end, then creation time, then id so the list never depends on
-    // server arrival order
-    const compareItems = (a: AnnotationRes, b: AnnotationRes) =>
-      compareCfiPosition(a.cfiRange, b.cfiRange)
-      || compareCfiPosition(a.cfiRange, b.cfiRange, true)
-      || a.createdAt - b.createdAt
-      || a.id.localeCompare(b.id)
-    return Array.from(byChapter.values())
-      .map((group) => ({
-        ...group,
-        list: group.list.sort((a, b) => (reverse ? -1 : 1) * compareItems(a, b)),
-      }))
-      .sort((g1, g2) => {
-        const a = orderIndex(g1)
-        const b = orderIndex(g2)
-        const aUnknown = a === chapterOrder.length
-        const bUnknown = b === chapterOrder.length
-        if (aUnknown !== bUnknown) return aUnknown ? 1 : -1
-        return (reverse ? -1 : 1) * (a - b)
-      })
-  }, [items, sort, chapterOrder, _])
-
-  const flat = useMemo(() => {
-    if (sort === 'chapter' || sort === 'chapter-desc') return null
-    return [...items].sort((a, b) => (sort === 'time-asc' ? a.createdAt - b.createdAt : b.createdAt - a.createdAt))
-  }, [items, sort])
+    return timeGroups
+  }, [items, sort, isChapterSort, chapterOrder, _])
 
 
 
@@ -587,12 +604,8 @@ export const NotesPanel = memo(function NotesPanel({
             </button>
             {!selectionMode && (
               <div className="mt-2 flex h-6 items-center px-0.5 text-xs text-[var(--bd-read-sub)]">
-                {a.type === 'bookmark' && a.chapter && !groups && (
-                  <span className="truncate text-[11px] text-[var(--bd-read-sub)]" title={a.chapter}>
-                    {a.chapter}
-                  </span>
-                )}
                 <span
+                  title={formatFullDateTime(_, a.createdAt)}
                   aria-label={formatFullDateTime(_, a.createdAt)}
                   className="group/time text-[11px] tabular-nums text-[var(--bd-read-sub)] opacity-70 transition-opacity cursor-default select-none hover:opacity-100 truncate"
                 >
@@ -705,14 +718,14 @@ export const NotesPanel = memo(function NotesPanel({
             {_('reader.noNotesHint')}
           </p>
         </div>
-      ) : groups && !chapterOrderReady ? (
+      ) : isChapterSort && !chapterOrderReady ? (
         <div className="flex flex-1 items-center justify-center py-12 text-xs text-[var(--bd-read-sub)]">
           {_('reader.loading')}
         </div>
-      ) : groups ? (
+      ) : (
         <div className="space-y-4">
           {groups.map((g) => (
-            <div key={g.chapterHref ? `href:${g.chapterHref}` : `label:${g.chapter}`} className="space-y-2">
+            <div key={g.key} className="space-y-2">
               <div className="group flex items-center justify-between px-1">
                 <button
                   type="button"
@@ -739,12 +752,6 @@ export const NotesPanel = memo(function NotesPanel({
             </div>
           ))}
         </div>
-      ) : (
-        <ul className="space-y-2">
-          {flat!.map((a) => (
-            <li key={a.id}>{renderCard(a)}</li>
-          ))}
-        </ul>
       )}
 
       {contextMenu && (

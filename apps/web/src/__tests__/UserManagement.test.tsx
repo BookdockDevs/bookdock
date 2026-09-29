@@ -43,6 +43,9 @@ const LIBRARIES: LibraryListItem[] = [
     description: 'Shared city books',
     visibility: 'public',
     relation: 'owner',
+    memberCount: 3,
+    workCount: 12,
+    ownerUsername: 'owner1',
     createdAt: 1700000000000,
     updatedAt: 1700000000000,
   },
@@ -94,6 +97,19 @@ describe('UserManagementSection', () => {
       expect(screen.getAllByText('成员')).toHaveLength(2)
       expect(screen.getByText('已禁用')).toBeInTheDocument()
       expect(screen.getAllByText('正常')).toHaveLength(2)
+    })
+
+    it('sorts instance users by role hierarchy (owner first) even if API returns out of order', () => {
+      const reversedUsers: AdminUserRes[] = [
+        { id: 'u2', username: 'bob', role: 'member', disabled: false, createdAt: 200, bookCount: 0, ownedLibraries: [] },
+        { id: 'u1', username: 'alice', role: 'owner', disabled: false, createdAt: 100, bookCount: 0, ownedLibraries: [] },
+      ]
+      ;(useAdminUsers as ReturnType<typeof vi.fn>).mockReturnValue({ data: { data: reversedUsers }, isLoading: false })
+      render(<UserManagementSection />)
+      const rows = screen.getAllByRole('row')
+      // Header is rows[0], owner alice should be rows[1], member bob should be rows[2]
+      expect(within(rows[1]).getByText('alice')).toBeInTheDocument()
+      expect(within(rows[2]).getByText('bob')).toBeInTheDocument()
     })
 
     it('confirms before disabling a user', () => {
@@ -160,11 +176,11 @@ describe('UserManagementSection', () => {
     it('confirms and deletes a plain member', () => {
       render(<UserManagementSection />)
       fireEvent.click(within(screen.getByText('carol').closest('tr')!).getByLabelText('更多操作'))
-      fireEvent.click(screen.getByRole('button', { name: '删除用户' }))
+      fireEvent.click(screen.getByRole('button', { name: '删除' }))
 
       const dialog = screen.getByRole('alertdialog')
       expect(within(dialog).getByText(/其私人书库与个人数据会被清除/)).toBeInTheDocument()
-      fireEvent.click(within(dialog).getByRole('button', { name: '删除用户' }))
+      fireEvent.click(within(dialog).getByRole('button', { name: '删除' }))
       expect(deleteUser).toHaveBeenCalledWith('u3', expect.objectContaining({ onSuccess: expect.any(Function) }))
     })
 
@@ -177,12 +193,12 @@ describe('UserManagementSection', () => {
       render(<UserManagementSection />)
 
       fireEvent.click(within(screen.getByText('alice').closest('tr')!).getByLabelText('更多操作'))
-      expect(screen.queryByText('删除用户')).not.toBeInTheDocument()
+      expect(screen.queryByText('删除')).not.toBeInTheDocument()
       fireEvent.keyDown(window, { key: 'Escape' })
 
       fireEvent.click(within(screen.getByText('dave').closest('tr')!).getByLabelText('更多操作'))
       const blocked = screen.getByTitle(/拥有书库/)
-      expect(blocked).toHaveTextContent('删除用户')
+      expect(blocked).toHaveTextContent('删除')
       expect(blocked.getAttribute('title')).toMatch(/City/)
       fireEvent.click(blocked)
       expect(deleteUser).not.toHaveBeenCalled()
@@ -237,11 +253,11 @@ describe('UserManagementSection', () => {
       render(<UserManagementSection initialTab="library" />)
       const carolRow = screen.getByText('carol').closest('tr')!
       fireEvent.click(within(carolRow).getByLabelText('更多操作'))
-      fireEvent.click(screen.getByRole('button', { name: '移出书库' }))
+      fireEvent.click(screen.getByRole('button', { name: '移出' }))
 
       const dialog = screen.getByRole('alertdialog')
       expect(within(dialog).getByText(/自己的书库和阅读数据不受影响/)).toBeInTheDocument()
-      fireEvent.click(within(dialog).getByRole('button', { name: '移出书库' }))
+      fireEvent.click(within(dialog).getByRole('button', { name: '移出' }))
 
       expect(removeMember).toHaveBeenCalledWith(
         { libraryId: 'lib_shared_1', userId: 'u3' },
@@ -256,6 +272,27 @@ describe('UserManagementSection', () => {
       })
       render(<UserManagementSection initialTab="library" />)
       expect(screen.queryByText('暂无其他成员')).not.toBeInTheDocument()
+    })
+
+    it('sorts members by role hierarchy (admin before member) and creation time', () => {
+      ;(useLibraryMembers as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: {
+          data: {
+            owner: { id: 'u1', username: 'alice' },
+            members: [
+              { id: 'm2', userId: 'u3', username: 'carol', role: 'member', createdAt: 200 },
+              { id: 'm1', userId: 'u2', username: 'bob', role: 'admin', createdAt: 100 },
+            ],
+          },
+        },
+        isLoading: false,
+      })
+      render(<UserManagementSection initialTab="library" />)
+      const rows = screen.getAllByRole('row')
+      // Header is rows[0], owner (alice) is rows[1], admin (bob) is rows[2], member (carol) is rows[3]
+      expect(within(rows[1]).getByText('alice')).toBeInTheDocument()
+      expect(within(rows[2]).getByText('bob')).toBeInTheDocument()
+      expect(within(rows[3]).getByText('carol')).toBeInTheDocument()
     })
   })
 })

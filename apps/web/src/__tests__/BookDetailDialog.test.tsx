@@ -9,6 +9,7 @@ import i18n from '../i18n/i18n'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { downloadBook, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../features/library/download'
 import BookDetailDialog from '../features/library/components/BookDetailDialog'
+import { formatDate } from '../lib/utils'
 
 const apiPatch = vi.fn()
 const apiPut = vi.fn()
@@ -74,6 +75,11 @@ vi.mock('../features/library/hooks', () => ({
     abortAll: vi.fn(), pruneSettled: vi.fn(), isUploading: false, clearQueue: vi.fn(), patchItem: vi.fn(),
   }),
   useUploadSettings: () => ({}),
+  useUploadCatalogBookCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRemoveCatalogBookCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUploadCatalogVersionCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRemoveCatalogVersionCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useResetCatalogVersionMetadata: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteCatalogVersion: () => ({ mutate: deleteCatalogVersionMutate, mutateAsync: deleteCatalogVersionMutate, isPending: false }),
 }))
 
@@ -398,7 +404,7 @@ describe('BookDetailDialog identity chips', () => {
   it('toggles the private work hidden from its detail actions', async () => {
     renderDialog()
 
-    fireEvent.click(screen.getByRole('button', { name: '隐藏作品' }))
+    fireEvent.click(screen.getByRole('button', { name: '书籍显示中，点击隐藏' }))
 
     await waitFor(() => {
       expect(apiPatch).toHaveBeenCalledWith('/books/book-1', { hidden: true })
@@ -755,6 +761,30 @@ describe('BookDetailDialog download menu (2×2)', () => {
   })
 })
 
+describe('BookDetailDialog more actions', () => {
+  it('shows only publish for a publishable EPUB and uses the home-menu icon', () => {
+    const onPublish = vi.fn()
+    render(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} onPublish={onPublish} />, { wrapper })
+
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    expect(screen.queryByRole('button', { name: '更换目录规则' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '追加内容' })).not.toBeInTheDocument()
+    const publish = screen.getByRole('button', { name: '发布' })
+    expect(publish.querySelector('path[d="M12 17V3"]')).not.toBeNull()
+    fireEvent.click(publish)
+    expect(onPublish).toHaveBeenCalledWith(expect.objectContaining({ id: book.id }))
+  })
+
+  it('keeps TXT-only actions available for a TXT book', () => {
+    render(<BookDetailDialog book={{ ...book, format: 'txt' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    expect(screen.getByRole('button', { name: '更换目录规则' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '追加内容' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '发布' })).not.toBeInTheDocument()
+  })
+})
+
 describe('BookDetailDialog shared work mode', () => {
   const cityLibrary: Library = {
     id: 'lib_city', userId: 'u2', type: 'shared', name: 'City', description: '',
@@ -837,14 +867,17 @@ describe('BookDetailDialog shared work mode', () => {
 
     // Single published version: unlisting breaks collected B cards, so it
     // confirms first.
-    fireEvent.click(screen.getByRole('button', { name: '隐藏' }))
+    fireEvent.click(screen.getByRole('button', { name: '版本显示中，点击隐藏' }))
     expect(updateCatalogVersionMutate).not.toHaveBeenCalled()
     const unlistDialog = screen.getByRole('alertdialog')
     expect(within(unlistDialog).getByText(/隐藏后，已收藏的成员将无法继续阅读/)).toBeInTheDocument()
     fireEvent.click(within(unlistDialog).getByRole('button', { name: '隐藏' }))
-    expect(updateCatalogVersionMutate).toHaveBeenCalledWith(expect.objectContaining({
-      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { status: 'unlisted' },
-    }))
+    expect(updateCatalogVersionMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { status: 'unlisted' },
+      }),
+      expect.anything(),
+    )
     // Deleting the last version removes the whole work: also confirmed.
     fireEvent.click(screen.getByLabelText('删除'))
     expect(deleteCatalogVersionMutate).not.toHaveBeenCalled()
@@ -854,23 +887,19 @@ describe('BookDetailDialog shared work mode', () => {
     expect(deleteCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1' })
   })
 
-  it('toggles the whole work hidden without touching versions', () => {
-    renderWorkDialog(catalogWork(), { canManage: true })
-
-    fireEvent.click(screen.getByRole('button', { name: '隐藏作品' }))
-    expect(updateCatalogBookMutate).toHaveBeenCalledWith({
-      libraryId: 'lib_city', libraryBookId: 'lb1', patch: { hidden: true },
-    })
-    cleanup()
-
-    // A hidden work offers the way back and badges itself for managers.
+  it('shows the single-version visibility state through its version control', () => {
     renderWorkDialog(catalogWork({ hidden: true }), { canManage: true })
-    expect(screen.getByRole('button', { name: '显示作品' })).toBeInTheDocument()
-    expect(screen.getByText('已隐藏')).toBeInTheDocument()
-    // Members never reach the toggle.
+    expect(screen.getByRole('button', { name: '版本已隐藏，点击显示' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '版本已隐藏，点击显示' }))
+    expect(updateCatalogVersionMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        patch: { status: 'published' },
+      }),
+      expect.anything(),
+    )
     cleanup()
     renderWorkDialog(catalogWork({ hidden: true }))
-    expect(screen.queryByRole('button', { name: '显示作品' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '版本已隐藏，点击显示' })).not.toBeInTheDocument()
   })
 
   it('switches the visible version from the tabs and acts on it', () => {
@@ -895,11 +924,31 @@ describe('BookDetailDialog shared work mode', () => {
     expect(boxes[0]!.checked).toBe(false)
   })
 
+  it('keeps shared actions in private-detail order and dates the selected version', () => {
+    const firstCreatedAt = 1700000000000
+    const secondCreatedAt = 1730000000000
+    renderWorkDialog(catalogWork({
+      versions: [
+        catalogVersion({ name: '初版', createdAt: firstCreatedAt }),
+        catalogVersion({ id: 'lbv2', bookVersionId: 'v2', name: '修订版', createdAt: secondCreatedAt }),
+      ],
+    }), { canManage: true })
+
+    const edit = screen.getByRole('button', { name: '编辑作品' })
+    const download = screen.getByRole('button', { name: '下载' })
+    expect(edit.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const addedAt = screen.getByText('添加时间').parentElement!
+    expect(within(addedAt).getByText(formatDate(firstCreatedAt))).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /修订版/ }))
+    expect(within(addedAt).getByText(formatDate(secondCreatedAt))).toBeInTheDocument()
+  })
+
   it('opens the work editor for managers only', () => {
     renderWorkDialog(catalogWork(), { canManage: true })
     fireEvent.click(screen.getByRole('button', { name: '编辑作品' }))
     expect(screen.getByText('作品信息')).toBeInTheDocument()
-    expect(screen.getByText(/版本信息/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /版本 1/ })).toBeInTheDocument()
     cleanup()
 
     renderWorkDialog(catalogWork())
@@ -910,7 +959,7 @@ describe('BookDetailDialog shared work mode', () => {
   it('opens the version-bound upload sheet for managers', () => {
     renderWorkDialog(catalogWork(), { canManage: true })
     fireEvent.click(screen.getByRole('button', { name: '上传新版本' }))
-    expect(screen.getByText(/将作为「City Book」的新版本上传/)).toBeInTheDocument()
+    expect(screen.getByText('版本 2').parentElement).toHaveAttribute('title', '将作为「City Book」的新版本上传')
   })
 
   it('shows no tabs for a single version and tabs past one', () => {
@@ -930,11 +979,11 @@ describe('BookDetailDialog shared work mode', () => {
     expect(screen.getByRole('tablist')).toBeInTheDocument()
     expect(screen.getAllByRole('tab')).toHaveLength(2)
     // Unnamed versions fall back to an ordinal label.
-    expect(screen.getByRole('tab', { name: /第1版/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /版本 1/ })).toBeInTheDocument()
   })
 
   it('locks reading and download on an unlisted version', () => {
-    renderWorkDialog(catalogWork({ versions: [catalogVersion({ status: 'unlisted' })] }), { canManage: true })
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ status: 'unlisted' })] }), { canManage: false })
 
     expect(screen.getByRole('button', { name: '开始阅读' })).toBeDisabled()
     expect(screen.queryByLabelText('下载')).toBeNull()

@@ -3,7 +3,7 @@ import type { CatalogVersion } from '@bookdock/shared'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 
-import { versionTabLabel } from '../book-row'
+import { versionTabLabel, versionOrdinal } from '../book-row'
 
 /**
  * Version picker for a multi-version work. A single version is the work
@@ -25,7 +25,7 @@ export default function VersionTabs({ versions, selectedId, onSelect }: VersionT
 
   return (
     <div role="tablist" aria-label={_('library.catalogVersions')} className="flex flex-wrap gap-1.5">
-      {versions.map((version, index) => {
+      {versions.map((version) => {
         const selected = version.id === selectedId
         return (
           <button
@@ -35,29 +35,15 @@ export default function VersionTabs({ versions, selectedId, onSelect }: VersionT
             aria-selected={selected}
             onClick={() => onSelect(version.id)}
             className={cn(
-              'flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-all',
+              'flex items-center rounded-lg border px-2.5 py-1.5 text-xs transition-all',
               selected
-                ? 'border-stone-900 bg-stone-900 text-white shadow-xs dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900'
-                : 'border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-600',
+                ? 'border-stone-400 bg-stone-100 font-semibold text-stone-900 shadow-2xs dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100'
+                : 'border-stone-200 bg-white font-medium text-stone-600 hover:border-stone-300 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-600',
             )}
           >
-            <span className="max-w-32 truncate">
-              {versionTabLabel(version.name, _('library.versionFallback', { n: index + 1 }))}
+            <span className="max-w-40 truncate">
+              {versionTabLabel(version.name, _('library.versionFallback', { n: versionOrdinal(versions, version.id) }))}
             </span>
-            <span className={cn('text-[10px]', selected ? 'opacity-70' : 'text-stone-400')}>
-              {version.format.toUpperCase()}
-            </span>
-            {version.status === 'unlisted' && (
-              <span className={cn(
-                'rounded px-1 py-px text-[10px]',
-                selected
-                  ? 'bg-white/20 text-white dark:bg-stone-900/20 dark:text-stone-900'
-                  : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300',
-              )}
-              >
-                {_('library.catalogUnlisted')}
-              </span>
-            )}
           </button>
         )
       })}

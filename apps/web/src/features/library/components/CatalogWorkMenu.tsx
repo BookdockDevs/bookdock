@@ -11,7 +11,7 @@ import { notify } from '@/lib/notifications'
 import type { SmartPosition } from '@/lib/position'
 
 import { downloadDefault } from '../download'
-import { useCollectBook, useUpdateCatalogVersion } from '../hooks'
+import { useCollectBook, useUpdateCatalogBook } from '../hooks'
 
 import { MenuDangerItem, MenuDivider, MenuHeader, MenuItem } from './RowMenuChrome'
 import DeleteVersionsDialog from './DeleteVersionsDialog'
@@ -39,20 +39,11 @@ interface CatalogWorkMenuProps {
 export default function CatalogWorkMenu({ innerRef, triggerRef, position, width, onClose, work, canManage, canCollect, canDownload, onShowDetails }: CatalogWorkMenuProps) {
   const _ = useTranslation()
   const collectBook = useCollectBook()
-  const updateVersion = useUpdateCatalogVersion()
+  const updateWork = useUpdateCatalogBook()
   const [deleteOpen, setDeleteOpen] = useState(false)
   // The menu predates versions in the UI: one work, one version, the first one.
   const first = work.versions[0]
-
-  function mutateVersion(patch: { pinned?: boolean }) {
-    if (!first) return
-    updateVersion.mutate({
-      libraryId: work.libraryId,
-      libraryBookId: work.id,
-      versionLinkId: first.id,
-      patch,
-    })
-  }
+  const hidden = work.hidden || (work.versions.length === 1 && first?.status === 'unlisted')
 
   return (
     <>
@@ -66,7 +57,7 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
         icon={<><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></>}
         onClick={onShowDetails}
       />
-      {canCollect && first && first.status === 'published' && (
+      {canCollect && first && (first.status === 'published' || canManage) && (
         <MenuItem
           label={_('library.collect')}
           icon={<><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /><line x1="12" y1="7" x2="12" y2="13" /><line x1="9" y1="10" x2="15" y2="10" /></>}
@@ -98,13 +89,36 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
           }}
         />
       )}
-      {canManage && first && (
+      {canManage && (
         <MenuItem
-          label={first.pinnedAt ? _('library.unpin') : _('library.pin')}
+          label={work.pinnedAt ? _('library.unpin') : _('library.pin')}
           icon={<><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></>}
           onClick={() => {
             onClose()
-            mutateVersion({ pinned: !first.pinnedAt })
+            updateWork.mutate({ libraryId: work.libraryId, libraryBookId: work.id, patch: { pinned: !work.pinnedAt } })
+          }}
+        />
+      )}
+      {canManage && (
+        <MenuItem
+          label={hidden ? _('library.catalogShowWork') : _('library.catalogHideWork')}
+          disabled={updateWork.isPending}
+          icon={hidden ? (
+            <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" /><line x1="2" x2="22" y1="2" y2="22" /></>
+          ) : (
+            <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>
+          )}
+          onClick={() => {
+            const showing = hidden
+            onClose()
+            updateWork.mutate({
+              libraryId: work.libraryId,
+              libraryBookId: work.id,
+              patch: { hidden: !hidden },
+            }, {
+              onSuccess: () => notify.success(showing ? _('library.catalogShowWork') : _('library.catalogHideWork')),
+              onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogHideWork')),
+            })
           }}
         />
       )}

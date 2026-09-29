@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 
 import type { LibraryListItem } from '@bookdock/shared'
 
@@ -19,7 +19,9 @@ vi.mock('../features/library/hooks', () => ({
   useBooks: vi.fn(),
   useTags: vi.fn(),
   useTrashEnabled: vi.fn(),
-  useLibraryPrefs: () => undefined,
+  useLibraryPrefs: vi.fn(),
+  useHiddenLibraries: vi.fn(),
+  useUpdateLibraryPrefs: vi.fn(),
   useCreateShelf: vi.fn(),
   useRenameShelf: vi.fn(),
   useDeleteShelf: vi.fn(),
@@ -41,6 +43,7 @@ vi.mock('../features/library/hooks', () => ({
   useCreateLibraryTag: vi.fn(),
   useUpdateLibraryTag: vi.fn(),
   useDeleteLibraryTag: vi.fn(),
+  useUpdateLibrary: vi.fn(),
 }))
 
 vi.mock('@/features/auth/AccountMenu', () => ({
@@ -79,6 +82,14 @@ function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1, trashEnabl
   ;(libraryHooks.useDeleteLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
   ;(libraryHooks.useUpdateLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
   ;(libraryHooks.useDeleteLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+  ;(libraryHooks.useUpdateLibrary as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
+  // Nothing hidden by default; the hide/show tests override this.
+  ;(libraryHooks.useHiddenLibraries as ReturnType<typeof vi.fn>).mockReturnValue({
+    hiddenIds: [],
+    isHidden: () => false,
+    setHidden: vi.fn(),
+  })
+  ;(libraryHooks.useLibraryPrefs as ReturnType<typeof vi.fn>).mockReturnValue(undefined)
   // Inert library context: these tests are about the private library, and the
   // sidebar still calls the shared-library hooks on every render.
   mockLibraryHooks()
@@ -345,7 +356,7 @@ describe('LibrarySidebar', () => {
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
     fireEvent.click(screen.getAllByLabelText('更多操作')[0])
 
-    expect(screen.getByText('重命名')).toBeInTheDocument()
+    expect(screen.getByText('改名')).toBeInTheDocument()
     expect(screen.getByText('删除')).toBeInTheDocument()
     expect(screen.getByText('3', { exact: true })).toHaveClass('opacity-0')
   })
@@ -437,6 +448,49 @@ describe('LibrarySidebar', () => {
     expect(badge).toHaveClass('rounded-full', 'dark:bg-stone-700/60', 'dark:text-stone-200')
   })
 
+  it('renders library as primary active when no filter is active, and switches to scope active when a filter is active', () => {
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 5 }] })
+
+    const { rerender } = render(
+      <LibrarySidebar
+        navSearch={navSearch}
+        shelfId={null}
+        tagId={null}
+        trash={false}
+        libraries={[
+          { id: 'p1', type: 'private', ownerUserId: 'u1', name: 'My Library', description: '', visibility: null, createdAt: 1, updatedAt: 1, relation: 'owner', memberCount: 1, workCount: 5, ownerUsername: 'u1' },
+          { id: 'lib-1', type: 'shared', ownerUserId: 'u1', name: 'Club', description: '', visibility: 'public', createdAt: 2, updatedAt: 2, relation: 'owner', memberCount: 2, workCount: 3, ownerUsername: 'u1' },
+        ]}
+      />,
+    )
+
+    const myLibBtn = screen.getByText('My Library').closest('button')!
+    // Primary active: card style with shadow and ring
+    expect(myLibBtn).toHaveClass('bg-white', 'shadow-sm')
+
+    // Filter active: shelf selected
+    rerender(
+      <LibrarySidebar
+        navSearch={navSearch}
+        shelfId="shelf-1"
+        tagId={null}
+        trash={false}
+        libraries={[
+          { id: 'p1', type: 'private', ownerUserId: 'u1', name: 'My Library', description: '', visibility: null, createdAt: 1, updatedAt: 1, relation: 'owner', memberCount: 1, workCount: 5, ownerUsername: 'u1' },
+          { id: 'lib-1', type: 'shared', ownerUserId: 'u1', name: 'Club', description: '', visibility: null, createdAt: 2, updatedAt: 2, relation: 'owner', memberCount: 2, workCount: 3, ownerUsername: 'u1' },
+        ]}
+      />,
+    )
+
+    // Scope active: flat highlight without shadow or ring
+    expect(myLibBtn).toHaveClass('bg-stone-200/50')
+    expect(myLibBtn).not.toHaveClass('shadow-sm')
+
+    // And the shelf row becomes the primary active focus
+    const shelfBtn = screen.getByText('Favorites').closest('button')!
+    expect(shelfBtn).toHaveClass('bg-white', 'shadow-sm')
+  })
+
   // 0.4.0: a shared library is not a second sidebar. The rows below the library
   // switcher are the same rows, reading the library in context.
   describe('shared library context', () => {
@@ -475,7 +529,7 @@ describe('LibrarySidebar', () => {
 
     it('lets an owner curate the taxonomy but not a plain member', () => {
       mockHooks()
-      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }], relation: 'member' })
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }], memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'member' })
 
       const { unmount } = render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
       expect(screen.queryByTitle('新建分类')).toBeNull()
@@ -483,7 +537,7 @@ describe('LibrarySidebar', () => {
       unmount()
 
       mockHooks()
-      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }], relation: 'owner' })
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }], memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'owner' })
       render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
       expect(screen.getByTitle('新建分类')).toBeInTheDocument()
     })
@@ -496,7 +550,7 @@ describe('LibrarySidebar', () => {
 
       render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
       fireEvent.click(screen.getAllByLabelText('更多操作')[0])
-      fireEvent.click(screen.getByText('重命名'))
+      fireEvent.click(screen.getByText('改名'))
       fireEvent.change(screen.getByPlaceholderText('分类名称'), { target: { value: '科幻' } })
       fireEvent.click(screen.getAllByRole('button', { name: '保存' })[0])
 
@@ -571,8 +625,8 @@ describe('LibrarySidebar', () => {
           tagId={null}
           trash={false}
           libraries={[
-            { id: 'p1', type: 'private', ownerUserId: 'u1', name: '个人书库', description: '', visibility: null, createdAt: 1, updatedAt: 1, relation: 'owner' },
-            { id: 'lib-1', type: 'shared', ownerUserId: 'u2', name: 'City', description: '', visibility: 'public', createdAt: 1, updatedAt: 1, relation: 'owner' },
+            { id: 'p1', type: 'private', ownerUserId: 'u1', name: '个人书库', description: '', visibility: null, createdAt: 1, updatedAt: 1, memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'owner' },
+            { id: 'lib-1', type: 'shared', ownerUserId: 'u2', name: 'City', description: '', visibility: 'public', createdAt: 1, updatedAt: 1, memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'owner' },
           ]}
           activeLibraryId="lib-1"
           onSelectLibrary={onSelectLibrary}
@@ -586,6 +640,224 @@ describe('LibrarySidebar', () => {
       // reader could never leave the library.
       expect(onSelectLibrary).toHaveBeenCalledTimes(1)
       expect(onSelectLibrary).toHaveBeenCalledWith(null)
+    })
+
+    it('renames the private library from its sidebar menu', () => {
+      mockHooks()
+      const mutate = vi.fn()
+      ;(libraryHooks.useUpdateLibrary as ReturnType<typeof vi.fn>).mockReturnValue({ mutate, isPending: false })
+      render(
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[
+            { id: 'p1', type: 'private', ownerUserId: 'u1', name: 'My books', description: '', visibility: null, createdAt: 1, updatedAt: 1, memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'owner' },
+          ]}
+          onExploreLibraries={vi.fn()}
+        />,
+      )
+
+      expect(screen.getByText('My books')).toBeInTheDocument()
+      fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+      fireEvent.click(screen.getByText('改名'))
+      const input = screen.getByPlaceholderText('名称')
+      fireEvent.change(input, { target: { value: '  小说角落  ' } })
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+      expect(mutate).toHaveBeenCalledWith(
+        { libraryId: 'p1', patch: { name: '小说角落' } },
+        expect.anything(),
+      )
+    })
+
+    it('opens a details panel from the row menu with the library facts', () => {
+      mockHooks()
+      render(
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[{
+            id: 'lib-1', type: 'shared', ownerUserId: 'u2', name: 'City', description: 'Shared city books',
+            visibility: 'public', createdAt: 1758000000000, updatedAt: 1, relation: 'owner',
+            memberCount: 12, workCount: 34, ownerUsername: 'alice',
+          }]}
+          onExploreLibraries={vi.fn()}
+        />,
+      )
+
+      fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+      fireEvent.click(screen.getByText('详情'))
+
+      // The sidebar row stays a switching surface; the numbers live here.
+      const panel = within(screen.getByRole('dialog'))
+      expect(panel.getByText('书库详情')).toBeInTheDocument()
+      expect(panel.getByText('City')).toBeInTheDocument()
+      expect(panel.getByText('Shared city books')).toBeInTheDocument()
+      expect(panel.getByText('alice')).toBeInTheDocument()
+      expect(panel.getByText('12')).toBeInTheDocument()
+      expect(panel.getByText('34')).toBeInTheDocument()
+      expect(panel.getByText('创建于')).toBeInTheDocument()
+      expect(panel.getByText(new Date(1758000000000).toLocaleDateString())).toBeInTheDocument()
+    })
+
+    it('keeps the personal library visible and offers no hide action for it', () => {
+      mockHooks()
+      const setHidden = vi.fn()
+      ;(libraryHooks.useHiddenLibraries as ReturnType<typeof vi.fn>).mockReturnValue({
+        // A stale preference from before the personal library became un-hideable.
+        hiddenIds: ['p1'],
+        isHidden: (id: string) => id === 'p1',
+        setHidden,
+      })
+
+      const view = () => (
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[
+            { id: 'p1', type: 'private', ownerUserId: 'u1', name: 'My books', description: '', visibility: null, createdAt: 1, updatedAt: 1, relation: 'owner', memberCount: 1, workCount: 3, ownerUsername: 'u1' },
+          ]}
+          onExploreLibraries={vi.fn()}
+        />
+      )
+
+      const { rerender } = render(view())
+      // The personal library is the way back to your own books, so a stale id
+      // in the settings blob cannot take it off the sidebar. It also has no
+      // roster or owner to report, so its menu stops at renaming.
+      expect(document.querySelector('nav')?.textContent).toContain('My books')
+      fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+      expect(screen.queryByText('隐藏')).toBeNull()
+      expect(screen.queryByText('显示')).toBeNull()
+      expect(screen.queryByText('详情')).toBeNull()
+      expect(screen.getByText('改名')).toBeInTheDocument()
+      expect(setHidden).not.toHaveBeenCalled()
+      rerender(view())
+      expect(document.querySelector('nav')?.textContent).toContain('My books')
+    })
+
+    it('makes joined shared rows draggable, and leaves the personal one alone', () => {
+      mockHooks()
+      render(
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[
+            { id: 'p1', type: 'private', ownerUserId: 'u1', name: 'My books', description: '', visibility: null, createdAt: 1, updatedAt: 1, relation: 'owner', memberCount: 1, workCount: 3, ownerUsername: 'u1' },
+            { id: 'lib-1', type: 'shared', ownerUserId: 'u1', name: 'Secret', description: '', visibility: 'private', createdAt: 2, updatedAt: 2, relation: 'owner', memberCount: 1, workCount: 1, ownerUsername: 'u1' },
+            { id: 'lib-2', type: 'shared', ownerUserId: 'u1', name: 'Open', description: '', visibility: 'public', createdAt: 3, updatedAt: 3, relation: 'owner', memberCount: 1, workCount: 1, ownerUsername: 'u1' },
+          ]}
+          onExploreLibraries={vi.fn()}
+        />,
+      )
+
+      // dnd-kit's attributes and pointer listeners have to reach the real
+      // element. NavItem renders its own button instead of spreading unknown
+      // props, so a row that drops them looks draggable and silently is not —
+      // which is exactly how this shipped broken once already.
+      const byLabel = new Map(
+        screen.getAllByRole('button', { name: /Secret|Open|My books/ }).map((row) => [row.textContent, row]),
+      )
+      expect(byLabel.get('Secret')).toHaveAttribute('aria-roledescription', 'sortable')
+      expect(byLabel.get('Open')).toHaveAttribute('aria-roledescription', 'sortable')
+      // The personal library is pinned to the top by design and never drags.
+      expect(byLabel.get('My books')).not.toHaveAttribute('aria-roledescription')
+    })
+
+    it('renders shared libraries in the reader manual order, not the server order', () => {
+      mockHooks()
+      ;(libraryHooks.useLibraryPrefs as ReturnType<typeof vi.fn>).mockReturnValue({
+        libraryOrder: ['lib-2', 'lib-1'],
+      })
+
+      render(
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[
+            { id: 'lib-1', type: 'shared', ownerUserId: 'u2', name: 'Alpha', description: '', visibility: 'public', createdAt: 1, updatedAt: 1, relation: 'owner', memberCount: 1, workCount: 1, ownerUsername: 'u2' },
+            { id: 'lib-2', type: 'shared', ownerUserId: 'u2', name: 'Bravo', description: '', visibility: 'public', createdAt: 2, updatedAt: 2, relation: 'member', memberCount: 1, workCount: 1, ownerUsername: 'u2' },
+          ]}
+          onExploreLibraries={vi.fn()}
+        />,
+      )
+
+      // The server answers in join order (Alpha first); the manual order wins.
+      const labels = Array.from(document.querySelectorAll('nav .truncate')).map((n) => n.textContent)
+      expect(labels.indexOf('Bravo')).toBeLessThan(labels.indexOf('Alpha'))
+    })
+
+    it('keeps a library the manual order omits at the bottom', () => {
+      mockHooks()
+      ;(libraryHooks.useLibraryPrefs as ReturnType<typeof vi.fn>).mockReturnValue({
+        libraryOrder: ['lib-3'],
+      })
+
+      render(
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[
+            { id: 'lib-1', type: 'shared', ownerUserId: 'u2', name: 'Alpha', description: '', visibility: 'public', createdAt: 1, updatedAt: 1, relation: 'owner', memberCount: 1, workCount: 1, ownerUsername: 'u2' },
+            { id: 'lib-2', type: 'shared', ownerUserId: 'u2', name: 'Bravo', description: '', visibility: 'public', createdAt: 2, updatedAt: 2, relation: 'member', memberCount: 1, workCount: 1, ownerUsername: 'u2' },
+            { id: 'lib-3', type: 'shared', ownerUserId: 'u2', name: 'Charlie', description: '', visibility: 'public', createdAt: 3, updatedAt: 3, relation: 'member', memberCount: 1, workCount: 1, ownerUsername: 'u2' },
+          ]}
+          onExploreLibraries={vi.fn()}
+        />,
+      )
+
+      // A library joined after the last drag has no place in the stored order
+      // and keeps its base position at the end.
+      const labels = Array.from(document.querySelectorAll('nav .truncate')).map((n) => n.textContent)
+      expect(labels.indexOf('Charlie')).toBeLessThan(labels.indexOf('Alpha'))
+      expect(labels.indexOf('Alpha')).toBeLessThan(labels.indexOf('Bravo'))
+    })
+
+    it('hides a joined shared library without touching the others', () => {
+      mockHooks()
+      let hiddenIds: string[] = []
+      ;(libraryHooks.useHiddenLibraries as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        hiddenIds,
+        isHidden: (id: string) => hiddenIds.includes(id),
+        setHidden: (id: string, next: boolean) => {
+          hiddenIds = next ? [...hiddenIds, id] : hiddenIds.filter((x) => x !== id)
+        },
+      }))
+
+      const view = () => (
+        <LibrarySidebar
+          navSearch={navSearch}
+          shelfId={null}
+          tagId={null}
+          trash={false}
+          libraries={[
+            { id: 'lib-1', type: 'shared', ownerUserId: 'u2', name: 'City', description: '', visibility: 'public', createdAt: 1, updatedAt: 1, memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'owner' },
+            { id: 'lib-2', type: 'shared', ownerUserId: 'u2', name: 'Book club', description: '', visibility: 'public', createdAt: 1, updatedAt: 1, memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'member' },
+          ]}
+          onExploreLibraries={vi.fn()}
+        />
+      )
+
+      const { rerender } = render(view())
+      const rows = screen.getAllByLabelText('更多操作')
+      fireEvent.click(rows[0])
+      fireEvent.click(screen.getByText('隐藏'))
+      rerender(view())
+
+      const navText = document.querySelector('nav')?.textContent
+      expect(navText).not.toContain('City')
+      expect(navText).toContain('Book club')
     })
 
     it('lists only joined libraries; unjoined public rows moved to future discovery', () => {
@@ -626,7 +898,7 @@ describe('LibrarySidebar', () => {
           tagId={null}
           trash={false}
           libraries={[
-            { id: 'lib-x', type: 'shared', ownerUserId: 'u2', name: 'Closed', description: '', visibility: 'private', createdAt: 1, updatedAt: 1, relation: 'member' },
+            { id: 'lib-x', type: 'shared', ownerUserId: 'u2', name: 'Closed', description: '', visibility: 'private', createdAt: 1, updatedAt: 1, memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'member' },
           ]}
         />,
       )

@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, sanitizeUsername } from '@bookdock/shared'
-import type { AdminUserRes, LibraryMemberEntry, MembershipRole, UpdateUserReq } from '@bookdock/shared'
+import type { AdminUserRes, LibraryListItem, LibraryMemberEntry, MembershipRole, UpdateUserReq } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -32,6 +32,25 @@ function UsersIcon({ className }: { className?: string }) {
       <circle cx="9" cy="7" r="4" />
       <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  )
+}
+
+function EyeToggleIcon({ show }: { show: boolean }) {
+  if (show) {
+    return (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+        <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+        <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+        <line x1="2" y1="2" x2="22" y2="22" />
+      </svg>
+    )
+  }
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
     </svg>
   )
 }
@@ -104,6 +123,107 @@ interface PendingAction {
   message: string
 }
 
+function LibrarySelectDropdown({
+  libraries,
+  selectedId,
+  onSelect,
+  selectAriaLabel,
+}: {
+  libraries: LibraryListItem[]
+  selectedId?: string
+  onSelect: (id: string) => void
+  selectAriaLabel: string
+}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const selectedLibrary = libraries.find((l) => l.id === selectedId) || libraries[0]
+
+  useEffect(() => {
+    if (!open) return
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open])
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        aria-label={selectAriaLabel}
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={cn(
+          'inline-flex h-8 items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 text-xs font-medium text-stone-800 shadow-2xs transition-colors hover:border-stone-300 hover:bg-stone-50/50 dark:border-stone-700 dark:bg-stone-800/90 dark:text-stone-100 dark:hover:border-stone-600',
+          open && 'border-stone-300 ring-2 ring-stone-200/50 dark:border-stone-600 dark:ring-stone-700/50',
+        )}
+      >
+        <span className="max-w-[120px] truncate sm:max-w-[170px]">
+          {selectedLibrary?.name}
+        </span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={cn('shrink-0 text-stone-400 transition-transform duration-150', open && 'rotate-180 text-stone-600 dark:text-stone-300')}
+          aria-hidden="true"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full z-40 mt-1.5 min-w-[180px] max-w-[260px] overflow-hidden rounded-xl border border-stone-200 bg-white/95 p-1 shadow-lg backdrop-blur-md dark:border-stone-800 dark:bg-stone-900/95 animate-in fade-in zoom-in-95 duration-100">
+          <div className="max-h-56 overflow-y-auto space-y-0.5">
+            {libraries.map((lib) => {
+              const isSelected = lib.id === selectedLibrary?.id
+              return (
+                <button
+                  key={lib.id}
+                  type="button"
+                  onClick={() => {
+                    onSelect(lib.id)
+                    setOpen(false)
+                  }}
+                  className={cn(
+                    'flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
+                    isSelected
+                      ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                      : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/60 dark:hover:text-stone-200',
+                  )}
+                >
+                  <span className="truncate">{lib.name}</span>
+                  {isSelected && (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-900 dark:text-stone-100" aria-hidden="true">
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface UserManagementSectionProps {
   initialTab?: 'instance' | 'library'
   initialLibraryId?: string
@@ -118,6 +238,7 @@ export default function UserManagementSection({
   const _ = useTranslation()
   const [tab, setTab] = useState<'instance' | 'library'>(lockTab ?? initialTab)
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | undefined>(initialLibraryId)
+  const [createOpen, setCreateOpen] = useState(false)
   const { data: librariesData } = useLibraries()
 
   const sharedLibraries = (librariesData?.data ?? []).filter(
@@ -149,28 +270,14 @@ export default function UserManagementSection({
       iconBgClass="bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
       title={_('admin.userManagement')}
       action={
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {tab === 'library' && sharedLibraries.length > 0 && (
-            <select
-              aria-label={_('admin.selectLibrary')}
-              value={activeLibraryId}
-              onChange={(e) => setSelectedLibraryId(e.target.value)}
-              className="h-7 rounded-lg border border-stone-200 bg-white px-2 py-0.5 text-xs text-stone-800 outline-none transition-all focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-200"
-            >
-              {sharedLibraries.map((lib) => (
-                <option key={lib.id} value={lib.id}>
-                  {lib.name}
-                </option>
-              ))}
-            </select>
-          )}
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-2.5">
           {!lockTab && (
-            <div className="flex items-center rounded-xl bg-stone-100 p-0.5 dark:bg-stone-800">
+            <div className="flex h-8 items-center rounded-xl bg-stone-100 p-0.5 dark:bg-stone-800">
               <button
                 type="button"
                 onClick={() => setTab('instance')}
                 className={cn(
-                  'rounded-lg px-2.5 py-1 text-xs font-medium transition-all',
+                  'flex h-7 items-center rounded-lg px-2.5 text-xs font-medium transition-all',
                   tab === 'instance'
                     ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-900 dark:text-stone-100'
                     : 'text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200',
@@ -182,7 +289,7 @@ export default function UserManagementSection({
                 type="button"
                 onClick={() => setTab('library')}
                 className={cn(
-                  'rounded-lg px-2.5 py-1 text-xs font-medium transition-all',
+                  'flex h-7 items-center rounded-lg px-2.5 text-xs font-medium transition-all',
                   tab === 'library'
                     ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-900 dark:text-stone-100'
                     : 'text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200',
@@ -192,12 +299,35 @@ export default function UserManagementSection({
               </button>
             </div>
           )}
+
+          {!lockTab && (tab === 'instance' || (tab === 'library' && sharedLibraries.length > 0)) && (
+            <div className="hidden h-4 w-px bg-stone-200 sm:block dark:bg-stone-700" />
+          )}
+
+          {tab === 'instance' && (
+            <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5 shadow-2xs">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              <span>{_('admin.createUser')}</span>
+            </Button>
+          )}
+
+          {tab === 'library' && sharedLibraries.length > 0 && (
+            <LibrarySelectDropdown
+              libraries={sharedLibraries}
+              selectedId={activeLibraryId}
+              onSelect={(id) => setSelectedLibraryId(id)}
+              selectAriaLabel={_('admin.selectLibrary')}
+            />
+          )}
         </div>
       }
       bodyClassName="-mx-4 -mb-4 sm:-mx-6 sm:-mb-6 mt-4 overflow-hidden rounded-b-2xl"
     >
       {tab === 'instance' ? (
-        <InstanceUsersView />
+        <InstanceUsersView createOpen={createOpen} setCreateOpen={setCreateOpen} />
       ) : (
         <LibraryMembersView
           activeLibraryId={activeLibraryId}
@@ -208,7 +338,13 @@ export default function UserManagementSection({
   )
 }
 
-function InstanceUsersView() {
+function InstanceUsersView({
+  createOpen,
+  setCreateOpen,
+}: {
+  createOpen: boolean
+  setCreateOpen: (open: boolean) => void
+}) {
   const _ = useTranslation()
   const currentUser = useAuthStore((s) => s.user)
   const { data: usersData, isError, isFetching, isLoading, refetch } = useAdminUsers()
@@ -219,10 +355,18 @@ function InstanceUsersView() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [transferTarget, setTransferTarget] = useState<AdminUserRes | null>(null)
   const [resetTarget, setResetTarget] = useState<AdminUserRes | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<AdminUserRes | null>(null)
 
-  const users = usersData?.data ?? []
+  const users = useMemo(() => {
+    const list = [...(usersData?.data ?? [])]
+    const ROLE_WEIGHT: Record<string, number> = { owner: 0, admin: 1, member: 2 }
+    return list.sort((a, b) => {
+      const weightA = ROLE_WEIGHT[a.role] ?? 3
+      const weightB = ROLE_WEIGHT[b.role] ?? 3
+      if (weightA !== weightB) return weightA - weightB
+      return a.createdAt - b.createdAt
+    })
+  }, [usersData?.data])
 
   function runUpdate(id: string, req: UpdateUserReq) {
     updateUser.mutate(
@@ -260,11 +404,6 @@ function InstanceUsersView() {
 
   return (
     <>
-      <div className="flex items-center justify-end px-4 pt-3 sm:px-6">
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          {_('admin.createUser')}
-        </Button>
-      </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[28rem] text-left text-sm sm:min-w-full">
           <thead>
@@ -352,7 +491,7 @@ function InstanceUsersView() {
         <ConfirmDialog
           title={_('admin.deleteUser')}
           message={_('admin.deleteUserConfirm', { name: deleteTarget.username })}
-          confirmLabel={_('admin.deleteUser')}
+          confirmLabel={_('admin.delete')}
           onClose={() => setDeleteTarget(null)}
           onConfirm={() => {
             const target = deleteTarget
@@ -440,7 +579,10 @@ function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword, onDelete
               }}
               className={menuItemClass}
             >
-              {_('admin.transferOwner')}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-amber-500">
+                <path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.203a4 4 0 0 1-3.86 2.928H8.713a4 4 0 0 1-3.86-2.928L2.018 6.02a.5.5 0 0 1 .798-.52l4.278 3.665a1 1 0 0 0 1.516-.294z" />
+              </svg>
+              <span>{_('admin.transferOwner')}</span>
             </button>
           )}
           {!isSelf && (
@@ -459,7 +601,18 @@ function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword, onDelete
               }}
               className={menuItemClass}
             >
-              {user.disabled ? _('admin.enable') : _('admin.disable')}
+              {user.disabled ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-emerald-500">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <path d="m9 11 3 3L22 4" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                </svg>
+              )}
+              <span>{user.disabled ? _('admin.enable') : _('admin.disable')}</span>
             </button>
           )}
           <button
@@ -470,7 +623,12 @@ function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword, onDelete
             }}
             className={menuItemClass}
           >
-            {_('admin.resetPassword')}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+              <path d="m21 2-9.6 9.6" />
+              <circle cx="7.5" cy="15.5" r="5.5" />
+              <path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4" />
+            </svg>
+            <span>{_('admin.resetPassword')}</span>
           </button>
           {deleteBlocked === null ? (
             <button
@@ -481,11 +639,21 @@ function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword, onDelete
               }}
               className={cn(menuItemClass, 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40')}
             >
-              {_('admin.deleteUser')}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-red-500">
+                <path d="M3 6h18" />
+                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+              </svg>
+              <span>{_('admin.delete')}</span>
             </button>
           ) : !isSelf && (
             <span title={deleteBlocked} className={cn(menuItemClass, 'cursor-not-allowed opacity-50')}>
-              {_('admin.deleteUser')}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                <path d="M3 6h18" />
+                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+              </svg>
+              <span>{_('admin.delete')}</span>
             </span>
           )}
         </SmartMenu>
@@ -501,6 +669,7 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
 }) {
   const _ = useTranslation()
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   if (!user) return null
@@ -519,28 +688,59 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
           }
           onSubmit(password)
         }}
-        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-2xl border border-stone-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
         onClick={(e) => e.stopPropagation()}
+        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 shadow-xl sm:max-h-none sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-900"
       >
-        <h2 className="mb-2 font-serif text-base font-medium text-stone-900 dark:text-stone-100">
-          {_('admin.resetPassword')}
-        </h2>
-        <p className="mb-4 text-sm text-stone-500">{_('admin.resetPasswordFor', { name: user.username })}</p>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          aria-label={_('auth.newPassword')}
-          placeholder={_('auth.newPassword')}
-          className="mb-4 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
-        />
-        {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
-        <div className="flex justify-end gap-3">
-          <Button type="button" variant="ghost" onClick={onClose}>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-stone-900 dark:text-stone-100">
+            {_('admin.resetPassword')}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
+            aria-label={_('library.cancel')}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <p className="mb-3 text-xs text-stone-500 dark:text-stone-400">{_('admin.resetPasswordFor', { name: user.username })}</p>
+        <div className="mb-4">
+          <label className="mb-1.5 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="reset-user-password">
+            {_('auth.newPassword')}
+          </label>
+          <div className="relative">
+            <input
+              id="reset-user-password"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              aria-label={_('auth.newPassword')}
+              placeholder={_('auth.newPassword')}
+              className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 pr-10 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+            />
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300"
+              aria-label={showPassword ? '隐藏密码' : '显示密码'}
+            >
+              <EyeToggleIcon show={showPassword} />
+            </button>
+          </div>
+        </div>
+        {error && <p className="mb-3 text-xs text-red-600 dark:text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
             {_('library.cancel')}
           </Button>
-          <Button type="submit">{_('library.save')}</Button>
+          <Button type="submit">
+            {_('library.save')}
+          </Button>
         </div>
       </form>
     </div>
@@ -555,6 +755,8 @@ function CreateUserDialog({ onClose, onSubmit }: {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   function submit(e: React.FormEvent) {
@@ -582,50 +784,110 @@ function CreateUserDialog({ onClose, onSubmit }: {
     >
       <form
         onSubmit={submit}
-        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-2xl border border-stone-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-950"
         onClick={(e) => e.stopPropagation()}
+        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 shadow-xl sm:max-h-none sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-900"
       >
-        <h2 className="mb-2 font-serif text-base font-medium text-stone-900 dark:text-stone-100">
-          {_('admin.createUser')}
-        </h2>
-        <p className="mb-4 text-sm text-stone-500">{_('admin.createUserFor')}</p>
-        <input
-          type="text"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-          maxLength={AUTH_REGISTER_USERNAME_MAX_LENGTH}
-          aria-label={_('auth.username')}
-          placeholder={_('auth.username')}
-          autoComplete="off"
-          className="mb-3 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
-        />
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          aria-label={_('auth.newPassword')}
-          placeholder={_('auth.newPassword')}
-          autoComplete="new-password"
-          className="mb-3 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
-        />
-        <input
-          type="password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          required
-          aria-label={_('auth.confirmPassword')}
-          placeholder={_('auth.confirmPassword')}
-          autoComplete="new-password"
-          className="mb-4 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
-        />
-        {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
-        <div className="flex justify-end gap-3">
-          <Button type="button" variant="ghost" onClick={onClose}>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-stone-900 dark:text-stone-100">
+            {_('admin.createUser')}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
+            aria-label={_('library.cancel')}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="space-y-3 mb-5">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="new-user-username">
+              {_('auth.username')}
+            </label>
+            <input
+              id="new-user-username"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              maxLength={AUTH_REGISTER_USERNAME_MAX_LENGTH}
+              aria-label={_('auth.username')}
+              placeholder={_('auth.username')}
+              autoComplete="off"
+              className="h-10 w-full rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="new-user-password">
+              {_('auth.newPassword')}
+            </label>
+            <div className="relative">
+              <input
+                id="new-user-password"
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                aria-label={_('auth.newPassword')}
+                placeholder={_('auth.newPassword')}
+                autoComplete="new-password"
+                className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 pr-10 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300"
+                aria-label={showPassword ? _('admin.hidePassword') : _('admin.showPassword')}
+              >
+                <EyeToggleIcon show={showPassword} />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="new-user-confirm">
+              {_('auth.confirmPassword')}
+            </label>
+            <div className="relative">
+              <input
+                id="new-user-confirm"
+                type={showConfirm ? 'text' : 'password'}
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                required
+                aria-label={_('auth.confirmPassword')}
+                placeholder={_('auth.confirmPassword')}
+                autoComplete="new-password"
+                className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 pr-10 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setShowConfirm((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300"
+                aria-label={showConfirm ? _('admin.hidePassword') : _('admin.showPassword')}
+              >
+                <EyeToggleIcon show={showConfirm} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {error && <p className="mb-4 text-xs text-red-600 dark:text-red-400">{error}</p>}
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
             {_('library.cancel')}
           </Button>
-          <Button type="submit">{_('admin.createUser')}</Button>
+          <Button type="submit">
+            {_('library.create')}
+          </Button>
         </div>
       </form>
     </div>
@@ -654,7 +916,16 @@ function LibraryMembersView({
   const [transferTarget, setTransferTarget] = useState<LibraryMemberEntry | null>(null)
 
   const owner = membersData?.data?.owner
-  const members = membersData?.data?.members ?? []
+  const members = useMemo(() => {
+    const list = [...(membersData?.data?.members ?? [])]
+    const ROLE_WEIGHT: Record<string, number> = { admin: 0, member: 1 }
+    return list.sort((a, b) => {
+      const weightA = ROLE_WEIGHT[a.role] ?? 2
+      const weightB = ROLE_WEIGHT[b.role] ?? 2
+      if (weightA !== weightB) return weightA - weightB
+      return a.createdAt - b.createdAt
+    })
+  }, [membersData?.data?.members])
 
   if (librariesLoading) {
     return (
@@ -774,7 +1045,7 @@ function LibraryMembersView({
         <ConfirmDialog
           title={_('library.removeMember')}
           message={_('library.removeMemberConfirm', { name: removeTarget.username })}
-          confirmLabel={_('library.removeMember')}
+          confirmLabel={_('library.remove')}
           confirmVariant="danger"
           onClose={() => setRemoveTarget(null)}
           onConfirm={() => {
@@ -880,7 +1151,10 @@ function LibraryMemberRow({
                   }}
                   className={menuItemClass}
                 >
-                  {member.role === 'admin' ? _('library.setAsMember') : _('library.setAsAdmin')}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                  <span>{member.role === 'admin' ? _('library.setAsMember') : _('library.setAsAdmin')}</span>
                 </button>
               )}
               {canTransfer && (
@@ -892,7 +1166,10 @@ function LibraryMemberRow({
                   }}
                   className={menuItemClass}
                 >
-                  {_('library.transferOwner')}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-amber-500">
+                    <path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.203a4 4 0 0 1-3.86 2.928H8.713a4 4 0 0 1-3.86-2.928L2.018 6.02a.5.5 0 0 1 .798-.52l4.278 3.665a1 1 0 0 0 1.516-.294z" />
+                  </svg>
+                  <span>{_('library.transferOwner')}</span>
                 </button>
               )}
               {canRemove && (
@@ -904,7 +1181,12 @@ function LibraryMemberRow({
                   }}
                   className={cn(menuItemClass, 'text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300')}
                 >
-                  {_('library.removeMember')}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-red-500">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                  <span>{_('library.remove')}</span>
                 </button>
               )}
             </SmartMenu>

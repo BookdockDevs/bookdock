@@ -128,15 +128,15 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   }, [sidebarOpen, activeNavTab, setActiveNavTab, setSidebarOpen, setNavTabRemembered])
 
   const [floatingActive, setFloatingActive] = useState(false)
-  const justDismissedRef = useRef(false)
+  const [justDismissed, setJustDismissed] = useState(false)
   const prevOpenRef = useRef(sidebarOpen)
   const dockRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (prevOpenRef.current && !sidebarOpen) {
-      justDismissedRef.current = true
+      setJustDismissed(true)
       const timer = setTimeout(() => {
-        justDismissedRef.current = false
+        setJustDismissed(false)
       }, 300)
       return () => clearTimeout(timer)
     }
@@ -144,7 +144,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   }, [sidebarOpen])
 
   const handleClosePanel = useCallback(() => {
-    justDismissedRef.current = true
+    setJustDismissed(true)
     panelRef.current?.saveScroll()
     setHovered(false)
     setFloatingActive(false)
@@ -160,19 +160,19 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   }, [])
 
   const handleHoverPointerEnter = useCallback((e: React.PointerEvent) => {
-    if (locked || sidebarOpen || justDismissedRef.current) return
+    if (locked || sidebarOpen || justDismissed) return
     if (!isWithinFloatingCorridor(e.clientY)) return
-    const isLeftEdge = e.clientX == null || e.clientX <= 24
+    const isLeftEdge = e.clientX == null || e.clientX <= 70
     if (isLeftEdge) {
       setHovered(true)
       setFloatingActive(true)
     }
-  }, [locked, sidebarOpen, isWithinFloatingCorridor])
+  }, [locked, sidebarOpen, justDismissed, isWithinFloatingCorridor])
 
   const handleHoverPointerMove = useCallback((e: React.PointerEvent) => {
-    if (locked || sidebarOpen || justDismissedRef.current) return
+    if (locked || sidebarOpen || justDismissed) return
     const inCorridor = isWithinFloatingCorridor(e.clientY)
-    const isLeftEdge = (e.clientX == null || e.clientX <= 24) && inCorridor
+    const isLeftEdge = (e.clientX == null || e.clientX <= 70) && inCorridor
     const isOverDock = Boolean(dockRef.current?.contains(e.target as Node))
     if (!isLeftEdge && !isOverDock) {
       if (hovered) setHovered(false)
@@ -182,7 +182,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       setHovered(true)
       setFloatingActive(true)
     }
-  }, [locked, sidebarOpen, hovered, isWithinFloatingCorridor])
+  }, [locked, sidebarOpen, justDismissed, hovered, isWithinFloatingCorridor])
 
   const handleHoverPointerLeave = useCallback(() => {
     setHovered(false)
@@ -204,7 +204,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
 
   const themeModeTitle = _('reader.themeModeTitle', { mode: _(`theme.${readingThemeMode}`) })
 
-  const isFloatingDock = !isTouch && !locked && !sidebarOpen && floatingActive
+  const isFloatingDock = !isTouch && !locked && !sidebarOpen && !justDismissed && floatingActive
 
   const toolbarVisible = isTouch
     ? mobileControlsVisible
@@ -283,7 +283,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
         'relative shrink-0 overflow-hidden',
         isTouch
           ? cn('order-1 w-full h-0 transition-[height]', sidebarOpen && (activeNavTab === 'ai' ? 'h-[80dvh] max-h-[720px]' : 'h-[65dvh] max-h-[520px]'))
-          : cn('order-none h-full', !resizing && 'transition-all duration-200', sidebarOpen ? '' : 'w-0'),
+          : cn('order-none h-full', !resizing && 'transition-[width] duration-200 will-change-[width]', sidebarOpen ? '' : 'w-0'),
       )}
       style={isTouch
         ? { backgroundColor: 'var(--bd-read-bg)' }
@@ -348,10 +348,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       data-testid="reader-sidebar"
       className={cn(
         locked ? 'relative flex h-full shrink-0' : 'absolute left-0 top-0 bottom-0 flex',
-        isFloatingDock ? 'overflow-visible -mr-2' : sidebarOpen ? 'overflow-visible' : 'overflow-hidden',
+        isFloatingDock ? 'overflow-visible -mr-2' : (!locked && !justDismissed) || sidebarOpen ? 'overflow-visible' : 'overflow-hidden',
         sidebarOpen || hovered ? 'z-[60]' : 'z-40',
         !locked && !sidebarOpen && !hovered && 'pointer-events-none',
-        !resizing && 'transition-all duration-200',
+        !resizing && 'transition-[width] duration-200 will-change-[width]',
       )}
       style={{ width: totalWidth }}
       onPointerEnter={handleHoverPointerEnter}
@@ -361,10 +361,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       {!isTouch && !locked && !sidebarOpen && (
         <div
           data-testid="reader-floating-hover-zone"
-          className={cn(
-            'pointer-events-auto absolute left-0 top-12 z-40',
-            isFloatingDock ? 'h-[340px] w-20' : 'h-[340px] w-3.5',
-          )}
+          className="pointer-events-auto absolute left-0 top-12 z-40 h-[332px] w-[70px]"
         />
       )}
       {toolDock}

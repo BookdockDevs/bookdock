@@ -5,6 +5,7 @@ import type { BookListItem, LibraryListItem } from '@bookdock/shared'
 
 import i18n from '../i18n/i18n'
 import PublishBookDialog from '../features/library/components/PublishBookDialog'
+import { useAuthStore } from '../stores/auth.store'
 
 const publishMutate = vi.fn()
 
@@ -20,14 +21,16 @@ const book: BookListItem = {
 }
 
 const libraries: LibraryListItem[] = [
-  { id: 'private-1', type: 'private', ownerUserId: 'user-1', name: '我的书库', description: '', visibility: null, relation: 'owner', createdAt: 1, updatedAt: 1 },
-  { id: 'shared-owner', type: 'shared', ownerUserId: 'user-1', name: '馆主书库', description: '', visibility: 'public', relation: 'owner', createdAt: 1, updatedAt: 1 },
-  { id: 'shared-admin', type: 'shared', ownerUserId: 'user-2', name: '管理书库', description: '', visibility: 'public', relation: 'admin', createdAt: 1, updatedAt: 1 },
-  { id: 'shared-member', type: 'shared', ownerUserId: 'user-3', name: '成员书库', description: '', visibility: 'public', relation: 'member', createdAt: 1, updatedAt: 1 },
+  { id: 'private-1', type: 'private', ownerUserId: 'user-1', name: '我的书库', description: '', visibility: null, relation: 'owner', memberCount: 3, workCount: 7, ownerUsername: 'u2', createdAt: 1, updatedAt: 1 },
+  { id: 'shared-owner', type: 'shared', ownerUserId: 'user-1', name: '馆主书库', description: '', visibility: 'public', relation: 'owner', memberCount: 3, workCount: 7, ownerUsername: 'u2', createdAt: 1, updatedAt: 1 },
+  { id: 'shared-admin', type: 'shared', ownerUserId: 'user-2', name: '管理书库', description: '', visibility: 'public', relation: 'admin', memberCount: 3, workCount: 7, ownerUsername: 'u2', createdAt: 1, updatedAt: 1 },
+  { id: 'shared-member', type: 'shared', ownerUserId: 'user-3', name: '成员书库', description: '', visibility: 'public', relation: 'member', memberCount: 3, workCount: 7, ownerUsername: 'u2', createdAt: 1, updatedAt: 1 },
 ]
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  localStorage.clear()
+  useAuthStore.setState({ user: { id: 'user-1', username: 'tester', role: 'owner' } })
   await i18n.changeLanguage('zh-CN')
 })
 
@@ -62,5 +65,42 @@ describe('PublishBookDialog', () => {
     render(<PublishBookDialog book={book} libraries={[libraries[0]!]} onClose={vi.fn()} onOpenLibrary={vi.fn()} />)
     expect(screen.getByText('当前没有可发布的多人书库')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '发布' })).not.toBeInTheDocument()
+  })
+
+  it('remembers the last successful target for the current user', () => {
+    publishMutate.mockImplementation((_vars: unknown, callbacks: { onSuccess: (response: unknown) => void }) => {
+      callbacks.onSuccess({ data: { libraryBookId: 'lb-1', versionLinkId: 'lbv-1', bookVersionId: 'v-1', duplicated: false } })
+    })
+    const props = { book, libraries, onClose: vi.fn(), onOpenLibrary: vi.fn() }
+    const { unmount } = render(<PublishBookDialog {...props} />)
+
+    fireEvent.change(screen.getByLabelText('目标书库'), { target: { value: 'shared-admin' } })
+    fireEvent.click(screen.getByRole('button', { name: '发布' }))
+    expect(localStorage.getItem('bd-publish-target-library:user-1')).toBe('shared-admin')
+
+    unmount()
+    const second = render(<PublishBookDialog {...props} />)
+    expect(screen.getByLabelText('目标书库')).toHaveValue('shared-admin')
+
+    second.unmount()
+    useAuthStore.setState({ user: { id: 'user-2', username: 'other', role: 'owner' } })
+    render(<PublishBookDialog {...props} />)
+    expect(screen.getByLabelText('目标书库')).toHaveValue('shared-owner')
+  })
+
+  it('does not remember a cancelled selection and ignores an unavailable target', () => {
+    const props = { book, libraries, onClose: vi.fn(), onOpenLibrary: vi.fn() }
+    const { unmount } = render(<PublishBookDialog {...props} />)
+    fireEvent.change(screen.getByLabelText('目标书库'), { target: { value: 'shared-admin' } })
+    unmount()
+
+    expect(localStorage.getItem('bd-publish-target-library:user-1')).toBeNull()
+    const second = render(<PublishBookDialog {...props} />)
+    expect(screen.getByLabelText('目标书库')).toHaveValue('shared-owner')
+    second.unmount()
+
+    localStorage.setItem('bd-publish-target-library:user-1', 'shared-admin')
+    render(<PublishBookDialog {...props} libraries={libraries.filter((library) => library.id !== 'shared-admin')} />)
+    expect(screen.getByLabelText('目标书库')).toHaveValue('shared-owner')
   })
 })
