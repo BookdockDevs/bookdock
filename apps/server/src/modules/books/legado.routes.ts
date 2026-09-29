@@ -2,17 +2,23 @@ import { Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import type { Context } from 'hono'
 
-import { legadoAccessKeySchema, legadoExploreSchema, legadoSearchSchema, PAGINATION, type LegadoAccessKeyCreateRes, type LegadoAccessKeyInfo, type LegadoBookInfoRes, type LegadoChapterContentRes, type LegadoChapterItem, type LegadoExploreConfigRes, type LegadoSearchRes, type LegadoTocRes } from '@bookdock/shared'
+import { legadoAccessKeySchema, legadoExploreSchema, legadoSearchSchema, PAGINATION, type LegadoAccessKeyCreateRes, type LegadoAccessKeyInfo, type LegadoBookInfoRes, type LegadoBookSearchItem, type LegadoChapterContentRes, type LegadoChapterItem, type LegadoExploreConfigRes, type LegadoSearchRes, type LegadoTocRes } from '@bookdock/shared'
 
-import { getActiveBook, getBookCoverContent, getBookMembership, listBooks } from './books.service'
+import { getActiveBook, getBookCoverContent, getBookMembership } from './books.service'
 import { getOrCreateLegadoAccessKey, resolveLegadoAccessKey, rotateLegadoAccessKey } from './legado-access.service'
-import { getLegadoBookResource, getLegadoChapterContent, getLegadoExploreConfig, getLegadoExploreFilter, getLegadoToc, type LegadoExploreScope } from './legado.service'
+import { getLegadoBookResource, getLegadoChapterContent, getLegadoExploreConfig, getLegadoExploreFilter, getLegadoToc, legadoJoinedLibraryIds, legadoLatestChapterTitles, legadoPrivateLibraryId, LEGADO_READ, type LegadoExploreScope } from './legado.service'
+import { getLibraryVersionPublication, listLibraryVersionEntries, type LibraryVersionEntry } from '../libraries/catalog.service'
 import { AppError } from '../../middleware/error'
+import { getUserTimezone } from '../auth/auth.service'
+import { formatTimestamp } from '../../lib/format-timestamp'
 import { isLegadoAccessKeyEnabled, isLegadoEnabled, isLegadoEpubMediaEnabled } from '../settings/settings.service'
 
 const legadoRoutes = new Hono()
-// Legado uses this value to decide whether a same-URL source import contains newer rules.
-const LEGADO_SOURCE_UPDATED_AT = 1790294400000
+// Legado uses this value to decide whether a same-URL source import contains
+// newer rules, and the same number is embedded in `exploreUrl` because Legado
+// caches the generated discovery rows keyed by MD5(bookSourceUrl + exploreUrl).
+// Bumping it is what forces an already-imported source to re-run the script.
+const LEGADO_SOURCE_UPDATED_AT = 1793731200000
 const LEGADO_SESSION_MAX_AGE = 7 * 24 * 60 * 60
 
 function publicOrigin(c: Context): string {
@@ -67,14 +73,9 @@ function formatBookSize(size: number): string {
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
-function formatBookDate(timestamp: number | null | undefined): string {
+function formatBookDate(timestamp: number | null | undefined, timezone: string | null): string {
   if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return ''
-  const date = new Date(timestamp)
-  if (!Number.isFinite(date.getTime())) return ''
-  const year = date.getUTCFullYear()
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(date.getUTCDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  return formatTimestamp(timestamp, timezone)
 }
 
 function formatLegadoWordCount(value: unknown): string | null {
@@ -99,17 +100,28 @@ function bookKind(book: Awaited<ReturnType<typeof getActiveBook>>, membership: R
   ].map(legadoBadgeText).filter(Boolean).join('\n')
 }
 
-function bookIntro(book: Awaited<ReturnType<typeof getActiveBook>>): string {
-  const metadata = book.meta.bookmeta && typeof book.meta.bookmeta === 'object'
-    ? book.meta.bookmeta as Record<string, unknown>
-    : {}
+/**
+ * Publication metadata for one version, already merged version over work over
+ * parsed file by the library listing. Reading a single flat `meta.bookmeta`
+ * here dropped the work- and version-level overrides a shared library curator
+ * set, so a curated edition lost its publisher and series on the detail page.
+ */
+function bookIntro(book: {
+  meta: Record<string, unknown>
+  size: number
+  createdAt: number
+  updatedAt: number
+}, mergedBookmeta: Record<string, unknown> | undefined, mergedFileName: string | null, timezone: string | null): string {
+  const metadata = mergedBookmeta && typeof mergedBookmeta === 'object'
+    ? mergedBookmeta
+    : book.meta.bookmeta && typeof book.meta.bookmeta === 'object' ? book.meta.bookmeta as Record<string, unknown> : {}
   const description = typeof metadata.description === 'string' ? metadata.description.trim() : ''
   const subjects = Array.isArray(metadata.subjects)
     ? metadata.subjects.filter((subject): subject is string => typeof subject === 'string' && subject.trim().length > 0)
     : []
-  const originalFile = typeof book.meta.fileName === 'string' ? book.meta.fileName.trim() : ''
-  const addedAt = formatBookDate(book.createdAt)
-  const updatedAt = book.updatedAt !== book.createdAt ? formatBookDate(book.updatedAt) : ''
+  const originalFile = (mergedFileName ?? (typeof book.meta.fileName === 'string' ? book.meta.fileName : '')).trim()
+  const addedAt = formatBookDate(book.createdAt, timezone)
+  const updatedAt = book.updatedAt !== book.createdAt ? formatBookDate(book.updatedAt, timezone) : ''
   const lines: string[] = []
   if (description) {
     const paragraphs = description.split(/\r?\n\s*\r?\n/).map((paragraph) => paragraph.trim()).filter(Boolean)
@@ -173,10 +185,31 @@ function bdAjax(ctx, url) {
 
 function bdExploreError(error) {
   var message = String(error && error.message ? error.message : error || "unknown error");
-  if (/401|unauthorized|not authenticated|登录/i.test(message)) return "登录状态未传递";
   if (/ajax is unavailable/i.test(message)) return "当前阅读版本不支持发现脚本";
+  if (/disabled|not enabled/i.test(message)) return "书源服务已关闭";
   if (/json|parse/i.test(message)) return "接口返回不是有效数据";
   return "接口请求失败";
+}
+
+// "Not signed in" arrives in two shapes and neither is a request failure: with
+// guest access off the guard answers 401, and with it on the guard injects the
+// guest user and the facade refuses that session with FORBIDDEN. A disabled
+// integration is also FORBIDDEN, so the code and the message are both needed to
+// keep "switch it back on" from being reported as "sign in first".
+function bdExploreLoginRequired(error) {
+  var code = String(error && error.code ? error.code : "");
+  var message = String(error && error.message ? error.message : error || "");
+  if (code === "UNAUTHORIZED") return true;
+  if (code === "FORBIDDEN") return /guest/i.test(message);
+  return /401|unauthorized|not authenticated/i.test(message);
+}
+
+function bdExploreLoginRows(rows) {
+  bdExploreHeader(rows, "未登录书坞");
+  // No clickable shortcut: the login bridge sets its cookie in Legado's own
+  // WebView, so opening it in an external browser would never reach the
+  // CookieStore this source reads from.
+  bdExploreEntry(rows, "请在书源列表中选中书坞后点登录，登录后下拉刷新本页", "", 1);
 }
 
 function bdExploreState(ctx) {
@@ -223,6 +256,14 @@ function bdExploreEntry(rows, title, url, basis) {
   rows.push(row);
 }
 
+function bdExploreIndent(depth) {
+  var n = Number(depth);
+  if (!isFinite(n) || n <= 0) return "";
+  // Full-width spaces rather than nesting: Legado's discovery list is flat, so
+  // a child shelf is marked by indentation inside its parent's section.
+  return new Array(Math.min(Math.round(n), 4) + 1).join("　");
+}
+
 function bdExploreSelectAction(key, title, converter) {
   return "var v=infoMap[" + JSON.stringify(title) + "]||(infoMap.get&&infoMap.get(" + JSON.stringify(title) + "));var d={};try{d=JSON.parse(source.getVariable()||'{}')}catch(e){};d." + key + "=" + converter + "(String(v||''));source.setVariable(JSON.stringify(d));try{source.refreshExplore()}catch(e){}try{java.refreshExplore()}catch(e){}";
 }
@@ -250,6 +291,10 @@ function bdExploreSelect(rows, state) {
   });
 }
 
+function bdExploreEmpty(rows, label) {
+  bdExploreEntry(rows, label, "", 1);
+}
+
 function bdExplore(ctx) {
   var state = bdExploreState(ctx);
   var rows = [];
@@ -259,38 +304,76 @@ function bdExplore(ctx) {
     apiRoot = bdApiRoot(ctx);
     var response = JSON.parse(bdAjax(ctx, apiRoot + "/explore/config"));
     if (response && response.error) {
-      throw new Error(String(response.error.message || response.error.code || "request failed"));
+      var failure = new Error(String(response.error.message || response.error.code || "request failed"));
+      failure.code = String(response.error.code || "");
+      throw failure;
     }
     config = response && response.data ? response.data : {};
   } catch (error) {
-    bdExploreHeader(rows, "发现加载失败：" + bdExploreError(error));
+    if (bdExploreLoginRequired(error)) {
+      bdExploreLoginRows(rows);
+    } else {
+      bdExploreHeader(rows, "发现加载失败：" + bdExploreError(error));
+    }
     return JSON.stringify(rows);
   }
 
   bdExploreSelect(rows, state);
   var sort = bdExploreSortFieldValue(state.bdSortField);
   var order = bdExploreSortOrderValue(state.bdSortOrder);
-  bdExploreEntry(rows, "全部书籍", apiRoot + "/explore/all?page={{page}}&sort=" + sort + "&order=" + order, 1);
+  var query = "page={{page}}&sort=" + sort + "&order=" + order;
+  var libraries = config.libraries || [];
+  // Nothing browsable: say so instead of rendering an all-books link that
+  // would open an empty list.
+  if (!libraries.length) {
+    bdExploreEmpty(rows, "暂无可浏览的书库");
+    return JSON.stringify(rows);
+  }
+  var multiple = libraries.length > 1;
 
-  bdExploreHeader(rows, "书架");
-  var shelves = config.shelves || [];
-  if (!shelves.length) {
-    bdExploreEntry(rows, "暂无书架", "", 1);
+  // A single library keeps the flat "全部书籍" entry the source always had; with
+  // more than one, each library gets its own full-width row so the reader can
+  // tell the private library from the ones they joined.
+  if (!multiple) {
+    bdExploreEntry(rows, "全部书籍", apiRoot + "/explore/all?scope=joined&" + query, 1);
   } else {
-    for (var shelfIndex = 0; shelfIndex < shelves.length; shelfIndex++) {
-      var shelf = shelves[shelfIndex] || {};
-      bdExploreEntry(rows, String(shelf.name || "未命名书架"), apiRoot + "/explore/shelves/" + encodeURIComponent(String(shelf.id || "")) + "?page={{page}}&sort=" + sort + "&order=" + order);
+    for (var libIndex = 0; libIndex < libraries.length; libIndex++) {
+      var libRow = libraries[libIndex] || {};
+      bdExploreEntry(rows, "全部 · " + String(libRow.name || "书库"), apiRoot + "/explore/libraries/" + encodeURIComponent(String(libRow.id || "")) + "?" + query, 1);
     }
   }
 
-  bdExploreHeader(rows, "标签");
-  var tags = config.tags || [];
-  if (!tags.length) {
-    bdExploreEntry(rows, "暂无标签", "", 1);
-  } else {
-    for (var tagIndex = 0; tagIndex < tags.length; tagIndex++) {
-      var tag = tags[tagIndex] || {};
-      bdExploreEntry(rows, String(tag.name || "未命名标签"), apiRoot + "/explore/tags/" + encodeURIComponent(String(tag.id || "")) + "?page={{page}}&sort=" + sort + "&order=" + order);
+  for (var index = 0; index < libraries.length; index++) {
+    var library = libraries[index] || {};
+    var libraryId = encodeURIComponent(String(library.id || ""));
+    var libraryName = String(library.name || "书库");
+    // Section headings name the library only when there is more than one, so a
+    // single-library reader sees the familiar 书架 / 标签 headings.
+    var prefix = multiple ? libraryName + " · " : "";
+    // The reader's own library keeps the 书架 wording the Web sidebar uses; a
+    // shared library's taxonomy is 分类.
+    var categoryLabel = String(library.type) === "private" ? "书架" : "分类";
+
+    bdExploreHeader(rows, prefix + categoryLabel);
+    var categories = library.categories || [];
+    if (!categories.length) {
+      bdExploreEmpty(rows, categoryLabel === "书架" ? "暂无书架" : "暂无分类");
+    } else {
+      for (var c = 0; c < categories.length; c++) {
+        var category = categories[c] || {};
+        bdExploreEntry(rows, bdExploreIndent(category.depth) + String(category.name || (categoryLabel === "书架" ? "未命名书架" : "未命名分类")), apiRoot + "/explore/libraries/" + libraryId + "/categories/" + encodeURIComponent(String(category.id || "")) + "?" + query);
+      }
+    }
+
+    bdExploreHeader(rows, prefix + "标签");
+    var tags = library.tags || [];
+    if (!tags.length) {
+      bdExploreEmpty(rows, "暂无标签");
+    } else {
+      for (var t = 0; t < tags.length; t++) {
+        var tag = tags[t] || {};
+        bdExploreEntry(rows, String(tag.name || "未命名标签"), apiRoot + "/explore/libraries/" + libraryId + "/tags/" + encodeURIComponent(String(tag.id || "")) + "?" + query);
+      }
     }
   }
   return JSON.stringify(rows);
@@ -305,7 +388,9 @@ function sourceDefinition(c: Context, access?: { id: string; token: string; crea
     bookSourceUrl: sourceIdentity,
     bookSourceName: '书坞',
     bookSourceGroup: '书坞',
-    bookSourceComment: access ? '只读取当前书坞账户可见的书籍；此书源使用免登录访问密钥。' : '只读取当前书坞账户可见的书籍；导入后请通过登录地址登录。',
+    bookSourceComment: access
+      ? '只读取当前书坞账户可见的书籍，含我的书库与已加入的共享书库；此书源使用免登录访问密钥。'
+      : '只读取当前书坞账户可见的书籍，含我的书库与已加入的共享书库；导入后请通过登录地址登录。',
     lastUpdateTime: Math.max(LEGADO_SOURCE_UPDATED_AT, access?.createdAt ?? 0),
     enabled: true,
     enabledCookieJar: !access,
@@ -316,7 +401,7 @@ function sourceDefinition(c: Context, access?: { id: string; token: string; crea
     enabledExplore: true,
     exploreUrl: `@js:\n/* Bookdock explore ${LEGADO_SOURCE_UPDATED_AT} */\nresult = bdExplore(this);`,
     jsLib: `var BD_API_ROOT = ${JSON.stringify(apiBase)};${legadoExploreJsLib}`,
-    searchUrl: `${apiBase}/search?keyword={{key}}&page={{page}}`,
+    searchUrl: `${apiBase}/search?keyword={{key}}&page={{page}}&scope=joined`,
     ruleSearch: {
       bookList: '$.data.items[*]',
       name: '$.title',
@@ -342,6 +427,7 @@ function sourceDefinition(c: Context, access?: { id: string; token: string; crea
       chapterName: '$.title',
       chapterUrl: '$.url',
       isVolume: '$.isVolume',
+      updateTime: '$.contentUpdateDate',
     },
     ruleContent: {
       content: '$.data.content',
@@ -433,63 +519,104 @@ legadoRoutes.get('/login', (c) => {
   return c.redirect(absoluteUrl(c, '/login?legado=1'))
 })
 
-async function exploreBooks(c: Context, scope: LegadoExploreScope, id?: string) {
+/**
+ * One page of readable versions across the requested libraries, projected into
+ * the shape `ruleSearch` and `ruleExplore` read. A work with several versions
+ * is one entry per version, because Legado addresses a book by `bookUrl` and
+ * that url is a BookVersion: collapsing them would leave the other versions
+ * unreachable from the source.
+ */
+async function legadoSearchItems(
+  c: Context,
+  userId: string,
+  libraryIds: string[],
+  params: { page: number; sortBy?: string; sortOrder?: string; categoryId?: string; tagId?: string; search?: string },
+) {
+  const items: LegadoBookSearchItem[] = []
+  let page = params.page
+  let total = 0
+  // Libraries are paged in turn and merged, so a joined library's books stay
+  // reachable without any single library having to fill the page alone.
+  for (const libraryId of libraryIds) {
+    const result = await listLibraryVersionEntries(userId, libraryId, { ...params, page })
+    const latest = legadoLatestChapterTitles(result.items.map((entry) => entry.bookVersionId))
+    for (const entry of result.items) items.push(legadoItem(c, entry, latest.get(entry.bookVersionId) ?? null))
+    total += result.total
+    if (items.length >= PAGINATION.DEFAULT_PAGE_SIZE) break
+    page = 1
+  }
+  return {
+    items: items.slice(0, PAGINATION.DEFAULT_PAGE_SIZE),
+    page: params.page,
+    pageSize: PAGINATION.DEFAULT_PAGE_SIZE,
+    total,
+  } satisfies LegadoSearchRes
+}
+
+/**
+ * Badges for one version: format, its category, its tags, and its version
+ * label when the uploader named it. The version label is a badge rather than a
+ * title suffix so the book keeps the name a reader recognises; Legado's own
+ * search does merge same-title hits, and discovery browsing does not, so the
+ * labelled versions stay separately reachable through every browse path.
+ */
+function legadoKind(entry: Pick<LibraryVersionEntry, 'format' | 'categoryName' | 'tags' | 'versionName'>): string {
+  return [entry.format, entry.categoryName ?? '', entry.versionName.trim(), ...entry.tags]
+    .map(legadoBadgeText)
+    .filter(Boolean)
+    .join('\n')
+}
+
+function legadoItem(c: Context, entry: LibraryVersionEntry, latestChapterTitle: string | null): LegadoBookSearchItem {
+  return {
+    id: entry.bookVersionId,
+    title: entry.title,
+    author: entry.author,
+    format: entry.format,
+    kind: legadoKind(entry),
+    wordCount: formatLegadoWordCount(entry.wordCount),
+    latestChapterTitle,
+    intro: entry.description,
+    url: absoluteUrl(c, `/api/v1/legado/books/${entry.bookVersionId}`),
+    coverUrl: coverUrl(c, entry.bookVersionId, entry.coverKey),
+  }
+}
+
+async function exploreBooks(c: Context, scope: LegadoExploreScope, id?: string, libraryId?: string) {
   const parsed = legadoExploreSchema.safeParse(c.req.query())
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid Legado explore query', parsed.error.flatten())
   }
 
   const user = c.get('user')
-  const filter = getLegadoExploreFilter(user.id, scope, id)
   const sortBy = parsed.data.sort === 'updated' ? 'updatedAt' : parsed.data.sort === 'title' ? 'title' : 'createdAt'
   const sortOrder = parsed.data.order ?? (parsed.data.sort === 'title' ? 'asc' : 'desc')
-  const result = await listBooks(
-    user.id,
-    parsed.data.page,
-    PAGINATION.DEFAULT_PAGE_SIZE,
-    undefined,
-    sortBy,
-    sortOrder,
-    filter.shelfId,
-    filter.tagId,
-  )
-  const items = await Promise.all(result.data.map(async (book) => {
-    const detail = await getActiveBook(user.id, book.id)
-    const chapters = await getLegadoToc(user.id, book.id)
-    const latestChapter = [...chapters].reverse().find((chapter) => !chapter.isVolume)
-    return {
-      id: book.id,
-      title: book.title,
-      author: book.author,
-      format: book.format,
-      kind: bookKind(detail, { shelfName: book.shelfName, tags: book.tags }),
-      wordCount: formatLegadoWordCount(detail.meta.wordCount),
-      latestChapterTitle: latestChapter?.title ?? null,
-      intro: bookDescription(detail.meta),
-      url: absoluteUrl(c, `/api/v1/legado/books/${book.id}`),
-      coverUrl: coverUrl(c, book.id, book.coverKey),
-    }
-  }))
-
+  const requested = libraryId ?? legadoPrivateLibraryId(user.id)
+  const filter = getLegadoExploreFilter(user.id, requested, scope, id)
+  const libraryIds = libraryId ? [filter.libraryId] : legadoJoinedLibraryIds(user.id)
   return c.json({
-    data: {
-      items,
-      page: result.page,
-      pageSize: result.pageSize,
-      total: result.total,
-    } satisfies LegadoSearchRes,
+    data: await legadoSearchItems(c, user.id, libraryIds, {
+      page: parsed.data.page,
+      sortBy,
+      sortOrder,
+      categoryId: filter.categoryId,
+      tagId: filter.tagId,
+    }),
   })
 }
 
-legadoRoutes.get('/explore/config', (c) => {
+legadoRoutes.get('/explore/config', async (c) => {
   const user = c.get('user')
-  const data = getLegadoExploreConfig(user.id)
+  const data = await getLegadoExploreConfig(user.id)
   return c.json({ data } satisfies { data: LegadoExploreConfigRes })
 })
 
+// `all` is the reader's own library plus every library they joined; the
+// per-library routes are what the discovery buttons point at.
 legadoRoutes.get('/explore/all', (c) => exploreBooks(c, 'all'))
-legadoRoutes.get('/explore/shelves/:id', (c) => exploreBooks(c, 'shelf', c.req.param('id')))
-legadoRoutes.get('/explore/tags/:id', (c) => exploreBooks(c, 'tag', c.req.param('id')))
+legadoRoutes.get('/explore/libraries/:id', (c) => exploreBooks(c, 'all', undefined, c.req.param('id')))
+legadoRoutes.get('/explore/libraries/:id/categories/:categoryId', (c) => exploreBooks(c, 'shelf', c.req.param('categoryId'), c.req.param('id')))
+legadoRoutes.get('/explore/libraries/:id/tags/:tagId', (c) => exploreBooks(c, 'tag', c.req.param('tagId'), c.req.param('id')))
 
 legadoRoutes.get('/search', async (c) => {
   const parsed = legadoSearchSchema.safeParse(c.req.query())
@@ -498,48 +625,39 @@ legadoRoutes.get('/search', async (c) => {
   }
 
   const user = c.get('user')
-  const result = await listBooks(user.id, parsed.data.page, PAGINATION.DEFAULT_PAGE_SIZE, parsed.data.keyword || undefined)
-  const items = await Promise.all(result.data.map(async (book) => {
-    const detail = await getActiveBook(user.id, book.id)
-    const chapters = await getLegadoToc(user.id, book.id)
-    const latestChapter = [...chapters].reverse().find((chapter) => !chapter.isVolume)
-    return {
-      id: book.id,
-      title: book.title,
-      author: book.author,
-      format: book.format,
-      kind: bookKind(detail, { shelfName: book.shelfName, tags: book.tags }),
-      wordCount: formatLegadoWordCount(detail.meta.wordCount),
-      latestChapterTitle: latestChapter?.title ?? null,
-      intro: bookDescription(detail.meta),
-      url: absoluteUrl(c, `/api/v1/legado/books/${book.id}`),
-      coverUrl: coverUrl(c, book.id, book.coverKey),
-    }
-  }))
-
+  const libraryIds = parsed.data.scope === 'private'
+    ? [legadoPrivateLibraryId(user.id)]
+    : legadoJoinedLibraryIds(user.id)
   return c.json({
-    data: {
-      items,
-      page: result.page,
-      pageSize: result.pageSize,
-      total: result.total,
-    } satisfies LegadoSearchRes,
+    data: await legadoSearchItems(c, user.id, libraryIds, {
+      page: parsed.data.page,
+      search: parsed.data.keyword || undefined,
+    }),
   })
 })
 
 legadoRoutes.get('/books/:id', async (c) => {
   const user = c.get('user')
-  const book = await getActiveBook(user.id, c.req.param('id'))
-  const membership = getBookMembership(user.id, book.id, book.shelfId)
+  const book = await getActiveBook(user.id, c.req.param('id'), LEGADO_READ)
   const wordCount = typeof book.meta.wordCount === 'number' && Number.isFinite(book.meta.wordCount) ? book.meta.wordCount : null
+  // A version collected from a shared library keeps the publisher, series and
+  // other publication fields the curator set, so the merged view is resolved
+  // through the library listing rather than from the flat parsed revision meta.
+  const entry = await getLibraryVersionPublication(user.id, book.id)
+  // Badges come from the same library listing the list rows use, so a detail
+  // page and its result row always agree. Reading them from the private
+  // library's membership instead left a book that lives only in a shared
+  // library showing its format badge and nothing else.
   const data: LegadoBookInfoRes = {
     id: book.id,
-    title: book.title,
+    title: entry?.title ?? book.title,
     author: book.author,
     format: book.format,
-    kind: bookKind(book, membership),
-    description: bookDescription(book.meta),
-    intro: bookIntro(book),
+    kind: entry
+      ? legadoKind({ format: book.format, categoryName: entry.categoryName, tags: entry.tags, versionName: entry.versionName })
+      : bookKind(book, getBookMembership(user.id, book.id, book.shelfId)),
+    description: entry?.description || bookDescription(book.meta),
+    intro: bookIntro(book, entry?.bookmeta, entry?.fileName ?? null, getUserTimezone(user.id)),
     wordCount,
     coverUrl: coverUrl(c, book.id, book.coverKey),
     tocUrl: absoluteUrl(c, `/api/v1/legado/books/${book.id}/chapters`),
@@ -578,6 +696,7 @@ legadoRoutes.get('/books/:id/chapters', async (c) => {
       title: chapter.title,
       level: chapter.level,
       isVolume: chapter.isVolume,
+      contentUpdateDate: chapter.contentUpdateDate,
       url: chapter.isVolume
         ? `${chapter.title}${chapter.index}`
         : absoluteUrl(c, `/api/v1/legado/books/${bookId}/chapters/${chapter.index}`),

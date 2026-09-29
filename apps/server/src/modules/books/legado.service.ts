@@ -1,12 +1,16 @@
 import { DOMParser, Element as XmlElement } from '@xmldom/xmldom'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray, or, sql } from 'drizzle-orm'
 
-import { applyRuleToRuns, applyTitleReplacements, findPointMatch, applyPointMatch, type LegadoExploreConfigRes, type TextRun } from '@bookdock/shared'
+import { applyRuleToRuns, applyTitleReplacements, findPointMatch, applyPointMatch, type LegadoExploreConfigRes, type LegadoExploreLibrary, type TextRun } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { shelves, tags } from '../../db/schema'
+import { contentRevisions, libraryCategories, libraryMemberships, libraryTags, libraries } from '../../db/schema'
 import { isEpubMediaPath, loadEpubChapterMarkup, loadEpubResource, resolveEpubResourcePath, type EpubChapterMedia } from '../../formats/epub'
 import { AppError } from '../../middleware/error'
+import { getUserTimezone } from '../auth/auth.service'
+import { formatTimestamp } from '../../lib/format-timestamp'
+import { ensurePrivateLibrary, isLibraryManager } from '../libraries/library-access'
+import { listLibraryVersionEntries } from '../libraries/catalog.service'
 
 import {
   getActiveBook,
@@ -21,43 +25,149 @@ const TITLE_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'title'])
 const READING_BLOCK_TAGS = new Set(['p', 'div', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre'])
 const READING_INLINE_TAGS = new Set(['b', 'em', 'i', 's', 'small', 'span', 'strong', 'sub', 'sup', 'u'])
 
+/** Sentinel category id meaning "uncategorized"; it exists once per library. */
+export const LEGADO_NONE_CATEGORY = 'none'
+
 export type LegadoExploreScope = 'all' | 'shelf' | 'tag'
 
-export function getLegadoExploreConfig(userId: string): LegadoExploreConfigRes {
-  const db = getDb()
-  const shelfRows = db
-    .select({ id: shelves.id, name: shelves.name })
-    .from(shelves)
-    .where(eq(shelves.userId, userId))
-    .orderBy(asc(shelves.sortOrder), asc(shelves.createdAt))
-    .all()
-  const tagRows = db
-    .select({ id: tags.id, name: tags.name })
-    .from(tags)
-    .where(eq(tags.userId, userId))
-    .orderBy(asc(tags.sortOrder), asc(tags.name))
-    .all()
-
-  return {
-    shelves: [{ id: 'none', name: '未分类' }, ...shelfRows],
-    tags: tagRows,
-  }
+/**
+ * A shelf/tag filter is always scoped to one library: taxonomy ids are
+ * library-local and the uncategorized sentinel repeats per library, so an id
+ * on its own would let one library's row answer for another's.
+ */
+export interface LegadoExploreFilter {
+  libraryId: string
+  categoryId?: string
+  tagId?: string
 }
 
-export function getLegadoExploreFilter(userId: string, scope: LegadoExploreScope, id?: string): { shelfId?: string; tagId?: string } {
-  if (scope === 'all') return {}
+/**
+ * Libraries the reader may browse from the book source: their own private
+ * library first, then the shared ones they actually joined (owner, admin or
+ * member). A public library they never joined is not in the source, matching
+ * the Web sidebar, which also omits unjoined rows.
+ */
+export function listLegadoLibraries(userId: string): { id: string; name: string; type: 'private' | 'shared'; private: boolean }[] {
+  const db = getDb()
+  const privateLibrary = db.select({ id: libraries.id, name: libraries.name }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  const shared = db.select({ id: libraries.id, name: libraries.name }).from(libraries)
+    .where(and(
+      eq(libraries.type, 'shared'),
+      or(eq(libraries.userId, userId), inArray(libraries.id, memberLibraryIds(userId))),
+    ))
+    .all()
+  return [
+    ...(privateLibrary ? [{ ...privateLibrary, type: 'private' as const, private: true }] : []),
+    // Joined libraries follow the reader's own join order, so the source
+    // mirrors the sidebar rather than an arbitrary server-side sort.
+    ...shared.map((row) => ({ ...row, type: 'shared' as const, private: false })),
+  ]
+}
+
+function memberLibraryIds(userId: string): string[] {
+  return getDb().select({ libraryId: libraryMemberships.libraryId }).from(libraryMemberships)
+    .where(eq(libraryMemberships.userId, userId)).all().map((row) => row.libraryId)
+}
+
+/** Nesting depth for the discovery indents; cycles cannot occur (see the
+ *  category-parent service, which refuses them) but a malformed row must not
+ *  hang the config request either. */
+function categoryDepths(rows: { id: string; parentId: string | null }[]): Map<string, number> {
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const depths = new Map<string, number>()
+  for (const row of rows) {
+    let depth = 0
+    let cursor = row.parentId
+    while (cursor && depth < 8) {
+      depth += 1
+      cursor = byId.get(cursor)?.parentId ?? null
+    }
+    depths.set(row.id, depth)
+  }
+  return depths
+}
+
+/**
+ * Discovery rows for every browsable library.
+ *
+ * Hidden taxonomy follows the same rule as hidden works and hidden versions: it
+ * is a member-facing switch, so a manager keeps seeing it. That needs no
+ * special case for the private library, whose owner is its own manager, and it
+ * is consistent there in a stronger way — the source already lists that owner's
+ * hidden books, so hiding their shelf rows would only have made a visible book
+ * unreachable by category. A library with no readable work is dropped entirely
+ * rather than rendered as a section of dead buttons.
+ */
+export async function getLegadoExploreConfig(userId: string): Promise<LegadoExploreConfigRes> {
+  const rows: LegadoExploreLibrary[] = []
+  for (const library of listLegadoLibraries(userId)) {
+    const showHidden = await isLibraryManager(userId, library.id)
+    const [categories, tags, works] = await Promise.all([
+      listLegadoCategories(library.id, showHidden),
+      listLegadoTags(library.id, showHidden),
+      listLibraryVersionEntries(userId, library.id, { page: 1, pageSize: 1 }),
+    ])
+    if (works.total === 0) continue
+    rows.push({ id: library.id, name: library.name, type: library.type, categories, tags })
+  }
+  return { libraries: rows }
+}
+
+function listLegadoCategories(libraryId: string, includeHidden: boolean) {
+  const db = getDb()
+  const rows = db.select({ id: libraryCategories.id, name: libraryCategories.name, parentId: libraryCategories.parentId, sortOrder: libraryCategories.sortOrder, createdAt: libraryCategories.createdAt })
+    .from(libraryCategories)
+    .where(includeHidden
+      ? eq(libraryCategories.libraryId, libraryId)
+      : and(eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.hidden, false)))
+    .orderBy(asc(libraryCategories.sortOrder), asc(libraryCategories.createdAt))
+    .all()
+  const depths = categoryDepths(rows)
+  return [{ id: LEGADO_NONE_CATEGORY, name: '未分类', depth: 0 }, ...rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    depth: depths.get(row.id) ?? 0,
+  }))]
+}
+
+function listLegadoTags(libraryId: string, includeHidden: boolean) {
+  return getDb().select({ id: libraryTags.id, name: libraryTags.name })
+    .from(libraryTags)
+    .where(includeHidden
+      ? eq(libraryTags.libraryId, libraryId)
+      : and(eq(libraryTags.libraryId, libraryId), eq(libraryTags.hidden, false)))
+    .orderBy(asc(libraryTags.sortOrder), asc(libraryTags.name))
+    .all()
+    .map((row) => ({ id: row.id, name: row.name, depth: 0 }))
+}
+
+/** Reject a taxonomy id that does not belong to the library it was asked for. */
+export function getLegadoExploreFilter(userId: string, libraryId: string, scope: LegadoExploreScope, id?: string): LegadoExploreFilter {
+  if (scope === 'all') return { libraryId }
   if (!id) throw new AppError(scope === 'shelf' ? 'SHELF_NOT_FOUND' : 'TAG_NOT_FOUND')
   if (scope === 'shelf') {
-    if (id === 'none') return { shelfId: 'none' }
-    const shelf = getDb().select({ id: shelves.id }).from(shelves)
-      .where(and(eq(shelves.id, id), eq(shelves.userId, userId))).get()
-    if (!shelf) throw new AppError('SHELF_NOT_FOUND')
-    return { shelfId: id }
+    if (id === LEGADO_NONE_CATEGORY) return { libraryId, categoryId: LEGADO_NONE_CATEGORY }
+    const category = getDb().select({ id: libraryCategories.id }).from(libraryCategories)
+      .where(and(eq(libraryCategories.id, id), eq(libraryCategories.libraryId, libraryId))).get()
+    if (!category) throw new AppError('SHELF_NOT_FOUND')
+    return { libraryId, categoryId: id }
   }
-  const tag = getDb().select({ id: tags.id }).from(tags)
-    .where(and(eq(tags.id, id), eq(tags.userId, userId))).get()
+  const tag = getDb().select({ id: libraryTags.id }).from(libraryTags)
+    .where(and(eq(libraryTags.id, id), eq(libraryTags.libraryId, libraryId))).get()
   if (!tag) throw new AppError('TAG_NOT_FOUND')
-  return { tagId: id }
+  return { libraryId, tagId: id }
+}
+
+/** The reader's own library, created on demand like every other private path. */
+export function legadoPrivateLibraryId(userId: string): string {
+  return ensurePrivateLibrary(getDb(), userId)
+}
+
+/** Every library the reader joined, private library first. */
+export function legadoJoinedLibraryIds(userId: string): string[] {
+  const libs = listLegadoLibraries(userId)
+  return libs.length > 0 ? libs.map((row) => row.id) : [legadoPrivateLibraryId(userId)]
 }
 
 interface EpubNode {
@@ -476,16 +586,35 @@ export function projectTxtChapterContent(title: string, content: string, rules: 
   }
 }
 
+/**
+ * A private library is a vault, so its owner also excludes hidden rows unless a
+ * read opts in. The book source is the owner's own external reader and lists
+ * hidden books on purpose, so every read below asks for them: a book the
+ * discovery page offers must be openable, or the source would advertise a row
+ * that 404s on tap. This only relaxes the hide filter; deletion and the
+ * collected-source check stay in force.
+ */
+export const LEGADO_READ = { showHidden: true } as const
+
 export async function getLegadoToc(userId: string, bookId: string) {
-  await getActiveBook(userId, bookId)
-  const chapters = await getBookChapters(userId, bookId)
+  const book = await getActiveBook(userId, bookId, LEGADO_READ)
+  const chapters = await getBookChapters(userId, bookId, LEGADO_READ)
   const rules = await loadEffectiveBookReplacementRules(userId, bookId)
+  // Legado renders TocRule.updateTime as a plain string beside every chapter
+  // title (BookChapter.tag), not as a timestamp, so this is a readable date and
+  // time. A chapter carries its own added time only once that differs from the
+  // revision it lives in, so an absent addedAt means every chapter of this book
+  // so far arrived with the file currently being read. Minutes are the useful
+  // ceiling: one append stamps all of its chapters with the same instant, so a
+  // seconds field would only expose how long the insert took.
+  const timezone = getUserTimezone(userId)
   return chapters.map((chapter, index) => ({
     id: chapter.id,
     index,
     title: applyTitleReplacements(chapter.title, rules.filter((rule) => rule.matchType === 'pattern' && rule.effectiveEnabled)),
     level: chapter.level,
     isVolume: chapters[index + 1] !== undefined && chapters[index + 1]!.level > chapter.level,
+    contentUpdateDate: formatTimestamp(chapter.addedAt ?? book.contentUpdatedAt, timezone),
   }))
 }
 
@@ -500,14 +629,14 @@ export async function getLegadoChapterContent(
     throw new AppError('VALIDATION_ERROR', 'Invalid chapter index')
   }
 
-  const book = await getActiveBook(userId, bookId)
-  const chapters = await getBookChapters(userId, bookId)
+  const book = await getActiveBook(userId, bookId, LEGADO_READ)
+  const chapters = await getBookChapters(userId, bookId, LEGADO_READ)
   const chapter = chapters[chapterIndex]
   if (!chapter) throw new AppError('VALIDATION_ERROR', 'Chapter index is out of range')
   const rules = await loadEffectiveBookReplacementRules(userId, bookId)
 
   if (book.format === 'txt') {
-    const raw = await getBookChapterContent(userId, bookId, chapterIndex)
+    const raw = await getBookChapterContent(userId, bookId, chapterIndex, LEGADO_READ)
     const projected = projectTxtChapterContent(chapter.title, raw.content, rules, chapterIndex)
     return { id: chapter.id, index: chapterIndex, title: projected.title, content: projected.content }
   }
@@ -516,7 +645,7 @@ export async function getLegadoChapterContent(
     chapter.title,
     rules.filter((rule) => rule.matchType === 'pattern' && rule.effectiveEnabled),
   )
-  const markup = await loadEpubChapterMarkup(await getBookEpubBuffer(userId, bookId), chapterIndex)
+  const markup = await loadEpubChapterMarkup(await getBookEpubBuffer(userId, bookId, LEGADO_READ), chapterIndex)
   if (markup) {
     try {
       const content = projectEpubChapterMarkup(markup.markup, rules, markup.href, resourceUrl, markup.media, title, includeMedia)
@@ -526,15 +655,48 @@ export async function getLegadoChapterContent(
     }
   }
 
-  const raw = await getBookChapterContent(userId, bookId, chapterIndex)
+  const raw = await getBookChapterContent(userId, bookId, chapterIndex, LEGADO_READ)
   const projected = projectTxtChapterContent(chapter.title, raw.content, rules, chapterIndex)
   return { id: chapter.id, index: chapterIndex, title: projected.title, content: projected.content }
 }
 
 export async function getLegadoBookResource(userId: string, bookId: string, resourcePath: string) {
-  const book = await getActiveBook(userId, bookId)
+  const book = await getActiveBook(userId, bookId, LEGADO_READ)
   if (book.format !== 'epub') throw new AppError('UNSUPPORTED_FORMAT', 'Only EPUB books expose media resources')
-  const resource = await loadEpubResource(await getBookEpubBuffer(userId, bookId), resourcePath)
+  const resource = await loadEpubResource(await getBookEpubBuffer(userId, bookId, LEGADO_READ), resourcePath)
   if (!resource) throw new AppError('BOOK_FILE_MISSING', 'EPUB media resource not found')
   return resource
+}
+
+/**
+ * Latest chapter title per BookVersion, read straight from the latest
+ * revision's cached chapter list. The list projections used to call the full
+ * TOC per row, which re-read the book and its replacement rules once per item;
+ * this is one query for the whole page.
+ */
+export function legadoLatestChapterTitles(bookVersionIds: string[]): Map<string, string> {
+  const titles = new Map<string, string>()
+  if (bookVersionIds.length === 0) return titles
+  const rows = getDb().select({
+    bookVersionId: contentRevisions.bookVersionId,
+    meta: contentRevisions.meta,
+  }).from(contentRevisions)
+    .where(and(
+      inArray(contentRevisions.bookVersionId, bookVersionIds),
+      eq(contentRevisions.revisionNo, sql`(SELECT max(${contentRevisions.revisionNo}) FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${contentRevisions.bookVersionId})`),
+    )).all()
+  for (const row of rows) {
+    const chapters = (row.meta as { chapters?: Array<{ title?: string; level?: number }> } | null)?.chapters
+    if (!Array.isArray(chapters) || chapters.length === 0) continue
+    // Mirrors the TOC's isVolume rule: a node is a volume when the next node
+    // is deeper, so the last such node has no content behind it.
+    let latest: string | null = null
+    for (let index = 0; index < chapters.length; index += 1) {
+      const chapter = chapters[index]!
+      if (chapters[index + 1] !== undefined && (chapters[index + 1]!.level ?? 1) > (chapter.level ?? 1)) continue
+      if (typeof chapter.title === 'string' && chapter.title) latest = chapter.title
+    }
+    if (latest) titles.set(row.bookVersionId, latest)
+  }
+  return titles
 }

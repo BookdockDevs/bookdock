@@ -941,6 +941,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     coverPaletteKey: typeof revisionMeta.coverPaletteKey === 'string' ? revisionMeta.coverPaletteKey : bookId,
     createdAt: work.createdAt,
     updatedAt: work.updatedAt,
+    contentUpdatedAt: revision.createdAt,
     readStatus: state?.readStatus ?? 'reading',
     progress: state?.percent ?? 0,
     pinnedAt: link.pinnedAt ?? null,
@@ -1044,6 +1045,10 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     coverPaletteKey: typeof revisionMeta.coverPaletteKey === 'string' ? revisionMeta.coverPaletteKey : bookId,
     createdAt: lb.createdAt,
     updatedAt: lb.updatedAt,
+    // When the file behind this read last changed. Distinct from updatedAt,
+    // which moves for metadata edits too, and it follows pinnedRevisionId
+    // because it is the resolved revision's own timestamp.
+    contentUpdatedAt: revision.createdAt,
     readStatus: state?.readStatus ?? 'reading',
     progress: state?.percent ?? 0,
     pinnedAt: lbv.pinnedAt ?? null,
@@ -1094,6 +1099,38 @@ export function getBookMembership(userId: string, bookId: string, shelfId: strin
   return { shelfName, tags: tagRows.map((tag) => tag.name) }
 }
 
+/**
+ * Carry per-chapter added times across a rewrite of `meta.chapters`.
+ *
+ * `addedAt` means "when this chapter first appeared", and it is stored only when
+ * that differs from the revision the chapter lives in — a fresh upload needs no
+ * field, because every chapter then shares its revision's own timestamp. So a
+ * rewrite copies the time of every chapter its predecessor already had and
+ * leaves genuinely new chapters absent, which is what makes them fall back to
+ * the new revision.
+ *
+ * A predecessor chapter without its own `addedAt` predates this field, so it
+ * inherits `previousRevisionAt`: that keeps an old book behaving exactly as it
+ * did before, and the moment it is appended or re-toc'd its chapters gain real
+ * times.
+ *
+ * Identity is the join key. TXT ids are byte offsets and EPUB ids are spine
+ * fragment ids, so re-reading the same file matches every chapter and replacing
+ * it with a different one matches nothing. Nothing records which chapter of a
+ * new file corresponds to which of the old, so treating them all as new is the
+ * honest answer; matching on title or position would only guess, and a wrong
+ * guess dates a chapter as someone else's.
+ */
+function carryChapterAddedAt<T extends { id: string }>(chapters: T[], previous: unknown, previousRevisionAt: number): T[] {
+  const before = Array.isArray(previous) ? (previous as Chapter[]) : []
+  if (before.length === 0) return chapters
+  const times = new Map(before.map((chapter) => [chapter.id, chapter.addedAt ?? previousRevisionAt]))
+  return chapters.map((chapter) => {
+    const addedAt = times.get(chapter.id)
+    return addedAt === undefined ? chapter : { ...chapter, addedAt }
+  })
+}
+
 export async function getBookChapters(userId: string | null, bookId: string, opts?: { showHidden?: boolean }) {
   const book = await getActiveBook(userId, bookId, opts)
   const existingChapters = (book.meta?.chapters ?? []) as Chapter[]
@@ -1109,17 +1146,21 @@ export async function getBookChapters(userId: string | null, bookId: string, opt
   try {
     const parsed = await parser.parse(await storage.get(book.filePath))
     const sameLength = parsed.chapters.length === existingChapters.length
-    const chapters = parsed.chapters.map((parsedChapter, index) => {
-      const existing = sameLength ? existingChapters[index] : undefined
-      return {
-        id: existing?.id ?? `ch-${index}`,
-        title: existing?.title ?? parsedChapter.title,
-        level: parsedChapter.level ?? existing?.level ?? 1,
-        startOffset: existing?.startOffset ?? 0,
-        endOffset: existing?.endOffset ?? 0,
-        wordCount: existing?.wordCount ?? parsedChapter.wordCount ?? 0,
-      }
-    })
+    const chapters = carryChapterAddedAt(
+      parsed.chapters.map((parsedChapter, index) => {
+        const existing = sameLength ? existingChapters[index] : undefined
+        return {
+          id: existing?.id ?? `ch-${index}`,
+          title: existing?.title ?? parsedChapter.title,
+          level: parsedChapter.level ?? existing?.level ?? 1,
+          startOffset: existing?.startOffset ?? 0,
+          endOffset: existing?.endOffset ?? 0,
+          wordCount: existing?.wordCount ?? parsedChapter.wordCount ?? 0,
+        }
+      }),
+      existingChapters,
+      book.contentUpdatedAt,
+    )
     const meta: Record<string, unknown> = { ...(book.meta as Record<string, unknown>), epubTocLevelVersion: EPUB_TOC_LEVEL_VERSION }
     if (chapters.length > 0) meta.chapters = chapters
     // Derived chapter cache lives on the latest revision now; the frozen
@@ -1308,7 +1349,11 @@ async function prepareTxtAppend(userId: string, bookId: string, appendedText: st
     id: txtChapterId(chapter),
     wordCount: countWords(getTxtChapterContent(normalized, chapter)),
   }))
-  const metaChapters = chapters.map((chapter) => ({
+  // The append is a pure tail operation, so every id the previous revision
+  // already had is a chapter that predates it and keeps its own time; the ones
+  // that match nothing are the chapters this append just added and fall back to
+  // the new revision.
+  const metaChapters = carryChapterAddedAt(chapters.map((chapter) => ({
     id: txtChapterId(chapter),
     title: chapter.title,
     level: chapter.level,
@@ -1317,7 +1362,7 @@ async function prepareTxtAppend(userId: string, bookId: string, appendedText: st
     contentStartOffset: chapter.contentStartOffset,
     contentRanges: chapter.contentRanges,
     wordCount: countWords(getTxtChapterContent(mergedNormalized, chapter)),
-  }))
+  })), book.meta.chapters, book.contentUpdatedAt)
   const newWordCount = metaChapters.reduce((sum, chapter) => sum + chapter.wordCount, 0)
   const addedChapterCount = Math.max(0, metaChapters.length - originalMetaChapters.length)
   const addedChapters = metaChapters.slice(originalMetaChapters.length).map((chapter) => ({
@@ -1537,7 +1582,7 @@ async function rebuildTocBook(
   const { chapters, excludedChapterIds } = applyTxtChapterExclusions(rawChapters, requestedExcludedChapterIds)
 
   const db = getDb()
-  const metaChapters = chapters.map((c) => ({
+  const metaChapters = carryChapterAddedAt(chapters.map((c) => ({
     id: txtChapterId(c),
     title: c.title,
     level: c.level,
@@ -1546,7 +1591,7 @@ async function rebuildTocBook(
     contentStartOffset: c.contentStartOffset,
     contentRanges: c.contentRanges,
     wordCount: countWords(getTxtChapterContent(normalized, c)),
-  }))
+  })), book.meta.chapters, book.contentUpdatedAt)
   const wordCount = metaChapters.reduce((sum, c) => sum + c.wordCount, 0)
   const meta: Record<string, unknown> = {
     ...book.meta,

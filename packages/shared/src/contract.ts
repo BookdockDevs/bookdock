@@ -51,11 +51,27 @@ export interface LegadoSearchRes {
 export interface LegadoExploreCategory {
   id: string
   name: string
+  /** Nesting depth from the category tree; siblings are ordered by sortOrder. */
+  depth: number
+}
+
+/**
+ * One library the reader can browse from the book source. The private library
+ * always comes first; joined shared libraries follow in the reader's own order.
+ * Taxonomy ids are library-scoped, so a category filter must carry its
+ * libraryId — the `none` sentinel exists once per library.
+ */
+export interface LegadoExploreLibrary {
+  id: string
+  name: string
+  type: 'private' | 'shared'
+  /** Libraries with no readable work are omitted entirely. */
+  categories: LegadoExploreCategory[]
+  tags: LegadoExploreCategory[]
 }
 
 export interface LegadoExploreConfigRes {
-  shelves: LegadoExploreCategory[]
-  tags: LegadoExploreCategory[]
+  libraries: LegadoExploreLibrary[]
 }
 
 export interface LegadoBookInfoRes {
@@ -78,6 +94,8 @@ export interface LegadoChapterItem {
   level: number
   isVolume: boolean
   url: string
+  /** YYYY-MM-DD, the revision this TOC was built from. */
+  contentUpdateDate: string
 }
 
 export interface LegadoTocRes {
@@ -215,6 +233,11 @@ export interface MeRes {
 
 export interface UpdateUsernameReq {
   username: string
+}
+
+export interface UpdateTimezoneReq {
+  /** IANA zone id, or null/'' to fall back to UTC. */
+  timezone: string | null
 }
 
 /** Account-mutation responses (username change, avatar upload): the fresh self profile */
@@ -1301,6 +1324,13 @@ export interface Chapter {
   contentStartOffset?: number
   contentRanges?: Array<{ startOffset: number; endOffset: number }>
   wordCount?: number
+  /**
+   * Unix ms of the revision this chapter first appeared in. Absent means "same
+   * as the revision it lives in", which is the truth for every chapter of a
+   * fresh upload, so the field is only stored once a rewrite would otherwise
+   * change the answer.
+   */
+  addedAt?: number
 }
 
 export interface ChapterListRes {

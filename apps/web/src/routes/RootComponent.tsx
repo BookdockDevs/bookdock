@@ -6,6 +6,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { Button } from '@/components/ui/Button'
 import { apiGet, UNAUTHORIZED_EVENT } from '@/api/client'
 import { useInstanceInfo, ME_QUERY_KEY } from '@/features/auth/hooks'
+import { reportBrowserTimezone } from '@/features/auth/report-timezone'
 import { libraryInviteParam, PENDING_INVITE_KEY } from '@/features/library/invite-link'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
@@ -60,6 +61,14 @@ export function RootComponent() {
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   }, [navigate, queryClient])
+
+  useEffect(() => {
+    const me = meQuery.data?.data
+    // Guests have no account to attach a timezone to, and the Legado facade
+    // refuses them anyway.
+    if (!me || me.guest === true) return
+    void reportBrowserTimezone(me.id).catch(() => {})
+  }, [meQuery.data])
 
   useEffect(() => {
     if (!instance) return

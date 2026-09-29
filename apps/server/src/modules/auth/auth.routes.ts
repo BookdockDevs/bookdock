@@ -7,6 +7,7 @@ import {
   registerSchema,
   setupSchema,
   updateInstanceSchema,
+  updateTimezoneSchema,
   updateUsernameSchema,
   type AccountRes,
   type SetupRequiredRes,
@@ -25,6 +26,7 @@ import {
   revokeSession,
   setupUser,
   updateInstanceSettings,
+  updateTimezone,
 } from './auth.service'
 import { assertLoginAllowed, clearLoginFailures, createLoginRateLimitKey, recordLoginFailure } from './auth.rate-limit'
 import { clearSessionCookie, readSessionToken, setSessionCookie } from './session-cookie'
@@ -127,6 +129,20 @@ authRoutes.post('/username', async (c) => {
   }
   const account = changeUsername(user.id, parsed.data.username)
   return c.json({ data: account } satisfies { data: AccountRes })
+})
+
+authRoutes.put('/timezone', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest')) {
+    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
+  }
+  const body = await c.req.json().catch(() => null)
+  const parsed = updateTimezoneSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  updateTimezone(user.id, parsed.data.timezone)
+  return c.json({ data: { ok: true } })
 })
 
 authRoutes.get('/me', (c) => {

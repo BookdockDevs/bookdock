@@ -26,7 +26,9 @@ import {
   findSimilarWorks,
   getCatalogBook,
   getCatalogBatchSelection,
+  getLibraryVersionPublication,
   listCatalogBooks,
+  listLibraryVersionEntries,
   moveCatalogVersion,
   organizeCatalogBatch,
   removeCatalogBookCover,
@@ -710,6 +712,63 @@ describe('shared library catalog', () => {
       .resolves.toMatchObject({ relation: 'owner' })
     await expect(resolveSharedVersionRead(libraryId, hiddenWork.bookVersionId, memberId))
       .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
+  })
+
+  it('lists one row per version for the book source, with the catalog hide asymmetry', async () => {
+    const tagId = seedTag(libraryId, 'Sci-Fi')
+    const categoryId = createId('cat')
+    db.insert(schema.libraryCategories).values({
+      id: categoryId, libraryId, userId: ownerId, name: 'Shelves', parentId: null,
+      sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
+    }).run()
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('v.txt', '第一章\n甲'), {
+      title: 'Visible', categoryId, tagIds: [tagId],
+    })
+
+    // One row per version, carrying the taxonomy the Web card shows.
+    const listed = await listLibraryVersionEntries(memberId, libraryId, {})
+    expect(listed.total).toBe(1)
+    expect(listed.items[0]).toMatchObject({
+      bookVersionId: created.bookVersionId,
+      title: 'Visible',
+      categoryName: 'Shelves',
+      tags: ['Sci-Fi'],
+    })
+
+    // A second version of the same work is its own row, because Legado
+    // addresses a book by version and cannot switch between them. The body has
+    // to differ: uploads dedupe on content hash.
+    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('v2.txt', '第一章\n乙乙乙乙乙乙乙乙'), {
+      title: 'Visible', categoryId, libraryBookId: created.libraryBookId,
+    })
+    expect(second.bookVersionId).not.toBe(created.bookVersionId)
+    const both = await listLibraryVersionEntries(memberId, libraryId, {})
+    expect(both.total).toBe(2)
+    expect(both.items.map((entry) => entry.bookVersionId).sort())
+      .toEqual([created.bookVersionId, second.bookVersionId].sort())
+
+    // Hiding the work closes every one of its versions for a member and leaves
+    // all of them open for a manager.
+    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, { hidden: true })
+    expect((await listLibraryVersionEntries(memberId, libraryId, {})).total).toBe(0)
+    expect((await listLibraryVersionEntries(ownerId, libraryId, {})).total).toBe(2)
+
+    // A hidden version behaves the same way at the version layer.
+    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, { hidden: false })
+    await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, second.versionLinkId!, { status: 'unlisted' })
+    const memberView = await listLibraryVersionEntries(memberId, libraryId, {})
+    expect(memberView.items.map((entry) => entry.bookVersionId)).toEqual([created.bookVersionId])
+    expect((await listLibraryVersionEntries(ownerId, libraryId, {})).total).toBe(2)
+
+    // The single-version publication lookup follows the same rule, so a detail
+    // page can never enrich itself for a version the reader may not see.
+    const links = db.select().from(schema.libraryBookVersions).all()
+    expect(await getLibraryVersionPublication(memberId, second.bookVersionId!)).toBeNull()
+    expect(await getLibraryVersionPublication(ownerId, second.bookVersionId!)).not.toBeNull()
+    // A public library's published version stays readable for any signed-in
+    // outsider, which is the same verdict the content routes give.
+    expect(await getLibraryVersionPublication(outsiderId, created.bookVersionId!)).not.toBeNull()
+    expect(links.filter((link) => link.status === 'unlisted')).toHaveLength(1)
   })
 
   it('merges work meta over the revision bookmeta, manager-only', async () => {

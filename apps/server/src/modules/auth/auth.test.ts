@@ -28,6 +28,7 @@ import {
   effectiveUploadMaxBytes,
   getDefaultUser,
   getInstanceInfo,
+  getUserTimezone,
   refreshSessionIfNeeded,
   register,
   resolveSession,
@@ -571,6 +572,68 @@ describe('auth module', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'newname' }),
+      })
+      expect(res.status).toBe(401)
+    })
+  })
+
+  describe('updateTimezone', () => {
+    it('stores the reported zone and reads it back', async () => {
+      const id = await insertUser(db, { username: 'ivan', password: 'password123' })
+      const app = createAuthApp({ id, username: 'ivan', role: 'member' })
+      const res = await app.request('/api/v1/auth/timezone', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone: 'Asia/Shanghai' }),
+      })
+      expect(res.status).toBe(200)
+      expect(getUserTimezone(id)).toBe('Asia/Shanghai')
+    })
+
+    it('treats an empty zone as UTC rather than storing a blank', async () => {
+      const id = await insertUser(db, { username: 'judy', password: 'password123' })
+      const app = createAuthApp({ id, username: 'judy', role: 'member' })
+      await app.request('/api/v1/auth/timezone', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone: 'Asia/Shanghai' }),
+      })
+      const res = await app.request('/api/v1/auth/timezone', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone: '' }),
+      })
+      expect(res.status).toBe(200)
+      expect(getUserTimezone(id)).toBeNull()
+    })
+
+    it('rejects a zone the runtime cannot format', async () => {
+      // Intl throws RangeError on an unknown zone, and the value is fed to a
+      // formatter on every server-rendered date, so this must not be stored.
+      const id = await insertUser(db, { username: 'karl', password: 'password123' })
+      const app = createAuthApp({ id, username: 'karl', role: 'member' })
+      const res = await app.request('/api/v1/auth/timezone', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone: 'Not/AZone' }),
+      })
+      expect(res.status).toBe(400)
+      expect(getUserTimezone(id)).toBeNull()
+    })
+
+    it('rejects guest-injected sessions', async () => {
+      const app = new Hono()
+      app.onError(errorHandler)
+      app.use('/api/v1/auth/*', async (c, next) => {
+        c.set('user', { id: 'u1', username: 'admin', role: 'guest', avatarKey: null })
+        c.set('guest', true)
+        return next()
+      })
+      app.route('/api/v1/auth', authRoutes)
+      const res = await app.request('/api/v1/auth/timezone', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone: 'Asia/Shanghai' }),
       })
       expect(res.status).toBe(401)
     })

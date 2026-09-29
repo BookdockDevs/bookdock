@@ -31,14 +31,15 @@ import {
 } from './library-query'
 import {
   normalizeAuthors,
+  type BatchOrganizeReq,
+  type BatchSelectionItem,
   type CatalogBook,
   type CatalogBookTag,
   type CatalogBookUpdateReq,
   type CatalogListRes,
   type CatalogVersion,
   type CatalogVersionUpdateReq,
-  type BatchOrganizeReq,
-  type BatchSelectionItem,
+  type LibraryVersionKind,
 } from '@bookdock/shared'
 
 /**
@@ -340,6 +341,292 @@ export async function listCatalogBooks(
     page,
     pageSize,
   }
+}
+
+/**
+ * One row per readable version, for any library the caller can browse.
+ *
+ * `listCatalogBooks` groups by work because the Web card is a work, and
+ * `listBooks` in the books domain stays the private list because it carries
+ * per-user reading state. Neither shape fits the book source: Legado
+ * deduplicates on `bookUrl`, which is a BookVersion, so a work with three
+ * versions has to be three entries or two of them become unreachable. This is
+ * the one projection both library types share, which is what keeps a private
+ * book and a joined shared book identical in the source.
+ *
+ * Visibility follows the same asymmetry as the catalog list: managers see
+ * every version including hidden ones, everyone else only published versions
+ * of works that are not effectively hidden. Reading state is absent by
+ * construction — a shared work belongs to nobody.
+ */
+export interface LibraryVersionEntry {
+  bookVersionId: string
+  libraryBookId: string
+  /** Version card label; empty unless the uploader named this version. */
+  versionName: string
+  title: string
+  author: string
+  authors: string[]
+  format: 'epub' | 'txt'
+  size: number
+  coverKey: string | null
+  description: string
+  wordCount: number | null
+  categoryId: string | null
+  categoryName: string | null
+  tags: string[]
+  /** Version over work over parsed-file publication metadata. */
+  bookmeta: Record<string, unknown>
+  fileName: string | null
+  kind: LibraryVersionKind
+  hidden: boolean
+  pinnedAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export async function listLibraryVersionEntries(
+  actorId: string,
+  libraryId: string,
+  params: Partial<LibraryListQuery> = {},
+): Promise<{ items: LibraryVersionEntry[]; total: number; page: number; pageSize: number }> {
+  const db = getDb()
+  await assertLibraryBrowsable(actorId, libraryId)
+  const manager = await isLibraryManager(actorId, libraryId)
+  const page = Math.max(1, params.page ?? 1)
+  const pageSize = Math.min(100, Math.max(1, params.pageSize ?? CATALOG_PAGE_SIZE))
+  // Latest-revision meta, so description/series/cover palette follow the
+  // content the reader will actually open.
+  const revMeta = (jsonPath: string) => sql`json_extract((SELECT ${contentRevisions.meta} FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1), ${jsonPath})`
+  const effTitle = sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title})`
+  const effAuthor = sql<string>`coalesce(${libraryBookVersions.author}, ${libraryBooks.author})`
+
+  const conditions: SQL[] = [
+    eq(libraryBookVersions.libraryId, libraryId),
+    isNull(libraryBooks.deletedAt),
+  ]
+  if (!manager) {
+    conditions.push(workHiddenExclusion(loadLibraryHiddenTaxonomy(db, libraryId)))
+    // A member never sees a hidden version. The work-level filter above is not
+    // enough on its own: a work can be visible while one of its versions is not.
+    conditions.push(eq(libraryBookVersions.status, 'published'))
+  }
+  if (params.search) {
+    const pattern = likePattern(params.search)
+    conditions.push(sql`(
+      ${effTitle} LIKE ${pattern} ESCAPE '!'
+      OR ${effAuthor} LIKE ${pattern} ESCAPE '!'
+      OR EXISTS (
+        SELECT 1 FROM json_each(coalesce(${libraryBookVersions.authors}, ${libraryBooks.authors}, '[]'))
+        WHERE value LIKE ${pattern} ESCAPE '!'
+      )
+      OR ${bookVersions.format} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.description')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.series')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.subjects')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.publisher')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.isbn')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.identifier')} LIKE ${pattern} ESCAPE '!'
+      OR ${revMeta('$.bookmeta.source')} LIKE ${pattern} ESCAPE '!'
+      OR ${taxonomyNameMatch(pattern, libraryId)}
+    )`)
+  }
+  conditions.push(...sharedListConditions({ page, pageSize, ...params }, libraryId))
+
+  const where = and(...conditions)
+  const baseQuery = () => db.select({
+    bookVersionId: bookVersions.id,
+    libraryBookId: libraryBooks.id,
+    versionName: libraryBookVersions.name,
+    versionTitle: libraryBookVersions.title,
+    versionAuthor: libraryBookVersions.author,
+    versionAuthors: libraryBookVersions.authors,
+    workTitle: libraryBooks.title,
+    workAuthor: libraryBooks.author,
+    workAuthors: libraryBooks.authors,
+    workDescription: libraryBooks.description,
+    versionDescription: libraryBookVersions.description,
+    format: bookVersions.format,
+    size: bookVersions.size,
+    coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey})`,
+    categoryId: libraryBooks.categoryId,
+    categoryName: libraryCategories.name,
+    wordCount: sql<number | null>`${revMeta('$.wordCount')}`,
+    bookmeta: sql<Record<string, unknown> | null>`${revMeta('$.bookmeta')}`,
+    workMeta: libraryBooks.meta,
+    versionMeta: libraryBookVersions.meta,
+    fileName: sql<string | null>`${revMeta('$.fileName')}`,
+    kind: libraryBookVersions.kind,
+    hidden: sql<boolean>`${libraryBooks.hidden}`,
+    pinnedAt: libraryBookVersions.pinnedAt,
+    createdAt: libraryBooks.createdAt,
+    updatedAt: libraryBooks.updatedAt,
+  }).from(libraryBookVersions)
+    .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+    .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
+    .innerJoin(contentRevisions, and(
+      eq(contentRevisions.bookVersionId, bookVersions.id),
+      eq(contentRevisions.revisionNo, sql`(SELECT max(${contentRevisions.revisionNo}) FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id})`),
+    ))
+    .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
+    .where(where)
+
+  // Pin-first is universal; a manager's pin on a private card and a shared
+  // work's own pin sort at the same unit here because one row is one version.
+  const orderBy = libraryOrderBy(params.sortBy, params.sortOrder, {
+    title: effTitle,
+    author: effAuthor,
+    size: bookVersions.size,
+    createdAt: libraryBooks.createdAt,
+    updatedAt: libraryBooks.updatedAt,
+  })
+  const rows = baseQuery()
+    .orderBy(asc(sql`${libraryBookVersions.pinnedAt} IS NULL`), ...orderBy)
+    .limit(pageSize).offset((page - 1) * pageSize).all()
+  const total = db.select({ count: sql<number>`count(*)` })
+    .from(libraryBookVersions)
+    .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+    .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
+    .innerJoin(contentRevisions, and(
+      eq(contentRevisions.bookVersionId, bookVersions.id),
+      eq(contentRevisions.revisionNo, sql`(SELECT max(${contentRevisions.revisionNo}) FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id})`),
+    ))
+    .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
+    .where(where).get()?.count ?? 0
+  // Tag names ride along in a second query: joining them into the paginated
+  // query would multiply rows per version and break LIMIT/OFFSET.
+  const tagNames = new Map<string, string[]>()
+  if (rows.length > 0) {
+    const tagRows = db.select({ libraryBookId: libraryBookTags.libraryBookId, name: libraryTags.name })
+      .from(libraryBookTags)
+      .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
+      .where(inArray(libraryBookTags.libraryBookId, [...new Set(rows.map((row) => row.libraryBookId))]))
+      .orderBy(libraryTags.sortOrder, libraryTags.name)
+      .all()
+    for (const row of tagRows) {
+      const list = tagNames.get(row.libraryBookId) ?? []
+      list.push(row.name)
+      tagNames.set(row.libraryBookId, list)
+    }
+  }
+
+  return {
+    items: rows.map((row) => {
+      return {
+        bookVersionId: row.bookVersionId,
+        libraryBookId: row.libraryBookId,
+        versionName: row.versionName,
+        // Legado dedups on name+author, so two versions of one work need
+        // distinguishable names or the second is folded away as a duplicate.
+        title: row.versionTitle ?? row.workTitle,
+        author: row.versionAuthor ?? row.workAuthor,
+        authors: row.versionAuthors ?? row.workAuthors ?? [],
+        format: row.format,
+        size: row.size,
+        coverKey: row.coverKey,
+        description: row.versionDescription ?? row.workDescription,
+        wordCount: row.wordCount,
+        categoryId: row.categoryId,
+        categoryName: row.categoryName ?? null,
+        tags: tagNames.get(row.libraryBookId) ?? [],
+        // Merged in JS, the same way toCatalogVersion does it: SQLite's
+        // json_patch applies one patch at a time, and the three layers live in
+        // different tables anyway.
+        bookmeta: {
+          ...((row.bookmeta ?? {}) as Record<string, unknown>),
+          ...((row.workMeta ?? {}) as Record<string, unknown>),
+          ...((row.versionMeta ?? {}) as Record<string, unknown>),
+        },
+        fileName: row.fileName,
+        kind: row.kind,
+        hidden: row.hidden,
+        pinnedAt: row.pinnedAt,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      }
+    }),
+    total,
+    page,
+    pageSize,
+  }
+}
+
+/**
+ * Publication view of a single version, resolved through the same
+ * version-over-work-over-parsed merge and the same visibility rule the listing
+ * applies. Null when the caller may not see it, so a detail page can enrich
+ * itself without ever widening access. Used by the book source, whose detail
+ * route addresses a BookVersion directly.
+ */
+export async function getLibraryVersionPublication(
+  actorId: string,
+  bookVersionId: string,
+): Promise<Pick<LibraryVersionEntry, 'versionName' | 'title' | 'description' | 'bookmeta' | 'fileName' | 'categoryName' | 'tags'> | null> {
+  const db = getDb()
+  const candidates = db.select({ libraryId: libraryBookVersions.libraryId })
+    .from(libraryBookVersions)
+    .where(eq(libraryBookVersions.bookVersionId, bookVersionId)).all()
+  for (const candidate of candidates) {
+    let manager = false
+    try {
+      await assertLibraryBrowsable(actorId, candidate.libraryId)
+      manager = await isLibraryManager(actorId, candidate.libraryId)
+    } catch (err) {
+      if (err instanceof AppError) continue
+      throw err
+    }
+    const row = db.select({
+      versionName: libraryBookVersions.name,
+      versionTitle: libraryBookVersions.title,
+      versionDescription: libraryBookVersions.description,
+      workTitle: libraryBooks.title,
+      workDescription: libraryBooks.description,
+      status: libraryBookVersions.status,
+      libraryBookId: libraryBooks.id,
+      categoryName: libraryCategories.name,
+      bookmeta: sql<Record<string, unknown> | null>`json_extract((SELECT ${contentRevisions.meta} FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1), '$.bookmeta')`,
+      workMeta: libraryBooks.meta,
+      versionMeta: libraryBookVersions.meta,
+      fileName: sql<string | null>`json_extract((SELECT ${contentRevisions.meta} FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1), '$.fileName')`,
+    }).from(libraryBookVersions)
+      .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+      .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
+      .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
+      .where(and(
+        eq(libraryBookVersions.libraryId, candidate.libraryId),
+        eq(libraryBookVersions.bookVersionId, bookVersionId),
+      )).get()
+    if (!row) continue
+    // Same asymmetry as the listing: a hidden version and an effectively hidden
+    // work are both invisible below manager, and either is enough to refuse.
+    if (!manager) {
+      if (row.status !== 'published') continue
+      const work = db.select({ id: libraryBooks.id, categoryId: libraryBooks.categoryId, hidden: libraryBooks.hidden })
+        .from(libraryBooks).where(eq(libraryBooks.id, row.libraryBookId)).get()
+      if (!work || isWorkEffectivelyHidden(db, candidate.libraryId, work)) continue
+    }
+    const tagNames = db.select({ name: libraryTags.name }).from(libraryBookTags)
+      .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
+      .where(eq(libraryBookTags.libraryBookId, row.libraryBookId))
+      .orderBy(libraryTags.sortOrder, libraryTags.name)
+      .all()
+      .map((tag) => tag.name)
+    return {
+      versionName: row.versionName,
+      title: row.versionTitle ?? row.workTitle,
+      categoryName: row.categoryName ?? null,
+      tags: tagNames,
+      description: row.versionDescription ?? row.workDescription,
+      // Same version-over-work-over-parsed merge the listing applies.
+      bookmeta: {
+        ...((row.bookmeta ?? {}) as Record<string, unknown>),
+        ...((row.workMeta ?? {}) as Record<string, unknown>),
+        ...((row.versionMeta ?? {}) as Record<string, unknown>),
+      },
+      fileName: row.fileName,
+    }
+  }
+  return null
 }
 
 export async function getCatalogBook(actorId: string, libraryId: string, libraryBookId: string) {

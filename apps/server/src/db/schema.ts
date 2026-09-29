@@ -14,6 +14,10 @@ export const users = sqliteTable('users', {
   role: text('role', { enum: ['owner', 'member', 'guest'] }).notNull().default('owner'),
   disabled: integer('disabled').notNull().default(0),
   avatarKey: text('avatar_key'),
+  // IANA zone reported by the client, used only to render timestamps the server
+  // formats (the Legado book source). NULL means UTC, which is what a server
+  // rendering for an unidentified reader has to assume anyway.
+  timezone: text('timezone'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at'),
 })

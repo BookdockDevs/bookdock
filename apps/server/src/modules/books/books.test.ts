@@ -53,6 +53,7 @@ import {
   cleanupStagedUpload,
 } from './books.service'
 import { getReaderBookSettings, updateReaderBookSettings } from './reader-settings.service'
+import { getLegadoToc } from './legado.service'
 import { createShelf, updateShelf } from '../shelves/shelves.service'
 import { createTocRule } from '../toc-rules/toc-rules.service'
 
@@ -1829,6 +1830,88 @@ describe('appendTxtBookContent', () => {
     const after = await getBook(ownerId, book.id)
     expect(after.updatedAt).toBe(before.updatedAt)
     expect(after.meta.chapters).toEqual(before.meta.chapters)
+  })
+
+  it('dates pre-existing chapters by the upload and only the appended ones by the append', async () => {
+    const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
+    const uploaded = await getBook(ownerId, book.id)
+    const uploadedAt = db.select({ createdAt: schema.contentRevisions.createdAt }).from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).get()!.createdAt
+    // A fresh upload stores no per-chapter time: every chapter shares its
+    // revision, so the field would only repeat what the revision already says.
+    expect((uploaded.meta.chapters as Array<{ addedAt?: number }>).map((c) => c.addedAt))
+      .toEqual([undefined, undefined])
+
+    await appendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
+
+    const appended = await getBook(ownerId, book.id)
+    const appendedAt = db.select({ createdAt: schema.contentRevisions.createdAt }).from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).orderBy(desc(schema.contentRevisions.revisionNo)).get()!.createdAt
+    expect(appendedAt).toBeGreaterThan(uploadedAt)
+    // The tail falls back to the new revision while the prefix keeps the time it
+    // was first seen at, which is what makes the label per chapter rather than
+    // per book.
+    expect((appended.meta.chapters as Array<{ title: string; addedAt?: number }>).map((c) => [c.title, c.addedAt]))
+      .toEqual([['第一章 启程', uploadedAt], ['第二章 旅途', uploadedAt], ['第三章 归来', undefined]])
+  })
+
+  it('sends one date for a fresh upload and splits the batches after each append', async () => {
+    // The exact strings Legado receives, on a fixed clock. A real test run does
+    // all of this inside one minute, and the label is minute-precision, so
+    // without a controlled clock every batch would collapse onto one string and
+    // the split would be invisible.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.setSystemTime(Date.UTC(2026, 0, 2, 3, 4))
+      const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
+      const dates = async () => (await getLegadoToc(ownerId, book.id)).map((c) => `${c.title}=${c.contentUpdateDate}`)
+
+      // Nothing is stored per chapter yet, so a fresh upload is one date.
+      expect(await dates()).toEqual(['第一章 启程=2026-01-02 03:04', '第二章 旅途=2026-01-02 03:04'])
+
+      vi.setSystemTime(Date.UTC(2026, 0, 3, 4, 5))
+      await appendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
+      expect(await dates()).toEqual([
+        '第一章 启程=2026-01-02 03:04',
+        '第二章 旅途=2026-01-02 03:04',
+        '第三章 归来=2026-01-03 04:05',
+      ])
+
+      vi.setSystemTime(Date.UTC(2026, 0, 4, 5, 6))
+      await appendTxtBookContent(ownerId, book.id, '第四章 后续\n\n正文四')
+      // A second append re-dates only its own chapter: the first batch keeps the
+      // upload day and the second keeps the first append, so an old chapter is
+      // never stamped with the latest touch.
+      expect(await dates()).toEqual([
+        '第一章 启程=2026-01-02 03:04',
+        '第二章 旅途=2026-01-02 03:04',
+        '第三章 归来=2026-01-03 04:05',
+        '第四章 后续=2026-01-04 05:06',
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps chapter dates when a re-toc re-derives the same chapters', async () => {
+    const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
+    await appendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
+    // A chapter with no stored time reads as the revision it lives in, so the
+    // effective date - not the stored field - is what must survive a rewrite.
+    const revisionAt = async () => db.select({ createdAt: schema.contentRevisions.createdAt }).from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).orderBy(desc(schema.contentRevisions.revisionNo)).get()!.createdAt
+    const effective = async () => {
+      const resolved = await getBook(ownerId, book.id)
+      const fallback = resolved.contentUpdatedAt
+      return (resolved.meta.chapters as Array<{ id: string; addedAt?: number }>).map((c) => [c.id, c.addedAt ?? fallback])
+    }
+
+    const before = await effective()
+    await reTocBook(ownerId, book.id)
+
+    expect(await effective()).toEqual(before)
+    // Re-reading the same file changes no bytes, so it stays the same revision.
+    expect(await revisionAt()).toBeLessThanOrEqual(before[before.length - 1]![1])
   })
 
   it('merges content without a recognized chapter title into the last chapter', async () => {

@@ -296,6 +296,23 @@ export function changeUsername(userId: string, username: string): AccountRes {
   return { id: row.id, username: row.username, role: row.role, avatarKey: row.avatarKey }
 }
 
+/**
+ * Store the reader's IANA zone so server-rendered dates can mean something to
+ * them. The Web app reports it because the browser already knows it; the field
+ * is deliberately not part of AccountRes, since nothing in the Web UI reads it
+ * back — the Web formats in the browser instead.
+ */
+export function updateTimezone(userId: string, timezone: string | null): void {
+  getDb().update(users)
+    .set({ timezone, updatedAt: Date.now() })
+    .where(eq(users.id, userId)).run()
+}
+
+export function getUserTimezone(userId: string): string | null {
+  return getDb().select({ timezone: users.timezone }).from(users)
+    .where(eq(users.id, userId)).get()?.timezone ?? null
+}
+
 export async function setupUser(username: string, password: string) {
   const db = getDb()
   if (!isSetupRequired()) {

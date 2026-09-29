@@ -793,6 +793,25 @@ describe('text replacement migration', () => {
     sqlite.close()
   })
 
+  it('adds a nullable timezone to users and stores nothing for an existing row', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrate(db, { migrationsFolder: migrationsDir })
+    // Nullable on purpose: an unidentified reader renders in UTC, which is what
+    // they saw before the zone existed, so the column must not carry a default
+    // that silently contradicts a stored value.
+    const column = (sqlite.prepare('PRAGMA table_info(users)').all() as { name: string; notnull: number; dflt_value: string | null }[])
+      .find((c) => c.name === 'timezone')
+    expect(column).toBeDefined()
+    expect(column?.notnull).toBe(0)
+    expect(column?.dflt_value).toBeNull()
+
+    sqlite.exec(`INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1)`)
+    expect(sqlite.prepare('SELECT timezone FROM users WHERE id = ?').get('u1')).toEqual({ timezone: null })
+    sqlite.close()
+  })
+
   it('backfills idea colors, styles and anchors dropped by the early annotation split', () => {
     const sqlite = new Database(':memory:')
     sqlite.pragma('foreign_keys = ON')

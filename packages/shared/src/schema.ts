@@ -642,6 +642,29 @@ export const updateUsernameSchema = z.object({
   username: z.string().transform(sanitizeUsername).pipe(z.string().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH)),
 })
 
+/**
+ * Ask the runtime instead of keeping a zone list: `Intl` throws RangeError on an
+ * unknown zone, and this value is handed straight to a formatter on every
+ * server-rendered date, so one unvalidated string would break the response for
+ * that user rather than just being ignored.
+ */
+function isSupportedTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Empty clears the stored zone, which reads as UTC. */
+export const updateTimezoneSchema = z.object({
+  timezone: z.string().trim().max(64)
+    .refine((value) => value === '' || isSupportedTimeZone(value), { message: 'Unknown time zone' })
+    .transform((value) => (value === '' ? null : value))
+    .nullable(),
+})
+
 export const updateInstanceSchema = z.object({
   allowRegistration: z.boolean().optional(),
   allowGuestAccess: z.boolean().optional(),
