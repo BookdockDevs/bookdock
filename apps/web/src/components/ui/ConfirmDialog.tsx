@@ -10,6 +10,7 @@ export interface ConfirmDialogProps {
   title: string
   message: ReactNode
   warning?: ReactNode
+  icon?: ReactNode
   confirmLabel: string
   confirmVariant?: 'danger' | 'primary'
   confirmDisabled?: boolean
@@ -25,6 +26,7 @@ export default function ConfirmDialog({
   title,
   message,
   warning,
+  icon,
   confirmLabel,
   confirmVariant = 'danger',
   confirmDisabled,
@@ -109,7 +111,7 @@ export default function ConfirmDialog({
             }
             aria-hidden="true"
           >
-            {confirmVariant === 'danger' ? <WarningIcon /> : <RestoreIcon />}
+            {icon ?? (confirmVariant === 'danger' ? <WarningIcon /> : <RestoreIcon />)}
           </div>
           <div className="min-w-0 flex-1">
             <h2 id={titleId} className="text-sm font-semibold text-stone-900 dark:text-stone-100">
@@ -118,7 +120,11 @@ export default function ConfirmDialog({
             <div id={messageId} className="mt-1.5 text-sm leading-relaxed text-stone-600 dark:text-stone-300">
               {message}
             </div>
-            {warning && <div className="mt-2 text-xs text-amber-600 dark:text-amber-500">{warning}</div>}
+            {warning && (
+              <div className="mt-2.5 rounded-lg border border-amber-200/70 bg-amber-50/70 px-2.5 py-1.5 text-xs leading-relaxed text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+                {warning}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex justify-end gap-2">

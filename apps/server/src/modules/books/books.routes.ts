@@ -33,6 +33,8 @@ import {
   organizePrivateBatch,
 } from './books.service'
 import { updateReaderBookSettings } from './reader-settings.service'
+import { forkLocalBook } from '../libraries/fork.service'
+import { getSourceStatus, repinToLatest } from '../libraries/repin.service'
 import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { getStorage } from '../../storage'
@@ -469,6 +471,29 @@ booksRoutes.post('/:id/reset-metadata', async (c) => {
   const id = c.req.param('id')
   const book = await resetBookMetadata(user.id, id, { normalizeTitle: isTitleNormalizeEnabled(user.id) })
   return c.json({ data: book })
+})
+
+// B rescue: fork a collected reference into an independent local copy.
+// The same card swaps to a new BookVersion; the city copy is untouched.
+booksRoutes.post('/:id/fork', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const result = await forkLocalBook(user.id, c.req.param('id'))
+  return c.json({ data: result }, 201)
+})
+
+// B follow-up: report whether the source published past the pin, and move
+// the pin on explicit request only. Both are private-card actions.
+booksRoutes.get('/:id/source-status', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  return c.json({ data: await getSourceStatus(user.id, c.req.param('id')) })
+})
+
+booksRoutes.post('/:id/repin', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  return c.json({ data: await repinToLatest(user.id, c.req.param('id')) })
 })
 
 booksRoutes.put('/:id/shelves', async (c) => {

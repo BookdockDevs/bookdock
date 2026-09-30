@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, CatalogBook, CatalogBookUpdateReq, CatalogListRes, CatalogVersion, CatalogVersionUpdateReq, CollectBookRes, Category, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, PublishPrivateBookRes, ReadStatus, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
+import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, BookSourceStatus, CatalogBook, CatalogBookUpdateReq, CatalogListRes, CatalogVersion, CatalogVersionUpdateReq, CollectBookRes, Category, ForkLocalRes, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, PublishPrivateBookRes, ReadStatus, RepinRes, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import { withReveal } from '@/lib/reveal-hidden'
@@ -759,6 +759,52 @@ export function useCollectBook() {
       // must stop offering the same version again.
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['books'] })
+    },
+  })
+}
+
+/**
+ * Fork a collected B into a local C (B rescue). The same card swaps to a new
+ * independent version; the caller navigates by the returned version id.
+ */
+export function useForkBook() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ bookId }: { bookId: string }) =>
+      apiPost<{ data: ForkLocalRes }>(`/books/${bookId}/fork`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+    },
+  })
+}
+
+/**
+ * Source-follow state for a B card: whether the source still reads and
+ * whether it published past the pin. Queried only for collected cards.
+ */
+export function useSourceStatus(bookId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['books', 'detail', bookId, 'source-status'],
+    queryFn: () => apiGet<{ data: BookSourceStatus }>(`/books/${bookId}/source-status`),
+    enabled: Boolean(bookId) && enabled,
+  })
+}
+
+/**
+ * Re-pin a B to its source's latest revision. Content changes under the same
+ * id, so list, detail, reader and chapter caches all refresh.
+ */
+export function useRepinBook() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ bookId }: { bookId: string }) =>
+      apiPost<{ data: RepinRes }>(`/books/${bookId}/repin`, {}),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['books', 'detail', vars.bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['book', vars.bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['chapters', vars.bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['progress', vars.bookId] })
     },
   })
 }

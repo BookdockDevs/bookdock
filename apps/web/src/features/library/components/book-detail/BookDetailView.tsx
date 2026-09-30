@@ -18,7 +18,8 @@ import { computeFromAnchor, type SmartPosition } from '@/lib/position'
 import { formatBytes, formatDate } from '@/lib/utils'
 
 import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../../download'
-import { useCollectBook } from '../../hooks'
+import { useCollectBook, useForkBook, useRepinBook, useSourceStatus } from '../../hooks'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import BookCover from '../BookCover'
 import ReadStatusChip from './ReadStatusChip'
 import { copyText, middleTruncate, isMachineIdentifier, formatLanguage } from './types'
@@ -53,8 +54,17 @@ export default function BookDetailView({
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const collectBook = useCollectBook()
+  const forkBook = useForkBook()
+  const repinBook = useRepinBook()
 
   const displayBook = detail ?? book
+  // A private B with a readable source may have an update to follow. The
+  // status query runs only for such cards, never for A/C or library reads.
+  const isPrivateB = !readOnly && Boolean(displayBook.source) && displayBook.collected !== false
+  const { data: sourceStatus } = useSourceStatus(
+    book.id,
+    isPrivateB && !displayBook.sourceUnavailable,
+  )
   const bookmeta = detail?.meta?.bookmeta
 
   const { data: replacementsData } = useBookReplacements(book.id)
@@ -65,6 +75,7 @@ export default function BookDetailView({
   const canExportEdited = displayBook.format === 'txt' && hasEffectiveRules
 
   const [downloadMenu, setDownloadMenu] = useState<SmartPosition | null>(null)
+  const [forkConfirmOpen, setForkConfirmOpen] = useState(false)
   const downloadAnchorRef = useRef<HTMLDivElement>(null)
   const downloadMenuRef = useRef<HTMLDivElement>(null)
 
@@ -280,6 +291,32 @@ export default function BookDetailView({
                 {_('library.collect')}
               </button>
             )}
+
+            {isPrivateB && !displayBook.sourceUnavailable && sourceStatus?.data.hasUpdate && (
+              // B follow-up: the source published past the pin. Following is
+              // explicit only; content changes under the same id.
+              <button
+                type="button"
+                onClick={() => repinBook.mutate({ bookId: book.id }, {
+                  onSuccess: (res) => {
+                    notify[res.data.alreadyUpToDate ? 'info' : 'success'](
+                      res.data.alreadyUpToDate ? _('library.repinAlreadyUpToDate') : _('library.repinSuccess'),
+                    )
+                  },
+                  onError: (err) => notify.error(getUserErrorNotification(err, 'library.repinFailed')),
+                })}
+                disabled={repinBook.isPending}
+                className="inline-flex items-center gap-1 rounded-full border border-blue-200/90 bg-blue-50/90 px-2.5 py-0.5 text-[11px] font-medium text-blue-700 transition-colors hover:border-blue-300 hover:bg-blue-100 dark:border-blue-800/80 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/60"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-blue-500">
+                  <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                  <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                  <path d="M16 16h5v5" />
+                </svg>
+                <span>{_('library.repinToLatest')}</span>
+              </button>
+            )}
             {shelfName && currentShelfId ? (
               <FilterChip prefix="📁" label={shelfName} onClick={() => goToFilter({ shelf: currentShelfId })} />
             ) : null}
@@ -435,6 +472,20 @@ export default function BookDetailView({
                   </SmartMenu>
                 )}
               </div>}
+              {isPrivateB && !displayBook.sourceUnavailable && (
+                <ActionIcon
+                  secondary
+                  label={_('library.forkLocal')}
+                  onClick={() => setForkConfirmOpen(true)}
+                  disabled={forkBook.isPending}
+                >
+                  <circle cx="12" cy="18" r="3" />
+                  <circle cx="6" cy="6" r="3" />
+                  <circle cx="18" cy="6" r="3" />
+                  <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" />
+                  <path d="M12 12v3" />
+                </ActionIcon>
+              )}
               {!readOnly && <div className="ml-auto">
                 <ActionIcon label={displayBook.source ? _('library.removeFromLibrary') : _('library.delete')} danger onClick={() => onDelete(book)}>
                   <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
@@ -502,6 +553,39 @@ export default function BookDetailView({
           </dl>
         </div>
       </section>
+
+      {forkConfirmOpen && (
+        <ConfirmDialog
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="18" r="3" />
+              <circle cx="6" cy="6" r="3" />
+              <circle cx="18" cy="6" r="3" />
+              <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" />
+              <path d="M12 12v3" />
+            </svg>
+          }
+          title={_('library.forkLocalTitle')}
+          message={_('library.forkLocalConfirm')}
+          warning={_('library.forkLocalWarning')}
+          confirmLabel={_('library.forkLocalConfirmBtn')}
+          confirmVariant="primary"
+          confirmDisabled={forkBook.isPending}
+          onConfirm={() => forkBook.mutate({ bookId: book.id }, {
+            onSuccess: () => {
+              notify.success(_('library.forkLocalSuccess'))
+              void queryClient.invalidateQueries({ queryKey: ['books'] })
+              setForkConfirmOpen(false)
+              onClose()
+            },
+            onError: (err) => {
+              notify.error(getUserErrorNotification(err, 'library.forkLocalFailed'))
+              setForkConfirmOpen(false)
+            },
+          })}
+          onClose={() => setForkConfirmOpen(false)}
+        />
+      )}
     </div>
   )
 }

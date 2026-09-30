@@ -6,6 +6,7 @@ import BookCard from '../features/library/components/BookCard'
 const mutateMock = vi.fn()
 vi.mock('../features/library/hooks', () => ({
   useUpdateBook: () => ({ mutate: mutateMock }),
+  useForkBook: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
 vi.mock('@/hooks/useTranslation', () => ({

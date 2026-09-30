@@ -353,6 +353,9 @@ export type {
   PublishPrivateBookReq,
   PublishPrivateBookRes,
   BookSourceInfo,
+  ForkLocalRes,
+  BookSourceStatus,
+  RepinRes,
   BatchSelectionItem,
   BatchOrganizeReq,
 } from './library'

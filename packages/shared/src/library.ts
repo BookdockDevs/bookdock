@@ -538,6 +538,37 @@ export interface BookSourceInfo {
   libraryName: string | null
 }
 
+/**
+ * Fork a private B into a local C (B rescue). The same card swaps to a new
+ * independent BookVersion built from the pinned revision; the city copy and
+ * other readers are untouched. The forker's own User x BookVersion reading
+ * data moves to the new version.
+ */
+export interface ForkLocalRes {
+  libraryBookId: string
+  bookVersionId: string
+}
+
+/**
+ * Source-follow state for a private B. `readable` mirrors the read gate;
+ * `hasUpdate` is true only while the source is readable and its latest
+ * revision differs from the pin. Null for A/C rows.
+ */
+export interface BookSourceStatus {
+  readable: boolean
+  pinnedRevisionId: string | null
+  latestRevisionId: string | null
+  latestRevisionNo: number | null
+  hasUpdate: boolean
+}
+
+/** Re-pin a private B to its source's latest revision. */
+export interface RepinRes {
+  pinnedRevisionId: string
+  revisionNo: number
+  alreadyUpToDate: boolean
+}
+
 // ------------------------------------------------------- Reading data
 
 /**

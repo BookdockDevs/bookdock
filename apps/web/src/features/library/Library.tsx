@@ -26,6 +26,7 @@ import { useAuthStore } from '@/stores/auth.store'
 
 import { ApiError } from '@/api/client'
 import { notify } from '@/lib/notifications'
+import { getUserErrorNotification } from '@/lib/error-message'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 
 import { indexRoute, type LibrarySearch } from '@/routes/index'
@@ -59,7 +60,7 @@ import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, resolveD
 import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-row'
 import { libraryUrlCorrection, vanishedFilterCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
-import { useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
+import { useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
 
 
 function estimateDynColumns(): number {  if (typeof window === 'undefined') return 4
@@ -212,12 +213,14 @@ export default function Library() {
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false)
   const [detailTarget, setDetailTarget] = useState<BookListItem | null>(null)
   const [publishTarget, setPublishTarget] = useState<BookListItem | null>(null)
+  const [forkTarget, setForkTarget] = useState<BookListItem | null>(null)
   const [workDetail, setWorkDetail] = useState<CatalogBook | null>(null)
   const [selection, setSelection] = useState<Set<string>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
   const lastSelectIndexRef = useRef<number | null>(null)
   const selectionActive = selectionMode || selection.size > 0
   const deleteBook = useDeleteBook()
+  const forkBook = useForkBook()
   const restoreBook = useRestoreBook()
   const permanentDeleteBook = usePermanentDeleteBook()
   const emptyTrash = useEmptyTrash()
@@ -1081,6 +1084,7 @@ export default function Library() {
                         readOnly={isGuest}
                         onDelete={isGuest ? undefined : setDeleteTarget}
                         onPublish={canPublishBook(book) ? setPublishTarget : undefined}
+                        onFork={isGuest ? undefined : setForkTarget}
                         onShowDetails={setDetailTarget}
                       />
                     </Link>
@@ -1118,6 +1122,7 @@ export default function Library() {
                     readOnly={isGuest}
                     onDelete={isGuest ? undefined : setDeleteTarget}
                     onPublish={canPublishBook(book) ? setPublishTarget : undefined}
+                    onFork={isGuest ? undefined : setForkTarget}
                     onShowDetails={setDetailTarget}
                   />
                 )
@@ -1236,6 +1241,35 @@ export default function Library() {
           onOpenLibrary={(libraryId) => {
             setPublishTarget(null)
             handleSwitchLibrary(libraryId)
+          }}
+        />
+      )}
+
+      {forkTarget && (
+        <ConfirmDialog
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="18" r="3" />
+              <circle cx="6" cy="6" r="3" />
+              <circle cx="18" cy="6" r="3" />
+              <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" />
+              <path d="M12 12v3" />
+            </svg>
+          }
+          title={_('library.forkLocalTitle')}
+          message={_('library.forkLocalConfirm')}
+          warning={_('library.forkLocalWarning')}
+          confirmLabel={_('library.forkLocalConfirmBtn')}
+          confirmVariant="primary"
+          confirmDisabled={forkBook.isPending}
+          onClose={() => setForkTarget(null)}
+          onConfirm={() => {
+            const target = forkTarget
+            setForkTarget(null)
+            forkBook.mutate({ bookId: target.id }, {
+              onSuccess: () => notify.success(_('library.forkLocalSuccess')),
+              onError: (err) => notify.error(getUserErrorNotification(err, 'library.forkLocalFailed')),
+            })
           }}
         />
       )}

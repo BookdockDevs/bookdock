@@ -85,16 +85,21 @@ function StatusFlyout({ book, onClose }: { book: BookListItem; onClose: () => vo
   )
 }
 
-export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPublish, onDelete, onClose }: {
+export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPublish, onFork, onDelete, onClose }: {
   book: BookListItem
   readOnly?: boolean
   onShowDetails?: (book: BookListItem) => void
   onPublish?: (book: BookListItem) => void
+  onFork?: (book: BookListItem) => void
   onDelete?: (book: BookListItem) => void
   onClose: () => void
 }) {
   const _ = useTranslation()
   const updateBook = useUpdateBook()
+  // B to a personal copy while the source still reads; A/C rows and library
+  // reads (collected === false) have no source binding to cut. The actual
+  // confirm lives with the caller, like onPublish/onDelete.
+  const canFork = Boolean(onFork) && Boolean(book.source) && book.collected !== false && !book.sourceUnavailable
   return (
     <>
       <MenuHeader
@@ -142,6 +147,28 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
         </MenuIcon>
         {_('library.download')}
       </button>
+
+      {canFork && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onClose()
+            onFork!(book)
+          }}
+          className={itemClass}
+        >
+          <MenuIcon>
+            <circle cx="12" cy="18" r="3" />
+            <circle cx="6" cy="6" r="3" />
+            <circle cx="18" cy="6" r="3" />
+            <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" />
+            <path d="M12 12v3" />
+          </MenuIcon>
+          {_('library.forkLocal')}
+        </button>
+      )}
 
       {divider}
 

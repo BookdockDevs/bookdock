@@ -146,6 +146,17 @@ become unreadable. Versions listed by no library are deleted with their
 database-backed personal reading records. Batch confirmation reports the
 distinct effects before any write.
 
+A private B with a readable source can be forked into a local C:
+the same card keeps its work, shelf and tags, but its version link swaps to a
+new independent `BookVersion` (a fresh revision reusing the pinned blob, no
+physical copy) with `kind: 'local'` and cleared source binding, so local-only
+operations (re-toc, append) become available on it. Forking requires the
+source to still be readable — an unlisted source or a deleted/lost library is
+an admin revocation, and forking past it would defeat that control. The
+forker's own `User x BookVersion` reading data moves to the new version; the
+city copy is untouched. Re-pinning a B to the source's latest revision is
+always an explicit user action, never automatic.
+
 ### Hidden (visibility) boundary
 
 Hiding is a visibility switch, never deletion: hidden rows stay intact and are
