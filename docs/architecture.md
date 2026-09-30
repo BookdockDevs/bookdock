@@ -1,6 +1,6 @@
 # Bookdock Architecture
 
-> Last updated: 2026-09-26 · This document is the authoritative architecture blueprint; the code follows it. When an architectural decision changes, update this document first, then change the code.
+> Last updated: 2026-09-30 · This document is the authoritative architecture blueprint; the code follows it. When an architectural decision changes, update this document first, then change the code.
 
 ---
 

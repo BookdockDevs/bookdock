@@ -6,6 +6,11 @@ import { BOOKDOCK_BUILD_INFO } from '@bookdock/shared'
 import systemRoutes from './system.routes'
 import { clearUpdateCheckCache } from './system.service'
 
+vi.mock('@bookdock/shared', async (importOriginal) => {
+  const shared = await importOriginal<typeof import('@bookdock/shared')>()
+  return { ...shared, BOOKDOCK_BUILD_INFO: { ...shared.BOOKDOCK_BUILD_INFO, version: '0.3.0' } }
+})
+
 const CURRENT_VERSION = BOOKDOCK_BUILD_INFO.version
 const AVAILABLE_VERSION = '0.4.0'
 const AVAILABLE_TAG = `v${AVAILABLE_VERSION}`

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { apiPut } from '@/api/client'
 import { reportBrowserTimezone } from '@/features/auth/report-timezone'
@@ -9,6 +9,14 @@ describe('reportBrowserTimezone', () => {
   beforeEach(() => {
     sessionStorage.clear()
     vi.mocked(apiPut).mockClear()
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+      ...new Intl.DateTimeFormat().resolvedOptions(),
+      timeZone: 'Asia/Shanghai',
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('sends the browser zone once per tab and not again for the same zone', async () => {

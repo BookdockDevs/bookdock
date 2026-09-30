@@ -16,6 +16,11 @@ import { config } from '../../config'
 
 const { settings } = vi.hoisted(() => ({ settings: { dataDir: '', launcherNonce: 'test-nonce' as string | undefined } }))
 
+vi.mock('@bookdock/shared', async (importOriginal) => {
+  const shared = await importOriginal<typeof import('@bookdock/shared')>()
+  return { ...shared, BOOKDOCK_BUILD_INFO: { ...shared.BOOKDOCK_BUILD_INFO, version: '0.3.0' } }
+})
+
 vi.mock('../../config', async () => {
   const os = await import('node:os')
   const nodePath = await import('node:path')

@@ -2,17 +2,67 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.3.8] - Unreleased
+## [0.4.0] - 2026-09-30
+
+### Highlights
+
+- Shared libraries (online library): every user keeps a private library, and owners can create shared libraries with public/password/private visibility, invite codes, admin/member roles, ownership transfer, and per-library categories/tags.
+- Snapshot publishing: an owner or admin publishes a private book into a shared library without moving it, and republishing identical content is idempotent. Readers collect shared works into their private library, and can fork a collected copy into an independent personal version with an explicit re-pin when the source updates.
+- Catalog reading UX: shared works open directly for reading with version tabs, default-version ordering, work/version metadata overrides, and per-listing guest readability.
+- Visibility is member-scoped: hiding a work, version, category, or tag hides it from ordinary members only. Managers keep reading, downloading, and collecting, with consistent badges across cards, rows, and the detail dialog.
+- Shared-library trash: owner-only list/restore/empty/configure with per-library retention and capacity rules. Managers soft-delete into it, members never see it.
+- Token-scoped external API at `/api/v1/ext`: six endpoints with one permission each; `/api/v1/**` is no longer reachable with an access token.
+- The Legado book source now projects the live library model (private plus joined shared libraries), with timezone-aware dates and per-chapter timestamps.
+- Settings ownership cleanup: library-home and profile preferences are per-user server settings, and reading preferences resolve from `readingConfig` with backfill defaults.
+
+### Added
+
+- Shared libraries, memberships, invites (Crockford-base32 codes), join-by-token discovery, ownership transfer, and instance switches `allowUserCreateLibrary`/`allowUserUpload`.
+- Publish/collect/fork/re-pin endpoints with shared contracts; uncollecting offers an optional personal-data wipe.
+- Per-book reader settings stored per user (`PATCH /books/:id/reader-settings`); legacy revision-meta values migrate on first read.
+- Multi-author metadata: authors list, first-author mirror, and per-author filter chips.
+- Avatar thumbnails (256px WebP, on demand, disk-cached).
+- Per-library trash settings with owner trash UI; cover placeholders render the title under the artwork, and coverless-EPUB results are cached on the revision.
+- External API (libraries/books/detail/file/upload/delete) with `updatedSince` sync filtering and head counts plus taxonomy per library.
+- `users.timezone` with server-side date formatting for Legado; chapter `addedAt` carried across append and re-toc.
+- Batch hide/show promoted to top-level selection-bar buttons; selection survives filter, search, sort, and page changes within one library.
+- In-detail upload-as-new-version reusing the upload sheet with auto-select; version count badges on shared cards and rows.
+- Owner user provisioning and account deletion UI with owned-library guards.
+
+### Changed
+
+- Catalog uploads land in the current category and private uploads on the current shelf; the upload sheet was rewritten with staged/running/settled states and per-shelf duplicate reporting.
+- Hiding replaces unlisting wording everywhere (隐藏/显示); work and version hides are independent at every version count.
+- The sidebar lists joined libraries with per-library taxonomy, ordering, hiding, and renaming; reveal-hidden moved to the view menu.
+- Legado discovery shows one section group per browsable library; version labels ride in kind badges; search takes `scope=joined|private`.
+- `PUT /settings` merges the stored library/profile blobs instead of re-listing fields; the guest sort/view fallback is guest-only; the `ui` blob drops the unread flat reading duplicates.
+- The access-token permission registry covers `ext:*`; token CORS stays scoped to `Bearer bd_...` requests.
+- The cover palette hashes a stable key carried across publish snapshots, so private and shared cards share one placeholder color.
+
+### Fixed
+
+- Similar-works suggestions withhold hidden works from non-managers.
+- Fixed the `json_extract` bookmeta object bug: publication fields (publisher, series, ISBN) resolve again in book-source detail.
+- Stale shelf/category/tag filters clear once the sidebar loads; the empty-filter state offers to clear filters instead of a dead retry.
+- Shelf/tag counts refresh on book mutations without over-invalidation.
+- Date display unified through a shared locale-pinned formatter.
+- EPUB page backgrounds fill the page in paginated mode and keep painting in-document while scrolled.
+- Opening a deleted shared work bounces back to the private library with a toast instead of stranding the reader.
+- Notes overflow measured with clamping and uniform expand controls; bookmark cards show chapters; the notes filter fixed.
+
+### Upgrade notes
+
+- Back up the complete `DATA_DIR` before upgrading. Migrations 0018–0031 apply automatically (shared libraries, invites, work/version meta, default version, pins, instance switches, timezone, trash settings).
+- Breaking: access tokens can no longer reach `/api/v1/**`. Grant `ext:*` permissions for automation clients and point them at `/api/v1/ext`.
+
+## [0.3.8] - 2026-09-26
 
 ### Highlights
 
 - Bookmark and idea annotations recovered their full content after the library-model migration: bookmarks show their saved excerpts again, and ideas keep their colors and styles.
-- Hiding a book in a shared library now only hides it from ordinary members. Library owners and admins keep reading, downloading and collecting whatever they hid, whether the hide came from the work, from one of its versions, or from its category or tags.
 
 ### Fixed
 
-- A shared-library work hidden through its category or tags is no longer reported as visible inside its own detail dialog. The hide control there is now inert and explains in its tooltip that the hide belongs to the category or tag, instead of offering a toggle that would have changed the wrong layer.
-- Hiding a one-version work no longer silently hides its version too, so a work behaves the same whether it has one version or several, and the detail dialog's hide control now changes the layer it describes.
 - Retrying a failed in-panel update now follows the latest release instead of replaying a stale target, and the update dialog no longer shows duplicate banners or Close buttons.
 - Server-sent update progress details are localized instead of leaking English action strings.
 - Bookmark renames persist, and bookmark/idea reads return the stored snippet, title, color, style, and chapter reference.
@@ -390,7 +440,60 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.3.8] - 待发布
+### [0.4.0] - 2026-09-30
+
+#### 主要更新
+
+- 共享书库（在线书库）：每人保留私人书库，拥有者可创建共享书库，支持公开/密码/私密可见性、邀请码、管理员/成员角色、所有权转移，以及每个书库独立的分类/标签。
+- 快照发布：拥有者或管理员把私人书籍发布到共享书库，原文不动；重复发布相同内容幂等返回。读者可收藏共享作品到私人书库，也可把收藏分叉为独立的个人版本，并在源更新后手动跟进。
+- 目录阅读体验：共享作品可直接打开阅读，支持版本页签、默认版本排序、作品/版本元数据覆盖，以及按书库配置的访客可读。
+- 可见性只对普通成员生效：隐藏作品、版本、分类或标签后，管理员仍可阅读、下载和收藏；卡片、列表与详情弹窗的隐藏标记保持一致。
+- 共享书库回收站：仅拥有者可查看、恢复、清空和配置，每个书库独立的保留期与容量规则；管理员删除进入回收站，成员不可见。
+- 令牌范围的外部接口 `/api/v1/ext`：六个端点各对应一个权限；访问令牌不再能调用 `/api/v1/**`。
+- 开源阅读书源改为投影实时书库模型（私人＋已加入的共享书库），日期按用户时区渲染，章节带时间戳。
+- 设置归属清理：书库主页与个人主页偏好改为按用户的服务端设置；阅读偏好统一从 `readingConfig` 解析，未填键按默认值回填。
+
+#### 新增
+
+- 共享书库、成员、邀请码、扫码/口令加入、所有权转移，以及 `allowUserCreateLibrary`/`allowUserUpload` 实例开关。
+- 发布/收藏/分叉/跟进端点与共享契约；取消收藏时可选择同时清除个人阅读数据。
+- 按用户存储的单书阅读设置（`PATCH /books/:id/reader-settings`）；旧版本元数据中的值首次读取时迁移。
+- 多作者元数据：作者列表、首作者镜像与按作者筛选。
+- 头像缩略图（256px WebP，按需生成，磁盘缓存）。
+- 按书库的回收站设置与拥有者回收站界面；封面占位标题移到配图下方，无封面 EPUB 的解析结果缓存到版本。
+- 外部接口（书库/书籍/详情/文件/上传/删除），支持 `updatedSince` 同步过滤，每个书库携带数量与分类体系。
+- `users.timezone` 与服务端日期格式化；章节 `addedAt` 在追写与重建目录时保留。
+- 批量隐藏/显示提升为选择栏顶层按钮；同一书库内切换筛选、搜索、排序与分页不再清空选择。
+- 详情弹窗内可直接上传新版本（复用上传面板并自动选中）；共享卡片与列表行显示版本数徽标。
+- 拥有者用户开通与账户删除界面（含名下书库保护）。
+
+#### 变更
+
+- 目录上传落到当前分类，私人上传落到当前书架；上传面板重写为待上传/进行中/已 settled 三态，并按书架报告重复。
+- 隐藏取代下架文案（隐藏/显示）；作品与版本隐藏在任何版本数量下相互独立。
+- 侧栏列出已加入的书库与各自的分类体系，支持排序、隐藏与重命名；显示隐藏开关移到视图菜单。
+- 书源发现页按可浏览书库分组；版本标签走 kind 徽标；搜索支持 `scope=joined|private`。
+- `PUT /settings` 合并已存的 library/profile 对象而不再逐字段枚举；访客排序/视图回退仅对访客生效；`ui` 去掉从未被读取的扁平阅读字段。
+- 访问令牌权限表覆盖 `ext:*`；令牌 CORS 仍限定 `Bearer bd_...` 请求。
+- 封面占位按稳定键哈希并随发布快照传递，私人与共享卡片同书同色。
+
+#### 修复
+
+- 相似推荐不再向非管理员泄露隐藏作品。
+- 修复 `json_extract` 书籍元数据对象解析错误：书源详情重新显示出版社、丛书与 ISBN。
+- 书架/分类/标签删除或隐藏后，过期筛选项在侧栏加载后自动清除；空筛选态提供清除筛选入口。
+- 书籍变更后刷新书架/标签计数且不超范围失效。
+- 日期显示统一走共享格式化器并固定语言。
+- EPUB 页面背景在分页模式铺满页面，滚动模式下随正文绘制。
+- 打开已被删除的共享作品时回到私人书库并提示，而不是停在原地。
+- 笔记溢出按钳制测量并统一展开控件；书签卡片显示章节；笔记筛选修复。
+
+#### 升级说明
+
+- 升级前请完整备份 `DATA_DIR`。迁移 0018–0031 自动执行（共享书库、邀请、作品/版本元数据、默认版本、置顶、实例开关、时区、回收站设置）。
+- 不兼容变更：访问令牌不再能调用 `/api/v1/**`；自动化客户端请授予 `ext:*` 权限并改用 `/api/v1/ext`。
+
+### [0.3.8] - 2026-09-26
 
 #### 主要更新
 
