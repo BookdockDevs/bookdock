@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import type { AccessToken, AccessTokenCreateRes } from '@bookdock/shared'
+import { ACCESS_TOKEN_PERMISSION_REGISTRY } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost } from '@/api/client'
 import AccessTokensSection from '@/features/settings/components/AccessTokensSection'
@@ -22,7 +23,7 @@ vi.mock('@/lib/notifications', () => ({
 const LISTED: AccessToken = {
   id: 't1',
   name: '浏览器扩展',
-  permissions: ['book:list', 'book:file'],
+  permissions: ['ext:books', 'ext:file'],
   tokenLast4: 'x7f2',
   createdAt: 1_700_000_000_000,
   expiresAt: 1_800_000_000_000,
@@ -60,7 +61,7 @@ describe('AccessTokensSection', () => {
 
     expect(await screen.findByText('浏览器扩展')).toBeInTheDocument()
     expect(screen.getByText(/x7f2/)).toBeInTheDocument()
-    expect(screen.getByText(/浏览书库 · 下载书籍/)).toBeInTheDocument()
+    expect(screen.getByText(/列出书籍 · 下载书籍文件/)).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: '禁用令牌' })).toHaveAttribute('aria-checked', 'true')
   })
 
@@ -83,7 +84,10 @@ describe('AccessTokensSection', () => {
     fireEvent.click(await screen.findByRole('button', { name: /创建令牌/ }))
 
     const checkboxes = screen.getAllByRole('checkbox')
-    expect(checkboxes).toHaveLength(4)
+    // Ticked by label rather than by position: the registry order is not a
+    // contract, and an index silently retargets the wrong permission the next
+    // time one is inserted.
+    expect(checkboxes).toHaveLength(ACCESS_TOKEN_PERMISSION_REGISTRY.length)
     for (const checkbox of checkboxes) expect(checkbox).not.toBeChecked()
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '新令牌' } })
@@ -104,12 +108,12 @@ describe('AccessTokensSection', () => {
     renderSection()
     fireEvent.click(await screen.findByRole('button', { name: /创建令牌/ }))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '脚本' } })
-    fireEvent.click(screen.getAllByRole('checkbox')[3]!)
+    fireEvent.click(screen.getByRole('checkbox', { name: /上传书籍/ }))
     fireEvent.click(screen.getByRole('button', { name: '永久' }))
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() =>
-      expect(apiPost).toHaveBeenCalledWith('/tokens', { name: '脚本', permissions: ['book:upload'], expiresIn: 'permanent' }),
+      expect(apiPost).toHaveBeenCalledWith('/tokens', { name: '脚本', permissions: ['ext:upload'], expiresIn: 'permanent' }),
     )
   })
 
@@ -122,23 +126,24 @@ describe('AccessTokensSection', () => {
   })
 
   it('edits a token name, permissions and expiry', async () => {
-    vi.mocked(apiPatch).mockResolvedValue({ data: { ...LISTED, name: '脚本', permissions: ['book:upload'] } })
+    vi.mocked(apiPatch).mockResolvedValue({ data: { ...LISTED, name: '脚本', permissions: ['ext:upload'] } })
     renderSection([LISTED])
 
     fireEvent.click(await screen.findByRole('button', { name: '编辑令牌' }))
     expect(screen.getByRole('heading', { name: '编辑访问令牌' })).toBeInTheDocument()
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '脚本' } })
-    fireEvent.click(screen.getAllByRole('checkbox')[3]!)
-    fireEvent.click(screen.getAllByRole('checkbox')[0]!)
-    fireEvent.click(screen.getAllByRole('checkbox')[2]!)
+    // LISTED starts as ext:books + ext:file; swap both for ext:upload.
+    fireEvent.click(screen.getByRole('checkbox', { name: /上传书籍/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /列出书籍/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /下载书籍文件/ }))
     fireEvent.click(screen.getByRole('button', { name: '1 年' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() =>
       expect(apiPatch).toHaveBeenCalledWith('/tokens/t1', {
         name: '脚本',
-        permissions: ['book:upload'],
+        permissions: ['ext:upload'],
         expiresIn: '1y',
       }),
     )

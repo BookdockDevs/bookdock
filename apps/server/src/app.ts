@@ -17,6 +17,7 @@ import usersRoutes from './modules/users/users.routes'
 import avatarsRoutes from './modules/avatars/avatars.routes'
 import booksRoutes from './modules/books/books.routes'
 import legadoRoutes from './modules/books/legado.routes'
+import extRoutes from './modules/ext/ext.routes'
 import progressRoutes from './modules/progress/progress.routes'
 import readingRecordsRoutes from './modules/reading-records/reading-records.routes'
 import settingsRoutes from './modules/settings/settings.routes'
@@ -62,6 +63,7 @@ app.route('/api/v1/users', usersRoutes)
 app.route('/api/v1/avatars', avatarsRoutes)
 app.route('/api/v1/books', booksRoutes)
 app.route('/api/v1/legado', legadoRoutes)
+app.route('/api/v1/ext', extRoutes)
 app.route('/api/v1/progress', progressRoutes)
 app.route('/api/v1/reading-records', readingRecordsRoutes)
 app.route('/api/v1/settings', settingsRoutes)

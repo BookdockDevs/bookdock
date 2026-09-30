@@ -31,6 +31,14 @@ export interface LibraryListQuery {
   format?: 'epub' | 'txt'
   author?: string
   series?: string
+  /**
+   * Unix ms; keep only rows whose newer of (work touched, content revised) is at
+   * least this. Both halves matter: adding a version or editing metadata moves
+   * the work, while appending to or replacing a file's content only produces a
+   * new revision, so filtering on the work alone would make a content change
+   * invisible to a client syncing on a watermark.
+   */
+  updatedSince?: number
 }
 
 /** Which sort keys this list can honour. Missing keys simply do not apply. */
@@ -318,6 +326,9 @@ export function sharedListConditions(query: LibraryListQuery, libraryId: string,
       WHERE filter_version.format = ${format}
       ${opts?.publishedOnly ? sql`AND filter_link.status = 'published'` : sql``}
     )`)
+  }
+  if (typeof query.updatedSince === 'number' && Number.isFinite(query.updatedSince)) {
+    conditions.push(sql`max(${libraryBooks.updatedAt}, ${contentRevisions.createdAt}) >= ${query.updatedSince}`)
   }
   return conditions
 }

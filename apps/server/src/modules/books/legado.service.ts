@@ -42,12 +42,17 @@ export interface LegadoExploreFilter {
 }
 
 /**
- * Libraries the reader may browse from the book source: their own private
- * library first, then the shared ones they actually joined (owner, admin or
- * member). A public library they never joined is not in the source, matching
- * the Web sidebar, which also omits unjoined rows.
+ * Libraries a reader may browse from a client that lists "my books": their own
+ * private library first, then the shared ones they actually joined (owner, admin
+ * or member). A public library they never joined is deliberately absent — both
+ * the book source's discovery page and the external API mirror the Web sidebar,
+ * which omits unjoined rows, rather than `GET /libraries` which lists them for
+ * discovery.
+ *
+ * Shared by the book source and the external API, so it is named for the rule
+ * rather than for either client.
  */
-export function listLegadoLibraries(userId: string): { id: string; name: string; type: 'private' | 'shared'; private: boolean }[] {
+export function listBrowsableLibraries(userId: string): { id: string; name: string; type: 'private' | 'shared'; private: boolean }[] {
   const db = getDb()
   const privateLibrary = db.select({ id: libraries.id, name: libraries.name }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
@@ -101,7 +106,7 @@ function categoryDepths(rows: { id: string; parentId: string | null }[]): Map<st
  */
 export async function getLegadoExploreConfig(userId: string): Promise<LegadoExploreConfigRes> {
   const rows: LegadoExploreLibrary[] = []
-  for (const library of listLegadoLibraries(userId)) {
+  for (const library of listBrowsableLibraries(userId)) {
     const showHidden = await isLibraryManager(userId, library.id)
     const [categories, tags, works] = await Promise.all([
       listLegadoCategories(library.id, showHidden),
@@ -166,7 +171,7 @@ export function legadoPrivateLibraryId(userId: string): string {
 
 /** Every library the reader joined, private library first. */
 export function legadoJoinedLibraryIds(userId: string): string[] {
-  const libs = listLegadoLibraries(userId)
+  const libs = listBrowsableLibraries(userId)
   return libs.length > 0 ? libs.map((row) => row.id) : [legadoPrivateLibraryId(userId)]
 }
 

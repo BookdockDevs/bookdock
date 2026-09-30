@@ -18,7 +18,14 @@
  * these strings.
  */
 
-export const ACCESS_TOKEN_PERMISSIONS = ['book:list', 'book:read', 'book:file', 'book:upload'] as const
+export const ACCESS_TOKEN_PERMISSIONS = [
+  'ext:libraries',
+  'ext:books',
+  'ext:book',
+  'ext:file',
+  'ext:upload',
+  'ext:delete',
+] as const
 
 export const ACCESS_TOKEN_NAME_MAX_LENGTH = 64
 
@@ -37,24 +44,43 @@ export interface AccessTokenPermissionDefinition {
 
 export const ACCESS_TOKEN_PERMISSION_REGISTRY: readonly AccessTokenPermissionDefinition[] = [
   {
-    id: 'book:list',
-    endpoints: ['GET /api/v1/books'],
-    description: 'List, search and filter the books in the library.',
+    id: 'ext:libraries',
+    // Carries each library's head counts and its whole shelf/tag taxonomy, so a
+    // client can place an upload without a second round trip to discover ids.
+    endpoints: ['GET /api/v1/ext/libraries'],
+    description: 'List the libraries the account can browse, with its role, write access, head counts and taxonomy on each.',
   },
   {
-    id: 'book:read',
-    endpoints: ['GET /api/v1/books/:id'],
-    description: 'Read a book\'s detail metadata.',
+    id: 'ext:books',
+    endpoints: ['GET /api/v1/ext/books'],
+    description: 'List or search books across the browsable libraries, one row per version.',
   },
   {
-    id: 'book:file',
-    endpoints: ['GET /api/v1/books/:id/file', 'HEAD /api/v1/books/:id/file'],
-    description: 'Download or range-read the book file (reader loading and the download button).',
+    id: 'ext:book',
+    endpoints: ['GET /api/v1/ext/books/:versionId'],
+    description: 'Read one book\'s detail metadata, with the cover thumbnail inlined.',
   },
   {
-    id: 'book:upload',
-    endpoints: ['POST /api/v1/books'],
-    description: 'Upload a new book.',
+    id: 'ext:file',
+    // HEAD rides with GET because it is the same read, and a client that can
+    // fetch bytes can ask for their length.
+    endpoints: ['GET /api/v1/ext/books/:versionId/file', 'HEAD /api/v1/ext/books/:versionId/file'],
+    // Deliberately separate from the listing: a token that can enumerate a
+    // library but not pull its files cannot exfiltrate the library, which is the
+    // difference that matters if the token ever lands in a CI log.
+    description: 'Download the book file, with range support.',
+  },
+  {
+    id: 'ext:upload',
+    endpoints: ['POST /api/v1/ext/books'],
+    description: 'Upload a book, optionally into a named library.',
+  },
+  {
+    id: 'ext:delete',
+    // Only ever the recoverable delete. The Web owns the trash, so a token cannot
+    // leave the library in a state its owner has no way to undo from the UI.
+    endpoints: ['DELETE /api/v1/ext/books/:versionId'],
+    description: 'Move a book to the trash.',
   },
 ]
 

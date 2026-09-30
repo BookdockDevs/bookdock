@@ -382,7 +382,15 @@ export interface LibraryVersionEntry {
   hidden: boolean
   pinnedAt: number | null
   createdAt: number
+  /** When the work row was last touched: metadata, membership or a new version. */
   updatedAt: number
+  /**
+   * When the file behind this version was last revised. Separate from
+   * `updatedAt` because content changes do not touch the work, and a client
+   * syncing on a watermark needs to see both — `updatedSince` filters on the
+   * newer of the two.
+   */
+  contentUpdatedAt: number
 }
 
 export async function listLibraryVersionEntries(
@@ -451,16 +459,20 @@ export async function listLibraryVersionEntries(
     coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey})`,
     categoryId: libraryBooks.categoryId,
     categoryName: libraryCategories.name,
-    wordCount: sql<number | null>`${revMeta('$.wordCount')}`,
-    bookmeta: sql<Record<string, unknown> | null>`${revMeta('$.bookmeta')}`,
+    // A real column, not json_extract on the meta blob that also stores a copy.
+    wordCount: contentRevisions.wordCount,
+    // Selected whole and read in JS. `json_extract` unquotes scalars but returns
+    // an *object* value as its JSON text, so extracting `$.bookmeta` and then
+    // spreading it produced a char-index object rather than the metadata.
+    revisionMeta: contentRevisions.meta,
     workMeta: libraryBooks.meta,
     versionMeta: libraryBookVersions.meta,
-    fileName: sql<string | null>`${revMeta('$.fileName')}`,
     kind: libraryBookVersions.kind,
     hidden: sql<boolean>`${libraryBooks.hidden}`,
     pinnedAt: libraryBookVersions.pinnedAt,
     createdAt: libraryBooks.createdAt,
     updatedAt: libraryBooks.updatedAt,
+    contentUpdatedAt: contentRevisions.createdAt,
   }).from(libraryBookVersions)
     .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
     .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
@@ -512,6 +524,7 @@ export async function listLibraryVersionEntries(
 
   return {
     items: rows.map((row) => {
+      const revisionMeta = (row.revisionMeta ?? {}) as { bookmeta?: Record<string, unknown>; fileName?: unknown }
       return {
         bookVersionId: row.bookVersionId,
         libraryBookId: row.libraryBookId,
@@ -533,16 +546,17 @@ export async function listLibraryVersionEntries(
         // json_patch applies one patch at a time, and the three layers live in
         // different tables anyway.
         bookmeta: {
-          ...((row.bookmeta ?? {}) as Record<string, unknown>),
+          ...(revisionMeta.bookmeta ?? {}),
           ...((row.workMeta ?? {}) as Record<string, unknown>),
           ...((row.versionMeta ?? {}) as Record<string, unknown>),
         },
-        fileName: row.fileName,
+        fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
         kind: row.kind,
         hidden: row.hidden,
         pinnedAt: row.pinnedAt,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
+        contentUpdatedAt: row.contentUpdatedAt,
       }
     }),
     total,
@@ -584,10 +598,15 @@ export async function getLibraryVersionPublication(
       status: libraryBookVersions.status,
       libraryBookId: libraryBooks.id,
       categoryName: libraryCategories.name,
-      bookmeta: sql<Record<string, unknown> | null>`json_extract((SELECT ${contentRevisions.meta} FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1), '$.bookmeta')`,
+      // The whole meta blob, read in JS below. Extracting `$.bookmeta` in SQL
+      // returned the object's JSON text (json_extract only unquotes scalars) and
+      // the spread then produced a char-index object, so every publication field
+      // resolved as missing. One subquery now serves both keys.
+      // Typed as the raw text a sql fragment yields: it bypasses the column's
+      // json mode, so the value is parsed by hand rather than by drizzle.
+      revisionMeta: sql<string | null>`(SELECT ${contentRevisions.meta} FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1)`,
       workMeta: libraryBooks.meta,
       versionMeta: libraryBookVersions.meta,
-      fileName: sql<string | null>`json_extract((SELECT ${contentRevisions.meta} FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1), '$.fileName')`,
     }).from(libraryBookVersions)
       .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
       .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
@@ -611,6 +630,7 @@ export async function getLibraryVersionPublication(
       .orderBy(libraryTags.sortOrder, libraryTags.name)
       .all()
       .map((tag) => tag.name)
+    const revisionMeta = (row.revisionMeta ? JSON.parse(row.revisionMeta) : {}) as { bookmeta?: Record<string, unknown>; fileName?: unknown }
     return {
       versionName: row.versionName,
       title: row.versionTitle ?? row.workTitle,
@@ -619,11 +639,11 @@ export async function getLibraryVersionPublication(
       description: row.versionDescription ?? row.workDescription,
       // Same version-over-work-over-parsed merge the listing applies.
       bookmeta: {
-        ...((row.bookmeta ?? {}) as Record<string, unknown>),
+        ...(revisionMeta.bookmeta ?? {}),
         ...((row.workMeta ?? {}) as Record<string, unknown>),
         ...((row.versionMeta ?? {}) as Record<string, unknown>),
       },
-      fileName: row.fileName,
+      fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
     }
   }
   return null

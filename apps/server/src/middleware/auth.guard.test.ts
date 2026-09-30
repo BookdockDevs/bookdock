@@ -38,10 +38,17 @@ function createGuardApp() {
   app.onError(errorHandler)
   app.use('/api/v1/*', tokenCors())
   app.use('/api/v1/*', authGuard())
+  // The ext surface is the only thing a token may reach, so it is what the
+  // stub app registers. The Web book routes stay registered too, to prove the
+  // registry still keeps them away from a token.
+  app.get('/api/v1/ext/libraries', (c) => c.json({ data: 'libraries' }))
+  app.get('/api/v1/ext/books', (c) => c.json({ data: 'list' }))
+  app.get('/api/v1/ext/books/:id', (c) => c.json({ data: 'detail' }))
+  app.on(['GET', 'HEAD'], '/api/v1/ext/books/:id/file', (c) => c.body(null, 200))
+  app.post('/api/v1/ext/books', (c) => c.json({ data: 'uploaded' }, 201))
+  app.delete('/api/v1/ext/books/:id', (c) => c.json({ data: 'deleted' }))
   app.get('/api/v1/books', (c) => c.json({ data: 'list' }))
-  app.post('/api/v1/books', (c) => c.json({ data: 'uploaded' }, 201))
   app.get('/api/v1/books/:id', (c) => c.json({ data: 'detail' }))
-  app.on(['GET', 'HEAD'], '/api/v1/books/:id/file', (c) => c.body(null, 200))
   app.delete('/api/v1/books/:id', (c) => c.json({ data: 'deleted' }))
   app.get('/api/v1/auth/me', (c) => c.json({ data: c.get('user') }))
   app.patch('/api/v1/auth/instance', requireOwner(), (c) => c.json({ data: 'instance' }))
@@ -89,14 +96,16 @@ describe('authGuard access token branch', () => {
 
   it('lets a token through exactly the operations it was granted', async () => {
     const app = createGuardApp()
-    const { plaintext } = issue(['book:list', 'book:read', 'book:file', 'book:upload'])
+    const { plaintext } = issue(['ext:libraries', 'ext:books', 'ext:book', 'ext:file', 'ext:upload', 'ext:delete'])
     const headers = bearer(plaintext)
 
-    expect((await app.request('/api/v1/books', { headers })).status).toBe(200)
-    expect((await app.request('/api/v1/books/b1', { headers })).status).toBe(200)
-    expect((await app.request('/api/v1/books/b1/file', { headers })).status).toBe(200)
-    expect((await app.request('/api/v1/books/b1/file', { method: 'HEAD', headers })).status).toBe(200)
-    expect((await app.request('/api/v1/books', { method: 'POST', headers })).status).toBe(201)
+    expect((await app.request('/api/v1/ext/libraries', { headers })).status).toBe(200)
+    expect((await app.request('/api/v1/ext/books', { headers })).status).toBe(200)
+    expect((await app.request('/api/v1/ext/books/b1', { headers })).status).toBe(200)
+    expect((await app.request('/api/v1/ext/books/b1/file', { headers })).status).toBe(200)
+    expect((await app.request('/api/v1/ext/books/b1/file', { method: 'HEAD', headers })).status).toBe(200)
+    expect((await app.request('/api/v1/ext/books', { method: 'POST', headers })).status).toBe(201)
+    expect((await app.request('/api/v1/ext/books/b1', { method: 'DELETE', headers })).status).toBe(200)
 
     const me = await app.request('/api/v1/auth/me', { headers })
     expect(me.status).toBe(200)
@@ -105,75 +114,82 @@ describe('authGuard access token branch', () => {
 
   it('rejects an operation the token was not granted with 403', async () => {
     const app = createGuardApp()
-    const { plaintext } = issue(['book:list'])
+    const { plaintext } = issue(['ext:books'])
     const headers = bearer(plaintext)
 
-    const upload = await app.request('/api/v1/books', { method: 'POST', headers })
+    const upload = await app.request('/api/v1/ext/books', { method: 'POST', headers })
     expect(upload.status).toBe(403)
     expect((await upload.json()).error.code).toBe('FORBIDDEN')
-    expect((await app.request('/api/v1/books/b1/file', { headers })).status).toBe(403)
+    // Separate from upload on purpose: a token that can enumerate a library but
+    // not pull its files cannot exfiltrate it.
+    expect((await app.request('/api/v1/ext/books/b1/file', { headers })).status).toBe(403)
+    expect((await app.request('/api/v1/ext/books/b1', { headers })).status).toBe(403)
+    expect((await app.request('/api/v1/ext/libraries', { headers })).status).toBe(403)
   })
 
-  it('denies every endpoint missing from the registry, including owner-only ones', async () => {
+  it('denies the Web API and every owner-only surface, even to an owner-minted token', async () => {
     const app = createGuardApp()
-    // Even a token minted by the owner must not reach owner-only surfaces.
-    const { plaintext } = issue(['book:list', 'book:read', 'book:file', 'book:upload'], ownerId)
+    const { plaintext } = issue(['ext:libraries', 'ext:books', 'ext:book', 'ext:file', 'ext:upload', 'ext:delete'], ownerId)
     const headers = bearer(plaintext)
 
+    // The Web book routes are sidebar-shaped and are no longer token-reachable at
+    // all: an external client uses /ext.
+    expect((await app.request('/api/v1/books', { headers })).status).toBe(403)
+    expect((await app.request('/api/v1/books/b1', { headers })).status).toBe(403)
+    expect((await app.request('/api/v1/books/b1', { method: 'DELETE', headers })).status).toBe(403)
     expect((await app.request('/api/v1/tokens', { headers })).status).toBe(403)
     expect((await app.request('/api/v1/auth/instance', { method: 'PATCH', headers })).status).toBe(403)
-    expect((await app.request('/api/v1/books/b1', { method: 'DELETE', headers })).status).toBe(403)
   })
 
   it('rejects an expired token with 401', async () => {
     const app = createGuardApp()
-    const { token, plaintext } = issue(['book:list'])
+    const { token, plaintext } = issue(['ext:books'])
     db.update(schema.accessTokens).set({ expiresAt: Date.now() - 1 }).where(eq(schema.accessTokens.id, token.id)).run()
 
-    const res = await app.request('/api/v1/books', { headers: bearer(plaintext) })
+    const res = await app.request('/api/v1/ext/books', { headers: bearer(plaintext) })
     expect(res.status).toBe(401)
     expect((await res.json()).error.code).toBe('UNAUTHORIZED')
   })
 
   it('rejects a disabled token with 403 and accepts it again once enabled', async () => {
     const app = createGuardApp()
-    const { token, plaintext } = issue(['book:list'])
+    const { token, plaintext } = issue(['ext:books'])
     const headers = bearer(plaintext)
 
     setAccessTokenDisabled(memberId, token.id, true)
-    const res = await app.request('/api/v1/books', { headers })
+    const res = await app.request('/api/v1/ext/books', { headers })
     expect(res.status).toBe(403)
     expect((await res.json()).error.code).toBe('FORBIDDEN')
 
     setAccessTokenDisabled(memberId, token.id, false)
-    expect((await app.request('/api/v1/books', { headers })).status).toBe(200)
+    expect((await app.request('/api/v1/ext/books', { headers })).status).toBe(200)
   })
 
   it('rejects an unknown bd_ token with 401', async () => {
     const app = createGuardApp()
-    const res = await app.request('/api/v1/books', { headers: bearer(`bd_${'z'.repeat(43)}`) })
+    const res = await app.request('/api/v1/ext/books', { headers: bearer(`bd_${'z'.repeat(43)}`) })
     expect(res.status).toBe(401)
     expect((await res.json()).error.code).toBe('UNAUTHORIZED')
   })
 
   it('rejects a token whose owner account was disabled, with ACCOUNT_DISABLED', async () => {
     const app = createGuardApp()
-    const { plaintext } = issue(['book:list'])
+    const { plaintext } = issue(['ext:books'])
     db.update(schema.users).set({ disabled: 1 }).where(eq(schema.users.id, memberId)).run()
     resetAuthCaches()
 
-    const res = await app.request('/api/v1/books', { headers: bearer(plaintext) })
+    const res = await app.request('/api/v1/ext/books', { headers: bearer(plaintext) })
     expect(res.status).toBe(403)
     expect((await res.json()).error.code).toBe('ACCOUNT_DISABLED')
   })
 
   it('stops resolving a deleted owner\'s tokens through the cascade delete', async () => {
     const app = createGuardApp()
-    const { plaintext } = issue(['book:list'])
+    const { plaintext } = issue(['ext:books'])
     db.delete(schema.users).where(eq(schema.users.id, memberId)).run()
     resetAuthCaches()
 
-    expect((await app.request('/api/v1/books', { headers: bearer(plaintext) })).status).toBe(401)
+    expect((await app.request('/api/v1/ext/books', { headers: bearer(plaintext) })).status).toBe(401)
   })
 
   it('leaves cookie and JWT session requests completely unaffected', async () => {

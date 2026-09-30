@@ -388,6 +388,17 @@ export {
   publishPrivateBookSchema,
 } from './library'
 
+export type {
+  ExternalBook,
+  ExternalBookDetail,
+  ExternalBookListRes,
+  ExternalCategory,
+  ExternalLibrariesRes,
+  ExternalLibrary,
+  ExternalTag,
+  ExternalUploadRes,
+} from './ext'
+
 export { getAiModelCapabilityFlags, isAiEmbeddingModel } from './ai-models'
 
 export {

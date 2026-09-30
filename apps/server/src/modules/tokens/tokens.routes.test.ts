@@ -56,24 +56,24 @@ describe('access token routes', () => {
   }
 
   async function issue(app: Hono, body: Record<string, unknown> = {}) {
-    const res = await post(app, '/api/v1/tokens', { name: 'extension', permissions: ['book:list'], ...body })
+    const res = await post(app, '/api/v1/tokens', { name: 'extension', permissions: ['ext:books'], ...body })
     expect(res.status).toBe(201)
     return res.json()
   }
 
   it('creates a token and returns the plaintext in that response only', async () => {
     const app = createApp()
-    const body = await issue(app, { permissions: ['book:list', 'book:file'] })
+    const body = await issue(app, { permissions: ['ext:books', 'ext:file'] })
 
     expect(body.data.plaintext).toMatch(/^bd_[A-Za-z0-9_-]{43}$/)
     expect(body.data.token.tokenLast4).toBe(body.data.plaintext.slice(-4))
-    expect(body.data.token.permissions).toEqual(['book:list', 'book:file'])
+    expect(body.data.token.permissions).toEqual(['ext:books', 'ext:file'])
     expect(body.data.token.disabled).toBe(false)
     expect(resolveAccessToken(body.data.plaintext)).toMatchObject({ status: 'active' })
 
     const list = await (await app.request('/api/v1/tokens')).json()
     expect(list.data.tokens).toHaveLength(1)
-    expect(list.data.tokens[0].permissions).toEqual(['book:list', 'book:file'])
+    expect(list.data.tokens[0].permissions).toEqual(['ext:books', 'ext:file'])
     expect(JSON.stringify(list)).not.toContain(body.data.plaintext)
   })
 
@@ -119,19 +119,19 @@ describe('access token routes', () => {
     const res = await app.request(`/api/v1/tokens/${created.data.token.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'renamed', permissions: ['book:read'], expiresIn: '1y' }),
+      body: JSON.stringify({ name: 'renamed', permissions: ['ext:book'], expiresIn: '1y' }),
     })
     expect(res.status).toBe(200)
     const updated = (await res.json()).data
     expect(updated.name).toBe('renamed')
-    expect(updated.permissions).toEqual(['book:read'])
+    expect(updated.permissions).toEqual(['ext:book'])
     expect(updated.createdAt).toBe(created.data.token.createdAt)
     expect(updated.expiresAt).toBeGreaterThanOrEqual(before + 365 * 24 * 60 * 60 * 1000)
 
     // The edit applies to the already-issued secret, with no re-issue.
     expect(resolveAccessToken(created.data.plaintext)).toMatchObject({
       status: 'active',
-      token: { permissions: ['book:read'] },
+      token: { permissions: ['ext:book'] },
     })
   })
 

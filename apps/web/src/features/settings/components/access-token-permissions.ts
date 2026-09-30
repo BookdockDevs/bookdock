@@ -6,8 +6,10 @@ import type { AccessTokenPermission } from '@bookdock/shared'
  * localizes by id instead of rendering those strings.
  */
 export const ACCESS_TOKEN_PERMISSION_LABEL_KEYS: Record<AccessTokenPermission, string> = {
-  'book:list': 'settings.tokenPermissionBookList',
-  'book:read': 'settings.tokenPermissionBookRead',
-  'book:file': 'settings.tokenPermissionBookFile',
-  'book:upload': 'settings.tokenPermissionBookUpload',
+  'ext:libraries': 'settings.tokenPermissionExtLibraries',
+  'ext:books': 'settings.tokenPermissionExtBooks',
+  'ext:book': 'settings.tokenPermissionExtBook',
+  'ext:file': 'settings.tokenPermissionExtFile',
+  'ext:upload': 'settings.tokenPermissionExtUpload',
+  'ext:delete': 'settings.tokenPermissionExtDelete',
 }
