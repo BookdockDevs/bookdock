@@ -868,14 +868,20 @@ export default function Library() {
 
   const columns = gridColumns === 'auto' ? dynColumns : Number(gridColumns)
 
+  // Selection spans filters within one library: switching shelf/category/tag/
+  // search/sort keeps every selected id so books scattered across shelves can
+  // be organized in one batch. Only a library or trash switch clears, because
+  // private version ids and shared work ids are not interchangeable and trash
+  // offers a different action set. Filter/sort/page changes only reset the
+  // Shift-click anchor, which is an index into the visible rows.
   useEffect(() => {
     clearSelection()
     setSelectionMode(false)
-  }, [activeLibrary?.id, shelfId, tagId, query, format, readStatus, trash, author, series])
+  }, [activeLibrary?.id, trash])
 
   useEffect(() => {
     lastSelectIndexRef.current = null
-  }, [currentPage])
+  }, [currentPage, activeLibrary?.id, shelfId, tagId, query, format, readStatus, trash, author, series, sortBy, sortOrder])
 
   function goToPage(targetPage: number) {
     if (targetPage < 1 || targetPage > totalPages || targetPage === currentPage) return

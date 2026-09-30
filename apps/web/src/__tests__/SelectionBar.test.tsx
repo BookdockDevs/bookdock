@@ -128,8 +128,7 @@ describe('SelectionBar', () => {
     selectionItems = [item('a'), item('b', { kind: 'shared' })]
     render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} />, { wrapper })
 
-    await clickReady('library.moreActions')
-    fireEvent.click(screen.getByRole('button', { name: 'library.batchDelete' }))
+    await clickReady('library.batchDelete')
     const dialog = screen.getByRole('alertdialog')
     expect(within(dialog).getByText('library.batchDeleteOwnedTrash')).toBeInTheDocument()
     expect(within(dialog).getByText('library.batchDeleteCollected')).toBeInTheDocument()
@@ -145,8 +144,7 @@ describe('SelectionBar', () => {
     selectionItems = [item('w1', { kind: undefined, versionCount: 3 })]
     render(<SelectionBar selectedIds={['w1']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
 
-    await clickReady('library.moreActions')
-    fireEvent.click(screen.getByRole('button', { name: 'library.batchDelete' }))
+    await clickReady('library.batchDelete')
     expect(screen.getByText('library.batchDeleteSharedConfirm')).toBeInTheDocument()
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'library.batchDelete' }))
     await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/libraries/lib1/books/w1'))

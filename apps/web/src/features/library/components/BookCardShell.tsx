@@ -128,13 +128,12 @@ export default function BookCardShell({
             <OverlayAction
               label={_('library.restore')}
               icon={<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5" />}
-              hover="hover:text-emerald-600 dark:hover:text-emerald-400"
               onClick={() => onRestore?.()}
             />
             <OverlayAction
+              danger
               label={_('library.permanentDelete')}
               icon={<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6" />}
-              hover="hover:text-red-600 hover:bg-red-500 hover:text-white dark:hover:bg-red-600 dark:hover:text-white"
               onClick={() => onPermanentDelete?.()}
             />
           </div>
@@ -165,7 +164,17 @@ export default function BookCardShell({
   )
 }
 
-function OverlayAction({ label, icon, hover, onClick }: { label: string; icon: ReactNode; hover: string; onClick: () => void }) {
+function OverlayAction({
+  label,
+  icon,
+  danger = false,
+  onClick,
+}: {
+  label: string
+  icon: ReactNode
+  danger?: boolean
+  onClick: () => void
+}) {
   return (
     <button
       type="button"
@@ -177,8 +186,10 @@ function OverlayAction({ label, icon, hover, onClick }: { label: string; icon: R
         onClick()
       }}
       className={cn(
-        'inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-stone-700 shadow-md backdrop-blur-sm transition-all hover:scale-105 hover:bg-white active:scale-95 dark:bg-stone-800/95 dark:text-stone-200',
-        hover,
+        'inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-stone-700 shadow-md backdrop-blur-sm transition-all hover:scale-105 active:scale-95 dark:bg-stone-800/95 dark:text-stone-200',
+        danger
+          ? 'hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/60 dark:hover:text-red-400'
+          : 'hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/60 dark:hover:text-emerald-400',
       )}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

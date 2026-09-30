@@ -7,6 +7,7 @@ type Size = 'sm' | 'md' | 'lg'
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant
   size?: Size
+  ref?: React.Ref<HTMLButtonElement>
 }
 
 const variants: Record<Variant, string> = {

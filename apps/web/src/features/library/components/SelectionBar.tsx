@@ -9,6 +9,7 @@ import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
 import { useLibraryCategories, useLibraryTags, useShelves, useTags } from '../hooks'
+import { READ_STATUS_OPTIONS } from './read-status'
 
 interface SelectionBarProps {
   selectedIds: string[]
@@ -53,7 +54,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
   // restore/permanent-delete for work ids against private endpoints.
   const effectiveTrash = trash && !libraryId
   const [dialog, setDialog] = useState<'organize' | 'delete' | 'permanent' | null>(null)
-  const [menu, setMenu] = useState<'status' | 'more' | null>(null)
+  const [statusOpen, setStatusOpen] = useState(false)
   const [marking, setMarking] = useState(false)
   const selectionQuery = useQuery({
     queryKey: ['batch-selection', libraryId ?? 'private', [...selectedIds].sort().join('|')],
@@ -69,8 +70,30 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
   const allHidden = selectionReady && selectionItems.every((item) => item.hidden)
   const barRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const statusButtonRef = useRef<HTMLButtonElement>(null)
+  const [statusAnchorLeft, setStatusAnchorLeft] = useState<number | null>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
+
+  const updateStatusAnchor = useCallback(() => {
+    const btn = statusButtonRef.current
+    const bar = barRef.current
+    if (btn && bar) {
+      const btnRect = btn.getBoundingClientRect()
+      const barRect = bar.getBoundingClientRect()
+      setStatusAnchorLeft(btnRect.left - barRect.left + btnRect.width / 2)
+    }
+  }, [])
+
+  const toggleStatusMenu = useCallback(() => {
+    if (statusOpen) {
+      setStatusOpen(false)
+      setStatusAnchorLeft(null)
+    } else {
+      updateStatusAnchor()
+      setStatusOpen(true)
+    }
+  }, [statusOpen, updateStatusAnchor])
 
   const updateScrollState = useCallback(() => {
     const el = scrollerRef.current
@@ -78,7 +101,10 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
     const { scrollLeft, scrollWidth, clientWidth } = el
     setCanScrollLeft(scrollLeft > 2)
     setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 2)
-  }, [])
+    if (statusOpen) {
+      updateStatusAnchor()
+    }
+  }, [statusOpen, updateStatusAnchor])
 
   useEffect(() => {
     updateScrollState()
@@ -90,14 +116,18 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
   }, [updateScrollState, selectedIds.length, effectiveTrash])
 
   useEffect(() => {
-    if (!menu) return
+    if (!statusOpen) return
     const onPointerDown = (event: PointerEvent) => {
-      if (!barRef.current?.contains(event.target as Node)) setMenu(null)
+      if (!barRef.current?.contains(event.target as Node)) {
+        setStatusOpen(false)
+        setStatusAnchorLeft(null)
+      }
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.stopImmediatePropagation()
-      setMenu(null)
+      setStatusOpen(false)
+      setStatusAnchorLeft(null)
     }
     document.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('keydown', onKeyDown, true)
@@ -105,7 +135,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
       document.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('keydown', onKeyDown, true)
     }
-  }, [menu])
+  }, [statusOpen])
 
   async function runBatch(
     action: (bookId: string) => Promise<unknown>,
@@ -204,7 +234,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
             : 'bottom-[calc(0.75rem+env(safe-area-inset-bottom))] sm:bottom-5',
         )}
       >
-        <div ref={barRef} className="pointer-events-auto relative flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] items-center rounded-2xl border border-stone-200/80 bg-white/95 shadow-xl shadow-stone-900/8 backdrop-blur-md animate-selection-bar-in sm:w-auto sm:max-w-none dark:border-stone-700 dark:bg-stone-900/95">
+        <div ref={barRef} className="pointer-events-auto relative flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] items-center rounded-2xl border border-stone-200/90 bg-white/95 p-1 shadow-2xl shadow-stone-900/10 backdrop-blur-xl animate-selection-bar-in sm:w-auto sm:max-w-none dark:border-stone-700/80 dark:bg-stone-900/95">
           {/* Left fade shadow */}
           <div
             data-testid="selection-bar-fade-left"
@@ -226,40 +256,128 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
           <div
             ref={scrollerRef}
             onScroll={updateScrollState}
-            className="flex w-full items-center gap-2 overflow-x-auto py-2 pl-4 pr-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-auto"
+            className="flex w-full items-center gap-1.5 overflow-x-auto py-1 pl-3 pr-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-auto"
           >
-            <span className="mr-1 whitespace-nowrap text-xs font-medium text-stone-600 dark:text-stone-300">
-              {_('library.selectionCount', { count: selectedIds.length })}
-            </span>
+            <div className="flex shrink-0 items-center pl-1 pr-1.5 text-xs font-medium text-stone-600 select-none dark:text-stone-300">
+              <span className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-2 py-0.5 text-xs font-semibold text-stone-800 dark:bg-stone-800 dark:text-stone-200">
+                {_('library.selectionCount', { count: selectedIds.length })}
+              </span>
+            </div>
+            <div className="h-4 w-px shrink-0 bg-stone-200 dark:bg-stone-700" />
           {effectiveTrash ? (
             <>
-              <Button className="shrink-0 whitespace-nowrap" variant="secondary" size="sm" disabled={marking} onClick={() => void handleBatchRestore()}>
+              <Button className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5" variant="secondary" size="sm" disabled={marking} onClick={() => void handleBatchRestore()}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5" />
+                </svg>
                 {_('library.restore')}
               </Button>
-              <Button className="shrink-0 whitespace-nowrap" variant="danger" size="sm" disabled={marking} onClick={() => setDialog('permanent')}>
+              <Button className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5" variant="danger" size="sm" disabled={marking} onClick={() => setDialog('permanent')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-white">
+                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+                </svg>
                 {_('library.permanentDelete')}
               </Button>
             </>
           ) : (
             <>
-              <Button className="shrink-0 whitespace-nowrap" variant="secondary" size="sm" disabled={marking || !selectionReady} onClick={() => setDialog('organize')}>
+              <Button
+                className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5"
+                variant="ghost"
+                size="sm"
+                disabled={marking || !selectionReady}
+                onClick={() => setDialog('organize')}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
                 {_('library.batchOrganize')}
               </Button>
-              {!libraryId && <Button className="hidden shrink-0 whitespace-nowrap md:inline-flex" variant="ghost" size="sm" disabled={marking} onClick={() => setMenu(menu === 'status' ? null : 'status')}>
-                {_('library.readStatusLabel')}
-              </Button>}
-              <Button className="hidden shrink-0 whitespace-nowrap md:inline-flex" variant="ghost" size="sm" disabled={marking || !selectionReady} onClick={() => void handleBatchPin(!allPinned)}>
+              {!libraryId && (
+                <Button
+                  ref={statusButtonRef}
+                  className={cn(
+                    'shrink-0 whitespace-nowrap inline-flex items-center gap-1.5',
+                    statusOpen && 'bg-stone-200/80 font-semibold text-stone-900 dark:bg-stone-700 dark:text-stone-100',
+                  )}
+                  variant="ghost"
+                  size="sm"
+                  disabled={marking}
+                  onClick={toggleStatusMenu}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 6v6l4 2" />
+                  </svg>
+                  {_('library.readStatusLabel')}
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn('shrink-0 text-stone-400 transition-transform duration-150', statusOpen && 'rotate-180')}>
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </Button>
+              )}
+              <Button
+                className={cn(
+                  'shrink-0 whitespace-nowrap inline-flex items-center gap-1.5',
+                  allPinned && 'bg-stone-200/80 font-semibold text-stone-900 dark:bg-stone-700 dark:text-stone-100',
+                )}
+                variant="ghost"
+                size="sm"
+                disabled={marking || !selectionReady}
+                onClick={() => void handleBatchPin(!allPinned)}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400">
+                  <path d="M12 17v5" />
+                  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+                </svg>
                 {_(allPinned ? 'library.unpin' : 'library.pin')}
               </Button>
-              <Button className="shrink-0 whitespace-nowrap" variant="ghost" size="sm" disabled={marking || !selectionReady} onClick={() => setMenu(menu === 'more' ? null : 'more')}>
-                {_('library.moreActions')}
+              <Button
+                className={cn(
+                  'shrink-0 whitespace-nowrap inline-flex items-center gap-1.5',
+                  allHidden && 'bg-stone-200/80 font-semibold text-stone-900 dark:bg-stone-700 dark:text-stone-100',
+                )}
+                variant="ghost"
+                size="sm"
+                disabled={marking || !selectionReady}
+                onClick={() => void handleBatchHide(!allHidden)}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400">
+                  {allHidden ? (
+                    <>
+                      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                      <line x1="2" x2="22" y1="2" y2="22" />
+                    </>
+                  )}
+                </svg>
+                {_(allHidden ? 'library.show' : 'library.hide')}
+              </Button>
+              <Button
+                className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                variant="ghost"
+                size="sm"
+                disabled={marking || !selectionReady}
+                onClick={() => setDialog('delete')}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-red-500/80 dark:text-red-400/80">
+                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+                </svg>
+                {_('library.batchDelete')}
               </Button>
             </>
           )}
+          <div className="h-4 w-px shrink-0 bg-stone-200 dark:bg-stone-700" />
           <button
             type="button"
             onClick={onClear}
             aria-label={_('library.clearSelection')}
+            title={_('library.clearSelection')}
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -273,20 +391,37 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
               <button type="button" onClick={() => void selectionQuery.refetch()} className="underline">{_('library.batchSelectionRetry')}</button>
             </div>
           )}
-          {menu && !effectiveTrash && (
-            <div className="absolute bottom-full right-2 mb-2 min-w-36 rounded-xl border border-stone-200 bg-white p-1 shadow-xl dark:border-stone-700 dark:bg-stone-900">
-              {menu === 'status' ? BATCH_STATUS_ACTIONS.map((action) => (
-                <button key={action.value} type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 dark:hover:bg-stone-800" onClick={() => { setMenu(null); void handleBatchStatus(action.value) }}>
-                  {_(action.labelKey)}
-                </button>
-              )) : (
-                <>
-                  {!libraryId && <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 md:hidden dark:hover:bg-stone-800" onClick={() => setMenu('status')}>{_('library.readStatusLabel')}</button>}
-                  <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 md:hidden dark:hover:bg-stone-800" onClick={() => { setMenu(null); void handleBatchPin(!allPinned) }}>{_(allPinned ? 'library.unpin' : 'library.pin')}</button>
-                  <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 dark:hover:bg-stone-800" onClick={() => { setMenu(null); void handleBatchHide(!allHidden) }}>{_(allHidden ? 'library.show' : 'library.hide')}</button>
-                  <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40" onClick={() => { setMenu(null); setDialog('delete') }}>{_('library.batchDelete')}</button>
-                </>
-              )}
+          {statusOpen && !effectiveTrash && (
+            <div
+              style={
+                statusAnchorLeft !== null
+                  ? { left: statusAnchorLeft, transform: 'translateX(-50%)' }
+                  : { left: '50%', transform: 'translateX(-50%)' }
+              }
+              className="absolute bottom-full mb-2 min-w-40 rounded-xl border border-stone-200/90 bg-white/95 p-1.5 shadow-xl shadow-stone-900/10 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 dark:border-stone-700/90 dark:bg-stone-900/95 dark:shadow-black/40"
+            >
+              {BATCH_STATUS_ACTIONS.map((action) => {
+                const opt = READ_STATUS_OPTIONS.find((o) => o.value === action.value)
+                return (
+                  <button
+                    key={action.value}
+                    type="button"
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-stone-700 transition-colors hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
+                    onClick={() => {
+                      setStatusOpen(false)
+                      setStatusAnchorLeft(null)
+                      void handleBatchStatus(action.value)
+                    }}
+                  >
+                    {opt && (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 ${opt.iconClass}`}>
+                        {opt.icon}
+                      </svg>
+                    )}
+                    <span className="flex-1">{_(action.labelKey)}</span>
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
