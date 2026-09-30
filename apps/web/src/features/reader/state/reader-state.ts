@@ -10,11 +10,23 @@ export interface AiPendingQuickCommand {
 export interface SidebarScrollPosition {
   top: number
   currentIndex?: number
+  /** Page-load token tagging the save. The loader drops it, so a position
+   *  restored from a previous load reads as stale: stale positions must not
+   *  suppress the TOC locate-on-open. */
+  sessionId?: string
 }
 
 type SidebarScrollPositions = Record<string, Partial<Record<NavTab, SidebarScrollPosition>>>
 
 const SIDEBAR_SCROLL_STORAGE_KEY = 'bd-reader-sidebar-scroll-v1'
+
+/**
+ * Unique per page load. Saved scroll positions are tagged with it so readers
+ * can tell a same-session remount (restore the exact position, don't yank)
+ * from a cross-session reopen (position is stale, locate the current chapter).
+ * Never meaningful when persisted: the loader drops it.
+ */
+export const READER_SESSION_ID = `${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffffff).toString(36)}`
 
 function loadSidebarScrollPositions(): SidebarScrollPositions {
   if (typeof window === 'undefined') return {}
@@ -134,11 +146,12 @@ export const useReaderState = create<ReaderState>((set) => ({
   setSidebarScrollPosition: (bookId, tab, position) => set((state) => {
     if (state.sidebarScrollPositions[bookId]?.[tab]?.top === position.top
       && state.sidebarScrollPositions[bookId]?.[tab]?.currentIndex === position.currentIndex) return state
+    const tagged = { ...position, sessionId: READER_SESSION_ID }
     const sidebarScrollPositions = {
       ...state.sidebarScrollPositions,
       [bookId]: {
         ...state.sidebarScrollPositions[bookId],
-        [tab]: position,
+        [tab]: tagged,
       },
     }
     persistSidebarScrollPositions(sidebarScrollPositions)

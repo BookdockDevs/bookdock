@@ -237,5 +237,21 @@ describe('ReaderSidebar on pointer devices', () => {
 
     await waitFor(() => expect(outerEl(container)).toHaveClass('overflow-visible'))
   })
+
+  it('collapses cleanly without flashing floating dock when clicking active tab button', async () => {
+    act(() => useReaderState.setState({ sidebarOpen: true, activeNavTab: 'toc' }))
+    const { container } = renderSidebar(false)
+    const tocBtn = screen.getByTitle('目录')
+
+    fireEvent.click(tocBtn)
+
+    expect(useReaderState.getState().sidebarOpen).toBe(false)
+    expect(dockEl(container)).toHaveClass('order-none', 'h-full', 'w-[56px]', 'opacity-0')
+    expect(dockEl(container)).not.toHaveClass('absolute', 'left-3', 'top-16')
+    expect(outerEl(container)).toHaveClass('overflow-hidden')
+    expect(outerEl(container).style.width).toBe('8px')
+
+    await waitFor(() => expect(outerEl(container)).toHaveClass('overflow-visible'))
+  })
 })
 

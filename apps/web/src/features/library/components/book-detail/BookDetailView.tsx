@@ -15,15 +15,16 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { computeFromAnchor, type SmartPosition } from '@/lib/position'
-import { formatBytes, formatDate } from '@/lib/utils'
+import { cn, formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 
 import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../../download'
 import { useCollectBook, useForkBook, useRepinBook, useSourceStatus } from '../../hooks'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import BookCover from '../BookCover'
 import ReadStatusChip from './ReadStatusChip'
-import { copyText, middleTruncate, isMachineIdentifier, formatLanguage } from './types'
-import { ActionIcon, FilterChip, GroupLabel } from './ui'
+import { copyValueOnClick, isMachineIdentifier, formatLanguage, formatWordCount } from './types'
+import { resolveMetaSpanClasses, resolveMetaValueSizeClasses } from './meta-grid'
+import { ActionIcon, FilterChip, GroupLabel, ExpandableRowValue } from './ui'
 
 interface BookDetailViewProps {
   book: BookListItem
@@ -36,6 +37,7 @@ interface BookDetailViewProps {
   onEdit: () => void
   onDelete: (book: BookListItem) => void
   onClose: () => void
+  onPublish?: (book: BookListItem) => void
 }
 
 export default function BookDetailView({
@@ -49,6 +51,7 @@ export default function BookDetailView({
   onEdit,
   onDelete,
   onClose,
+  onPublish,
 }: BookDetailViewProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
@@ -154,24 +157,15 @@ export default function BookDetailView({
   const rawIdentifier = bookmeta?.isbn || bookmeta?.identifier || ''
   const isIsbn = Boolean(bookmeta?.isbn)
 
-  const metaRows: { label: string; value: string; copyable?: boolean; onClick?: () => void }[] = []
-  if (bookmeta?.publisher) metaRows.push({ label: _('library.publisher'), value: bookmeta.publisher })
-  if (bookmeta?.published) metaRows.push({ label: _('library.published'), value: bookmeta.published })
-  if (bookmeta?.language) {
-    metaRows.push({ label: _('library.language'), value: formatLanguage(bookmeta.language, i18n.language) })
-  }
-  metaRows.push({ label: _('library.format'), value: displayBook.format.toUpperCase() })
-  metaRows.push({ label: _('library.sortBy.size'), value: formatBytes(displayBook.size) })
-  if (detail?.meta?.fileName) {
-    metaRows.push({ label: _('library.originalFile'), value: detail.meta.fileName, copyable: true })
-  }
-  metaRows.push({ label: _('library.addedAt'), value: formatDate(displayBook.createdAt) })
-  if (rawIdentifier && (isIsbn || !isMachineIdentifier(rawIdentifier))) {
-    metaRows.push({ label: isIsbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true })
-  }
-  if (bookmeta?.subjects?.length) {
-    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、') })
-  }
+  const metaRows: {
+    label: string
+    value: string
+    copyable?: boolean
+    onClick?: () => void
+    expandable?: boolean
+    hint?: string
+  }[] = []
+  const groupDigits = (n: number): string => new Intl.NumberFormat(i18n.language).format(n)
   if (bookmeta?.series) {
     metaRows.push({
       label: _('library.seriesSection'),
@@ -179,6 +173,36 @@ export default function BookDetailView({
       onClick: () => goToFilter({ series: bookmeta.series }),
     })
   }
+  if (bookmeta?.publisher) metaRows.push({ label: _('library.publisher'), value: bookmeta.publisher })
+  if (bookmeta?.published) metaRows.push({ label: _('library.published'), value: bookmeta.published })
+  if (bookmeta?.language) {
+    metaRows.push({ label: _('library.language'), value: formatLanguage(bookmeta.language, i18n.language) })
+  }
+  if (rawIdentifier && (isIsbn || !isMachineIdentifier(rawIdentifier))) {
+    metaRows.push({ label: isIsbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true, hint: _('library.copyValue') })
+  }
+  metaRows.push({ label: _('library.format'), value: displayBook.format.toUpperCase() })
+  metaRows.push({ label: _('library.sortBy.size'), value: formatBytes(displayBook.size), hint: `${groupDigits(displayBook.size)} B` })
+  if (detail?.meta?.wordCount != null) {
+    const wordCount = detail.meta.wordCount
+    metaRows.push({
+      label: _('library.wordCount'),
+      value: formatWordCount(wordCount, i18n.language, _),
+      hint: _('library.tocRuleWords', { count: groupDigits(wordCount) }),
+    })
+  }
+  metaRows.push({ label: _('library.addedAt'), value: formatDate(displayBook.createdAt), hint: formatDateTime(displayBook.createdAt) })
+  if (displayBook.updatedAt !== displayBook.createdAt) {
+    metaRows.push({ label: _('library.updatedAt'), value: formatDate(displayBook.updatedAt), hint: formatDateTime(displayBook.updatedAt) })
+  }
+  if (bookmeta?.subjects?.length) {
+    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、'), expandable: true })
+  }
+  if (detail?.meta?.fileName) {
+    metaRows.push({ label: _('library.originalFile'), value: detail.meta.fileName, copyable: true, expandable: true, hint: _('library.copyFullFileName') })
+  }
+  const metaSpanClasses = resolveMetaSpanClasses(metaRows.map((row) => row.value))
+  const metaValueSizeClasses = resolveMetaValueSizeClasses(metaRows.map((row) => row.value))
 
   return (
     <div>
@@ -336,7 +360,7 @@ export default function BookDetailView({
                   <span />
                 )}
                 {displayBook.lastReadAt ? (
-                  <span className="text-[11px] text-stone-400 dark:text-stone-500">
+                  <span className="text-[11px] text-stone-400 dark:text-stone-500" title={formatDateTime(displayBook.lastReadAt)}>
                     {formatRelativeTime(_, displayBook.lastReadAt)}
                   </span>
                 ) : null}
@@ -398,6 +422,17 @@ export default function BookDetailView({
                       <circle cx="12" cy="12" r="3" />
                     </>
                   )}
+                </ActionIcon>
+              )}
+              {!readOnly && onPublish && (
+                <ActionIcon
+                  secondary
+                  label={_('library.publish')}
+                  onClick={() => onPublish(displayBook)}
+                >
+                  <path d="M12 17V3" />
+                  <path d="m7 8 5-5 5 5" />
+                  <path d="M5 21h14" />
                 </ActionIcon>
               )}
               {!readOnly && <div ref={downloadAnchorRef} className="relative">
@@ -508,19 +543,31 @@ export default function BookDetailView({
       <section className="mt-5">
         <div className="rounded-xl border border-stone-200/70 bg-stone-50/70 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
-            {metaRows.map((row) => (
-              <div key={row.label} className="min-w-0">
+            {metaRows.map((row, index) => (
+              <div key={row.label} className={cn('min-w-0', metaSpanClasses[index])}>
                 <dt className="text-xs text-stone-400 dark:text-stone-500">{row.label}</dt>
                 {row.copyable ? (
                   <dd className="mt-0.5">
-                    <button
-                      type="button"
-                      title={row.value}
-                      onClick={() => void copyText(row.value)}
-                      className="line-clamp-2 break-all font-mono text-sm text-stone-700 transition-colors hover:text-stone-900 dark:text-stone-200 dark:hover:text-stone-100"
-                    >
-                      {middleTruncate(row.value)}
-                    </button>
+                    {row.expandable ? (
+                      <ExpandableRowValue
+                        value={row.value}
+                        mono
+                        textClass={metaValueSizeClasses[index] || 'text-sm'}
+                        onCopy={() => copyValueOnClick(row.value)}
+                        copyHint={row.hint}
+                        expandLabel={_('library.expand')}
+                        collapseLabel={_('library.collapse')}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        title={row.hint ?? row.value}
+                        onClick={() => copyValueOnClick(row.value)}
+                        className="block max-w-full cursor-pointer truncate text-left font-mono text-sm text-stone-700 hover:underline dark:text-stone-200"
+                      >
+                        {row.value}
+                      </button>
+                    )}
                   </dd>
                 ) : row.onClick ? (
                   <dd className="mt-0.5">
@@ -528,13 +575,23 @@ export default function BookDetailView({
                       type="button"
                       title={row.value}
                       onClick={row.onClick}
-                      className="line-clamp-2 break-words text-left text-sm text-stone-700 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-200 dark:decoration-stone-600 dark:hover:text-stone-100"
+                      className={cn('line-clamp-2 break-words text-left text-stone-700 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-200 dark:decoration-stone-600 dark:hover:text-stone-100', metaValueSizeClasses[index] || 'text-sm')}
                     >
                       {row.value}
                     </button>
                   </dd>
+                ) : row.expandable ? (
+                  <dd className="mt-0.5">
+                    <ExpandableRowValue
+                      value={row.value}
+                      wrapClass="break-words"
+                      textClass={metaValueSizeClasses[index] || 'text-sm'}
+                      expandLabel={_('library.expand')}
+                      collapseLabel={_('library.collapse')}
+                    />
+                  </dd>
                 ) : (
-                  <dd className="mt-0.5 line-clamp-2 break-words text-sm text-stone-700 dark:text-stone-200">{row.value}</dd>
+                  <dd title={row.hint} className={cn('mt-0.5 line-clamp-2 break-words text-stone-700 dark:text-stone-200', metaValueSizeClasses[index] || 'text-sm')}>{row.value}</dd>
                 )}
               </div>
             ))}

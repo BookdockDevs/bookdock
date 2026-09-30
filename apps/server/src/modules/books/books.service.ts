@@ -425,9 +425,15 @@ async function materializeUpload(userId: string, file: File, buffer: Buffer, ver
   }
   // File names of web-novels often carry the author where metadata has none.
   if (!author && derived?.author) author = derived.author
-  // Multi-author: parsed creators win; the file-name fallback is a single name.
+  // Multi-author: parsed creators win; the file-name fallback can supply multiple names if derived.
   const parsedAuthors = (parsed.meta.authors ?? []).map((name) => name.trim()).filter(Boolean).slice(0, 10)
-  const authors = parsedAuthors.length > 0 ? parsedAuthors : author.trim() ? [author.trim()] : []
+  const authors = parsedAuthors.length > 0
+    ? parsedAuthors
+    : (derived?.authors && derived.authors.length > 0)
+      ? derived.authors
+      : author.trim()
+        ? [author.trim()]
+        : []
   if (authors.length > 0) author = authors[0]!
 
   let coverKey: string | null = null
@@ -525,6 +531,7 @@ async function materializeUpload(userId: string, file: File, buffer: Buffer, ver
     description: typeof parsed.meta.bookmeta?.description === 'string' ? parsed.meta.bookmeta.description : '',
     chapterCount: metaChapters?.length ?? 0,
     wordCount: typeof meta.wordCount === 'number' ? meta.wordCount : null,
+    versionName: derived?.versionName,
   }
 }
 
@@ -736,7 +743,7 @@ export async function uploadCatalogBook(
       }
       tx.insert(libraryBookVersions).values({
         id: linkId, libraryId, libraryBookId, bookVersionId: versionId, kind: 'personal',
-        name: opts?.name ?? '',
+        name: opts?.name?.trim() || upload.versionName || '',
         title: targetLibraryBookId ? upload.title : null,
         author: targetLibraryBookId ? upload.author : null,
         authors: targetLibraryBookId ? (upload.authors.length > 0 ? upload.authors : null) : null,
@@ -2275,7 +2282,11 @@ export async function resetBookMetadata(userId: string, bookId: string, opts?: {
     author = derived.author
   }
   const resetAuthors = normalizeAuthors({
-    authors: parsed.meta.authors?.length ? parsed.meta.authors : undefined,
+    authors: parsed.meta.authors?.length
+      ? parsed.meta.authors
+      : derived?.authors?.length
+        ? derived.authors
+        : undefined,
     author,
   })
   const now = Date.now()

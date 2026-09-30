@@ -377,6 +377,8 @@ export {
   authorListSchema,
   MAX_AUTHORS,
   normalizeAuthors,
+  extractVersionNameFromFileName,
+  VERSION_NAME_BLACKLIST,
   catalogUploadSchema,
   catalogBookUpdateSchema,
   batchSelectionSchema,

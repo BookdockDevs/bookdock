@@ -110,6 +110,17 @@ export async function copyText(value: string) {
   }
 }
 
+/**
+ * Click-to-copy for metadata values: copies the full value, but never hijacks
+ * an in-progress text selection (clicking after drag-selecting must keep the
+ * user's selection instead of replacing it with the full value).
+ */
+export function copyValueOnClick(value: string) {
+  const selection = typeof window !== 'undefined' ? window.getSelection() : null
+  if (selection && !selection.isCollapsed) return
+  void copyText(value)
+}
+
 export function toggleSetItem(prev: Set<string>, id: string): Set<string> {
   const next = new Set(prev)
   if (next.has(id)) next.delete(id)
@@ -138,4 +149,20 @@ export function formatLanguage(lang: string, locale: string): string {
   } catch {
     return lang
   }
+}
+
+/**
+ * Detail-view word count: exact below the compact threshold, 万 above it in
+ * Chinese (起点/微信读书 style) and k words in English. Both detail views
+ * share it so the same book reads identically everywhere.
+ */
+export function formatWordCount(
+  count: number,
+  locale: string,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  const compact = (value: number): string => value.toFixed(1).replace(/\.0$/, '')
+  if (locale.startsWith('zh') && count >= 10000) return t('library.bookWordsWan', { count: compact(count / 10000) })
+  if (count >= 1000) return t('library.tocRuleWordsK', { count: compact(count / 1000) })
+  return t('library.tocRuleWords', { count })
 }

@@ -1,3 +1,5 @@
+import { extractVersionNameFromFileName, VERSION_NAME_BLACKLIST } from '@bookdock/shared'
+
 // Filename-to-metadata normalization for fields missing from the book file.
 // Deliberately conservative: every rule whitelists known noise so a clean
 // filename passes through untouched.
@@ -19,11 +21,21 @@ const SITE_CN_SUFFIX = /\s*[-_－—–]+\s*[^\s-_－—–]{0,14}(?:笔趣阁|�
 
 // Colon form is unambiguous anywhere; the loose form requires a visible
 // separator so titles that merely contain "作者" survive.
-const AUTHOR_COLON = /作\s*者\s*[:：]\s*([^\s，,。、；;：:（()）【】［］《》[\]{}｛｝]{1,30})/
-const AUTHOR_LABEL = /(?:^|[\s\-_－—–、，,。（(【《[［{｛])\s*(?:作\s*者|by)\s+([^\s，,。、；;：:（()）【】［］《》[\]{}｛｝]{1,30})(?=$|[\s\-_－—–、，,。）)】》\]］}｝（(【[［{｛])/
-const AUTHOR_TRAILING_ZHU = /([\u4e00-\u9fa5·]{2,6})\s*著\s*(?:[（(【]\s*\d{4}\s*[)）】])?\s*$/
+// A name character: letters, numbers, Han characters, middle dots, periods, apostrophes.
+// Excludes brackets, punctuation, colons, slashes, ampersands, hyphens/dashes.
+const NAME_CHAR = '[^\\s，,。、；;：:（()）【】［］《》\\[\\]{}｛｝/／&＆\\-_－—–]'
+// Internal whitespace is allowed between words in a name (e.g. English first & last names).
+const SINGLE_NAME = `${NAME_CHAR}+(?:\\s+${NAME_CHAR}+)*`
+const AUTHOR_SEP = '(?:\\s*(?:[、/／&＆]|\\band\\b|[,，])\\s*)'
+const MULTI_AUTHORS = `${SINGLE_NAME}(?:${AUTHOR_SEP}${SINGLE_NAME})*`
 
-const ANGLE_TITLE = /^\s*《([^》]{1,200})》/
+const AUTHOR_COLON = new RegExp(`作\\s*者\\s*[:：]\\s*(${MULTI_AUTHORS})`, 'i')
+const AUTHOR_LABEL = new RegExp(`(?:^|[\\s\\-_－—–、，,。（(【《[［{｛])\\s*(?:作\\s*者|by)\\s+(${MULTI_AUTHORS})(?=$|[\\s\\-_－—–、，,。；;：:。）)】》\\]］}｝（(【[［{｛])`, 'i')
+
+const ZHU_CHINESE_SINGLE = '[\\u4e00-\\u9fa5·]{2,6}'
+const ZHU_NAME = '(?:[\\u4e00-\\u9fa5·]{2,12}|[a-zA-Z.\\s\'-]+)'
+const ZHU_MULTI = `${ZHU_NAME}(?:${AUTHOR_SEP}${ZHU_NAME})+`
+const AUTHOR_TRAILING_ZHU = new RegExp(`(?:(${ZHU_MULTI})|(${ZHU_CHINESE_SINGLE}))\\s*著\\s*(?:[（(【]\\s*\\d{4}\\s*[)）】])?\\s*$`, 'i')
 
 function isNoiseBracket(inner: string): boolean {
   const trimmed = inner.trim()
@@ -41,27 +53,48 @@ function isNoiseBracket(inner: string): boolean {
   return false
 }
 
-function cleanAuthor(raw: string): string {
+function isValidAuthorCandidate(str: string): boolean {
+  if (!str || str.length > 40) return false
+  // Skip volume / chapter / progress terms
+  if (/^(?:第?\s*\d+\s*[章节回卷册部集期话]|全[一二三四五六七八九十\d]+[卷册部集])/i.test(str)) return false
+  // Skip publisher / studio / platform / category suffix
+  if (/(?:出版社|书店|文库|工作室|公司|小说网|中文网|文学城|论坛|贴吧|制作组|汉化组|整理|校对|排版|推荐|点评|导读|分卷|合集|系列)$/i.test(str)) return false
+  // Skip purely digits or punctuation
+  if (/^[\d\s\-_.]+$/.test(str)) return false
+  return true
+}
+
+export function cleanAuthor(raw: string): string {
   return raw
     .replace(/^[\s\-_－—–·、，,。；;：:.[\]（()）【】［］{}｛｝]+|[\s\-_－—–·、，,。；;：:.[\]（()）【】［］{}｛｝]+$/g, '')
     .trim()
 }
 
-export function normalizeBookTitle(fileName: string): { title: string; author?: string } {
+export function splitAuthors(raw: string): string[] {
+  const cleaned = cleanAuthor(raw)
+  if (!cleaned) return []
+  const parts = cleaned
+    .split(/\s*(?:[、/／&＆]|(?:\s+and\s+)|\s*[,，]\s*)\s*/i)
+    .map((p) => cleanAuthor(p))
+    .filter(Boolean)
+  return [...new Set(parts)].slice(0, 10)
+}
+
+export function normalizeBookTitle(fileName: string): { title: string; author?: string; authors?: string[]; versionName?: string } {
   let base = fileName.replace(/\.[^.]+$/, '')
-  let author: string | undefined
+  let authorRaw: string | undefined
+
+  const versionName = extractVersionNameFromFileName(fileName)
 
   const labelMatch = base.match(AUTHOR_COLON) ?? base.match(AUTHOR_LABEL)
   const zhuMatch = base.match(AUTHOR_TRAILING_ZHU)
   if (labelMatch?.[1] && labelMatch.index !== undefined) {
-    author = cleanAuthor(labelMatch[1])
+    authorRaw = labelMatch[1]
     base = base.slice(0, labelMatch.index) + base.slice(labelMatch.index + labelMatch[0].length)
-  } else if (zhuMatch?.[1] && zhuMatch.index !== undefined) {
-    author = zhuMatch[1]
+  } else if ((zhuMatch?.[1] || zhuMatch?.[2]) && zhuMatch.index !== undefined) {
+    authorRaw = zhuMatch[1] || zhuMatch[2]
     base = base.slice(0, zhuMatch.index)
   }
-
-  base = base.replace(BRACKET, (whole, inner: string) => (isNoiseBracket(inner) ? '' : whole))
 
   for (;;) {
     const next = base.replace(SITE_DOMAIN_SUFFIX, '').replace(SITE_CN_SUFFIX, '')
@@ -69,15 +102,51 @@ export function normalizeBookTitle(fileName: string): { title: string; author?: 
     base = next
   }
 
-  const angle = base.match(ANGLE_TITLE)
-  if (angle?.[1]) base = angle[1]
+  const angleMatches = Array.from(base.matchAll(/《([^》]{1,200})》/g))
+  if (angleMatches.length === 1) {
+    const match = angleMatches[0]!
+    const titleCandidate = match[1].trim()
+
+    if (!authorRaw && match.index !== undefined) {
+      const before = base.slice(0, match.index)
+      const after = base.slice(match.index + match[0].length)
+
+      const cleanCandidate = (fragment: string): string => {
+        return fragment
+          .replace(BRACKET, (whole, inner: string) => (isNoiseBracket(inner) || extractVersionNameFromFileName(whole) || VERSION_NAME_BLACKLIST.test(inner) ? '' : whole))
+          .replace(/^[\s\-_－—–·、，,。；;：:.[\]（()）【】［］{}｛｝]+|[\s\-_－—–·、，,。；;：:.[\]（()）【】［］{}｛｝]+$/g, '')
+          .trim()
+      }
+
+      const beforeClean = cleanCandidate(before)
+      const afterClean = cleanCandidate(after)
+
+      if (afterClean && isValidAuthorCandidate(afterClean)) {
+        authorRaw = afterClean
+      } else if (beforeClean && isValidAuthorCandidate(beforeClean)) {
+        authorRaw = beforeClean
+      }
+    }
+
+    base = titleCandidate
+  } else {
+    base = base.replace(BRACKET, (whole, inner: string) => (isNoiseBracket(inner) ? '' : whole))
+    base = base.replace(/[《》]/g, '')
+  }
 
   base = base
-    .replace(/[《》]/g, '')
     .replace(/^[\s\-_－—–·、，,。；;：:.]+|[\s\-_－—–·、，,。；;：:.]+$/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim()
     .slice(0, MAX_TITLE_LENGTH)
 
-  return author ? { title: base, author } : { title: base }
+  const authors = authorRaw ? splitAuthors(authorRaw) : []
+  const author = authors[0]
+
+  return {
+    title: base,
+    ...(author ? { author } : {}),
+    ...(authors.length > 0 ? { authors } : {}),
+    ...(versionName ? { versionName } : {}),
+  }
 }

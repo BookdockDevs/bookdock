@@ -2215,6 +2215,20 @@ export class Paginator extends HTMLElement {
         if (this.#views.size === 0) return
         const primaryView = this.#primaryView
         if (!primaryView) return
+        // The scrolled-mode scroll handler is debounced, so #anchor still
+        // describes the position from before the last scroll burst, and
+        // #primaryIndex can lag the viewport by up to ~250ms. Re-detect and
+        // re-anchor against the live viewport first: without this the
+        // measurement below is taken against a stale anchor and the reader is
+        // thrown back to wherever that anchor happened to point.
+        if (this.scrolled) this.#flushScrolledState()
+        // Re-anchoring snaps the anchor's top edge to the viewport top, which
+        // discards however far into a line the reader had scrolled — a settings
+        // toggle that does not even change the layout still shifted the page by
+        // up to a line. Record the anchor's distance from the scroll origin and
+        // restore that same distance, so the paragraph under the reader's eyes
+        // stays exactly where it was.
+        const anchorOffset = this.scrolled ? this.#anchorScrollOffset() : null
         this.#stabilizing = true
         const layout = this.#beforeRender({
             vertical: this.#vertical,
@@ -2226,9 +2240,32 @@ export class Paginator extends HTMLElement {
         // Scroll synchronously to prevent visible layout shift during resize.
         // RAF deferral is only needed for initial display and mode switches
         // (handled by #display), not for resize re-renders.
-        this.#scrollToAnchor(this.#anchor)
+        if (anchorOffset == null || !this.#restoreAnchorScrollOffset(anchorOffset))
+            this.#scrollToAnchor(this.#anchor)
         this.#stabilizing = false
         this.dispatchEvent(new Event('stabilized'))
+    }
+    // Distance in scroll-axis pixels from the scroll origin to the anchor's
+    // leading edge. Negative when the anchor starts above the viewport.
+    #anchorScrollOffset() {
+        const rects = uncollapse(this.#anchor)?.getClientRects?.()
+        if (!rects) return null
+        const rect = Array.from(rects)
+            .find(r => r.width > 0 && r.height > 0 && r.x >= 0 && r.y >= 0) || rects[0]
+        if (!rect) return null
+        const viewOffset = this.#getViewOffset(this.#primaryIndex)
+        return viewOffset + this.#getRectMapper()(rect).left - this.#renderedStart
+    }
+    // Scroll so the anchor sits at the same distance from the scroll origin it
+    // had before the re-layout. Returns false when the anchor went away (a
+    // re-render can drop nodes), leaving the caller to fall back to #anchor.
+    #restoreAnchorScrollOffset(offset) {
+        const current = this.#anchorScrollOffset()
+        if (current == null) return false
+        const target = this.#renderedStart + (current - offset)
+        if (Math.abs(this.containerPosition - target) < 0.5) return true
+        this.#scrollTo(target, 'anchor', false)
+        return true
     }
     get scrolled() {
         return this.getAttribute('flow') === 'scrolled'

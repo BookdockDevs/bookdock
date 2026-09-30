@@ -211,7 +211,7 @@ export default function CatalogListRow({
           onClose={menu.close}
           work={work}
           canManage={canManage}
-          canCollect={canCollect && first?.collected !== true}
+          canCollect={canCollect}
           canDownload={canCollect && (canManage || first?.status === 'published')}
           onShowDetails={() => { menu.close(); onShowDetails(work) }}
           onDeleteRequest={() => { menu.close(); setDeleteOpen(true) }}

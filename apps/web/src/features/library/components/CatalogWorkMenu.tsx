@@ -1,4 +1,5 @@
 import type { RefObject } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 
 import type { CatalogBook } from '@bookdock/shared'
 
@@ -40,11 +41,14 @@ interface CatalogWorkMenuProps {
 
 export default function CatalogWorkMenu({ innerRef, triggerRef, position, width, onClose, work, canManage, canCollect, canDownload, onShowDetails, onDeleteRequest }: CatalogWorkMenuProps) {
   const _ = useTranslation()
+  const navigate = useNavigate()
   const collectBook = useCollectBook()
   const updateWork = useUpdateCatalogBook()
   // The menu predates versions in the UI: one work, one version, the first one.
   const first = work.versions[0]
   const hidden = work.hidden || (work.versions.length === 1 && first?.status === 'unlisted')
+  const firstVersionId = first?.bookVersionId
+  const readable = Boolean(firstVersionId) && (canManage || first?.status === 'published')
 
   return (
     <>
@@ -52,44 +56,20 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
       <MenuHeader
         title={work.title}
         subtitle={[formatAuthorList(work.authors, work.author), first?.format].filter(Boolean).join(' · ')}
+        onClick={firstVersionId ? () => {
+          onClose()
+          if (readable) {
+            void navigate({ to: '/books/$id', params: { id: firstVersionId } })
+          } else {
+            onShowDetails()
+          }
+        } : undefined}
       />
       <MenuItem
         label={_('library.details')}
         icon={<><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></>}
         onClick={onShowDetails}
       />
-      {canCollect && first && (first.status === 'published' || canManage) && (
-        <MenuItem
-          label={_('library.collect')}
-          icon={<><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /><line x1="12" y1="7" x2="12" y2="13" /><line x1="9" y1="10" x2="15" y2="10" /></>}
-          onClick={() => {
-            onClose()
-            collectBook.mutate(
-              { libraryId: work.libraryId, versionLinkId: first.id },
-              {
-                onSuccess: (res) => {
-                  notify[res.data.alreadyExists ? 'info' : 'success'](
-                    res.data.alreadyExists ? _('library.collectAlready') : _('library.collectSuccess'),
-                  )
-                },
-                onError: (err) => notify.error(getUserErrorNotification(err, 'library.collectFailed')),
-              },
-            )
-          }}
-        />
-      )}
-      {canDownload && first && (
-        <MenuItem
-          label={_('library.download')}
-          icon={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>}
-          onClick={() => {
-            onClose()
-            void downloadDefault({ id: first.bookVersionId, title: first.effective.title, format: first.format }).catch((err) => {
-              notify.error(getUserErrorNotification(err, 'errors.downloadFailed'))
-            })
-          }}
-        />
-      )}
       {canManage && (
         <MenuItem
           label={work.pinnedAt ? _('library.unpin') : _('library.pin')}
@@ -119,6 +99,50 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
             }, {
               onSuccess: () => notify.success(showing ? _('library.catalogShowWork') : _('library.catalogHideWork')),
               onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogHideWork')),
+            })
+          }}
+        />
+      )}
+
+      {(canCollect || canDownload) && first && <MenuDivider />}
+
+      {canCollect && first && (first.status === 'published' || canManage) && (
+        first.collected ? (
+          <MenuItem
+            label={_('library.collected')}
+            disabled
+            icon={<><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /><polyline points="9 11 11 13 15 9" /></>}
+            onClick={() => {}}
+          />
+        ) : (
+          <MenuItem
+            label={_('library.collect')}
+            icon={<><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /><line x1="12" y1="7" x2="12" y2="13" /><line x1="9" y1="10" x2="15" y2="10" /></>}
+            onClick={() => {
+              onClose()
+              collectBook.mutate(
+                { libraryId: work.libraryId, versionLinkId: first.id },
+                {
+                  onSuccess: (res) => {
+                    notify[res.data.alreadyExists ? 'info' : 'success'](
+                      res.data.alreadyExists ? _('library.collectAlready') : _('library.collectSuccess'),
+                    )
+                  },
+                  onError: (err) => notify.error(getUserErrorNotification(err, 'library.collectFailed')),
+                },
+              )
+            }}
+          />
+        )
+      )}
+      {canDownload && first && (
+        <MenuItem
+          label={_('library.download')}
+          icon={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>}
+          onClick={() => {
+            onClose()
+            void downloadDefault({ id: first.bookVersionId, title: first.effective.title, format: first.format }).catch((err) => {
+              notify.error(getUserErrorNotification(err, 'errors.downloadFailed'))
             })
           }}
         />

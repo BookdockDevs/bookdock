@@ -3,7 +3,7 @@ import { act, render, screen, fireEvent } from '@testing-library/react'
 import { createRef } from 'react'
 import { NavigationPanel } from '../features/reader/components/NavigationPanel'
 import { formatCardExcerpt } from '../features/reader/lib/book-search'
-import { useReaderState } from '../features/reader/state/reader-state'
+import { READER_SESSION_ID, useReaderState } from '../features/reader/state/reader-state'
 import { useReaderApi } from '../features/reader/hooks/useReaderApi'
 import { useAnnotations } from '../features/reader/hooks/useAnnotations'
 
@@ -128,6 +128,60 @@ describe('NavigationPanel', () => {
 
     await new Promise((r) => setTimeout(r, 300))
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
+  })
+
+  it('scrolls to current chapter on reopen even when the remembered index matches', async () => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn()
+
+    // Continue-reading case across page loads: the persisted sidebar state
+    // already points at the current chapter but carries no current session tag,
+    // so the reopen must still scroll; matching highlight alone leaves the
+    // panel stuck at its stale scroll position.
+    useReaderState.setState({
+      tocItems: [
+        { label: '第一章 开篇', href: 'chapter:0' },
+        { label: '第二章 续篇', href: 'chapter:1' },
+      ],
+      currentChapter: '第二章 续篇',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 9999, currentIndex: 1 } } },
+    })
+
+    render(<NavigationPanel bookId="book-1" open />)
+
+    await new Promise((r) => setTimeout(r, 350))
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
+  })
+
+  it('does not scroll twice when the TOC tree rebuilds under the same chapter', async () => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn()
+
+    useReaderState.setState({
+      tocItems: [
+        { label: '第一章 开篇', href: 'chapter:0' },
+        { label: '第二章 续篇', href: 'chapter:1' },
+      ],
+      currentChapter: '第二章 续篇',
+    })
+
+    render(<NavigationPanel bookId="book-1" open />)
+
+    await new Promise((r) => setTimeout(r, 350))
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(1)
+
+    // Parsed TOC replaces the initial tree with identical entries: same chapter,
+    // so the tree-swap re-arm must stay suppressed by the scrolled guard.
+    vi.mocked(window.HTMLElement.prototype.scrollIntoView).mockClear()
+    act(() => {
+      useReaderState.setState({
+        tocItems: [
+          { label: '第一章 开篇', href: 'chapter:0' },
+          { label: '第二章 续篇', href: 'chapter:1' },
+        ],
+      })
+    })
+
+    await new Promise((r) => setTimeout(r, 350))
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
   })
 
   it('navigates to clicked chapter', () => {
@@ -322,7 +376,7 @@ describe('NavigationPanel', () => {
     useReaderState.setState({
       tocItems: Array.from({ length: 30 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
       currentChapter: '第15章',
-      sidebarScrollPositions: { 'book-1': { toc: { top: 123, currentIndex: 14 } } },
+      sidebarScrollPositions: { 'book-1': { toc: { top: 123, currentIndex: 14, sessionId: READER_SESSION_ID } } },
     })
 
     const first = render(<NavigationPanel bookId="book-1" open />)
@@ -343,7 +397,7 @@ describe('NavigationPanel', () => {
     useReaderState.setState({
       tocItems: Array.from({ length: 30 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
       currentChapter: '第15章',
-      sidebarScrollPositions: { 'book-1': { toc: { top: 123, currentIndex: 14 } } },
+      sidebarScrollPositions: { 'book-1': { toc: { top: 123, currentIndex: 14, sessionId: READER_SESSION_ID } } },
     })
 
     const view = render(<NavigationPanel bookId="book-1" open />)
@@ -354,7 +408,7 @@ describe('NavigationPanel', () => {
     list.scrollTop = 0
     fireEvent.scroll(list)
 
-    expect(useReaderState.getState().sidebarScrollPositions['book-1']).toEqual({ toc: { top: 123, currentIndex: 14 } })
+    expect(useReaderState.getState().sidebarScrollPositions['book-1']).toEqual({ toc: { top: 123, currentIndex: 14, sessionId: READER_SESSION_ID } })
 
     view.rerender(<NavigationPanel bookId="book-1" open />)
     await act(async () => {

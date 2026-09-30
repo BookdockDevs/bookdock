@@ -184,4 +184,27 @@ describe('foliate paginator renderer contract', () => {
     expect(range?.startOffset).toBe(0)
     expect(range?.endOffset).toBe(1)
   })
+
+  // Regression: render() re-anchors to #anchor. Two failure modes, both seen
+  // when toggling a reader setting after scrolling:
+  //   1. #afterScroll only refreshes #anchor on a ~250ms debounce, so a render()
+  //      landing in that window restored a stale position.
+  //   2. Re-anchoring snapped the anchor's top edge to the viewport top, which
+  //      discarded how far into a line the reader had scrolled — the page
+  //      visibly shifted by up to a line even when the layout did not change.
+  // render() now flushes the scrolled state, then preserves the anchor's
+  // distance from the scroll origin instead of re-snapping it.
+  it('re-anchors on the preserved scroll offset, not a top-edge snap', () => {
+    const source = Paginator.prototype.render.toString()
+
+    const flushAt = source.indexOf('#flushScrolledState')
+    const measureAt = source.indexOf('#anchorScrollOffset()')
+    const restoreAt = source.indexOf('#restoreAnchorScrollOffset')
+    expect(flushAt).toBeGreaterThan(-1)
+    expect(measureAt).toBeGreaterThan(flushAt)
+    expect(restoreAt).toBeGreaterThan(measureAt)
+    // #scrollToAnchor stays only as the fallback when the anchor is gone.
+    expect(source).toContain('if (anchorOffset == null || !this.#restoreAnchorScrollOffset(anchorOffset))')
+    expect(source).toContain('this.#scrollToAnchor(this.#anchor)')
+  })
 })

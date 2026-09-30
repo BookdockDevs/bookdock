@@ -14,14 +14,14 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { computeFromAnchor, type SmartPosition } from '@/lib/position'
-import { formatBytes, formatDate } from '@/lib/utils'
+import { cn, formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover } from '../book-row'
 import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../download'
 import { useCollectBook, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
 import BookCover from './BookCover'
-import { copyText, formatLanguage, isMachineIdentifier, middleTruncate } from './book-detail/types'
-import { ActionIcon, FilterChip, GroupLabel } from './book-detail/ui'
+import { copyValueOnClick, formatLanguage, formatWordCount, isMachineIdentifier } from './book-detail/types'
+import { ActionIcon, FilterChip, GroupLabel, ExpandableRowValue } from './book-detail/ui'
 import DeleteVersionsDialog from './DeleteVersionsDialog'
 import VersionTabs from './VersionTabs'
 import WorkEditDialog from './WorkEditDialog'
@@ -252,28 +252,17 @@ export default function WorkDetailBody({
     })
   }
 
-  const metaRows: { label: string; value: string; copyable?: boolean; onClick?: () => void }[] = []
+  const metaRows: {
+    label: string
+    value: string
+    copyable?: boolean
+    onClick?: () => void
+    fullWidth?: boolean
+    expandable?: boolean
+    hint?: string
+  }[] = []
   const bookmeta = selected?.effective.bookmeta
-  if (bookmeta?.publisher) metaRows.push({ label: _('library.publisher'), value: bookmeta.publisher })
-  if (bookmeta?.published) metaRows.push({ label: _('library.published'), value: bookmeta.published })
-  if (bookmeta?.language) {
-    metaRows.push({ label: _('library.language'), value: formatLanguage(bookmeta.language, i18n.language) })
-  }
-  if (selected) {
-    metaRows.push({ label: _('library.format'), value: selected.format.toUpperCase() })
-    metaRows.push({ label: _('library.sortBy.size'), value: formatBytes(selected.size) })
-  }
-  if (selected?.effective.fileName) {
-    metaRows.push({ label: _('library.originalFile'), value: selected.effective.fileName, copyable: true })
-  }
-  if (selected) metaRows.push({ label: _('library.addedAt'), value: formatDate(selected.createdAt) })
-  const rawIdentifier = bookmeta?.isbn || bookmeta?.identifier || ''
-  if (rawIdentifier && (bookmeta?.isbn || !isMachineIdentifier(rawIdentifier))) {
-    metaRows.push({ label: bookmeta?.isbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true })
-  }
-  if (bookmeta?.subjects?.length) {
-    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、') })
-  }
+  const groupDigits = (n: number): string => new Intl.NumberFormat(i18n.language).format(n)
   if (bookmeta?.series) {
     const series = bookmeta.series
     metaRows.push({
@@ -281,6 +270,36 @@ export default function WorkDetailBody({
       value: bookmeta.seriesIndex != null ? `${series} #${bookmeta.seriesIndex}` : series,
       onClick: () => goToFilter({ series }),
     })
+  }
+  if (bookmeta?.publisher) metaRows.push({ label: _('library.publisher'), value: bookmeta.publisher })
+  if (bookmeta?.published) metaRows.push({ label: _('library.published'), value: bookmeta.published })
+  if (bookmeta?.language) {
+    metaRows.push({ label: _('library.language'), value: formatLanguage(bookmeta.language, i18n.language) })
+  }
+  const rawIdentifier = bookmeta?.isbn || bookmeta?.identifier || ''
+  if (rawIdentifier && (bookmeta?.isbn || !isMachineIdentifier(rawIdentifier))) {
+    metaRows.push({ label: bookmeta?.isbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true, hint: _('library.copyValue') })
+  }
+  if (selected) {
+    metaRows.push({ label: _('library.format'), value: selected.format.toUpperCase() })
+    metaRows.push({ label: _('library.sortBy.size'), value: formatBytes(selected.size), hint: `${groupDigits(selected.size)} B` })
+    if (selected.wordCount != null) {
+      metaRows.push({
+        label: _('library.wordCount'),
+        value: formatWordCount(selected.wordCount, i18n.language, _),
+        hint: _('library.tocRuleWords', { count: groupDigits(selected.wordCount) }),
+      })
+    }
+    metaRows.push({ label: _('library.addedAt'), value: formatDate(selected.createdAt), hint: formatDateTime(selected.createdAt) })
+    if (selected.updatedAt !== selected.createdAt) {
+      metaRows.push({ label: _('library.updatedAt'), value: formatDate(selected.updatedAt), hint: formatDateTime(selected.updatedAt) })
+    }
+  }
+  if (bookmeta?.subjects?.length) {
+    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、'), fullWidth: true, expandable: true })
+  }
+  if (selected?.effective.fileName) {
+    metaRows.push({ label: _('library.originalFile'), value: selected.effective.fileName, copyable: true, fullWidth: true, expandable: true, hint: _('library.copyFullFileName') })
   }
 
   if (!selected) return null
@@ -389,16 +408,22 @@ export default function WorkDetailBody({
               {_('library.startReading')}
             </Button>
             <div className="flex flex-1 items-center gap-1.5">
-              {canCollect && !isCollected && (
+              {canCollect && (
                 <ActionIcon
                   secondary
-                  label={_('library.collect')}
-                  disabled={collect.isPending}
-                  onClick={collectSelected}
+                  label={isCollected ? _('library.collected') : _('library.collect')}
+                  disabled={isCollected || collect.isPending}
+                  onClick={isCollected ? undefined : collectSelected}
                 >
                   <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                  <line x1="12" y1="7" x2="12" y2="13" />
-                  <line x1="9" y1="10" x2="15" y2="10" />
+                  {isCollected ? (
+                    <polyline points="9 11 11 13 15 9" />
+                  ) : (
+                    <>
+                      <line x1="12" y1="7" x2="12" y2="13" />
+                      <line x1="9" y1="10" x2="15" y2="10" />
+                    </>
+                  )}
                 </ActionIcon>
               )}
               {canManage && (
@@ -560,18 +585,29 @@ export default function WorkDetailBody({
         <div className="rounded-xl border border-stone-200/70 bg-stone-50/70 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
             {metaRows.map((row) => (
-              <div key={row.label} className="min-w-0">
+              <div key={row.label} className={cn('min-w-0', row.fullWidth && 'col-span-full')}>
                 <dt className="text-xs text-stone-400 dark:text-stone-500">{row.label}</dt>
                 {row.copyable ? (
                   <dd className="mt-0.5">
-                    <button
-                      type="button"
-                      title={row.value}
-                      onClick={() => void copyText(row.value)}
-                      className="line-clamp-2 break-all font-mono text-sm text-stone-700 transition-colors hover:text-stone-900 dark:text-stone-200 dark:hover:text-stone-100"
-                    >
-                      {middleTruncate(row.value)}
-                    </button>
+                    {row.expandable ? (
+                      <ExpandableRowValue
+                        value={row.value}
+                        mono
+                        onCopy={() => copyValueOnClick(row.value)}
+                        copyHint={row.hint}
+                        expandLabel={_('library.expand')}
+                        collapseLabel={_('library.collapse')}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        title={row.hint ?? row.value}
+                        onClick={() => copyValueOnClick(row.value)}
+                        className="block max-w-full cursor-pointer truncate text-left font-mono text-sm text-stone-700 hover:underline dark:text-stone-200"
+                      >
+                        {row.value}
+                      </button>
+                    )}
                   </dd>
                 ) : row.onClick ? (
                   <dd className="mt-0.5">
@@ -584,8 +620,17 @@ export default function WorkDetailBody({
                       {row.value}
                     </button>
                   </dd>
+                ) : row.expandable ? (
+                  <dd className="mt-0.5">
+                    <ExpandableRowValue
+                      value={row.value}
+                      wrapClass="break-words"
+                      expandLabel={_('library.expand')}
+                      collapseLabel={_('library.collapse')}
+                    />
+                  </dd>
                 ) : (
-                  <dd className="mt-0.5 line-clamp-2 break-words text-sm text-stone-700 dark:text-stone-200">{row.value}</dd>
+                  <dd title={row.hint} className="mt-0.5 line-clamp-2 break-words text-sm text-stone-700 dark:text-stone-200">{row.value}</dd>
                 )}
               </div>
             ))}

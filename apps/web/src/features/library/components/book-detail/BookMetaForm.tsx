@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
-import { autoGrow, copyText, middleTruncate, type MetaDraft } from './types'
+import { autoGrow, copyValueOnClick, middleTruncate, type MetaDraft } from './types'
 import { Field, GroupLabel, inputClass, textareaClass } from './ui'
 
 interface BookMetaFormProps {
@@ -149,9 +149,9 @@ export default function BookMetaForm({ draft, onChange, identifier, coverSlot }:
                 <span className="mb-1 block text-xs text-stone-400 dark:text-stone-500">{_('library.identifier')}</span>
                 <button
                   type="button"
-                  title={identifier}
-                  onClick={() => void copyText(identifier)}
-                  className="font-mono text-sm text-stone-600 transition-colors hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100"
+                  title={_('library.copyValue')}
+                  onClick={() => copyValueOnClick(identifier)}
+                  className="cursor-pointer font-mono text-sm text-stone-600 transition-colors hover:text-stone-900 hover:underline dark:text-stone-300 dark:hover:text-stone-100"
                 >
                   {middleTruncate(identifier)}
                 </button>

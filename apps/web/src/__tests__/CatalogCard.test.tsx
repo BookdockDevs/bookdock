@@ -186,18 +186,29 @@ describe('CatalogCard', () => {
   it('offers collect to a reader in the menu when canCollect is true', () => {
     const { container, collect } = renderCard(work(), { canCollect: true })
     openMenu(container)
-    expect(screen.getByText('加入我的书库')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('加入我的书库'))
+    expect(screen.getByText('加入书库')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('加入书库'))
     expect(collect).toHaveBeenCalledWith(
       { libraryId: 'lib_city', versionLinkId: 'lbv1' },
       expect.any(Object),
     )
   })
 
-  it('hides collect when the first version is already in the private library', () => {
+  it('shows collect as disabled when the first version is already in the private library', () => {
     const { container } = renderCard(work({ versions: [version({ collected: true })] }))
     openMenu(container)
-    expect(screen.queryByText('加入我的书库')).not.toBeInTheDocument()
+    expect(screen.queryByText('加入书库')).not.toBeInTheDocument()
+    const collectedItem = screen.getByText('已在书库中')
+    expect(collectedItem).toBeInTheDocument()
+    expect(collectedItem.closest('button')).toBeDisabled()
+  })
+
+  it('navigates to the reader when clicking the menu header title', () => {
+    const { container } = renderCard(work())
+    openMenu(container)
+    const headerTitle = screen.getByRole('button', { name: /City Book/ })
+    fireEvent.click(headerTitle)
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/books/$id', params: { id: 'v1' } })
   })
 
   it('does not display version count for single or multi-version works', () => {

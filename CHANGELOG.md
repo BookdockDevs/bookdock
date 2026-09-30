@@ -2,6 +2,25 @@
 
 All notable changes to Bookdock are documented here.
 
+## [0.4.1] - Unreleased
+
+### Added
+
+- Book detail pages (private and shared) show word-count and conditionally updated-time rows; long metadata values expand in place, copyable values copy on click, and compact numbers/dates reveal exact values on hover.
+- File names now contribute authors and edition tags (e.g. 精校版); catalog uploads carry the edition name through.
+- Catalog menus navigate from their headers and keep the collect action as a disabled already-in-library state instead of hiding it.
+- Metadata grids auto-pack without holes; values wrapped onto two lines render slightly smaller.
+
+### Changed
+
+- The book-detail overflow menu is TXT-only; publish moved to the action bar.
+
+### Fixed
+
+- Upgrading no longer refuses to boot over books whose source files are already gone; they are skipped with a migration anomaly while the rest of the library migrates.
+- Reopening a book now scrolls the directory to the current chapter instead of replaying its stale position.
+- The reader sidebar dock no longer flashes when toggling tabs, and the scrolled position holds across re-renders.
+
 ## [0.4.0] - 2026-09-30
 
 ### Highlights
@@ -439,6 +458,25 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [0.4.1] - 待发布
+
+#### 新增
+
+- 书籍详情（私人与共享）新增字数行与按需显示的更新时间行；长元数据行内展开、可复制值点击复制，紧凑数字与日期悬停显示精确值。
+- 文件名可解析出作者与版本标签（如精校版）；目录上传保留版本名。
+- 目录菜单头部可点击跳转；收藏操作保留为不可用的已在书库中状态，不再隐藏。
+- 元数据网格自动排满无空洞；折成两行的值字号略小。
+
+#### 变更
+
+- 书籍详情更多菜单仅 TXT 显示；发布移至操作栏。
+
+#### 修复
+
+- 源文件已丢失的书不再阻塞升级启动；它们记为迁移异常跳过，其余书正常迁移。
+- 重开书籍时目录会定位到当前章节，不再停在上次记住的旧位置。
+- 阅读器侧栏切换不再闪烁；滚动位置在重排后保持。
 
 ### [0.4.0] - 2026-09-30
 

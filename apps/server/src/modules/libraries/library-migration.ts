@@ -636,12 +636,23 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
   'all set, all unique')
 
   const bookRows = db.select().from(books).all()
+  // A book whose file is already gone from storage cannot be migrated by any
+  // correct migration: the steps skip it with an anomaly. Failing verification
+  // (and refusing to boot) over such a row bricks upgrades for data that was
+  // already broken, so only books with present files gate the boot.
+  const verifiableBooks: typeof bookRows = []
+  const missingSourceFiles: string[] = []
+  for (const book of bookRows) {
+    if (await storage.exists(book.filePath)) verifiableBooks.push(book)
+    else missingSourceFiles.push(book.id)
+  }
+  check('missing-source-files', true, missingSourceFiles.slice(0, 5).join(', ') || 'none')
   const versionIds = new Set(db.select({ id: bookVersions.id }).from(bookVersions).all().map((r) => r.id))
-  check('book-versions', bookRows.every((b) => versionIds.has(b.id)), `${versionIds.size}/${bookRows.length}`)
+  check('book-versions', verifiableBooks.every((b) => versionIds.has(b.id)), `${versionIds.size}/${verifiableBooks.length}`)
   const revisions = db.select().from(contentRevisions).all()
-  check('initial-revisions', bookRows.every((b) => revisions.some((r) => r.bookVersionId === b.id && r.revisionNo === 1)),
+  check('initial-revisions', verifiableBooks.every((b) => revisions.some((r) => r.bookVersionId === b.id && r.revisionNo === 1)),
     `${revisions.length} revisions`)
-  const chapterMismatch = bookRows.filter((b) => {
+  const chapterMismatch = verifiableBooks.filter((b) => {
     const legacyChapters = (b.meta as { chapters?: unknown[] })?.chapters
     if (!Array.isArray(legacyChapters)) return false
     const latest = revisions.filter((r) => r.bookVersionId === b.id).sort((x, y) => x.revisionNo - y.revisionNo).at(-1)
@@ -663,8 +674,8 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
   check('tags', tagRows.every((t) => libraryTagRows.some((l) => l.id === t.id)), `${libraryTagRows.length}/${tagRows.length}`)
 
   const states = db.select().from(bookStates).all()
-  check('reading-states', bookRows.every((b) => states.some((s) => s.userId === b.userId && s.bookVersionId === b.id)),
-    `${states.length}/${bookRows.length}`)
+  check('reading-states', verifiableBooks.every((b) => states.some((s) => s.userId === b.userId && s.bookVersionId === b.id)),
+    `${states.length}/${verifiableBooks.length}`)
 
   const annotationRows = db.select().from(annotations).all()
   const highlightRows = db.select().from(highlights).all()

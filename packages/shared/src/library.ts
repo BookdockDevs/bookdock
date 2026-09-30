@@ -381,6 +381,39 @@ export function normalizeAuthors(input?: { author?: string | null; authors?: str
   return single ? { author: single, authors: [single] } : { author: '', authors: [] }
 }
 
+export const VERSION_NAME_BLACKLIST = /(?:校园|修真|修仙|玄幻|都市|耽美|武侠|仙侠|科幻|奇幻|军事|历史|网游|同人|穿越|重生|种田|快穿|女尊|百合|纯爱|言情|异能|末世|游戏|无限流|悬疑|推理|灵异|恐怖|治愈|虐恋|爽文|系统|打脸|升级|万人迷|ABO|西幻|古言|现言|二次元|短篇|轻小说|小说网|中文网|文学城|贴吧|论坛|公众号|首发|制作|出品|整理|扫图|汉化|搬运|分享|下载|资源|笔趣阁|顶点|手机版|网页版|电脑版|txt|epub|pdf|azw3|mobi|zlibrary|鸠摩|微盘|夸克|百度网盘|阿里网盘|精品|精选|推荐|热销|必读|畅销|排行榜|好书|高分|神作|^(?:作者|by|著)[：:\s]|^[日美英法德俄韩中清明宋唐汉元]$)/i
+const VERSION_HIGH_CONFIDENCE = /(?:精校|校对|精修|修订|校订|重修|精排|定稿|插图|彩插|图文|未删减|无删减|未删节|典藏|珍藏|纪念|合订|注音|双语|双语对照|全译本|译本|第\s*[0-9一二三四五六七八九十]+\s*版|^[vV](?:er(?:sion)?)?\.?\s*\d+(?:\.\d+)*$)/i
+const VERSION_NAME_PATTERN = /(?:(?:^|[^\w\u4e00-\u9fa5]|[\u4e00-\u9fa5]+)(?:版|版本)$|^(?:精校全本|完结\s*[+＋]\s*番外|全本番外|完结|全本)$)/i
+
+/**
+ * Extracts a high-confidence version/edition name from bracketed noise in a file name.
+ * Adheres to conservative matching: returns undefined rather than false-positive tags.
+ */
+export function extractVersionNameFromFileName(filename: string): string | undefined {
+  const base = filename.replace(/\.[^.]+$/, '')
+  const matches = Array.from(base.matchAll(/[[(（【［{｛]([^\])）】］}｝]+)[\])）】］}｝]/g))
+  if (matches.length === 0) return undefined
+
+  const candidates: Array<{ text: string; priority: number }> = []
+
+  for (const m of matches) {
+    const text = m[1].trim()
+    if (!text || text.length > 30) continue
+    if (text.includes(':') || text.includes('：')) continue
+    if (VERSION_NAME_BLACKLIST.test(text)) continue
+
+    if (VERSION_HIGH_CONFIDENCE.test(text)) {
+      candidates.push({ text, priority: 2 })
+    } else if (VERSION_NAME_PATTERN.test(text)) {
+      candidates.push({ text, priority: 1 })
+    }
+  }
+
+  if (candidates.length === 0) return undefined
+  candidates.sort((a, b) => b.priority - a.priority)
+  return candidates[0]!.text
+}
+
 export const catalogUploadSchema = z.object({
   /** Existing work to attach this version to (5.2); omit to create one. */
   libraryBookId: z.string().min(1).max(128).optional(),

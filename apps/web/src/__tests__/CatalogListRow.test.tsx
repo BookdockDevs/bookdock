@@ -17,7 +17,9 @@ const HOOKS = vi.hoisted(() => ({
 }))
 
 vi.mock('../features/library/hooks', () => HOOKS)
+const navigateMock = vi.fn()
 vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => navigateMock,
   Link: ({ to, params, children, onClick, className }: {
     to: string
     params?: { id?: string }
@@ -134,21 +136,24 @@ describe('CatalogListRow', () => {
     fireEvent.contextMenu(screen.getByText('City Book'))
     expect(screen.getByText('详情')).toBeInTheDocument()
     expect(screen.getByText('下载')).toBeInTheDocument()
-    expect(screen.getByText('加入我的书库')).toBeInTheDocument()
+    expect(screen.getByText('加入书库')).toBeInTheDocument()
     expect(screen.queryByText('置顶')).toBeNull()
     expect(screen.queryByText('删除')).toBeNull()
   })
 
-  it('hides collect when the first version is already in the private library', () => {
+  it('shows collect as disabled when the first version is already in the private library', () => {
     renderRow(work({ versions: [version({ collected: true })] }))
     fireEvent.contextMenu(screen.getByText('City Book'))
-    expect(screen.queryByText('加入我的书库')).not.toBeInTheDocument()
+    expect(screen.queryByText('加入书库')).not.toBeInTheDocument()
+    const collectedItem = screen.getByText('已在书库中')
+    expect(collectedItem).toBeInTheDocument()
+    expect(collectedItem.closest('button')).toBeDisabled()
   })
 
   it('triggers collect through the menu item when clicked', () => {
     const { collect } = renderRow(work(), { canCollect: true })
     fireEvent.contextMenu(screen.getByText('City Book'))
-    fireEvent.click(screen.getByText('加入我的书库'))
+    fireEvent.click(screen.getByText('加入书库'))
     expect(collect).toHaveBeenCalledWith(
       { libraryId: 'lib_city', versionLinkId: 'lbv1' },
       expect.any(Object),

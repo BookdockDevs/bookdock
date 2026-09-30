@@ -33,17 +33,6 @@ export default function LibraryDetailsDialog({ library, onClose }: LibraryDetail
       title={_('library.detailsTitle')}
       onClose={onClose}
       closeLabel={_('library.close')}
-      footer={(
-        <div className="flex w-full justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100"
-          >
-            {_('library.close')}
-          </button>
-        </div>
-      )}
     >
       <div className="flex flex-col gap-4">
         <div className="flex items-start gap-3">

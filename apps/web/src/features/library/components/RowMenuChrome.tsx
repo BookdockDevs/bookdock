@@ -6,7 +6,35 @@ import type { ReactNode } from 'react'
  * shared library's row menu are the same menu with different items, so the
  * frame lives here and each side supplies only what it can do.
  */
-export function MenuHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+export function MenuHeader({
+  title,
+  subtitle,
+  onClick,
+}: {
+  title: string
+  subtitle?: string
+  onClick?: () => void
+}) {
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          onClick()
+        }}
+        className="group/header mx-1 mb-1 block w-[calc(100%-0.5rem)] rounded-lg border-b border-stone-100 p-1.5 text-left transition-colors hover:bg-stone-100 dark:border-stone-800 dark:hover:bg-stone-800/80"
+      >
+        <p className="truncate text-xs font-medium text-stone-900 transition-colors group-hover/header:text-blue-600 dark:text-stone-100 dark:group-hover/header:text-blue-400">
+          {title}
+        </p>
+        {subtitle && (
+          <p className="mt-0.5 truncate text-[10px] text-stone-400 dark:text-stone-500">{subtitle}</p>
+        )}
+      </button>
+    )
+  }
   return (
     <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
       <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{title}</p>

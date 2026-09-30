@@ -1,7 +1,37 @@
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { AppendContentPreviewRes, BookDetailRes, BookFormat, BookListItem, BookListRes, BookMetadata, BookSourceStatus, CatalogBook, CatalogBookUpdateReq, CatalogListRes, CatalogVersion, CatalogVersionUpdateReq, CollectBookRes, Category, ForkLocalRes, LibraryCreateReq, LibraryListItem, LibraryMembersRes, LibraryRelation, LibraryTag, LibraryUpdateReq, MembershipRole, PublishPrivateBookRes, ReadStatus, RepinRes, SettingsRes, ShelfListItem, TagListItem } from '@bookdock/shared'
+import {
+  extractVersionNameFromFileName,
+  type AppendContentPreviewRes,
+  type BookDetailRes,
+  type BookFormat,
+  type BookListItem,
+  type BookListRes,
+  type BookMetadata,
+  type BookSourceStatus,
+  type CatalogBook,
+  type CatalogBookUpdateReq,
+  type CatalogListRes,
+  type CatalogVersion,
+  type CatalogVersionUpdateReq,
+  type CollectBookRes,
+  type Category,
+  type ForkLocalRes,
+  type LibraryCreateReq,
+  type LibraryListItem,
+  type LibraryMembersRes,
+  type LibraryRelation,
+  type LibraryTag,
+  type LibraryUpdateReq,
+  type MembershipRole,
+  type PublishPrivateBookRes,
+  type ReadStatus,
+  type RepinRes,
+  type SettingsRes,
+  type ShelfListItem,
+  type TagListItem,
+} from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import { withReveal } from '@/lib/reveal-hidden'
@@ -1009,19 +1039,7 @@ export function isAcceptedUploadFile(file: File): boolean {
   return UPLOAD_ACCEPTED_EXTENSIONS.some((ext) => name.endsWith(ext))
 }
 
-export function extractVersionNameFromFileName(filename: string): string | undefined {
-  const base = filename.replace(/\.[^.]+$/, '')
-  const matches = Array.from(base.matchAll(/[[(（【]([^\])）】]+)[\])）】]/g))
-  if (matches.length === 0) return undefined
-  const versionKeywordRegex = /(?:校|版|插图|完结|精|无删减|修|全本|第.+版|v\d+|ver)/i
-  for (let i = matches.length - 1; i >= 0; i--) {
-    const content = matches[i][1].trim()
-    if (versionKeywordRegex.test(content)) {
-      return content
-    }
-  }
-  return undefined
-}
+export { extractVersionNameFromFileName } from '@bookdock/shared'
 
 const UPLOAD_CONCURRENCY = 3
 

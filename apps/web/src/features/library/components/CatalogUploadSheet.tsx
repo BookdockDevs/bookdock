@@ -55,8 +55,9 @@ export default function CatalogUploadSheet({
     url: `/libraries/${libraryId}/books`,
     fields: (item) => ({
       ...(libraryBookId
-        ? { libraryBookId, ...(item.versionName?.trim() ? { name: item.versionName.trim() } : {}) }
+        ? { libraryBookId }
         : (categoryId ? { categoryId } : {})),
+      ...(item.versionName?.trim() ? { name: item.versionName.trim() } : {}),
     }),
     // Bound-work uploads answer the new link id so the caller can select the
     // version it just added. It is not a readable book id: the in-detail flow
@@ -87,7 +88,8 @@ export default function CatalogUploadSheet({
       shelfName={categoryName}
       isCategory
       target={target}
-      versionNameMode={Boolean(libraryBookId)}
+      versionNameMode={true}
+      boundWork={Boolean(libraryBookId)}
       contextNote={versionContextNote}
       contextTitle={versionContextTitle}
       onUploaded={onUploadedVersion}

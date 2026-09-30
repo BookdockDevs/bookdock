@@ -130,4 +130,19 @@ describe('resetBookMetadata metadata normalization', () => {
     expect(book.title).toBe('文件名')
     expect(book.author).toBe('作者名')
   })
+
+  it('derives multiple authors from file name when uploading and resetting', async () => {
+    const file = new File(['正文'], '《好兆头》作者：尼尔·盖曼、特里·普拉切特.txt', { type: 'text/plain' })
+    const { book } = await uploadBook(ownerId, file, undefined, { normalizeTitle: true })
+
+    expect(book.title).toBe('好兆头')
+    expect(book.author).toBe('尼尔·盖曼')
+    expect(book.authors).toEqual(['尼尔·盖曼', '特里·普拉切特'])
+
+    await updateBook(ownerId, book.id, { title: '改动的标题', authors: ['单人'] })
+    const reset = await resetBookMetadata(ownerId, book.id, { normalizeTitle: true })
+    expect(reset.title).toBe('好兆头')
+    expect(reset.author).toBe('尼尔·盖曼')
+    expect(reset.authors).toEqual(['尼尔·盖曼', '特里·普拉切特'])
+  })
 })

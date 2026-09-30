@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useReaderApi } from '../hooks/useReaderApi'
-import { useReaderState } from '../state/reader-state'
+import { READER_SESSION_ID, useReaderState } from '../state/reader-state'
 import type { NavTab, SearchResult } from '../types'
 import { useAnnotations, useBatchDeleteAnnotations } from '../hooks/useAnnotations'
 import { useBookChapters } from '../hooks/useBookChapters'
@@ -218,13 +218,22 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const volumeLiRefs = useRef<Map<number, HTMLLIElement>>(new Map())
   const [stuckVolumeIndex, setStuckVolumeIndex] = useState<number | null>(null)
   const rememberedScrollPositions = useReaderState.getState().sidebarScrollPositions[bookId] ?? {}
+  // Only a position saved during this page load is fresh enough to replay. A
+  // cross-session reopen replays a stale viewport while the current chapter
+  // matches the remembered index, which would satisfy the auto-scroll guard
+  // without any scroll ever happening.
+  const rememberedTocPosition = rememberedScrollPositions.toc
+  const tocPositionFresh = rememberedTocPosition?.sessionId === READER_SESSION_ID
   const savedScrollTop = useRef<Partial<Record<NavTab, number>>>({
-    toc: rememberedScrollPositions.toc?.top,
+    toc: tocPositionFresh ? rememberedTocPosition?.top : undefined,
     notes: rememberedScrollPositions.notes?.top,
     stats: rememberedScrollPositions.stats?.top,
     ai: rememberedScrollPositions.ai?.top,
   })
-  const lastScrolledIndex = useRef<number | null>(rememberedScrollPositions.toc?.currentIndex ?? null)
+  // A stale (cross-session) position must neither replay its viewport nor
+  // satisfy the auto-scroll guard: the reopen earns its own locate scroll.
+  // A fresh (same-session) position replays exactly and suppresses it.
+  const lastScrolledIndex = useRef<number | null>(tocPositionFresh ? (rememberedTocPosition?.currentIndex ?? null) : null)
 
   const rememberSidebarScroll = useCallback((tabToRemember: NavTab, top: number, index?: number) => {
     savedScrollTop.current[tabToRemember] = top
@@ -661,6 +670,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
 
   // Scroll the current chapter into view when the panel opens or current chapter changes.
   // Position the current item at roughly the top 1/4 of the panel viewport for better context.
+  // `tree` is a dep on purpose: on cold open the tree swaps from the synthesized
+  // chapter list to the parsed TOC, and a timer that fired mid-swap drops its
+  // scroll when the target row is not mounted yet. The swap re-arms the attempt;
+  // the lastScrolledIndex guard still suppresses duplicate scrolls.
   useEffect(() => {
     if (tab !== 'toc' || !open || currentIndex < 0 || searchExpanded) return
     if (currentIndex === lastScrolledIndex.current) return
@@ -668,7 +681,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       scrollToCurrentChapter()
     }, 300)
     return () => clearTimeout(timer)
-  }, [tab, open, currentIndex, collapsed, searchExpanded, scrollToCurrentChapter])
+  }, [tab, open, currentIndex, collapsed, searchExpanded, scrollToCurrentChapter, tree])
 
   const pendingSearchQuery = useReaderState((s) => s.pendingSearchQuery)
   const setPendingSearchQuery = useReaderState((s) => s.setPendingSearchQuery)

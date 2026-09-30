@@ -18,6 +18,12 @@ export function formatDate(ts: number): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+export function formatDateTime(ts: number): string {
+  const d = new Date(ts)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${formatDate(ts)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
 /**
  * Single-line author display for list rows: the full list joined, falling
  * back to the first-author mirror for rows that predate the authors column.

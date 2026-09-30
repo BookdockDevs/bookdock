@@ -35,15 +35,15 @@ describe('reader-state resetForBook', () => {
     useReaderState.getState().setSidebarScrollPosition('book-1', 'notes', { top: 456 })
     useReaderState.getState().resetForBook()
     expect(useReaderState.getState().sidebarScrollPositions['book-1']).toEqual({
-      toc: { top: 123, currentIndex: 14 },
-      notes: { top: 456 },
+      toc: { top: 123, currentIndex: 14, sessionId: expect.any(String) },
+      notes: { top: 456, sessionId: expect.any(String) },
     })
   })
 
   it('persists sidebar positions for a fresh reader load', () => {
     useReaderState.getState().setSidebarScrollPosition('book-1', 'stats', { top: 789 })
     expect(JSON.parse(localStorage.getItem('bd-reader-sidebar-scroll-v1') ?? '{}')).toEqual({
-      'book-1': { stats: { top: 789 } },
+      'book-1': { stats: { top: 789, sessionId: expect.any(String) } },
     })
   })
 })

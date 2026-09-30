@@ -367,6 +367,34 @@ describe('library identity migration', () => {
     ]))
   })
 
+  it('passes verification when a trashed book lost its source file', async () => {
+    db.insert(schema.books).values([
+      {
+        id: 'b-good', userId: 'u-owner', title: 'Good', author: '', format: 'txt',
+        filePath: 'blobs/ab/good.epub', coverKey: null, size: 10,
+        meta: {}, createdAt: 1, updatedAt: 1,
+      },
+      {
+        id: 'b-lost', userId: 'u-owner', title: 'Lost', author: '', format: 'txt',
+        filePath: 'blobs/zz/gone.epub', coverKey: null, size: 10,
+        meta: {}, createdAt: 2, updatedAt: 3, deletedAt: 4,
+      },
+    ]).run()
+    vi.spyOn(storage, 'getStorage').mockReturnValue(memoryStorage(new Map([['blobs/ab/good.epub', 10]])))
+
+    await backfillUserFields()
+    await migratePrivateLibraries()
+    await seedInstance()
+    await migrateLibraryOrganization()
+    await migrateReadingStates()
+    await migrateAnnotations()
+    await backfillVersionReferences()
+    const report = await verifyPhase2Migration()
+    expect(report.pass).toBe(true)
+    expect(report.checks.find((c) => c.name === 'missing-source-files')?.detail).toBe('b-lost')
+    expect(report.checks.find((c) => c.name === 'book-versions')?.detail).toBe('1/1')
+  })
+
   it('backfills revision meta and pins from legacy rows without touching newer state', async () => {
     db.insert(schema.books).values({
       id: 'b1', userId: 'u-owner', title: 'B', author: '', format: 'txt',

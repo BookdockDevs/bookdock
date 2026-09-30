@@ -33,6 +33,8 @@ interface UploadSheetProps {
    * target already bound to one work.
    */
   versionNameMode?: boolean
+  /** Upload target is already bound to an existing work: prevents navigating to reading directly. */
+  boundWork?: boolean
   /** One-line context under the dropzone, e.g. which work new versions join. */
   contextNote?: string
   /** Optional hover title for contextNote */
@@ -74,6 +76,7 @@ export default function UploadSheet({
   tagId,
   target,
   versionNameMode = false,
+  boundWork,
   contextNote,
   contextTitle,
   onUploaded,
@@ -157,7 +160,7 @@ export default function UploadSheet({
   const readable = settled && items.length === 1
     && (items[0].status === 'success' || items[0].status === 'duplicate')
     && Boolean(items[0].bookVersionId)
-    && !versionNameMode
+    && !(boundWork ?? versionNameMode)
 
   function handleRead() {
     const bookVersionId = items[0]?.bookVersionId

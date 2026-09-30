@@ -262,7 +262,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
         closeLabel={_('library.close')}
         size="xl"
         actions={
-          !readOnly && !isLibraryOwned && (displayBook.format === 'txt' || onPublish) ? (
+          !readOnly && !isLibraryOwned && displayBook.format === 'txt' ? (
             <div ref={moreAnchorRef} className="relative">
               <button
                 type="button"
@@ -279,58 +279,37 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
               </button>
               {moreMenu && (
                 <SmartMenu innerRef={moreMenuRef} position={moreMenu} onClose={() => setMoreMenu(null)}>
-                  {displayBook.format === 'txt' && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMoreMenu(null)
-                          setTocRuleOpen(true)
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                          <line x1="8" y1="6" x2="21" y2="6" />
-                          <line x1="8" y1="12" x2="21" y2="12" />
-                          <line x1="8" y1="18" x2="21" y2="18" />
-                          <line x1="3" y1="6" x2="3.01" y2="6" />
-                          <line x1="3" y1="12" x2="3.01" y2="12" />
-                          <line x1="3" y1="18" x2="3.01" y2="18" />
-                        </svg>
-                        <span className="flex-1">{_('library.changeTocRule')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMoreMenu(null)
-                          setAppendContentOpen(true)
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                          <path d="M12 5v14M5 12h14" />
-                        </svg>
-                        <span className="flex-1">{_('library.appendContent')}</span>
-                      </button>
-                    </>
-                  )}
-                  {onPublish && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMoreMenu(null)
-                        onPublish(displayBook)
-                      }}
-                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
-                    >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                        <path d="M12 17V3" />
-                        <path d="m7 8 5-5 5 5" />
-                        <path d="M5 21h14" />
-                      </svg>
-                      <span className="flex-1">{_('library.publish')}</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreMenu(null)
+                      setTocRuleOpen(true)
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                      <line x1="8" y1="6" x2="21" y2="6" />
+                      <line x1="8" y1="12" x2="21" y2="12" />
+                      <line x1="8" y1="18" x2="21" y2="18" />
+                      <line x1="3" y1="6" x2="3.01" y2="6" />
+                      <line x1="3" y1="12" x2="3.01" y2="12" />
+                      <line x1="3" y1="18" x2="3.01" y2="18" />
+                    </svg>
+                    <span className="flex-1">{_('library.changeTocRule')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreMenu(null)
+                      setAppendContentOpen(true)
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                    <span className="flex-1">{_('library.appendContent')}</span>
+                  </button>
                 </SmartMenu>
               )}
             </div>
@@ -431,6 +410,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
               onEdit={enterEdit}
               onDelete={onDelete}
               onClose={onClose}
+              onPublish={onPublish}
             />
           )}
 

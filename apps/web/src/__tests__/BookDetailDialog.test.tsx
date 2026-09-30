@@ -501,24 +501,114 @@ describe('BookDetailDialog metadata rows', () => {
     expect(screen.queryByText('系列')).toBeNull()
     expect(screen.queryByText('更新日期')).toBeNull()
     expect(screen.queryByText('原始文件')).toBeNull()
+    expect(screen.queryByText('字数')).toBeNull()
 
     expect(screen.getByText('添加时间')).toBeInTheDocument()
     expect(screen.getByText('格式')).toBeInTheDocument()
     expect(screen.getByText('大小')).toBeInTheDocument()
   })
 
+  it('shows the word count row when the detail meta carries it', () => {
+    bookDetail = { data: { ...book, meta: { bookmeta: {}, wordCount: 454385 } } }
+    renderDialog()
+
+    expect(screen.getByText('字数')).toBeInTheDocument()
+    expect(screen.getByText('45.4万字')).toBeInTheDocument()
+  })
+
   it('shows the original file name as a copyable row', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    const LONG_FILE_NAME = '《韵母攻略》作者：流浪老师.txt'
+    bookDetail = { data: { ...book, meta: { fileName: LONG_FILE_NAME } } }
+    renderDialog()
+
+    expect(screen.getByText('原始文件')).toBeInTheDocument()
+    const button = screen.getByTitle('复制文件名')
+    expect(button).toBeInTheDocument()
+    expect(button.textContent).toBe(LONG_FILE_NAME)
+    expect(button.closest('dl > div')?.className).toContain('sm:col-span-2')
+
+    fireEvent.click(button)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(LONG_FILE_NAME))
+  })
+
+  it('keeps a text selection instead of hijacking it with the full value', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })
     bookDetail = { data: { ...book, meta: { fileName: 'my-old-book.txt' } } }
     renderDialog()
 
-    expect(screen.getByText('原始文件')).toBeInTheDocument()
-    const button = screen.getByTitle('my-old-book.txt')
-    expect(button).toBeInTheDocument()
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    const range = document.createRange()
+    range.selectNodeContents(screen.getByText('my-old-book.txt'))
+    selection?.addRange(range)
 
-    fireEvent.click(button)
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('my-old-book.txt'))
+    fireEvent.click(screen.getByTitle('复制文件名'))
+    expect(writeText).not.toHaveBeenCalled()
+
+    selection?.removeAllRanges()
+  })
+
+  it('shows the updated time only when the book changed after upload', () => {
+    bookDetail = { data: { ...book, meta: { bookmeta: {} } } }
+    const { unmount } = renderDialog()
+    expect(screen.queryByText('更新日期')).toBeNull()
+    unmount()
+
+    bookDetail = { data: { ...book, updatedAt: 86400002, meta: { bookmeta: {} } } }
+    renderDialog()
+    expect(screen.getByText('更新日期')).toBeInTheDocument()
+    expect(screen.getByText('1970-01-02')).toBeInTheDocument()
+  })
+
+  it('reveals the exact word count behind the compact display', () => {
+    bookDetail = { data: { ...book, meta: { bookmeta: {}, wordCount: 454385 } } }
+    renderDialog()
+
+    expect(screen.getByText('45.4万字').closest('dd')).toHaveAttribute('title', '454,385 字')
+  })
+
+  it('expands a long file name in place', () => {
+    const proto = HTMLElement.prototype as unknown as Record<string, unknown>
+    const hadScrollHeight = Object.prototype.hasOwnProperty.call(proto, 'scrollHeight')
+    const hadClientHeight = Object.prototype.hasOwnProperty.call(proto, 'clientHeight')
+    const savedScrollHeight = hadScrollHeight
+      ? Object.getOwnPropertyDescriptor(proto, 'scrollHeight')
+      : undefined
+    const savedClientHeight = hadClientHeight
+      ? Object.getOwnPropertyDescriptor(proto, 'clientHeight')
+      : undefined
+    Object.defineProperty(proto, 'scrollHeight', { configurable: true, value: 100 })
+    Object.defineProperty(proto, 'clientHeight', { configurable: true, value: 20 })
+    try {
+      const longName = `《${'很长'.repeat(30)}》未删减完整版01_32连载_本站首发_作品作者：某某某.txt`
+      bookDetail = { data: { ...book, meta: { fileName: longName } } }
+      renderDialog()
+
+      const row = screen.getByText('原始文件').closest('div')!
+      const toggle = within(row).getByTitle('展开')
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      fireEvent.click(toggle)
+      expect(within(row).getByTitle('收起')).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByText(longName)).toBeInTheDocument()
+    } finally {
+      if (hadScrollHeight && savedScrollHeight) Object.defineProperty(proto, 'scrollHeight', savedScrollHeight)
+      else delete proto.scrollHeight
+      if (hadClientHeight && savedClientHeight) Object.defineProperty(proto, 'clientHeight', savedClientHeight)
+      else delete proto.clientHeight
+    }
+  })
+
+  it('hides the expand chevron when the value fits on one line', () => {
+    bookDetail = { data: { ...book, meta: { fileName: 'my-old-book.txt' } } }
+    renderDialog()
+
+    const row = screen.getByText('原始文件').closest('div')!
+    expect(within(row).queryByTitle('展开')).toBeNull()
+    expect(within(row).queryByTitle('收起')).toBeNull()
+    expect(screen.getByText('my-old-book.txt')).toBeInTheDocument()
   })
 
   it('renders lastRead in reading progress area when lastReadAt is present', () => {
@@ -599,15 +689,14 @@ describe('BookDetailDialog description draft', () => {
 })
 
 describe('BookDetailDialog identifier', () => {
-  it('copies the full identifier from the middle-truncated metadata row', async () => {
+  it('copies the full identifier from the truncated metadata row', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })
     withMeta({ identifier: LONG_IDENTIFIER })
     renderDialog()
 
-    const button = screen.getByTitle(LONG_IDENTIFIER)
-    expect(button.textContent).not.toBe(LONG_IDENTIFIER)
-    expect(button.textContent).toContain('…')
+    const button = screen.getByTitle('点击复制')
+    expect(button.textContent).toBe(LONG_IDENTIFIER)
     fireEvent.click(button)
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(LONG_IDENTIFIER))
@@ -622,7 +711,7 @@ describe('BookDetailDialog identifier', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(screen.queryByDisplayValue(LONG_IDENTIFIER)).toBeNull()
 
-    fireEvent.click(screen.getByTitle(LONG_IDENTIFIER))
+    fireEvent.click(screen.getByTitle('点击复制'))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(LONG_IDENTIFIER))
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -765,27 +854,38 @@ describe('BookDetailDialog download menu (2×2)', () => {
   })
 })
 
-describe('BookDetailDialog more actions', () => {
-  it('shows only publish for a publishable EPUB and uses the home-menu icon', () => {
+describe('BookDetailDialog publish action', () => {
+  it('renders publish in the action bar for a publishable book and invokes onPublish', () => {
     const onPublish = vi.fn()
     render(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} onPublish={onPublish} />, { wrapper })
 
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    expect(screen.queryByRole('button', { name: '更换目录规则' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '追加内容' })).not.toBeInTheDocument()
     const publish = screen.getByRole('button', { name: '发布' })
     expect(publish.querySelector('path[d="M12 17V3"]')).not.toBeNull()
     fireEvent.click(publish)
     expect(onPublish).toHaveBeenCalledWith(expect.objectContaining({ id: book.id }))
   })
 
+  it('does not render publish when onPublish is not provided or readOnly', () => {
+    const { rerender } = render(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    expect(screen.queryByRole('button', { name: '发布' })).not.toBeInTheDocument()
+
+    rerender(<BookDetailDialog book={book} readOnly onClose={vi.fn()} onDelete={vi.fn()} onPublish={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: '发布' })).not.toBeInTheDocument()
+  })
+})
+
+describe('BookDetailDialog more actions', () => {
   it('keeps TXT-only actions available for a TXT book', () => {
     render(<BookDetailDialog book={{ ...book, format: 'txt' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
 
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
     expect(screen.getByRole('button', { name: '更换目录规则' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '追加内容' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '发布' })).not.toBeInTheDocument()
+  })
+
+  it('does not show more actions for a non-TXT book', () => {
+    render(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument()
   })
 })
 
@@ -841,9 +941,12 @@ describe('BookDetailDialog shared work mode', () => {
     expect(screen.getByText('格式')).toBeInTheDocument()
     expect(screen.getByText('TXT')).toBeInTheDocument()
     expect(screen.getByText('大小')).toBeInTheDocument()
+    expect(screen.getByText('字数')).toBeInTheDocument()
+    expect(screen.getByText('45.4万字')).toBeInTheDocument()
     expect(screen.getByText('添加时间')).toBeInTheDocument()
+    expect(screen.queryByText('更新日期')).toBeNull()
     expect(screen.getByRole('button', { name: '开始阅读' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '加入我的书库' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加入书库' })).toBeInTheDocument()
     expect(screen.getByLabelText('下载')).toBeInTheDocument()
     // A work belongs to nobody: no read-status chip, no progress, no editor.
     expect(screen.queryByRole('button', { name: '在读' })).toBeNull()

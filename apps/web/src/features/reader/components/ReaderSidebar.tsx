@@ -116,6 +116,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   const handleNavTab = useCallback((tab: NavTab) => {
     if (sidebarOpen && activeNavTab === tab) {
       panelRef.current?.saveScroll()
+      dismissCooldownRef.current = true
+      setJustDismissed(true)
+      setHovered(false)
+      setFloatingActive(false)
       setSidebarOpen(false)
     } else {
       if (sidebarOpen) panelRef.current?.saveScroll()
@@ -129,12 +133,14 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
 
   const [floatingActive, setFloatingActive] = useState(false)
   const [justDismissed, setJustDismissed] = useState(false)
+  const dismissCooldownRef = useRef(false)
   const prevOpenRef = useRef(sidebarOpen)
   const dockRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (prevOpenRef.current && !sidebarOpen) {
       setJustDismissed(true)
+      dismissCooldownRef.current = true
       const timer = setTimeout(() => {
         setJustDismissed(false)
       }, 300)
@@ -144,6 +150,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   }, [sidebarOpen])
 
   const handleClosePanel = useCallback(() => {
+    dismissCooldownRef.current = true
     setJustDismissed(true)
     panelRef.current?.saveScroll()
     setHovered(false)
@@ -160,7 +167,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   }, [])
 
   const handleHoverPointerEnter = useCallback((e: React.PointerEvent) => {
-    if (locked || sidebarOpen || justDismissed) return
+    if (locked || sidebarOpen || justDismissed || dismissCooldownRef.current) return
     if (!isWithinFloatingCorridor(e.clientY)) return
     const isLeftEdge = e.clientX == null || e.clientX <= 70
     if (isLeftEdge) {
@@ -170,7 +177,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   }, [locked, sidebarOpen, justDismissed, isWithinFloatingCorridor])
 
   const handleHoverPointerMove = useCallback((e: React.PointerEvent) => {
-    if (locked || sidebarOpen || justDismissed) return
+    if (locked || sidebarOpen || justDismissed || dismissCooldownRef.current) return
     const inCorridor = isWithinFloatingCorridor(e.clientY)
     const isLeftEdge = (e.clientX == null || e.clientX <= 70) && inCorridor
     const isOverDock = Boolean(dockRef.current?.contains(e.target as Node))
@@ -186,6 +193,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
 
   const handleHoverPointerLeave = useCallback(() => {
     setHovered(false)
+    dismissCooldownRef.current = false
   }, [])
 
   // Once mouse leaves the floating dock, allow fade out before dropping floating state
@@ -235,7 +243,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
             ? 'absolute left-3 top-16 z-50 h-auto w-12 flex-col items-center gap-1.5 rounded-2xl border border-[var(--bd-read-accent)]/80 p-1 shadow-2xl backdrop-blur-md before:pointer-events-auto before:absolute before:-left-3 before:top-0 before:h-full before:w-3 before:content-[\'\']'
             : 'order-none h-full w-[56px] flex-col items-center border-r py-3',
         collapsed ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',
-        !resizing && 'transition-all duration-200',
+        !resizing && 'transition-opacity duration-150',
       )}
       style={isFloatingDock
         ? { backgroundColor: 'color-mix(in srgb, var(--bd-read-bg) 92%, transparent)' }

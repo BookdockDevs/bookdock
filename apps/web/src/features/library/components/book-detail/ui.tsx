@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 export const inputClass =
@@ -124,5 +125,99 @@ export function ActionIcon({
         {children}
       </svg>
     </button>
+  )
+}
+
+/** Row-level expand/collapse for long metadata values (file names, subjects). */
+export function RowExpandButton({ expanded, label, onToggle }: { expanded: boolean; label: string; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      title={label}
+      aria-label={label}
+      className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-stone-400 transition-colors hover:bg-stone-500/10 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-200"
+    >
+      <svg
+        className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="m6 9 6 6 6-6" />
+      </svg>
+    </button>
+  )
+}
+
+/**
+ * A long metadata value with overflow-gated expansion. The chevron renders
+ * only when the clamped content actually overflows (or while expanded), so
+ * single-line values never grow a useless affordance. Copyable rows copy on
+ * value click; plain rows toggle on value click.
+ */
+export function ExpandableRowValue({
+  value,
+  mono = false,
+  wrapClass = 'break-all',
+  textClass = 'text-sm',
+  onCopy,
+  copyHint,
+  expandLabel,
+  collapseLabel,
+}: {
+  value: string
+  mono?: boolean
+  wrapClass?: string
+  textClass?: string
+  onCopy?: () => void
+  copyHint?: string
+  expandLabel: string
+  collapseLabel: string
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const textRef = useRef<HTMLButtonElement | null>(null)
+  const [overflowed, setOverflowed] = useState(false)
+  useLayoutEffect(() => {
+    const el = textRef.current
+    if (!el || expanded) return
+    const measure = () => {
+      const next = el.scrollHeight > el.clientHeight + 1
+      setOverflowed((prev) => (prev === next ? prev : next))
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  })
+  const label = expanded ? collapseLabel : expandLabel
+  const toggle = () => setExpanded((prev) => !prev)
+  return (
+    <div className="flex max-w-full items-start gap-1">
+      <button
+        ref={textRef}
+        type="button"
+        title={onCopy ? (copyHint ?? value) : undefined}
+        onClick={onCopy ?? toggle}
+        aria-expanded={onCopy ? undefined : expanded}
+        className={
+          `min-w-0 flex-1 cursor-pointer text-left ${textClass} text-stone-700 dark:text-stone-200`
+          + (mono ? ' font-mono' : '')
+          + (onCopy && !expanded ? ' hover:underline' : '')
+          + (expanded ? ` whitespace-pre-wrap ${wrapClass}` : ` line-clamp-2 ${wrapClass}`)
+        }
+      >
+        {value}
+      </button>
+      {(expanded || overflowed) && (
+        <RowExpandButton expanded={expanded} label={label} onToggle={toggle} />
+      )}
+    </div>
   )
 }
