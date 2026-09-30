@@ -145,7 +145,7 @@ describe('SelectionBar', () => {
     render(<SelectionBar selectedIds={['w1']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchDelete')
-    expect(screen.getByText('library.batchDeleteSharedConfirm')).toBeInTheDocument()
+    expect(screen.getByText('library.batchDeleteSharedTrash')).toBeInTheDocument()
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'library.batchDelete' }))
     await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/libraries/lib1/books/w1'))
   })

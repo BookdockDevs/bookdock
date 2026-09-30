@@ -49,10 +49,12 @@ async function settleBatch(ids: string[], action: (id: string) => Promise<unknow
 export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, onRetainSelection, trash = false, trashEnabled = true, elevated = false, libraryId }: SelectionBarProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
-  // Trash is a private-library state. The caller already forces it off in a
-  // shared library, but a stale prop must never flip this bar into offering
-  // restore/permanent-delete for work ids against private endpoints.
-  const effectiveTrash = trash && !libraryId
+  // Trash mode offers only restore/permanent-delete, which route per id below
+  // (private endpoints for private ids, library endpoints for work ids), so a
+  // shared-library trash selection is safe here. Normal mode keeps the
+  // selection query to resolve organize/pin/hide/delete metadata.
+  const effectiveTrash = trash
+  const sharedTrash = trash && Boolean(libraryId)
   const [dialog, setDialog] = useState<'organize' | 'delete' | 'permanent' | null>(null)
   const [statusOpen, setStatusOpen] = useState(false)
   const [marking, setMarking] = useState(false)
@@ -188,7 +190,9 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
 
   async function handleBatchRestore() {
     const ok = await runBatch(
-      (bookId) => apiPost(`/books/${bookId}/restore`),
+      (bookId) => libraryId
+        ? apiPost(`/libraries/${libraryId}/books/${bookId}/restore`, {})
+        : apiPost(`/books/${bookId}/restore`),
       'library.batchRestoreSucceeded',
       'library.batchActionRestore',
     )
@@ -452,6 +456,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
       {dialog === 'permanent' && (
         <BatchPermanentDeleteDialog
           ids={selectedIds}
+          libraryId={sharedTrash ? libraryId : undefined}
           onRetainSelection={onRetainSelection}
           onClose={() => setDialog(null)}
           onDone={onComplete}
@@ -670,7 +675,7 @@ function BatchDeleteDialog({ ids, items, libraryId, trashEnabled, onRetainSelect
       message={
         <div className="space-y-2">
           {libraryId ? (
-            <p>{_('library.batchDeleteSharedConfirm', { count: ids.length, versions: versionCount })}</p>
+            <p>{_(trashEnabled ? 'library.batchDeleteSharedTrash' : 'library.batchDeleteSharedPermanent', { count: ids.length, versions: versionCount })}</p>
           ) : (
             <>
               {ownedCount > 0 && <p>{_(trashEnabled ? 'library.batchDeleteOwnedTrash' : 'library.batchDeleteOwnedPermanent', { count: ownedCount })}</p>}
@@ -694,17 +699,25 @@ function BatchDeleteDialog({ ids, items, libraryId, trashEnabled, onRetainSelect
   )
 }
 
-function BatchPermanentDeleteDialog({ ids, onRetainSelection, onClose, onDone }: { ids: string[]; onRetainSelection?: (ids: string[]) => void; onClose: () => void; onDone: () => void }) {
+function BatchPermanentDeleteDialog({ ids, libraryId, onRetainSelection, onClose, onDone }: { ids: string[]; libraryId?: string; onRetainSelection?: (ids: string[]) => void; onClose: () => void; onDone: () => void }) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const [deleting, setDeleting] = useState(false)
 
   async function handleDelete() {
     setDeleting(true)
-    const results = await settleBatch(ids, (id) => apiDelete(`/books/${id}/permanent`))
+    const results = await settleBatch(ids, (id) => libraryId
+      ? apiDelete(`/libraries/${libraryId}/books/${id}/permanent`)
+      : apiDelete(`/books/${id}/permanent`))
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
     void queryClient.invalidateQueries({ queryKey: ['books'] })
+    if (libraryId) {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+    }
     if (failed === 0) {
       notify.success({ key: 'library.batchPermanentDeleteSucceeded', params: { count: succeeded } })
     } else {

@@ -443,6 +443,11 @@ export const libraries = sqliteTable('libraries', {
   // Scrypt hash for password-visibility libraries; null otherwise. Never
   // exposed through shared contracts.
   accessPasswordHash: text('access_password_hash'),
+  // Shared-library trash settings (per-library, owner-only). NULL = default
+  // (enabled on, 30d retention, unlimited capacity); private rows stay NULL.
+  trashEnabled: integer('trash_enabled', { mode: 'boolean' }),
+  trashAutoCleanDays: integer('trash_auto_clean_days'),
+  trashMaxBytes: integer('trash_max_bytes'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({

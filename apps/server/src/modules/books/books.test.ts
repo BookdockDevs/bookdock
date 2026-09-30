@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 import { and, desc, eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
@@ -225,6 +225,17 @@ function seedBook(
   }).run()
   return book
 }
+
+// The parser registry is first-match and shared for the whole file, so a
+// coverless package cannot be stubbed from inside a suite: the coverful .epub
+// stub below is already registered by then. Registering at file level with a
+// sentinel hash keeps this parser off every other fixture's path.
+const COVERLESS_HASH = 'c'.repeat(64)
+const coverlessParse = vi.fn(async () => ({ meta: { title: 'No Artwork' }, chapters: [] }))
+
+beforeAll(() => {
+  registerParser({ match: (fileName) => fileName.includes(COVERLESS_HASH), parse: coverlessParse })
+})
 
 describe('legacy TXT artifact migration', () => {
   let db: ReturnType<typeof createTestDb>
@@ -480,6 +491,24 @@ describe('lazy EPUB cover repair', () => {
     expect(cover?.coverKey).toBe(`blobs/aa/${'a'.repeat(64)}.cover.jpg`)
     expect(mem.files.get(cover!.coverKey)).toEqual(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
     expect(libraryBookOf(db, book.id)?.coverKey).toBe(cover?.coverKey)
+  })
+
+  it('records a package with no artwork instead of re-parsing it on every read', async () => {
+    coverlessParse.mockClear()
+    const filePath = `blobs/cc/${COVERLESS_HASH}.epub`
+    const book = seedBook(db, userId, { format: 'epub', filePath })
+    mem.files.set(filePath, Buffer.from('epub-bytes'))
+
+    expect(await getBookCover(userId, book.id)).toBeNull()
+    expect(await getBookCover(userId, book.id)).toBeNull()
+
+    // The negative result is a recorded fact, so the second read costs no
+    // archive read and no parse. Without it every card render re-fetched the
+    // whole epub just to answer 404, delaying the placeholder title.
+    expect(coverlessParse).toHaveBeenCalledTimes(1)
+    const revision = db.select({ meta: schema.contentRevisions.meta }).from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).get()!
+    expect((revision.meta as Record<string, unknown>).coverSuppressed).toBe(true)
   })
 
   it('does not resurrect a cover after the user removes it', async () => {

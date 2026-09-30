@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import BookCover from '../features/library/components/BookCover'
 
 const baseBook = {
@@ -28,6 +28,21 @@ describe('BookCover', () => {
   it('requests an EPUB cover when the stored cover key is missing', () => {
     render(<BookCover book={{ ...baseBook, format: 'epub' }} />)
     expect(screen.getByRole('img')).toHaveAttribute('src', '/api/v1/books/book-1/cover?v=auto')
+  })
+
+  it('shows the title under a pending EPUB cover instead of a blank card', () => {
+    // The artwork is an overlay on the placeholder, so the title never waits on
+    // the cover request that a coverless EPUB can only ever answer 404 to.
+    render(<BookCover book={{ ...baseBook, title: 'Pending Book', format: 'epub' }} />)
+    expect(screen.getByRole('img')).toHaveClass('opacity-0')
+    expect(screen.getByText('Pending Book')).toBeVisible()
+  })
+
+  it('keeps the title underneath a loaded cover', () => {
+    render(<BookCover book={{ ...baseBook, title: 'Real Cover', coverKey: 'covers/book-1.jpg' }} />)
+    fireEvent.load(screen.getByRole('img'))
+    expect(screen.getByRole('img')).toHaveClass('opacity-100')
+    expect(screen.getByText('Real Cover')).toBeInTheDocument()
   })
 
   it('renders an explicitly supplied cover source', () => {

@@ -71,6 +71,7 @@ vi.mock('../features/library/hooks', () => ({
   useSourceStatus: () => ({ data: undefined }),
   useUpdateCatalogVersion: () => ({ mutate: updateCatalogVersionMutate, isPending: false }),
   useUpdateCatalogBook: () => ({ mutate: updateCatalogBookMutate, mutateAsync: updateCatalogBookMutate, isPending: false }),
+  useLibraries: () => ({ data: undefined }),
   useLibraryCategories: () => ({ data: { data: [] } }),
   useLibraryTags: () => ({ data: { data: [] } }),
   useUploadBooks: () => ({
@@ -882,7 +883,7 @@ describe('BookDetailDialog shared work mode', () => {
     fireEvent.click(screen.getByLabelText('删除'))
     expect(deleteCatalogVersionMutate).not.toHaveBeenCalled()
     const deleteDialog = screen.getByRole('alertdialog')
-    expect(within(deleteDialog).getByText(/删除后整个作品会被移除/)).toBeInTheDocument()
+    expect(within(deleteDialog).getByText(/将整体移入回收站/)).toBeInTheDocument()
     fireEvent.click(within(deleteDialog).getByRole('button', { name: '删除' }))
     expect(deleteCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1' })
   })

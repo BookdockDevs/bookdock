@@ -34,6 +34,7 @@ import { indexRoute, type LibrarySearch } from '@/routes/index'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useInstanceInfo } from '@/features/auth/hooks'
 import BookCard from './components/BookCard'
+import BookCardShell from './components/BookCardShell'
 import BookCover from './components/BookCover'
 import BookGrid from './components/BookGrid'
 import CatalogCard from './components/CatalogCard'
@@ -60,7 +61,7 @@ import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, resolveD
 import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-row'
 import { libraryUrlCorrection, vanishedFilterCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
-import { useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
+import { useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
 
 
 function estimateDynColumns(): number {  if (typeof window === 'undefined') return 4
@@ -111,9 +112,9 @@ export default function Library() {
   const view = search.view ?? libraryPrefs?.view ?? (isGuest ? viewPref : 'grid')
   const query = search.q ?? ''
   const currentPage = search.page ?? 1
-  // Trash is a private-library concept: a shared/bookmarked ?trash=1 URL must
-  // never leave a recycle-bin state inside a shared library, where restore and
-  // permanent-delete would fire private endpoints with work ids.
+  // Trash lives in the private library and, owner-only, inside a shared
+  // library. A shared ?trash=1 URL for a non-owner falls back to the normal
+  // catalog via the `trash` guard below.
   const requestedLibraryId = !isGuest ? (search.libraryId ?? null) : null
   const { data: librariesData } = useLibraries({ enabled: !isGuest })
   const libraries = useMemo(() => librariesData?.data ?? [], [librariesData])
@@ -123,9 +124,19 @@ export default function Library() {
   const activeLibrary = requestedLibraryId
     ? (libraries.find((library) => library.id === requestedLibraryId && library.type === 'shared') ?? null)
     : null
-  const trash = !isGuest && !activeLibrary && (search.trash ?? false)
-  const trashEnabled = useTrashEnabled({ enabled: !isGuest })
-  const trashCapBytes = useTrashCapBytes({ enabled: !isGuest })
+  // Shared-library trash is owner-only: only the library owner keeps a
+  // ?trash=1 state inside a shared library; admins/members/guests fall back
+  // to the normal catalog. The row relation is authoritative here because the
+  // per-library relation query resolves later.
+  const activeLibraryIsOwner = activeLibrary?.relation === 'owner'
+  const trash = !isGuest && (search.trash ?? false) && (!activeLibrary || activeLibraryIsOwner)
+  const privateTrashEnabled = useTrashEnabled({ enabled: !isGuest })
+  const privateTrashCapBytes = useTrashCapBytes({ enabled: !isGuest })
+  // Per-library switch (owner sees the value, others get null); private rows
+  // never carry it. Defaults mirror the private trash: on / unlimited.
+  const libraryTrashEnabled = activeLibrary ? (activeLibrary.trashEnabled ?? true) : privateTrashEnabled
+  const trashEnabled = libraryTrashEnabled
+  const trashCapBytes = activeLibrary ? (activeLibrary.trashMaxBytes ? Number(activeLibrary.trashMaxBytes) : undefined) : privateTrashCapBytes
   // The trash defaults to newest-deleted first; the library sort preference
   // is a separate concern and must not be overwritten by trash-only sorting
   const sortBy = search.sortBy ?? (trash ? 'deletedAt' : defaultSortBy ?? 'createdAt')
@@ -177,6 +188,7 @@ export default function Library() {
           format: format ?? undefined,
           author: author ?? undefined,
           series: series ?? undefined,
+          trash: nextTrash || undefined,
         })
         return
       }
@@ -211,6 +223,7 @@ export default function Library() {
   })
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<BookListItem | null>(null)
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false)
+  const [libraryPermanentTarget, setLibraryPermanentTarget] = useState<CatalogBook | null>(null)
   const [detailTarget, setDetailTarget] = useState<BookListItem | null>(null)
   const [publishTarget, setPublishTarget] = useState<BookListItem | null>(null)
   const [forkTarget, setForkTarget] = useState<BookListItem | null>(null)
@@ -224,6 +237,10 @@ export default function Library() {
   const restoreBook = useRestoreBook()
   const permanentDeleteBook = usePermanentDeleteBook()
   const emptyTrash = useEmptyTrash()
+  const restoreLibraryBook = useRestoreLibraryBook()
+  const permanentDeleteLibraryBook = usePermanentDeleteLibraryBook()
+  const emptyLibraryTrash = useEmptyLibraryTrash()
+  const sharedTrash = Boolean(activeLibrary && trash)
 
   function toggleSelect(id: string, index?: number, shiftKey?: boolean) {
     if (activeLibrary && !isLibraryManager) return
@@ -506,6 +523,7 @@ export default function Library() {
     format: format ?? undefined,
     author: author ?? undefined,
     series: series ?? undefined,
+    trash: activeLibrary ? trash : undefined,
   })
   const libraryRelationQuery = useLibraryRelation(activeLibrary?.id ?? null)
 
@@ -934,7 +952,7 @@ export default function Library() {
           catalogMode={activeLibrary !== null}
           onUploadClick={canUpload ? () => setUploadOpen(true) : undefined}
           trashCount={total}
-          bookSize={trash ? totalSize : undefined}
+          bookSize={trash && !activeLibrary ? totalSize : undefined}
           trashCapBytes={trash ? trashCapBytes : undefined}
           onEmptyTrash={isGuest ? undefined : () => setEmptyTrashOpen(true)}
           selectionActive={selectionActive}
@@ -990,7 +1008,45 @@ export default function Library() {
                 ? <EmptyFilter onClear={clearActiveFilters} />
                 : <EmptyLibrary canUpload={canUpload} />
           ) : activeLibrary ? (
-            view === 'list' ? (
+            sharedTrash ? (
+              view === 'list' ? (
+                <BookGrid pageKey={currentPage} view="list" columns={columns}>
+                  {catalogWorks.map((work, index) => (
+                    <LibraryTrashWorkRow
+                      key={work.id}
+                      work={work}
+                      autoCleanDays={activeLibrary.trashAutoCleanDays ?? 30}
+                      selected={selection.has(work.id)}
+                      selectionActive={selectionActive}
+                      onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                      onRestore={() => {
+                        deselect(work.id)
+                        void restoreLibraryBook.mutateAsync({ libraryId: activeLibrary.id, libraryBookId: work.id, title: work.title }).catch(() => undefined)
+                      }}
+                      onPermanentDelete={() => setLibraryPermanentTarget(work)}
+                    />
+                  ))}
+                </BookGrid>
+              ) : (
+                <BookGrid pageKey={currentPage} view={view} columns={columns}>
+                  {catalogWorks.map((work, index) => (
+                    <LibraryTrashWorkCard
+                      key={work.id}
+                      work={work}
+                      autoCleanDays={activeLibrary.trashAutoCleanDays ?? 30}
+                      selected={selection.has(work.id)}
+                      selectionActive={selectionActive}
+                      onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                      onRestore={() => {
+                        deselect(work.id)
+                        void restoreLibraryBook.mutateAsync({ libraryId: activeLibrary.id, libraryBookId: work.id, title: work.title }).catch(() => undefined)
+                      }}
+                      onPermanentDelete={() => setLibraryPermanentTarget(work)}
+                    />
+                  ))}
+                </BookGrid>
+              )
+            ) : view === 'list' ? (
               /* List view draws rows, not cards: the same data, the same
                  selection and the same drag rules, only the row chrome differs
                  the way a private list row differs from a private card. */
@@ -1149,7 +1205,9 @@ export default function Library() {
       </>
       </main>
 
-      {/* Shared selections contain work ids; private selections contain version ids. */}
+      {/* Shared selections contain work ids; private selections contain version ids.
+          The shared trash is owner-only (see the trash guard above), so its
+          batch bar only offers restore/permanent-delete. */}
       {!isGuest && (!activeLibrary || isLibraryManager) && selection.size > 0 && (
         <SelectionBar
           selectedIds={Array.from(selection)}
@@ -1385,7 +1443,7 @@ export default function Library() {
           message={
             <>
               {_('library.emptyTrashConfirm')}
-              {totalSize > 0 && (
+              {!activeLibrary && totalSize > 0 && (
                 <span className="mt-1 block text-stone-700 dark:text-stone-200">
                   {_('library.emptyTrashFrees', { size: formatBytes(totalSize) })}
                 </span>
@@ -1397,7 +1455,33 @@ export default function Library() {
           onClose={() => setEmptyTrashOpen(false)}
           onConfirm={() => {
             setEmptyTrashOpen(false)
-            void emptyTrash.mutateAsync().catch(() => undefined)
+            if (activeLibrary) {
+              void emptyLibraryTrash.mutateAsync({ libraryId: activeLibrary.id }).catch(() => undefined)
+            } else {
+              void emptyTrash.mutateAsync().catch(() => undefined)
+            }
+          }}
+        />
+      )}
+
+      {libraryPermanentTarget && (
+        <ConfirmDialog
+          title={_('library.permanentDelete')}
+          message={
+            <>
+              {_('library.permanentDeleteConfirm')}
+              <span className="mt-1 block truncate text-stone-700 dark:text-stone-200">{libraryPermanentTarget.title}</span>
+            </>
+          }
+          confirmLabel={_('library.permanentDelete')}
+          confirmVariant="danger"
+          onClose={() => setLibraryPermanentTarget(null)}
+          onConfirm={() => {
+            const target = libraryPermanentTarget
+            setLibraryPermanentTarget(null)
+            if (!activeLibrary) return
+            deselect(target.id)
+            void permanentDeleteLibraryBook.mutateAsync({ libraryId: activeLibrary.id, libraryBookId: target.id, title: target.title }).catch(() => undefined)
           }}
         />
       )}
@@ -1694,6 +1778,122 @@ function TrashListRow({ book, selected, selectionActive, onToggleSelect, onResto
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LibraryTrashWorkCard({ work, autoCleanDays, selected, selectionActive, onToggleSelect, onRestore, onPermanentDelete }: {
+  work: CatalogBook
+  autoCleanDays: number
+  selected: boolean
+  selectionActive: boolean
+  onToggleSelect: (id: string, shiftKey?: boolean) => void
+  onRestore: () => void
+  onPermanentDelete: (work: CatalogBook) => void
+}) {
+  return (
+    <BookCardShell
+      row={catalogWorkRow(work)}
+      gridCardFields={['title', 'author']}
+      selected={selected}
+      selectionActive={selectionActive}
+      onToggleSelect={onToggleSelect}
+      trashCard
+      onRestore={onRestore}
+      onPermanentDelete={() => onPermanentDelete(work)}
+      coverOverlay={(
+        <div className="pointer-events-none absolute right-1.5 top-1.5 z-10">
+          <TrashInfo book={work} variant="pill" autoCleanDays={autoCleanDays} />
+        </div>
+      )}
+    />
+  )
+}
+/**
+ * A trashed shared work in list view, mirroring TrashListRow: small cover,
+ * title, author + retention badge, format/version badge, and the same hover
+ * restore/permanent-delete icon buttons.
+ */
+function LibraryTrashWorkRow({ work, autoCleanDays, selected, selectionActive, onToggleSelect, onRestore, onPermanentDelete }: {
+  work: CatalogBook
+  autoCleanDays: number
+  selected: boolean
+  selectionActive: boolean
+  onToggleSelect: (id: string, shiftKey?: boolean) => void
+  onRestore: () => void
+  onPermanentDelete: (work: CatalogBook) => void
+}) {
+  const _ = useTranslation()
+  const row = catalogWorkRow(work)
+  const versionCount = work.versions.length
+
+  function handleRowClick(e: React.MouseEvent) {
+    // Trash rows have no destination: plain clicks only select in selection mode
+    if (selectionActive || e.ctrlKey || e.metaKey || e.shiftKey) {
+      onToggleSelect(work.id, e.shiftKey)
+    }
+  }
+
+  return (
+    <div
+      onClick={handleRowClick}
+      className={`group flex items-center gap-3.5 rounded-xl px-3 py-2.5 select-none transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
+    >
+      <div className="shrink-0 rounded-xl opacity-80 grayscale-[60%]">
+        <BookCover book={rowCover(row)} coverSrc={row.coverSrc} size="sm" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-serif text-sm font-medium text-stone-900 dark:text-stone-100">
+          {work.title}
+        </div>
+        <div className="mt-1 flex items-center gap-2">
+          {work.author && (
+            <span className="truncate text-xs text-stone-500 dark:text-stone-400">{formatAuthorList(work.authors, work.author)}</span>
+          )}
+          <TrashInfo book={work} className="shrink-0" autoCleanDays={autoCleanDays} />
+        </div>
+      </div>
+      <span className="shrink-0 rounded border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500">
+        {versionCount > 1 ? _('library.versionCount', { count: versionCount }) : (work.versions[0]?.format ?? '')}
+      </span>
+      {selectionActive ? (
+        <SelectionCheck selected={selected} />
+      ) : (
+        <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+          <button
+            type="button"
+            aria-label={_('library.restore')}
+            title={_('library.restore')}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onRestore()
+            }}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-label={_('library.permanentDelete')}
+            title={_('library.permanentDelete')}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onPermanentDelete(work)
+            }}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2V6h14z" />
               <path d="M10 11v6M14 11v6" />
             </svg>
           </button>

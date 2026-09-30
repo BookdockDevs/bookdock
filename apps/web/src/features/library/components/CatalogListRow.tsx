@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { Link } from '@tanstack/react-router'
 
@@ -13,6 +14,7 @@ import { useLibraryCategories, useUpdateCatalogBook } from '../hooks'
 import BookCover from './BookCover'
 import HiddenIndicator from './HiddenIndicator'
 import CatalogWorkMenu from './CatalogWorkMenu'
+import DeleteVersionsDialog from './DeleteVersionsDialog'
 import ListItemInfo from './ListItemInfo'
 import { SelectionCheck } from './RowChrome'
 import { PinIcon } from './UnpinButton'
@@ -42,6 +44,8 @@ export default function CatalogListRow({
   const _ = useTranslation()
   const menu = useContextMenu()
   const updateWork = useUpdateCatalogBook()
+  // Same rule as the card: the delete dialog must outlive the menu.
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const row = catalogWorkRow(work)
   const first = work.versions[0]
   const isPinned = Boolean(work.pinnedAt)
@@ -210,6 +214,16 @@ export default function CatalogListRow({
           canCollect={canCollect && first?.collected !== true}
           canDownload={canCollect && (canManage || first?.status === 'published')}
           onShowDetails={() => { menu.close(); onShowDetails(work) }}
+          onDeleteRequest={() => { menu.close(); setDeleteOpen(true) }}
+        />
+      )}
+      {deleteOpen && (
+        <DeleteVersionsDialog
+          work={work}
+          libraryId={work.libraryId}
+          preselectedIds={work.versions.map((v) => v.id)}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={() => setDeleteOpen(false)}
         />
       )}
     </div>

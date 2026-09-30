@@ -141,11 +141,28 @@ target.
 The batch action labeled "Delete" follows each selection's ownership: private
 A/C entries use the owner's trash setting, while a private B reference is
 removed immediately and optionally clears only that user's reading data.
-Deleting a shared work removes all of its library version links after a
-manager confirmation; existing private B references retain provenance and may
-become unreadable. Versions listed by no library are deleted with their
+Deleting a shared work soft-deletes it into the library trash while the
+library trash switch is on (default): any manager (owner/admin) moves a normal
+work there, existing private B references keep provenance but read as
+unreadable until restored, and only the library owner lists/restores/empties/
+permanently-deletes it or edits its trash settings. While the switch is off
+there is no trash: manager deletes hard-delete directly. Versions listed by no
+library are deleted with their
 database-backed personal reading records. Batch confirmation reports the
 distinct effects before any write.
+
+### Shared-library trash boundary
+
+Trash is deletion with undo, never a visibility switch: trashed works are
+excluded from every normal read for every relation (catalog, counts, Legado,
+ext, direct version reads all treat `deletedAt IS NOT NULL` as `NOT_FOUND`).
+Only the library owner opens the trash (`GET catalog?trash=1`), restores,
+empties, permanently deletes, or changes `trashEnabled/trashAutoCleanDays/
+trashMaxBytes`. Admins never see or operate the trash UI; their delete only
+moves a normal work into it (or hard-deletes while disabled). Members never
+see it. Trash auto-clean reuses the private rules per library (retention days,
+then oldest-deleted-first capacity), triggered lazily on the owner trash list
+plus a boot sweep; disabling the switch permanently deletes the current trash.
 
 A private B with a readable source can be forked into a local C:
 the same card keeps its work, shelf and tags, but its version link swaps to a
@@ -433,7 +450,7 @@ SQLite + Drizzle. All business tables carry a `userId` FK. A single-user instanc
 | `ai_chunks` | id, userId FK, indexId FK (cascade), bookId FK (cascade), chapterIndex, chapterId, chapterTitle, startOffset, endOffset, text, createdAt | reusable bounded book-text units for FTS and later embeddings; source text is not chat history |
 | `ai_chunk_embeddings` | id, userId FK, indexId FK (cascade), chunkId FK (cascade), bookId FK (cascade), model, dimension, vector, createdAt | optional per-index Float32 embedding blobs; the parent index stores the provider/model/dimension fingerprint, and all three must match before semantic results are used |
 | `ai_chunks_fts` | chunkId, userId, bookId, chapterIndex, chapterTitle, text | SQLite FTS5 derived index; synchronized by `ai_chunks` triggers and never used without ownership filters |
-| `libraries` | id, userId (= owner, tenant key), type (private\|shared), name, description, visibility (public\|password\|private)?, accessPassword?, accessPasswordHash?, createdAt, updatedAt | one Private Library per real user (no membership rows); Shared Libraries carry an owner and optional memberships; `user_id` holds the owner so the per-user scoping rule needs no second column, exposed on the wire as `ownerUserId`; `access_password_hash` holds the scrypt hash the join path verifies, `access_password` the same secret in plaintext so the owner can read it back and re-share it. Both are cleared when visibility leaves `password`, and only `access_password` reaches the wire, only for the owner — a database read therefore yields the access password, which is the accepted cost of making it re-shareable (hash-only storage would make it unrecoverable) |
+| `libraries` | id, userId (= owner, tenant key), type (private\|shared), name, description, visibility (public\|password\|private)?, accessPassword?, accessPasswordHash?, trashEnabled?, trashAutoCleanDays?, trashMaxBytes?, createdAt, updatedAt | one Private Library per real user (no membership rows); Shared Libraries carry an owner and optional memberships; `user_id` holds the owner so the per-user scoping rule needs no second column, exposed on the wire as `ownerUserId`; `access_password_hash` holds the scrypt hash the join path verifies, `access_password` the same secret in plaintext so the owner can read it back and re-share it. Both are cleared when visibility leaves `password`, and only `access_password` reaches the wire, only for the owner — a database read therefore yields the access password, which is the accepted cost of making it re-shareable (hash-only storage would make it unrecoverable). Shared-library trash is per-library here (not per-user `settings.trash`): `trashEnabled` (omitted/1 = on), `trashAutoCleanDays` (0=never/7/30, default 30), `trashMaxBytes` (0/NULL=unlimited; presets 1/2/5 GB). Only the library owner sees the trash, restores, empties, permanently deletes, or edits these fields; admins soft-delete into the trash (hard-delete directly while disabled) but never operate it; members never see it |
 
 Private-library names are owner-editable. An empty stored name means the localized
 default ("My library" / "个人书库"); a nonempty name is shown in both the library

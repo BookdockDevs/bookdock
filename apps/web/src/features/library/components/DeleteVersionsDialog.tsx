@@ -8,7 +8,7 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
-import { useDeleteCatalogVersion } from '../hooks'
+import { useDeleteCatalogVersion, useLibraries } from '../hooks'
 import { versionOrdinal, versionTabLabel } from '../book-row'
 
 /**
@@ -46,6 +46,9 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
   const checkedVersions = versions.filter((v) => checked.includes(v.id))
   const removesWork = multi && checkedVersions.length === versions.length
   const fallback = (n: number) => _('library.versionFallback', { n }) as string
+  // Per-library switch (owner sees the value, others get null); default on.
+  const { data: librariesData } = useLibraries()
+  const trashEnabled = (librariesData?.data ?? []).find((library) => library.id === libraryId)?.trashEnabled ?? true
 
   function toggle(id: string) {
     setChecked((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
@@ -63,8 +66,13 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
     }
   }
 
+  // Trash is work-scoped: removing some (not all) versions deletes those
+  // links immediately and never enters the trash, so its copy is always the
+  // permanent one. Only removing the whole work follows the trash switch.
   const consequence = !multi || removesWork
-    ? _('library.catalogDeleteLastVersionConfirm', { work: work.title })
+    ? (trashEnabled
+      ? _('library.catalogDeleteLastVersionTrashConfirm', { work: work.title })
+      : _('library.catalogDeleteLastVersionConfirm', { work: work.title }))
     : _('library.catalogDeleteVersionConfirm', {
       name: checkedVersions.map((v) => labelOf(versions, v, fallback)).join('、'),
     })

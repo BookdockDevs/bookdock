@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import type { Library, LibraryVisibility } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -63,8 +64,20 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
   const [description, setDescription] = useState(library.description)
   const [visibility, setVisibility] = useState<LibraryVisibility>(library.visibility ?? 'private')
   const [password, setPassword] = useState(library.accessPassword ?? '')
+  // Shared-library trash knobs (owner-only, per-library). Private rows never
+  // carry them; null falls back to the on/30d/unlimited defaults.
+  const [trashEnabled, setTrashEnabled] = useState(library.trashEnabled ?? true)
+  const [trashAutoCleanDays, setTrashAutoCleanDays] = useState<0 | 7 | 30>(
+    library.trashAutoCleanDays === 0 || library.trashAutoCleanDays === 7 ? library.trashAutoCleanDays : 30,
+  )
+  const [trashMaxBytes, setTrashMaxBytes] = useState<0 | 1073741824 | 2147483648 | 5368709120>(
+    library.trashMaxBytes === 0 || library.trashMaxBytes === 1073741824
+    || library.trashMaxBytes === 2147483648 || library.trashMaxBytes === 5368709120
+      ? library.trashMaxBytes : 0,
+  )
 
   const updateLibrary = useUpdateLibrary()
+  const [disableTrashOpen, setDisableTrashOpen] = useState(false)
 
   // Settings are edited from the library we were handed; keep them in sync when
   // another surface (another tab) changed it.
@@ -73,13 +86,24 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
     setDescription(library.description)
     setVisibility(library.visibility ?? 'private')
     setPassword(library.accessPassword ?? '')
+    setTrashEnabled(library.trashEnabled ?? true)
+    setTrashAutoCleanDays(library.trashAutoCleanDays === 0 || library.trashAutoCleanDays === 7 ? library.trashAutoCleanDays : 30)
+    setTrashMaxBytes(library.trashMaxBytes === 0 || library.trashMaxBytes === 1073741824
+    || library.trashMaxBytes === 2147483648 || library.trashMaxBytes === 5368709120
+      ? library.trashMaxBytes : 0)
   }, [library])
 
   const passwordChanged = visibility === 'password' && password.trim() !== (library.accessPassword ?? '')
+  const trashChanged = library.type === 'shared' && (
+    trashEnabled !== (library.trashEnabled ?? true)
+    || trashAutoCleanDays !== (library.trashAutoCleanDays ?? 30)
+    || trashMaxBytes !== (library.trashMaxBytes ?? 0)
+  )
   const settingsChanged = name.trim() !== library.name
     || description !== library.description
     || visibility !== (library.visibility ?? 'private')
     || passwordChanged
+    || trashChanged
 
   const isPasswordValid = visibility !== 'password' || password.trim().length >= 4
   const canSave = settingsChanged && name.trim().length > 0 && isPasswordValid && !updateLibrary.isPending
@@ -90,6 +114,16 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
 
   function handleSave() {
     if (!canSave) return
+    // Disabling purges the current trash on the server; confirm first, like
+    // the private trash switch.
+    if (library.type === 'shared' && (library.trashEnabled ?? true) && !trashEnabled) {
+      setDisableTrashOpen(true)
+      return
+    }
+    saveLibrary()
+  }
+
+  function saveLibrary() {
     updateLibrary.mutate({
       libraryId: library.id,
       patch: {
@@ -97,6 +131,11 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
         description,
         visibility,
         ...(visibility === 'password' ? { accessPassword: password.trim() } : {}),
+        ...(library.type === 'shared' ? {
+          trashEnabled,
+          trashAutoCleanDays,
+          trashMaxBytes,
+        } : {}),
       },
     }, {
       onSuccess: () => {
@@ -263,6 +302,82 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
                   </label>
                 </div>
               )}
+
+              {library.type === 'shared' && (
+                <div className="flex flex-col gap-3 rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trash')}</p>
+                      <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashAutoCleanHint')}</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={trashEnabled}
+                      aria-label={_('settings.trashEnabled')}
+                      disabled={updateLibrary.isPending}
+                      onClick={() => setTrashEnabled(!trashEnabled)}
+                      className={cn(
+                        'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60',
+                        trashEnabled ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-200 dark:bg-stone-700',
+                      )}
+                    >
+                      <span className={cn(
+                        'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all dark:bg-stone-900',
+                        trashEnabled ? 'left-[22px] dark:bg-stone-900' : 'left-0.5',
+                      )} />
+                    </button>
+                  </div>
+                  {trashEnabled && (
+                    <>
+                      <div className="flex flex-col gap-2">
+                        <span className="text-xs font-medium text-stone-600 dark:text-stone-300">{_('settings.trashAutoClean')}</span>
+                        <div className="inline-flex items-center gap-0.5 self-start rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.trashAutoClean')}>
+                          {([0, 7, 30] as const).map((days) => (
+                            <button
+                              key={days}
+                              type="button"
+                              aria-pressed={trashAutoCleanDays === days}
+                              disabled={updateLibrary.isPending}
+                              onClick={() => setTrashAutoCleanDays(days)}
+                              className={cn(
+                                'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
+                                trashAutoCleanDays === days
+                                  ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                                  : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
+                              )}
+                            >
+                              {days === 0 ? _('settings.trashCleanNever') : days === 7 ? _('settings.trashClean7Days') : _('settings.trashClean30Days')}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <span className="text-xs font-medium text-stone-600 dark:text-stone-300">{_('settings.trashCap')}</span>
+                        <div className="inline-flex items-center gap-0.5 self-start rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.trashCap')}>
+                          {([0, 1073741824, 2147483648, 5368709120] as const).map((cap) => (
+                            <button
+                              key={cap}
+                              type="button"
+                              aria-pressed={trashMaxBytes === cap}
+                              disabled={updateLibrary.isPending}
+                              onClick={() => setTrashMaxBytes(cap)}
+                              className={cn(
+                                'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
+                                trashMaxBytes === cap
+                                  ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                                  : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
+                              )}
+                            >
+                              {cap === 0 ? _('settings.trashCapUnlimited') : cap === 1073741824 ? _('settings.trashCap1GB') : cap === 2147483648 ? _('settings.trashCap2GB') : _('settings.trashCap5GB')}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <p className="rounded-xl border border-stone-200/80 bg-stone-50/50 p-4 text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-800/30 dark:text-stone-400">
@@ -272,6 +387,19 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
           {library.visibility === 'private' && <LibraryInvitePanel key={library.id} libraryId={library.id} />}
         </div>
       </Modal>
+
+      {disableTrashOpen && (
+        <ConfirmDialog
+          title={_('settings.trashDisable')}
+          message={_('settings.trashDisableConfirm')}
+          confirmLabel={_('settings.trashDisableConfirmAction')}
+          onConfirm={() => {
+            setDisableTrashOpen(false)
+            saveLibrary()
+          }}
+          onClose={() => setDisableTrashOpen(false)}
+        />
+      )}
 
     </>
   )

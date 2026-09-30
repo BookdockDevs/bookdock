@@ -1,4 +1,4 @@
-import { useState, type RefObject } from 'react'
+import type { RefObject } from 'react'
 
 import type { CatalogBook } from '@bookdock/shared'
 
@@ -14,7 +14,6 @@ import { downloadDefault } from '../download'
 import { useCollectBook, useUpdateCatalogBook } from '../hooks'
 
 import { MenuDangerItem, MenuDivider, MenuHeader, MenuItem } from './RowMenuChrome'
-import DeleteVersionsDialog from './DeleteVersionsDialog'
 
 /**
  * A work's menu, in the same language as a private book's: what it is, get it,
@@ -34,13 +33,15 @@ interface CatalogWorkMenuProps {
   /** Logged-in readers of a published version may download it, collected or not. */
   canDownload: boolean
   onShowDetails: () => void
+  /** Parent closes the menu and opens the version-delete dialog (which must
+   * live outside the menu subtree, or closing the menu unmounts it). */
+  onDeleteRequest: () => void
 }
 
-export default function CatalogWorkMenu({ innerRef, triggerRef, position, width, onClose, work, canManage, canCollect, canDownload, onShowDetails }: CatalogWorkMenuProps) {
+export default function CatalogWorkMenu({ innerRef, triggerRef, position, width, onClose, work, canManage, canCollect, canDownload, onShowDetails, onDeleteRequest }: CatalogWorkMenuProps) {
   const _ = useTranslation()
   const collectBook = useCollectBook()
   const updateWork = useUpdateCatalogBook()
-  const [deleteOpen, setDeleteOpen] = useState(false)
   // The menu predates versions in the UI: one work, one version, the first one.
   const first = work.versions[0]
   const hidden = work.hidden || (work.versions.length === 1 && first?.status === 'unlisted')
@@ -128,23 +129,11 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
           <MenuDangerItem
             label={_('library.delete')}
             icon={<><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2 2V6h14z" /></>}
-            onClick={() => setDeleteOpen(true)}
+            onClick={() => onDeleteRequest()}
           />
         </>
       )}
       </SmartMenu>
-      {deleteOpen && (
-        <DeleteVersionsDialog
-          work={work}
-          libraryId={work.libraryId}
-          preselectedIds={work.versions.map((v) => v.id)}
-          onClose={() => setDeleteOpen(false)}
-          onDeleted={() => {
-            setDeleteOpen(false)
-            onClose()
-          }}
-        />
-      )}
     </>
   )
 }

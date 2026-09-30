@@ -31,6 +31,7 @@ import {
   listLibraryVersionEntries,
   moveCatalogVersion,
   organizeCatalogBatch,
+  permanentDeleteCatalogBook,
   removeCatalogBookCover,
   removeCatalogVersionCover,
   resetCatalogVersionMetadata,
@@ -282,8 +283,12 @@ describe('shared library catalog', () => {
     await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'b'), { libraryBookId: first.libraryBookId })
     expect((await getCatalogBatchSelection(ownerId, libraryId, [first.libraryBookId]))[0]?.versionCount).toBe(2)
     await expect(deleteCatalogBook(memberId, libraryId, first.libraryBookId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    expect((await deleteCatalogBook(ownerId, libraryId, first.libraryBookId)).versionCount).toBe(2)
+    // Trash is on by default: manager delete soft-deletes into the owner trash.
+    expect(await deleteCatalogBook(ownerId, libraryId, first.libraryBookId)).toMatchObject({ trashed: true, versionCount: 2 })
     expect((await listCatalogBooks(ownerId, libraryId, {})).items).toHaveLength(0)
+    expect((await listCatalogBooks(ownerId, libraryId, { trash: true })).items).toHaveLength(1)
+    expect(await permanentDeleteCatalogBook(ownerId, libraryId, first.libraryBookId)).toMatchObject({ id: first.libraryBookId })
+    expect((await listCatalogBooks(ownerId, libraryId, { trash: true })).items).toHaveLength(0)
   })
 
   it('filters and orders the catalog by the same vocabulary as a private list', async () => {
@@ -546,10 +551,15 @@ describe('shared library catalog', () => {
     expect(db.select().from(schema.blobs).all()).toHaveLength(1)
 
     await deleteCatalogVersion(ownerId, libraryId, first.libraryBookId, first.versionLinkId!)
+    // Last-version delete moves the work into the owner trash; content stays.
+    expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, first.bookVersionId)).get()).toBeTruthy()
+    expect(files.has(blobKey)).toBe(true)
+    expect(await permanentDeleteCatalogBook(ownerId, libraryId, first.libraryBookId)).toMatchObject({ id: first.libraryBookId })
     expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, first.bookVersionId)).get()).toBeUndefined()
     expect(files.has(blobKey)).toBe(true)
 
     await deleteCatalogVersion(outsiderId, otherId, second.libraryBookId, second.versionLinkId!)
+    await permanentDeleteCatalogBook(outsiderId, otherId, second.libraryBookId)
     expect(files.has(blobKey)).toBe(false)
     expect(db.select().from(schema.blobs).where(eq(schema.blobs.key, blobKey)).get()).toBeUndefined()
   })
@@ -1111,14 +1121,17 @@ describe('shared library catalog', () => {
       .toMatchObject({ workDeleted: false })
     expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, city.libraryBookId)).get()).toBeTruthy()
 
-    // The last version takes its work with it, and the mirrored content stays.
+    // The last version moves its work into the owner trash, mirrored content stays.
     expect(await deleteCatalogVersion(ownerId, libraryId, city.libraryBookId, city.versionLinkId!))
-      .toMatchObject({ workDeleted: true })
-    expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, city.libraryBookId)).get()).toBeUndefined()
-    expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, city.bookVersionId)).get()).toBeUndefined()
+      .toMatchObject({ trashed: true })
+    expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, city.libraryBookId)).get()?.deletedAt).toEqual(expect.any(Number))
+    expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, city.bookVersionId)).get()).toBeTruthy()
     expect(db.select().from(schema.blobs).where(eq(schema.blobs.key, blobKey)).get()).toBeTruthy()
     expect(files.get(blobKey)?.length ?? 0).toBeGreaterThan(0)
     expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, mirror.bookVersionId)).get()).toBeTruthy()
+    await permanentDeleteCatalogBook(ownerId, libraryId, city.libraryBookId)
+    expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, city.libraryBookId)).get()).toBeUndefined()
+    expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, city.bookVersionId)).get()).toBeUndefined()
   })
 
   it('releases the work-level cover when the last version goes', async () => {
@@ -1130,7 +1143,9 @@ describe('shared library catalog', () => {
     files.set(coverKey, Buffer.from('cover'))
 
     expect(await deleteCatalogVersion(ownerId, libraryId, city.libraryBookId, city.versionLinkId!))
-      .toMatchObject({ workDeleted: true })
+      .toMatchObject({ trashed: true })
+    expect(files.has(coverKey)).toBe(true)
+    await permanentDeleteCatalogBook(ownerId, libraryId, city.libraryBookId)
     expect(files.has(coverKey)).toBe(false)
     expect(db.select().from(schema.blobs).where(eq(schema.blobs.key, coverKey)).get()).toBeUndefined()
   })

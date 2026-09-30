@@ -496,6 +496,8 @@ export interface CatalogListParams {
   format?: string
   author?: string
   series?: string
+  /** Owner-only shared-library trash; server rejects non-owners. */
+  trash?: boolean
 }
 
 /**
@@ -515,6 +517,7 @@ function catalogQueryParts(libraryId: string, params: CatalogListParams) {
     format: params.format ?? '',
     author: params.author ?? '',
     series: params.series ?? '',
+    trash: params.trash ?? false,
   }
   const search = new URLSearchParams({ page: String(key.page) })
   if (key.pageSize) search.set('pageSize', String(key.pageSize))
@@ -526,6 +529,7 @@ function catalogQueryParts(libraryId: string, params: CatalogListParams) {
   if (key.format) search.set('format', key.format)
   if (key.author) search.set('author', key.author)
   if (key.series) search.set('series', key.series)
+  if (key.trash) search.set('trash', '1')
   return { key, path: `/libraries/${libraryId}/books?${search.toString()}` }
 }
 
@@ -706,6 +710,63 @@ export function useDeleteCatalogVersion() {
     url: `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}`,
     method: 'delete',
   }))
+}
+
+/** Owner-only: restore one trashed shared work. */
+export function useRestoreLibraryBook() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, libraryBookId }: { libraryId: string; libraryBookId: string; title: string }) =>
+      apiPost<{ data: { id: string } }>(`/libraries/${libraryId}/books/${libraryBookId}/restore`, {}),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      notify.success({ key: 'library.bookRestored', params: { title: vars.title } })
+    },
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'toast.restoreFailed'))
+    },
+  })
+}
+
+/** Owner-only: permanently delete one trashed shared work. */
+export function usePermanentDeleteLibraryBook() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, libraryBookId }: { libraryId: string; libraryBookId: string; title: string }) =>
+      apiDelete<{ data: { id: string } }>(`/libraries/${libraryId}/books/${libraryBookId}/permanent`),
+    onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      notify.success({ key: 'library.bookPermanentlyDeleted', params: { title: vars.title } })
+    },
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'toast.permanentDeleteFailed'))
+    },
+  })
+}
+
+/** Owner-only: empty a shared library trash. */
+export function useEmptyLibraryTrash() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId }: { libraryId: string }) =>
+      apiDelete<{ data: { count: number } }>(`/libraries/${libraryId}/trash`),
+    onSuccess: (result, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      notify.success({ key: 'library.trashEmptied', params: { count: result.data.count } })
+    },
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'toast.emptyTrashFailed'))
+    },
+  })
 }
 
 export function useUploadCatalogVersionCover() {

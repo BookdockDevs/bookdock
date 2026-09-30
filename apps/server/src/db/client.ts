@@ -252,6 +252,19 @@ export async function runMigrations(hooks?: RunMigrationsHooks) {
   if (libColumns.length > 0 && !libColumns.some((c) => c.name === 'access_password')) {
     db.run(sql.raw('ALTER TABLE "libraries" ADD COLUMN "access_password" TEXT'))
   }
+  // 0031 shared-library trash settings: same ledger-ahead hazard as above;
+  // NULL means default (enabled, 30d, unlimited), matching the wire default.
+  if (libColumns.length > 0) {
+    if (!libColumns.some((c) => c.name === 'trash_enabled')) {
+      db.run(sql.raw('ALTER TABLE "libraries" ADD COLUMN "trash_enabled" INTEGER'))
+    }
+    if (!libColumns.some((c) => c.name === 'trash_auto_clean_days')) {
+      db.run(sql.raw('ALTER TABLE "libraries" ADD COLUMN "trash_auto_clean_days" INTEGER'))
+    }
+    if (!libColumns.some((c) => c.name === 'trash_max_bytes')) {
+      db.run(sql.raw('ALTER TABLE "libraries" ADD COLUMN "trash_max_bytes" INTEGER'))
+    }
+  }
   // 0029 operator switches: same ledger-ahead hazard as above; both default
   // open so existing instances keep their behavior.
   const instanceColumns = db.all(sql.raw('PRAGMA table_info("instance")')) as Array<{ name: string }>

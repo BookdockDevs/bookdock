@@ -12,6 +12,7 @@ const HOOKS = vi.hoisted(() => ({
   useMoveCatalogVersion: vi.fn(),
   useDeleteCatalogVersion: vi.fn(),
   useCollectBook: vi.fn(),
+  useLibraries: vi.fn(),
 }))
 
 vi.mock('../features/library/hooks', () => HOOKS)
@@ -53,6 +54,7 @@ function renderCard(book: CatalogBook, { canManage = false, canCollect = true } 
   HOOKS.useMoveCatalogVersion.mockReturnValue({ mutate: moveVersion })
   HOOKS.useDeleteCatalogVersion.mockReturnValue({ mutate: deleteVersion, mutateAsync: deleteVersion })
   HOOKS.useCollectBook.mockReturnValue({ mutate: collect, isPending: false })
+  HOOKS.useLibraries.mockReturnValue({ data: undefined })
   const { container } = renderRow(
     <CatalogCard
       book={book}
@@ -78,8 +80,10 @@ describe('CatalogCard', () => {
   it('draws the work with the same card a private book uses', () => {
     renderCard(work({ tags: [{ id: 't1', name: 'classic' }] }))
     // Title, author and artwork, and nothing about reading: a work belongs to
-    // nobody, so there is no progress to show and none is invented.
-    expect(screen.getByText('City Book')).toBeInTheDocument()
+    // nobody, so there is no progress to show and none is invented. The title
+    // reads twice because the cover placeholder always carries it, sitting
+    // under the artwork until - unless - that artwork arrives.
+    expect(screen.getAllByText('City Book')).toHaveLength(2)
     expect(screen.getByText('Someone')).toBeInTheDocument()
     expect(screen.queryByText('1 个版本')).toBeNull()
     expect(screen.queryByText(/^\d+%$/)).toBeNull()
@@ -152,7 +156,7 @@ describe('CatalogCard', () => {
         onShowDetails={vi.fn()}
       />,
     )
-    expect(screen.getByText('City Book')).toBeInTheDocument()
+    expect(screen.getAllByText('City Book')).toHaveLength(2)
     expect(screen.queryByText('Someone')).toBeNull()
     expect(screen.queryByText(/^\d+%$/)).toBeNull()
   })
@@ -222,7 +226,7 @@ describe('CatalogCard', () => {
     fireEvent.click(screen.getByText('删除'))
     expect(deleteVersion).not.toHaveBeenCalled()
     const dialog = screen.getByRole('alertdialog')
-    expect(within(dialog).getByText(/删除后整个作品会被移除/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/将整体移入回收站/)).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '删除' }))
     expect(deleteVersion).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1' })
   })

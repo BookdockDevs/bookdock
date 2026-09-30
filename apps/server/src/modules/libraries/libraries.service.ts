@@ -27,6 +27,7 @@ export interface LibraryIdentity {
 }
 
 function toLibraryRes(row: typeof libraries.$inferSelect, isOwner?: boolean): Library {
+  const shared = row.type === 'shared'
   return {
     id: row.id,
     type: row.type,
@@ -35,6 +36,11 @@ function toLibraryRes(row: typeof libraries.$inferSelect, isOwner?: boolean): Li
     description: row.description,
     visibility: row.visibility,
     accessPassword: isOwner ? (row.accessPassword ?? null) : undefined,
+    // Trash knobs are owner-only like the access password; other relations
+    // get null (shared) so the UI can tell "shared" from "private" (undefined).
+    trashEnabled: !shared ? undefined : (isOwner ? (row.trashEnabled ?? true) : null),
+    trashAutoCleanDays: !shared ? undefined : (isOwner ? (row.trashAutoCleanDays ?? 30) : null),
+    trashMaxBytes: !shared ? undefined : (isOwner ? (row.trashMaxBytes ?? 0) : null),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -297,6 +303,9 @@ export async function createLibrary(identity: LibraryIdentity, data: LibraryCrea
     accessPasswordHash: data.visibility === 'password' && data.accessPassword
       ? await hashPassword(data.accessPassword)
       : null,
+    trashEnabled: null,
+    trashAutoCleanDays: null,
+    trashMaxBytes: null,
     createdAt: now,
     updatedAt: now,
   }
@@ -321,6 +330,8 @@ export async function updateLibrary(userId: string, libraryId: string, data: Lib
   if (library.type === 'private' && (
     data.name === undefined || data.description !== undefined
     || data.visibility !== undefined || data.accessPassword !== undefined
+    || data.trashEnabled !== undefined || data.trashAutoCleanDays !== undefined
+    || data.trashMaxBytes !== undefined
   )) {
     throw new AppError('VALIDATION_ERROR', 'Only the private library name can be changed')
   }
@@ -330,6 +341,18 @@ export async function updateLibrary(userId: string, libraryId: string, data: Lib
   const patch: Partial<typeof libraries.$inferInsert> = { updatedAt: Date.now() }
   if (data.name !== undefined) patch.name = data.name
   if (data.description !== undefined) patch.description = data.description
+  // Shared-library trash knobs (owner-only; updateLibrary itself is owner-only).
+  let trashDisabling = false
+  if (library.type === 'shared') {
+    if (data.trashEnabled !== undefined) {
+      patch.trashEnabled = data.trashEnabled
+      if (!data.trashEnabled) trashDisabling = true
+    }
+    if (data.trashAutoCleanDays !== undefined) patch.trashAutoCleanDays = data.trashAutoCleanDays
+    if (data.trashMaxBytes !== undefined) patch.trashMaxBytes = data.trashMaxBytes
+  } else if (data.trashEnabled !== undefined || data.trashAutoCleanDays !== undefined || data.trashMaxBytes !== undefined) {
+    throw new AppError('VALIDATION_ERROR', 'Private libraries have no trash settings')
+  }
   if (data.visibility !== undefined) {
     patch.visibility = data.visibility
     if (data.visibility === 'password') {
@@ -365,6 +388,12 @@ export async function updateLibrary(userId: string, libraryId: string, data: Lib
       }).run()
     }
   })
+  // Flipping the switch off permanently deletes the current trash, mirroring
+  // the private-library master switch.
+  if (trashDisabling) {
+    const { emptyLibraryTrash } = await import('./catalog.service')
+    await emptyLibraryTrash(userId, libraryId)
+  }
   return toLibraryRes(db.select().from(libraries).where(eq(libraries.id, libraryId)).get()!, true)
 }
 

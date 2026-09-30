@@ -114,6 +114,17 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
     trash: true,
   }, { enabled: trashEnabled })
   const trashCount = trashData?.total
+  // Shared-library trash is owner-only: the row relation comes from the list,
+  // falling back to the per-library query while it loads.
+  const activeLibraryRow = (libraries ?? []).find((library) => library.id === activeLibraryId)
+  const sharedTrashVisible = inLibrary && !readOnly
+    && ((activeLibraryRow?.relation ?? relationQuery.data?.data.relation) === 'owner')
+  const libraryTrashEnabled = activeLibraryRow?.trashEnabled ?? true
+  const { data: libraryTrashData } = useLibraryCatalog(
+    sharedTrashVisible && libraryTrashEnabled ? activeLibraryId : null,
+    { page: 1, pageSize: 1, trash: true },
+  )
+  const libraryTrashCount = libraryTrashData?.data.total
 
   // The uncategorized count is a per-view badge, so it is asked of whichever
   // list is in context: a private library's books, or the shared catalog's
@@ -385,13 +396,29 @@ const LibrarySidebar = memo(function LibrarySidebar({ navSearch, onPrefetchNavig
           </>
         )}
 
-        {/* The trash is a private-library concept: a shared library has no
-            soft-delete flow, so the row is not offered there. */}
+        {/* The private trash lives outside any library; a shared library
+            offers its own owner-only trash row while in context. */}
         {trashEnabled && !readOnly && !inLibrary && (
           <div className="mt-6 border-t border-stone-200/60 pt-4 dark:border-stone-800/50">
             <NavItem
               label={_('library.trash')}
               count={trashCount}
+              active={trash}
+              icon={
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+                </svg>
+              }
+              onClick={() => selectNavigation({ trash: true, shelf: undefined, tag: undefined, status: undefined })}
+              onPointerEnter={() => onPrefetchNavigation?.({ trash: true, shelf: undefined, tag: undefined, status: undefined })}
+            />
+          </div>
+        )}
+        {sharedTrashVisible && libraryTrashEnabled && (
+          <div className="mt-6 border-t border-stone-200/60 pt-4 dark:border-stone-800/50">
+            <NavItem
+              label={_('library.trash')}
+              count={libraryTrashCount}
               active={trash}
               icon={
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -58,15 +58,49 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
     setLoaded(false)
   }, [source])
 
-  if (hasCover) {
-    return (
-      <div
-        className={cn(
-          'relative overflow-hidden rounded-xl border border-stone-200/80 shadow-xs dark:border-stone-800/70',
-          isSm ? 'h-16 w-12 shrink-0' : 'aspect-[2/3] w-full',
-          palette.className,
-        )}
-      >
+  const title = displayTitle(book.title)
+  const initial = title.match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? '?'
+
+  return (
+    <div
+      className={cn(
+        'relative overflow-hidden rounded-xl border border-stone-200/80 shadow-xs dark:border-stone-800/70',
+        isSm
+          ? 'flex h-16 w-12 shrink-0 items-center justify-center'
+          : 'flex aspect-[2/3] w-full select-none flex-col',
+        palette.className,
+      )}
+    >
+      {isSm ? (
+        <>
+          <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 bg-gradient-to-r from-black/15 to-transparent dark:from-black/30" />
+          <span className="pointer-events-none absolute inset-y-0 left-1.5 w-px bg-white/25 dark:bg-white/10" />
+          <span className="select-none font-serif text-lg font-medium">{initial}</span>
+        </>
+      ) : (
+        <>
+          {/* Spine lighting & crease */}
+          <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-black/10 dark:bg-black/25" />
+          <span className="pointer-events-none absolute inset-y-0 left-2 w-px bg-black/5 dark:bg-black/15" />
+          <span className="pointer-events-none absolute inset-y-0 left-0 w-3.5 bg-gradient-to-r from-black/15 via-black/5 to-transparent dark:from-black/30" />
+          {/* Right edge curvature */}
+          <span className="pointer-events-none absolute inset-y-0 right-0 w-1.5 bg-gradient-to-l from-black/5 to-transparent dark:from-black/15" />
+
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 pl-5">
+            <span className="line-clamp-4 text-center font-serif text-[13px] font-medium leading-snug tracking-wide">
+              {title}
+            </span>
+          </div>
+          <span className="pb-2 text-center font-mono text-[9px] font-medium uppercase tracking-widest opacity-40">
+            {book.format}
+          </span>
+        </>
+      )}
+
+      {/* Artwork is an overlay on the placeholder, not a replacement for it, so
+          a cover that is absent - or still in flight, as for every EPUB whose
+          artwork only the server can find - never blanks out the title. */}
+      {hasCover && (
         <img
           ref={(img) => {
             if (img?.complete && img?.naturalWidth > 0 && !loaded) {
@@ -78,7 +112,7 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
           decoding="async"
           onLoad={() => setLoaded(true)}
           className={cn(
-            'block h-full w-full transition-opacity duration-300',
+            'absolute inset-0 block h-full w-full transition-opacity duration-300',
             loaded ? 'opacity-100' : 'opacity-0',
             coverFit === 'full'
               ? 'bg-stone-100 object-contain p-1 dark:bg-stone-800'
@@ -87,53 +121,15 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
           onError={() => setError(true)}
           loading="lazy"
         />
-        {/* Subtle spine shadow overlay on real covers */}
-        <span className={cn('pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-black/25 via-black/5 to-transparent', isSm ? 'w-1.5' : 'w-3')} />
-        <span className={cn('pointer-events-none absolute inset-y-0 w-px bg-white/20', isSm ? 'left-1.5' : 'left-2.5')} />
-      </div>
-    )
-  }
-
-  const title = displayTitle(book.title)
-  const initial = title.match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? '?'
-
-  if (isSm) {
-    return (
-      <div
-        className={cn(
-          'relative flex h-16 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-stone-200/80 shadow-xs dark:border-stone-800/70',
-          palette.className,
-        )}
-      >
-        <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 bg-gradient-to-r from-black/15 to-transparent dark:from-black/30" />
-        <span className="pointer-events-none absolute inset-y-0 left-1.5 w-px bg-white/25 dark:bg-white/10" />
-        <span className="select-none font-serif text-lg font-medium">{initial}</span>
-      </div>
-    )
-  }
-
-  return (
-    <div
-      className={cn(
-        'relative flex aspect-[2/3] w-full select-none flex-col overflow-hidden rounded-xl border border-stone-200/80 shadow-xs dark:border-stone-800/70',
-        palette.className,
       )}
-    >
-      {/* Spine lighting & crease */}
-      <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-black/10 dark:bg-black/25" />
-      <span className="pointer-events-none absolute inset-y-0 left-2 w-px bg-black/5 dark:bg-black/15" />
-      <span className="pointer-events-none absolute inset-y-0 left-0 w-3.5 bg-gradient-to-r from-black/15 via-black/5 to-transparent dark:from-black/30" />
-      {/* Right edge curvature */}
-      <span className="pointer-events-none absolute inset-y-0 right-0 w-1.5 bg-gradient-to-l from-black/5 to-transparent dark:from-black/15" />
 
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 pl-5">
-        <span className="line-clamp-4 text-center font-serif text-[13px] font-medium leading-snug tracking-wide">
-          {title}
-        </span>
-      </div>
-      <span className="pb-2 text-center font-mono text-[9px] font-medium uppercase tracking-widest opacity-40">
-        {book.format}
-      </span>
+      {/* Subtle spine shadow overlay on real covers */}
+      {hasCover && !isSm && (
+        <>
+          <span className="pointer-events-none absolute inset-y-0 left-0 w-3 bg-gradient-to-r from-black/25 via-black/5 to-transparent" />
+          <span className="pointer-events-none absolute inset-y-0 left-2.5 w-px bg-white/20" />
+        </>
+      )}
     </div>
   )
 }

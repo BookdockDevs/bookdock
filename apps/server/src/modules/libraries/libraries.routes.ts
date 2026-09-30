@@ -48,13 +48,16 @@ import {
 import {
   deleteCatalogVersion,
   deleteCatalogBook,
+  emptyLibraryTrash,
   findSimilarWorks,
   getCatalogBook,
   listCatalogBooks,
   moveCatalogVersion,
+  permanentDeleteCatalogBook,
   removeCatalogBookCover,
   removeCatalogVersionCover,
   resetCatalogVersionMetadata,
+  restoreCatalogBook,
   updateCatalogBook,
   updateCatalogBookCover,
   updateCatalogVersion,
@@ -259,6 +262,7 @@ librariesRoutes.get('/:id/books', async (c) => {
     format: format === 'epub' || format === 'txt' ? format : undefined,
     author: c.req.query('author') ?? undefined,
     series: c.req.query('series') ?? undefined,
+    trash: c.req.query('trash') === '1',
   })
   return c.json({ data: result })
 })
@@ -363,6 +367,24 @@ librariesRoutes.delete('/:id/books/:bookId', async (c) => {
   const user = c.get('user')
   if (!user || user.role === 'guest') throw new AppError('FORBIDDEN')
   return c.json({ data: await deleteCatalogBook(user.id, c.req.param('id'), c.req.param('bookId')) })
+})
+
+librariesRoutes.post('/:id/books/:bookId/restore', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role === 'guest') throw new AppError('FORBIDDEN')
+  return c.json({ data: await restoreCatalogBook(user.id, c.req.param('id'), c.req.param('bookId')) })
+})
+
+librariesRoutes.delete('/:id/books/:bookId/permanent', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role === 'guest') throw new AppError('FORBIDDEN')
+  return c.json({ data: await permanentDeleteCatalogBook(user.id, c.req.param('id'), c.req.param('bookId')) })
+})
+
+librariesRoutes.delete('/:id/trash', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role === 'guest') throw new AppError('FORBIDDEN')
+  return c.json({ data: await emptyLibraryTrash(user.id, c.req.param('id')) })
 })
 
 librariesRoutes.patch('/:id/books/:bookId', async (c) => {

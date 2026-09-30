@@ -134,6 +134,41 @@ export async function isLibraryManager(actorId: string, libraryId: string): Prom
 }
 
 /**
+ * Shared-library trash settings, resolved with private-style defaults: NULL
+ * means enabled on, 30d retention, unlimited capacity.
+ */
+export function getLibraryTrashSettings(library: typeof libraries.$inferSelect): {
+  enabled: boolean
+  autoCleanDays: number
+  maxTrashBytes: number
+} {
+  return {
+    enabled: library.trashEnabled ?? true,
+    autoCleanDays: library.trashAutoCleanDays ?? 30,
+    maxTrashBytes: library.trashMaxBytes ?? 0,
+  }
+}
+
+export function isLibraryTrashEnabled(library: typeof libraries.$inferSelect): boolean {
+  return getLibraryTrashSettings(library).enabled
+}
+
+/**
+ * Shared-library trash gate: only the library owner lists, restores, empties
+ * or permanently deletes trashed works, or edits trash settings. Admins move
+ * normal works into the trash through the manager delete path but never open
+ * it; members never see it.
+ */
+export async function requireLibraryOwner(actorId: string, libraryId: string): Promise<ManagedLibrary> {
+  const db = getDb()
+  const library = db.select().from(libraries).where(eq(libraries.id, libraryId)).get()
+  if (!library) throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  if (library.type === 'private') throw new AppError('FORBIDDEN', 'Only shared libraries have an owner trash')
+  if (library.userId !== actorId) throw new AppError('FORBIDDEN', 'Only the library owner can manage the trash')
+  return { library, relation: 'owner' as const }
+}
+
+/**
  * Library-scoped version read: the version must belong to the library,
  * otherwise it is a NOT_FOUND (never a cross-library existence leak).
  */
@@ -193,6 +228,10 @@ function resolveSharedVersionReadInternal(
   const link = db.select().from(libraryBookVersions)
     .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.bookVersionId, bookVersionId))).get()
   if (!link) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+  // Trash binds every relation: a trashed work reads as deleted until restored.
+  const trashedWork = db.select({ deletedAt: libraryBooks.deletedAt }).from(libraryBooks)
+    .where(eq(libraryBooks.id, link.libraryBookId)).get()
+  if (!trashedWork || trashedWork.deletedAt) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
   const manager = relation === 'owner' || relation === 'admin'
   // Both hides bind members only. A manager curates a library and must keep
   // reading, downloading and collecting what they hid, so neither the version

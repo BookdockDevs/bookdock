@@ -107,11 +107,13 @@ function mockLibraryHooks({
   tags = [],
   relation = 'owner',
   uncategorizedTotal = 0,
+  trashTotal = 0,
 }: {
   categories?: ShelfItemData[]
   tags?: TagItemData[]
   relation?: string
   uncategorizedTotal?: number
+  trashTotal?: number
 } = {}) {
   ;(libraryHooks.useLibraryCategories as ReturnType<typeof vi.fn>).mockReturnValue({
     data: { data: categories },
@@ -124,10 +126,12 @@ function mockLibraryHooks({
   ;(libraryHooks.useLibraryRelation as ReturnType<typeof vi.fn>).mockReturnValue({
     data: { data: { relation } },
   })
-  ;(libraryHooks.useLibraryCatalog as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { data: { items: [], total: uncategorizedTotal } },
-    isLoading: false,
-  })
+  ;(libraryHooks.useLibraryCatalog as ReturnType<typeof vi.fn>).mockImplementation(
+    (_libraryId: unknown, params?: { trash?: boolean }) => ({
+      data: { data: { items: [], total: params?.trash ? trashTotal : uncategorizedTotal } },
+      isLoading: false,
+    }),
+  )
   // The name dialogs mount with the sidebar (closed), so their mutations are
   // called on every render even in a private-library test.
   ;(libraryHooks.useCreateLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
@@ -629,12 +633,16 @@ describe('LibrarySidebar', () => {
       expect(navSearch).toHaveBeenCalledWith({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
     })
 
-    it('hides the trash, which is a private-library concept', () => {
+    it('shows the trash to a shared-library owner but hides it from members', () => {
       mockHooks({ trashEnabled: true })
-      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 1 }] })
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 1 }], relation: 'owner', trashTotal: 3 })
 
+      const { unmount } = render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+      expect(screen.getByText('回收站')).toBeInTheDocument()
+      unmount()
+
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 1 }], relation: 'member', trashTotal: 3 })
       render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
-
       expect(screen.queryByText('回收站')).toBeNull()
     })
 

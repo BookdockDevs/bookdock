@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import {
@@ -17,7 +17,7 @@ import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
 import { blobKey, coverThumbnailKey, detectImageExtension, generateCoverThumbnail } from '../../lib/cover'
 import { sha256 } from '../../lib/hash'
-import { assertLibraryBrowsable, deleteOrphanedBookVersions, isLibraryManager, requireLibraryManager } from './library-access'
+import { assertLibraryBrowsable, deleteOrphanedBookVersions, getLibraryTrashSettings, isLibraryManager, isLibraryTrashEnabled, requireLibraryManager, requireLibraryOwner } from './library-access'
 import {
   isWorkEffectivelyHidden,
   likePattern,
@@ -162,6 +162,7 @@ function toCatalogBook(
     effectiveHidden: managerView && isWorkEffectivelyHidden(getDb(), work.libraryId, work),
     pinnedAt: work.pinnedAt ?? null,
     defaultVersionLinkId: work.defaultVersionLinkId ?? null,
+    deletedAt: work.deletedAt ?? null,
     tags,
     versions: ordered.map((link) => toCatalogVersion(work, link, resolved, collectedVersionIds)),
     createdAt: work.createdAt,
@@ -264,9 +265,51 @@ function setWorkTags(
 export async function listCatalogBooks(
   actorId: string,
   libraryId: string,
-  params: Partial<LibraryListQuery> = {},
+  params: Partial<LibraryListQuery> & { trash?: boolean } = {},
 ): Promise<CatalogListRes> {
   const db = getDb()
+  // Trash is owner-only and never leaks through the normal list: even the
+  // owner reads trashed works only with trash=true.
+  if (params.trash) {
+    await requireLibraryOwner(actorId, libraryId)
+    await purgeLibraryTrashIfNeeded(libraryId)
+    const page = Math.max(1, params.page ?? 1)
+    const pageSize = Math.min(100, Math.max(1, params.pageSize ?? CATALOG_PAGE_SIZE))
+    const filters: SQL[] = [eq(libraryBooks.libraryId, libraryId), isNotNull(libraryBooks.deletedAt)]
+    if (params.search) {
+      const pattern = likePattern(params.search)
+      filters.push(sql`(
+        ${libraryBooks.title} LIKE ${pattern} ESCAPE '!'
+        OR ${libraryBooks.author} LIKE ${pattern} ESCAPE '!'
+        OR ${libraryBooks.description} LIKE ${pattern} ESCAPE '!'
+        OR ${taxonomyNameMatch(pattern, libraryId)}
+        OR ${versionEffectiveMatch(pattern, libraryId, {})}
+      )`)
+    }
+    filters.push(...sharedListConditions({ page, pageSize, ...params }, libraryId, {}))
+    const where = and(...filters)
+    const total = db.select({ count: sql<number>`count(*)` }).from(libraryBooks).where(where).get()?.count ?? 0
+    const trashWorks = db.select().from(libraryBooks).where(where)
+      .orderBy(desc(libraryBooks.deletedAt), asc(libraryBooks.id))
+      .limit(pageSize).offset((page - 1) * pageSize).all()
+    const items: CatalogBook[] = []
+    for (const work of trashWorks) {
+      const links = db.select().from(libraryBookVersions)
+        .where(eq(libraryBookVersions.libraryBookId, work.id))
+        .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all()
+      const facts = loadVersionFacts(links.map((link) => link.bookVersionId))
+      const collectedVersionIds = getCollectedVersionIds(actorId, links.map((link) => link.bookVersionId))
+      items.push(toCatalogBook(
+        work,
+        links,
+        tagNamesByWork(db, [work.id]).get(work.id) ?? [],
+        facts,
+        collectedVersionIds,
+        true,
+      ))
+    }
+    return { items, total, page, pageSize }
+  }
   await assertLibraryBrowsable(actorId, libraryId)
   const includeUnlisted = await isLibraryManager(actorId, libraryId)
   const page = Math.max(1, params.page ?? 1)
@@ -616,6 +659,11 @@ export async function getLibraryVersionPublication(
         eq(libraryBookVersions.bookVersionId, bookVersionId),
       )).get()
     if (!row) continue
+    // Trash binds every relation here too: the content gates already refuse
+    // trashed works, but a direct metadata lookup must not leak them either.
+    const trashed = db.select({ deletedAt: libraryBooks.deletedAt }).from(libraryBooks)
+      .where(eq(libraryBooks.id, row.libraryBookId)).get()
+    if (!trashed || trashed.deletedAt) continue
     // Same asymmetry as the listing: a hidden version and an effectively hidden
     // work are both invisible below manager, and either is enough to refuse.
     if (!manager) {
@@ -654,6 +702,9 @@ export async function getCatalogBook(actorId: string, libraryId: string, library
   await assertLibraryBrowsable(actorId, libraryId)
   const includeUnlisted = await isLibraryManager(actorId, libraryId)
   const work = getWork(libraryId, libraryBookId)
+  // Trash binds every relation in the normal read: trashed works surface only
+  // through the owner trash list.
+  if (work.deletedAt) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
   // Hidden works read as NOT_FOUND for non-managers (same verdict as an
   // unlisted-only work); managers always see them, badged.
   if (!includeUnlisted && isWorkEffectivelyHidden(db, libraryId, work)) {
@@ -1072,9 +1123,51 @@ export async function moveCatalogVersion(
  * and simply becomes unreadable.
  */
 export async function deleteCatalogBook(actorId: string, libraryId: string, libraryBookId: string) {
-  await requireLibraryManager(actorId, libraryId)
+  const { library } = await requireLibraryManager(actorId, libraryId)
+  // While the trash switch is on, manager deletes only move the work into the
+  // owner trash; while off, they hard-delete directly.
   const db = getDb()
   const work = getWork(libraryId, libraryBookId)
+  const links = db.select().from(libraryBookVersions)
+    .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.libraryBookId, libraryBookId))).all()
+  if (isLibraryTrashEnabled(library)) {
+    if (work.deletedAt) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
+    const now = Date.now()
+    db.update(libraryBooks).set({ deletedAt: now, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+    return { id: libraryBookId, versionCount: links.length, trashed: true as const }
+  }
+  const orphanedVersionIds: string[] = []
+  db.transaction((tx) => {
+    tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
+    tx.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
+    tx.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
+    for (const link of links) {
+      const stillListed = tx.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+        .where(eq(libraryBookVersions.bookVersionId, link.bookVersionId)).get()
+      if (!stillListed) orphanedVersionIds.push(link.bookVersionId)
+    }
+  })
+  const coverKeys = [work.coverKey, ...links.map((link) => link.coverKey)]
+    .filter((key): key is string => key !== null)
+  await deleteOrphanedBookVersions([...new Set(orphanedVersionIds)], { coverKeys: [...new Set(coverKeys)] })
+  return { id: libraryBookId, versionCount: links.length, trashed: false as const }
+}
+
+/** Owner-only: restore one trashed work. */
+export async function restoreCatalogBook(actorId: string, libraryId: string, libraryBookId: string) {
+  await requireLibraryOwner(actorId, libraryId)
+  const db = getDb()
+  const work = getWork(libraryId, libraryBookId)
+  if (!work.deletedAt) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
+  db.update(libraryBooks).set({ deletedAt: null, updatedAt: Date.now() }).where(eq(libraryBooks.id, libraryBookId)).run()
+  return { id: libraryBookId }
+}
+
+async function hardDeleteCatalogWork(libraryId: string, libraryBookId: string): Promise<boolean> {
+  const db = getDb()
+  const work = db.select().from(libraryBooks)
+    .where(and(eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
+  if (!work) return false
   const links = db.select().from(libraryBookVersions)
     .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.libraryBookId, libraryBookId))).all()
   const orphanedVersionIds: string[] = []
@@ -1091,7 +1184,76 @@ export async function deleteCatalogBook(actorId: string, libraryId: string, libr
   const coverKeys = [work.coverKey, ...links.map((link) => link.coverKey)]
     .filter((key): key is string => key !== null)
   await deleteOrphanedBookVersions([...new Set(orphanedVersionIds)], { coverKeys: [...new Set(coverKeys)] })
-  return { id: libraryBookId, versionCount: links.length }
+  return true
+}
+
+/** Owner-only: permanently delete one trashed work. */
+export async function permanentDeleteCatalogBook(actorId: string, libraryId: string, libraryBookId: string) {
+  await requireLibraryOwner(actorId, libraryId)
+  const work = getWork(libraryId, libraryBookId)
+  if (!work.deletedAt) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
+  await hardDeleteCatalogWork(libraryId, libraryBookId)
+  return { id: libraryBookId }
+}
+
+/** Owner-only: empty the whole library trash. */
+export async function emptyLibraryTrash(actorId: string, libraryId: string) {
+  await requireLibraryOwner(actorId, libraryId)
+  const db = getDb()
+  const trashed = db.select({ id: libraryBooks.id }).from(libraryBooks)
+    .where(and(eq(libraryBooks.libraryId, libraryId), isNotNull(libraryBooks.deletedAt))).all()
+  for (const row of trashed) await hardDeleteCatalogWork(libraryId, row.id)
+  return { count: trashed.length }
+}
+
+/** Retention + capacity sweep for one shared library; shared-trash twin of the private purge. */
+export async function purgeLibraryTrashIfNeeded(libraryId: string): Promise<number> {
+  const db = getDb()
+  const library = db.select().from(libraries).where(eq(libraries.id, libraryId)).get()
+  if (!library || library.type !== 'shared') return 0
+  const settings = getLibraryTrashSettings(library)
+  if (!settings.enabled) return 0
+  let purged = 0
+  if (settings.autoCleanDays > 0) {
+    const cutoff = Date.now() - settings.autoCleanDays * 24 * 60 * 60 * 1000
+    const expired = db.select({ id: libraryBooks.id }).from(libraryBooks)
+      .where(and(eq(libraryBooks.libraryId, libraryId), isNotNull(libraryBooks.deletedAt), lt(libraryBooks.deletedAt, cutoff))).all()
+    for (const row of expired) {
+      if (await hardDeleteCatalogWork(libraryId, row.id)) purged++
+    }
+  }
+  if (settings.maxTrashBytes > 0) {
+    const rows = db.select({
+      id: libraryBooks.id,
+      size: sql<number>`coalesce(sum(${bookVersions.size}), 0)`,
+    })
+      .from(libraryBooks)
+      .innerJoin(libraryBookVersions, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+      .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
+      .where(and(eq(libraryBooks.libraryId, libraryId), isNotNull(libraryBooks.deletedAt)))
+      .groupBy(libraryBooks.id)
+      .orderBy(asc(libraryBooks.deletedAt)).all()
+    let total = rows.reduce((sum, row) => sum + row.size, 0)
+    for (const row of rows) {
+      if (total <= settings.maxTrashBytes) break
+      if (await hardDeleteCatalogWork(libraryId, row.id)) {
+        total -= row.size
+        purged++
+      }
+    }
+  }
+  return purged
+}
+
+/** Boot-time sweep across shared libraries; fail-silent like the private one. */
+export async function purgeAllLibraryTrash(): Promise<void> {
+  try {
+    const db = getDb()
+    const sharedIds = db.select({ id: libraries.id }).from(libraries).where(eq(libraries.type, 'shared')).all()
+    for (const row of sharedIds) await purgeLibraryTrashIfNeeded(row.id)
+  } catch {
+    // Startup sweep never blocks boot.
+  }
 }
 
 export async function deleteCatalogVersion(
@@ -1101,10 +1263,19 @@ export async function deleteCatalogVersion(
   versionLinkId: string,
 ) {
   const db = getDb()
-  await requireLibraryManager(actorId, libraryId)
+  const { library } = await requireLibraryManager(actorId, libraryId)
   const work = getWork(libraryId, libraryBookId)
+  if (work.deletedAt) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
   const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
   const now = Date.now()
+  // Trash is work-scoped: removing the last version moves the work into the
+  // owner trash instead of deleting it; other versions delete immediately.
+  const remaining = db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
+    .where(eq(libraryBookVersions.libraryBookId, libraryBookId)).all()
+  if (isLibraryTrashEnabled(library) && remaining.length <= 1) {
+    db.update(libraryBooks).set({ deletedAt: now, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+    return { id: link.id, libraryBookId, workDeleted: false, trashed: true as const }
+  }
   const orphanedVersionIds: string[] = []
   let workDeleted = false
   db.transaction((tx) => {

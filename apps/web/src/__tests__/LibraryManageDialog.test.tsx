@@ -53,7 +53,7 @@ describe('LibraryManageDialog', () => {
     expect(save()).not.toBeDisabled()
     fireEvent.click(save())
     expect(HOOKS.useUpdateLibrary().mutate).toHaveBeenCalledWith(
-      { libraryId: 'lib_city', patch: { name: 'Renamed', description: 'All the books', visibility: 'public' } },
+      { libraryId: 'lib_city', patch: { name: 'Renamed', description: 'All the books', visibility: 'public', trashEnabled: true, trashAutoCleanDays: 30, trashMaxBytes: 0 } },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
   })

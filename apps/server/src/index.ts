@@ -8,6 +8,7 @@ import { config } from './config'
 import { runMigrations } from './db/client'
 import { log } from './lib/logger'
 import { migrateTxtArtifacts, purgeAllExpiredTrash } from './modules/books/books.service'
+import { purgeAllLibraryTrash } from './modules/libraries/catalog.service'
 import { interruptStaleAiGenerationRuns } from './modules/ai/ai.runs.service'
 import { runPhase2StartupBackfill } from './modules/libraries/startup-backfill'
 
@@ -17,6 +18,7 @@ async function runTrashSweep() {
   const startedAt = Date.now()
   try {
     await purgeAllExpiredTrash()
+    await purgeAllLibraryTrash()
     log('info', 'trash.sweep.completed', { durationMs: Date.now() - startedAt })
   } catch (err) {
     // Trash cleanup is deliberately fail-silent so an operational cleanup

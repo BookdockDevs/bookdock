@@ -855,6 +855,15 @@ export function assertReadableBookSync(userId: string, bookId: string): void {
     const library = db.select({ id: libraries.id, userId: libraries.userId, type: libraries.type, visibility: libraries.visibility })
       .from(libraries).where(eq(libraries.id, candidate.libraryId)).get()
     if (!library || library.type === 'private') continue
+    const link = db.select({ status: libraryBookVersions.status, libraryBookId: libraryBookVersions.libraryBookId }).from(libraryBookVersions)
+      .where(and(
+        eq(libraryBookVersions.libraryId, candidate.libraryId),
+        eq(libraryBookVersions.bookVersionId, bookId),
+      )).get()
+    if (!link) continue
+    const work = db.select({ deletedAt: libraryBooks.deletedAt }).from(libraryBooks)
+      .where(eq(libraryBooks.id, link.libraryBookId)).get()
+    if (!work || work.deletedAt) continue
     const membership = db.select({ role: libraryMemberships.role }).from(libraryMemberships).where(and(
       eq(libraryMemberships.libraryId, candidate.libraryId),
       eq(libraryMemberships.userId, userId),
@@ -867,11 +876,6 @@ export function assertReadableBookSync(userId: string, bookId: string): void {
     // Everyone else is bound by visibility AND by the version status, so a
     // public member and a public outsider read the same published set.
     if (library.visibility !== 'public' && !membership) continue
-    const link = db.select({ status: libraryBookVersions.status }).from(libraryBookVersions)
-      .where(and(
-        eq(libraryBookVersions.libraryId, candidate.libraryId),
-        eq(libraryBookVersions.bookVersionId, bookId),
-      )).get()
     if (link?.status === 'published') return
   }
   throw new AppError('BOOK_NOT_FOUND')
@@ -914,7 +918,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
   if (!granted) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   const link = granted.link
   const work = db.select().from(libraryBooks).where(eq(libraryBooks.id, link.libraryBookId)).get()
-  if (!work) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  if (!work || work.deletedAt) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   const bv = db.select().from(bookVersions).where(eq(bookVersions.id, bookId)).get()
   if (!bv) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   const revision = db.select().from(contentRevisions)
@@ -2123,7 +2127,25 @@ export async function getBookCover(userId: string | null, bookId: string): Promi
   if (!book.contentHash) return null
   try {
     const parsed = await parser.parse(await storage.get(book.filePath))
-    if (!parsed.meta.cover) return null
+    if (!parsed.meta.cover) {
+      // "This package has no artwork" is a stable fact about immutable bytes,
+      // so record it. Without this every card render re-reads and re-parses the
+      // whole epub just to answer 404. Same guard as removeBookCover: only a
+      // private version writes the flag, because a shared revision's meta is
+      // read by every library and its owner records the fact once for all.
+      if (userId !== null) {
+        const { kind } = resolveLibraryBook(userId, book.id)
+        if (kind !== 'shared') {
+          const latestRevision = db.select().from(contentRevisions)
+            .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+          if (latestRevision) {
+            const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>), coverSuppressed: true }
+            db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+          }
+        }
+      }
+      return null
+    }
     const ext = detectImageExtension(parsed.meta.cover)
     if (!ext) return null
     const coverKey = blobKey(book.contentHash, `.cover.${ext}`)

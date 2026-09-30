@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import type { CatalogBook, GridCardField } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
@@ -8,6 +10,7 @@ import BookCardShell from './BookCardShell'
 import HiddenIndicator from './HiddenIndicator'
 import { useContextMenu } from './use-context-menu'
 import CatalogWorkMenu from './CatalogWorkMenu'
+import DeleteVersionsDialog from './DeleteVersionsDialog'
 import { PinIcon } from './UnpinButton'
 import { useUpdateCatalogBook } from '../hooks'
 
@@ -38,6 +41,10 @@ export default function CatalogCard({
   const _ = useTranslation()
   const menu = useContextMenu()
   const updateWork = useUpdateCatalogBook()
+  // The version-delete dialog lives here (outside the menu subtree): closing
+  // the menu unmounts everything inside it, so menu-owned dialog state dies
+  // with the menu and the confirm never fires.
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const first = book.versions[0]
   const isPinned = Boolean(book.pinnedAt)
   const hasHiddenVersions = book.versions.length > 1 && book.versions.some((version) => version.status === 'unlisted')
@@ -127,6 +134,16 @@ export default function CatalogCard({
           canCollect={canCollect && first?.collected !== true}
           canDownload={canCollect && (canManage || book.versions[0]?.status === 'published')}
           onShowDetails={() => { menu.close(); onShowDetails(book) }}
+          onDeleteRequest={() => { menu.close(); setDeleteOpen(true) }}
+        />
+      )}
+      {deleteOpen && (
+        <DeleteVersionsDialog
+          work={book}
+          libraryId={book.libraryId}
+          preselectedIds={book.versions.map((v) => v.id)}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={() => setDeleteOpen(false)}
         />
       )}
     </>

@@ -32,6 +32,12 @@ export interface Library {
   /** Null for private libraries, which sit outside the visibility system. */
   visibility: LibraryVisibility | null
   accessPassword?: string | null
+  /** Shared-library trash switch; null for private libraries. Omitted/true = on. */
+  trashEnabled?: boolean | null
+  /** Days a trashed work is kept; 0 = never auto-clean. Null for private libraries. */
+  trashAutoCleanDays?: number | null
+  /** Trash capacity in bytes; 0/null = unlimited. Null for private libraries. */
+  trashMaxBytes?: number | null
   createdAt: number
   updatedAt: number
 }
@@ -87,6 +93,10 @@ export const libraryUpdateSchema = z.object({
   description: z.string().max(2000).optional(),
   visibility: libraryVisibilitySchema.optional(),
   accessPassword: z.string().min(4).max(128).nullable().optional(),
+  /** Shared-library trash switch; private libraries reject it. */
+  trashEnabled: z.boolean().optional(),
+  trashAutoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]).optional(),
+  trashMaxBytes: z.union([z.literal(0), z.literal(1073741824), z.literal(2147483648), z.literal(5368709120)]).optional(),
 })
 
 export type LibraryUpdateReq = z.infer<typeof libraryUpdateSchema>
@@ -301,6 +311,11 @@ export interface CatalogBook {
   effectiveHidden: boolean
   /** Shared-library home pin. Every version of this work shares one card. */
   pinnedAt: number | null
+  /**
+   * Soft-delete stamp; non-null only inside the owner trash list. Normal
+   * reads reject trashed works, so this mostly feeds the trash retention pill.
+   */
+  deletedAt: number | null
   /**
    * Default display version: cards, rows and the detail dialog lead with this
    * version instead of the oldest upload. Null = oldest first.
