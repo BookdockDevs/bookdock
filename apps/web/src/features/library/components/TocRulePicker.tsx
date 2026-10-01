@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import type { Chapter, TocPreviewChapter, TocPreviewReq, TocPreviewRes, TocRulePattern } from '@bookdock/shared'
 
-import { apiPost } from '@/api/client'
-import { useReToc, useTocPreview, useTocRules } from '@/api/hooks/useTocRules'
+import { tocPreviewPost, useReToc, useTocPreview, useTocRules, type TocTarget } from '@/api/hooks/useTocRules'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
@@ -15,7 +14,7 @@ import { cn } from '@/lib/utils'
 import BookCustomTocEditor from './BookCustomTocEditor'
 
 interface TocRulePickerProps {
-  bookId: string
+  target: TocTarget
   /** Currently pinned/auto-scored rule id from the book meta */
   currentRuleId?: string
   /** True when the id was chosen by auto-scoring rather than pinned */
@@ -30,7 +29,7 @@ interface TocRulePickerProps {
 }
 
 export default function TocRulePicker({
-  bookId,
+  target,
   currentRuleId,
   autoScored,
   customPatterns,
@@ -41,7 +40,7 @@ export default function TocRulePicker({
   const _ = useTranslation()
   const rulesQuery = useTocRules()
   const rules = useMemo(() => rulesQuery.data?.data ?? [], [rulesQuery.data?.data])
-  const reToc = useReToc(bookId)
+  const reToc = useReToc(target)
 
   const [customEditorOpen, setCustomEditorOpen] = useState(false)
 
@@ -76,7 +75,7 @@ export default function TocRulePicker({
   }, [activeTarget, customPatterns, excludedChapterIds, selectedTarget])
 
   const shouldPreview = Boolean(currentChapters?.length) && selectionReadyTarget === activeTarget
-  const previewQuery = useTocPreview(bookId, previewReq, { enabled: Boolean(bookId) && shouldPreview })
+  const previewQuery = useTocPreview(target, previewReq, { enabled: shouldPreview })
   const preview = previewQuery.data?.data
 
   const [extraChapters, setExtraChapters] = useState<TocPreviewChapter[]>([])
@@ -165,11 +164,9 @@ export default function TocRulePicker({
     if (!preview || isLoadingMore) return
     setIsLoadingMore(true)
     try {
-      const res = await apiPost<{ data: { chapters: TocPreviewChapter[] } }>(`/books/${bookId}/toc-preview`, {
-        ...previewReq,
-        offset: allChapters.length,
-        limit: 1000,
-      })
+      const res = await tocPreviewPost(target, { ...previewReq, offset: allChapters.length, limit: 1000 }) as {
+        data: { chapters: TocPreviewChapter[] }
+      }
       if (res?.data?.chapters?.length) {
         setExtraChapters((prev) => [...prev, ...res.data.chapters])
       }
@@ -470,7 +467,7 @@ export default function TocRulePicker({
       {/* Book-Specific Custom TOC Rule Editor */}
       {customEditorOpen && (
         <BookCustomTocEditor
-          bookId={bookId}
+          target={target}
           initialPatterns={customPatterns}
           onClose={() => setCustomEditorOpen(false)}
           onSaved={() => {

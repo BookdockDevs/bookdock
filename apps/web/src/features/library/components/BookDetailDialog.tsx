@@ -7,19 +7,19 @@ import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
-import SmartMenu from '@/components/ui/SmartMenu'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { computeFromAnchor, PADDING, type SmartPosition } from '@/lib/position'
 
-import { useBook, useBookMembership, useResetMetadata, useShelves, useTags } from '../hooks'
+import { useBook, useBookMembership, useResetMetadata, useShelves, useTags, useVersionTocState } from '../hooks'
 
 import AppendContentModal from './AppendContentModal'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
 import BookCoverEditor from './book-detail/BookCoverEditor'
 import BookDetailView from './book-detail/BookDetailView'
 import BookMetaForm from './book-detail/BookMetaForm'
+import type { MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
 import { draftFrom, draftToBookmeta, parseAuthorList, type MetaDraft } from './book-detail/types'
 import TocRulePicker from './TocRulePicker'
 import WorkDetailBody from './WorkDetailBody'
@@ -32,7 +32,7 @@ interface BookDetailDialogProps {
    * where a reader picks one to read - not a panel folded into the list row.
    * Only one of `book` and `work` is ever set.
    */
-  work?: { work: CatalogBook; library: Library; canManage: boolean; canCollect: boolean } | null
+  work?: { work: CatalogBook; library: Library; canManage: boolean; canCollect: boolean; canContribute?: boolean } | null
   readOnly?: boolean
   onClose: () => void
   onDelete: (book: BookListItem) => void
@@ -65,11 +65,50 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
   const [shelfSel, setShelfSel] = useState<string | null>(null)
   const [tagSel, setTagSel] = useState<Set<string>>(new Set())
 
-  const [moreMenu, setMoreMenu] = useState<SmartPosition | null>(null)
-  const moreAnchorRef = useRef<HTMLDivElement>(null)
-  const moreMenuRef = useRef<HTMLDivElement>(null)
   const [tocRuleOpen, setTocRuleOpen] = useState(false)
   const [appendContentOpen, setAppendContentOpen] = useState(false)
+
+  // A work's visible version is owned here, not inside its body, because the
+  // header overflow menu offers the content-maintenance actions for whichever
+  // version is on screen - the same two the private book offers for itself.
+  const [workVersionId, setWorkVersionId] = useState<string | null>(null)
+  const [workTocOpen, setWorkTocOpen] = useState(false)
+  const [workAppendOpen, setWorkAppendOpen] = useState(false)
+  const pendingWorkVersionRef = useRef<string[]>([])
+  const workVersion =
+    work?.work.versions.find((v) => v.id === workVersionId) ?? work?.work.versions[0]
+  // The server resolves maintainability per version with the same predicate the
+  // write endpoints gate on, so the payload - not the library-level flag - is
+  // what says whether this version can be appended to or re-chaptered.
+  const workCanEditContent = Boolean(
+    workVersion?.maintainable ?? (Boolean(work?.canManage) || Boolean(work?.canContribute)),
+  )
+  const workTocState = useVersionTocState(
+    work && workTocOpen ? work.library.id : null,
+    work && workTocOpen ? work.work.id : null,
+    work && workTocOpen && workVersion ? workVersion.id : null,
+  )
+
+  // A deleted or moved-away selection falls back instead of pointing nowhere;
+  // versions uploaded from this dialog report their link ids before the catalog
+  // refetch lands, so hold them aside rather than letting the fallback eat the
+  // fresh selection.
+  useEffect(() => {
+    const versions = work?.work.versions
+    if (!versions) return
+    if (pendingWorkVersionRef.current.length > 0) {
+      const arrived = pendingWorkVersionRef.current.find((id) => versions.some((v) => v.id === id))
+      if (arrived) {
+        setWorkVersionId(arrived)
+        pendingWorkVersionRef.current = []
+      }
+      return
+    }
+    if (versions.length > 0 && !versions.some((v) => v.id === workVersionId)) {
+      setWorkVersionId(versions[0]?.id ?? null)
+    }
+  }, [work?.work.versions, workVersionId])
+
   const { data: chaptersData } = useBookChapters(book?.id ?? '', tocRuleOpen && displayBook.format === 'txt')
 
   useEffect(() => {
@@ -81,26 +120,6 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
     setCoverPreviewUrl(url)
     return () => URL.revokeObjectURL(url)
   }, [pendingCoverFile])
-
-  function toggleMoreMenu() {
-    const el = moreAnchorRef.current
-    if (!el) return
-    if (moreMenu) {
-      setMoreMenu(null)
-      return
-    }
-    const rect = el.getBoundingClientRect()
-    const menuW = 176
-    const position = computeFromAnchor(
-      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      menuW,
-      88,
-    )
-    setMoreMenu({
-      ...position,
-      left: Math.max(PADDING, Math.min(rect.right - menuW, window.innerWidth - menuW - PADDING)),
-    })
-  }
 
   const discardEdit = useCallback(() => {
     setEditing(false)
@@ -210,15 +229,77 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
   }
 
   if (work) {
+    // Content maintenance lives in the header overflow on both sides of the
+    // library boundary, so the affordance never depends on which library a book
+    // came from.
+    const workMenuItems: MoreActionsMenuItem[] =
+      workVersion?.format === 'txt' && workCanEditContent
+        ? [
+          {
+            key: 'toc',
+            label: _('library.changeTocRule'),
+            icon: (
+              <>
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
+                <line x1="3" y1="6" x2="3.01" y2="6" />
+                <line x1="3" y1="12" x2="3.01" y2="12" />
+                <line x1="3" y1="18" x2="3.01" y2="18" />
+              </>
+            ),
+            onSelect: () => setWorkTocOpen(true),
+          },
+          {
+            key: 'append',
+            label: _('library.appendContent'),
+            icon: <path d="M12 5v14M5 12h14" />,
+            onSelect: () => setWorkAppendOpen(true),
+          },
+        ]
+        : []
     return (
-      <Modal title={_('library.bookDetails')} onClose={closeDialog} closeLabel={_('library.close')} size="xl">
+      <Modal
+        title={_('library.bookDetails')}
+        onClose={closeDialog}
+        closeLabel={_('library.close')}
+        size="xl"
+      >
         <WorkDetailBody
           work={work.work}
           library={work.library}
           canManage={work.canManage}
           canCollect={work.canCollect}
+          canContribute={work.canContribute}
+          selectedVersionId={workVersion?.id ?? null}
+          onSelectVersion={setWorkVersionId}
+          onVersionsUploaded={(ids) => {
+            if (ids.length > 0) pendingWorkVersionRef.current = ids
+          }}
+          moreActions={workMenuItems}
           onClose={closeDialog}
         />
+        {workAppendOpen && workVersion && workCanEditContent && (
+          <AppendContentModal
+            target={{ libraryId: work.library.id, libraryBookId: work.work.id, versionLinkId: workVersion.id }}
+            onClose={() => setWorkAppendOpen(false)}
+          />
+        )}
+        {workTocOpen && workVersion && workCanEditContent && (
+          workTocState.isError
+            ? <QueryErrorState isRetrying={workTocState.isFetching} onRetry={() => void workTocState.refetch()} />
+            : workTocState.data && (
+              <TocRulePicker
+                target={{ libraryId: work.library.id, libraryBookId: work.work.id, versionLinkId: workVersion.id }}
+                currentRuleId={workTocState.data.data.tocRuleId ?? undefined}
+                autoScored={workTocState.data.data.tocRuleAuto}
+                customPatterns={workTocState.data.data.customPatterns}
+                excludedChapterIds={workTocState.data.data.excludedChapterIds}
+                currentChapters={workTocState.data.data.chapters}
+                onClose={() => setWorkTocOpen(false)}
+              />
+            )
+        )}
       </Modal>
     )
   }
@@ -229,8 +310,8 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
     memShelves.data?.data !== undefined ? memShelves.data.data : (book.shelfId ?? null)
   const tagIds = memTags.data?.data ? new Set(memTags.data.data) : null
   // 7.x: a collected B keeps its own metadata editable, but its content belongs
-  // to the library �?appending, re-chaptering and resetting derived metadata
-  // would rewrite the city's revision, so the server refuses them too. `source`
+  // to the library — appending, re-chaptering and resetting derived metadata
+  // would rewrite the shared revision, so the server refuses them too. `source`
   // is the right test for that: it is set for a B and for a library read, and
   // absent for A/C.
   // 0.4.0: a library version read *without* collecting it has no private card,
@@ -254,6 +335,33 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
   const rawId = bookmeta?.isbn || bookmeta?.identifier || ''
   const identifier = rawId && (bookmeta?.isbn || !isMachineId(rawId)) ? rawId : ''
 
+  const privateMenuItems: MoreActionsMenuItem[] =
+    !readOnly && !isLibraryOwned && displayBook.format === 'txt'
+      ? [
+        {
+          key: 'toc',
+          label: _('library.changeTocRule'),
+          icon: (
+            <>
+              <line x1="8" y1="6" x2="21" y2="6" />
+              <line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" />
+              <line x1="3" y1="6" x2="3.01" y2="6" />
+              <line x1="3" y1="12" x2="3.01" y2="12" />
+              <line x1="3" y1="18" x2="3.01" y2="18" />
+            </>
+          ),
+          onSelect: () => setTocRuleOpen(true),
+        },
+        {
+          key: 'append',
+          label: _('library.appendContent'),
+          icon: <path d="M12 5v14M5 12h14" />,
+          onSelect: () => setAppendContentOpen(true),
+        },
+      ]
+      : []
+
   return (
     <>
       <Modal
@@ -261,60 +369,6 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
         onClose={closeDialog}
         closeLabel={_('library.close')}
         size="xl"
-        actions={
-          !readOnly && !isLibraryOwned && displayBook.format === 'txt' ? (
-            <div ref={moreAnchorRef} className="relative">
-              <button
-                type="button"
-                onClick={toggleMoreMenu}
-                aria-label={_('library.moreActions')}
-                title={_('library.moreActions')}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="1" />
-                  <circle cx="19" cy="12" r="1" />
-                  <circle cx="5" cy="12" r="1" />
-                </svg>
-              </button>
-              {moreMenu && (
-                <SmartMenu innerRef={moreMenuRef} position={moreMenu} onClose={() => setMoreMenu(null)}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMoreMenu(null)
-                      setTocRuleOpen(true)
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                      <line x1="8" y1="6" x2="21" y2="6" />
-                      <line x1="8" y1="12" x2="21" y2="12" />
-                      <line x1="8" y1="18" x2="21" y2="18" />
-                      <line x1="3" y1="6" x2="3.01" y2="6" />
-                      <line x1="3" y1="12" x2="3.01" y2="12" />
-                      <line x1="3" y1="18" x2="3.01" y2="18" />
-                    </svg>
-                    <span className="flex-1">{_('library.changeTocRule')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMoreMenu(null)
-                      setAppendContentOpen(true)
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 transition-colors hover:bg-stone-500/10 dark:text-stone-200"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                      <path d="M12 5v14M5 12h14" />
-                    </svg>
-                    <span className="flex-1">{_('library.appendContent')}</span>
-                  </button>
-                </SmartMenu>
-              )}
-            </div>
-          ) : undefined
-        }
         footer={
           editing ? (
             <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
@@ -407,6 +461,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
               currentShelfId={currentShelfId}
               memberTags={memberTags}
               isLoading={detailLoading || !detail}
+              moreActions={privateMenuItems}
               onEdit={enterEdit}
               onDelete={onDelete}
               onClose={onClose}
@@ -416,7 +471,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
 
           {!readOnly && !isLibraryOwned && displayBook.format === 'txt' && tocRuleOpen && (
             <TocRulePicker
-              bookId={book.id}
+              target={{ bookId: book.id }}
               currentRuleId={detail?.meta?.tocRuleId}
               autoScored={detail?.meta?.tocRuleAuto}
               customPatterns={detail?.meta?.customTocPatterns}
@@ -426,7 +481,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
             />
         )}
       </Modal>
-      {!readOnly && !isLibraryOwned && displayBook.format === 'txt' && appendContentOpen && <AppendContentModal bookId={book.id} onClose={() => setAppendContentOpen(false)} />}
+      {!readOnly && !isLibraryOwned && displayBook.format === 'txt' && appendContentOpen && <AppendContentModal target={{ bookId: book.id }} onClose={() => setAppendContentOpen(false)} />}
     </>
   )
 }

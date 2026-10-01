@@ -13,6 +13,8 @@ import type { SmartPosition } from '@/lib/position'
 
 import { downloadDefault } from '../download'
 import { useCollectBook, useUpdateCatalogBook } from '../hooks'
+import { getHiddenCause } from '../hidden-status'
+import { ApiError } from '@/api/client'
 
 import { MenuDangerItem, MenuDivider, MenuHeader, MenuItem } from './RowMenuChrome'
 
@@ -46,6 +48,9 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
   const updateWork = useUpdateCatalogBook()
   // The menu predates versions in the UI: one work, one version, the first one.
   const first = work.versions[0]
+  // A taxonomy-derived hide has no work flag to clear: the toggle below would
+  // write hidden=true on top of it, so the menu names the cause and stays inert.
+  const hiddenCause = getHiddenCause(work, 'category')
   const hidden = work.hidden || (work.versions.length === 1 && first?.status === 'unlisted')
   const firstVersionId = first?.bookVersionId
   const readable = Boolean(firstVersionId) && (canManage || first?.status === 'published')
@@ -80,7 +85,16 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
           }}
         />
       )}
-      {canManage && (
+      {canManage && hiddenCause && (
+        <MenuItem
+          label={_(hiddenCause.shortKey)}
+          title={_(hiddenCause.hintKey, hiddenCause.hintParams)}
+          disabled
+          icon={<><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" /><line x1="2" x2="22" y1="2" y2="22" /></>}
+          onClick={() => {}}
+        />
+      )}
+      {canManage && !hiddenCause && (
         <MenuItem
           label={hidden ? _('library.catalogShowWork') : _('library.catalogHideWork')}
           disabled={updateWork.isPending}
@@ -107,7 +121,7 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
       {(canCollect || canDownload) && first && <MenuDivider />}
 
       {canCollect && first && (first.status === 'published' || canManage) && (
-        first.collected ? (
+        first.collected || first.ownsSource ? (
           <MenuItem
             label={_('library.collected')}
             disabled
@@ -128,7 +142,13 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
                       res.data.alreadyExists ? _('library.collectAlready') : _('library.collectSuccess'),
                     )
                   },
-                  onError: (err) => notify.error(getUserErrorNotification(err, 'library.collectFailed')),
+                  onError: (err) => {
+                    if (err instanceof ApiError && err.code === 'ALREADY_OWNS_SOURCE') {
+                      notify.info(_('library.collectAlready'))
+                    } else {
+                      notify.error(getUserErrorNotification(err, 'library.collectFailed'))
+                    }
+                  },
                 },
               )
             }}

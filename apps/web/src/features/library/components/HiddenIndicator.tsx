@@ -8,9 +8,11 @@ interface HiddenIndicatorProps {
    * with no background block.
    */
   overlay?: boolean
+  /** Hover explanation; defaults to the kind label. Callers pass the hidden cause hint. */
+  title?: string
 }
 
-export default function HiddenIndicator({ kind, overlay = false }: HiddenIndicatorProps) {
+export default function HiddenIndicator({ kind, overlay = false, title }: HiddenIndicatorProps) {
   const _ = useTranslation()
   const label = kind === 'versions'
     ? _('library.hiddenVersionsStatus')
@@ -20,7 +22,7 @@ export default function HiddenIndicator({ kind, overlay = false }: HiddenIndicat
     <span
       role="img"
       aria-label={label}
-      title={label}
+      title={title ?? label}
       className={overlay
         ? 'inline-flex h-7 w-7 shrink-0 cursor-default items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm'
         : 'inline-flex h-4 w-4 shrink-0 items-center justify-center text-stone-400 dark:text-stone-500'}

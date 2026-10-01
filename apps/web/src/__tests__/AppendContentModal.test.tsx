@@ -50,7 +50,7 @@ describe('AppendContentModal', () => {
 
   it('debounces pasted text, shows the chapter diff, and saves the selected source', async () => {
     const onClose = vi.fn()
-    render(<AppendContentModal bookId="book-1" onClose={onClose} />, { wrapper })
+    render(<AppendContentModal target={{ bookId: 'book-1' }} onClose={onClose} />, { wrapper })
 
     fireEvent.click(screen.getByRole('tab', { name: '粘贴文本' }))
     fireEvent.change(screen.getByRole('textbox', { name: '粘贴文本' }), { target: { value: '第二章 续篇\n\n正文' } })
@@ -63,7 +63,7 @@ describe('AppendContentModal', () => {
     })
 
     expect(mocks.previewMutate).toHaveBeenCalledWith(
-      { bookId: 'book-1', text: '第二章 续篇\n\n正文' },
+      { target: { bookId: 'book-1' }, text: '第二章 续篇\n\n正文' },
       expect.anything(),
     )
     expect(screen.getByText(/1 章 \(100字\)/)).toBeInTheDocument()
@@ -77,14 +77,14 @@ describe('AppendContentModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '追加并保存' }))
     expect(mocks.appendMutate).toHaveBeenCalledWith(
-      { bookId: 'book-1', text: '第二章 续篇\n\n正文', startOffset: 0 },
+      { target: { bookId: 'book-1' }, text: '第二章 续篇\n\n正文', startOffset: 0 },
       expect.anything(),
     )
     expect(onClose).toHaveBeenCalled()
   })
 
   it('accepts a TXT file and submits it as multipart input', async () => {
-    render(<AppendContentModal bookId="book-2" onClose={vi.fn()} />, { wrapper })
+    render(<AppendContentModal target={{ bookId: 'book-2' }} onClose={vi.fn()} />, { wrapper })
     const input = document.querySelector('input[type="file"]')!
     const file = new File(['第三章\n\n正文'], 'update.txt', { type: 'text/plain' })
 
@@ -93,7 +93,7 @@ describe('AppendContentModal', () => {
       vi.advanceTimersByTime(350)
     })
 
-    expect(mocks.previewMutate).toHaveBeenCalledWith({ bookId: 'book-2', file }, expect.anything())
+    expect(mocks.previewMutate).toHaveBeenCalledWith({ target: { bookId: 'book-2' }, file }, expect.anything())
     expect(screen.getByText('update.txt')).toBeInTheDocument()
   })
 
@@ -113,7 +113,7 @@ describe('AppendContentModal', () => {
       addedChapters: [{ title: '第三章 终章', level: 1, wordCount: 80 }],
     }
     mocks.previewMutate.mockImplementation((_input, options: { onSuccess: (value: unknown) => void }) => options.onSuccess({ data: candidatePreview }))
-    render(<AppendContentModal bookId="book-3" onClose={vi.fn()} />, { wrapper })
+    render(<AppendContentModal target={{ bookId: 'book-3' }} onClose={vi.fn()} />, { wrapper })
 
     fireEvent.click(screen.getByRole('tab', { name: '粘贴文本' }))
     fireEvent.change(screen.getByRole('textbox', { name: '粘贴文本' }), { target: { value: '第二章 续篇\n\n第三章 终章' } })
@@ -129,7 +129,7 @@ describe('AppendContentModal', () => {
     fireEvent.click(screen.getByRole('button', { name: '追加并保存' }))
 
     expect(mocks.appendMutate).toHaveBeenCalledWith(
-      { bookId: 'book-3', text: '第二章 续篇\n\n第三章 终章', startOffset: 0 },
+      { target: { bookId: 'book-3' }, text: '第二章 续篇\n\n第三章 终章', startOffset: 0 },
       expect.anything(),
     )
   })

@@ -75,6 +75,10 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
     || library.trashMaxBytes === 2147483648 || library.trashMaxBytes === 5368709120
       ? library.trashMaxBytes : 0,
   )
+  // Member-upload lane (owner-only, per-library). Members may then upload new
+  // works/versions and maintain versions they uploaded; the server still
+  // refuses everything else.
+  const [allowMemberUpload, setAllowMemberUpload] = useState(library.allowMemberUpload ?? false)
 
   const updateLibrary = useUpdateLibrary()
   const [disableTrashOpen, setDisableTrashOpen] = useState(false)
@@ -91,6 +95,7 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
     setTrashMaxBytes(library.trashMaxBytes === 0 || library.trashMaxBytes === 1073741824
     || library.trashMaxBytes === 2147483648 || library.trashMaxBytes === 5368709120
       ? library.trashMaxBytes : 0)
+    setAllowMemberUpload(library.allowMemberUpload ?? false)
   }, [library])
 
   const passwordChanged = visibility === 'password' && password.trim() !== (library.accessPassword ?? '')
@@ -98,6 +103,7 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
     trashEnabled !== (library.trashEnabled ?? true)
     || trashAutoCleanDays !== (library.trashAutoCleanDays ?? 30)
     || trashMaxBytes !== (library.trashMaxBytes ?? 0)
+    || allowMemberUpload !== (library.allowMemberUpload ?? false)
   )
   const settingsChanged = name.trim() !== library.name
     || description !== library.description
@@ -135,6 +141,7 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
           trashEnabled,
           trashAutoCleanDays,
           trashMaxBytes,
+          allowMemberUpload,
         } : {}),
       },
     }, {
@@ -305,6 +312,32 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
 
               {library.type === 'shared' && (
                 <div className="flex flex-col gap-3 rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      {/* Same wording as the instance-level upload switch: this
+                          is the same decision at library scope, and one wording
+                          means one thing to learn. */}
+                      <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('admin.allowUserUpload')}</p>
+                      <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('admin.allowUserUploadHint')}</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={allowMemberUpload}
+                      aria-label={_('admin.allowUserUpload')}
+                      disabled={updateLibrary.isPending}
+                      onClick={() => setAllowMemberUpload(!allowMemberUpload)}
+                      className={cn(
+                        'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60',
+                        allowMemberUpload ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-200 dark:bg-stone-700',
+                      )}
+                    >
+                      <span className={cn(
+                        'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all dark:bg-stone-900',
+                        allowMemberUpload ? 'left-[22px] dark:bg-stone-900' : 'left-0.5',
+                      )} />
+                    </button>
+                  </div>
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trash')}</p>

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import type { BookListItem, LibraryListItem } from '@bookdock/shared'
 
@@ -8,11 +8,16 @@ import PublishBookDialog from '../features/library/components/PublishBookDialog'
 import { useAuthStore } from '../stores/auth.store'
 
 const publishMutate = vi.fn()
+const pushMutate = vi.fn()
+let bookDetailData: unknown = undefined
+// Rendered behind a real modal, so the confirm dialog portals out of it.
 
 vi.mock('../features/library/hooks', () => ({
   useLibraryCategories: () => ({ data: { data: [{ id: 'category-1', name: '分类' }] }, isLoading: false }),
   useLibraryTags: () => ({ data: { data: [{ id: 'tag-1', name: '标签' }] }, isLoading: false }),
   usePublishPrivateBook: () => ({ mutate: publishMutate, isPending: false }),
+  useBook: () => ({ data: bookDetailData }),
+  usePushVersion: () => ({ mutate: pushMutate, isPending: false }),
 }))
 
 const book: BookListItem = {
@@ -30,6 +35,7 @@ const libraries: LibraryListItem[] = [
 beforeEach(async () => {
   vi.clearAllMocks()
   localStorage.clear()
+  bookDetailData = undefined
   useAuthStore.setState({ user: { id: 'user-1', username: 'tester', role: 'owner' } })
   await i18n.changeLanguage('zh-CN')
 })
@@ -102,5 +108,80 @@ describe('PublishBookDialog', () => {
     localStorage.setItem('bd-publish-target-library:user-1', 'shared-admin')
     render(<PublishBookDialog {...props} libraries={libraries.filter((library) => library.id !== 'shared-admin')} />)
     expect(screen.getByLabelText('目标书库')).toHaveValue('shared-owner')
+  })
+
+  it('gives each published library the action its content state allows', () => {
+    bookDetailData = {
+      data: {
+        publishedTo: [
+          { libraryId: 'lib_city', libraryName: 'City', libraryBookId: 'lb1', versionLinkId: 'lbv1', versionName: '', inSync: true, cityMoved: false, sourceMoved: false },
+          { libraryId: 'lib_town', libraryName: 'Town', libraryBookId: 'lb2', versionLinkId: 'lbv2', versionName: '精校版', inSync: false, cityMoved: true, sourceMoved: false },
+          { libraryId: 'lib_split', libraryName: 'Split', libraryBookId: 'lb4', versionLinkId: 'lbv4', versionName: '', inSync: false, cityMoved: true, sourceMoved: true },
+          { libraryId: 'lib_a', libraryName: 'A', libraryBookId: 'lb3', versionLinkId: 'lbv3', versionName: '', inSync: false, cityMoved: false, sourceMoved: true },
+        ],
+      },
+    }
+    const onOpenLibrary = vi.fn()
+    render(<PublishBookDialog book={book} libraries={libraries} onClose={vi.fn()} onOpenLibrary={onOpenLibrary} />)
+
+    expect(screen.getByText('已发布书库')).toBeInTheDocument()
+    expect(screen.getByText('内容同步')).toBeInTheDocument()
+    // The library moving ahead of an untouched copy reads differently from both
+    // sides having edited: the second one is a dead end for this book's future
+    // pushes, and the row has to say so rather than look like the first.
+    expect(screen.getByText('书库已更新')).toBeInTheDocument()
+    expect(screen.getByText('内容已分叉')).toBeInTheDocument()
+    expect(screen.getByText('内容更新')).toBeInTheDocument()
+
+    // In sync: nothing to send. Library ahead, either way: the server refuses a
+    // push, so the row opens that library instead. This book ahead: push.
+    const pushButton = screen.getByRole('button', { name: '推送更新' })
+    const viewButtons = screen.getAllByRole('button', { name: '查看书库版本' })
+    expect(viewButtons).toHaveLength(2)
+
+    fireEvent.click(viewButtons[0]!)
+    expect(onOpenLibrary).toHaveBeenCalledWith('lib_town')
+    fireEvent.click(viewButtons[1]!)
+    expect(onOpenLibrary).toHaveBeenCalledWith('lib_split')
+
+    fireEvent.click(pushButton)
+    // The confirm states the consequence and names the target, so a book
+    // published to several libraries cannot be pushed into the wrong one.
+    const confirm = within(screen.getByRole('alertdialog'))
+    expect(confirm.getByText('将用本书当前内容更新「A」，目标书库中现有的内容将被替换。确定继续吗？')).toBeInTheDocument()
+    fireEvent.click(confirm.getByRole('button', { name: '确认推送' }))
+    expect(pushMutate).toHaveBeenCalledWith(
+      { libraryId: 'lib_a', libraryBookId: 'lb3', versionLinkId: 'lbv3' },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    )
+  })
+
+  it('includes the version name when the library version has one', () => {
+    bookDetailData = {
+      data: {
+        publishedTo: [
+          { libraryId: 'lib_town', libraryName: '试读会', libraryBookId: 'lb2', versionLinkId: 'lbv2', versionName: '精校版', inSync: false, cityMoved: false, sourceMoved: false },
+        ],
+      },
+    }
+    render(<PublishBookDialog book={book} libraries={libraries} onClose={vi.fn()} onOpenLibrary={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '推送更新' }))
+    expect(screen.getByText(/将用本书当前内容更新「试读会 · 精校版」/)).toBeInTheDocument()
+  })
+
+  it('never promises a rollback for a push', () => {
+    // The push overwrites what the library serves and no surface restores it,
+    // so the confirm copy must not sell it as reversible or as keeping history.
+    bookDetailData = {
+      data: {
+        publishedTo: [
+          { libraryId: 'lib_city', libraryName: 'City', libraryBookId: 'lb1', versionLinkId: 'lbv1', versionName: '', inSync: false, cityMoved: false, sourceMoved: false },
+        ],
+      },
+    }
+    render(<PublishBookDialog book={book} libraries={libraries} onClose={vi.fn()} onOpenLibrary={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '推送更新' }))
+    const confirm = within(screen.getByRole('alertdialog')).getByText(/将用本书当前内容更新/)
+    expect(confirm.textContent).not.toMatch(/撤回|还原|恢复|历史/)
   })
 })

@@ -67,8 +67,8 @@ vi.mock('../features/library/hooks', () => ({
   useResetMetadata: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCollectBook: () => ({ mutate: collectBookMutate, isPending: false }),
   useForkBook: () => ({ mutate: vi.fn(), isPending: false }),
-  useRepinBook: () => ({ mutate: vi.fn(), isPending: false }),
-  useSourceStatus: () => ({ data: undefined }),
+  usePushVersion: () => ({ mutate: vi.fn(), isPending: false }),
+  useVersionTocState: () => ({ data: undefined }),
   useUpdateCatalogVersion: () => ({ mutate: updateCatalogVersionMutate, isPending: false }),
   useUpdateCatalogBook: () => ({ mutate: updateCatalogBookMutate, mutateAsync: updateCatalogBookMutate, isPending: false }),
   useLibraries: () => ({ data: undefined }),
@@ -533,6 +533,59 @@ describe('BookDetailDialog metadata rows', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(LONG_FILE_NAME))
   })
 
+  it('marks a card whose content grew since the reader last opened it', () => {
+    // The pin already moved for everyone, so the notice is a plain mark rather
+    // than an action: there is nothing to click, the next read picks it up.
+    bookDetail = {
+      data: {
+        ...book,
+        kind: 'shared',
+        source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' },
+        meta: { bookmeta: {} },
+        hasUnreadUpdate: true,
+      },
+    }
+    renderDialog()
+
+    const mark = screen.getByText('有更新')
+    expect(mark).toBeInTheDocument()
+    expect(mark.closest('button')).toBeNull()
+    expect(screen.queryByRole('button', { name: '更新' })).toBeNull()
+  })
+
+  it('shows no mark once the reader has caught up', () => {
+    bookDetail = {
+      data: {
+        ...book,
+        kind: 'shared',
+        source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' },
+        meta: { bookmeta: {} },
+        hasUnreadUpdate: false,
+      },
+    }
+    renderDialog()
+
+    expect(screen.queryByText('有更新')).toBeNull()
+  })
+
+  it('shows owns-source exactly like a collected version in the book detail', () => {
+    bookDetail = {
+      data: {
+        ...book,
+        collected: false,
+        source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' },
+        meta: { bookmeta: {} },
+        ownsSource: true,
+      },
+    }
+    renderDialog()
+
+    expect(screen.queryByRole('button', { name: '加入书库' })).toBeNull()
+    const joined = screen.getByRole('button', { name: '已在书库中' })
+    expect(joined).toBeInTheDocument()
+    expect(joined).toBeDisabled()
+  })
+
   it('keeps a text selection instead of hijacking it with the full value', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })
@@ -738,11 +791,10 @@ describe('BookDetailDialog primary action', () => {
 })
 
 describe('BookDetailDialog TOC rule menu', () => {
-  it('opens the TOC rule picker from edit mode', async () => {
+  it('opens the TOC rule picker from more actions menu', async () => {
     bookDetail = { data: { ...book, format: 'txt', meta: {} } }
     renderDialog()
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
     fireEvent.click(await screen.findByRole('button', { name: '更换目录规则' }))
 
@@ -912,18 +964,18 @@ describe('BookDetailDialog shared work mode', () => {
   function catalogWork(overrides: Partial<CatalogBook> = {}): CatalogBook {
     return {
       id: 'lb1', libraryId: 'lib_city', categoryId: null, title: 'City Book', author: 'Someone',
-      description: 'A tale', coverKey: null, hidden: false, effectiveHidden: false,
+      description: 'A tale', coverKey: null, hidden: false, effectiveHidden: false, hiddenReason: null,
       tags: [{ id: 't1', name: 'classic' }],
       versions: [catalogVersion()], createdAt: 1710000000000, updatedAt: 1710000000000, ...overrides,
     }
   }
 
-  function renderWorkDialog(target: CatalogBook, { canManage = false, canCollect = true } = {}) {
+  function renderWorkDialog(target: CatalogBook, { canManage = false, canCollect = true, canContribute = false } = {}) {
     const onClose = vi.fn()
     const rendered = render(
       <BookDetailDialog
         book={null}
-        work={{ work: target, library: cityLibrary, canManage, canCollect }}
+        work={{ work: target, library: cityLibrary, canManage, canCollect, canContribute }}
         onClose={onClose}
         onDelete={vi.fn()}
       />,
@@ -960,6 +1012,58 @@ describe('BookDetailDialog shared work mode', () => {
     fireEvent.click(screen.getByRole('button', { name: '开始阅读' }))
     expect(onClose).toHaveBeenCalled()
     expect(navigateMock).toHaveBeenCalledWith({ to: '/books/$id', params: { id: 'v1' } })
+  })
+
+  it('shows owns-source exactly like a collected version in the work detail', () => {
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ ownsSource: true })] }))
+    expect(screen.queryByRole('button', { name: '加入书库' })).toBeNull()
+    const joined = screen.getByRole('button', { name: '已在书库中' })
+    expect(joined).toBeInTheDocument()
+    expect(joined).toBeDisabled()
+  })
+
+  it('hides content edits from a contributor on a version they did not upload', () => {
+    // canContribute is a library-level right; the per-version `maintainable`
+    // flag is what the server actually gates on, and it says no here.
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ maintainable: false })] }), { canContribute: true })
+    expect(screen.queryByRole('button', { name: '追加内容' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '更换目录规则' })).toBeNull()
+    // Uploading a version for the work is still theirs to do.
+    expect(screen.getByRole('button', { name: '上传新版本' })).toBeInTheDocument()
+  })
+
+  it('offers content edits to a contributor on a version they uploaded', () => {
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ maintainable: true })] }), { canContribute: true })
+    // Same overflow menu the private library uses for the same two actions,
+    // rather than a second pair of icons in the action row.
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    expect(screen.getByRole('button', { name: '追加内容' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '更换目录规则' })).toBeInTheDocument()
+  })
+
+  it('hangs the work overflow off the action row, consistent with the private book', () => {
+    // Both private books and shared-library works place the overflow menu
+    // at the end of the action row before delete.
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ maintainable: true })] }), { canManage: true })
+    const overflow = screen.getByRole('button', { name: '更多操作' })
+    const deleteBtn = screen.getByRole('button', { name: '删除' })
+    expect(overflow.compareDocumentPosition(deleteBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('never offers the city-side push; that lives on the private book', () => {
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ maintainable: true })] }), { canManage: true })
+    expect(screen.queryByRole('button', { name: '同步来源更新' })).toBeNull()
+  })
+
+  it('offers delete to a contributor on their own version only', () => {
+    const work = catalogWork({ versions: [catalogVersion({ id: 'lbv1', maintainable: true }), catalogVersion({ id: 'lbv2', maintainable: false })] })
+    renderWorkDialog(work, { canContribute: true })
+    expect(screen.getByRole('button', { name: '删除' })).toBeInTheDocument()
+  })
+
+  it('hides delete from a contributor who maintains nothing on this work', () => {
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ maintainable: false })] }), { canContribute: true })
+    expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
   })
 
   it('filters by author and tag inside the library', () => {
@@ -1119,16 +1223,24 @@ describe('BookDetailDialog shared work mode', () => {
   it('keeps the hide icon but makes it inert for a taxonomy-derived hide', () => {
     // A hidden category sets effectiveHidden without the direct flag, so there
     // is no work-level action to take: same icon, disabled, and the tooltip
-    // explains where the hide actually lives.
-    renderWorkDialog(catalogWork({ hidden: false, effectiveHidden: true }), { canManage: true })
+    // names the exact hiding layer.
+    renderWorkDialog(catalogWork({ hidden: false, effectiveHidden: true, hiddenReason: 'category', hiddenVia: { categoryName: 'Vault' } }), { canManage: true })
 
-    const icon = screen.getByLabelText('作品已隐藏')
+    const icon = screen.getByLabelText('分类已隐藏')
     expect(icon).toBeDisabled()
-    expect(icon).toHaveAttribute('title', '此作品所属分类或标签被隐藏')
+    expect(icon).toHaveAttribute('title', '所属分类「Vault」已隐藏')
     expect(screen.queryByLabelText('版本显示中，点击隐藏')).toBeNull()
     expect(screen.queryByLabelText('版本已隐藏，点击显示')).toBeNull()
     // Reading is untouched: the curator still reads what they hid.
     expect(screen.getByRole('button', { name: '开始阅读' })).not.toBeDisabled()
+  })
+
+  it('names the hiding tag for a tag-derived hide', () => {
+    renderWorkDialog(catalogWork({ hidden: false, effectiveHidden: true, hiddenReason: 'tag', hiddenVia: { tagNames: ['Secret'] } }), { canManage: true })
+
+    const icon = screen.getByLabelText('标签已隐藏')
+    expect(icon).toBeDisabled()
+    expect(icon).toHaveAttribute('title', '所属标签「Secret」已隐藏')
   })
 
   it('reads the direct work hide as a work-level control on a one-version work', () => {

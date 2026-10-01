@@ -7,6 +7,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import SmartMenu from '@/components/ui/SmartMenu'
 
 import { privateBookRow } from '../book-row'
+import { getHiddenCause } from '../hidden-status'
 import BookCardShell from './BookCardShell'
 import HiddenIndicator from './HiddenIndicator'
 import { useContextMenu } from './use-context-menu'
@@ -42,6 +43,8 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
   const menu = useContextMenu()
   const trashCard = Boolean(onRestore && onPermanentDelete)
   const showMenu = !trashCard
+  // The badge tooltip names the hiding layer when taxonomy hides the book.
+  const hiddenCause = getHiddenCause(book, 'shelf')
 
   function handleContextMenu(e: React.MouseEvent) {
     if (!showMenu) return
@@ -83,7 +86,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
             <TrashInfo book={book} variant="pill" />
           </div>
         ) : undefined}
-        coverBadge={book.hidden || book.effectiveHidden ? <HiddenIndicator kind="private" overlay /> : undefined}
+        coverBadge={book.hidden || book.effectiveHidden ? <HiddenIndicator kind="private" overlay title={hiddenCause ? _(hiddenCause.hintKey, hiddenCause.hintParams) : undefined} /> : undefined}
         infoFooter={book.sourceUnavailable ? (
           <div className="mt-0.5 flex items-center gap-1">
             <p className="truncate text-[11px] text-amber-600 dark:text-amber-400">

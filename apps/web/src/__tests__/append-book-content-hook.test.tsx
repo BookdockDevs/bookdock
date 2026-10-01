@@ -34,11 +34,29 @@ describe('useAppendBookContent', () => {
     queryClient.setQueryData(['book', 'book-1'], { data: { id: 'book-1', updatedAt: 1 } })
     const { result } = renderHook(() => useAppendBookContent(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ bookId: 'book-1', text: '新内容' })
+    result.current.mutate({ target: { bookId: 'book-1' }, text: '新内容' })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
     expect(queryClient.getQueryData(['book', 'book-1'])).toEqual({ data: { id: 'book-1', updatedAt: 2 } })
     expect(queryClient.getQueryState(['book', 'book-1'])?.isInvalidated).toBe(true)
+  })
+
+  it('posts city appends to the version URL and invalidates the catalog', async () => {
+    queryClient.setQueryData(['libraries', 'lib1', 'catalog'], { data: [] })
+    const { result } = renderHook(() => useAppendBookContent(), { wrapper: wrapper(queryClient) })
+
+    result.current.mutate({
+      target: { libraryId: 'lib1', libraryBookId: 'lb1', versionLinkId: 'lbv1' },
+      text: '新内容',
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(vi.mocked(apiClient.apiPost)).toHaveBeenCalledWith(
+      '/libraries/lib1/books/lb1/versions/lbv1/append',
+      expect.anything(),
+    )
+    expect(queryClient.getQueryState(['libraries', 'lib1', 'catalog'])?.isInvalidated).toBe(true)
   })
 })

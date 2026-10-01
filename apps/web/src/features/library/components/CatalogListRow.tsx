@@ -9,6 +9,7 @@ import { formatAuthorList } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover } from '../book-row'
 import type { BookDragPayload } from '../dnd'
+import { getHiddenCause } from '../hidden-status'
 import { useLibraryCategories, useUpdateCatalogBook } from '../hooks'
 
 import BookCover from './BookCover'
@@ -49,6 +50,8 @@ export default function CatalogListRow({
   const row = catalogWorkRow(work)
   const first = work.versions[0]
   const isPinned = Boolean(work.pinnedAt)
+  // The badge tooltip names the hiding layer when taxonomy hides the work.
+  const hiddenCause = getHiddenCause(work, 'category')
   // A work's category is the shelf column of this row; the name resolves
   // through the same cached taxonomy query the sidebar reads.
   const { data: categoriesData } = useLibraryCategories(work.libraryId)
@@ -78,7 +81,7 @@ export default function CatalogListRow({
           <span className="truncate font-serif text-sm font-medium text-stone-900 dark:text-stone-100">
             {work.title}
           </span>
-          {(work.hidden || work.effectiveHidden === true || (work.versions.length === 1 && first?.status === 'unlisted')) && <HiddenIndicator kind="work" overlay />}
+          {(work.hidden || work.effectiveHidden === true || (work.versions.length === 1 && first?.status === 'unlisted')) && <HiddenIndicator kind="work" overlay title={hiddenCause ? _(hiddenCause.hintKey, hiddenCause.hintParams) : undefined} />}
           {work.versions.length > 1 && work.versions.some((version) => version.status === 'unlisted') && <HiddenIndicator kind="versions" overlay />}
           {isPinned && (
             canManage ? (

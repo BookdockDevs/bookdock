@@ -10,9 +10,10 @@ import { notify } from '@/lib/notifications'
 import { formatBytes } from '@/lib/utils'
 
 import { useAppendBookContent, useAppendBookContentPreview, type AppendContentInput } from '../hooks'
+import type { TocTarget } from '@/api/hooks/useTocRules'
 
 interface AppendContentModalProps {
-  bookId: string
+  target: TocTarget
   onClose: () => void
 }
 
@@ -27,7 +28,7 @@ function compactWordCount(count: number): string {
   return count >= 10_000 ? `${(count / 10_000).toFixed(1)}万` : String(count)
 }
 
-export default function AppendContentModal({ bookId, onClose }: AppendContentModalProps) {
+export default function AppendContentModal({ target, onClose }: AppendContentModalProps) {
   const _ = useTranslation()
   const previewMutation = useAppendBookContentPreview()
   const appendMutation = useAppendBookContent()
@@ -56,7 +57,7 @@ export default function AppendContentModal({ bookId, onClose }: AppendContentMod
     requestIdRef.current += 1
   }
 
-  function schedulePreview(input: Omit<AppendContentInput, 'bookId'> | null, targetSource: InputSource) {
+  function schedulePreview(input: Omit<AppendContentInput, 'target'> | null, targetSource: InputSource) {
     clearScheduledPreview()
     setPreviewError(null)
     previewMutation.reset()
@@ -88,7 +89,7 @@ export default function AppendContentModal({ bookId, onClose }: AppendContentMod
     previewTimerRef.current = setTimeout(() => {
       previewTimerRef.current = null
       previewMutation.mutate(
-        { bookId, ...input },
+        { target, ...input },
         {
           onSuccess: (result) => {
             if (requestId !== requestIdRef.current) return
@@ -115,7 +116,7 @@ export default function AppendContentModal({ bookId, onClose }: AppendContentMod
     }, 350)
   }
 
-  function inputFor(nextSource = source): Omit<AppendContentInput, 'bookId'> | null {
+  function inputFor(nextSource = source): Omit<AppendContentInput, 'target'> | null {
     if (nextSource === 'file') return file ? { file } : null
     return text.trim() ? { text } : null
   }
@@ -232,7 +233,7 @@ export default function AppendContentModal({ bookId, onClose }: AppendContentMod
     const addedCount = appendStats?.addedChapterCount
     const startOffset = appendStats?.selectedStartOffset
     appendMutation.mutate(
-      { bookId, ...input, ...(startOffset !== undefined ? { startOffset } : {}) },
+      { target, ...input, ...(startOffset !== undefined ? { startOffset } : {}) },
       {
         onSuccess: () => {
           notify.success(addedCount != null && addedCount > 0

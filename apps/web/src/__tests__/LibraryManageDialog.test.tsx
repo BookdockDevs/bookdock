@@ -53,9 +53,29 @@ describe('LibraryManageDialog', () => {
     expect(save()).not.toBeDisabled()
     fireEvent.click(save())
     expect(HOOKS.useUpdateLibrary().mutate).toHaveBeenCalledWith(
-      { libraryId: 'lib_city', patch: { name: 'Renamed', description: 'All the books', visibility: 'public', trashEnabled: true, trashAutoCleanDays: 30, trashMaxBytes: 0 } },
+      { libraryId: 'lib_city', patch: { name: 'Renamed', description: 'All the books', visibility: 'public', trashEnabled: true, trashAutoCleanDays: 30, trashMaxBytes: 0, allowMemberUpload: false } },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
+  })
+
+  it('saves the member-upload switch with the settings', () => {
+    renderDialog()
+    // The switch reuses the instance-level upload wording: it is the same
+    // decision at library scope, and the key must resolve to text rather than
+    // falling back to printing the key itself.
+    fireEvent.click(screen.getByRole('switch', { name: '允许上传文件' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(HOOKS.useUpdateLibrary().mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ patch: expect.objectContaining({ allowMemberUpload: true }) }),
+      expect.any(Object),
+    )
+  })
+
+  it('shows the resolved upload wording, never a raw i18n key', () => {
+    renderDialog()
+    expect(screen.getByText('允许上传文件')).toBeInTheDocument()
+    expect(screen.getByText('关闭后普通成员无法上传文件')).toBeInTheDocument()
+    expect(screen.queryByText(/settings\.allowUserUpload|admin\.allowUserUpload/)).toBeNull()
   })
 
   it('requires a 4+ char password when visibility is password', () => {

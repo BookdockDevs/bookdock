@@ -8,6 +8,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { formatAuthorList } from '@/lib/utils'
 
 import type { BookDragPayload } from '../dnd'
+import { getHiddenCause } from '../hidden-status'
 import BookCover from './BookCover'
 import HiddenIndicator from './HiddenIndicator'
 import { ContextMenuContent } from './BookContextMenu'
@@ -134,13 +135,15 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
 }
 
 function ListItemContent({ book }: { book: BookListItem }) {
+  const _ = useTranslation()
+  const hiddenCause = getHiddenCause(book, 'shelf')
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2">
         <span className="truncate font-serif text-sm font-medium text-stone-900 dark:text-stone-100">
           {book.title}
         </span>
-        {(book.hidden || book.effectiveHidden) && <HiddenIndicator kind="private" overlay />}
+        {(book.hidden || book.effectiveHidden) && <HiddenIndicator kind="private" overlay title={hiddenCause ? _(hiddenCause.hintKey, hiddenCause.hintParams) : undefined} />}
         {book.pinnedAt && (
           <UnpinButton
             bookId={book.id}

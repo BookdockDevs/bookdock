@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import { useNavigate } from '@tanstack/react-router'
 import i18n from 'i18next'
@@ -6,22 +6,25 @@ import i18n from 'i18next'
 import type { CatalogBook, Library } from '@bookdock/shared'
 
 import { useBookReplacements } from '@/api/hooks/useReplacements'
+import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
-import MenuFlyout from '@/components/ui/MenuFlyout'
-import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { computeFromAnchor, type SmartPosition } from '@/lib/position'
-import { cn, formatBytes, formatDate, formatDateTime } from '@/lib/utils'
+import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover } from '../book-row'
 import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../download'
 import { useCollectBook, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
+import { getHiddenCause } from '../hidden-status'
 import BookCover from './BookCover'
-import { copyValueOnClick, formatLanguage, formatWordCount, isMachineIdentifier } from './book-detail/types'
-import { ActionIcon, FilterChip, GroupLabel, ExpandableRowValue } from './book-detail/ui'
+import DetailHeader from './book-detail/DetailHeader'
+import DownloadMenu from './book-detail/DownloadMenu'
+import MetaGrid, { type MetaRow } from './book-detail/MetaGrid'
+import MoreActionsMenu, { type MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
+import { formatLanguage, formatWordCount, isMachineIdentifier } from './book-detail/types'
+import { ActionIcon, FilterChip, GroupLabel } from './book-detail/ui'
 import DeleteVersionsDialog from './DeleteVersionsDialog'
 import VersionTabs from './VersionTabs'
 import WorkEditDialog from './WorkEditDialog'
@@ -35,12 +38,24 @@ import CatalogUploadSheet from './CatalogUploadSheet'
  * more than one to choose from; a single version is the work, acted on above.
  */
 export default function WorkDetailBody({
-  work, library, canManage, canCollect, onClose,
+  work, library, canManage, canCollect, canContribute = false, onClose,
+  selectedVersionId, onSelectVersion, onVersionsUploaded, moreActions,
 }: {
   work: CatalogBook
   library: Library
   canManage: boolean
   canCollect: boolean
+  /** Member upload lane: the library opened member uploads. Server still refuses non-owners. */
+  canContribute?: boolean
+  /**
+   * Which version is on screen is owned by the dialog, not here: the overflow
+   * menu offers the content-maintenance actions for that same version, so the
+   * two cannot disagree about it.
+   */
+  selectedVersionId: string | null
+  onSelectVersion: (versionLinkId: string) => void
+  onVersionsUploaded: (versionLinkIds: string[]) => void
+  moreActions?: MoreActionsMenuItem[]
   onClose: () => void
 }) {
   const _ = useTranslation()
@@ -48,40 +63,19 @@ export default function WorkDetailBody({
   const row = catalogWorkRow(work)
   // The visible version drives everything below: header, actions and manager
   // operations all read the selection, never a hardcoded first row.
-  const [selectedId, setSelectedId] = useState<string | null>(work.versions[0]?.id ?? null)
-  const selected = work.versions.find((v) => v.id === selectedId) ?? work.versions[0]
+  const selected = work.versions.find((v) => v.id === selectedVersionId) ?? work.versions[0]
   const collect = useCollectBook()
   const updateVersion = useUpdateCatalogVersion()
   const updateWork = useUpdateCatalogBook()
   const [collectedIds, setCollectedIds] = useState<Record<string, boolean>>({})
-  const isCollected = selected ? (collectedIds[selected.id] || selected.collected === true) : false
+  // Collected and owns-source share one disabled state: both mean the private
+  // library already holds this content, one as a B card and one as its source.
+  const alreadyJoined = selected ? (collectedIds[selected.id] || selected.collected === true || selected.ownsSource === true) : false
   const [copyingCover, setCopyingCover] = useState(false)
-  const [downloadMenu, setDownloadMenu] = useState<SmartPosition | null>(null)
-  const downloadAnchorRef = useRef<HTMLDivElement>(null)
-  const downloadMenuRef = useRef<HTMLDivElement>(null)
   const [confirmUnlist, setConfirmUnlist] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
-  // Versions uploaded from this dialog report their link ids before the
-  // catalog refetch lands; hold them aside so the fallback below does not eat
-  // the fresh selection while waiting for the new rows.
-  const pendingSelectRef = useRef<string[]>([])
-
-  // A deleted or moved-away selection falls back instead of pointing nowhere.
-  useEffect(() => {
-    if (pendingSelectRef.current.length > 0) {
-      const arrived = pendingSelectRef.current.find((id) => work.versions.some((v) => v.id === id))
-      if (arrived) {
-        setSelectedId(arrived)
-        pendingSelectRef.current = []
-      }
-      return
-    }
-    if (!work.versions.some((v) => v.id === selectedId)) {
-      setSelectedId(work.versions[0]?.id ?? null)
-    }
-  }, [work.versions, selectedId])
 
   const hasCoverImage = Boolean(work.coverKey || selected?.format === 'epub')
   // The two hides resolve independently (see the Hidden boundary in
@@ -91,7 +85,8 @@ export default function WorkDetailBody({
   const workHidden = work.hidden || work.effectiveHidden === true
   // A taxonomy-derived hide has no work flag to clear, so the control is
   // read-only: offering an action here would write the version layer instead.
-  const taxonomyHidden = !work.hidden && work.effectiveHidden === true
+  // The cause names the exact layer (category or tag) for the tooltip.
+  const hiddenCause = getHiddenCause(work, 'category')
   const singleVersion = work.versions.length === 1
   const versionHidden = selected?.status === 'unlisted'
   const selectedHidden = versionHidden || (singleVersion && workHidden)
@@ -141,26 +136,8 @@ export default function WorkDetailBody({
     }
   }
 
-  function toggleDownloadMenu() {
-    const el = downloadAnchorRef.current
-    if (!el) return
-    if (downloadMenu) {
-      setDownloadMenu(null)
-      return
-    }
-    const rect = el.getBoundingClientRect()
-    setDownloadMenu(
-      computeFromAnchor(
-        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-        176,
-        96,
-      ),
-    )
-  }
-
   async function onExport(format: 'epub' | 'txt', plain: boolean) {
     if (!selected) return
-    setDownloadMenu(null)
     const title = selected.effective.title
     try {
       if (format === 'epub') {
@@ -177,22 +154,17 @@ export default function WorkDetailBody({
 
   function downloadSelected() {
     if (!selected) return
-    if (selected.format === 'txt') {
-      toggleDownloadMenu()
-      return
-    }
     void Promise.resolve(downloadBook(selected.bookVersionId, selected.effective.title)).catch((err) =>
       notify.error(getUserErrorNotification(err, 'errors.downloadFailed')),
     )
   }
-
   function togglePublish() {
     if (!selected) return
     // A one-version work has no version-level meaning to toggle: the control
     // reads as a work-level switch, so it must write library_books.hidden.
     // Writing the version here left the work badged as hidden while the button
     // reported it as shown.
-    if (singleVersion && !taxonomyHidden) {
+    if (singleVersion && !hiddenCause) {
       const showing = workHidden
       updateWork.mutate({
         libraryId: library.id,
@@ -248,19 +220,17 @@ export default function WorkDetailBody({
           res.data.alreadyExists ? _('library.collectAlready') : _('library.collectSuccess'),
         )
       },
-      onError: (err) => notify.error(getUserErrorNotification(err, 'library.collectFailed')),
+      onError: (err) => {
+        if (err instanceof ApiError && err.code === 'ALREADY_OWNS_SOURCE') {
+          notify.info(_('library.collectAlready'))
+        } else {
+          notify.error(getUserErrorNotification(err, 'library.collectFailed'))
+        }
+      },
     })
   }
 
-  const metaRows: {
-    label: string
-    value: string
-    copyable?: boolean
-    onClick?: () => void
-    fullWidth?: boolean
-    expandable?: boolean
-    hint?: string
-  }[] = []
+  const metaRows: MetaRow[] = []
   const bookmeta = selected?.effective.bookmeta
   const groupDigits = (n: number): string => new Intl.NumberFormat(i18n.language).format(n)
   if (bookmeta?.series) {
@@ -296,10 +266,10 @@ export default function WorkDetailBody({
     }
   }
   if (bookmeta?.subjects?.length) {
-    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、'), fullWidth: true, expandable: true })
+    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、'), expandable: true })
   }
   if (selected?.effective.fileName) {
-    metaRows.push({ label: _('library.originalFile'), value: selected.effective.fileName, copyable: true, fullWidth: true, expandable: true, hint: _('library.copyFullFileName') })
+    metaRows.push({ label: _('library.originalFile'), value: selected.effective.fileName, copyable: true, expandable: true, hint: _('library.copyFullFileName') })
   }
 
   if (!selected) return null
@@ -318,81 +288,24 @@ export default function WorkDetailBody({
 
   return (
     <div>
-      <div className="flex flex-col gap-4 sm:flex-row sm:gap-5">
-        <div className="group/cover relative w-32 shrink-0 self-center overflow-hidden rounded-xl shadow-md shadow-stone-900/10 sm:self-start">
-          <BookCover book={rowCover(selectedRow)} coverSrc={selectedRow.coverSrc} />
-          {hasCoverImage && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 p-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 transition-opacity duration-200 group-hover/cover:pointer-events-auto group-hover/cover:opacity-100 group-focus-within/cover:pointer-events-auto group-focus-within/cover:opacity-100">
-              <button
-                type="button"
-                onClick={handleCopyCover}
-                disabled={copyingCover}
-                title={_('library.copyCover')}
-                aria-label={_('library.copyCover')}
-                className="flex h-7 w-7 items-center justify-center rounded-md bg-white/20 text-white backdrop-blur-xs transition hover:scale-110 hover:bg-white/30 active:scale-95 disabled:opacity-50"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadCover}
-                title={_('library.downloadCover')}
-                aria-label={_('library.downloadCover')}
-                className="flex h-7 w-7 items-center justify-center rounded-md bg-white/20 text-white backdrop-blur-xs transition hover:scale-110 hover:bg-white/30 active:scale-95"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" x2="12" y1="15" y2="3" />
-                </svg>
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="font-serif text-xl font-semibold leading-snug text-stone-900 dark:text-stone-100">
-            {selected.effective.title}
-          </h3>
-          {(selected.effective.authors ?? []).length > 0 ? (
-            <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-sm">
-              {(selected.effective.authors ?? []).map((name, index) => (
-                <span key={`${name}-${index}`} className="flex items-center gap-x-1">
-                  {index > 0 && <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>}
-                  <button
-                    type="button"
-                    onClick={() => goToFilter({ author: name })}
-                    className="text-left text-stone-500 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-400 dark:decoration-stone-600 dark:hover:text-stone-100"
-                  >
-                    {name}
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : selected.effective.author ? (
-            <button
-              type="button"
-              onClick={() => goToFilter({ author: selected.effective.author })}
-              className="mt-1 text-left text-sm text-stone-500 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-400 dark:decoration-stone-600 dark:hover:text-stone-100"
-            >
-              {selected.effective.author}
-            </button>
-          ) : (
-            <p className="mt-1 text-sm text-stone-400 dark:text-stone-500">
-              {_('library.unknown')}
-            </p>
-          )}
-
-          {work.tags.length > 0 && (
-            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-              {work.tags.map((tag) => (
-                <FilterChip key={tag.id} prefix="#" label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />
-              ))}
-            </div>
-          )}
-
+      <DetailHeader
+        cover={<BookCover book={rowCover(selectedRow)} coverSrc={selectedRow.coverSrc} />}
+        hasCoverImage={hasCoverImage}
+        copyingCover={copyingCover}
+        onCopyCover={() => void handleCopyCover()}
+        onDownloadCover={() => void handleDownloadCover()}
+        title={selected.effective.title}
+        authors={selected.effective.authors ?? []}
+        author={selected.effective.author}
+        onAuthorClick={(name) => goToFilter({ author: name })}
+        chips={work.tags.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            {work.tags.map((tag) => (
+              <FilterChip key={tag.id} prefix="#" label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />
+            ))}
+          </div>
+        )}
+        actions={(
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button
               size="sm"
@@ -408,15 +321,16 @@ export default function WorkDetailBody({
               {_('library.startReading')}
             </Button>
             <div className="flex flex-1 items-center gap-1.5">
+              {/* Action order mirrors BookDetailView: flow, edit, download, maintain, hide, delete. */}
               {canCollect && (
                 <ActionIcon
                   secondary
-                  label={isCollected ? _('library.collected') : _('library.collect')}
-                  disabled={isCollected || collect.isPending}
-                  onClick={isCollected ? undefined : collectSelected}
+                  label={alreadyJoined ? _('library.collected') : _('library.collect')}
+                  disabled={alreadyJoined || collect.isPending}
+                  onClick={alreadyJoined ? undefined : collectSelected}
                 >
                   <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                  {isCollected ? (
+                  {alreadyJoined ? (
                     <polyline points="9 11 11 13 15 9" />
                   ) : (
                     <>
@@ -437,92 +351,34 @@ export default function WorkDetailBody({
                 </ActionIcon>
               )}
               {canDownload && (
-                <div ref={downloadAnchorRef} className="relative">
-                  <ActionIcon
-                    secondary
-                    label={_('library.download')}
-                    onClick={downloadSelected}
-                  >
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </ActionIcon>
-                  {downloadMenu && selected.format === 'txt' && (
-                    <SmartMenu
-                      innerRef={downloadMenuRef}
-                      position={downloadMenu}
-                      onClose={() => setDownloadMenu(null)}
-                    >
-                      {canExportEdited && (
-                        <MenuFlyout
-                          panelWidth={96}
-                          row={({ open, flip, toggle }) => (
-                            <button
-                              type="button"
-                              onClick={toggle}
-                              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-stone-500/10 ${open ? 'bg-stone-500/10' : ''}`}
-                            >
-                              <span className="flex-1">{_('library.edited')}</span>
-                              <FlyoutChevron flip={flip} />
-                            </button>
-                          )}
-                        >
-                          {(close) => (
-                            <ExportFormats
-                              onPick={(format) => {
-                                close()
-                                void onExport(format, false)
-                              }}
-                            />
-                          )}
-                        </MenuFlyout>
-                      )}
-                      <MenuFlyout
-                        panelWidth={96}
-                        row={({ open, flip, toggle }) => (
-                          <button
-                            type="button"
-                            onClick={toggle}
-                            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-stone-500/10 ${open ? 'bg-stone-500/10' : ''}`}
-                          >
-                            <span className="flex-1">{_('library.original')}</span>
-                            <FlyoutChevron flip={flip} />
-                          </button>
-                        )}
-                      >
-                        {(close) => (
-                          <ExportFormats
-                            onPick={(format) => {
-                              close()
-                              void onExport(format, true)
-                            }}
-                          />
-                        )}
-                      </MenuFlyout>
-                    </SmartMenu>
-                  )}
-                </div>
+                <DownloadMenu
+                  format={selected.format}
+                  canExportEdited={canExportEdited}
+                  onDownloadFile={downloadSelected}
+                  onExport={(format, plain) => void onExport(format, plain)}
+                />
               )}
-              {canManage && (
+              {(canManage || canContribute) && (
                 <ActionIcon
                   secondary
                   label={_('library.uploadNewVersion')}
                   onClick={() => setUploadOpen(true)}
                 >
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" y1="3" x2="12" y2="15" />
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="12" y1="18" x2="12" y2="12" />
+                  <line x1="9" y1="15" x2="15" y2="15" />
                 </ActionIcon>
               )}
               {canManage && (
-                taxonomyHidden ? (
+                hiddenCause ? (
                   // The hide came from a hidden category or tag, so there is no
                   // work-level action to take. Keep the same eye icon, just
                   // inert, and let the tooltip say why.
                   <ActionIcon
                     secondary
-                    label={_('library.taxonomyHiddenAction')}
-                    title={_('library.taxonomyHiddenHint')}
+                    label={_(hiddenCause.shortKey)}
+                    title={_(hiddenCause.hintKey, hiddenCause.hintParams)}
                     disabled
                   >
                     <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
@@ -554,7 +410,10 @@ export default function WorkDetailBody({
                   </ActionIcon>
                 )
               )}
-              {canManage && (
+              {moreActions && moreActions.length > 0 && (
+                <MoreActionsMenu items={moreActions} />
+              )}
+              {(canManage || selected.maintainable) && (
                 <div className="ml-auto">
                   <ActionIcon label={_('library.delete')} danger onClick={() => setDeleteOpen(true)}>
                     <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
@@ -563,14 +422,13 @@ export default function WorkDetailBody({
               )}
             </div>
           </div>
-
-          {work.versions.length > 1 && (
-            <div className="mt-3.5">
-              <VersionTabs versions={work.versions} selectedId={selected.id} onSelect={setSelectedId} />
-            </div>
-          )}
-        </div>
-      </div>
+        )}
+        footer={work.versions.length > 1 && (
+          <div className="mt-3.5">
+            <VersionTabs versions={work.versions} selectedId={selected.id} onSelect={onSelectVersion} />
+          </div>
+        )}
+      />
 
       {selected.effective.description && (
         <section className="mt-5">
@@ -581,62 +439,7 @@ export default function WorkDetailBody({
         </section>
       )}
 
-      <section className="mt-5">
-        <div className="rounded-xl border border-stone-200/70 bg-stone-50/70 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
-            {metaRows.map((row) => (
-              <div key={row.label} className={cn('min-w-0', row.fullWidth && 'col-span-full')}>
-                <dt className="text-xs text-stone-400 dark:text-stone-500">{row.label}</dt>
-                {row.copyable ? (
-                  <dd className="mt-0.5">
-                    {row.expandable ? (
-                      <ExpandableRowValue
-                        value={row.value}
-                        mono
-                        onCopy={() => copyValueOnClick(row.value)}
-                        copyHint={row.hint}
-                        expandLabel={_('library.expand')}
-                        collapseLabel={_('library.collapse')}
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        title={row.hint ?? row.value}
-                        onClick={() => copyValueOnClick(row.value)}
-                        className="block max-w-full cursor-pointer truncate text-left font-mono text-sm text-stone-700 hover:underline dark:text-stone-200"
-                      >
-                        {row.value}
-                      </button>
-                    )}
-                  </dd>
-                ) : row.onClick ? (
-                  <dd className="mt-0.5">
-                    <button
-                      type="button"
-                      title={row.value}
-                      onClick={row.onClick}
-                      className="line-clamp-2 break-words text-left text-sm text-stone-700 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-200 dark:decoration-stone-600 dark:hover:text-stone-100"
-                    >
-                      {row.value}
-                    </button>
-                  </dd>
-                ) : row.expandable ? (
-                  <dd className="mt-0.5">
-                    <ExpandableRowValue
-                      value={row.value}
-                      wrapClass="break-words"
-                      expandLabel={_('library.expand')}
-                      collapseLabel={_('library.collapse')}
-                    />
-                  </dd>
-                ) : (
-                  <dd title={row.hint} className="mt-0.5 line-clamp-2 break-words text-sm text-stone-700 dark:text-stone-200">{row.value}</dd>
-                )}
-              </div>
-            ))}
-          </dl>
-        </div>
-      </section>
+      <MetaGrid rows={metaRows} />
 
       {confirmUnlist && (
         <ConfirmDialog
@@ -652,6 +455,12 @@ export default function WorkDetailBody({
           work={work}
           libraryId={library.id}
           preselectedIds={[selected.id]}
+          // A manager needs no scope; a member contributor gets the exact set
+          // the server accepts, so their own version opens checked and anyone
+          // else's is visible but cannot be picked.
+          deletableIds={canManage
+            ? undefined
+            : new Set(work.versions.filter((v) => v.maintainable).map((v) => v.id))}
           onClose={() => setDeleteOpen(false)}
           onDeleted={(workDeleted) => {
             setDeleteOpen(false)
@@ -675,9 +484,7 @@ export default function WorkDetailBody({
           libraryBookId={work.id}
           workTitle={work.title}
           nextVersionIndex={work.versions.length + 1}
-          onUploadedVersion={(ids) => {
-            if (ids.length > 0) pendingSelectRef.current = ids
-          }}
+          onUploadedVersion={onVersionsUploaded}
           onClose={() => setUploadOpen(false)}
         />
       )}
@@ -685,28 +492,3 @@ export default function WorkDetailBody({
   )
 }
 
-function FlyoutChevron({ flip }: { flip: boolean }) {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-stone-400 transition-transform ${flip ? 'rotate-180' : ''}`}>
-      <path d="M9 18l6-6-6-6" />
-    </svg>
-  )
-}
-
-function ExportFormats({ onPick }: { onPick: (format: 'epub' | 'txt') => void }) {
-  const _ = useTranslation()
-  return (
-    <>
-      {(['epub', 'txt'] as const).map((format) => (
-        <button
-          key={format}
-          type="button"
-          onClick={() => onPick(format)}
-          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-stone-500/10"
-        >
-          <span className="flex-1">{format === 'epub' ? 'EPUB' : 'TXT'}</span>
-        </button>
-      ))}
-    </>
-  )
-}

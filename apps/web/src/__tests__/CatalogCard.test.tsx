@@ -34,7 +34,7 @@ function version(overrides: Partial<CatalogBook['versions'][number]> = {}): Cata
 function work(overrides: Partial<CatalogBook> = {}): CatalogBook {
   return {
     id: 'lb1', libraryId: 'lib_city', categoryId: null, title: 'City Book', author: 'Someone',
-    description: '', coverKey: null, pinnedAt: null, tags: [], versions: [version()], createdAt: 1, updatedAt: 1, ...overrides,
+    description: '', coverKey: null, pinnedAt: null, tags: [], versions: [version()], createdAt: 1, updatedAt: 1, hiddenReason: null, ...overrides,
   }
 }
 
@@ -196,6 +196,15 @@ describe('CatalogCard', () => {
 
   it('shows collect as disabled when the first version is already in the private library', () => {
     const { container } = renderCard(work({ versions: [version({ collected: true })] }))
+    openMenu(container)
+    expect(screen.queryByText('加入书库')).not.toBeInTheDocument()
+    const collectedItem = screen.getByText('已在书库中')
+    expect(collectedItem).toBeInTheDocument()
+    expect(collectedItem.closest('button')).toBeDisabled()
+  })
+
+  it('shows owns-source exactly like an already collected version', () => {
+    const { container } = renderCard(work({ versions: [version({ ownsSource: true })] }))
     openMenu(container)
     expect(screen.queryByText('加入书库')).not.toBeInTheDocument()
     const collectedItem = screen.getByText('已在书库中')

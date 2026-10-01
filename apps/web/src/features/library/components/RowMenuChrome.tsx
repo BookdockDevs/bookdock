@@ -49,11 +49,12 @@ export function MenuDivider() {
   return <div className="mx-2 my-1 border-t border-stone-100 dark:border-stone-800" />
 }
 
-export function MenuItem({ icon, label, onClick, disabled = false }: { icon?: ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
+export function MenuItem({ icon, label, onClick, disabled = false, title }: { icon?: ReactNode; label: string; onClick: () => void; disabled?: boolean; title?: string }) {
   return (
     <button
       type="button"
       disabled={disabled}
+      title={title ?? label}
       onClick={(e) => {
         e.preventDefault()
         e.stopPropagation()

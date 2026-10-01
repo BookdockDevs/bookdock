@@ -28,23 +28,33 @@ interface DeleteVersionsDialogProps {
   onClose: () => void
   /** True when the batch removed every version, so the work itself is gone. */
   onDeleted: (workDeleted: boolean) => void
+  /**
+   * Version ids this caller may delete. Omitted for a manager, who may delete
+   * any; a member contributor only their own uploads, so the dialog lists only
+   * those versions rather than showing everyone else's.
+   */
+  deletableIds?: ReadonlySet<string>
 }
 
 function labelOf(versions: CatalogVersion[], version: CatalogVersion, fallback: (n: number) => string): string {
   return `${versionTabLabel(version.name, fallback(versionOrdinal(versions, version.id)))} · ${version.format.toUpperCase()}`
 }
 
-export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, onClose, onDeleted }: DeleteVersionsDialogProps) {
+export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, onClose, onDeleted, deletableIds }: DeleteVersionsDialogProps) {
   const _ = useTranslation()
   const deleteVersion = useDeleteCatalogVersion()
-  const [checked, setChecked] = useState<string[]>(() =>
-    work.versions.filter((v) => preselectedIds.includes(v.id)).map((v) => v.id),
-  )
-
+  const deletable = (id: string) => !deletableIds || deletableIds.has(id)
   const versions = work.versions
-  const multi = versions.length > 1
-  const checkedVersions = versions.filter((v) => checked.includes(v.id))
-  const removesWork = multi && checkedVersions.length === versions.length
+  const removableVersions = versions.filter((v) => deletable(v.id))
+  const [checked, setChecked] = useState<string[]>(() => {
+    const selected = removableVersions.filter((v) => preselectedIds.includes(v.id)).map((v) => v.id)
+    return selected.length > 0 ? selected : removableVersions.slice(0, 1).map((v) => v.id)
+  })
+
+  // A single deletable version is one direct confirmation, not a checklist.
+  const multi = removableVersions.length > 1
+  const checkedVersions = removableVersions.filter((v) => checked.includes(v.id))
+  const removesWork = checkedVersions.length === versions.length
   const fallback = (n: number) => _('library.versionFallback', { n }) as string
   // Per-library switch (owner sees the value, others get null); default on.
   const { data: librariesData } = useLibraries()
@@ -69,7 +79,7 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
   // Trash is work-scoped: removing some (not all) versions deletes those
   // links immediately and never enters the trash, so its copy is always the
   // permanent one. Only removing the whole work follows the trash switch.
-  const consequence = !multi || removesWork
+  const consequence = removesWork
     ? (trashEnabled
       ? _('library.catalogDeleteLastVersionTrashConfirm', { work: work.title })
       : _('library.catalogDeleteLastVersionConfirm', { work: work.title }))
@@ -85,7 +95,7 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
           {multi && (
             <div className="flex flex-col gap-2">
               <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-0.5">
-                {versions.map((version) => {
+                {removableVersions.map((version) => {
                   const isChecked = checked.includes(version.id)
                   return (
                     <label
@@ -102,6 +112,7 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => toggle(version.id)}
+                          aria-label={versionTabLabel(version.name, fallback(versionOrdinal(versions, version.id)))}
                           className="h-4 w-4 shrink-0 rounded accent-stone-900 dark:accent-stone-100"
                         />
                         <span className="truncate font-medium text-stone-800 dark:text-stone-200">

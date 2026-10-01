@@ -591,12 +591,16 @@ export default function Library() {
     ? (libraries.find((l) => l.id === manageTarget.id)?.relation ?? manageTarget.relation)
     : null
   // One upload surface per context. A reader may always upload to their own
-  // library; a shared library accepts files only from those who curate it, and
-  // the drop-anywhere shortcut has to obey the same rule or a file would be
-  // dragged in and silently refused. The instance upload switch only closes
-  // the private surface for ordinary members — managers keep curating their
-  // libraries, and the server enforces all of this regardless.
-  const canUpload = !isGuest && (activeLibrary ? isLibraryManager : userUploadAllowed)
+  // library; a shared library accepts files from curators, plus members when
+  // the owner opened member uploads — and the drop-anywhere shortcut has to
+  // obey the same rule or a file would be dragged in and silently refused.
+  // The instance upload switch only closes the private surface for ordinary
+  // members — managers keep curating their libraries, and the server enforces
+  // all of this regardless.
+  const canContribute = activeLibrary?.type === 'shared'
+    && libraryRelation === 'member'
+    && activeLibrary.allowMemberUpload === true
+  const canUpload = !isGuest && (activeLibrary ? (isLibraryManager || canContribute) : userUploadAllowed)
   const setUploadOpenIfAllowed = useCallback((open: boolean) => {
     if (canUpload) setUploadOpen(open)
   }, [canUpload])
@@ -1281,6 +1285,7 @@ export default function Library() {
           library: activeLibrary,
           canManage: isLibraryManager,
           canCollect: libraryRelation !== 'guest',
+          canContribute,
         } : null}
         readOnly={isGuest}
         onClose={() => {

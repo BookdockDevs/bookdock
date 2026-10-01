@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import type { BookListItem, LibraryListItem, PublishPrivateBookRes } from '@bookdock/shared'
+import type { BookListItem, LibraryListItem, PublishedLinkInfo, PublishPrivateBookRes } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
 
-import { useLibraryCategories, useLibraryTags, usePublishPrivateBook } from '../hooks'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
+
+import { useLibraryCategories, useLibraryTags, usePublishPrivateBook, useBook, usePushVersion } from '../hooks'
 
 interface CustomSelectOption {
   value: string
@@ -174,6 +177,9 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
   const _ = useTranslation()
   const userId = useAuthStore((state) => state.user?.id)
   const publishBook = usePublishPrivateBook()
+  const pushVersion = usePushVersion()
+  const { data: detailData } = useBook(book?.id ?? null)
+  const publishedTo = detailData?.data.publishedTo ?? []
   const targets = useMemo(
     () => libraries.filter((library) => library.type === 'shared' && (library.relation === 'owner' || library.relation === 'admin')),
     [libraries],
@@ -185,6 +191,10 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
   const [tagIds, setTagIds] = useState<string[]>([])
   const [result, setResult] = useState<PublishPrivateBookRes | null>(null)
   const [errorKey, setErrorKey] = useState<string | null>(null)
+  // Push is the one destructive-ish action in this dialog — it replaces what
+  // the city serves — so it goes through a confirm. The prompt differs for a
+  // target that moved on, because that is the case that actually loses work.
+  const [pushTarget, setPushTarget] = useState<PublishedLinkInfo | null>(null)
 
   useEffect(() => {
     // Initialize (or repair) the selection only: the libraries list refetches
@@ -350,6 +360,73 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
         </div>
       ) : (
         <div className="space-y-5">
+          {publishedTo.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-xs font-medium text-stone-600 dark:text-stone-300">{_('library.publishedTo')}</p>
+              <ul className="flex flex-col gap-1.5">
+                {publishedTo.map((entry) => (
+                  <li
+                    key={entry.versionLinkId}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-stone-200/80 bg-stone-50/50 px-3 py-2 dark:border-stone-800 dark:bg-stone-800/40"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-stone-700 dark:text-stone-200">
+                        {entry.libraryName ?? entry.libraryId}
+                        {entry.versionName ? ` · ${entry.versionName}` : ''}
+                      </p>
+                      <p className="mt-0.5 flex items-center gap-1.5 text-xs text-stone-400 dark:text-stone-500">
+                        {/* Four states, and only one of them is actionable. In
+                            sync has nothing to send. This book leading is the
+                            one push the server allows. The library leading —
+                            with or without edits here — cannot be pushed over,
+                            so those two offer the library's own version
+                            instead, which is the only way forward. */}
+                        {entry.inSync ? (
+                          <>
+                            <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+                            <span>{_('library.pushInSync')}</span>
+                          </>
+                        ) : !entry.cityMoved ? (
+                          <>
+                            <span className="size-1.5 rounded-full bg-blue-500" aria-hidden="true" />
+                            <span className="text-stone-600 dark:text-stone-300">{_('library.pushSourceAhead')}</span>
+                          </>
+                        ) : entry.sourceMoved ? (
+                          <>
+                            <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                            <span className="text-amber-600 dark:text-amber-400">{_('library.pushDiverged')}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="size-1.5 rounded-full bg-stone-400" aria-hidden="true" />
+                            <span>{_('library.pushLibraryAhead')}</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                    {entry.inSync ? null : entry.cityMoved ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenLibrary(entry.libraryId)}
+                        className="shrink-0 rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-50 hover:text-stone-900 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
+                      >
+                        {_('library.pushViewInLibrary')}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setPushTarget(entry)}
+                        disabled={pushVersion.isPending}
+                        className="shrink-0 rounded-lg bg-stone-900 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-stone-700 disabled:opacity-60 disabled:hover:bg-stone-900 dark:bg-stone-100 dark:text-stone-900"
+                      >
+                        {_('library.pushNow')}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div>
             <label className="mb-1.5 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="publish-target-library">
               {_('library.publishTarget')}
@@ -440,6 +517,35 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
 
           {errorKey && <p className="text-xs text-red-600 dark:text-red-400">{_(errorKey)}</p>}
         </div>
+      )}
+      {pushTarget && (
+        <ConfirmDialog
+          title={_('library.pushNow')}
+          // Same "library · version" label the row already shows, so the
+          // confirm names the exact target rather than "the library".
+          message={_('library.pushSourceConfirm', {
+            target: [pushTarget.libraryName ?? pushTarget.libraryId, pushTarget.versionName]
+              .filter(Boolean).join(' · '),
+          })}
+          confirmLabel={_('library.pushConfirm')}
+          confirmDisabled={pushVersion.isPending}
+          onClose={() => setPushTarget(null)}
+          onConfirm={() => {
+            const target = pushTarget
+            setPushTarget(null)
+            pushVersion.mutate({
+              libraryId: target.libraryId,
+              libraryBookId: target.libraryBookId,
+              versionLinkId: target.versionLinkId,
+            }, {
+              // One outcome, one word: the server's alreadyUpToDate means the
+              // bytes matched, which is exactly what a push achieves, so it is
+              // not a separate case to report.
+              onSuccess: () => notify.success(_('library.pushSuccess')),
+              onError: (err) => notify.error(getUserErrorNotification(err, 'library.pushFailed')),
+            })
+          }}
+        />
       )}
     </Modal>
   )

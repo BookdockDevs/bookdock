@@ -83,34 +83,58 @@ export function useSeedTocRules() {
   })
 }
 
-/** Pin + re-split a book (POST /books/:id/re-toc). Returns the refreshed book. */
-export function useReToc(bookId: string | undefined) {
+/** Content target for TOC/append operations: a private book, or a city version. */
+export type TocTarget =
+  | { bookId: string }
+  | { libraryId: string; libraryBookId: string; versionLinkId: string }
+
+export function tocBasePath(target: TocTarget): string {
+  return 'bookId' in target
+    ? `/books/${target.bookId}`
+    : `/libraries/${target.libraryId}/books/${target.libraryBookId}/versions/${target.versionLinkId}`
+}
+
+/** Reads the version's own rule by id; used to page a preview past its first window. */
+export function tocPreviewPost(target: TocTarget, req: TocPreviewReq): Promise<unknown> {
+  return apiPost(`${tocBasePath(target)}/toc-preview`, req)
+}
+
+/** Pin + re-split (POST re-toc). Private books refresh their own caches; city targets invalidate the catalog. */
+export function useReToc(target: TocTarget | undefined) {
   const queryClient = useQueryClient()
+  const bookId = target && 'bookId' in target ? target.bookId : undefined
   return useMutation({
-    mutationFn: (body: ReTocReq) =>
-      apiPost<{ data: BookDetailRes }>(`/books/${bookId}/re-toc`, body),
+    mutationFn: (body: ReTocReq) => {
+      if (!target) throw new Error('re-toc requires a target')
+      return apiPost<{ data: BookDetailRes }>(`${tocBasePath(target)}/re-toc`, body)
+    },
     onSuccess: (response) => {
       void queryClient.invalidateQueries({ queryKey: ['books'] })
-      queryClient.setQueryData(['books', 'detail', bookId], response)
-      queryClient.setQueryData(['book', bookId], response)
-      void queryClient.invalidateQueries({ queryKey: ['book', bookId] })
-      void queryClient.invalidateQueries({ queryKey: ['chapters', bookId] })
-      void queryClient.invalidateQueries({ queryKey: ['progress', bookId] })
-      queryClient.removeQueries({ queryKey: ['chapters', bookId], type: 'inactive' })
-      queryClient.removeQueries({ queryKey: ['progress', bookId], type: 'inactive' })
+      if (!target || 'bookId' in target) {
+        queryClient.setQueryData(['books', 'detail', bookId], response)
+        queryClient.setQueryData(['book', bookId], response)
+        void queryClient.invalidateQueries({ queryKey: ['book', bookId] })
+        void queryClient.invalidateQueries({ queryKey: ['chapters', bookId] })
+        void queryClient.invalidateQueries({ queryKey: ['progress', bookId] })
+      } else {
+        void queryClient.invalidateQueries({ queryKey: ['libraries', target.libraryId, 'catalog'] })
+      }
     },
   })
 }
 
 export function useTocPreview(
-  bookId: string | undefined,
+  target: TocTarget | undefined,
   req: TocPreviewReq,
   options?: { enabled?: boolean },
 ) {
   return useQuery({
-    queryKey: ['books', bookId, 'toc-preview', req],
-    queryFn: () => apiPost<{ data: TocPreviewRes }>(`/books/${bookId}/toc-preview`, req),
-    enabled: options?.enabled !== false && Boolean(bookId),
+    queryKey: ['toc-preview', target, req],
+    queryFn: () => {
+      if (!target) throw new Error('toc preview requires a target')
+      return apiPost<{ data: TocPreviewRes }>(`${tocBasePath(target)}/toc-preview`, req)
+    },
+    enabled: options?.enabled !== false && Boolean(target),
     staleTime: 60 * 1000,
   })
 }

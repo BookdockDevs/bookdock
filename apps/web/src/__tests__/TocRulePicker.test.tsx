@@ -62,7 +62,12 @@ vi.mock('@/api/hooks/useTocRules', () => ({
     mutate: reTocMutate,
     isPending: false,
   }),
-  useTocPreview: (_bookId: string, req: TocPreviewReq, options?: { enabled?: boolean }) => {
+  // Paging past the preview's first window is the one path that needs the raw
+  // poster, so the mock has to carry it — otherwise it throws only in a branch
+  // no test reaches.
+  tocPreviewPost: (_target: unknown, _req: TocPreviewReq) =>
+    Promise.resolve({ data: { chapters: [] } }),
+  useTocPreview: (_target: unknown, req: TocPreviewReq, options?: { enabled?: boolean }) => {
     const enabled = options?.enabled !== false
     lastPreviewEnabled = enabled
     previewEnabledCalls.push(enabled)
@@ -95,7 +100,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
   it('renders auto split, global rules, and preview panel with apply button', () => {
     render(
       <TocRulePicker
-        bookId="book-1"
+        target={{ bookId: 'book-1' }}
         currentRuleId="rule-1"
         currentChapters={[{ id: 'current-1', title: '当前第一章', level: 1, wordCount: 1800 }]}
         onClose={vi.fn()}
@@ -134,7 +139,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
 
     render(
       <TocRulePicker
-        bookId="book-1"
+        target={{ bookId: 'book-1' }}
         currentRuleId="rule-1"
         currentChapters={[
           { id: 'current-1', title: '第一章 当前目录', level: 1, wordCount: 1800 },
@@ -159,7 +164,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
   it('displays custom rule when book has customPatterns without redundant badge', () => {
     render(
       <TocRulePicker
-        bookId="book-1"
+        target={{ bookId: 'book-1' }}
         currentRuleId="custom"
         customPatterns={[{ level: 1, regex: '^自定义.*', enabled: true }]}
         onClose={vi.fn()}
@@ -193,7 +198,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
   it('previews the active rule so its chapter boundaries can be edited', () => {
     render(
       <TocRulePicker
-        bookId="book-1"
+        target={{ bookId: 'book-1' }}
         currentRuleId="rule-1"
         currentChapters={[
           { id: 'current-1', title: '第一章 当前目录', level: 1, wordCount: 1800 },
@@ -227,7 +232,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
 
     render(
       <TocRulePicker
-        bookId="book-1"
+        target={{ bookId: 'book-1' }}
         currentRuleId="rule-1"
         currentChapters={[
           { id: 'ch-0', title: '第一章 当前目录', level: 1, wordCount: 3500 },
@@ -255,7 +260,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
 
     render(
       <BookCustomTocEditor
-        bookId="book-1"
+        target={{ bookId: 'book-1' }}
         initialPatterns={[{ level: 1, regex: '^第.+章', replacement: '$1', enabled: true }]}
         onClose={onClose}
         onSaved={onSaved}
@@ -285,7 +290,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
     // samplePreview has totalChapters: 2, but if totalChapters is 1500
     render(
       <TocRulePicker
-        bookId="book-1"
+        target={{ bookId: 'book-1' }}
         currentRuleId="rule-1"
         onClose={vi.fn()}
       />,
@@ -299,7 +304,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
     selectedRulePreviewData = samplePreview
     render(
       <TocRulePicker
-        bookId="book-1"
+        target={{ bookId: 'book-1' }}
         currentRuleId={undefined}
         currentChapters={[{ level: 1 }]}
         onClose={vi.fn()}

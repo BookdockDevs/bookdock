@@ -10,6 +10,7 @@ import { notify } from '@/lib/notifications'
 import { formatAuthorList } from '@/lib/utils'
 
 import { useUpdateBook } from '../hooks'
+import { getHiddenCause } from '../hidden-status'
 
 import { downloadDefault } from '../download'
 
@@ -102,6 +103,9 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
   // reads (collected === false) have no source binding to cut. The actual
   // confirm lives with the caller, like onPublish/onDelete.
   const canFork = Boolean(onFork) && Boolean(book.source) && book.collected !== false && !book.sourceUnavailable
+  // A taxonomy-derived hide has no book flag to clear: the toggle below would
+  // write hidden=true on top of it, so the menu names the cause and stays inert.
+  const hiddenCause = getHiddenCause(book, 'shelf')
   return (
     <>
       <MenuHeader
@@ -153,6 +157,22 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
 
           <StatusFlyout book={book} onClose={onClose} />
 
+          {hiddenCause ? (
+            <button
+              type="button"
+              disabled
+              title={_(hiddenCause.hintKey, hiddenCause.hintParams)}
+              className={`${itemClass} cursor-not-allowed opacity-60`}
+            >
+              <MenuIcon>
+                <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                <line x1="2" x2="22" y1="2" y2="22" />
+              </MenuIcon>
+              {_(hiddenCause.shortKey)}
+            </button>
+          ) : (
           <button
             type="button"
             onClick={(e) => {
@@ -180,6 +200,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
             </MenuIcon>
             {book.hidden ? _('library.show') : _('library.hide')}
           </button>
+          )}
 
           {divider}
 

@@ -5,6 +5,7 @@ import type { CatalogBook, GridCardField } from '@bookdock/shared'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { catalogWorkRow } from '../book-row'
+import { getHiddenCause } from '../hidden-status'
 
 import BookCardShell from './BookCardShell'
 import HiddenIndicator from './HiddenIndicator'
@@ -50,6 +51,8 @@ export default function CatalogCard({
   // Badging follows the effective flag so taxonomy-hidden works carry the
   // mark; management (menu labels, click-through) stays on the direct flag.
   const isEffectivelyHidden = book.hidden || book.effectiveHidden === true
+  // The badge tooltip names the hiding layer when taxonomy hides the work.
+  const hiddenCause = getHiddenCause(book, 'category')
 
   return (
     <>
@@ -97,7 +100,7 @@ export default function CatalogCard({
         }}
         coverBadge={(isEffectivelyHidden || hasHiddenVersions) ? (
           <>
-            {isEffectivelyHidden && <HiddenIndicator kind="work" overlay />}
+            {isEffectivelyHidden && <HiddenIndicator kind="work" overlay title={hiddenCause ? _(hiddenCause.hintKey, hiddenCause.hintParams) : undefined} />}
             {hasHiddenVersions && <HiddenIndicator kind="versions" overlay />}
           </>
         ) : undefined}

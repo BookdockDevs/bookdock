@@ -9,7 +9,6 @@ import {
   type BookListItem,
   type BookListRes,
   type BookMetadata,
-  type BookSourceStatus,
   type CatalogBook,
   type CatalogBookUpdateReq,
   type CatalogListRes,
@@ -27,13 +26,14 @@ import {
   type MembershipRole,
   type PublishPrivateBookRes,
   type ReadStatus,
-  type RepinRes,
   type SettingsRes,
   type ShelfListItem,
   type TagListItem,
+  type TocRulePattern,
 } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
+import { tocBasePath, type TocTarget } from '@/api/hooks/useTocRules'
 import { withReveal } from '@/lib/reveal-hidden'
 import i18n from '@/i18n/i18n'
 import { getErrorKeyByCode, getUserErrorNotification } from '@/lib/error-message'
@@ -870,32 +870,49 @@ export function useForkBook() {
 }
 
 /**
- * Source-follow state for a B card: whether the source still reads and
- * whether it published past the pin. Queried only for collected cards.
+ * TOC baseline of one city version for the rule picker: pinned rule state
+ * plus chapter summaries, without touching list payloads.
  */
-export function useSourceStatus(bookId: string | null, enabled: boolean) {
+export interface VersionTocState {
+  tocRuleId: string | null
+  tocRuleAuto: boolean
+  customPatterns: TocRulePattern[]
+  /** Display-only name of the rule the stored patterns came from. */
+  tocRuleLabel: string | null
+  excludedChapterIds: string[]
+  chapters: Array<{ id: string; title: string; level: number; wordCount: number }>
+}
+
+export function useVersionTocState(
+  libraryId: string | null,
+  libraryBookId: string | null,
+  versionLinkId: string | null,
+  enabled = true,
+) {
   return useQuery({
-    queryKey: ['books', 'detail', bookId, 'source-status'],
-    queryFn: () => apiGet<{ data: BookSourceStatus }>(`/books/${bookId}/source-status`),
-    enabled: Boolean(bookId) && enabled,
+    queryKey: ['libraries', libraryId, 'toc-state', libraryBookId, versionLinkId],
+    queryFn: () => apiGet<{ data: VersionTocState }>(
+      `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/toc-state`,
+    ),
+    enabled: Boolean(libraryId && libraryBookId && versionLinkId) && enabled,
   })
 }
 
 /**
- * Re-pin a B to its source's latest revision. Content changes under the same
- * id, so list, detail, reader and chapter caches all refresh.
+ * Push a linked private draft to its published city version. Managers only;
+ * appends a revision, never rewrites one. Identical bytes are a no-op.
  */
-export function useRepinBook() {
+export function usePushVersion() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ bookId }: { bookId: string }) =>
-      apiPost<{ data: RepinRes }>(`/books/${bookId}/repin`, {}),
+    mutationFn: ({ libraryId, libraryBookId, versionLinkId }: { libraryId: string; libraryBookId: string; versionLinkId: string }) =>
+      apiPost<{ data: { revisionNo: number; alreadyUpToDate: boolean; diverged: boolean } }>(
+        `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/push`,
+        {},
+      ),
     onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['books'] })
-      void queryClient.invalidateQueries({ queryKey: ['books', 'detail', vars.bookId] })
-      void queryClient.invalidateQueries({ queryKey: ['book', vars.bookId] })
-      void queryClient.invalidateQueries({ queryKey: ['chapters', vars.bookId] })
-      void queryClient.invalidateQueries({ queryKey: ['progress', vars.bookId] })
     },
   })
 }
@@ -1536,24 +1553,27 @@ export function useBook(bookId: string | null) {
     queryKey: ['books', 'detail', bookId],
     queryFn: () => apiGet<{ data: BookDetailRes }>(withReveal(`/books/${bookId}`)),
     enabled: Boolean(bookId),
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 }
 
 export interface AppendContentInput {
-  bookId: string
+  target: TocTarget
   file?: File
   text?: string
   startOffset?: number
 }
 
-function appendContentRequest<T>(path: string, { bookId, file, text, startOffset }: AppendContentInput): Promise<T> {
+function appendContentRequest<T>(path: string, { target, file, text, startOffset }: AppendContentInput): Promise<T> {
+  const base = tocBasePath(target)
   if (file) {
     const formData = new FormData()
     formData.append('file', file)
     if (startOffset !== undefined) formData.append('startOffset', String(startOffset))
-    return apiUpload<T>(`/books/${bookId}/${path}`, formData)
+    return apiUpload<T>(`${base}/${path}`, formData)
   }
-  return apiPost<T>(`/books/${bookId}/${path}`, {
+  return apiPost<T>(`${base}/${path}`, {
     text: text ?? '',
     ...(startOffset !== undefined ? { startOffset } : {}),
   })
@@ -1571,12 +1591,17 @@ export function useAppendBookContent() {
   return useMutation({
     mutationFn: (input: AppendContentInput) => appendContentRequest<{ data: BookDetailRes }>('append', input),
     onSuccess: (result, input) => {
-      queryClient.setQueryData(['book', input.bookId], result)
-      queryClient.invalidateQueries({ queryKey: ['books'] })
-      queryClient.invalidateQueries({ queryKey: ['books', 'detail', input.bookId] })
-      queryClient.invalidateQueries({ queryKey: ['book', input.bookId] })
-      queryClient.invalidateQueries({ queryKey: ['chapters', input.bookId] })
-      queryClient.invalidateQueries({ queryKey: ['progress', input.bookId] })
+      if ('bookId' in input.target) {
+        queryClient.setQueryData(['book', input.target.bookId], result)
+        queryClient.invalidateQueries({ queryKey: ['books'] })
+        queryClient.invalidateQueries({ queryKey: ['books', 'detail', input.target.bookId] })
+        queryClient.invalidateQueries({ queryKey: ['book', input.target.bookId] })
+        queryClient.invalidateQueries({ queryKey: ['chapters', input.target.bookId] })
+        queryClient.invalidateQueries({ queryKey: ['progress', input.target.bookId] })
+      } else {
+        void queryClient.invalidateQueries({ queryKey: ['libraries', input.target.libraryId, 'catalog'] })
+        void queryClient.invalidateQueries({ queryKey: ['books'] })
+      }
     },
   })
 }

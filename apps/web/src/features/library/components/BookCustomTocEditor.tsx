@@ -5,8 +5,7 @@ import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-ki
 
 import type { TocPreviewChapter, TocPreviewReq, TocRulePattern } from '@bookdock/shared'
 
-import { apiPost } from '@/api/client'
-import { useReToc, useTocPreview, useTocRules } from '@/api/hooks/useTocRules'
+import { tocPreviewPost, useReToc, useTocPreview, useTocRules, type TocTarget } from '@/api/hooks/useTocRules'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import TocPatternRow, { type TocPatternError } from '@/features/settings/components/TocPatternRow'
@@ -16,7 +15,7 @@ import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
 interface BookCustomTocEditorProps {
-  bookId: string
+  target: TocTarget
   initialPatterns?: TocRulePattern[] | null
   onClose: () => void
   onSaved: () => void
@@ -39,7 +38,7 @@ function toDrafts(patterns: TocRulePattern[]): PatternDraft[] {
 }
 
 export default function BookCustomTocEditor({
-  bookId,
+  target,
   initialPatterns,
   onClose,
   onSaved,
@@ -47,7 +46,7 @@ export default function BookCustomTocEditor({
   const _ = useTranslation()
   const rulesQuery = useTocRules()
   const globalRules = rulesQuery.data?.data ?? []
-  const reToc = useReToc(bookId)
+  const reToc = useReToc(target)
 
   const defaultPatterns = initialPatterns && initialPatterns.length > 0
     ? initialPatterns
@@ -66,7 +65,7 @@ export default function BookCustomTocEditor({
     return null
   })
 
-  const previewQuery = useTocPreview(bookId, testPayload ?? {}, { enabled: Boolean(testPayload) })
+  const previewQuery = useTocPreview(target, testPayload ?? {}, { enabled: Boolean(testPayload) })
   const preview = previewQuery.data?.data
 
   const [extraChapters, setExtraChapters] = useState<TocPreviewChapter[]>([])
@@ -81,11 +80,9 @@ export default function BookCustomTocEditor({
     if (!preview || !testPayload || isLoadingMore) return
     setIsLoadingMore(true)
     try {
-      const res = await apiPost<{ data: { chapters: TocPreviewChapter[] } }>(`/books/${bookId}/toc-preview`, {
-        ...testPayload,
-        offset: allChapters.length,
-        limit: 1000,
-      })
+      const res = await tocPreviewPost(target, { ...testPayload, offset: allChapters.length, limit: 1000 }) as {
+        data: { chapters: TocPreviewChapter[] }
+      }
       if (res?.data?.chapters?.length) {
         setExtraChapters((prev) => [...prev, ...res.data.chapters])
       }
