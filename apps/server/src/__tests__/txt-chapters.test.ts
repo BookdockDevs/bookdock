@@ -244,4 +244,10 @@ describe('detectTxtChapters', () => {
     expect(applied.excludedChapterIds).toEqual([])
     expect(applied.chapters).toHaveLength(2)
   })
+
+  it('leaves section-like body lines alone without a rule', () => {
+    const chapters = detectTxtChapters('第二章 朋友\n\n第一节是班主任江老师的英语课。\n\n正文内容\n\n第六章 测试\n\n仅供测试追加内容')
+
+    expect(chapters.map((chapter) => chapter.title)).toEqual(['第二章 朋友', '第六章 测试'])
+  })
 })

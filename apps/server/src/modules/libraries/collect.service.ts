@@ -13,7 +13,7 @@ import {
 } from '../../db/schema'
 import { AppError, isUniqueViolation } from '../../middleware/error'
 import { createId } from '../../lib/id'
-import { getLibraryBookVersion, resolveSharedVersionRead } from './library-access'
+import { getLibraryBookVersion, getOwnsSourceVersionIds, resolveSharedVersionRead } from './library-access'
 import { getCatalogBook } from './catalog.service'
 
 /**
@@ -84,6 +84,18 @@ export async function addToPrivateLibrary(
     }
   }
 
+  // Stage 5: collecting a version published from a book still held privately
+  // would duplicate it. While the city hasn't moved past the publish base,
+  // refuse with a pointer to the original; a moved city (or a gone original)
+  // collects normally — that content is genuinely new to the caller.
+  // The predicate lives in getOwnsSourceVersionIds, shared with the catalog
+  // verdict, so the button and this refusal always agree.
+  if (getOwnsSourceVersionIds(userId, [link]).has(link.bookVersionId)) {
+    throw new AppError('ALREADY_OWNS_SOURCE', 'This version was published from a book already in the private library', {
+      bookVersionId: link.sourceBaseVersionId,
+    })
+  }
+
   if (opts?.categoryId) {
     const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
       .where(and(eq(libraryCategories.id, opts.categoryId), eq(libraryCategories.libraryId, privateLibrary.id))).get()
@@ -140,6 +152,7 @@ export async function addToPrivateLibrary(
       tx.insert(libraryBookVersions).values({
         id: createId('lbv'), libraryId: privateLibrary.id, libraryBookId, bookVersionId: link.bookVersionId,
         kind: 'shared', status: 'published',
+        userId,
         // (7.2) The single source, stored as plain text so it survives source
         // deletion; the private card keeps naming it even when unreadable.
         sourceLibraryId: libraryId, sourceLibraryBookVersionId: versionLinkId,

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
@@ -13,7 +14,7 @@ import { createId } from '../../lib/id'
 import { errorHandler } from '../../middleware/error'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
-import { uploadBook } from '../books/books.service'
+import { uploadBook, uploadCatalogBook } from '../books/books.service'
 import librariesRoutes from './libraries.routes'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -168,6 +169,104 @@ describe('libraries routes', () => {
         body: JSON.stringify({ bookId: source.book.id }),
       })
       expect(member.status).toBe(403)
+    })
+
+    it('pushes a linked private draft and refuses members', async () => {
+      const draft = await uploadBook(ownerId, new File(['第一章\n草稿'], 'd.txt', { type: 'text/plain' }))
+      const ownerApp = createApp({ id: ownerId })
+      const published = await ownerApp.request(`/api/v1/libraries/${libraryId}/books/from-private`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId: draft.book.id }),
+      })
+      expect(published.status).toBe(201)
+      const pub = (await published.json()).data as { libraryBookId: string; versionLinkId: string }
+      const url = `/api/v1/libraries/${libraryId}/books/${pub.libraryBookId}/versions/${pub.versionLinkId}/push`
+      const res = await ownerApp.request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      // Draft unchanged since publish: identical bytes, no new revision.
+      expect(res.status).toBe(200)
+      expect((await res.json()).data).toMatchObject({ revisionNo: 1, alreadyUpToDate: true, diverged: false })
+
+      const memberApp = createApp({ id: memberId })
+      const denied = await memberApp.request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      expect(denied.status).toBe(403)
+    })
+
+    it('appends and re-splits city content for managers', async () => {
+      // Content reads need real bytes: swap the file mock for a memory driver.
+      const files = new Map<string, Buffer>()
+      const driver = {
+        put: async (key: string, data: Buffer | AsyncIterable<Buffer>) => {
+          files.set(key, Buffer.isBuffer(data) ? data : Buffer.concat(await collectChunks(data)))
+        },
+        get: async (key: string) => {
+          const buf = files.get(key)
+          if (!buf) throw new Error(`missing blob: ${key}`)
+          return Readable.from(buf)
+        },
+        delete: async (key: string) => { files.delete(key) },
+        exists: async (key: string) => files.has(key),
+        size: async (key: string) => files.get(key)?.length ?? 0,
+      }
+      async function collectChunks(data: AsyncIterable<Buffer>) {
+        const chunks: Buffer[] = []
+        for await (const chunk of data) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+        return chunks
+      }
+      vi.spyOn(storage, 'getStorage').mockReturnValue(driver as unknown as ReturnType<typeof storage.getStorage>)
+      const created = await uploadCatalogBook(libraryId, ownerId, new File(['第一章\n甲'], 'c.txt', { type: 'text/plain' }), { title: 'Serial' })
+      const ownerApp = createApp({ id: ownerId })
+      const base = `/api/v1/libraries/${libraryId}/books/${created.libraryBookId}/versions/${created.versionLinkId}`
+
+      const preview = await ownerApp.request(`${base}/append-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: '第二章\n乙' }),
+      })
+      expect(preview.status).toBe(200)
+      expect((await preview.json()).data).toMatchObject({ addedChapterCount: 1 })
+      const appended = await ownerApp.request(`${base}/append`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: '第二章\n乙' }),
+      })
+      expect(appended.status).toBe(200)
+      expect((await appended.json()).data).toMatchObject({ revisionNo: 2 })
+
+      const tocPreview = await ownerApp.request(`${base}/toc-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      expect(tocPreview.status).toBe(200)
+      const retoc = await ownerApp.request(`${base}/re-toc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      expect(retoc.status).toBe(200)
+
+      const memberApp = createApp({ id: memberId })
+      const denied = await memberApp.request(`${base}/append`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: '第二章\n乙' }),
+      })
+      expect(denied.status).toBe(403)
+      const bad = await ownerApp.request(`${base}/append`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      expect(bad.status).toBe(400)
     })
 
     it('lists the catalog and edits work and version metadata', async () => {

@@ -9,17 +9,21 @@ import {
   libraryBookTags,
   libraryBookVersions,
   libraryCategories,
+  libraryMemberships,
   libraryTags,
   libraries,
 } from '../../db/schema'
 import { AppError } from '../../middleware/error'
+import { createId } from '../../lib/id'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
 import { blobKey, coverThumbnailKey, detectImageExtension, generateCoverThumbnail } from '../../lib/cover'
 import { sha256 } from '../../lib/hash'
-import { assertLibraryBrowsable, deleteOrphanedBookVersions, getLibraryTrashSettings, isLibraryManager, isLibraryTrashEnabled, requireLibraryManager, requireLibraryOwner } from './library-access'
+import { assertLibraryBrowsable, deleteOrphanedBookVersions, getLibraryTrashSettings, getOwnsSourceVersionIds, getMaintainableVersionLinkIds as getMaintainableLinkIds, isLibraryManager, isLibraryTrashEnabled, requireLibraryManager, requireLibraryOwner, assertCanContribute, resolveContributorRelation } from './library-access'
 import {
   isWorkEffectivelyHidden,
+  classifyWorkHidden,
+  getWorkHiddenDetail,
   likePattern,
   libraryOrderBy,
   loadLibraryHiddenTaxonomy,
@@ -27,6 +31,7 @@ import {
   taxonomyNameMatch,
   versionEffectiveMatch,
   workHiddenExclusion,
+  type LibraryHiddenTaxonomy,
   type LibraryListQuery,
 } from './library-query'
 import {
@@ -39,6 +44,7 @@ import {
   type CatalogListRes,
   type CatalogVersion,
   type CatalogVersionUpdateReq,
+  type HiddenReason,
   type LibraryVersionKind,
 } from '@bookdock/shared'
 
@@ -71,6 +77,8 @@ function toCatalogVersion(
   link: typeof libraryBookVersions.$inferSelect,
   facts: { versions: Map<string, typeof bookVersions.$inferSelect>; revisions: Map<string, typeof contentRevisions.$inferSelect> },
   collectedVersionIds?: ReadonlySet<string>,
+  ownsSourceVersionIds?: ReadonlySet<string>,
+  maintainableVersionLinkIds?: ReadonlySet<string>,
 ): CatalogVersion {
   const version = facts.versions.get(link.bookVersionId)
   const revision = facts.revisions.get(link.bookVersionId)
@@ -112,6 +120,12 @@ function toCatalogVersion(
       fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
     },
     collected: collectedVersionIds?.has(link.bookVersionId) ?? false,
+    // Stage 5: published from a book the caller still holds and the city
+    // hasn't moved past the base — collecting would just duplicate it.
+    ownsSource: ownsSourceVersionIds?.has(link.bookVersionId) ?? false,
+    // The write gate, resolved by the same predicate the endpoints use, so a
+    // menu never offers an append or a re-split the server would refuse.
+    maintainable: maintainableVersionLinkIds?.has(link.id) ?? false,
     // Per-listing anonymous switch; only meaningful with public visibility
     // and the instance guest switch (see resolveSharedVersionRead).
     guestReadable: link.guestReadable,
@@ -130,9 +144,14 @@ function toCatalogBook(
   tags: CatalogBookTag[] = [],
   facts?: { versions: Map<string, typeof bookVersions.$inferSelect>; revisions: Map<string, typeof contentRevisions.$inferSelect> },
   collectedVersionIds?: ReadonlySet<string>,
+  ownsSourceVersionIds?: ReadonlySet<string>,
+  maintainableVersionLinkIds?: ReadonlySet<string>,
   // Managers receive hidden rows; members only ever see visible works, so
   // their effective flag stays false without paying for a taxonomy load.
   managerView = false,
+  // List paths preload one taxonomy for the page and pass it down; single-work
+  // reads leave it absent and pay for one load here instead.
+  taxonomy?: LibraryHiddenTaxonomy,
 ): CatalogBook {
   const resolved = facts ?? { versions: new Map(), revisions: new Map() }
   // Default display version leads: cards, rows and the detail dialog read
@@ -144,6 +163,9 @@ function toCatalogBook(
     const at = ordered.findIndex((link) => link.id === work.defaultVersionLinkId)
     if (at > 0) ordered.unshift(...ordered.splice(at, 1))
   }
+  const hiddenDetail = !managerView ? { reason: null as HiddenReason | null } : taxonomy
+    ? classifyWorkHidden(work, taxonomy, tags.map((tag) => tag.id))
+    : getWorkHiddenDetail(getDb(), work.libraryId, work)
   return {
     id: work.id,
     libraryId: work.libraryId,
@@ -159,12 +181,14 @@ function toCatalogBook(
     // managers receive them badged.
     hidden: work.hidden,
     // Effective hide for badging taxonomy-hidden works managers can still see.
-    effectiveHidden: managerView && isWorkEffectivelyHidden(getDb(), work.libraryId, work),
+    effectiveHidden: hiddenDetail.reason !== null,
+    hiddenReason: hiddenDetail.reason,
+    ...('via' in hiddenDetail && hiddenDetail.via ? { hiddenVia: hiddenDetail.via } : {}),
     pinnedAt: work.pinnedAt ?? null,
     defaultVersionLinkId: work.defaultVersionLinkId ?? null,
     deletedAt: work.deletedAt ?? null,
     tags,
-    versions: ordered.map((link) => toCatalogVersion(work, link, resolved, collectedVersionIds)),
+    versions: ordered.map((link) => toCatalogVersion(work, link, resolved, collectedVersionIds, ownsSourceVersionIds, maintainableVersionLinkIds)),
     createdAt: work.createdAt,
     updatedAt: work.updatedAt,
   }
@@ -182,6 +206,34 @@ function getCollectedVersionIds(actorId: string, versionIds: string[]) {
       eq(libraryBookVersions.libraryId, privateLibrary.id),
       inArray(libraryBookVersions.bookVersionId, versionIds),
     )).all().map((row) => row.bookVersionId))
+}
+
+/**
+ * Which of these version links the caller may change the content of, batched:
+ * one library row plus the caller's relation, then pure filtering over links
+ * the caller already loaded. This is the same verdict `assertCanContribute`
+ * gates the write endpoints with, so `CatalogVersion.maintainable` and what the
+ * server accepts cannot drift apart.
+ */
+function getMaintainableVersionLinkIds(
+  actorId: string,
+  libraryId: string,
+  links: Array<{ id: string; userId: string | null }>,
+): Set<string> {
+  if (links.length === 0) return new Set<string>()
+  const db = getDb()
+  const library = db.select({
+    type: libraries.type,
+    userId: libraries.userId,
+    allowMemberUpload: libraries.allowMemberUpload,
+  }).from(libraries).where(eq(libraries.id, libraryId)).get()
+  if (!library) return new Set<string>()
+  const memberRole = library.userId === actorId
+    ? undefined
+    : db.select({ role: libraryMemberships.role }).from(libraryMemberships)
+        .where(and(eq(libraryMemberships.libraryId, libraryId), eq(libraryMemberships.userId, actorId))).get()?.role
+  const relation = resolveContributorRelation(library.userId, actorId, memberRole)
+  return new Set([...getMaintainableLinkIds(actorId, library, relation, links)])
 }
 
 /**
@@ -305,6 +357,9 @@ export async function listCatalogBooks(
         tagNamesByWork(db, [work.id]).get(work.id) ?? [],
         facts,
         collectedVersionIds,
+        undefined,
+        // The trash list is owner-only, so every link there is maintainable.
+        new Set(links.map((link) => link.id)),
         true,
       ))
     }
@@ -370,7 +425,11 @@ export async function listCatalogBooks(
     .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all()
   const facts = loadVersionFacts([...new Set(links.map((link) => link.bookVersionId))])
   const collectedVersionIds = getCollectedVersionIds(actorId, [...new Set(links.map((link) => link.bookVersionId))])
+  const ownsSourceVersionIds = getOwnsSourceVersionIds(actorId, links)
+  const maintainableLinkIds = getMaintainableVersionLinkIds(actorId, libraryId, links)
   const tagMap = tagNamesByWork(db, works.map((w) => w.id))
+  // One taxonomy load for the page; toCatalogBook classifies per work from it.
+  const pageTaxonomy = includeUnlisted && works.length > 0 ? loadLibraryHiddenTaxonomy(db, libraryId) : undefined
   return {
     items: works.map((work) => toCatalogBook(
       work,
@@ -378,7 +437,10 @@ export async function listCatalogBooks(
       tagMap.get(work.id) ?? [],
       facts,
       collectedVersionIds,
+      ownsSourceVersionIds,
+      maintainableLinkIds,
       includeUnlisted,
+      pageTaxonomy,
     )),
     total,
     page,
@@ -715,12 +777,16 @@ export async function getCatalogBook(actorId: string, libraryId: string, library
     .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all()
   const facts = loadVersionFacts(links.map((link) => link.bookVersionId))
   const collectedVersionIds = getCollectedVersionIds(actorId, links.map((link) => link.bookVersionId))
+  const ownsSourceVersionIds = getOwnsSourceVersionIds(actorId, links)
+  const maintainableLinkIds = getMaintainableVersionLinkIds(actorId, libraryId, links)
   return toCatalogBook(
     work,
     links.filter((link) => includeUnlisted || link.status === 'published'),
     tagNamesByWork(db, [work.id]).get(work.id) ?? [],
     facts,
     collectedVersionIds,
+    ownsSourceVersionIds,
+    maintainableLinkIds,
     includeUnlisted,
   )
 }
@@ -1004,8 +1070,21 @@ export async function resetCatalogVersionMetadata(
     const parser = getParser(latestRevision.blobKey, '')
     if (!parser) throw new AppError('UNSUPPORTED_FORMAT')
     const parsed = await parser.parse(await getStorage().get(latestRevision.blobKey))
-    const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
-    db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+    const parsedBookmeta = parsed.meta.bookmeta ?? {}
+    const storedBookmeta = ((latestRevision.meta ?? {}) as Record<string, unknown>).bookmeta ?? {}
+    if (JSON.stringify(parsedBookmeta) !== JSON.stringify(storedBookmeta)) {
+      // Same discipline as resetBookMetadata: derived metadata changes append
+      // a revision reusing the blob; an identical parse is a no-op.
+      db.transaction((tx) => {
+        tx.insert(contentRevisions).values({
+          id: createId('rev'), bookVersionId: link.bookVersionId, revisionNo: latestRevision.revisionNo + 1,
+          blobKey: latestRevision.blobKey, size: latestRevision.size,
+          wordCount: latestRevision.wordCount, chapterCount: latestRevision.chapterCount,
+          meta: { ...((latestRevision.meta ?? {}) as Record<string, unknown>), bookmeta: parsedBookmeta },
+          createdAt: Date.now(),
+        }).run()
+      })
+    }
   }
   db.update(libraryBookVersions).set({
     title: null, author: null, authors: null, description: null, coverKey: null, meta: {},
@@ -1061,6 +1140,8 @@ export async function findSimilarWorks(
     .where(inArray(libraryBookVersions.libraryBookId, candidates.map((c) => c.work.id))).all()
   const facts = loadVersionFacts([...new Set(links.map((link) => link.bookVersionId))])
   const collectedVersionIds = getCollectedVersionIds(actorId, [...new Set(links.map((link) => link.bookVersionId))])
+  const ownsSourceVersionIds = getOwnsSourceVersionIds(actorId, links)
+  const maintainableLinkIds = getMaintainableVersionLinkIds(actorId, libraryId, links)
   const includeUnlisted = await isLibraryManager(actorId, libraryId)
   const visibleLinks = (workId: string) => links.filter(
     (link) => link.libraryBookId === workId && (includeUnlisted || link.status === 'published'),
@@ -1072,7 +1153,7 @@ export async function findSimilarWorks(
     .filter(({ work }) => (includeUnlisted || visibleLinks(work.id).length > 0)
       && (includeUnlisted || !isWorkEffectivelyHidden(db, libraryId, work)))
     .map(({ work, score }) => ({
-      ...toCatalogBook(work, visibleLinks(work.id), [], facts, collectedVersionIds, includeUnlisted),
+      ...toCatalogBook(work, visibleLinks(work.id), [], facts, collectedVersionIds, ownsSourceVersionIds, maintainableLinkIds, includeUnlisted),
       matchScore: score,
     }))
 }
@@ -1263,7 +1344,9 @@ export async function deleteCatalogVersion(
   versionLinkId: string,
 ) {
   const db = getDb()
-  const { library } = await requireLibraryManager(actorId, libraryId)
+  // Managers, or the uploading member when the library opened uploads.
+  await assertCanContribute(actorId, libraryId, versionLinkId)
+  const library = db.select().from(libraries).where(eq(libraries.id, libraryId)).get()!
   const work = getWork(libraryId, libraryBookId)
   if (work.deletedAt) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
   const link = getVersionLink(libraryId, libraryBookId, versionLinkId)

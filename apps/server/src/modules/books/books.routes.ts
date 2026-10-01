@@ -1,8 +1,12 @@
 import { Hono, type Context } from 'hono'
-import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, paginationSchema, bookMembershipSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
+import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, paginationSchema, bookMembershipSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
+  attachOwnsSource,
+  attachUnreadUpdate,
+  acknowledgeReadRevision,
+  attachPublishedTo,
   deleteBook,
   resolveLibraryBook,
   trashBook,
@@ -34,7 +38,6 @@ import {
 } from './books.service'
 import { updateReaderBookSettings } from './reader-settings.service'
 import { forkLocalBook } from '../libraries/fork.service'
-import { getSourceStatus, repinToLatest } from '../libraries/repin.service'
 import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { getStorage } from '../../storage'
@@ -168,6 +171,9 @@ booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
   }
   const book = await getActiveBook(requestUserId(c), id, { showHidden: requestShowHidden(c) })
+  if (c.req.query('revisionId') && c.req.query('revisionId') !== book.revisionId) {
+    throw new AppError('VALIDATION_ERROR', 'Content revision changed; reopen the book')
+  }
   return streamBookFile(c, book)
 })
 
@@ -243,10 +249,21 @@ booksRoutes.get('/:id/export.epub', async (c) => {
   })
 })
 
+booksRoutes.put('/:id/read-revision', async (c) => {
+  const userId = requestUserId(c)
+  if (!userId) throw new AppError('FORBIDDEN')
+  const parsed = readRevisionSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid content revision')
+  const data = await acknowledgeReadRevision(userId, c.req.param('id'), parsed.data.revisionId, requestShowHidden(c))
+  return c.json({ data })
+})
+
 booksRoutes.get('/:id', async (c) => {
   const id = c.req.param('id')
   const book = await getActiveBook(requestUserId(c), id, { showHidden: requestShowHidden(c) })
-  return c.json({ data: stripMetaChapters(book) })
+  const uid = requestUserId(c)
+  const detailed = await attachUnreadUpdate(uid, await attachOwnsSource(uid, book))
+  return c.json({ data: stripMetaChapters(await attachPublishedTo(uid, detailed)) })
 })
 
 booksRoutes.get('/:id/chapters', async (c) => {
@@ -420,19 +437,7 @@ booksRoutes.post('/:id/fork', async (c) => {
   return c.json({ data: result }, 201)
 })
 
-// B follow-up: report whether the source published past the pin, and move
-// the pin on explicit request only. Both are private-card actions.
-booksRoutes.get('/:id/source-status', async (c) => {
-  const user = c.get('user')
-  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
-  return c.json({ data: await getSourceStatus(user.id, c.req.param('id')) })
-})
 
-booksRoutes.post('/:id/repin', async (c) => {
-  const user = c.get('user')
-  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
-  return c.json({ data: await repinToLatest(user.id, c.req.param('id')) })
-})
 
 booksRoutes.put('/:id/shelves', async (c) => {
   const user = c.get('user')

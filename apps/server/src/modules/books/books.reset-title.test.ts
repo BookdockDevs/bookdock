@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { desc, eq } from 'drizzle-orm'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -144,5 +145,38 @@ describe('resetBookMetadata metadata normalization', () => {
     expect(reset.title).toBe('好兆头')
     expect(reset.author).toBe('尼尔·盖曼')
     expect(reset.authors).toEqual(['尼尔·盖曼', '特里·普拉切特'])
+  })
+
+  it('appends a new revision reusing the blob when the parse differs', async () => {
+    const { book } = await uploadBook(ownerId, junkFile(), undefined, { normalizeTitle: false })
+    const stored = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).all()
+    expect(stored).toHaveLength(1)
+    db.update(schema.contentRevisions)
+      .set({ meta: { ...((stored[0]!.meta ?? {}) as Record<string, unknown>), bookmeta: { publisher: 'Bogus' } } })
+      .where(eq(schema.contentRevisions.id, stored[0]!.id)).run()
+
+    await resetBookMetadata(ownerId, book.id, { normalizeTitle: false })
+    const rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id))
+      .orderBy(desc(schema.contentRevisions.revisionNo)).all()
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.blobKey).toBe(rows[1]!.blobKey)
+    expect((rows[1]!.meta as Record<string, unknown>).bookmeta).toMatchObject({ publisher: 'Bogus' })
+    expect((rows[0]!.meta as Record<string, unknown>).bookmeta).not.toMatchObject({ publisher: 'Bogus' })
+  })
+
+  it('creates no revision when the parse is identical', async () => {
+    const { book } = await uploadBook(ownerId, junkFile(), undefined, { normalizeTitle: false })
+    const stored = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).all().at(0)!
+    const storedBookmeta = ((stored.meta ?? {}) as Record<string, unknown>).bookmeta ?? {}
+    // The fake EPUB parser closes over epubMeta: feed it the stored value so
+    // the reset parse is identical.
+    ;(epubMeta as unknown as Record<string, unknown>).bookmeta = storedBookmeta
+    await resetBookMetadata(ownerId, book.id, { normalizeTitle: false })
+    const rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).all()
+    expect(rows).toHaveLength(1)
   })
 })

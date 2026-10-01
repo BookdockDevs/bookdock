@@ -796,3 +796,5 @@ export const bookUpdateSchema = z.object({
   // null clears the pinned placeholder-cover palette (falls back to the id hash)
   coverPaletteId: z.enum(COVER_PALETTE_IDS).nullable().optional(),
 })
+
+export const readRevisionSchema = z.object({ revisionId: z.string().min(1).max(128) })

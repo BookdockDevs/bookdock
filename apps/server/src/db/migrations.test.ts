@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -50,6 +51,40 @@ function applyReplacementScopeMigration(sqlite: Database.Database) {
   const sql = fs.readFileSync(replacementScopeMigrationFile, 'utf8')
   for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
     sqlite.exec(statement)
+  }
+}
+
+/**
+ * Apply the whole chain except the migration named by `before`, so a test can
+ * stand up a database in the exact state an instance was on before that
+ * release. `readMigrationFiles` is the same source `migrate` uses, so the
+ * order and the statements cannot drift apart.
+ */
+/**
+ * Migrate a database only as far as `before`, using drizzle's own migrator on a
+ * trimmed copy of the journal. Hand-applying the .sql files would re-implement
+ * statement splitting (trigger bodies contain their own semicolons) and could
+ * quietly diverge from what actually runs on boot.
+ */
+function migrateUpTo(db: ReturnType<typeof drizzle<typeof schema>>, before: string) {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-migrations-'))
+  try {
+    // meta/ carries drizzle's snapshots, which the migrator only needs for
+    // hashing new files; only the .sql files and the journal have to be real.
+    fs.mkdirSync(path.join(scratch, 'meta'), { recursive: true })
+    for (const name of fs.readdirSync(migrationsDir).filter((n) => n.endsWith('.sql'))) {
+      fs.copyFileSync(path.join(migrationsDir, name), path.join(scratch, name))
+    }
+    fs.copyFileSync(path.join(migrationsDir, 'meta', '_journal.json'), path.join(scratch, 'meta', '_journal.json'))
+    const journalPath = path.join(scratch, 'meta', '_journal.json')
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { entries: Array<{ tag: string }> }
+    const cutoff = journal.entries.findIndex((entry) => entry.tag === before)
+    if (cutoff < 0) throw new Error(`migration not found: ${before}`)
+    journal.entries = journal.entries.slice(0, cutoff)
+    fs.writeFileSync(journalPath, JSON.stringify(journal, null, 2))
+    migrate(db, { migrationsFolder: scratch })
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true })
   }
 }
 
@@ -902,6 +937,76 @@ describe('shared work pin migration', () => {
       .toEqual({ pinnedAt: 20 })
     expect(sqlite.prepare('SELECT pinned_at AS pinnedAt FROM library_books WHERE id = ?').get('private-work'))
       .toEqual({ pinnedAt: null })
+    sqlite.close()
+  })
+})
+
+describe('version source base migration', () => {
+  it('adds nullable base columns through the full chain', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    migrate(drizzle(sqlite, { schema }), { migrationsFolder: migrationsDir })
+    const cols = sqlite.prepare('PRAGMA table_info("library_book_versions")').all() as Array<{ name: string }>
+    const names = new Set(cols.map((c) => c.name))
+    expect(names.has('source_base_version_id')).toBe(true)
+    expect(names.has('source_base_revision_id')).toBe(true)
+    // The publish dialog resolves its targets on every private-book detail, so
+    // that lookup is indexed rather than scanning the whole versions table.
+    const indexes = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'library_book_versions'").all() as Array<{ name: string }>
+    expect(indexes.map((i) => i.name)).toContain('library_book_versions_source_base_idx')
+    sqlite.close()
+  })
+})
+
+describe('member upload migration', () => {
+  it('adds the library switch and link uploader columns through the full chain', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    migrate(drizzle(sqlite, { schema }), { migrationsFolder: migrationsDir })
+    const libraries = sqlite.prepare('PRAGMA table_info("libraries")').all() as Array<{ name: string; notnull: number; dflt_value: unknown }>
+    const flags = libraries.find((c) => c.name === 'allow_member_upload')!
+    expect(flags).toBeDefined()
+    expect(flags.notnull).toBe(1)
+    const links = sqlite.prepare('PRAGMA table_info("library_book_versions")').all() as Array<{ name: string; notnull: number }>
+    const uploader = links.find((c) => c.name === 'user_id')!
+    expect(uploader).toBeDefined()
+    expect(uploader.notnull).toBe(0)
+    sqlite.close()
+  })
+
+  it('upgrades a populated pre-0032 database without losing rows', () => {
+    // The other migration tests only ever assert the columns exist on a fresh
+    // database. This is the path an existing instance actually takes, and the
+    // one whose failure locks the owner out of their own library.
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrateUpTo(db, '0032_version_source_base')
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1);
+      INSERT INTO libraries (id, user_id, type, name, description, created_at, updated_at)
+        VALUES ('lib1', 'u1', 'shared', 'City', '', 1, 1);
+      INSERT INTO library_books (id, library_id, user_id, title, author, authors, description, meta, created_at, updated_at)
+        VALUES ('lb1', 'lib1', 'u1', 'Work', '', '[]', '', '{}', 1, 1);
+      INSERT INTO book_versions (id, format, size, created_at, updated_at) VALUES ('bv1', 'epub', 1, 1, 1);
+      INSERT INTO content_revisions (id, book_version_id, revision_no, blob_key, size, chapter_count, meta, created_at)
+        VALUES ('rev1', 'bv1', 1, 'k1', 1, 1, '{}', 1);
+      INSERT INTO library_book_versions
+        (id, library_id, library_book_id, book_version_id, kind, status, name, authors, meta, created_at, updated_at)
+        VALUES ('lbv1', 'lib1', 'lb1', 'bv1', 'personal', 'published', '', '[]', '{}', 1, 1);
+    `)
+
+    migrate(db, { migrationsFolder: migrationsDir })
+
+    // Existing content survives, and the new columns read as their documented
+    // defaults: no publish base, no uploader, member uploads closed.
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM library_book_versions').get())
+      .toEqual({ count: 1 })
+    expect(sqlite.prepare('SELECT source_base_version_id, source_base_revision_id, user_id FROM library_book_versions WHERE id = ?').get('lbv1'))
+      .toEqual({ source_base_version_id: null, source_base_revision_id: null, user_id: null })
+    expect(sqlite.prepare('SELECT allow_member_upload FROM libraries WHERE id = ?').get('lib1'))
+      .toEqual({ allow_member_upload: 0 })
+    expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([])
     sqlite.close()
   })
 })

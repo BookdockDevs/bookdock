@@ -448,6 +448,9 @@ export const libraries = sqliteTable('libraries', {
   trashEnabled: integer('trash_enabled', { mode: 'boolean' }),
   trashAutoCleanDays: integer('trash_auto_clean_days'),
   trashMaxBytes: integer('trash_max_bytes'),
+  // Per-library member-upload switch (owner-only). Members may upload new
+  // works/versions and maintain versions they uploaded; default off.
+  allowMemberUpload: integer('allow_member_upload', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
@@ -548,6 +551,17 @@ export const libraryBookVersions = sqliteTable('library_book_versions', {
   meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
   sourceLibraryId: text('source_library_id'),
   sourceLibraryBookVersionId: text('source_library_book_version_id'),
+  // Publish-time base of this listing: which private version+revision the
+  // snapshot was taken from. Plain text (no FK) like the other source ids so
+  // the base stays readable as provenance after the source is deleted; a
+  // missing base means published before base tracking (collectible as usual).
+  sourceBaseVersionId: text('source_base_version_id'),
+  sourceBaseRevisionId: text('source_base_revision_id'),
+  // Link creator (uploader/collector/forker). Maintainer checks compare it
+  // against the actor; old rows stay null (managers only). Plain text (no
+  // FK) so user deletion never blocks on it — orphaned links simply lose
+  // their maintainer and fall back to managers-only.
+  userId: text('user_id'),
   pinnedRevisionId: text('pinned_revision_id').references(() => contentRevisions.id),
   // Sort-first pin carried over from books.pinned_at (private cards keep order).
   pinnedAt: integer('pinned_at'),
@@ -563,6 +577,9 @@ export const libraryBookVersions = sqliteTable('library_book_versions', {
   // One B per BookVersion per private library; enforced in service code against
   // (libraryId, bookVersionId, kind) because A/C duplicates are legitimate.
   libraryVersionIdx: index('library_book_versions_library_version_idx').on(table.libraryId, table.bookVersionId),
+  // "Which city listings were published from this private book?", read on
+  // every private-book detail to build the publish dialog's targets.
+  sourceBaseIdx: index('library_book_versions_source_base_idx').on(table.sourceBaseVersionId),
   // The database backstop for that rule: only shared (B) rows are constrained,
   // so legitimate A/C duplicates in the same library keep working.
   sharedVersionUnique: uniqueIndex('library_book_versions_shared_unique')
@@ -688,6 +705,14 @@ export const bookStates = sqliteTable('book_states', {
   // Last reading activity (books.last_read_at carry-over); position writes
   // bump updated_at, reading alone bumps last_read_at.
   lastReadAt: integer('last_read_at'),
+  /**
+   * The content revision this reader last opened. The pin moves for every
+   * holder at once, so only this separates one account's "seen it" from
+   * another's. Null = never opened the reader, which counts as having an
+   * update once any revision exists. Plain text: a deleted revision leaves it
+   * dangling and the row simply reads as "has an update".
+   */
+  readRevisionId: text('read_revision_id'),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.userId, table.bookVersionId] }),

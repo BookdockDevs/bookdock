@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
 
 import type { LibraryRelation } from '@bookdock/shared'
 
@@ -372,6 +372,162 @@ export function assertMutableContent(kind: string): void {
   if (kind === 'shared') {
     throw new AppError('FORBIDDEN', 'This book comes from a shared library; its content is managed by the library')
   }
+}
+
+/**
+ * Stage 5 owns-source verdict: versions published from a book the caller
+ * still holds privately read as already-owned while the city still serves that
+ * book's own bytes. Shared by the collect refusal and the catalog `ownsSource`
+ * marking so the button and the action can never disagree.
+ *
+ * The test is byte identity between the city's current revision and the
+ * source's current revision — never a revision count. A revision that reuses
+ * the blob (a metadata reset) appends history without changing content, and
+ * counting it as "the city moved on" would unblock a duplicate collect of the
+ * very book the caller already holds.
+ */
+export function getOwnsSourceVersionIds(
+  actorId: string,
+  links: Array<{ bookVersionId: string; sourceBaseVersionId: string | null }>,
+): Set<string> {
+  const db = getDb()
+  const owns = new Set<string>()
+  const candidates = links.filter((l) => l.sourceBaseVersionId)
+  if (candidates.length === 0) return owns
+  const privateLibrary = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, actorId), eq(libraries.type, 'private'))).get()
+  if (!privateLibrary) return owns
+  // A trashed original counts as gone: holdings must be live cards.
+  const holdings = new Set(
+    db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+      .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+      .where(and(
+        eq(libraryBookVersions.libraryId, privateLibrary.id),
+        inArray(libraryBookVersions.bookVersionId, [...new Set(candidates.map((l) => l.sourceBaseVersionId as string))]),
+        ne(libraryBookVersions.kind, 'shared'),
+        isNull(libraryBooks.deletedAt),
+      )).all().map((r) => r.bookVersionId),
+  )
+  if (holdings.size === 0) return owns
+  const heldSources = [...new Set(candidates.map((l) => l.sourceBaseVersionId as string))].filter((id) => holdings.has(id))
+  if (heldSources.length === 0) return owns
+  const latestBlob = new Map<string, string>()
+  for (const row of db.select({ bookVersionId: contentRevisions.bookVersionId, blobKey: contentRevisions.blobKey }).from(contentRevisions)
+    .where(inArray(contentRevisions.bookVersionId, [...new Set([...candidates.map((l) => l.bookVersionId), ...heldSources])]))
+    .orderBy(desc(contentRevisions.revisionNo)).all()) {
+    if (!latestBlob.has(row.bookVersionId)) latestBlob.set(row.bookVersionId, row.blobKey)
+  }
+  for (const link of candidates) {
+    if (!holdings.has(link.sourceBaseVersionId as string)) continue
+    const cityBlob = latestBlob.get(link.bookVersionId)
+    const sourceBlob = latestBlob.get(link.sourceBaseVersionId as string)
+    if (cityBlob && sourceBlob && cityBlob === sourceBlob) owns.add(link.bookVersionId)
+  }
+  return owns
+}
+
+/**
+ * Contributor gate for shared-library content (Stage 6): managers always;
+ * members only when the library opened member uploads — for a new upload, or
+ * for an existing version only its uploader. Guests/outsiders never
+ * contribute. Private libraries stay owner-only.
+ *
+ * The verdict is one pure predicate so the write endpoints and the catalog
+ * affordance (`CatalogVersion.maintainable`) can never disagree about who may
+ * change a version's content. `relation` and the library row are resolved here
+ * so both callers pass the same inputs.
+ */
+export type ContributorRelation = 'owner' | 'admin' | 'member' | 'none'
+
+export function resolveContributorRelation(
+  libraryOwnerId: string,
+  actorId: string,
+  memberRole: 'admin' | 'member' | undefined,
+): ContributorRelation {
+  if (libraryOwnerId === actorId) return 'owner'
+  if (memberRole === 'admin') return 'admin'
+  if (memberRole === 'member') return 'member'
+  return 'none'
+}
+
+export interface ContributorLibrary {
+  type: string
+  userId: string
+  allowMemberUpload: boolean | null
+}
+
+/** Library-level content lane: may this actor add or curate content here? */
+export function canContributeToLibrary(
+  actorId: string,
+  library: ContributorLibrary,
+  relation: ContributorRelation,
+): boolean {
+  if (library.type === 'private') return library.userId === actorId
+  if (relation === 'owner' || relation === 'admin') return true
+  return relation === 'member' && library.allowMemberUpload === true
+}
+
+/**
+ * Version-level content right, on top of that lane: managers everywhere, a
+ * member only for the versions they uploaded. A null `link` is a library-scoped
+ * action (a new upload), which the lane alone covers.
+ */
+export function canContributeToVersion(
+  actorId: string,
+  library: ContributorLibrary,
+  relation: ContributorRelation,
+  link: { userId: string | null } | null,
+): boolean {
+  if (!canContributeToLibrary(actorId, library, relation)) return false
+  if (relation === 'owner' || relation === 'admin') return true
+  return link === null || link.userId === actorId
+}
+
+/**
+ * Every link in `links` this actor may change the content of. Pure filtering
+ * over rows the caller already loaded, so a catalog page costs no extra query.
+ */
+export function getMaintainableVersionLinkIds(
+  actorId: string,
+  library: ContributorLibrary,
+  relation: ContributorRelation,
+  links: Array<{ id: string; userId: string | null }>,
+): Set<string> {
+  const maintainable = new Set<string>()
+  for (const link of links) {
+    if (canContributeToVersion(actorId, library, relation, link)) maintainable.add(link.id)
+  }
+  return maintainable
+}
+
+export async function assertCanContribute(actorId: string, libraryId: string, versionLinkId?: string): Promise<void> {
+  const db = getDb()
+  const library = db.select().from(libraries).where(eq(libraries.id, libraryId)).get()
+  if (!library) throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  if (library.type === 'private' && library.userId !== actorId) {
+    throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  }
+  // Owners and admins never need the membership row, and an owner must not pay
+  // for it: the relation is resolved before any second query.
+  const memberRole = library.userId === actorId
+    ? undefined
+    : db.select({ role: libraryMemberships.role }).from(libraryMemberships)
+        .where(and(eq(libraryMemberships.libraryId, libraryId), eq(libraryMemberships.userId, actorId))).get()?.role
+  const relation = resolveContributorRelation(library.userId, actorId, memberRole)
+  const link = versionLinkId
+    ? db.select({ userId: libraryBookVersions.userId }).from(libraryBookVersions)
+        .where(and(eq(libraryBookVersions.id, versionLinkId), eq(libraryBookVersions.libraryId, libraryId))).get() ?? null
+    : null
+  if (canContributeToVersion(actorId, library, relation, link)) return
+  // One verdict, two refusals: a closed lane reads as "this library is not
+  // yours to curate", a member reaching someone else's version reads only as
+  // "that version is not yours".
+  throw new AppError(
+    'FORBIDDEN',
+    relation === 'member' && library.allowMemberUpload
+      ? 'Only the uploader can maintain this version'
+      : 'Only owners and admins can manage this library',
+  )
 }
 
 /**

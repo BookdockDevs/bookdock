@@ -38,6 +38,8 @@ export interface Library {
   trashAutoCleanDays?: number | null
   /** Trash capacity in bytes; 0/null = unlimited. Null for private libraries. */
   trashMaxBytes?: number | null
+  /** Shared-library member-upload switch; members may upload and maintain own versions. Null for private libraries. */
+  allowMemberUpload?: boolean | null
   createdAt: number
   updatedAt: number
 }
@@ -97,6 +99,8 @@ export const libraryUpdateSchema = z.object({
   trashEnabled: z.boolean().optional(),
   trashAutoCleanDays: z.union([z.literal(0), z.literal(7), z.literal(30)]).optional(),
   trashMaxBytes: z.union([z.literal(0), z.literal(1073741824), z.literal(2147483648), z.literal(5368709120)]).optional(),
+  /** Shared-library member-upload switch; private libraries reject it. */
+  allowMemberUpload: z.boolean().optional(),
 })
 
 export type LibraryUpdateReq = z.infer<typeof libraryUpdateSchema>
@@ -268,6 +272,20 @@ export interface CatalogVersion {
   /** Whether this version already has a B entry in the current user's private library. */
   collected?: boolean
   /**
+   * Whether this version was published from a book the caller still holds
+   * privately while the city hasn't moved past the publish base. Collecting
+   * it would only duplicate that book.
+   */
+  ownsSource?: boolean
+  /**
+   * Whether the caller may change this version's content (append, re-chapter,
+   * push, delete). Managers always can; a member only for the versions they
+   * uploaded while the library allows member uploads. Computed by the same
+   * predicate the write endpoints gate on, so an affordance never offers an
+   * action the server would refuse.
+   */
+  maintainable?: boolean
+  /**
    * Per-listing anonymous switch. Only takes effect with public visibility
    * and the instance guest switch; one library's value never opens another
    * library's copy of the same version.
@@ -284,6 +302,20 @@ export interface CatalogVersion {
 export interface CatalogBookTag {
   id: string
   name: string
+}
+
+/**
+ * Why a work is effectively hidden. `direct` is the work's own flag;
+ * `category`/`tag` come from hidden taxonomy. Priority is direct over
+ * category over tag, so one reason always wins for display.
+ */
+export type HiddenReason = 'direct' | 'category' | 'tag'
+
+export interface HiddenVia {
+  /** Nearest hidden ancestor category name, for `category` only. */
+  categoryName?: string
+  /** Hidden tag names carried by the work, for `tag` only. */
+  tagNames?: string[]
 }
 
 export interface CatalogBook {
@@ -309,6 +341,14 @@ export interface CatalogBook {
    * Badge on this, never on `hidden` alone. Members never receive such rows.
    */
   effectiveHidden: boolean
+  /**
+   * Which layer hides the work; null when visible. Priority is direct over
+   * category over tag so menus and details name one cause. Members never
+   * receive hidden rows, so this only ever reaches managers and vault owners.
+   */
+  hiddenReason: HiddenReason | null
+  /** Human-readable cause for `hiddenReason`; absent for direct hides. */
+  hiddenVia?: HiddenVia
   /** Shared-library home pin. Every version of this work shares one card. */
   pinnedAt: number | null
   /**
@@ -553,6 +593,16 @@ export const collectBookSchema = z.object({
 
 export type CollectBookReq = z.infer<typeof collectBookSchema>
 
+/**
+ * Push a private draft to its published city version. Omits to the
+ * publish-time base; an explicit source overrides it.
+ */
+export const pushVersionSchema = z.object({
+  sourceBookVersionId: z.string().min(1).max(128).optional(),
+})
+
+export type PushVersionReq = z.infer<typeof pushVersionSchema>
+
 export interface CollectBookRes {
   libraryBookId: string
   bookVersionId: string
@@ -602,21 +652,6 @@ export interface ForkLocalRes {
  * `hasUpdate` is true only while the source is readable and its latest
  * revision differs from the pin. Null for A/C rows.
  */
-export interface BookSourceStatus {
-  readable: boolean
-  pinnedRevisionId: string | null
-  latestRevisionId: string | null
-  latestRevisionNo: number | null
-  hasUpdate: boolean
-}
-
-/** Re-pin a private B to its source's latest revision. */
-export interface RepinRes {
-  pinnedRevisionId: string
-  revisionNo: number
-  alreadyUpToDate: boolean
-}
-
 // ------------------------------------------------------- Reading data
 
 /**

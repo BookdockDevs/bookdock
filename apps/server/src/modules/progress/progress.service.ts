@@ -80,7 +80,8 @@ export async function upsertProgress(userId: string, bookId: string, data: { cfi
     } else {
       db.insert(bookStates).values({
         userId, bookVersionId: bookId, readStatus: 'reading', percent: data.percent,
-        cfi: data.cfi ?? null, chapter: data.chapter ?? null, lastReadAt: now, updatedAt: now,
+        cfi: data.cfi ?? null, chapter: data.chapter ?? null,
+        lastReadAt: now, updatedAt: now,
       }).run()
     }
   }

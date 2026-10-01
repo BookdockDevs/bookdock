@@ -1,6 +1,7 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 
 import {
+  appendContentSchema,
   catalogBookUpdateSchema,
   batchOrganizeSchema,
   batchSelectionSchema,
@@ -9,6 +10,9 @@ import {
   catalogVersionMoveSchema,
   catalogVersionUpdateSchema,
   collectBookSchema,
+  pushVersionSchema,
+  reTocSchema,
+  tocPreviewSchema,
   categoryCreateSchema,
   categoryReorderSchema,
   categoryUpdateSchema,
@@ -67,8 +71,9 @@ import {
 } from './catalog.service'
 import { addToPrivateLibrary } from './collect.service'
 import { publishPrivateBook } from './publish.service'
-import { uploadCatalogBook } from '../books/books.service'
+import { appendCityVersionContent, getVersionTocState, previewCityAppend, previewCityToc, pushPrivateToVersion, reTocCityVersion, uploadCatalogBook } from '../books/books.service'
 import { AppError } from '../../middleware/error'
+import { decodeTextBuffer } from '../../formats/txt'
 
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { isTitleNormalizeEnabled } from '../settings/settings.service'
@@ -476,6 +481,93 @@ librariesRoutes.post('/:id/books/:bookId/versions/:versionLinkId/reset-metadata'
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const book = await resetCatalogVersionMetadata(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'))
   return c.json({ data: book })
+})
+
+librariesRoutes.post('/:id/books/:bookId/versions/:versionLinkId/push', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = pushVersionSchema.safeParse(await c.req.json().catch(() => null))
+  const revision = await pushPrivateToVersion(
+    user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'),
+    parsed.success ? parsed.data.sourceBookVersionId : undefined,
+  )
+  const book = await getCatalogBook(user.id, c.req.param('id'), c.req.param('bookId'))
+  return c.json({ data: { ...revision, book } })
+})
+
+async function parseCityAppendRequest(c: Context) {
+  const maxBytes = effectiveUploadMaxBytes()
+  const contentType = c.req.header('content-type') ?? ''
+  if (contentType.toLowerCase().includes('multipart/form-data')) {
+    const body = await c.req.parseBody()
+    const rawFile = body['file']
+    if (rawFile === undefined) throw new AppError('VALIDATION_ERROR', 'File or text is required')
+    if (!(rawFile instanceof File)) throw new AppError('VALIDATION_ERROR', 'File is invalid')
+    if (!rawFile.name.toLowerCase().endsWith('.txt')) throw new AppError('UNSUPPORTED_FORMAT', 'Append file must be a TXT file')
+    if (rawFile.size > maxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
+    const buffer = Buffer.from(await rawFile.arrayBuffer())
+    if (buffer.length > maxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
+    const options = appendContentSchema.pick({ startOffset: true }).safeParse({ startOffset: body['startOffset'] })
+    if (!options.success) throw new AppError('VALIDATION_ERROR', 'Invalid append start offset', options.error.flatten())
+    return { text: decodeTextBuffer(buffer), startOffset: options.data.startOffset }
+  }
+  const parsed = appendContentSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    throw new AppError('VALIDATION_ERROR', 'Invalid append content', parsed.error.flatten())
+  }
+  if (Buffer.byteLength(parsed.data.text, 'utf8') > maxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'Text too large')
+  return parsed.data
+}
+
+librariesRoutes.post('/:id/books/:bookId/versions/:versionLinkId/append-preview', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const { text, startOffset } = await parseCityAppendRequest(c)
+  const preview = await previewCityAppend(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'), text, startOffset)
+  return c.json({ data: preview })
+})
+
+librariesRoutes.post('/:id/books/:bookId/versions/:versionLinkId/append', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const { text, startOffset } = await parseCityAppendRequest(c)
+  const revision = await appendCityVersionContent(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'), text, startOffset)
+  const book = await getCatalogBook(user.id, c.req.param('id'), c.req.param('bookId'))
+  return c.json({ data: { ...revision, book } })
+})
+
+librariesRoutes.post('/:id/books/:bookId/versions/:versionLinkId/toc-preview', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const body = await c.req.json().catch(() => ({}))
+  const parsed = tocPreviewSchema.safeParse(body)
+  if (!parsed.success) {
+    throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
+  }
+  const preview = await previewCityToc(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'), parsed.data)
+  return c.json({ data: preview })
+})
+
+librariesRoutes.post('/:id/books/:bookId/versions/:versionLinkId/re-toc', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const body = await c.req.json().catch(() => ({}))
+  const parsed = reTocSchema.safeParse(body)
+  if (!parsed.success) {
+    throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
+  }
+  const revision = await reTocCityVersion(
+    user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'),
+    parsed.data.tocRuleId, parsed.data.customPatterns, parsed.data.excludedChapterIds,
+  )
+  const book = await getCatalogBook(user.id, c.req.param('id'), c.req.param('bookId'))
+  return c.json({ data: { ...revision, book } })
+})
+
+librariesRoutes.get('/:id/books/:bookId/versions/:versionLinkId/toc-state', async (c) => {
+  const user = c.get('user')
+  const state = await getVersionTocState(user?.id ?? null, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'))
+  return c.json({ data: state })
 })
 
 // -------------------------------------------------------------- Collect (7.x)

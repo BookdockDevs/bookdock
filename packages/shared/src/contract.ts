@@ -1,7 +1,7 @@
 import type { AccessTokenDuration, AccessTokenPermission } from './access-tokens'
 import type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
-import type { BookSourceInfo, LibraryVersionKind } from './library'
+import type { BookSourceInfo, HiddenReason, HiddenVia, LibraryVersionKind } from './library'
 import type { AnnotationStyle, AnnotationType, TocRulePattern, ReplacementMatchType, ReplacementScope, ViewSettings } from './domain'
 
 export interface ApiResponse<T> {
@@ -1233,6 +1233,20 @@ export interface BookListItem {
    * and content-editing affordances and offers "add to my library" instead.
    */
   collected?: boolean
+  /**
+   * Stage 5, detail responses only: true when the version was published from
+   * a book the caller still holds privately while the city hasn't moved past
+   * the publish base. The UI renders it exactly like an already collected
+   * version instead of offering a duplicate collect.
+   */
+  ownsSource?: boolean
+  /**
+   * The content grew since this account last opened the reader. Appending or
+   * re-chaptering moves every holder's pin at once, so the pin cannot say who
+   * has caught up — this compares the newest revision against the one the
+   * reader last saw. Detail responses only; the list never carries it.
+   */
+  hasUnreadUpdate?: boolean
   /** Work-level hide; private vault rows surface only with showHidden. */
   hidden?: boolean
   /**
@@ -1241,6 +1255,13 @@ export interface BookListItem {
    * taxonomy would surface in reveal mode with no mark.
    */
   effectiveHidden: boolean
+  /**
+   * Which layer hides the book; null when visible. Same priority as the
+   * catalog: direct over shelf/category over tag.
+   */
+  hiddenReason: HiddenReason | null
+  /** Human-readable cause for `hiddenReason`; absent for direct hides. */
+  hiddenVia?: HiddenVia
 }
 
 export interface BookContributor {
@@ -1310,9 +1331,39 @@ export interface ReaderBookSettings {
 }
 
 export interface BookDetailRes extends BookListItem {
+  /** Content revision resolved for this read; used for file validation and acknowledgment. */
+  revisionId?: string
   filePath: string
   meta: BookMeta
   readerSettings: ReaderBookSettings
+  /**
+   * Stage 5: city versions published from this private book, for the merged
+   * publish dialog. Empty for anything that was never a publish source.
+   * Detail-only; lists never carry it.
+   */
+  publishedTo?: PublishedLinkInfo[]
+}
+
+/** One city listing born from a private book: where it lives and whether it kept up. */
+export interface PublishedLinkInfo {
+  libraryId: string
+  libraryName: string | null
+  libraryBookId: string
+  versionLinkId: string
+  versionName: string
+  /** Library bytes equal the source's current bytes. */
+  inSync: boolean
+  /**
+   * The library's own content moved on after the publish snapshot. A push would
+   * overwrite it, so the server refuses one and the dialog offers no button.
+   */
+  cityMoved: boolean
+  /**
+   * This private book changed after the publish snapshot. With `cityMoved` it
+   * means both sides edited and no push can reconcile them, which is a different
+   * state to be in than a library that simply moved ahead of an untouched copy.
+   */
+  sourceMoved: boolean
 }
 
 export interface Chapter {

@@ -182,6 +182,7 @@ export type {
   BookMetadata,
   BookMeta,
   BookDetailRes,
+  PublishedLinkInfo,
   ReaderBookSettings,
   Chapter,
   ChapterListRes,
@@ -297,6 +298,7 @@ export {
   bookMetadataSchema,
   viewSettingsSchema,
   readerBookSettingsSchema,
+  readRevisionSchema,
   bookUpdateSchema,
   systemUpdateStartSchema,
 } from './schema'
@@ -318,6 +320,8 @@ export type {
   LibraryBook,
   LibraryBookVersion,
   BookVersion,
+  HiddenReason,
+  HiddenVia,
   CatalogBook,
   CatalogBookTag,
   CatalogVersion,
@@ -350,12 +354,11 @@ export type {
   CatalogVersionUpdateReq,
   CollectBookReq,
   CollectBookRes,
+  PushVersionReq,
   PublishPrivateBookReq,
   PublishPrivateBookRes,
   BookSourceInfo,
   ForkLocalRes,
-  BookSourceStatus,
-  RepinRes,
   BatchSelectionItem,
   BatchOrganizeReq,
 } from './library'
@@ -387,6 +390,7 @@ export {
   catalogVersionMoveSchema,
   catalogSimilarQuerySchema,
   collectBookSchema,
+  pushVersionSchema,
   publishPrivateBookSchema,
 } from './library'
 

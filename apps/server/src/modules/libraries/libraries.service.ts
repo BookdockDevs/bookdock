@@ -41,6 +41,9 @@ function toLibraryRes(row: typeof libraries.$inferSelect, isOwner?: boolean): Li
     trashEnabled: !shared ? undefined : (isOwner ? (row.trashEnabled ?? true) : null),
     trashAutoCleanDays: !shared ? undefined : (isOwner ? (row.trashAutoCleanDays ?? 30) : null),
     trashMaxBytes: !shared ? undefined : (isOwner ? (row.trashMaxBytes ?? 0) : null),
+    // Member upload is library policy like visibility: every reader of a
+    // shared row sees it (enforcement stays server-side). Private rows omit it.
+    allowMemberUpload: !shared ? undefined : row.allowMemberUpload,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -306,6 +309,7 @@ export async function createLibrary(identity: LibraryIdentity, data: LibraryCrea
     trashEnabled: null,
     trashAutoCleanDays: null,
     trashMaxBytes: null,
+    allowMemberUpload: false,
     createdAt: now,
     updatedAt: now,
   }
@@ -331,7 +335,7 @@ export async function updateLibrary(userId: string, libraryId: string, data: Lib
     data.name === undefined || data.description !== undefined
     || data.visibility !== undefined || data.accessPassword !== undefined
     || data.trashEnabled !== undefined || data.trashAutoCleanDays !== undefined
-    || data.trashMaxBytes !== undefined
+    || data.trashMaxBytes !== undefined || data.allowMemberUpload !== undefined
   )) {
     throw new AppError('VALIDATION_ERROR', 'Only the private library name can be changed')
   }
@@ -348,9 +352,10 @@ export async function updateLibrary(userId: string, libraryId: string, data: Lib
       patch.trashEnabled = data.trashEnabled
       if (!data.trashEnabled) trashDisabling = true
     }
+    if (data.allowMemberUpload !== undefined) patch.allowMemberUpload = data.allowMemberUpload
     if (data.trashAutoCleanDays !== undefined) patch.trashAutoCleanDays = data.trashAutoCleanDays
     if (data.trashMaxBytes !== undefined) patch.trashMaxBytes = data.trashMaxBytes
-  } else if (data.trashEnabled !== undefined || data.trashAutoCleanDays !== undefined || data.trashMaxBytes !== undefined) {
+  } else if (data.trashEnabled !== undefined || data.trashAutoCleanDays !== undefined || data.trashMaxBytes !== undefined || data.allowMemberUpload !== undefined) {
     throw new AppError('VALIDATION_ERROR', 'Private libraries have no trash settings')
   }
   if (data.visibility !== undefined) {

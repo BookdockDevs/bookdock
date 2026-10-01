@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { Readable } from 'node:stream'
@@ -12,10 +12,13 @@ import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
-import { registerParser } from '../../formats/registry'
+import { registerParser, getParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
-import { uploadCatalogBook } from '../books/books.service'
+import { appendCityVersionContent, appendTxtBookContent, getVersionTocState, previewCityToc, pushPrivateToVersion, reTocCityVersion, uploadBook, uploadCatalogBook } from '../books/books.service'
+import { publishPrivateBook } from './publish.service'
+import { updateLibrary } from './libraries.service'
 import { createLibrary } from './libraries.service'
+import { ensurePrivateLibrary } from './library-access'
 import { listLibraryCategories } from '../shelves/shelves.service'
 import { listLibraryTags } from '../tags/tags.service'
 import { addToPrivateLibrary } from './collect.service'
@@ -914,6 +917,341 @@ describe('shared library catalog', () => {
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
   })
 
+  it('appends a version revision instead of overwriting when the catalog parse differs', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('s.txt', '第一章\n甲'), { title: 'Twin' })
+    const stored = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all()
+    expect(stored).toHaveLength(1)
+    db.update(schema.contentRevisions)
+      .set({ meta: { ...((stored[0]!.meta ?? {}) as Record<string, unknown>), bookmeta: { publisher: 'Bogus' } } })
+      .where(eq(schema.contentRevisions.id, stored[0]!.id)).run()
+    registerParser({
+      match: (fileName) => fileName.toLowerCase().endsWith('.epub'),
+      parse: async () => ({
+        meta: { title: 'Parsed', bookmeta: { publisher: 'Parsed Press' } },
+        chapters: [],
+      }),
+    })
+    await resetCatalogVersionMetadata(ownerId, libraryId, created.libraryBookId, created.versionLinkId!)
+    const rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all()
+      .sort((a, b) => a.revisionNo - b.revisionNo)
+    expect(rows).toHaveLength(2)
+    expect(rows[1]!.blobKey).toBe(rows[0]!.blobKey)
+    expect((rows[0]!.meta as Record<string, unknown>).bookmeta).toMatchObject({ publisher: 'Bogus' })
+    expect((rows[1]!.meta as Record<string, unknown>).bookmeta).toMatchObject({ publisher: 'Parsed Press' })
+  })
+
+  it('creates no version revision when the catalog parse is identical', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('t.txt', '第一章\n甲'), { title: 'Twin Same' })
+    const stored = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all().at(0)!
+    // Echo the winning parser: store exactly what the reset parse returns, so
+    // the reset is a guaranteed no-op regardless of parser registration order.
+    const parser = getParser(stored.blobKey, '')!
+    const parsed = await parser.parse(await storage.getStorage().get(stored.blobKey))
+    const parsedBookmeta = parsed.meta.bookmeta ?? {}
+    db.update(schema.contentRevisions)
+      .set({ meta: { ...((stored.meta ?? {}) as Record<string, unknown>), bookmeta: parsedBookmeta } })
+      .where(eq(schema.contentRevisions.id, stored.id)).run()
+    await resetCatalogVersionMetadata(ownerId, libraryId, created.libraryBookId, created.versionLinkId!)
+    const rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all()
+    expect(rows).toHaveLength(1)
+  })
+
+  it('pushes the linked private draft to its city version', async () => {
+    const draft = await uploadBook(ownerId, txtFile('draft.txt', '第一章\n草稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: draft.book.id })
+    await appendTxtBookContent(ownerId, draft.book.id, '第二章\n续写')
+
+    const result = await pushPrivateToVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId)
+    expect(result).toMatchObject({ revisionNo: 2, alreadyUpToDate: false, diverged: false })
+    const rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, pub.bookVersionId)).all()
+      .sort((a, b) => a.revisionNo - b.revisionNo)
+    const draftLatest = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, draft.book.id))
+      .orderBy(desc(schema.contentRevisions.revisionNo)).get()!
+    expect(rows).toHaveLength(2)
+    expect(rows[1]!.blobKey).toBe(draftLatest.blobKey)
+    // The base advances with the push, so the next identical push is a no-op.
+    const again = await pushPrivateToVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId)
+    expect(again).toMatchObject({ revisionNo: 2, alreadyUpToDate: true, diverged: false })
+  })
+
+  it('refuses a push once the library moved on, leaving both sides intact', async () => {
+    // Only a source that leads alone may push. With both sides edited there is
+    // no honest merge, and the pin follows the newest revision, so pushing
+    // would discard the library's content with no way back.
+    const draft = await uploadBook(ownerId, txtFile('draft.txt', '第一章\n草稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: draft.book.id })
+    await appendCityVersionContent(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId, '第二章\n馆主修订')
+    const latestInLibrary = () => db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, pub.bookVersionId))
+      .orderBy(desc(schema.contentRevisions.revisionNo)).get()!
+    const libraryBlob = latestInLibrary().blobKey
+    const revisionsBefore = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, pub.bookVersionId)).all().length
+
+    await appendTxtBookContent(ownerId, draft.book.id, '第二章\n私库续写')
+    await expect(pushPrivateToVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+
+    // Nothing was written: no revision appended, and the library still serves
+    // exactly what it served before.
+    expect(db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, pub.bookVersionId)).all()).toHaveLength(revisionsBefore)
+    expect(latestInLibrary().blobKey).toBe(libraryBlob)
+  })
+
+  it('refuses a push that would change the target version format', async () => {
+    // A version's declared format is part of its content identity and readers
+    // branch on it, so a push may only refresh a same-format version — and one
+    // work can legitimately hold both formats side by side.
+    const draft = await uploadBook(ownerId, txtFile('draft.txt', '第一章\n原稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: draft.book.id })
+    const epubDraft = await uploadBook(ownerId, new File([new Uint8Array([80, 75, 3, 4])], 'other.epub', { type: 'application/epub+zip' }))
+
+    await expect(pushPrivateToVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId, epubDraft.book.id))
+      .rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
+
+    // The same-format push still works, and nothing was written by the refusal.
+    const sameFormat = await pushPrivateToVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId, draft.book.id)
+    expect(sameFormat.alreadyUpToDate).toBe(true)
+    expect(db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, pub.bookVersionId)).all()).toHaveLength(1)
+  })
+
+  it('refuses push from non-managers, shared sources and trashed works', async () => {
+    const draft = await uploadBook(ownerId, txtFile('draft.txt', '第一章\n草稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: draft.book.id })
+    await expect(pushPrivateToVersion(memberId, libraryId, pub.libraryBookId, pub.versionLinkId))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await deleteCatalogBook(ownerId, libraryId, pub.libraryBookId)
+    await expect(pushPrivateToVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId))
+      .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
+  })
+
+  it('lets members upload and maintain own versions once the library opens uploads', async () => {
+    await expect(uploadCatalogBook(libraryId, memberId, txtFile('m.txt', '第一章\n成员')))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await updateLibrary(ownerId, libraryId, { allowMemberUpload: true })
+
+    const mine = await uploadCatalogBook(libraryId, memberId, txtFile('m.txt', '第一章\n成员'), { title: 'Mine' })
+    const other = await uploadCatalogBook(libraryId, ownerId, txtFile('o.txt', '第一章\n馆主'), { title: 'Theirs' })
+    // Own version: content update + delete allowed.
+    const updated = await appendCityVersionContent(memberId, libraryId, mine.libraryBookId, mine.versionLinkId!, '第二章\n续')
+    expect(updated.revisionNo).toBe(2)
+    await deleteCatalogVersion(memberId, libraryId, mine.libraryBookId, mine.versionLinkId!)
+    // Someone else's version: still forbidden.
+    await expect(appendCityVersionContent(memberId, libraryId, other.libraryBookId, other.versionLinkId!, '第一章\n改'))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(deleteCatalogVersion(memberId, libraryId, other.libraryBookId, other.versionLinkId!))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    // Switch off again: uploads close for members, managers unaffected.
+    await updateLibrary(ownerId, libraryId, { allowMemberUpload: false })
+    await expect(uploadCatalogBook(libraryId, memberId, txtFile('m2.txt', '第一章\n又来')))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    const owners = await uploadCatalogBook(libraryId, ownerId, txtFile('o2.txt', '第一章\n馆主又来'))
+    expect(owners.duplicated).toBe(false)
+  })
+
+  it('keeps the member-upload switch owner-only and shared-only', async () => {
+    await expect(updateLibrary(memberId, libraryId, { allowMemberUpload: true }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    const privateId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: privateId, userId: ownerId, type: 'private', name: 'Mine',
+      description: '', visibility: null, createdAt: 1, updatedAt: 1,
+    }).run()
+    await expect(updateLibrary(ownerId, privateId, { allowMemberUpload: true }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    // Outsiders stay out even with the switch on.
+    await updateLibrary(ownerId, libraryId, { allowMemberUpload: true })
+    await expect(uploadCatalogBook(libraryId, outsiderId, txtFile('s.txt', '第一章\n外人')))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
+  it('appends city content as a new revision and refreshes holder progress', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('c.txt', '第一章\n甲'), { title: 'City Serial' })
+    // Owner + a plain reader hold positions on rev 1.
+    const ownerKey = `progress/${ownerId}/${created.bookVersionId}.json`
+    const memberKey = `progress/${memberId}/${created.bookVersionId}.json`
+    files.set(ownerKey, Buffer.from(JSON.stringify({ cfi: 'chapter-0001.xhtml#epubcfi(/6/1)', chapter: '第一章', percent: 50, updatedAt: 1 })))
+    files.set(memberKey, Buffer.from(JSON.stringify({ cfi: 'chapter-0001.xhtml#epubcfi(/6/1)', chapter: '第一章', percent: 30, updatedAt: 1 })))
+    db.insert(schema.bookStates).values([
+      { userId: ownerId, bookVersionId: created.bookVersionId, percent: 50, updatedAt: 1 },
+      { userId: memberId, bookVersionId: created.bookVersionId, percent: 30, updatedAt: 1 },
+    ]).run()
+
+    const result = await appendCityVersionContent(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, '第二章\n乙')
+    expect(result.revisionNo).toBe(2)
+    const rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all()
+      .sort((a, b) => a.revisionNo - b.revisionNo)
+    expect(rows).toHaveLength(2)
+    expect(rows[1]!.blobKey).not.toBe(rows[0]!.blobKey)
+    // Actor progress rescales; the other holder keeps percent, loses the stale CFI.
+    expect(JSON.parse(files.get(ownerKey)!.toString())).toMatchObject({ chapter: null })
+    const memberProgress = JSON.parse(files.get(memberKey)!.toString())
+    expect(memberProgress.cfi).toBeNull()
+    expect(memberProgress.percent).toBe(30)
+  })
+
+  it('moves every holder onto the new content and drops their stale position', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('p.txt', '第一章\n甲'), { title: 'Pinned Serial' })
+    // A content write moves every pin in the same transaction as the revision,
+    // so a collected member is reading the new chapter map on their next open:
+    // their CFI describes the old one and has to go, exactly like the outsider's
+    // who was already following the latest.
+    ensurePrivateLibrary(db, memberId)
+    ensurePrivateLibrary(db, outsiderId)
+    await addToPrivateLibrary(memberId, libraryId, created.versionLinkId!)
+    const rev1 = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all().at(0)!
+    const memberKey = `progress/${memberId}/${created.bookVersionId}.json`
+    const plainKey = `progress/${outsiderId}/${created.bookVersionId}.json`
+    const saved = { cfi: 'chapter-0001.xhtml#epubcfi(/6/1)', chapter: '第一章', percent: 30, updatedAt: 1 }
+    files.set(memberKey, Buffer.from(JSON.stringify(saved)))
+    files.set(plainKey, Buffer.from(JSON.stringify(saved)))
+    // Collecting already creates the member's state row; the outsider reads the
+    // library directly and is the only one needing one seeded.
+    db.insert(schema.bookStates)
+      .values({ userId: outsiderId, bookVersionId: created.bookVersionId, percent: 30, updatedAt: 1 })
+      .onConflictDoNothing().run()
+
+    const reToc = await reTocCityVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, null, [
+      { level: 1, regex: '^第(.+)$', replacement: '$1' },
+    ])
+    expect(reToc.chaptersChanged).toBe(true)
+    const rev2 = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId))
+      .orderBy(desc(schema.contentRevisions.revisionNo)).all().at(0)!
+    expect(rev2.id).not.toBe(rev1.id)
+    const pin = db.select().from(schema.libraryBookVersions)
+      .where(and(
+        eq(schema.libraryBookVersions.userId, memberId),
+        eq(schema.libraryBookVersions.bookVersionId, created.bookVersionId),
+      )).get()!
+    expect(pin.pinnedRevisionId).toBe(rev2.id)
+
+    // Percent describes the right book and is kept; the exact position is
+    // re-derived from the book fraction by the reader.
+    for (const key of [memberKey, plainKey]) {
+      expect(JSON.parse(files.get(key)!.toString())).toMatchObject({ cfi: null, chapter: null, percent: 30 })
+    }
+  })
+
+  it('marks only a version the caller may actually maintain', async () => {
+    await updateLibrary(ownerId, libraryId, { allowMemberUpload: true })
+    const mine = await uploadCatalogBook(libraryId, memberId, txtFile('mine.txt', '第一章\n我的'), { title: 'Mine' })
+    const theirs = await uploadCatalogBook(libraryId, ownerId, txtFile('theirs.txt', '第一章\n馆主'), { title: 'Theirs' })
+    // The contributor may maintain their own upload and nobody else's.
+    const asMember = (await getCatalogBook(memberId, libraryId, mine.libraryBookId)).versions
+    expect(asMember.find((v) => v.id === mine.versionLinkId)!.maintainable).toBe(true)
+    const others = (await getCatalogBook(memberId, libraryId, theirs.libraryBookId)).versions
+    expect(others.find((v) => v.id === theirs.versionLinkId)!.maintainable).toBe(false)
+    // A manager maintains everything in their own library.
+    const asOwner = await getCatalogBook(ownerId, libraryId, theirs.libraryBookId)
+    expect(asOwner.versions.find((v) => v.id === theirs.versionLinkId)!.maintainable).toBe(true)
+    // The flag agrees with the endpoint: what it says false is what gets refused.
+    await expect(appendCityVersionContent(memberId, libraryId, theirs.libraryBookId, theirs.versionLinkId!, '第二章\n改'))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
+  it('refuses content writes to a work sitting in the library trash', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('t.txt', '第一章\n甲'), { title: 'Trashed Serial' })
+    await deleteCatalogBook(ownerId, libraryId, created.libraryBookId)
+    // push already refused this; append and re-split must refuse the same way,
+    // or a deleted work keeps growing revisions behind the owner's back.
+    await expect(pushPrivateToVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!))
+      .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
+    await expect(appendCityVersionContent(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, '第二章\n乙'))
+      .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
+    await expect(previewCityToc(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, {}))
+      .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
+    await expect(reTocCityVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!))
+      .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
+  })
+
+  it('re-splits a city version the same way whoever maintains it', async () => {
+    // The publisher pins one of their own named rules; a different maintainer
+    // then re-runs the re-split. Resolving that rule through the second account
+    // would re-chapter the shared book with their rules and write their rule id
+    // into content every member reads.
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('s.txt', '序言正文\n\n第一章\n甲\n\n第二章\n乙'), { title: 'Shared Rules' })
+    const publisherRule = createId('tr')
+    db.insert(schema.tocRules).values({
+      id: publisherRule, userId: ownerId, name: '出版方规则',
+      patterns: [{ level: 1, regex: '^第(.+)章?$' }], enabled: 1, sortOrder: 0, createdAt: 1, updatedAt: 1,
+    }).run()
+    await reTocCityVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, publisherRule)
+    const afterPublisher = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId))
+      .orderBy(desc(schema.contentRevisions.revisionNo)).get()!
+    const publisherChapters = ((afterPublisher.meta as Record<string, unknown>).chapters as Array<{ title: string }>).map((c) => c.title)
+
+    // A second manager with entirely different rules touches the same version.
+    const otherRule = createId('tr')
+    db.insert(schema.tocRules).values({
+      id: otherRule, userId: adminId, name: '另一套规则',
+      patterns: [{ level: 1, regex: '^第(\\S)章$', replacement: '$1' }], enabled: 1, sortOrder: 0, createdAt: 1, updatedAt: 1,
+    }).run()
+    const byOther = await reTocCityVersion(adminId, libraryId, created.libraryBookId, created.versionLinkId!)
+    const latest = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId))
+      .orderBy(desc(schema.contentRevisions.revisionNo)).get()!
+    const meta = latest.meta as Record<string, unknown>
+    // The split is unchanged, so no new revision is written at all.
+    expect(latest.id).toBe(afterPublisher.id)
+    expect(byOther.chaptersChanged).toBe(false)
+    expect(meta.tocRuleId).toBe('custom')
+    expect(JSON.stringify(meta.customTocPatterns)).toBe(JSON.stringify([{ level: 1, regex: '^第(.+)章?$' }]))
+    // No other account's rule id leaks into shared metadata.
+    expect(JSON.stringify(meta)).not.toContain(otherRule)
+    expect(((meta.chapters as Array<{ title: string }>).map((c) => c.title))).toEqual(publisherChapters)
+  })
+
+  it('refuses city appends from non-maintainers and non-txt versions', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('c.txt', '第一章\n甲'), { title: 'Guarded Serial' })
+    await expect(appendCityVersionContent(memberId, libraryId, created.libraryBookId, created.versionLinkId!, '第二章\n乙'))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    // Member upload lane: own versions are maintainable.
+    await updateLibrary(ownerId, libraryId, { allowMemberUpload: true })
+    const mine = await uploadCatalogBook(libraryId, memberId, txtFile('m.txt', '第一章\n我的'), { title: 'Mine' })
+    const result = await appendCityVersionContent(memberId, libraryId, mine.libraryBookId, mine.versionLinkId!, '第二章\n续')
+    expect(result.revisionNo).toBe(2)
+  })
+
+  it('re-splits city chapters with the stage-1 write discipline', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('c.txt', '序言\n\n=== 第一章\n\n正文一'), { title: 'City ReToc' })
+    // A rule that moves boundaries appends a revision reusing nothing new.
+    const changed = await reTocCityVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, null, [
+      { level: 1, regex: '^=== (.+)$', replacement: '$1' },
+    ])
+    expect(changed.chaptersChanged).toBe(true)
+    let rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all()
+    expect(rows).toHaveLength(2)
+    // Same split again: no revision, rule selection persists.
+    const same = await reTocCityVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, null, [
+      { level: 1, regex: '^=== (.+)$', replacement: '$1' },
+    ])
+    expect(same.chaptersChanged).toBe(false)
+    rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all()
+    expect(rows).toHaveLength(2)
+    // Previews and toc-state read through the same derivation.
+    const preview = await previewCityToc(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, {})
+    expect(preview.totalChapters).toBeGreaterThan(0)
+    const state = await getVersionTocState(ownerId, libraryId, created.libraryBookId, created.versionLinkId!)
+    expect(state.chapters.length).toBeGreaterThan(0)
+    // Members without a lane ticket are refused.
+    await expect(reTocCityVersion(memberId, libraryId, created.libraryBookId, created.versionLinkId!))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
   it('leads with the default display version instead of the oldest upload', async () => {
     const first = await uploadCatalogBook(libraryId, ownerId, txtFile('old.txt', '第一章\n甲'), { title: 'Editions' })
     const second = await uploadCatalogBook(libraryId, ownerId, txtFile('new.txt', '第一章\n乙'), {
@@ -985,8 +1323,17 @@ describe('shared library catalog', () => {
       await expect(getCatalogBook(memberId, libraryId, created.libraryBookId))
         .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
     }
+    // The cause names the exact layer: the nearest hidden ancestor for the
+    // subtree child, the tag name for the tagged work.
+    expect((await getCatalogBook(ownerId, libraryId, inHiddenChild.libraryBookId)).hiddenReason).toBe('category')
+    expect((await getCatalogBook(ownerId, libraryId, inHiddenChild.libraryBookId)).hiddenVia).toEqual({ categoryName: 'Vault' })
+    expect((await getCatalogBook(ownerId, libraryId, taggedSecret.libraryBookId)).hiddenReason).toBe('tag')
+    expect((await getCatalogBook(ownerId, libraryId, taggedSecret.libraryBookId)).hiddenVia).toEqual({ tagNames: ['Secret'] })
     expect((await listCatalogBooks(ownerId, libraryId)).items.find((b) => b.title === 'InHiddenChild')?.effectiveHidden).toBe(true)
+    expect((await listCatalogBooks(ownerId, libraryId)).items.find((b) => b.title === 'InHiddenChild')?.hiddenReason).toBe('category')
+    expect((await listCatalogBooks(ownerId, libraryId)).items.find((b) => b.title === 'TaggedSecret')?.hiddenVia).toEqual({ tagNames: ['Secret'] })
     expect((await listCatalogBooks(ownerId, libraryId)).items.find((b) => b.title === 'Plain')?.effectiveHidden).toBe(false)
+    expect((await listCatalogBooks(ownerId, libraryId)).items.find((b) => b.title === 'Plain')?.hiddenReason).toBeNull()
   })
 
   it('browses by search and category and pages the catalog', async () => {    const categoryId = createId('cat')

@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql, type SQL, typ
 
 import { bookVersions, contentRevisions, libraryBookTags, libraryBooks, libraryBookVersions, libraryCategories, libraryTags } from '../../db/schema'
 import type { getDb } from '../../db/client'
+import type { HiddenReason, HiddenVia } from '@bookdock/shared'
 
 /**
  * Query dimensions a library's book list can be filtered and ordered by (0.4.0).
@@ -88,7 +89,15 @@ export function tagFilter(tagId: string, libraryId: string): SQL | undefined {
  */
 export interface LibraryHiddenTaxonomy {
   hiddenCategoryIds: string[]
+  /** Only rows flagged hidden themselves, without inherited descendants. */
+  directHiddenCategoryIds: string[]
   hiddenTagIds: string[]
+  /** Every category's display name, for naming the hiding ancestor. */
+  categoryNames: Map<string, string>
+  /** Every category's parent, for walking a work's ancestry upward. */
+  categoryParents: Map<string, string | null>
+  /** Hidden tags' display names, for naming the hiding tags. */
+  hiddenTagNames: Map<string, string>
 }
 
 export function loadLibraryHiddenTaxonomy(
@@ -99,9 +108,14 @@ export function loadLibraryHiddenTaxonomy(
     id: libraryCategories.id,
     parentId: libraryCategories.parentId,
     hidden: libraryCategories.hidden,
+    name: libraryCategories.name,
   }).from(libraryCategories).where(eq(libraryCategories.libraryId, libraryId)).all()
   const childrenByParent = new Map<string, string[]>()
+  const categoryNames = new Map<string, string>()
+  const categoryParents = new Map<string, string | null>()
   for (const category of categories) {
+    categoryNames.set(category.id, category.name)
+    categoryParents.set(category.id, category.parentId)
     if (!category.parentId) continue
     const siblings = childrenByParent.get(category.parentId) ?? []
     siblings.push(category.id)
@@ -118,9 +132,73 @@ export function loadLibraryHiddenTaxonomy(
       queue.push(child)
     }
   }
-  const tags = db.select({ id: libraryTags.id }).from(libraryTags)
+  const tags = db.select({ id: libraryTags.id, name: libraryTags.name }).from(libraryTags)
     .where(and(eq(libraryTags.libraryId, libraryId), eq(libraryTags.hidden, true))).all()
-  return { hiddenCategoryIds: [...closure], hiddenTagIds: tags.map((tag) => tag.id) }
+  return {
+    hiddenCategoryIds: [...closure],
+    directHiddenCategoryIds: categories.filter((category) => category.hidden).map((category) => category.id),
+    hiddenTagIds: tags.map((tag) => tag.id),
+    categoryNames,
+    categoryParents,
+    hiddenTagNames: new Map(tags.map((tag) => [tag.id, tag.name])),
+  }
+}
+
+/** Which layer hides a work, with the names the UI needs to say so. */
+export interface WorkHiddenDetail {
+  reason: HiddenReason | null
+  via?: HiddenVia
+}
+
+/**
+ * Pure classification over a preloaded taxonomy: no queries, so list paths
+ * call it per row after one taxonomy load. Priority is direct over category
+ * over tag, so a work hidden two ways still names one cause. The category
+ * name is the nearest hidden ancestor, which is where the owner must unhide.
+ */
+export function classifyWorkHidden(
+  work: { hidden: boolean; categoryId: string | null },
+  taxonomy: LibraryHiddenTaxonomy,
+  workTagIds: string[] = [],
+): WorkHiddenDetail {
+  if (work.hidden) return { reason: 'direct' }
+  // Walk the ancestry for the nearest directly-hidden category: descendants
+  // inherit the hide but only the flagged ancestor names the cause.
+  const seen = new Set<string>()
+  let current: string | null | undefined = work.categoryId
+  while (current && !seen.has(current)) {
+    seen.add(current)
+    if (taxonomy.directHiddenCategoryIds.includes(current)) {
+      return { reason: 'category', via: { categoryName: taxonomy.categoryNames.get(current) } }
+    }
+    current = taxonomy.categoryParents.get(current) ?? null
+  }
+  const hitNames = workTagIds.flatMap((id) => {
+    const name = taxonomy.hiddenTagNames.get(id)
+    return name === undefined ? [] : [name]
+  })
+  if (hitNames.length > 0) return { reason: 'tag', via: { tagNames: hitNames } }
+  return { reason: null }
+}
+
+/**
+ * Single-work detail for detail/read gates that already hold the work row.
+ * Loads the library taxonomy once per call; libraries are small and the
+ * result is not cached across requests.
+ */
+export function getWorkHiddenDetail(
+  db: ReturnType<typeof getDb>,
+  libraryId: string,
+  work: { id: string; categoryId: string | null; hidden: boolean },
+): WorkHiddenDetail {
+  if (work.hidden) return { reason: 'direct' }
+  const taxonomy = loadLibraryHiddenTaxonomy(db, libraryId)
+  const tagIds = taxonomy.hiddenTagIds.length === 0 ? [] : db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
+    .where(and(
+      eq(libraryBookTags.libraryBookId, work.id),
+      inArray(libraryBookTags.tagId, taxonomy.hiddenTagIds),
+    )).all().map((row) => row.tagId)
+  return classifyWorkHidden(work, taxonomy, tagIds)
 }
 
 /**
@@ -175,16 +253,7 @@ export function isWorkEffectivelyHidden(
   libraryId: string,
   work: { id: string; categoryId: string | null; hidden: boolean },
 ): boolean {
-  if (work.hidden) return true
-  const taxonomy = loadLibraryHiddenTaxonomy(db, libraryId)
-  if (work.categoryId && taxonomy.hiddenCategoryIds.includes(work.categoryId)) return true
-  if (taxonomy.hiddenTagIds.length === 0) return false
-  const tagged = db.select({ id: libraryBookTags.tagId }).from(libraryBookTags)
-    .where(and(
-      eq(libraryBookTags.libraryBookId, work.id),
-      inArray(libraryBookTags.tagId, taxonomy.hiddenTagIds),
-    )).get()
-  return !!tagged
+  return getWorkHiddenDetail(db, libraryId, work).reason !== null
 }
 
 /**

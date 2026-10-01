@@ -2,6 +2,9 @@ import { and, desc, eq, or } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import {
+  aiBookIndexes,
+  aiChunkEmbeddings,
+  aiChunks,
   aiThreads,
   blobs,
   bookmarks,
@@ -99,6 +102,12 @@ export async function forkLocalBook(userId: string, bookVersionId: string): Prom
   const newBookVersionId = createId('book')
 
   db.transaction((tx) => {
+    // Re-check inside the transaction: two concurrent forks serialize here,
+    // so the loser sees the already-rewired link instead of forking twice.
+    const freshLink = tx.select().from(libraryBookVersions).where(eq(libraryBookVersions.id, link.id)).get()
+    if (!freshLink || freshLink.kind !== 'shared') {
+      throw new AppError('FORBIDDEN', 'Only collected books can be forked to a local copy')
+    }
     tx.insert(bookVersions).values({
       id: newBookVersionId,
       format: sourceVersion.format,
@@ -160,6 +169,15 @@ export async function forkLocalBook(userId: string, bookVersionId: string): Prom
         eq(aiThreads.userId, userId),
         or(eq(aiThreads.bookId, bookVersionId), eq(aiThreads.bookVersionId, bookVersionId)),
       )).run()
+    // The retrieval index is content-derived and the fork reuses the exact
+    // bytes, so rebind it instead of orphaning it; the existing sourceVersion
+    // check still flags drift for an explicit rebuild.
+    tx.update(aiBookIndexes).set({ bookId: newBookVersionId, bookVersionId: newBookVersionId })
+      .where(and(eq(aiBookIndexes.userId, userId), eq(aiBookIndexes.bookId, bookVersionId))).run()
+    tx.update(aiChunks).set({ bookId: newBookVersionId, bookVersionId: newBookVersionId })
+      .where(and(eq(aiChunks.userId, userId), eq(aiChunks.bookId, bookVersionId))).run()
+    tx.update(aiChunkEmbeddings).set({ bookId: newBookVersionId, bookVersionId: newBookVersionId })
+      .where(and(eq(aiChunkEmbeddings.userId, userId), eq(aiChunkEmbeddings.bookId, bookVersionId))).run()
     tx.update(settings).set({ key: `reader.book:${newBookVersionId}` })
       .where(and(eq(settings.userId, userId), eq(settings.key, `reader.book:${bookVersionId}`))).run()
   })

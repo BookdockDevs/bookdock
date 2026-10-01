@@ -170,6 +170,11 @@ export async function publishPrivateBook(
       bookVersionId: newBookVersionId,
       kind: 'personal',
       status: 'published',
+      userId: actorId,
+      // Source base for push/collect-dedup decisions: the private version and
+      // revision this snapshot was taken from. Plain text, survives deletion.
+      sourceBaseVersionId: opts.bookId,
+      sourceBaseRevisionId: sourceRevision.id,
       createdAt: now,
       updatedAt: now,
     }).run()

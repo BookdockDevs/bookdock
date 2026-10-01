@@ -209,7 +209,10 @@ function bdExploreLoginRows(rows) {
   // No clickable shortcut: the login bridge sets its cookie in Legado's own
   // WebView, so opening it in an external browser would never reach the
   // CookieStore this source reads from.
-  bdExploreEntry(rows, "请在书源列表中选中书坞后点登录，登录后下拉刷新本页", "", 1);
+  // Both actions live in the popup that a long press on the source row opens;
+  // the discovery list has no swipe-refresh container, so naming a pull-down
+  // gesture here would send the reader down a path that does nothing.
+  bdExploreEntry(rows, "请长按书源名「书坞」，在弹出菜单中点登录，登录后再次长按点刷新", "", 1);
 }
 
 function bdExploreState(ctx) {

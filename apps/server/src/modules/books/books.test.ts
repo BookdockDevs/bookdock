@@ -55,6 +55,7 @@ import {
 import { getReaderBookSettings, updateReaderBookSettings } from './reader-settings.service'
 import { getLegadoToc } from './legado.service'
 import { createShelf, updateShelf } from '../shelves/shelves.service'
+import { createTag, updateTag } from '../tags/tags.service'
 import { createTocRule } from '../toc-rules/toc-rules.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -602,6 +603,17 @@ describe('POST /api/v1/books upload membership', () => {
     return app
   }
 
+  it('serves the book detail route, including its enrichments', async () => {
+    // GET /:id is the app's highest-traffic read and it carries two
+    // service-level enrichments (ownsSource, publishedTo) that no service test
+    // exercises: a missing import here would 500 the detail of every book.
+    const { book } = await uploadBook(ownerId, new File(['detail body'], 'd.txt', { type: 'text/plain' }))
+    const response = await createUploadApp().request(`/api/v1/books/${book.id}`)
+    expect(response.status).toBe(200)
+    const payload = (await response.json()).data as { id: string }
+    expect(payload.id).toBe(book.id)
+  })
+
   it('assigns multipart upload membership before returning the new book', async () => {
     const body = new FormData()
     body.append('file', new File(['book content'], 'book.txt', { type: 'text/plain' }))
@@ -799,8 +811,33 @@ describe('private vault (hidden works)', () => {
     const row = revealed.data.find((b) => b.id === shelved.id)
     expect(row?.hidden).toBe(false)
     expect(row?.effectiveHidden).toBe(true)
+    expect(row?.hiddenReason).toBe('category')
+    expect(row?.hiddenVia).toEqual({ categoryName: 'Vault' })
     // Detail agrees with the list.
-    expect((await getActiveBook(ownerId, shelved.id, { showHidden: true })).effectiveHidden).toBe(true)
+    const detail = await getActiveBook(ownerId, shelved.id, { showHidden: true })
+    expect(detail.effectiveHidden).toBe(true)
+    expect(detail.hiddenReason).toBe('category')
+  })
+
+  it('names the hiding tag and prefers direct over category over tag', async () => {
+    const tag = await createTag(ownerId, 'Secret')
+    const tagged = seedBook(db, ownerId, { title: 'Tagged' })
+    const taggedWork = libraryBookOf(db, tagged.id)!
+    db.insert(schema.libraryBookTags).values({ libraryBookId: taggedWork.id, tagId: tag.id }).run()
+    await updateTag(ownerId, tag.id, { hidden: true })
+
+    const revealed = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, true)
+    const row = revealed.data.find((b) => b.id === tagged.id)
+    expect(row?.effectiveHidden).toBe(true)
+    expect(row?.hiddenReason).toBe('tag')
+    expect(row?.hiddenVia).toEqual({ tagNames: ['Secret'] })
+
+    // Priority: a directly hidden work reports direct even under hidden taxonomy.
+    await updateBook(ownerId, tagged.id, { hidden: true })
+    const direct = (await listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, true))
+      .data.find((b) => b.id === tagged.id)
+    expect(direct?.hiddenReason).toBe('direct')
+    expect(direct?.hiddenVia).toBeUndefined()
   })
 })
 
@@ -2258,6 +2295,53 @@ describe('reTocBook', () => {
     const switched = await getActiveBook(ownerId, book.id)
     expect(switched.meta.tocRuleId).toBe(globalRule.id)
     expect(switched.meta.customTocPatterns).toBeUndefined()
+  })
+
+  it('appends a new revision reusing the blob when same-byte re-split changes boundaries', async () => {
+    const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
+    const rule = createTocRule(ownerId, {
+      name: 'custom',
+      patterns: [{ level: 1, regex: '^第[一二三四五六七八九十]+章 .+$' }],
+    })
+    await reTocBook(ownerId, book.id, rule.id)
+    const afterFirst = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).all()
+    const latest = [...afterFirst].sort((a, b) => b.revisionNo - a.revisionNo)[0]!
+    // Simulate a stale revision meta (no chapters): identical bytes must
+    // append, never overwrite.
+    db.update(schema.contentRevisions).set({ meta: {} })
+      .where(eq(schema.contentRevisions.id, latest.id)).run()
+
+    await reTocBook(ownerId, book.id, rule.id)
+    const rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).all()
+      .sort((a, b) => a.revisionNo - b.revisionNo)
+    expect(rows).toHaveLength(afterFirst.length + 1)
+    const prev = rows.at(-2)!
+    const curr = rows.at(-1)!
+    expect(curr.revisionNo).toBe(prev.revisionNo + 1)
+    expect(curr.blobKey).toBe(prev.blobKey)
+    expect(prev.meta).toEqual({})
+    const meta = curr.meta as Record<string, unknown>
+    expect(meta.tocRuleId).toBe(rule.id)
+    expect((meta.chapters as { title: string }[]).map((c) => c.title)).toEqual(['第一章 启程', '第二章 旅途'])
+  })
+
+  it('creates no revision when the same-byte re-split is unchanged', async () => {
+    const rule = createTocRule(ownerId, {
+      name: 'custom',
+      patterns: [{ level: 1, regex: '^第[一二三四五六七八九十]+章 .+$' }],
+    })
+    const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
+    await reTocBook(ownerId, book.id, rule.id)
+    const afterFirst = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).all()
+    await reTocBook(ownerId, book.id, rule.id)
+    const rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).all()
+    expect(rows).toHaveLength(afterFirst.length)
+    const latest = [...rows].sort((a, b) => b.revisionNo - a.revisionNo)[0]!
+    expect((latest.meta as Record<string, unknown>).tocRuleId).toBe(rule.id)
   })
 
   describe('previewBookToc', () => {

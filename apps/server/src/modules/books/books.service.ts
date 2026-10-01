@@ -24,9 +24,9 @@ import {
 import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
-import { assertMutableContent, ensurePrivateLibrary, requireLibraryManager, sourceStillReadable, sourceStillReadableSync } from '../libraries/library-access'
+import { assertCanContribute, assertLibraryBrowsable, assertMutableContent, ensurePrivateLibrary, getOwnsSourceVersionIds, isLibraryManager, sourceStillReadable, sourceStillReadableSync } from '../libraries/library-access'
 import { assertUserUploadAllowed } from '../auth/auth.service'
-import { libraryOrderBy, isWorkEffectivelyHidden, loadLibraryHiddenTaxonomy, workHiddenExclusion } from '../libraries/library-query'
+import { libraryOrderBy, classifyWorkHidden, getWorkHiddenDetail, isWorkEffectivelyHidden, loadLibraryHiddenTaxonomy, workHiddenExclusion } from '../libraries/library-query'
 import { resolveSharedVersionRead } from '../libraries/library-access'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { sha256 } from '../../lib/hash'
@@ -35,7 +35,7 @@ import { countWords } from '../../lib/word-count'
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { coverThumbnailKey, detectImageExtension, blobKey, generateCoverThumbnail } from '../../lib/cover'
 import { log } from '../../lib/logger'
-import { normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type CoverPaletteId, type Chapter, type LibraryVersionKind, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
+import { normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type CoverPaletteId, type Chapter, type HiddenReason, type LibraryVersionKind, type PublishedLinkInfo, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
 
 import { getReaderBookSettings } from './reader-settings.service'
 
@@ -284,17 +284,21 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   // Tag names are fetched per page in a second query: joining tags into
   // the paginated query would multiply rows per book and break LIMIT/OFFSET.
   const tagRows = rows.length > 0
-    ? db.select({ libraryBookId: libraryBookTags.libraryBookId, name: libraryTags.name })
+    ? db.select({ libraryBookId: libraryBookTags.libraryBookId, tagId: libraryBookTags.tagId, name: libraryTags.name })
       .from(libraryBookTags)
       .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
       .where(inArray(libraryBookTags.libraryBookId, rows.map((b) => b.libraryBookId)))
       .all()
     : []
   const tagsByBook = new Map<string, string[]>()
+  const tagIdsByBook = new Map<string, string[]>()
   for (const row of tagRows) {
     const list = tagsByBook.get(row.libraryBookId) ?? []
     list.push(row.name)
     tagsByBook.set(row.libraryBookId, list)
+    const ids = tagIdsByBook.get(row.libraryBookId) ?? []
+    ids.push(row.tagId)
+    tagIdsByBook.set(row.libraryBookId, ids)
   }
   // 7.7: mark collected cards whose source is gone so the list can say so
   // before the reader refuses the file. Batched in two queries — existence of
@@ -304,11 +308,8 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   //
   // Effective-hidden marks ride the same batching: without reveal every
   // returned row is visible by construction, so taxonomy loads only then.
+  // Tag matching is by id (names are display-only and can collide).
   const taxonomy = showHidden && !trash ? loadLibraryHiddenTaxonomy(db, library.id) : null
-  const hiddenTagNames = taxonomy && taxonomy.hiddenTagIds.length > 0
-    ? new Set(db.select({ name: libraryTags.name }).from(libraryTags)
-      .where(inArray(libraryTags.id, taxonomy.hiddenTagIds)).all().map((row) => row.name))
-    : null
   const sourceIds = [...new Set(rows.flatMap((row) => (row.sourceLibraryId ? [row.sourceLibraryId] : [])))]
   const sourceLinkIds = [...new Set(rows.flatMap((row) => (row.sourceLibraryBookVersionId ? [row.sourceLibraryBookVersionId] : [])))]
   const sourceNameById = new Map(
@@ -330,27 +331,32 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     libraryBookId: _libraryBookId,
     versionAuthors, workAuthors,
     sourceLibraryId, sourceLibraryBookVersionId, ...b
-  }) => ({
-    ...b,
-    authors: versionAuthors ?? workAuthors ?? [],
-    tags: tagsByBook.get(_libraryBookId) ?? [],
+  }) => {
     // Effective hide for badging: without reveal every row here is visible
-    // by construction, so this only ever fires in reveal mode.
-    effectiveHidden: taxonomy !== null && (b.hidden
-      || (b.shelfId !== null && taxonomy.hiddenCategoryIds.includes(b.shelfId))
-      || (hiddenTagNames !== null && tagsByBook.get(_libraryBookId)?.some((name) => hiddenTagNames.has(name)) === true)),
-    // 7.7: a B carries its single source; A/C rows report null.
-    source: sourceLibraryId
-      ? {
-          libraryId: sourceLibraryId,
-          libraryBookVersionId: sourceLibraryBookVersionId,
-          libraryName: sourceNameById.get(sourceLibraryId) ?? null,
-        }
-      : null,
-    sourceUnavailable: sourceLibraryId
-      ? !liveSourceLibraries.has(sourceLibraryId) || !liveSourceLinks.has(sourceLibraryBookVersionId!)
-      : false,
-  }))
+    // by construction, so a reason only ever fires in reveal mode.
+    const detail = taxonomy
+      ? classifyWorkHidden({ hidden: b.hidden, categoryId: b.shelfId }, taxonomy, tagIdsByBook.get(_libraryBookId) ?? [])
+      : { reason: null as HiddenReason | null }
+    return {
+      ...b,
+      authors: versionAuthors ?? workAuthors ?? [],
+      tags: tagsByBook.get(_libraryBookId) ?? [],
+      effectiveHidden: detail.reason !== null,
+      hiddenReason: detail.reason,
+      ...(detail.via ? { hiddenVia: detail.via } : {}),
+      // 7.7: a B carries its single source; A/C rows report null.
+      source: sourceLibraryId
+        ? {
+            libraryId: sourceLibraryId,
+            libraryBookVersionId: sourceLibraryBookVersionId,
+            libraryName: sourceNameById.get(sourceLibraryId) ?? null,
+          }
+        : null,
+      sourceUnavailable: sourceLibraryId
+        ? !liveSourceLibraries.has(sourceLibraryId) || !liveSourceLinks.has(sourceLibraryBookVersionId!)
+        : false,
+    }
+  })
   return { data, page, pageSize, total: agg?.count ?? 0, totalSize: agg?.totalSize ?? 0 }
 }
 
@@ -675,8 +681,8 @@ export async function uploadCatalogBook(
   },
 ) {
   const db = getDb()
-  // Owner/admin only: ordinary members have no submission path in this design.
-  await requireLibraryManager(userId, libraryId)
+  // Owner/admin only by default; members when the library opened uploads.
+  await assertCanContribute(userId, libraryId)
   const tagIds = [...new Set(opts?.tagIds ?? [])]
   if (opts?.categoryId) {
     const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
@@ -688,8 +694,13 @@ export async function uploadCatalogBook(
       .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, tagIds))).get()
     if ((existingTags?.count ?? 0) !== tagIds.length) throw new AppError('TAG_NOT_FOUND')
   }
-  // Grouping into an existing work (5.2) is the admin's explicit choice; the
-  // work must live in the same library, and the version must not be there yet.
+  // Grouping into an existing work (5.2): the work must live in the same
+  // library, and the version must not be there yet. Member upload rights are
+  // not scoped to their own works — the owner opening the member-upload lane
+  // delegates adding content to the library, and a member may already create an
+  // arbitrary work outright, so filing a version under an existing one grants
+  // strictly less. What stays scoped is *maintaining* it: only the uploader of
+  // a version may change that version's content.
   let targetLibraryBookId = opts?.libraryBookId
   if (targetLibraryBookId) {
     const target = db.select({ id: libraryBooks.id }).from(libraryBooks)
@@ -743,6 +754,7 @@ export async function uploadCatalogBook(
       }
       tx.insert(libraryBookVersions).values({
         id: linkId, libraryId, libraryBookId, bookVersionId: versionId, kind: 'personal',
+        userId,
         name: opts?.name?.trim() || upload.versionName || '',
         title: targetLibraryBookId ? upload.title : null,
         author: targetLibraryBookId ? upload.author : null,
@@ -762,6 +774,167 @@ export async function uploadCatalogBook(
     throw err
   }
   return { bookVersionId: versionId, libraryBookId, versionLinkId: linkId, duplicated: false }
+}
+
+/**
+ * Stage 5 detail-only enrichment: city listings born from this private book,
+ * for the merged publish dialog. Empty for anything that was never a publish
+ * source (B/C cards, uncollected reads). File/chapter/content paths skip it.
+ */
+export async function attachPublishedTo<T extends { id: string }>(userId: string | null, book: T): Promise<T> {
+  if (!userId) return book
+  const db = getDb()
+  // Scoped to the caller's relation to each library: a caller removed from a
+  // city they once published to keeps their private book and its provenance,
+  // but that library's name and its version names are not theirs to see. This
+  // is a per-library verdict, so it reuses the browse gate rather than
+  // re-deriving visibility here.
+  const candidates = db.select({
+    id: libraryBookVersions.id,
+    libraryId: libraryBookVersions.libraryId,
+    libraryBookId: libraryBookVersions.libraryBookId,
+    bookVersionId: libraryBookVersions.bookVersionId,
+    name: libraryBookVersions.name,
+    status: libraryBookVersions.status,
+    sourceBaseRevisionId: libraryBookVersions.sourceBaseRevisionId,
+  }).from(libraryBookVersions)
+    .where(eq(libraryBookVersions.sourceBaseVersionId, book.id)).all()
+  const links: typeof candidates = []
+  for (const candidate of candidates) {
+    try {
+      await assertLibraryBrowsable(userId, candidate.libraryId)
+    } catch (err) {
+      // Permission and topology denials are the verdict; anything else (a
+      // database failure) must not masquerade as "never published there".
+      if (err instanceof AppError) continue
+      throw err
+    }
+    const work = db.select({ deletedAt: libraryBooks.deletedAt })
+      .from(libraryBooks).where(eq(libraryBooks.id, candidate.libraryBookId)).get()
+    if (!work || work.deletedAt) continue
+    if (candidate.status !== 'published' && !await isLibraryManager(userId, candidate.libraryId)) continue
+    links.push(candidate)
+  }
+  if (links.length === 0) return book
+  const sourceBlob = db.select({ blobKey: contentRevisions.blobKey }).from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, book.id))
+    .orderBy(desc(contentRevisions.revisionNo)).all().at(0)?.blobKey ?? null
+  // Both endpoints of the comparison in one pass: the source's current bytes,
+  // each city's current bytes, and each base snapshot's bytes.
+  const cityVersionIds = [...new Set(links.map((link) => link.bookVersionId))]
+  const baseRevisionIds = [...new Set(links.map((link) => link.sourceBaseRevisionId).filter((id): id is string => id !== null))]
+  const cityBlobByVersion = latestBlobByBookVersion(cityVersionIds)
+  const baseBlobByRevision = new Map(
+    baseRevisionIds.length === 0
+      ? []
+      : db.select({ id: contentRevisions.id, blobKey: contentRevisions.blobKey }).from(contentRevisions)
+          .where(inArray(contentRevisions.id, baseRevisionIds)).all().map((row) => [row.id, row.blobKey]),
+  )
+  const publishedTo: PublishedLinkInfo[] = []
+  for (const link of links) {
+    const library = db.select({ id: libraries.id, name: libraries.name }).from(libraries)
+      .where(eq(libraries.id, link.libraryId)).get()
+    if (!library) continue
+    const cityBlob = cityBlobByVersion.get(link.bookVersionId)
+    if (!cityBlob) continue
+    // Three questions about the same three byte strings, none of them a row
+    // count: inSync — do the two sides serve the same bytes right now; cityMoved
+    // — has the library written anything since the publish snapshot;
+    // sourceMoved — has this private book written anything since it. The last
+    // one is what separates "the library moved on and you have not touched it"
+    // from "you both edited", which read identically without it. Same-blob
+    // revisions (a metadata reset) are not a move on either side.
+    const baseBlob = link.sourceBaseRevisionId ? baseBlobByRevision.get(link.sourceBaseRevisionId) ?? null : null
+    publishedTo.push({
+      libraryId: library.id,
+      libraryName: library.name,
+      libraryBookId: link.libraryBookId,
+      versionLinkId: link.id,
+      versionName: link.name,
+      inSync: sourceBlob !== null && cityBlob === sourceBlob,
+      cityMoved: baseBlob === null || cityBlob !== baseBlob,
+      sourceMoved: baseBlob !== null && sourceBlob !== null && sourceBlob !== baseBlob,
+    })
+  }
+  return { ...book, publishedTo }
+}
+
+/**
+ * Current blob of each requested BookVersion in one query, keyed by version.
+ * Byte identity is what every "did the content actually change" verdict in
+ * Stage 5 reads, so a revision that reuses the blob never counts as a change.
+ */
+function latestBlobByBookVersion(bookVersionIds: string[]): Map<string, string> {
+  const latest = new Map<string, string>()
+  if (bookVersionIds.length === 0) return latest
+  for (const row of getDb().select({ bookVersionId: contentRevisions.bookVersionId, blobKey: contentRevisions.blobKey }).from(contentRevisions)
+    .where(inArray(contentRevisions.bookVersionId, bookVersionIds))
+    .orderBy(desc(contentRevisions.revisionNo)).all()) {
+    if (!latest.has(row.bookVersionId)) latest.set(row.bookVersionId, row.blobKey)
+  }
+  return latest
+}
+
+/**
+ * Stage 5 detail-only enrichment: an uncollected library read carries
+ * ownsSource so the detail dialog renders it exactly like a collected
+ * version. File/chapter/content paths skip it (hot paths, no UI need).
+ */
+export async function attachOwnsSource<T extends { id: string; collected?: boolean }>(userId: string | null, book: T): Promise<T> {
+  if (!userId || book.collected !== false) return book
+  const db = getDb()
+  const links = db.select({
+    bookVersionId: libraryBookVersions.bookVersionId,
+    sourceBaseVersionId: libraryBookVersions.sourceBaseVersionId,
+    sourceBaseRevisionId: libraryBookVersions.sourceBaseRevisionId,
+  }).from(libraryBookVersions).where(eq(libraryBookVersions.bookVersionId, book.id)).all()
+  if (!getOwnsSourceVersionIds(userId, links).has(book.id)) return book
+  return { ...book, ownsSource: true }
+}
+
+/**
+ * Detail-only: the content grew since this account last opened the reader.
+ * Every holder's pin moves at once when content is appended or re-chaptered,
+ * so the pin cannot separate readers who caught up from those who did not —
+ * the revision recorded on the reader's own state row can. Detail only: a list
+ * row has no business carrying a notice. Successful rendering acknowledges
+ * the resolved revision independently of position writes.
+ */
+export async function attachUnreadUpdate<T extends { id: string; kind?: LibraryVersionKind }>(userId: string | null, book: T): Promise<T> {
+  // Only a card that follows library content can fall behind: an A or C card
+  // owns its bytes, so there is nothing else for it to be behind.
+  if (!userId || book.kind !== 'shared') return book
+  const db = getDb()
+  const latest = db.select({ id: contentRevisions.id }).from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, book.id))
+    .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (!latest) return book
+  const state = db.select({ readRevisionId: bookStates.readRevisionId }).from(bookStates)
+    .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, book.id))).get()
+  // Never opened the reader counts as not caught up: there is no position to
+  // have read from.
+  if (state?.readRevisionId === latest.id) return book
+  return { ...book, hasUnreadUpdate: true }
+}
+
+export async function acknowledgeReadRevision(userId: string, bookId: string, revisionId: string, showHidden = false) {
+  await assertReadableBook(userId, bookId, showHidden)
+  const db = getDb()
+  const revision = db.select({ id: contentRevisions.id, revisionNo: contentRevisions.revisionNo }).from(contentRevisions)
+    .where(and(eq(contentRevisions.id, revisionId), eq(contentRevisions.bookVersionId, bookId))).get()
+  if (!revision) throw new AppError('VALIDATION_ERROR', 'Invalid content revision')
+  // An older tab finishing late cannot undo a newer tab's acknowledgment.
+  const seen = db.select({ revisionNo: contentRevisions.revisionNo }).from(bookStates)
+    .innerJoin(contentRevisions, eq(contentRevisions.id, bookStates.readRevisionId))
+    .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
+  if (seen && seen.revisionNo > revision.revisionNo) return { revisionId }
+  db.insert(bookStates).values({
+    userId, bookVersionId: bookId, readRevisionId: revisionId, updatedAt: Date.now(),
+  }).onConflictDoUpdate({
+    target: [bookStates.userId, bookStates.bookVersionId],
+    set: { readRevisionId: revisionId },
+  }).run()
+  return { revisionId }
 }
 
 export async function getBook(userId: string | null, bookId: string, opts?: { showHidden?: boolean }) {
@@ -935,6 +1108,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
   const state = userId === null ? undefined : db.select().from(bookStates)
     .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
   const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
+  const hiddenDetail = getWorkHiddenDetail(db, granted.library.id, work)
   return {
     id: bookId,
     userId,
@@ -945,6 +1119,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     authors: link.authors ?? work.authors ?? [],
     format: bv.format,
     filePath: revision.blobKey,
+    revisionId: revision.id,
     coverKey: link.coverKey ?? work.coverKey,
     contentHash: hashFromBlobKey(revision.blobKey),
     size: bv.size,
@@ -960,7 +1135,9 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     deletedAt: null,
     shelfId: null,
     hidden: work.hidden,
-    effectiveHidden: isWorkEffectivelyHidden(db, granted.library.id, work),
+    effectiveHidden: hiddenDetail.reason !== null,
+    hiddenReason: hiddenDetail.reason,
+    ...(hiddenDetail.via ? { hiddenVia: hiddenDetail.via } : {}),
     readerSettings: getReaderBookSettings(userId, bookId),
     // Present so the UI can offer "add to my library" and hide the actions
     // that would write library-owned content.
@@ -1041,14 +1218,17 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
   const sourceLibrary = lbv.sourceLibraryId
     ? db.select({ name: libraries.name }).from(libraries).where(eq(libraries.id, lbv.sourceLibraryId)).get()
     : null
+  const hiddenDetail = getWorkHiddenDetail(db, library.id, lb)
   return {
     id: bookId,
     userId,
+    kind: lbv.kind as LibraryVersionKind,
     title: lbv.title ?? lb.title,
     author: lbv.author ?? lb.author,
     authors: lbv.authors ?? lb.authors ?? [],
     format: bv.format,
     filePath: revision.blobKey,
+    revisionId: revision.id,
     coverKey: lbv.coverKey ?? lb.coverKey,
     contentHash: hashFromBlobKey(revision.blobKey),
     size: bv.size,
@@ -1068,7 +1248,9 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     shelfId: lb.categoryId,
     // Work-level hide; surfaced so the vault reveal mode can badge the row.
     hidden: lb.hidden,
-    effectiveHidden: isWorkEffectivelyHidden(db, library.id, lb),
+    effectiveHidden: hiddenDetail.reason !== null,
+    hiddenReason: hiddenDetail.reason,
+    ...(hiddenDetail.via ? { hiddenVia: hiddenDetail.via } : {}),
     readerSettings: getReaderBookSettings(userId, bookId),
     source: lbv.sourceLibraryId
       ? {
@@ -1181,6 +1363,7 @@ export async function getBookChapters(userId: string | null, bookId: string, opt
     const latestRevision = userId === null ? undefined : getDb().select({ id: contentRevisions.id }).from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, book.id)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
     if (latestRevision) {
+      // Derived-cache exception: recomputable from the blob, never a revision.
       getDb().update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
     }
     return (chapters.length > 0 ? chapters : existingChapters) as Chapter[]
@@ -1487,11 +1670,12 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
   const maxRevision = db.select({ revisionNo: contentRevisions.revisionNo }).from(contentRevisions)
     .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
   const nextRevisionNo = (maxRevision?.revisionNo ?? 0) + 1
+  const newRevisionId = createId('rev')
   const { libraryBookId } = resolveLibraryBook(userId, bookId)
   try {
     db.transaction((tx) => {
       tx.insert(contentRevisions).values({
-        id: createId('rev'), bookVersionId: bookId, revisionNo: nextRevisionNo,
+        id: newRevisionId, bookVersionId: bookId, revisionNo: nextRevisionNo,
         blobKey: filePath, size: epubBuffer.length, wordCount: prepared.newWordCount,
         chapterCount: prepared.metaChapters.length, meta, createdAt: updatedAt,
       }).run()
@@ -1499,6 +1683,13 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
       tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, bookId)).run()
       tx.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, libraryBookId)).run()
       tx.update(bookStates).set({ percent: newPercent, updatedAt }).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
+      // A collected card of this book follows the new content, same as a card
+      // in a shared library: appending is a content update, not a new version.
+      tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
+        .where(and(
+          eq(libraryBookVersions.bookVersionId, bookId),
+          eq(libraryBookVersions.kind, 'shared'),
+        )).run()
     })
   } catch (err) {
     await cleanupStagedUpload({ fileKey: filePath, coverKey: null })
@@ -1507,11 +1698,7 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
   invalidateCachedNormalized(bookId)
 
   if (oldFilePath !== filePath) {
-    const refs = db.select({ count: sql<number>`count(*)` }).from(contentRevisions).where(eq(contentRevisions.blobKey, oldFilePath)).get()
-    if ((refs?.count ?? 0) === 0 && await storage.exists(oldFilePath)) {
-      await storage.delete(oldFilePath)
-      db.delete(blobs).where(eq(blobs.key, oldFilePath)).run()
-    }
+    await deleteUnreferencedRevision(oldFilePath)
   }
 
   return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, showHidden: true }))
@@ -1571,6 +1758,55 @@ export async function migrateTxtArtifacts(): Promise<TxtArtifactMigrationResult>
 }
 
 /**
+ * View-pref half of a re-toc: which rule produced the split. Stored in the
+ * revision meta but never worth a revision on its own (see the revision-write
+ * discipline in architecture.md).
+ */
+function applyTocRuleSelection(
+  target: Record<string, unknown>,
+  sel: { customPatterns?: TocRulePattern[] | null; tocRuleId: string | null; tocRuleAuto: boolean },
+) {
+  if (sel.customPatterns && sel.customPatterns.length > 0) {
+    target.customTocPatterns = sel.customPatterns
+    target.tocRuleId = 'custom'
+    target.tocRuleAuto = false
+  } else if (sel.tocRuleId) {
+    target.tocRuleId = sel.tocRuleId
+    target.tocRuleAuto = sel.tocRuleAuto
+    delete target.customTocPatterns
+  } else {
+    delete target.tocRuleId
+    delete target.tocRuleAuto
+    delete target.customTocPatterns
+  }
+}
+
+/**
+ * Persist a shared version's TOC selection as self-contained patterns.
+ *
+ * A private book pins a `toc_rules` id because its reader is its only reader.
+ * A shared version is not: storing one user's rule id would make that user's
+ * private rule the thing every member's chapter map depends on, and the next
+ * append would re-derive it through whoever happened to run it. So the rule's
+ * patterns are frozen onto the version and only its display name is kept.
+ */
+function applySharedTocRuleSelection(
+  target: Record<string, unknown>,
+  sel: { patterns: TocRulePattern[] | null; tocRuleAuto: boolean; label?: string | null },
+): void {
+  if (sel.patterns && sel.patterns.length > 0) {
+    target.customTocPatterns = sel.patterns
+    target.tocRuleId = 'custom'
+  } else {
+    delete target.customTocPatterns
+    delete target.tocRuleId
+  }
+  target.tocRuleAuto = sel.tocRuleAuto
+  if (sel.label) target.tocRuleLabel = sel.label
+  else delete target.tocRuleLabel
+}
+
+/**
  * Rebuild a TXT book's chapters and stored EPUB from the effective TOC preset.
  * The normalized text is recovered from the server-generated EPUB, then the
  * stored artifact is replaced so the reader serves the new split immediately.
@@ -1619,27 +1855,12 @@ async function rebuildTocBook(
   } else {
     delete meta.tocExcludedLeadingText
   }
-  const oldChapters = (book.meta as { chapters?: { id?: string }[] } | undefined)?.chapters
-  // CFIs address the EPUB by chapter-file index, so only the chapter
-  // boundaries (ids = start offsets) decide whether the saved position is
-  // stale — title-only drift keeps every file structurally identical.
-  const chaptersChanged =
-    !oldChapters ||
-    oldChapters.length !== metaChapters.length ||
-    oldChapters.some((c, i) => c.id !== metaChapters[i]?.id)
-  if (customPatterns && customPatterns.length > 0) {
-    meta.customTocPatterns = customPatterns
-    meta.tocRuleId = 'custom'
-    meta.tocRuleAuto = false
-  } else if (tocRuleId) {
-    meta.tocRuleId = tocRuleId
-    meta.tocRuleAuto = tocRuleAuto
-    delete meta.customTocPatterns
-  } else {
-    delete meta.tocRuleId
-    delete meta.tocRuleAuto
-    delete meta.customTocPatterns
-  }
+  const oldChapters = (book.meta as { chapters?: { id?: string; title?: string; level?: number }[] } | undefined)?.chapters
+  const chaptersChanged = chapterBoundariesChanged(
+    oldChapters,
+    metaChapters.map((c) => ({ id: c.id, title: c.title, level: c.level })),
+  )
+  applyTocRuleSelection(meta, { customPatterns, tocRuleId, tocRuleAuto })
 
   const epubChapters = chapters.map((c) => ({
     id: txtChapterId(c),
@@ -1683,11 +1904,27 @@ async function rebuildTocBook(
       await storage.delete(book.filePath)
       db.delete(blobs).where(eq(blobs.key, book.filePath)).run()
     }
+  } else if (chaptersChanged) {
+    // Same bytes, new chapter map: record a new revision reusing the blob so
+    // pinned readers keep reading the split they pinned.
+    const latestRevision = db.select({ id: contentRevisions.id, revisionNo: contentRevisions.revisionNo, size: contentRevisions.size }).from(contentRevisions)
+      .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+    db.transaction((tx) => {
+      tx.insert(contentRevisions).values({
+        id: createId('rev'), bookVersionId: bookId, revisionNo: (latestRevision?.revisionNo ?? 0) + 1,
+        blobKey: book.filePath, size: latestRevision?.size ?? 0, wordCount, chapterCount: metaChapters.length,
+        meta, createdAt: updatedAt,
+      }).run()
+    })
   } else {
-    const latestRevision = db.select({ id: contentRevisions.id }).from(contentRevisions)
+    // Boundaries unchanged: only the rule selection may differ. View prefs
+    // stay in place; no new revision.
+    const latestRevision = db.select({ id: contentRevisions.id, meta: contentRevisions.meta }).from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
     if (latestRevision) {
-      db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+      const base = { ...((latestRevision.meta ?? {}) as Record<string, unknown>) }
+      applyTocRuleSelection(base, { customPatterns, tocRuleId, tocRuleAuto })
+      db.update(contentRevisions).set({ meta: base }).where(eq(contentRevisions.id, latestRevision.id)).run()
     }
   }
 
@@ -1957,6 +2194,437 @@ export async function previewBookToc(
   }
 }
 
+/**
+ * TOC preview for a shared-library version (Stage 6): same derivation as the
+ * private flow, resolved against the city's stored self-contained patterns
+ * rather than a private card's rule. A named rule the caller passes is still
+ * resolved — but only against that caller's own rules, since picking one is an
+ * explicit act, while the version's *current* selection never depends on who
+ * is asking.
+ */
+export async function previewCityToc(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+  options: PreviewBookTocOptions = {},
+): Promise<TocPreviewRes> {
+  const link = await getManagedVersionLink(actorId, libraryId, libraryBookId, versionLinkId)
+  const db = getDb()
+  const version = db.select().from(bookVersions).where(eq(bookVersions.id, link.bookVersionId)).get()
+  if (!version || version.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'TOC preview only supports txt books')
+  const latest = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, link.bookVersionId))
+    .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (!latest) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
+  const latestMeta = (latest.meta ?? {}) as Record<string, unknown>
+
+  const normalized = await getOrRecoverTxtNormalized({ filePath: latest.blobKey, id: link.bookVersionId, updatedAt: latest.createdAt, meta: latestMeta })
+  const storedExcludedChapterIds = Array.isArray(latestMeta.tocExcludedChapterIds)
+    ? (latestMeta.tocExcludedChapterIds as unknown[]).filter((id): id is string => typeof id === 'string')
+    : []
+  const requestedExcludedChapterIds = options.excludedChapterIds ?? storedExcludedChapterIds
+  let patterns: TocRulePattern[] | null = null
+  let ruleId: string | null = null
+  let ruleName: string | undefined
+  let autoScored = false
+
+  if (options.customPatterns && options.customPatterns.length > 0) {
+    patterns = options.customPatterns.filter((p) => p.enabled !== false)
+    ruleId = 'custom'
+    ruleName = '本书专属规则'
+  } else if (options.tocRuleId !== undefined) {
+    if (options.tocRuleId !== null) {
+      if (options.tocRuleId === 'custom') {
+        const custom = latestMeta.customTocPatterns
+        if (Array.isArray(custom) && custom.length > 0) {
+          patterns = (custom as TocRulePattern[]).filter((p) => p.enabled !== false)
+          ruleId = 'custom'
+          ruleName = '本书专属规则'
+        }
+      } else {
+        const rule = db.select().from(tocRules).where(and(eq(tocRules.id, options.tocRuleId), eq(tocRules.userId, actorId))).get()
+        if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
+        patterns = rule.patterns.filter((p) => p.enabled !== false)
+        ruleId = rule.id
+        ruleName = rule.name
+      }
+    } else {
+      const scored = scoreTocRules(actorId, normalized.slice(0, TOC_SAMPLE_SIZE))
+      if (scored) {
+        patterns = scored.patterns.filter((p) => p.enabled !== false)
+        ruleId = scored.id
+        ruleName = scored.name
+        autoScored = true
+      }
+    }
+  } else {
+    // No request: preview what the version actually has, which is stored
+    // patterns and nothing account-scoped.
+    const stored = readSharedTocSelection(latestMeta)
+    patterns = stored?.patterns ?? null
+    ruleId = patterns ? 'custom' : null
+    ruleName = typeof latestMeta.tocRuleLabel === 'string' ? latestMeta.tocRuleLabel : undefined
+    autoScored = stored?.tocRuleAuto ?? false
+  }
+
+  const outMeta: { fallback?: boolean } = {}
+  const rawChapters = scanTxtChapters(normalized, patterns ?? undefined, outMeta)
+  const { chapters: effectiveChapters, excludedChapterIds } = applyTxtChapterExclusions(rawChapters, requestedExcludedChapterIds)
+
+  const currentChapters = (latestMeta.chapters ?? []) as Chapter[]
+  const levelCounts: Record<number, number> = {}
+  for (const c of effectiveChapters) {
+    levelCounts[c.level] = (levelCounts[c.level] ?? 0) + 1
+  }
+
+  const previewLimit = options.limit ?? 1000
+  const previewOffset = options.offset ?? 0
+  const chapters: TocPreviewChapter[] = rawChapters.slice(previewOffset, previewOffset + previewLimit).map((c, index) => ({
+    id: txtChapterId(c),
+    title: c.title,
+    level: c.level,
+    wordCount: countWords(getTxtChapterContent(normalized, c)),
+    excluded: excludedChapterIds.includes(txtChapterId(c)),
+    canExclude: canExcludeTxtChapter(c, previewOffset + index),
+  }))
+
+  return {
+    ruleId,
+    ruleName,
+    autoScored,
+    fallback: outMeta.fallback === true,
+    totalChapters: effectiveChapters.length,
+    matchedTotalChapters: rawChapters.length,
+    currentTotalChapters: currentChapters.length,
+    levelCounts,
+    excludedChapterIds,
+    chapters,
+  }
+}
+
+export async function reTocCityVersion(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+  tocRuleId?: string | null,
+  customPatterns?: TocRulePattern[],
+  excludedChapterIds?: string[],
+): Promise<{ revisionId: string; revisionNo: number; chaptersChanged: boolean }> {
+  const link = await getManagedVersionLink(actorId, libraryId, libraryBookId, versionLinkId)
+  const db = getDb()
+  const version = db.select().from(bookVersions).where(eq(bookVersions.id, link.bookVersionId)).get()
+  if (!version || version.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'Re-TOC only supports txt books')
+  const latest = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, link.bookVersionId))
+    .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (!latest) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
+  const latestMeta = (latest.meta ?? {}) as Record<string, unknown>
+  const storedExcludedChapterIds = Array.isArray(latestMeta.tocExcludedChapterIds)
+    ? (latestMeta.tocExcludedChapterIds as unknown[]).filter((id): id is string => typeof id === 'string')
+    : []
+  const effectiveExcludedChapterIds = excludedChapterIds ?? storedExcludedChapterIds
+
+  if (customPatterns && customPatterns.length > 0) {
+    const active = customPatterns.filter((p) => p.enabled !== false)
+    return rebuildCityToc(actorId, link, latest, latestMeta, active, false, customPatterns, effectiveExcludedChapterIds)
+  }
+
+  if (tocRuleId !== undefined) {
+    if (tocRuleId !== null) {
+      const rule = db.select().from(tocRules).where(and(eq(tocRules.id, tocRuleId), eq(tocRules.userId, actorId))).get()
+      if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
+      // The rule's patterns freeze onto the version and only its name travels
+      // as a label, so the chapter map stops depending on the rule row later.
+      return rebuildCityToc(
+        actorId, link, latest, latestMeta,
+        rule.patterns.filter((p) => p.enabled !== false),
+        false, null, effectiveExcludedChapterIds, rule.name,
+      )
+    }
+    const normalized = await getOrRecoverTxtNormalized({ filePath: latest.blobKey, id: link.bookVersionId, updatedAt: latest.createdAt, meta: latestMeta })
+    const scored = scoreTocRules(actorId, normalized.slice(0, TOC_SAMPLE_SIZE))
+    if (scored) {
+      return rebuildCityToc(
+        actorId, link, latest, latestMeta,
+        scored.patterns.filter((p) => p.enabled !== false),
+        true, null, effectiveExcludedChapterIds, scored.name,
+      )
+    }
+    return rebuildCityToc(actorId, link, latest, latestMeta, null, false, null, effectiveExcludedChapterIds)
+  }
+
+  // No request: keep whatever the version already has. Reading it back must
+  // never depend on whose account is asking, so a rule another account picked
+  // stays exactly as it was (see readSharedTocSelection).
+  const stored = readSharedTocSelection(latestMeta)
+  if (stored) {
+    const label = typeof latestMeta.tocRuleLabel === 'string' ? latestMeta.tocRuleLabel : null
+    return rebuildCityToc(
+      actorId, link, latest, latestMeta,
+      stored.patterns, stored.tocRuleAuto, stored.customPatterns, effectiveExcludedChapterIds, label,
+    )
+  }
+
+  const normalized = await getOrRecoverTxtNormalized({ filePath: latest.blobKey, id: link.bookVersionId, updatedAt: latest.createdAt, meta: latestMeta })
+  const scored = scoreTocRules(actorId, normalized.slice(0, TOC_SAMPLE_SIZE))
+  if (scored) {
+    return rebuildCityToc(
+      actorId, link, latest, latestMeta,
+      scored.patterns.filter((p) => p.enabled !== false),
+      true, null, effectiveExcludedChapterIds, scored.name,
+    )
+  }
+  return rebuildCityToc(actorId, link, latest, latestMeta, null, false, null, effectiveExcludedChapterIds)
+}
+
+/**
+ * What a shared version's stored TOC selection actually is, in a form no
+ * account can influence.
+ *
+ * A city version's chapter map is content every member reads, so it must not
+ * depend on a per-user `toc_rules` row: resolving one through the caller would
+ * silently re-split the book with the maintainer's own rules whenever they
+ * differ from the rule the publisher pinned, and would write the maintainer's
+ * rule id into shared metadata. So a named rule is frozen into
+ * `customTocPatterns` at write time (see rebuildCityToc) and read back here
+ * from the patterns alone. `tocRuleId` is accepted for a pre-freeze version but
+ * is only ever treated as the label it came from.
+ */
+function readSharedTocSelection(meta: Record<string, unknown>): {
+  patterns: TocRulePattern[] | null
+  customPatterns: TocRulePattern[] | null
+  tocRuleAuto: boolean
+} | null {
+  const custom = Array.isArray(meta.customTocPatterns) ? meta.customTocPatterns as TocRulePattern[] : null
+  if (custom && custom.length > 0) {
+    return { patterns: custom.filter((p) => p.enabled !== false), customPatterns: custom, tocRuleAuto: false }
+  }
+  // A named rule frozen before the freeze landed: its patterns are not on the
+  // version, so report "nothing stored" and let the caller's fallback decide
+  // rather than guessing a pattern set the version never recorded.
+  if (typeof meta.tocRuleId === 'string' && meta.tocRuleId !== 'custom') return null
+  return { patterns: null, customPatterns: null, tocRuleAuto: meta.tocRuleAuto === true }
+}
+
+/**
+ * Rebuild core for a shared-library version (Stage 6): same derivation as
+ * rebuildTocBook, resolved against the city's revision. The Stage 1 write
+ * discipline applies verbatim — changed bytes append, same bytes with new
+ * boundaries append reusing the blob, unchanged splits only persist the rule
+ * selection.
+ */
+async function rebuildCityToc(
+  actorId: string,
+  link: { id: string; bookVersionId: string; libraryBookId: string },
+  latest: { id: string; blobKey: string; revisionNo: number; meta: unknown; createdAt: number },
+  latestMeta: Record<string, unknown>,
+  patterns: TocRulePattern[] | null,
+  tocRuleAuto: boolean,
+  customPatterns: TocRulePattern[] | null,
+  requestedExcludedChapterIds: string[] = [],
+  tocRuleLabel: string | null = null,
+): Promise<{ revisionId: string; revisionNo: number; chaptersChanged: boolean }> {
+  const db = getDb()
+  const storage = getStorage()
+  // A shared version stores the resolved patterns, never the caller's rule id:
+  // the chapter map is content every member reads, so pinning a per-user rule
+  // here would make one member's rule decide what another member sees, and
+  // would let a later append re-split the book differently depending on who
+  // ran it. The rule's name is kept for display only.
+  const frozenPatterns = customPatterns ?? patterns
+  const storedCustom = Array.isArray(latestMeta.customTocPatterns) ? latestMeta.customTocPatterns : null
+  const storedExcluded = Array.isArray(latestMeta.tocExcludedChapterIds) ? latestMeta.tocExcludedChapterIds : []
+  const storedChapters = latestMeta.chapters
+  const selectionSame = JSON.stringify(storedCustom) === JSON.stringify(frozenPatterns)
+    && (latestMeta.tocRuleAuto ?? false) === tocRuleAuto
+    && JSON.stringify(storedExcluded) === JSON.stringify(requestedExcludedChapterIds)
+  if (selectionSame && Array.isArray(storedChapters) && storedChapters.length > 0) {
+    return { revisionId: latest.id, revisionNo: latest.revisionNo, chaptersChanged: false }
+  }
+  const normalized = await getOrRecoverTxtNormalized({ filePath: latest.blobKey, id: link.bookVersionId, updatedAt: latest.createdAt, meta: latestMeta })
+  const rawChapters = scanTxtChapters(normalized, patterns ?? undefined)
+  const { chapters, excludedChapterIds } = applyTxtChapterExclusions(rawChapters, requestedExcludedChapterIds)
+
+  const metaChapters = carryChapterAddedAt(chapters.map((c) => ({
+    id: txtChapterId(c),
+    title: c.title,
+    level: c.level,
+    startOffset: c.startOffset,
+    endOffset: c.endOffset,
+    contentStartOffset: c.contentStartOffset,
+    contentRanges: c.contentRanges,
+    wordCount: countWords(getTxtChapterContent(normalized, c)),
+  })), (latestMeta.chapters ?? []) as Array<{ id?: string }>, latest.createdAt)
+  const wordCount = metaChapters.reduce((sum, c) => sum + c.wordCount, 0)
+  const meta: Record<string, unknown> = {
+    ...latestMeta,
+    chapters: metaChapters,
+    wordCount,
+    txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION,
+  }
+  if (excludedChapterIds.length > 0) meta.tocExcludedChapterIds = excludedChapterIds
+  else delete meta.tocExcludedChapterIds
+  const leadingExcludedId = rawChapters[0] ? txtChapterId(rawChapters[0]) : null
+  if (rawChapters[0]?.synthetic && leadingExcludedId && excludedChapterIds.includes(leadingExcludedId)) {
+    const leadingText = getTxtChapterContent(normalized, rawChapters[0]).trim()
+    if (leadingText) meta.tocExcludedLeadingText = leadingText
+  } else {
+    delete meta.tocExcludedLeadingText
+  }
+  const oldChapters = (latestMeta.chapters ?? []) as Array<{ id?: string; title?: string; level?: number; wordCount?: number }>
+  const chaptersChanged = chapterBoundariesChanged(oldChapters, metaChapters.map((c) => ({ id: c.id, title: c.title, level: c.level })))
+  applySharedTocRuleSelection(meta, { patterns: frozenPatterns, tocRuleAuto, label: tocRuleLabel })
+
+  const work = db.select({ title: libraryBooks.title, author: libraryBooks.author }).from(libraryBooks)
+    .where(eq(libraryBooks.id, link.libraryBookId)).get()!
+  const epubChapters = chapters.map((c) => ({
+    id: txtChapterId(c),
+    title: c.title,
+    level: c.level,
+  }))
+  const contentFor = (index: number) => {
+    const c = chapters[index]
+    return getTxtChapterContent(normalized, c)
+  }
+  const epubBuffer = await convertTxtToEpub(
+    { title: work.title, author: work.author || undefined, id: link.bookVersionId },
+    epubChapters,
+    contentFor,
+  )
+  const newFileKey = blobKey(sha256(epubBuffer), '.epub')
+  const updatedAt = Date.now()
+  const oldWordCount = oldChapters.reduce((sum, c) => sum + (c.wordCount ?? 0), 0)
+
+  if (newFileKey !== latest.blobKey) {
+    await storage.put(newFileKey, epubBuffer)
+    const nextRevisionNo = latest.revisionNo + 1
+    const newRevisionId = createId('rev')
+    try {
+      db.transaction((tx) => {
+        tx.insert(contentRevisions).values({
+          id: newRevisionId, bookVersionId: link.bookVersionId, revisionNo: nextRevisionNo,
+          blobKey: newFileKey, size: epubBuffer.length, wordCount, chapterCount: metaChapters.length,
+          meta, createdAt: updatedAt,
+        }).run()
+        tx.insert(blobs).values({ key: newFileKey, size: epubBuffer.length, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
+        tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, link.bookVersionId)).run()
+        tx.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, link.libraryBookId)).run()
+        // Every holder follows the new content: a pin left behind would keep
+        // serving bytes this write just replaced, the state the old repin button
+        // existed to resolve one reader at a time. Readers are told through
+        // their own unread-update flag instead.
+        tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
+          .where(and(
+            eq(libraryBookVersions.bookVersionId, link.bookVersionId),
+            eq(libraryBookVersions.kind, 'shared'),
+          )).run()
+      })
+    } catch (err) {
+      await cleanupStagedUpload({ fileKey: newFileKey, coverKey: null })
+      throw err
+    }
+    await refreshCityProgress(actorId, link.bookVersionId, {
+      oldWordCount,
+      newWordCount: wordCount,
+      chaptersChanged,
+      scaleActorPercent: false,
+    })
+    invalidateCachedNormalized(link.bookVersionId)
+    await deleteUnreferencedRevision(latest.blobKey)
+    return { revisionId: newRevisionId, revisionNo: nextRevisionNo, chaptersChanged }
+  }
+
+  if (chaptersChanged) {
+    const nextRevisionNo = latest.revisionNo + 1
+    const newRevisionId = createId('rev')
+    db.transaction((tx) => {
+      tx.insert(contentRevisions).values({
+        id: newRevisionId, bookVersionId: link.bookVersionId, revisionNo: nextRevisionNo,
+        blobKey: latest.blobKey, size: epubBuffer.length, wordCount, chapterCount: metaChapters.length,
+        meta, createdAt: updatedAt,
+      }).run()
+      // Same bytes, new chapter map: readers follow the new structure.
+      tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
+        .where(and(
+          eq(libraryBookVersions.bookVersionId, link.bookVersionId),
+          eq(libraryBookVersions.kind, 'shared'),
+        )).run()
+    })
+    await refreshCityProgress(actorId, link.bookVersionId, {
+      oldWordCount,
+      newWordCount: wordCount,
+      chaptersChanged,
+      scaleActorPercent: false,
+    })
+    invalidateCachedNormalized(link.bookVersionId)
+    return { revisionId: newRevisionId, revisionNo: nextRevisionNo, chaptersChanged }
+  }
+
+  const base = { ...(latest.meta as Record<string, unknown> | null ?? {}) }
+  applySharedTocRuleSelection(base, { patterns: frozenPatterns, tocRuleAuto, label: tocRuleLabel })
+  db.update(contentRevisions).set({ meta: base }).where(eq(contentRevisions.id, latest.id)).run()
+  return { revisionId: latest.id, revisionNo: latest.revisionNo, chaptersChanged }
+}
+
+/**
+ * TOC baseline for the city picker UI (Stage 6): the version's stored rule
+ * state plus chapter summaries, without touching list payloads. Gated exactly
+ * like chapter reads — whoever may read the version may see its outline.
+ *
+ * A shared version's selection is self-contained patterns, so the picker reads
+ * it back as "the book's own rule" whatever account asks; `tocRuleLabel` is
+ * the name to show and nothing else resolves a `toc_rules` row.
+ */
+export interface VersionTocState {
+  /** Always 'custom' when the version carries patterns; the picker edits them as such. */
+  tocRuleId: string | null
+  tocRuleAuto: boolean
+  customPatterns: TocRulePattern[]
+  /** Display-only name of the rule the patterns came from, if it had one. */
+  tocRuleLabel: string | null
+  excludedChapterIds: string[]
+  chapters: Array<{ id: string; title: string; level: number; wordCount: number }>
+}
+
+export async function getVersionTocState(
+  userId: string | null,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+): Promise<VersionTocState> {
+  const db = getDb()
+  const link = db.select().from(libraryBookVersions)
+    .where(and(
+      eq(libraryBookVersions.id, versionLinkId),
+      eq(libraryBookVersions.libraryId, libraryId),
+      eq(libraryBookVersions.libraryBookId, libraryBookId),
+    )).get()
+  if (!link) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+  await assertReadableBook(userId, link.bookVersionId)
+  const latest = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, link.bookVersionId))
+    .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (!latest) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
+  const meta = (latest.meta ?? {}) as Record<string, unknown>
+  const chapters = ((meta.chapters ?? []) as Array<{ id?: string; title?: string; level?: number; wordCount?: number }>)
+    .filter((c) => typeof c.id === 'string')
+    .map((c) => ({ id: c.id as string, title: c.title ?? '', level: c.level ?? 1, wordCount: c.wordCount ?? 0 }))
+  const stored = readSharedTocSelection(meta)
+  const patterns = Array.isArray(meta.customTocPatterns) ? meta.customTocPatterns as TocRulePattern[] : []
+  return {
+    tocRuleId: patterns.length > 0 ? 'custom' : null,
+    tocRuleAuto: stored?.tocRuleAuto ?? false,
+    customPatterns: patterns,
+    tocRuleLabel: typeof meta.tocRuleLabel === 'string' ? meta.tocRuleLabel : null,
+    excludedChapterIds: Array.isArray(meta.tocExcludedChapterIds)
+      ? (meta.tocExcludedChapterIds as unknown[]).filter((id): id is string => typeof id === 'string')
+      : [],
+    chapters,
+  }
+}
+
 export async function getBookContent(userId: string | null, bookId: string, opts?: { showHidden?: boolean }): Promise<string> {
   const book = await getActiveBook(userId, bookId, opts)
   if (book.format !== 'txt') {
@@ -2069,6 +2737,8 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
     touchedMeta = true
   }
   if (touchedMeta && latestRevision) {
+    // Curation class: hand-filled bookmeta and view prefs refresh in place by
+    // design (same as title/author on the card); never a new revision.
     db.update(contentRevisions).set({ meta: baseMeta }).where(eq(contentRevisions.id, latestRevision.id)).run()
   }
   if (data.title || data.author !== undefined || data.authors !== undefined || data.hidden !== undefined || touchedMeta || data.pinned !== undefined || data.readStatus !== undefined || data.progress !== undefined) {
@@ -2265,9 +2935,20 @@ export async function resetBookMetadata(userId: string, bookId: string, opts?: {
   const parsed = await parser.parse(await storage.get(book.filePath))
   const latestRevision = db.select().from(contentRevisions)
     .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
-  if (latestRevision) {
-    const meta = { ...((latestRevision.meta ?? {}) as Record<string, unknown>), bookmeta: parsed.meta.bookmeta ?? {} }
-    db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+  const parsedBookmeta = parsed.meta.bookmeta ?? {}
+  const storedBookmeta = ((latestRevision?.meta ?? {}) as Record<string, unknown>).bookmeta ?? {}
+  if (latestRevision && JSON.stringify(parsedBookmeta) !== JSON.stringify(storedBookmeta)) {
+    // Derived metadata changed: append a revision reusing the blob so the
+    // previous description stays readable; an identical parse is a no-op.
+    db.transaction((tx) => {
+      tx.insert(contentRevisions).values({
+        id: createId('rev'), bookVersionId: bookId, revisionNo: latestRevision.revisionNo + 1,
+        blobKey: latestRevision.blobKey, size: latestRevision.size,
+        wordCount: latestRevision.wordCount, chapterCount: latestRevision.chapterCount,
+        meta: { ...((latestRevision.meta ?? {}) as Record<string, unknown>), bookmeta: parsedBookmeta },
+        createdAt: Date.now(),
+      }).run()
+    })
   }
   let title = parsed.meta.title
   let author = parsed.meta.author ?? ''
@@ -2297,6 +2978,445 @@ export async function resetBookMetadata(userId: string, bookId: string, opts?: {
     updatedAt: now,
   }).where(eq(libraryBooks.id, libraryBookId)).run()
   return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, showHidden: true }))
+}
+
+/**
+ * Managed version lookup shared by the city content writers (push/append/
+ * re-toc): contributor gate plus link/work existence. B writers never reach
+ * it — their guard rejects shared links first.
+ */
+async function getManagedVersionLink(actorId: string, libraryId: string, libraryBookId: string, versionLinkId: string) {
+  await assertCanContribute(actorId, libraryId, versionLinkId)
+  const db = getDb()
+  const link = db.select().from(libraryBookVersions)
+    .where(and(
+      eq(libraryBookVersions.id, versionLinkId),
+      eq(libraryBookVersions.libraryId, libraryId),
+      eq(libraryBookVersions.libraryBookId, libraryBookId),
+    )).get()
+  if (!link) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+  const work = db.select({ deletedAt: libraryBooks.deletedAt }).from(libraryBooks)
+    .where(and(eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
+  if (!work || work.deletedAt) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
+  return link
+}
+
+/**
+ * Chapter-split comparison shared by every revision writer: title+level
+ * sequences decide staleness, not byte offsets — offsets drift through EPUB
+ * recovery serialization while the split stays identical, and CFIs address
+ * chapter files, not meta offsets. Title renames still count: readers see
+ * them in the TOC.
+ */
+function chapterBoundariesChanged(
+  oldChapters: Array<{ id?: string; title?: string; level?: number }> | undefined,
+  newChapters: Array<{ id?: string; title?: string; level?: number }>,
+): boolean {
+  if (!oldChapters) return true
+  if (oldChapters.length !== newChapters.length) return true
+  return oldChapters.some((c, i) => (c.title ?? '') !== (newChapters[i]?.title ?? '')
+    || (c.level ?? 1) !== (newChapters[i]?.level ?? 1))
+}
+
+/**
+ * Drop a content blob once no revision points at it. A pin that outlived its
+ * revision would keep serving deleted bytes, so pins are cleared together with
+ * the row they referenced; anything still reading a pinned revision therefore
+ * keeps that revision alive.
+ */
+async function deleteUnreferencedRevision(blobKey: string): Promise<void> {
+  const db = getDb()
+  const refs = db.select({ count: sql<number>`count(*)` }).from(contentRevisions).where(eq(contentRevisions.blobKey, blobKey)).get()
+  if ((refs?.count ?? 0) > 0 || !await getStorage().exists(blobKey)) return
+  await getStorage().delete(blobKey)
+  db.delete(blobs).where(eq(blobs.key, blobKey)).run()
+}
+
+async function refreshCityProgress(
+  actorId: string,
+  bookVersionId: string,
+  opts: { oldWordCount: number; newWordCount: number; chaptersChanged: boolean; scaleActorPercent: boolean },
+): Promise<void> {
+  const db = getDb()
+  // Position maintenance is best-effort: a broken progress file must never
+  // fail the content update it rides along with.
+  const refreshOne = async (uid: string, scale: boolean) => {
+    try {
+      const progress = await readProgressFile(uid, bookVersionId)
+      if (!progress) return
+      if (!scale && !opts.chaptersChanged) return
+      if (!scale && !progress.cfi && !progress.chapter) return
+      const nextProgress = { ...progress }
+      if (scale) {
+        const scaleFraction = (value: number) => Math.max(0, Math.min(1, value * scaleFactor))
+        nextProgress.percent = Math.min(100, Math.round((progress.percent ?? 0) * scaleFactor))
+        nextProgress.fraction = typeof progress.fraction === 'number' ? scaleFraction(progress.fraction) : progress.fraction
+        nextProgress.intervals = (progress.intervals ?? []).map(([start, end]) => [scaleFraction(start), scaleFraction(end)] as [number, number])
+        nextProgress.updatedAt = Date.now()
+      }
+      if (opts.chaptersChanged) {
+        nextProgress.cfi = null
+        nextProgress.chapter = null
+      }
+      await writeProgressFile(uid, bookVersionId, nextProgress as never)
+      if (scale) {
+        db.update(bookStates).set({ percent: nextProgress.percent, updatedAt: Date.now() })
+          .where(and(eq(bookStates.userId, uid), eq(bookStates.bookVersionId, bookVersionId))).run()
+      }
+    } catch (err) {
+      log('warn', 'books.city_progress_refresh_failed', { error: err, meta: { bookVersionId } })
+    }
+  }
+  const scaleFactor = opts.scaleActorPercent && opts.newWordCount > 0 ? opts.oldWordCount / opts.newWordCount : 1
+  await refreshOne(actorId, opts.scaleActorPercent)
+  if (!opts.chaptersChanged) return
+  // Every holder's pin moved to the new revision in the same transaction, so
+  // everyone is now reading content this update just produced and every stored
+  // CFI describes the old chapter map. Drop them all; the reader falls back to
+  // the book fraction, which still lands in the right neighbourhood.
+  const holders = db.select({ userId: bookStates.userId }).from(bookStates)
+    .where(eq(bookStates.bookVersionId, bookVersionId)).all()
+  for (const { userId } of holders) {
+    if (userId === actorId) continue
+    await refreshOne(userId, false)
+  }
+}
+
+/**
+ * One-click push of a private draft to its published library version (Stage 5):
+ * appends the source's CURRENT bytes as the new revision, no file round-trip.
+ * Defaults to the publish-time base; an explicit source overrides it. The
+ * source must lead alone - a library that moved on since publishing is refused
+ * rather than overwritten (see the guard below). The source must be the
+ * caller's own non-shared book (no laundering B content upward).
+ */
+export async function pushPrivateToVersion(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+  sourceBookVersionId?: string,
+): Promise<{ revisionId: string; revisionNo: number; alreadyUpToDate: boolean; diverged: boolean }> {
+  const link = await getManagedVersionLink(actorId, libraryId, libraryBookId, versionLinkId)
+  const db = getDb()
+  const sourceId = sourceBookVersionId ?? link.sourceBaseVersionId
+  if (!sourceId) {
+    throw new AppError('VALIDATION_ERROR', 'No linked source book; pass sourceBookVersionId or upload a file')
+  }
+  const sourceLink = resolveLibraryBook(actorId, sourceId)
+  assertMutableContent(sourceLink.kind)
+  const sourceLatest = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, sourceId))
+    .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (!sourceLatest) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
+  // A version's declared format is part of its content identity: every reader
+  // branches on it (TXT export, which bytes the reader loads, whether recovery
+  // rebuilds from the artifact), and no migration can restore the meaning of a
+  // history whose format changed under it. So a push may only ever refresh a
+  // version of the same format — switching format is what uploading a new
+  // version is for, and a work can hold both formats side by side. The default
+  // source (the publish-time base) is same-format by construction, so this only
+  // guards an explicitly chosen source.
+  const targetVersion = db.select().from(bookVersions).where(eq(bookVersions.id, link.bookVersionId)).get()
+  const sourceVersion = db.select().from(bookVersions).where(eq(bookVersions.id, sourceId)).get()
+  if (targetVersion && sourceVersion && targetVersion.format !== sourceVersion.format) {
+    throw new AppError(
+      'UNSUPPORTED_FORMAT',
+      `Source is ${sourceVersion.format} and the target version is ${targetVersion.format}; upload it as a new version instead`,
+    )
+  }
+  const targetLatest = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, link.bookVersionId))
+    .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  // Byte identity against the publish snapshot, never a revision count: a
+  // same-blob revision (a metadata reset) appends history without moving the
+  // content, and counting it as divergence would cry wolf about a book nobody
+  // changed. An unknown base counts as diverged - there is nothing to compare
+  // against, so nothing may be overwritten on that guess.
+  const baseBlob = link.sourceBaseRevisionId
+    ? db.select({ blobKey: contentRevisions.blobKey }).from(contentRevisions)
+        .where(eq(contentRevisions.id, link.sourceBaseRevisionId)).get()?.blobKey ?? null
+    : null
+  const diverged = baseBlob === null || targetLatest?.blobKey !== baseBlob
+  if (targetLatest && sourceLatest.blobKey === targetLatest.blobKey) {
+    return { revisionId: targetLatest.id, revisionNo: targetLatest.revisionNo, alreadyUpToDate: true, diverged }
+  }
+  // Only a source that leads alone may push. Once the library wrote anything
+  // since the publish snapshot, this push would discard it with no way back:
+  // the pin follows the newest revision, so members following the library read
+  // the overwritten bytes, and no reader surface exposes an older one. Rather
+  // than silently resolve a two-sided edit by picking a winner, refuse and let
+  // the owner publish the intended content as a new version, where both sides
+  // stay intact.
+  if (diverged) {
+    throw new AppError(
+      'VALIDATION_ERROR',
+      'The library version changed after publishing; publish the intended content as a new version instead',
+    )
+  }
+  const baseMeta = ((targetLatest?.meta ?? {}) as Record<string, unknown>)
+  const meta: Record<string, unknown> = {
+    ...(sourceLatest.meta as Record<string, unknown> | null ?? {}),
+  }
+  for (const key of ['coverPaletteId', 'coverSuppressed'] as const) {
+    if (baseMeta[key] !== undefined) meta[key] = baseMeta[key]
+  }
+  const updatedAt = Date.now()
+  const nextRevisionNo = (targetLatest?.revisionNo ?? 0) + 1
+  const newRevisionId = createId('rev')
+  db.transaction((tx) => {
+    tx.insert(contentRevisions).values({
+      id: newRevisionId, bookVersionId: link.bookVersionId, revisionNo: nextRevisionNo,
+      blobKey: sourceLatest.blobKey, size: sourceLatest.size,
+      wordCount: sourceLatest.wordCount, chapterCount: sourceLatest.chapterCount,
+      meta, createdAt: updatedAt,
+    }).run()
+    tx.insert(blobs).values({ key: sourceLatest.blobKey, size: sourceLatest.size, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
+    tx.update(bookVersions).set({ size: sourceLatest.size, updatedAt }).where(eq(bookVersions.id, link.bookVersionId)).run()
+    tx.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, libraryBookId)).run()
+    tx.update(libraryBookVersions).set({
+      sourceBaseVersionId: sourceId,
+      sourceBaseRevisionId: newRevisionId,
+      updatedAt,
+    }).where(eq(libraryBookVersions.id, link.id)).run()
+    // Holders follow the pushed content, same as any other content write.
+    tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
+      .where(and(
+        eq(libraryBookVersions.bookVersionId, link.bookVersionId),
+        eq(libraryBookVersions.kind, 'shared'),
+      )).run()
+  })
+  await refreshCityProgress(actorId, link.bookVersionId, {
+    oldWordCount: targetLatest?.wordCount ?? 0,
+    newWordCount: sourceLatest.wordCount ?? 0,
+    chaptersChanged: chapterBoundariesChanged(
+      ((targetLatest?.meta ?? {}) as Record<string, unknown>).chapters as Array<{ id?: string; title?: string; level?: number }> | undefined,
+      (((sourceLatest.meta ?? {}) as Record<string, unknown>).chapters as Array<{ id?: string; title?: string; level?: number }> | undefined) ?? [],
+    ),
+    scaleActorPercent: true,
+  })
+  const oldBlobKey = targetLatest?.blobKey
+  if (oldBlobKey && oldBlobKey !== sourceLatest.blobKey) {
+    await deleteUnreferencedRevision(oldBlobKey)
+  }
+  const inserted = db.select({ id: contentRevisions.id }).from(contentRevisions)
+    .where(and(eq(contentRevisions.bookVersionId, link.bookVersionId), eq(contentRevisions.revisionNo, nextRevisionNo))).get()!
+  // Unreachable as diverged: the guard above refuses that case outright.
+  return { revisionId: inserted.id, revisionNo: nextRevisionNo, alreadyUpToDate: false, diverged: false }
+}
+
+/**
+ * Incremental append for a shared-library version (Stage 6): same derivation
+ * as the private flow, resolved against the city's revision (stored rule
+ * first, actor-scoped fallback) instead of a private card. Managers, or the
+ * uploading member when the library opened uploads.
+ */
+export async function previewCityAppend(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+  appendedText: string,
+  startOffset?: number,
+): Promise<AppendContentPreviewRes> {
+  const prepared = await prepareCityAppend(actorId, libraryId, libraryBookId, versionLinkId, appendedText, startOffset)
+  return prepared.preview
+}
+
+async function prepareCityAppend(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+  appendedText: string,
+  requestedStartOffset?: number,
+) {
+  if (!appendedText.trim()) throw new AppError('VALIDATION_ERROR', 'Append content is required')
+  const link = await getManagedVersionLink(actorId, libraryId, libraryBookId, versionLinkId)
+  const db = getDb()
+  const version = db.select().from(bookVersions).where(eq(bookVersions.id, link.bookVersionId)).get()
+  if (!version || version.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'Appending content only supports txt books')
+  const latest = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, link.bookVersionId))
+    .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  if (!latest) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
+  const latestMeta = (latest.meta ?? {}) as Record<string, unknown>
+
+  const normalized = await getOrRecoverTxtNormalized({ filePath: latest.blobKey, id: link.bookVersionId, updatedAt: latest.createdAt, meta: latestMeta })
+  const appendedNormalized = normalizeText(appendedText)
+  if (!appendedNormalized) throw new AppError('VALIDATION_ERROR', 'Append content is required')
+  // The version's own stored patterns decide the split. Falling back to the
+  // actor's rules here would make an append re-chapter the book differently
+  // depending on who ran it, and would write that user's rule id into content
+  // every other member reads.
+  const stored = readSharedTocSelection(latestMeta)
+  const patterns = stored?.patterns ?? null
+  const storedExcludedChapterIds = Array.isArray(latestMeta.tocExcludedChapterIds)
+    ? (latestMeta.tocExcludedChapterIds as unknown[]).filter((id): id is string => typeof id === 'string')
+    : []
+  const originalRawChapters = scanTxtChapters(normalized, patterns ?? undefined)
+  const { chapters: originalChapters } = applyTxtChapterExclusions(originalRawChapters, storedExcludedChapterIds)
+  const originalCandidateChapters = originalChapters.map((chapter) => ({
+    title: chapter.title,
+    level: chapter.level,
+    wordCount: countWords(getTxtChapterContent(normalized, chapter)),
+    startOffset: chapter.startOffset,
+  }))
+  const candidateRawChapters = scanTxtChapters(appendedNormalized, patterns ?? undefined)
+  const candidateChapters = candidateRawChapters.map((chapter) => ({
+    title: chapter.title,
+    level: chapter.level,
+    wordCount: countWords(getTxtChapterContent(appendedNormalized, chapter)),
+    startOffset: chapter.startOffset,
+  }))
+  const originalWordCount = originalCandidateChapters.reduce((sum, chapter) => sum + chapter.wordCount, 0)
+  const predictedStartIndex = predictAppendStartIndex(originalCandidateChapters, candidateChapters, originalWordCount)
+  const selectedStartOffset = resolveAppendStartOffset(appendedNormalized, candidateChapters, predictedStartIndex, requestedStartOffset)
+  const validAppendedNormalized = appendedNormalized.slice(selectedStartOffset).trimStart()
+  const mergedNormalized = validAppendedNormalized
+    ? `${normalized.trimEnd()}\n\n${validAppendedNormalized}`
+    : normalized
+  const mergedRawChapters = scanTxtChapters(mergedNormalized, patterns ?? undefined)
+  const { chapters, excludedChapterIds } = applyTxtChapterExclusions(mergedRawChapters, storedExcludedChapterIds)
+
+  const oldMetaChapters = ((latestMeta.chapters ?? []) as Array<{ id?: string }>)
+  const metaChapters = carryChapterAddedAt(chapters.map((chapter) => ({
+    id: txtChapterId(chapter),
+    title: chapter.title,
+    level: chapter.level,
+    startOffset: chapter.startOffset,
+    endOffset: chapter.endOffset,
+    contentStartOffset: chapter.contentStartOffset,
+    contentRanges: chapter.contentRanges,
+    wordCount: countWords(getTxtChapterContent(mergedNormalized, chapter)),
+  })), oldMetaChapters, latest.createdAt)
+  const newWordCount = metaChapters.reduce((sum, chapter) => sum + chapter.wordCount, 0)
+  const addedChapterCount = Math.max(0, metaChapters.length - oldMetaChapters.length)
+  const preview: AppendContentPreviewRes = {
+    originalChapterCount: oldMetaChapters.length,
+    originalWordCount,
+    newChapterCount: metaChapters.length,
+    newWordCount,
+    addedChapterCount,
+    addedWordCount: Math.max(0, newWordCount - originalWordCount),
+    candidateTextLength: appendedNormalized.length,
+    candidateChapters,
+    predictedStartIndex,
+    addedChapters: metaChapters.slice(oldMetaChapters.length).map((chapter) => ({
+      title: chapter.title,
+      level: chapter.level,
+      wordCount: chapter.wordCount,
+    })),
+    appendedToLastChapter: addedChapterCount === 0,
+    ...(addedChapterCount === 0 && metaChapters.length > 0 ? { lastChapterTitle: metaChapters[metaChapters.length - 1]!.title } : {}),
+  }
+
+  return {
+    link,
+    version,
+    latest,
+    latestMeta,
+    normalized,
+    mergedNormalized,
+    mergedRawChapters,
+    chapters,
+    excludedChapterIds,
+    metaChapters,
+    originalWordCount,
+    newWordCount,
+    chaptersChanged: chapterBoundariesChanged(
+      oldMetaChapters,
+      metaChapters.map((c) => ({ id: c.id, title: c.title, level: c.level })),
+    ),
+    preview,
+  }
+}
+
+export async function appendCityVersionContent(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+  appendedText: string,
+  startOffset?: number,
+): Promise<{ revisionId: string; revisionNo: number }> {
+  const prepared = await prepareCityAppend(actorId, libraryId, libraryBookId, versionLinkId, appendedText, startOffset)
+  const db = getDb()
+  const storage = getStorage()
+  const { link, latest, latestMeta, mergedNormalized, mergedRawChapters, chapters, excludedChapterIds, metaChapters, originalWordCount, newWordCount, chaptersChanged } = prepared
+  const work = db.select({ title: libraryBooks.title, author: libraryBooks.author }).from(libraryBooks)
+    .where(eq(libraryBooks.id, libraryBookId)).get()!
+  const meta: Record<string, unknown> = {
+    ...latestMeta,
+    chapters: metaChapters,
+    wordCount: newWordCount,
+    txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION,
+  }
+  const leadingExcludedId = mergedRawChapters[0] ? txtChapterId(mergedRawChapters[0]) : null
+  if (excludedChapterIds.length > 0) meta.tocExcludedChapterIds = excludedChapterIds
+  else delete meta.tocExcludedChapterIds
+  if (mergedRawChapters[0]?.synthetic && leadingExcludedId && excludedChapterIds.includes(leadingExcludedId)) {
+    const leadingText = getTxtChapterContent(mergedNormalized, mergedRawChapters[0]).trim()
+    if (leadingText) meta.tocExcludedLeadingText = leadingText
+  } else {
+    delete meta.tocExcludedLeadingText
+  }
+
+  const epubChapters = chapters.map((chapter) => ({
+    id: txtChapterId(chapter),
+    title: chapter.title,
+    level: chapter.level,
+  }))
+  const contentFor = (index: number) => getTxtChapterContent(mergedNormalized, chapters[index]!)
+  const epubBuffer = await convertTxtToEpub(
+    { title: work.title, author: work.author || undefined, id: link.bookVersionId },
+    epubChapters,
+    contentFor,
+  )
+  const fileKey = blobKey(sha256(epubBuffer), '.epub')
+  await storage.put(fileKey, epubBuffer)
+
+  const updatedAt = Date.now()
+  const nextRevisionNo = latest.revisionNo + 1
+  const newRevisionId = createId('rev')
+  try {
+    db.transaction((tx) => {
+      tx.insert(contentRevisions).values({
+        id: newRevisionId, bookVersionId: link.bookVersionId, revisionNo: nextRevisionNo,
+        blobKey: fileKey, size: epubBuffer.length, wordCount: newWordCount,
+        chapterCount: metaChapters.length, meta, createdAt: updatedAt,
+      }).run()
+      tx.insert(blobs).values({ key: fileKey, size: epubBuffer.length, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
+      tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, link.bookVersionId)).run()
+      tx.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, libraryBookId)).run()
+      // Every holder follows the new content: a pin that stayed behind would
+      // keep serving bytes this write just replaced, which is the state the
+      // old repin button existed to resolve one reader at a time. Readers learn
+      // about it from their own "unread update" flag, not by acting on a pin.
+      tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
+        .where(and(
+          eq(libraryBookVersions.bookVersionId, link.bookVersionId),
+          eq(libraryBookVersions.kind, 'shared'),
+        )).run()
+    })
+  } catch (err) {
+    await cleanupStagedUpload({ fileKey, coverKey: null })
+    throw err
+  }
+  // After the commit, never before: a failed write must not leave a reader
+  // positioned for content that was never published.
+  await refreshCityProgress(actorId, link.bookVersionId, {
+    oldWordCount: originalWordCount,
+    newWordCount,
+    chaptersChanged,
+    scaleActorPercent: true,
+  })
+  invalidateCachedNormalized(link.bookVersionId)
+  const oldBlobKey = latest.blobKey
+  if (oldBlobKey !== fileKey) {
+    await deleteUnreferencedRevision(oldBlobKey)
+  }
+  return { revisionId: newRevisionId, revisionNo: nextRevisionNo }
 }
 
 export async function trashBook(userId: string, bookId: string) {

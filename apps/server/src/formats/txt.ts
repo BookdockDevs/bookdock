@@ -119,11 +119,13 @@ export function decodeTextBuffer(buffer: Buffer): string {
   }
 }
 
-/** Built-in default patterns used when no TOC rule is pinned or scored. */
+/** Built-in default patterns used when no TOC rule is pinned or scored.
+ * Kept in sync with SEED_TOC_RULES (modules/toc-rules/seeds.ts): the scrapped
+ * section level stays out, otherwise rule-less rescans re-split content the
+ * presets deliberately leave alone. */
 export const defaultTocPatterns: TocPatternLike[] = [
   { level: 1, regex: '^第[一二三四五六七八九十百千万零\\d]+章\\s*[：:]?\\s*(.+)?$' },
   { level: 1, regex: '^第[一二三四五六七八九十百千万零\\d]+回\\s*[：:]?\\s*(.+)?$' },
-  { level: 2, regex: '^第[一二三四五六七八九十百千万零\\d]+节\\s*[：:]?\\s*(.+)?$' },
   { level: 1, regex: '^[Cc]hapter\\s+\\d+\\s*[：:]?\\s*(.+)?$' },
   { level: 0, regex: '^[Vv]olume\\s+\\d+\\s*[：:]?\\s*(.+)?$' },
   { level: 0, regex: '^第[一二三四五六七八九十百千万零\\d]+卷\\s*[：:]?\\s*(.+)?$' },

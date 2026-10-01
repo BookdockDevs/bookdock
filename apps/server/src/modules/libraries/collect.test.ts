@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
+import { Hono } from 'hono'
+import booksRoutes from '../books/books.routes'
+import { errorHandler } from '../../middleware/error'
+import { upsertProgress } from '../progress/progress.service'
 import { and, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
@@ -15,10 +19,11 @@ import { createId } from '../../lib/id'
 import { readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
-import { assertReadableBookSync, getActiveBook, getBook, getBookShelf, reTocBook, appendTxtBookContent, resetBookMetadata, updateBook, uploadBook, deleteBook, updateBookCover, removeBookCover } from '../books/books.service'
+import { assertReadableBookSync, getActiveBook, getBook, getBookShelf, reTocBook, appendCityVersionContent, appendTxtBookContent, pushPrivateToVersion, resetBookMetadata, updateBook, uploadBook, deleteBook, updateBookCover, removeBookCover, attachOwnsSource, attachPublishedTo } from '../books/books.service'
 import { uploadCatalogBook } from '../books/books.service'
-import { addMember, createLibrary, deleteLibrary } from './libraries.service'
-import { updateCatalogVersion } from './catalog.service'
+import { addMember, createLibrary, deleteLibrary, removeMember, updateLibrary } from './libraries.service'
+import { deleteCatalogBook, updateCatalogVersion, getCatalogBook, resetCatalogVersionMetadata } from './catalog.service'
+import { publishPrivateBook } from './publish.service'
 import { addToPrivateLibrary, describeCollectSource } from './collect.service'
 import { sourceStillReadable } from './library-access'
 import { createAnnotation, listAnnotations } from '../annotations/annotations.service'
@@ -111,6 +116,65 @@ describe('add-to-private (7.x)', () => {
     const created = await uploadCatalogBook(libraryId, ownerId, txtFile('第一章\n正文内容'), { title, author: '刘慈欣' })
     return created
   }
+
+  it('reports appended content through real detail and acknowledgment routes without a progress write', async () => {
+    const city = await seedCityBook()
+    await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
+    const app = new Hono()
+    app.use('*', async (c, next) => {
+      c.set('user', { id: memberId, username: 'member', role: 'member', avatarKey: null })
+      c.set('guest', false)
+      await next()
+    })
+    app.onError(errorHandler)
+    app.route('/api/v1/books', booksRoutes)
+    const url = `/api/v1/books/${city.bookVersionId}`
+    const first = await (await app.request(url)).json()
+    expect(first.data.kind).toBe('shared')
+    const acknowledged = await app.request(`${url}/read-revision`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revisionId: first.data.revisionId }),
+    })
+    expect(acknowledged.status).toBe(200)
+    expect((await (await app.request(url)).json()).data.hasUnreadUpdate).toBeUndefined()
+
+    await appendCityVersionContent(ownerId, libraryId, city.libraryBookId, city.versionLinkId!, '第二章\n更新')
+    const updated = await (await app.request(url)).json()
+    expect(updated.data.hasUnreadUpdate).toBe(true)
+    expect(updated.data.revisionId).not.toBe(first.data.revisionId)
+    // A background position save from the old reader must not consume the update.
+    await upsertProgress(memberId, city.bookVersionId, { percent: 20 })
+    expect((await (await app.request(url)).json()).data.hasUnreadUpdate).toBe(true)
+    expect((await app.request(`${url}/file?reader=1&revisionId=${first.data.revisionId}`)).status).toBe(400)
+
+    const invalid = await app.request(`${url}/read-revision`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revisionId: 'unrelated-revision' }),
+    })
+    expect(invalid.status).toBe(400)
+    await app.request(`${url}/read-revision`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revisionId: first.data.revisionId }),
+    })
+    expect((await (await app.request(url)).json()).data.hasUnreadUpdate).toBe(true)
+    await app.request(`${url}/read-revision`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revisionId: updated.data.revisionId }),
+    })
+    expect((await (await app.request(url)).json()).data.hasUnreadUpdate).toBeUndefined()
+    const state = db.select().from(schema.bookStates)
+      .where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, city.bookVersionId))).get()!
+    expect(state.percent).toBe(20)
+    expect(state.readRevisionId).toBe(updated.data.revisionId)
+    await app.request(`${url}/read-revision`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revisionId: first.data.revisionId }),
+    })
+    expect((await (await app.request(url)).json()).data.hasUnreadUpdate).toBeUndefined()
+    expect(db.select().from(schema.bookStates)
+      .where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, city.bookVersionId))).get()!.readRevisionId)
+      .toBe(updated.data.revisionId)
+  })
 
   it('collects a version into the private library with pinned source and metadata', async () => {
     const city = await seedCityBook()
@@ -219,6 +283,129 @@ describe('add-to-private (7.x)', () => {
     const card = db.select().from(schema.libraryBooks)
       .where(eq(schema.libraryBooks.libraryId, memberPrivateId())).get()
     expect(card?.title).toBe('三体')
+  })
+
+  it('refuses to collect a version published from a book still held privately', async () => {
+    const source = await uploadBook(ownerId, txtFile('第一章\n原稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: source.book.id })
+    await expect(addToPrivateLibrary(ownerId, libraryId, pub.versionLinkId))
+      .rejects.toMatchObject({ code: 'ALREADY_OWNS_SOURCE', details: { bookVersionId: source.book.id } })
+    // No duplicate card was created.
+    expect(db.select().from(schema.libraryBookVersions)
+      .where(and(eq(schema.libraryBookVersions.libraryId, memberPrivateId()), eq(schema.libraryBookVersions.bookVersionId, pub.bookVersionId))).get())
+      .toBeUndefined()
+    // The verdict agrees: owns the source.
+    const detail = await getCatalogBook(ownerId, libraryId, pub.libraryBookId)
+    expect(detail.versions.find((v) => v.id === pub.versionLinkId)).toMatchObject({ ownsSource: true, collected: false })
+  })
+
+  it('collects normally once the city moved past the publish base', async () => {
+    const source = await uploadBook(ownerId, txtFile('第一章\n原稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: source.book.id })
+    await appendCityVersionContent(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId, '第二章\n更新')
+    const collected = await addToPrivateLibrary(ownerId, libraryId, pub.versionLinkId)
+    expect(collected.alreadyExists).toBe(false)
+    expect(collected.bookVersionId).toBe(pub.bookVersionId)
+  })
+
+  it('still refuses after a same-bytes revision, and never reports a cleared verdict', async () => {
+    const source = await uploadBook(ownerId, txtFile('第一章\n原稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: source.book.id })
+    // A metadata reset on the city version appends a revision that reuses the
+    // very same blob. Nothing about the content changed, so this must not count
+    // as "the city moved on" — that reading both unblocks a duplicate collect of
+    // the book the caller still holds and leaves `diverged` permanently true.
+    registerParser({
+      match: (fileName) => fileName.toLowerCase().endsWith('.epub'),
+      parse: async () => ({ meta: { title: 'Re-parsed', bookmeta: { publisher: 'Reset Press' } }, chapters: [] }),
+    })
+    await resetCatalogVersionMetadata(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId)
+    const revisions = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, pub.bookVersionId)).all()
+    expect(revisions).toHaveLength(2)
+    expect(new Set(revisions.map((r) => r.blobKey)).size).toBe(1)
+
+    await expect(addToPrivateLibrary(ownerId, libraryId, pub.versionLinkId))
+      .rejects.toMatchObject({ code: 'ALREADY_OWNS_SOURCE' })
+    const detail = await getCatalogBook(ownerId, libraryId, pub.libraryBookId)
+    const version = detail.versions.find((v) => v.id === pub.versionLinkId)!
+    expect(version.ownsSource).toBe(true)
+
+    // And a push over identical bytes is a clean no-op, not a divergence.
+    const pushed = await pushPrivateToVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId)
+    expect(pushed).toMatchObject({ alreadyUpToDate: true, diverged: false })
+    const afterPush = await attachPublishedTo(ownerId, { id: source.book.id })
+    expect(afterPush).toMatchObject({ publishedTo: [{ inSync: true, cityMoved: false }] })
+  })
+
+  it('collects normally after the private original is trashed', async () => {
+    const source = await uploadBook(ownerId, txtFile('第一章\n原稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: source.book.id })
+    await deleteBook(ownerId, source.book.id)
+    const collected = await addToPrivateLibrary(ownerId, libraryId, pub.versionLinkId)
+    expect(collected.alreadyExists).toBe(false)
+  })
+
+  it('marks uncollected reads of own published sources for the detail dialog', async () => {    const source = await uploadBook(ownerId, txtFile('第一章\n原稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: source.book.id })
+    const uncollected = { id: pub.bookVersionId, collected: false as const }
+    expect(await attachOwnsSource(ownerId, uncollected)).toMatchObject({ ownsSource: true })
+    // Anyone else just reads it.
+    expect('ownsSource' in (await attachOwnsSource(memberId, uncollected))).toBe(false)
+    // Guests and private cards never carry the mark.
+    expect('ownsSource' in (await attachOwnsSource(null, uncollected))).toBe(false)
+    expect('ownsSource' in (await attachOwnsSource(ownerId, { id: source.book.id }))).toBe(false)
+    // A moved city drops the mark.
+    await appendCityVersionContent(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId, '第二章\n更新')
+    expect('ownsSource' in (await attachOwnsSource(ownerId, uncollected))).toBe(false)
+  })
+
+  it('hides a published target the caller can no longer see', async () => {
+    // Publishing is provenance the caller keeps forever, but the city it names
+    // is not theirs to see after they lose access: the dialog must not keep
+    // naming a library, or a version, they can no longer reach.
+    const source = await uploadBook(ownerId, txtFile('第一章\n原稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: source.book.id })
+    await addMember(ownerId, libraryId, { userId: memberId, role: 'member' })
+    expect(await attachPublishedTo(memberId, { id: source.book.id })).toMatchObject({ publishedTo: expect.any(Array) })
+
+    await updateLibrary(ownerId, libraryId, { visibility: 'private' })
+    await removeMember(ownerId, libraryId, memberId)
+    expect('publishedTo' in await attachPublishedTo(memberId, { id: source.book.id })).toBe(false)
+    // The owner still sees it, and the provenance itself is untouched.
+    expect(await attachPublishedTo(ownerId, { id: source.book.id }))
+      .toMatchObject({ publishedTo: [{ versionLinkId: pub.versionLinkId }] })
+  })
+
+  it('hides a target whose work was deleted or unlisted', async () => {
+    const source = await uploadBook(ownerId, txtFile('第一章\n原稿'))
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: source.book.id })
+    await updateCatalogVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId, { status: 'unlisted' })
+    // A manager curating the library keeps seeing it; a plain member does not.
+    expect(await attachPublishedTo(ownerId, { id: source.book.id }))
+      .toMatchObject({ publishedTo: [{ versionLinkId: pub.versionLinkId }] })
+    await addMember(ownerId, libraryId, { userId: memberId, role: 'member' })
+    expect('publishedTo' in await attachPublishedTo(memberId, { id: source.book.id })).toBe(false)
+
+    await updateCatalogVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId, { status: 'published' })
+    await deleteCatalogBook(ownerId, libraryId, pub.libraryBookId)
+    expect('publishedTo' in await attachPublishedTo(ownerId, { id: source.book.id })).toBe(false)
+  })
+
+  it('lists published targets with sync state for the merged publish dialog', async () => {
+    const source = await uploadBook(ownerId, txtFile('第一章\n原稿'))
+    expect(await attachPublishedTo(ownerId, { id: source.book.id })).not.toHaveProperty('publishedTo')
+    const pub = await publishPrivateBook(ownerId, libraryId, { bookId: source.book.id })
+    await expect(attachPublishedTo(ownerId, { id: source.book.id })).resolves.toMatchObject({
+      publishedTo: [{ libraryId, versionLinkId: pub.versionLinkId, inSync: true, cityMoved: false }],
+    })
+    // City moves on: still listed, flagged behind.
+    await appendCityVersionContent(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId, '第二章\n更新')
+    await expect(attachPublishedTo(ownerId, { id: source.book.id })).resolves.toMatchObject({
+      publishedTo: [{ inSync: false, cityMoved: true }],
+    })
+    // Guests and collected cards get nothing.
+    expect('publishedTo' in (await attachPublishedTo(null, { id: source.book.id }))).toBe(false)
   })
 
   it('keeps the B readable as provenance after the source library is deleted', async () => {

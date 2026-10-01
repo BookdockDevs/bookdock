@@ -1,0 +1,1 @@
+CREATE INDEX `library_book_versions_source_base_idx` ON `library_book_versions` (`source_base_version_id`);

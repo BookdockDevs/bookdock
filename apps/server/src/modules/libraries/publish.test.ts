@@ -121,6 +121,16 @@ describe('publish private book snapshot', () => {
       .where(eq(schema.bookStates.bookVersionId, ownerResult.bookVersionId)).all()).toHaveLength(0)
   })
 
+  it('records the publish-time source base on the city link', async () => {
+    const source = await privateBook(ownerId, '第一章\n馆主内容')
+    const result = await publishPrivateBook(ownerId, sharedLibraryId, { bookId: source.book.id })
+    const sourceRevision = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, source.book.id)).get()!
+    expect(db.select().from(schema.libraryBookVersions)
+      .where(eq(schema.libraryBookVersions.id, result.versionLinkId)).get())
+      .toMatchObject({ sourceBaseVersionId: source.book.id, sourceBaseRevisionId: sourceRevision.id })
+  })
+
   it('rejects members, non-members, and private targets', async () => {
     const book = await privateBook(ownerId)
     await expect(publishPrivateBook(memberId, sharedLibraryId, { bookId: book.book.id }))
