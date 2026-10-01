@@ -35,7 +35,7 @@ describe('ui.store resetUserScopedPrefs', () => {
     expect(store.getState().coverFit).toBe('crop')
     expect(store.getState().ttsVoiceId).toBe('')
     expect(store.getState().readingTimerMode).toBe('auto')
-    expect(store.getState().fontSize).toBe(18)
+    expect(store.getState().fontSize).toBe(22)
     expect(store.getState().customThemes).toEqual([])
   })
 
@@ -63,9 +63,9 @@ describe('ui.store resetUserScopedPrefs', () => {
 
     const config = JSON.parse(store.getState().readingConfig) as { global: { fontSize: number }; presets: Array<{ name: string; snapshot: { fontSize: number } }> }
     expect(config.presets.map((preset) => preset.name)).toEqual(['护眼'])
-    expect(config.global.fontSize).toBe(18)
-    expect(config.presets[0]!.snapshot.fontSize).toBe(18)
-    expect(store.getState().fontSize).toBe(18)
+    expect(config.global.fontSize).toBe(22)
+    expect(config.presets[0]!.snapshot.fontSize).toBe(22)
+    expect(store.getState().fontSize).toBe(22)
   })
 })
 

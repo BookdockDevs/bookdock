@@ -52,7 +52,7 @@ describe('reading profiles', () => {
     }
     expect(parsed.global.fontSize).toBe(20)
     expect(parsed.global.clickAreaMode).toBe('standard')
-    expect(parsed.global.showHeader).toBe(true)
+    expect(parsed.global.showHeader).toBe(false)
   })
 
   it('backfills the mode-mirror fields from the matching backing field', () => {
@@ -140,7 +140,7 @@ describe('reading profiles', () => {
   it('folds changes into the global config without a target', () => {
     const next = foldReadingChange(configWith({ id: 'p1', name: 'x', snapshot: snapshot() }), 'fontSize', 19, null)
     expect(next.global.fontSize).toBe(19)
-    expect(next.presets[0].snapshot.fontSize).toBe(18)
+    expect(next.presets[0].snapshot.fontSize).toBe(22)
   })
 
   it('folds a dangling target into the global config (resolution fallback)', () => {

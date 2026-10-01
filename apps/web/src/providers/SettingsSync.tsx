@@ -7,11 +7,10 @@ import { apiPut } from '@/api/client'
 import { customThemesFromSync } from '@/lib/reading-theme'
 import { fetchSettings, seedSettingsQuery } from '@/lib/settings-cache'
 import { useAuthStore } from '@/stores/auth.store'
-import { useUiStore } from '@/stores/ui.store'
+import { PENDING_SETTINGS_STORAGE_KEY, useUiStore } from '@/stores/ui.store'
 
 const SYNC_CHANNEL = 'bd-settings'
 const SESSION_ID = Math.random().toString(36).slice(2)
-const PENDING_SETTINGS_STORAGE_KEY = 'bd-settings-pending'
 
 // Only user-level settings that should travel across devices sync to the server. Flat reading
 // fields are deliberately excluded (intents sync, outcomes stay local):

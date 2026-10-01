@@ -10,16 +10,38 @@ All notable changes to Bookdock are documented here.
 - File names now contribute authors and edition tags (e.g. 精校版); catalog uploads carry the edition name through.
 - Catalog menus navigate from their headers and keep the collect action as a disabled already-in-library state instead of hiding it.
 - Metadata grids auto-pack without holes; values wrapped onto two lines render slightly smaller.
+- Shared libraries gain a member-upload switch: once opened, members can upload new works and maintain only the versions they uploaded.
+- The publish dialog gains a "Published libraries" list showing each target library and its sync state (Content in sync / Content updated / Library updated / Content diverged); a push is offered only when the private copy leads.
+- Shared-library versions support in-place content appends and re-chaptering, with previews (TXT only).
+- Shared-library updates surface an "Updated" badge in detail and reader with a one-time notice; reading clears the mark.
+- Shared versions published from a book already in the private library read as already collected instead of offering a duplicate collect.
+- Hide causes are consistent everywhere: taxonomy-hidden works show an inert control naming the shelf, category, or tag responsible.
 
 ### Changed
 
 - The book-detail overflow menu is TXT-only; publish moved to the action bar.
+- Manual source follow-up is gone: opening a book always serves the latest content, with no follow action.
+- Space no longer turns pages: it pauses or resumes active playback, otherwise toggles the reader chrome, and never starts playback.
+- The TTS panel primary action is now pause/resume with a separate stop button; starting playback from either panel dismisses the popover and unpins the chrome.
+- Default reading layout for new users updated (type size, spacing, snap scrolling).
+- The reader toolbar is locked by default.
+- TXT chapter detection no longer treats "第X节" lines as chapters.
+- Delete-user confirmation no longer claims shared-library content is unaffected.
 
 ### Fixed
 
 - Upgrading no longer refuses to boot over books whose source files are already gone; they are skipped with a migration anomaly while the rest of the library migrates.
 - Reopening a book now scrolls the directory to the current chapter instead of replaying its stale position.
 - The reader sidebar dock no longer flashes when toggling tabs, and the scrolled position holds across re-renders.
+- Switching accounts after logout no longer lets reset defaults overwrite server reading settings.
+- Paginated mode no longer opens short chapters half-empty or lands jumps on the wrong chapter.
+- Pausing timed auto-reading with space no longer restarts the step from scratch.
+- The Legado discovery login hint now names the long-press source menu instead of a pull-down gesture.
+- Restored the missing English copy for the catalog upload hint.
+
+### Upgrade notes
+
+- Back up the complete `DATA_DIR` before upgrading. Migrations 0032–0035 apply automatically (member uploads, publish source base, read acknowledgements).
 
 ## [0.4.0] - 2026-09-30
 
@@ -467,16 +489,38 @@ All notable changes to Bookdock are documented here.
 - 文件名可解析出作者与版本标签（如精校版）；目录上传保留版本名。
 - 目录菜单头部可点击跳转；收藏操作保留为不可用的已在书库中状态，不再隐藏。
 - 元数据网格自动排满无空洞；折成两行的值字号略小。
+- 共享书库新增成员上传开关：开启后，成员可上传新作品，并维护自己上传的版本。
+- 发布弹窗新增「已发布书库」列表：展示本书已发布的书库与内容同步状态（内容同步 / 内容更新 / 书库已更新 / 内容已分叉）；仅「内容更新」时可推送更新。
+- 共享书库版本支持直接追写内容与重建目录（仅 TXT）。
+- 共享书库内容更新后，收藏者将在书籍详情与阅读器中看到「有更新」标记与更新提示，阅读后消失。
+- 与私人书库藏书同源的共享版本直接显示为「已在书库中」，不再重复收藏。
+- 连带隐藏的原因在各处保持一致：被书架、分类或标签隐藏时，操作入口置灰并注明原因。
 
 #### 变更
 
 - 书籍详情更多菜单仅 TXT 显示；发布移至操作栏。
+- 内容更新后打开即为最新，不再需要手动跟进。
+- 空格键不再翻页：播报中按空格暂停或继续，其余场景仅开关阅读器栏，不会误启动播报。
+- TTS 面板主按钮改为暂停/继续，并新增独立停止键；从面板开始播报时自动收起面板与顶栏。
+- 新用户默认阅读排版更新（字号、行距、段距等）。
+- 阅读器工具栏默认锁定。
+- TXT 目录识别不再将「第X节」识别为章节。
+- 删除用户确认文案不再声称共享书库内容不受影响。
 
 #### 修复
 
 - 源文件已丢失的书不再阻塞升级启动；它们记为迁移异常跳过，其余书正常迁移。
 - 重开书籍时目录会定位到当前章节，不再停在上次记住的旧位置。
 - 阅读器侧栏切换不再闪烁；滚动位置在重排后保持。
+- 退出登录后再次登录，阅读设置不再被重置时的默认值覆盖。
+- 分页模式下，短章节首屏不再半空，跳转不再落到书首或跳章。
+- 定时自动阅读按空格暂停后不再重头开始。
+- 开源阅读发现页的登录与刷新入口改为长按书源名操作。
+- 补回英文版目录上传提示缺失的文案。
+
+#### 升级说明
+
+- 升级前请完整备份 `DATA_DIR`。迁移 0032–0035 自动执行（成员上传、发布来源、更新提醒）。
 
 ### [0.4.0] - 2026-09-30
 

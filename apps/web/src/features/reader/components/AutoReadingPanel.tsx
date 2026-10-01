@@ -65,10 +65,11 @@ function ReaderToggle({ label, checked, onChange }: ReaderToggleProps) {
 
 interface AutoReadingPanelProps {
   readingMode: ReadingMode
-  onClose: () => void
+  /** Fired once a start settles, to dismiss the popover and unpin the chrome. */
+  onStart?: () => void
 }
 
-export default function AutoReadingPanel({ readingMode, onClose }: AutoReadingPanelProps) {
+export default function AutoReadingPanel({ readingMode, onStart }: AutoReadingPanelProps) {
   const _ = useTranslation()
   const { controller, state } = useAutoReadingSession()
   const autoReadingMode = useUiStore((s) => s.autoReadingMode)
@@ -102,7 +103,7 @@ export default function AutoReadingPanel({ readingMode, onClose }: AutoReadingPa
       void controller.resume()
       return
     }
-    void controller.start().finally(onClose)
+    void controller.start().finally(() => onStart?.())
   }
 
   return (

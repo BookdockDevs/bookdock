@@ -1674,7 +1674,7 @@ export class FoliateReader implements BookReader {
   private resizeObserver: ResizeObserver | null = null
   private lastScrollVPad = -1
   private activeDocs = new Set<Document>()
-  private selectionDocs = new Map<Document, { index: number; handler: () => void; selectionChangeHandler: () => void; startHandler: () => void; dblHandler: () => void; escHandler: (e: KeyboardEvent) => void }>()
+  private selectionDocs = new Map<Document, { index: number; handler: () => void; selectionChangeHandler: () => void; startHandler: () => void; dblHandler: () => void; keyForwardHandler: (e: KeyboardEvent) => void }>()
   private selectionActive = false
   private selectionDismissPending = false
   private foliateOverlayer: any = null
@@ -2295,7 +2295,14 @@ export class FoliateReader implements BookReader {
       view.addEventListener('doctouchstart', () => this.emit('userInteraction'))
       view.addEventListener('doctouchend', () => this.emit('userInteractionEnd'))
       view.addEventListener('docwheel', () => this.emit('userInteraction'), { passive: true })
-      view.addEventListener('dockeydown', () => this.emit('userInteraction'))
+      view.addEventListener('dockeydown', (event: Event) => {
+        // Space never moves the text, so it must not rebase timed auto-reading:
+        // the same press pauses the session, and a rebase would clear the step
+        // countdown before pause() can measure the remainder. The paginator no
+        // longer reports space at all; this guards cached paginator copies.
+        if ((event as CustomEvent).detail?.key === ' ') return
+        this.emit('userInteraction')
+      })
       view.addEventListener('draw-annotation', (event: Event) =>
         this.handleDrawAnnotation((event as CustomEvent).detail))
       view.addEventListener('show-annotation', (event: Event) =>
@@ -4163,7 +4170,7 @@ export class FoliateReader implements BookReader {
             doc.removeEventListener('selectionchange', sel.selectionChangeHandler)
             doc.removeEventListener('touchend', sel.handler)
             doc.removeEventListener('dblclick', sel.dblHandler)
-            doc.removeEventListener('keydown', sel.escHandler)
+            doc.removeEventListener('keydown', sel.keyForwardHandler)
             this.selectionDocs.delete(doc)
           }
         }
@@ -4243,20 +4250,23 @@ export class FoliateReader implements BookReader {
         }
         doc.addEventListener('dblclick', dblHandler)
         // Focus lives inside the section iframe, so parent-window keydown
-        // listeners (popup Esc handlers, the boss key) never fire. Re-dispatch
-        // Escape on a deep parent element with bubbles: dispatching on
-        // `document` directly would NOT reach window-level listeners — the
-        // event path is built from the parentNode chain, which stops at the
-        // document (document.parentNode is null, window is never appended).
-        const escHandler = (e: KeyboardEvent) => {
-          if (e.key !== 'Escape') return
+        // listeners (popup Esc handlers, the boss key, the space key) never
+        // fire. Re-dispatch those keys on a deep parent element with bubbles:
+        // dispatching on `document` directly would NOT reach window-level
+        // listeners — the event path is built from the parentNode chain, which
+        // stops at the document (document.parentNode is null, window is never
+        // appended). Paging keys are not forwarded: the paginator's own doc
+        // handler already owns them inside the iframe.
+        const forwardedKeys = ['Escape', ' ']
+        const keyForwardHandler = (e: KeyboardEvent) => {
+          if (!forwardedKeys.includes(e.key)) return
           const host = this.container ?? document.body
           if (host) {
-            host.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+            host.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, bubbles: true }))
           }
         }
-        doc.addEventListener('keydown', escHandler)
-        this.selectionDocs.set(doc, { index, handler, selectionChangeHandler, startHandler, dblHandler, escHandler })
+        doc.addEventListener('keydown', keyForwardHandler)
+        this.selectionDocs.set(doc, { index, handler, selectionChangeHandler, startHandler, dblHandler, keyForwardHandler })
       }
       this.activeDocs = docs
     } catch {

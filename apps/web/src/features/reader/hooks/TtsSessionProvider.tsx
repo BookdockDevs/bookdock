@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 
 import { useTtsServiceVoices, useTtsServices } from '@/api/hooks/useTts'
+import { notify } from '@/lib/notifications'
 import { useUiStore } from '@/stores/ui.store'
 
 import type { ReaderPlaybackCoordinator } from '../lib/playback-coordinator'
@@ -39,6 +40,26 @@ export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = fals
 
   useEffect(() => {
     if (!controller) return
+    return coordinator.registerToggle('tts', {
+      // 'starting' counts: the controller's own pause() stops a session that has
+      // not produced audio yet, which is what the panel's pause button does, so
+      // the key stays consistent with the button instead of inventing a third
+      // outcome.
+      available: () => {
+        const status = controller.getSnapshot().status
+        return status === 'playing' || status === 'starting' || status === 'paused'
+      },
+      apply: () => {
+        // toggle() would also start() from 'idle', which the key must never do.
+        const status = controller.getSnapshot().status
+        if (status === 'playing' || status === 'starting') void controller.pause()
+        else if (status === 'paused') void controller.resume()
+      },
+    })
+  }, [controller, coordinator])
+
+  useEffect(() => {
+    if (!controller) return
     const timers = [0, 2_000].map((delay) => window.setTimeout(() => controller.refreshVoices(), delay))
     const synthesis = globalThis.speechSynthesis
     synthesis?.addEventListener?.('voiceschanged', controller.refreshVoices)
@@ -50,5 +71,11 @@ export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = fals
   }, [controller])
 
   const state = useSyncExternalStore(controller?.subscribe ?? (() => () => undefined), controller?.getSnapshot ?? (() => IDLE_TTS_STATE), () => IDLE_TTS_STATE)
+  useEffect(() => {
+    // Mirror AutoReadingPanel: failures toast so dismissing the popover on
+    // start never hides them. The panel renders the same generic message
+    // in-panel; the controller's raw error strings are not i18n keys.
+    if (state.error) notify.error({ key: 'reader.ttsPlaybackFailed' })
+  }, [state.error])
   return <TtsSessionContext.Provider value={{ controller, state }}>{children}</TtsSessionContext.Provider>
 }

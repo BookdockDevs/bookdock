@@ -155,6 +155,86 @@ describe('AutoReadingController', () => {
     controller.dispose()
   })
 
+  it('keeps the remaining step time when the interaction lands before the pause', async () => {
+    // Focus inside the section iframe: the renderer reports `dockeydown` and
+    // Reader's bridge pauses in the same task, and which one runs first depends
+    // on listener registration order. The interaction used to rebase the
+    // countdown, so `pause()` then found no `stepStartedAt`, saved no
+    // remaining time, and resuming restarted the whole step — the intermittent
+    // reset reported for the space key in page-flip mode.
+    const fake = fakeRenderer()
+    const controller = new AutoReadingController(fake.renderer, { mode: 'timed', speed: 100, readingMode: 'page' })
+    await controller.start()
+    vi.advanceTimersByTime(800)
+
+    fake.emit('userInteraction')
+    await controller.pause()
+    expect(controller.getSnapshot()).toMatchObject({ status: 'paused', stepRemaining: 1200 })
+
+    await controller.resume()
+    vi.advanceTimersByTime(1199)
+    expect(fake.renderer.scrollByPages).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(fake.renderer.scrollByPages).toHaveBeenCalledWith(1, undefined, { internal: true })
+
+    controller.dispose()
+  })
+
+  it('keeps the remaining step time when the interaction lands after the pause', async () => {
+    const fake = fakeRenderer()
+    const controller = new AutoReadingController(fake.renderer, { mode: 'timed', speed: 100, readingMode: 'page' })
+    await controller.start()
+    vi.advanceTimersByTime(800)
+
+    await controller.pause()
+    fake.emit('userInteraction')
+    await Promise.resolve()
+    expect(controller.getSnapshot()).toMatchObject({ status: 'paused', stepRemaining: 1200 })
+    // The trailing report must not also queue a resume behind the pause.
+    vi.advanceTimersByTime(5000)
+    expect(controller.getSnapshot().status).toBe('paused')
+    expect(fake.renderer.scrollByPages).not.toHaveBeenCalled()
+
+    controller.dispose()
+  })
+
+  it('still rebases a genuine interaction while running', async () => {
+    // The guard must stay narrow: a real edit during playback still restarts the
+    // step from the current position.
+    const fake = fakeRenderer()
+    const controller = new AutoReadingController(fake.renderer, { mode: 'timed', speed: 100, readingMode: 'page' })
+    await controller.start()
+    vi.advanceTimersByTime(800)
+
+    fake.emit('userInteraction')
+    await Promise.resolve()
+    expect(controller.getSnapshot()).toMatchObject({ status: 'running', stepRemaining: null, stepStartedAt: null })
+
+    controller.dispose()
+  })
+
+  it('rebases a real interaction that arrives after a paused one', async () => {
+    // Only the reports belonging to the pause keypress are swallowed; the next
+    // real edit after resuming rebases as before.
+    const fake = fakeRenderer()
+    const controller = new AutoReadingController(fake.renderer, { mode: 'timed', speed: 100, readingMode: 'page' })
+    await controller.start()
+    vi.advanceTimersByTime(800)
+
+    fake.emit('userInteraction')
+    await controller.pause()
+    fake.emit('userInteraction')
+    await Promise.resolve()
+    await controller.resume()
+
+    vi.advanceTimersByTime(100)
+    fake.emit('userInteraction')
+    await Promise.resolve()
+    expect(controller.getSnapshot()).toMatchObject({ status: 'running', stepRemaining: null, stepStartedAt: null })
+
+    controller.dispose()
+  })
+
   it('tracks step timing and handles pause and resume with remaining duration', async () => {
     const fake = fakeRenderer()
     const controller = new AutoReadingController(fake.renderer, { mode: 'timed', speed: 100, readingMode: 'page' })

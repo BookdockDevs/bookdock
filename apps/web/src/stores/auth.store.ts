@@ -55,6 +55,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     })
   },
   clearAuth: () => {
+    // Drop the session before resetting preferences: the settings subscription
+    // skips syncing while logged out, so the reset below stays local and can
+    // never be mistaken for a user edit and PUT back to the server.
+    set({ user: null })
     if (typeof window !== 'undefined') {
       localStorage.removeItem('bd-user')
       clearStoredSettings()
@@ -64,6 +68,5 @@ export const useAuthStore = create<AuthState>((set) => ({
       // the reader, so a shared browser keeps them across accounts.
       useUiStore.getState().resetUserScopedPrefs()
     }
-    set({ user: null })
   },
 }))

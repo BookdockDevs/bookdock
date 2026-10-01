@@ -43,6 +43,7 @@ import { SelectionToolbar } from './components/SelectionToolbar'
 import { ImageContextMenu } from './components/ImageContextMenu'
 import ShareCardDialog from './components/share/ShareCardDialog'
 import { ProgressStrip } from './components/ProgressStrip'
+import ContentUpdateNotice from './components/ContentUpdateNotice'
 import HistoryCapsule from './components/HistoryCapsule'
 import ReaderFooterControls from './components/ReaderFooterControls'
 import AutoReadingProgressBar from './components/AutoReadingProgressBar'
@@ -233,6 +234,8 @@ export default function Reader() {
     queryKey: ['book', id],
     queryFn: () => apiGet<{ data: BookDetailRes }>(withReveal(`/books/${id}`)),
     enabled: !!id,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
   usePageTitle(bookQuery.data?.data?.title ?? _('reader.loading'))
 
@@ -547,8 +550,8 @@ export default function Reader() {
   // branch's container div exists — mounting earlier grabs the loading-branch
   // div, which React replaces when bookQuery resolves, leaving the view
   // appended to a detached subtree (iframe never loads -> first-open hang).
-  const contentUrl = id && bookQuery.data?.data
-    ? withReveal(`/api/v1/books/${id}/file?reader=1&v=${bookQuery.data.data.updatedAt}`)
+  const contentUrl = id && bookQuery.isFetchedAfterMount && bookQuery.data?.data
+    ? withReveal(`/api/v1/books/${id}/file?reader=1&revisionId=${encodeURIComponent(bookQuery.data.data.revisionId ?? '')}&v=${bookQuery.data.data.updatedAt}`)
     : ''
 
   // Latch initialCfi at first resolve: later refetches of ['progress'] (e.g.
@@ -641,6 +644,24 @@ export default function Reader() {
     deepLinkHandled.current = false
     setProgressStartOver(false)
   }, [id, setReplaceTarget])
+
+  // One definition of "toggle the reading chrome", shared by the middle-tap
+  // gesture and the space key: the dismissal rules (locked desktop sidebar is
+  // persistent) are subtle enough that a second copy would drift.
+  const toggleChrome = useCallback(() => {
+    keepChromePinnedRef.current = false
+    // Tap-to-toggle: anything visible (pinned bars, the settings popover,
+    // or a dismissible sidebar) closes on tap. A locked desktop sidebar is
+    // persistent and must not participate in reading-chrome dismissal.
+    const dismissibleSidebarOpen = sidebarOpen && (isTouch || !toolbarLocked)
+    if (chromePinned || settingsOpen || dismissibleSidebarOpen) {
+      setChromePinned(false)
+      setSettingsOpen(false)
+      if (dismissibleSidebarOpen) setSidebarOpen(false)
+    } else {
+      setChromePinned(true)
+    }
+  }, [chromePinned, isTouch, setSidebarOpen, settingsOpen, sidebarOpen, toolbarLocked])
 
   const { containerRef, renderer, fontStack, fontCss } = useReaderRenderer({
     url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
@@ -816,20 +837,7 @@ export default function Reader() {
         chapter: e.sectionIndex === undefined ? undefined : sectionTocLabels?.[e.sectionIndex],
       })
     },
-    onChromeToggle: () => {
-      keepChromePinnedRef.current = false
-      // Tap-to-toggle: anything visible (pinned bars, the settings popover,
-      // or a dismissible sidebar) closes on tap. A locked desktop sidebar is
-      // persistent and must not participate in reading-chrome dismissal.
-      const dismissibleSidebarOpen = sidebarOpen && (isTouch || !toolbarLocked)
-      if (chromePinned || settingsOpen || dismissibleSidebarOpen) {
-        setChromePinned(false)
-        setSettingsOpen(false)
-        if (dismissibleSidebarOpen) setSidebarOpen(false)
-      } else {
-        setChromePinned(true)
-      }
-    },
+    onChromeToggle: toggleChrome,
     onUserJump: () => {
       // An explicit jump supersedes the in-flight restore: wherever the
       // user lands is their intent and may be saved
@@ -1173,6 +1181,22 @@ export default function Reader() {
     setAutoReadingOpen((v) => !v)
   }, [])
 
+  // Starting playback means eyes on the text: starting from either panel drops
+  // a pinned chrome along with the popover so both leave the same clean view.
+  // Hover-summoned chrome is untouched — it hides on its own 180ms timer — and
+  // a plain dismiss (Esc, outside click, toggle button) never unpins.
+  const onAutoReadingStart = useCallback(() => {
+    keepChromePinnedRef.current = false
+    setChromePinned(false)
+    setAutoReadingOpen(false)
+  }, [])
+
+  const onTtsStart = useCallback(() => {
+    keepChromePinnedRef.current = false
+    setChromePinned(false)
+    setTtsOpen(false)
+  }, [])
+
   const onToggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
       void document.documentElement.requestFullscreen()
@@ -1238,6 +1262,21 @@ export default function Reader() {
         }, 0)
         return
       }
+      if (e.key === ' ') {
+        // Space is a playback and chrome key, never a page turn. Paging is the
+        // arrows' job: a space press is unpredictable enough that a reader
+        // cannot tell in advance whether it will move the text, and in scrolled
+        // mode the browser's native space-scroll would move it anyway.
+        // Ctrl/Alt/Meta are left alone so the IME toggle (Ctrl+Space),
+        // the window menu (Alt+Space) and the macOS input switcher
+        // (Cmd+Space) still reach the system.
+        if (e.ctrlKey || e.altKey || e.metaKey) return
+        if (target.tagName === 'BUTTON' || target.getAttribute('role') === 'button') return
+        e.preventDefault()
+        if (playbackCoordinator.canToggle()) playbackCoordinator.toggle()
+        else toggleChrome()
+        return
+      }
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
         if (readingMode === 'page' && rendererRef.current?.scrollByPages) {
@@ -1265,7 +1304,7 @@ export default function Reader() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [readingMode, navigate])
+  }, [playbackCoordinator, readingMode, navigate, toggleChrome])
 
   // Belt-and-braces: a stale "consumed" mark from a previous session (Esc
   // closed a popup, then the reader was left without another Esc) must not
@@ -1398,6 +1437,8 @@ export default function Reader() {
                   onToggleSettings={onToggleSettings}
                   onToggleTts={isGuest ? undefined : onToggleTts}
                   onToggleAutoReading={onToggleAutoReading}
+                  onTtsStart={onTtsStart}
+                  onAutoReadingStart={onAutoReadingStart}
                   onToggleFullscreen={onToggleFullscreen}
                   bookmarkActive={!isGuest && !!currentBookmark}
                 />
@@ -1596,6 +1637,7 @@ export default function Reader() {
             </div>
           </div>
         </div>
+        <ContentUpdateNotice bookId={id} book={bookQuery.isFetchedAfterMount ? bookQuery.data?.data : undefined} ready={readerReady} guest={isGuest} />
         {!isGuest && <SelectionToolbar bookId={id} fontStack={fontStack} fontCss={fontCss} />}
         {footnoteEntry && (
           <FootnotePopup

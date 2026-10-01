@@ -40,6 +40,24 @@ export function AutoReadingSessionProvider({ renderer, coordinator, children }: 
     return coordinator.register('auto', () => controller.stop())
   }, [controller, coordinator])
 
+  useEffect(() => {
+    if (!controller) return
+    return coordinator.registerToggle('auto', {
+      available: () => {
+        const status = controller.getSnapshot().status
+        return status === 'running' || status === 'paused'
+      },
+      // Space pauses and resumes an existing session; it never starts one, so
+      // 'idle' is deliberately outside the toggle even though start() would
+      // accept it.
+      apply: () => {
+        const status = controller.getSnapshot().status
+        if (status === 'running') void controller.pause()
+        else if (status === 'paused') void controller.resume()
+      },
+    })
+  }, [controller, coordinator])
+
   useEffect(() => () => {
     controller?.dispose()
   }, [controller])

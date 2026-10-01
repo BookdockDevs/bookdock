@@ -236,4 +236,30 @@ describe('SettingsSync persistence', () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalledWith('/api/v1/settings', expect.anything())
     expect(useUiStore.getState().fontPreferences).toEqual({ serif: { enabled: false } })
   })
+
+  it('never syncs the logout reset back to the server', async () => {
+    // A logout must stay local: the reset defaults the snapshots (names
+    // survive) but must neither queue a pending snapshot nor PUT, or the next
+    // login replays the defaults over the server config.
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    useUiStore.getState().setFontSize(26)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
+    vi.mocked(fetch).mockClear()
+
+    useAuthStore.getState().clearAuth()
+    await vi.advanceTimersByTimeAsync(3000)
+
+    // Local values reset by design (shared browser), server untouched.
+    expect(useUiStore.getState().fontSize).not.toBe(26)
+    expect(localStorage.getItem('bd-settings-pending')).toBeNull()
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+
+    // Re-login replays nothing: no PUT means the server config stands.
+    useAuthStore.getState().setAuth(user)
+    await vi.runAllTimersAsync()
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+  })
 })

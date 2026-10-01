@@ -1,8 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReaderHeader } from '../features/reader/components/ReaderHeader'
 import { IDLE_TTS_STATE, TtsSessionContext } from '../features/reader/hooks/tts-session-context'
+import { AutoReadingSessionContext, IDLE_AUTO_READING_STATE } from '../features/reader/hooks/auto-reading-session-context'
+import type { AutoReadingController } from '../features/reader/lib/auto-reading'
+import type { TtsController } from '../features/reader/lib/tts-controller'
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: ReactNode }) => <a href="/">{children}</a>,
@@ -90,5 +94,52 @@ describe('ReaderHeader', () => {
       '全屏',
       '设置',
     ])
+  })
+
+  it('notifies onAutoReadingStart when auto reading begins so the reader can unpin the chrome', async () => {
+    const start = vi.fn(async () => {})
+    const onAutoReadingStart = vi.fn()
+    render(
+      <AutoReadingSessionContext.Provider
+        value={{ controller: { start } as unknown as AutoReadingController, state: IDLE_AUTO_READING_STATE }}
+      >
+        <ReaderHeader
+          title="测试书籍"
+          visible
+          autoReadingOpen
+          onToggleAutoReading={vi.fn()}
+          onAutoReadingStart={onAutoReadingStart}
+        />
+      </AutoReadingSessionContext.Provider>,
+    )
+
+    fireEvent.click(screen.getByText('reader.autoReadingStart'))
+    expect(start).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(onAutoReadingStart).toHaveBeenCalledTimes(1))
+  })
+
+  it('notifies onTtsStart synchronously when TTS begins so the reader can unpin the chrome', () => {
+    const start = vi.fn(async () => {})
+    const onTtsStart = vi.fn()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TtsSessionContext.Provider
+          value={{ controller: { start } as unknown as TtsController, state: IDLE_TTS_STATE }}
+        >
+          <ReaderHeader
+            title="测试书籍"
+            visible
+            ttsOpen
+            onToggleTts={vi.fn()}
+            onTtsStart={onTtsStart}
+          />
+        </TtsSessionContext.Provider>
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(screen.getByText('reader.ttsPlay'))
+    expect(start).toHaveBeenCalledTimes(1)
+    expect(onTtsStart).toHaveBeenCalledTimes(1)
   })
 })

@@ -54,11 +54,14 @@ interface ReaderHeaderProps {
   onToggleSettings?: () => void
   onToggleTts?: () => void
   onToggleAutoReading?: () => void
+  /** Fired when playback is started from a panel: dismisses the popover and unpins the chrome. */
+  onTtsStart?: () => void
+  onAutoReadingStart?: () => void
   onToggleFullscreen?: () => void
   bookmarkActive?: boolean
 }
 
-export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onTtsStart, onAutoReadingStart, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
   const _ = useTranslation()
   const onBack = useBackNavigation('/')
   const { state: ttsState } = useTtsSession()
@@ -113,7 +116,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
               )}
             </button>
             <SettingsPopover open={!!ttsOpen} onClose={() => onToggleTts?.()} toggleSelector="[data-tts-toggle]">
-              <TtsPanel />
+              <TtsPanel onStart={onTtsStart} />
             </SettingsPopover>
           </div>
         )}
@@ -135,7 +138,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
               <AutoReadingIcon status={autoReadingState.status} />
             </button>
             <SettingsPopover open={!!autoReadingOpen} onClose={() => onToggleAutoReading?.()} toggleSelector="[data-auto-reading-toggle]">
-              <AutoReadingPanel readingMode={readingMode} onClose={() => onToggleAutoReading?.()} />
+              <AutoReadingPanel readingMode={readingMode} onStart={onAutoReadingStart} />
             </SettingsPopover>
           </div>
         )}

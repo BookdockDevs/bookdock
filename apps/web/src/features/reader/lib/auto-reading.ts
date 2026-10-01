@@ -58,6 +58,13 @@ export class AutoReadingController {
   private interactionResumeTimer: ReturnType<typeof setTimeout> | null = null
   private waitingForInteraction = false
   private navigationPending = false
+  /**
+   * Collapses repeated `userInteraction` reports for one keypress into one
+   * deferred rebase decision. Space never reaches here (the paginator excludes
+   * it from `dockeydown` and the adapter drops cached copies), so a pause press
+   * cannot rebase the countdown away before `pause()` measures the remainder.
+   */
+  private interactionRebaseQueued = false
   private claim: PlaybackClaim | null = null
   private unbinders: (() => void)[] = []
 
@@ -236,17 +243,27 @@ export class AutoReadingController {
   }
 
   private rebaseAfterUserInteraction() {
-    if (this.state.status !== 'running') return
-    this.generation++
-    this.cancelLoop()
-    this.lastFrameAt = 0
-    this.smoothDistanceRemainder = 0
-    this.waitingForInteraction = true
-    if (this.state.mode === 'timed') {
-      this.state = { ...this.state, stepStartedAt: null, stepDuration: null, stepRemaining: null }
-      this.emit()
-    }
-    this.scheduleInteractionResume()
+    // Genuine navigation still rebases: nothing pauses, so the state is still
+    // running when the microtask runs. Space is excluded at the source and never
+    // reaches here, so a pause press cannot clear `stepStartedAt` before
+    // `pause()` measures the remainder. The deferral only collapses repeated
+    // reports of one press into a single decision.
+    if (this.interactionRebaseQueued) return
+    this.interactionRebaseQueued = true
+    queueMicrotask(() => {
+      this.interactionRebaseQueued = false
+      if (this.state.status !== 'running') return
+      this.generation++
+      this.cancelLoop()
+      this.lastFrameAt = 0
+      this.smoothDistanceRemainder = 0
+      this.waitingForInteraction = true
+      if (this.state.mode === 'timed') {
+        this.state = { ...this.state, stepStartedAt: null, stepDuration: null, stepRemaining: null }
+        this.emit()
+      }
+      this.scheduleInteractionResume()
+    })
   }
 
   private scheduleInteractionResume() {

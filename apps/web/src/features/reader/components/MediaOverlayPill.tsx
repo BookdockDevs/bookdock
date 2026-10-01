@@ -364,6 +364,13 @@ export const MediaOverlayPill = memo(function MediaOverlayPill({ coordinator, in
     return unregister
   }, [coordinator, renderer])
 
+  useEffect(() => coordinator.registerToggle('media', {
+    // handleTogglePlay also starts a fresh cue when idle; the key must only
+    // pause and resume, so idle is filtered out here.
+    available: () => statusRef.current !== 'idle',
+    apply: () => void handleTogglePlay(),
+  }), [coordinator, handleTogglePlay])
+
   // Check cue availability when chapter/relocate changes
   useEffect(() => {
     if (!renderer) {

@@ -124,10 +124,11 @@
 15. **`paginator.js` / continuous mode behavior**
     - 对应版本：Upstream parent `4512f39859280b8c1f1e6fefa4f104f9e09c55e5`、`packages/foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`；历史行为对照为 Bookdock `v0.2.2` tag `a326427a12579b5914b0be2f5404c0234464d320`。
     - 符号：`#onWheel`、`#onWheelSnap`、`#onWheelPage`、`#onDocKey`、`#scheduleBackwardBuffer`、`scrollByViewport`、`scrollByPixels`、`snapWheelStep`；`FoliateReader.applyContinuousScroll` 的 `continuous`/`no-continuous-scroll` 属性切换。
+    - 空格键：上游把空格当作下一页（paged flow 下 `e.key === ' '` 与 `ArrowRight`/`PageDown` 同分支），Bookdock 取消这一语义——空格归宿主所有，只用于播放暂停恢复与顶栏/底栏显隐，任何 flow 下都不翻页。`#onDocKey` 因此在两个 flow 分支之前统一拦下空格并 `preventDefault`：paged flow 不再翻页，scrolled flow 也不会落到浏览器原生空格滚动而把正文挪走。空格已从 `#onDocKey` 上方的 `isNavigationKey` 列表里摘除，所以 `dockeydown` 不再为它派发，这一次按键也不再被计为 `userInteraction`：空格从不移动正文，计入会与同一按键的暂停打架——rebase 先把 timed 计时的 `stepStartedAt` 清掉，`pause()` 就量不出剩余时间，恢复时整步重来、底部进度条被清空。阅读计时 ping 走 relocate，本来就不依赖这次按键。翻页改由方向键与 `PageUp`/`PageDown` 承担，语义不变。
     - 根因/需求：重基线的 paginator 没有迁回 v0.2.2 的 iframe wheel/keyboard 入口、跳章两阶段累计和连续边缘状态；adapter 直接写 `containerPosition` 又绕过了核心边界。另一个迁移遗漏是切换到长卷时只改属性、不启动最终状态下的 `#fillVisibleArea()`，造成“长卷已选中但仍单章”。自动阅读还曾在启动时移除 `snap-turn`，导致跳章模式到章尾既不累计切章也不返回停止信号。关闭模式只允许明确导航切章；跳章第一次到边界、再次同向达到阈值才切章；长卷向下追加、向上非对称回读/回收；滚动模式上下键跳视口、左右键切章。
     - 为什么不能仅放适配层：iframe 事件、section 边界、`#views` 装载/销毁、scroll compensation、主视图计算和模式属性回调都属于 paginator 的 shadow DOM 私有状态；在 React 适配层复制会形成第二套导航和阈值状态。
     - 影响范围：只改变 page/scrolled 的滚轮、iframe 键盘、continuous buffer、模式切换初始化和自动滚动边界；不改变 EPUB 内容、CFI、Range、搜索或标注数据。连续模式历史边缘补章仍只在到达保留窗口边缘并再次同向操作后触发；有 wheel 距离时只回放实际累积距离，没有可测 wheel 距离的触屏场景最多续接一个视口，避免加载完成后停在当前章顶部。显式章节导航不主动加载更上一章，待用户继续向上到历史边缘后再触发。`scrollByPixels` 返回 `false` 表示当前模式阻止继续自动移动，避免关闭模式在章尾无动作空转。
-    - 验证用例：paginator/Reader/continuous-scroll/auto-reading 定向测试共 56 项通过；`pnpm test` 的 Server 482、Web 1029 项全量测试通过，`pnpm typecheck`、`pnpm lint`、production build 和 `node --check` 通过；浏览器已验证跳章边界和长卷向下 1→2→3 view 追加、向上不对称增长。自动阅读/键盘的完整实机验收仍标 `[B]`。
+    - 验证用例：paginator/Reader/continuous-scroll/auto-reading/playback-coordinator 定向测试通过；`pnpm typecheck`、`pnpm lint` 通过。浏览器已验证跳章边界和长卷向下 1→2→3 view 追加、向上不对称增长。自动阅读/键盘的完整实机验收仍标 `[B]`，空格键的播放暂停与顶栏底栏显隐同样待实机确认。
 
 16. **`paginator.js` / `#container` full-width scroll surface**
    - 需求：正文和 scrolled 模式的真实滚动容器必须覆盖外层左右 gutter；宽窗口下两侧空白仍应接收滚轮，并由同一个容器参与居中/分页布局。
@@ -151,6 +152,18 @@
     - 需求：分页仍允许相邻 section 共用跨页，不补空栏；同屏跨章时以阅读顺序较后的可见 section 作为当前位置。切回 `off`/`snap` 滚动时只保留这个 section，不能让分页模式预载的相邻章节短暂混入视口。
     - 不能只放适配层：相邻 view 的清理和重新锚定发生在 paginator 的私有容器里。
     - 范围：分页滚动后用跨页末端探针判定 primary view，在 `flow` 切换到非连续滚动时清理其他 view；连续滚动和分页宽度计算保持原有语义。
+
+20. **`paginator.js` / 首屏 fill 空跑后的 deferred 补跑**
+    - 需求：短首节（不足一个 spread，如 TXT 的短序章）首开时左栏有字、右栏空白，要动一下才填上第一章。根因是初次导航后的 `#fillVisibleArea` 可能跑在布局稳定之前（`size` 为 0），旧逻辑静默返回且没有任何重试；此后的 resize/fonts-ready 只重排现有视图从不补加载，只有翻页导航能救。
+    - 不能只放适配层：`size` 测量、私有 `#views` 装载和 `expand` 回调都在 paginator 内部，宿主调不到 `#fillVisibleArea`。
+    - 做法：`#fillVisibleArea` 在 `!size` 时不再丢弃，而是置 `#fillDeferred`；view 的 `onExpand` 和 `render()` 结尾各消费一次（`reanchor: false`，不挪位置，`size` 仍为 0 则重新挂起）。只补相邻加载，不改变导航、锚点和 CFI。
+    - 影响/验证：只影响首开/布局竞态的首屏完整性；jsdom 量不出布局，无单测，浏览器验收：TXT 短序章从 0% 新开，翻页双栏首屏即 序章+第一章。
+
+21. **`paginator.js` / 跳转落点前清理非目标视图（仅分页模式）**
+    - 需求：目录点第 2 章，spread 显示 序章+第 2 章；点回序章，显示 序章+第 5 章——落点永远被保留的旧视图带偏。根因是无 fragment 章节跳转的 anchor 就是绝对 0（`epub.js resolveHref` 的 `() => 0`），分页落点公式 `pagesBeforePrimary + 0` 只在目标前面没有视图时才等于目标开头；而 `#goTo` 的 keep 集合（旧 primary + `|i-index|<=2` 附近）会留下 stale 视图，顺带还把 forward 预加载的页数统计撑大、挡住连续章节的补齐。
+    - 不能只放适配层：视图存废、`#sortedViews` 顺序和落点公式全在 paginator 私有状态里，宿主够不着。
+    - 做法：`#display`（目标未加载分支）和 `#goTo` 复用分支里，落点前在分页模式下销毁所有非目标视图（滚动模式按 primary 偏移算锚点，天生免疫，不动）。容器当时还处在 fade 中，load 已成功，所以无闪烁、不影响失败回滚；fraction 锚点（翻页、进度恢复）本来就是 target-relative，不受影响；短首节需要的前邻由既有 needsPrev/fill 重建。
+    - 影响/验证：只影响分页模式的跳转落点；`foliate-paginator.test.ts` 通过；浏览器验收：目录在 序章/第 2 章/第 5 章之间互跳，spread 恒为目标章节开头（短首节配下一章，长章节配后续章节）。
 
 ### 2.3 EPUB 资源和元数据
 

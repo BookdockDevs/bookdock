@@ -1362,6 +1362,11 @@ export class Paginator extends HTMLElement {
     #bgAnimContext = null
     #filling = false // true while #fillVisibleArea is running
     #fillPromise = null // tracks in-progress #fillVisibleArea for awaiting
+    // A post-navigation fill that found no layout yet (size 0) leaves this set
+    // instead of silently doing nothing; the next expand/resize consumes it
+    // once with a position-preserving fill so a short first section does not
+    // leave a half-empty spread until the user paginates.
+    #fillDeferred = false
     #stabilizing = false // true while #display is stabilizing layout
     #rendered = false // true after first #display completes
     // A navigation may be superseded while a section or adjacent preload is
@@ -1649,9 +1654,13 @@ export class Paginator extends HTMLElement {
                     || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
                 const isNavigationKey = e.key === 'ArrowLeft' || e.key === 'ArrowRight'
                     || e.key === 'ArrowUp' || e.key === 'ArrowDown'
-                    || e.key === 'PageUp' || e.key === 'PageDown' || e.key === ' '
+                    || e.key === 'PageUp' || e.key === 'PageDown'
+                // Space is intentionally excluded: it never moves the text (the
+                // host owns it for playback pause/resume and chrome), so it must
+                // not count as a navigation interaction. Reporting it would race
+                // a timed auto-reading pause and clear the step countdown.
                 if (!isEditable && isNavigationKey)
-                    this.dispatchEvent(new CustomEvent('dockeydown', { bubbles: true, composed: true }))
+                    this.dispatchEvent(new CustomEvent('dockeydown', { bubbles: true, composed: true, detail: { key: e.key } }))
                 this.#onDocKey(e)
             })
         })
@@ -1862,6 +1871,13 @@ export class Paginator extends HTMLElement {
                 if (this.#filling || this.#stabilizing || this.scrolled) return
                 if (this.#primaryIndex === index)
                     this.#scrollToAnchor(this.#anchor)
+                // Consume a fill deferred for lack of layout: one shot,
+                // position-preserving, and self-rearming while size is
+                // still 0 so a later expand retries instead of dropping it.
+                if (this.#fillDeferred && !this.#filling) {
+                    this.#fillDeferred = false
+                    this.#fillPromise = this.#fillVisibleArea({ reanchor: false })
+                }
             },
         })
         this.#views.set(index, view)
@@ -2243,6 +2259,13 @@ export class Paginator extends HTMLElement {
         if (anchorOffset == null || !this.#restoreAnchorScrollOffset(anchorOffset))
             this.#scrollToAnchor(this.#anchor)
         this.#stabilizing = false
+        // Pure container resizes re-render without growing any view, so the
+        // expand hook above would never fire for them: consume a deferred
+        // fill here as well, once and position-preserving.
+        if (this.#fillDeferred && !this.#filling) {
+            this.#fillDeferred = false
+            this.#fillPromise = this.#fillVisibleArea({ reanchor: false })
+        }
         this.dispatchEvent(new Event('stabilized'))
     }
     // Distance in scroll-axis pixels from the scroll origin to the anchor's
@@ -3499,6 +3522,15 @@ export class Paginator extends HTMLElement {
         const target = e.target
         if (target && (target.isContentEditable
             || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+        if (e.key === ' ') {
+            // Space belongs to playback and reading chrome, never to paging: the
+            // host decides what it means. Swallowed here in both flows so the
+            // browser's native space-scroll cannot move the text behind the
+            // host's back. It stays in the navigation-key list above, so the
+            // press still counts as user interaction.
+            e.preventDefault()
+            return
+        }
         if (this.scrolled) {
             if (e.key === 'ArrowRight') {
                 e.preventDefault()
@@ -3515,7 +3547,7 @@ export class Paginator extends HTMLElement {
             }
             return
         }
-        if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+        if (e.key === 'ArrowRight' || e.key === 'PageDown') {
             e.preventDefault()
             void this.next()
         } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
@@ -3570,6 +3602,23 @@ export class Paginator extends HTMLElement {
                 if (view.document) {
                     const dir = getDirection(view.document)
                     this.#directionCache.set(index, dir.vertical)
+                }
+                // A jump must open on the target's own spread: drop kept views
+                // around it, or a section-start anchor (absolute 0, which is
+                // what a fragment-less chapter jump resolves to) lands on the
+                // book start and pairs a stale section with the target, while a
+                // stale trailing view fools the forward page count and blocks
+                // contiguous preloading. Scrolled mode offsets anchors to the
+                // primary view, so only paginated mode needs this. The
+                // container is still faded and the load already succeeded, so
+                // neither flashing nor the failure path below is affected.
+                // Fractional anchors (page turns, progress restores) stay
+                // target-relative; the fill below rebuilds exactly the
+                // neighbors a short primary needs.
+                if (!this.scrolled) {
+                    for (const [i] of this.#views) {
+                        if (i !== index) this.#destroyView(i)
+                    }
                 }
                 this.dispatchEvent(new CustomEvent('create-overlayer', {
                     detail: {
@@ -3749,7 +3798,10 @@ export class Paginator extends HTMLElement {
         this.#filling = true
         try {
             const { size } = this
-            if (!size) return
+            if (!size) {
+                this.#fillDeferred = true
+                return
+            }
             const minPages = 5
             const maxSections = 8
 
@@ -3876,6 +3928,17 @@ export class Paginator extends HTMLElement {
                 this.#primaryIndex = index
                 this.#syncA11y()
                 this.#trimDistantViews()
+                // Same stale-view fix as #display below: the target may
+                // already be loaded while older or newer views surround it,
+                // and a section-start anchor (absolute 0) would then land on
+                // the book start or skip chapters instead of the target. The
+                // following prev-fill rebuilds exactly what a short primary
+                // needs, and fractional anchors stay target-relative.
+                if (!this.scrolled) {
+                    for (const [i] of this.#views) {
+                        if (i !== index) this.#destroyView(i)
+                    }
+                }
                 // In noContinuousScroll mode, destroy all non-primary views
                 if (this.noContinuousScroll) {
                     for (const [i] of this.#views) {

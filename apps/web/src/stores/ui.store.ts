@@ -40,6 +40,12 @@ export const LIBRARY_PAGE_SIZES = [24, 48, 96] as const
 export type LibraryPageSize = (typeof LIBRARY_PAGE_SIZES)[number]
 
 const CUSTOM_THEMES_KEY = 'bd-read-custom-themes'
+/**
+ * Unsynced settings snapshot for the reload-before-PUT race. Owned by
+ * SettingsSync, but the logout reset must clear it too: a reset written here
+ * would replay as a user edit on the next login and wipe the server config.
+ */
+export const PENDING_SETTINGS_STORAGE_KEY = 'bd-settings-pending'
 const READING_THEME_MODE_KEY = 'bd-read-theme-mode'
 const READING_THEME_MODE_ORDER: readonly ReadingThemeMode[] = ['system', 'light', 'dark']
 
@@ -477,7 +483,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   sortBy: getInitial<string>('bd-sort-by', 'createdAt'),
   sortOrder: getInitial<string>('bd-sort-order', 'desc') === 'asc' ? ('asc' as const) : ('desc' as const),
   view: getInitial<string>('bd-library-view', 'grid') === 'list' ? ('list' as const) : ('grid' as const),
-  toolbarLocked: getInitialBoolean('bd-reader-toolbar-locked', false),
+  toolbarLocked: getInitialBoolean('bd-reader-toolbar-locked', true),
   sidebarWidth: getInitialNumber('bd-sidebar-width', 288, 200, 640),
   sidebarRememberedOpen: getInitialBoolean('bd-reader-sidebar-open', true),
   navTabRemembered: getInitialNavTab(),
@@ -896,6 +902,13 @@ export const useUiStore = create<UiState>((set, get) => ({
     persistReadingConfig(config
       ? { global: defaults, presets: config.presets.map((preset) => ({ ...preset, snapshot: defaults })) }
       : emptyConfig(defaults))
+    // A reset is not a user edit: drop any unsynced snapshot so the next login
+    // cannot replay these defaults over the server config.
+    try {
+      localStorage.removeItem(PENDING_SETTINGS_STORAGE_KEY)
+    } catch {
+      // ignore localStorage errors in private/incognito modes
+    }
     useUiStore.setState({
       fontPreferences: {},
       fontOrder: [],

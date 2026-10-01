@@ -30,6 +30,15 @@ function StopIcon() {
   )
 }
 
+function PauseIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="6" y="5" width="4" height="14" rx="1" />
+      <rect x="14" y="5" width="4" height="14" rx="1" />
+    </svg>
+  )
+}
+
 function ChevronDownIcon() {
   return (
     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -162,7 +171,7 @@ function ReaderToggle({ label, hint, checked, onChange }: ReaderToggleProps) {
   )
 }
 
-export default function TtsPanel() {
+export default function TtsPanel({ onStart }: { onStart?: () => void }) {
   const _ = useTranslation()
   const { controller, state } = useTtsSession()
   const { renderer } = useReaderApi()
@@ -217,17 +226,29 @@ export default function TtsPanel() {
   }
 
   function handlePrimaryAction() {
+    // Mirror AutoReadingPanel: pause/resume/stop keep the popover open for live
+    // tuning, while start dismisses it synchronously so the text is visible
+    // immediately. Start failures surface through the error toast (see
+    // TtsSessionProvider), so closing eagerly never hides them.
     setMenuOpen(false)
-    if (active) {
-      void controller?.stop()
+    if (state.status === 'playing' || state.status === 'starting') {
+      void controller?.pause()
       return
     }
-    void controller?.start()
+    if (state.status === 'paused') {
+      void controller?.resume()
+      return
+    }
+    if (!controller) return
+    onStart?.()
+    void controller.start()
   }
 
   function startFromChapter() {
+    if (!controller) return
     setMenuOpen(false)
-    void controller?.startFromChapter()
+    onStart?.()
+    void controller.startFromChapter()
   }
 
   function startFromSelection() {
@@ -236,6 +257,7 @@ export default function TtsPanel() {
     setMenuOpen(false)
     renderer?.clearSelection()
     setSelection(null)
+    onStart?.()
     void controller.start(cfiRange)
   }
 
@@ -249,9 +271,22 @@ export default function TtsPanel() {
             disabled={!controller}
             className="flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-l-lg bg-[var(--bd-read-text)] px-3 text-sm font-medium text-[var(--bd-read-bg)] transition-opacity disabled:opacity-50"
           >
-            {active ? <StopIcon /> : <PlayIcon />}
-            {active ? _('reader.ttsStop') : _('reader.ttsPlay')}
+            {state.status === 'playing' || state.status === 'starting' ? <PauseIcon /> : <PlayIcon />}
+            {state.status === 'playing' || state.status === 'starting'
+              ? _('reader.ttsPause')
+              : state.status === 'paused' ? _('reader.ttsResume') : _('reader.ttsPlay')}
           </button>
+          {active && (
+            <button
+              type="button"
+              onClick={() => void controller?.stop()}
+              title={_('reader.ttsStop')}
+              aria-label={_('reader.ttsStop')}
+              className="flex h-10 w-11 shrink-0 items-center justify-center border-l border-[var(--bd-read-bg)]/30 bg-[var(--bd-read-text)] text-[var(--bd-read-bg)] transition-opacity hover:opacity-85"
+            >
+              <StopIcon />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setMenuOpen((open) => !open)}
