@@ -495,6 +495,7 @@ function BatchClassifyDialog({ ids, items, libraryId, onClose, onDone }: { ids: 
       void queryClient.invalidateQueries({ queryKey: ['books'] })
       void queryClient.invalidateQueries({ queryKey: ['shelves'] })
       void queryClient.invalidateQueries({ queryKey: ['tags'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       if (libraryId) {
         void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
         void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })

@@ -179,8 +179,14 @@ const VolumeHeaderItem = memo(function VolumeHeaderItem({
   )
 })
 
-interface NavigationPanelProps {
-  bookId: string
+// A located row counts as placed only inside the upper-half comfort zone.
+// Merely visible at the bottom edge still lacks following context, so it
+// gets pulled up to the 1/4 landing spot instead of staying put.
+function isTocRowPlaced(rowTop: number, viewportTop: number, viewportBottom: number, topInset: number): boolean {
+  return rowTop >= viewportTop + topInset && rowTop + 32 <= viewportBottom - (viewportBottom - viewportTop) * 0.5
+}
+
+interface NavigationPanelProps {  bookId: string
   open: boolean
   locked?: boolean
   statsDisabled?: boolean
@@ -542,11 +548,11 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       const bounds = row.getBoundingClientRect()
       const viewport = container.getBoundingClientRect()
       const topInset = tree[currentIndex]?.parent === null ? 0 : 40
-      if (bounds.top < viewport.top + topInset || bounds.top + 32 > viewport.bottom) {
+      if (!isTocRowPlaced(bounds.top, viewport.top, viewport.bottom, topInset)) {
         container.scrollTop = Math.max(0, container.scrollTop + bounds.top - viewport.top - container.clientHeight * 0.25)
       }
       const finalBounds = row.getBoundingClientRect()
-      if (finalBounds.top >= viewport.top && finalBounds.top + 32 <= viewport.bottom) {
+      if (isTocRowPlaced(finalBounds.top, viewport.top, viewport.bottom, topInset)) {
         lastScrolledIndex.current = currentIndex
         hasPositioned.current = true
       }
@@ -567,11 +573,30 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     if (locateFrame.current === null) return
     cancelAnimationFrame(locateFrame.current)
     locateFrame.current = null
+    // Snap instantly to the intended landing spot instead of halting mid-flight:
+    // halting here used to record the chapter as positioned while the viewport
+    // sat at an arbitrary offset (which the unmount flush then persisted, so
+    // reopening restored the interrupted offset forever). The snap is one-shot;
+    // manual browsing right after is unaffected.
+    const item = itemRefs.current.get(currentIndex)
     const container = listRef.current
-    if (container) container.scrollTo?.({ top: container.scrollTop, behavior: 'instant' })
+    if (item && container) {
+      const row = item.closest('li') ?? item
+      const itemRect = row.getBoundingClientRect()
+      const containerRect = container.getBoundingClientRect()
+      const target = Math.max(0, container.scrollTop + (itemRect.top - containerRect.top) - container.clientHeight * 0.25)
+      if (typeof container.scrollTo === 'function') {
+        container.scrollTo({ top: target, behavior: 'instant' })
+      } else {
+        item.scrollIntoView({ block: 'start', behavior: 'instant' })
+      }
+      rememberSidebarScroll('toc', container.scrollTop, currentIndex)
+    } else if (container) {
+      container.scrollTo?.({ top: container.scrollTop, behavior: 'instant' })
+    }
     lastScrolledIndex.current = currentIndex
     hasPositioned.current = true
-  }, [currentIndex])
+  }, [currentIndex, rememberSidebarScroll])
 
   // Collapsing only hides the bar — query and results survive the round trip,
   // so reopening restores the search instantly instead of re-running it.
@@ -760,7 +785,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     const bounds = (item.closest('li') ?? item).getBoundingClientRect()
     const viewport = container.getBoundingClientRect()
     const topInset = tree[currentIndex]?.parent === null ? 0 : 40
-    if (lastScrolledIndex.current !== null && bounds.top >= viewport.top + topInset && bounds.top + 32 <= viewport.bottom) {
+    if (lastScrolledIndex.current !== null && isTocRowPlaced(bounds.top, viewport.top, viewport.bottom, topInset)) {
       lastScrolledIndex.current = currentIndex
       hasPositioned.current = true
       rememberSidebarScroll('toc', container.scrollTop, currentIndex)

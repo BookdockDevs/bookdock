@@ -75,6 +75,18 @@ describe('AboutSettingsSection in-app update', () => {
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2))
   })
 
+  it('dismisses a settled failure through the cancel action', async () => {
+    renderSection([{ phase: 'failed', currentVersion: CURRENT, targetVersion: TARGET, progressId: 'update-stale', error: { code: 'UPDATE_FAILED', message: 'Checksum mismatch' } }])
+    vi.mocked(apiDelete).mockResolvedValueOnce({ data: { phase: 'idle', currentVersion: CURRENT } })
+
+    fireEvent.click(screen.getByRole('button', { name: '立即更新' }))
+    expect(await screen.findByText('更新失败，请重试')).toBeInTheDocument()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消更新' }))
+
+    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/system/update/update-stale'))
+    await waitFor(() => expect(screen.queryByText('更新失败，请重试')).not.toBeInTheDocument())
+  })
+
   it('shows the extraction phase while the package is unpacking', async () => {
     renderSection([{ phase: 'extract', outcome: 'active', currentVersion: CURRENT, targetVersion: TARGET, action: 'Unpacking release files', extraction: { files: 2, bytes: 1024, totalFiles: 5 } }])
 

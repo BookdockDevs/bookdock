@@ -360,6 +360,21 @@ describe('update state machine', () => {
     await startUpdate({ targetVersion: TARGET, progressId: 'p1' }, { restart: vi.fn() })
     expect(await settled()).toMatchObject({ phase: 'failed', error: { code: 'SNAPSHOT_CREATE_FAILED' } })
   })
+
+  it('dismisses a settled on-disk failure by its progress id', async () => {
+    stubAssets(expectedManifest())
+    vi.mocked(createSnapshot).mockRejectedValue(new AppError('SNAPSHOT_CREATE_FAILED', 'disk full'))
+
+    await startUpdate({ targetVersion: TARGET, progressId: 'p-stale' }, { restart: vi.fn() })
+    expect(await settled()).toMatchObject({ phase: 'failed', error: { code: 'SNAPSHOT_CREATE_FAILED' } })
+    // A container restart drops the in-memory job but keeps DATA_DIR.
+    clearUpdateJob()
+    expect(await getUpdateStatus()).toMatchObject({ phase: 'failed', error: { code: 'SNAPSHOT_CREATE_FAILED' } })
+
+    await expect(cancelUpdate('someone-else')).rejects.toMatchObject({ code: 'UPDATE_NOT_AVAILABLE' })
+    await expect(cancelUpdate('p-stale')).resolves.toMatchObject({ phase: 'idle' })
+    expect(await exists(path.join(RELEASES_DIR, 'update-state.json'))).toBe(false)
+  })
 })
 
 describe('update status', () => {

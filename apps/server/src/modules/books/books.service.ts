@@ -3,6 +3,7 @@ import type { Readable } from 'node:stream'
 import { eq, lt, desc, asc, and, or, sql, inArray, isNull, isNotNull, type SQL } from 'drizzle-orm'
 import JSZip from 'jszip'
 import { getDb } from '../../db/client'
+import { blobKeyReferenced, deleteBlobRowIfUnreferenced } from '../../db/blob-refs'
 import {
   blobs, books, annotations, bookTags, bookVersions, bookStates, contentRevisions, libraries, libraryBooks,
   libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
@@ -3030,6 +3031,50 @@ async function deleteUnreferencedRevision(blobKey: string): Promise<void> {
   if ((refs?.count ?? 0) > 0 || !await getStorage().exists(blobKey)) return
   await getStorage().delete(blobKey)
   db.delete(blobs).where(eq(blobs.key, blobKey)).run()
+}
+
+/**
+ * Revision retention: reads only ever resolve the latest revision (private)
+ * or the moved-forward pin (shared), so older revisions are pure disk cost
+ * with no product use. Keeps the latest revision per BookVersion plus any
+ * revision still pinned by a library card (FK + stale-pin safety), then
+ * collects blobs nothing references anymore. Runs in the boot/periodic
+ * sweep, never inside a content-write transaction.
+ */
+export async function pruneOldContentRevisions(): Promise<{ prunedRevisions: number; deletedBlobs: number }> {
+  const db = getDb()
+  const storage = getStorage()
+  const pinned = new Set(
+    db.select({ id: libraryBookVersions.pinnedRevisionId }).from(libraryBookVersions)
+      .where(isNotNull(libraryBookVersions.pinnedRevisionId)).all()
+      .map((row) => row.id).filter((id): id is string => id !== null),
+  )
+  const latestByVersion = new Map<string, string>()
+  for (const row of db.select({
+    id: contentRevisions.id,
+    bookVersionId: contentRevisions.bookVersionId,
+    revisionNo: contentRevisions.revisionNo,
+  }).from(contentRevisions).orderBy(desc(contentRevisions.revisionNo)).all()) {
+    if (!latestByVersion.has(row.bookVersionId)) latestByVersion.set(row.bookVersionId, row.id)
+  }
+  const keep = new Set([...pinned, ...latestByVersion.values()])
+  const doomed = db.select({ id: contentRevisions.id, blobKey: contentRevisions.blobKey })
+    .from(contentRevisions).all().filter((row) => !keep.has(row.id))
+  for (let i = 0; i < doomed.length; i += 500) {
+    db.delete(contentRevisions)
+      .where(inArray(contentRevisions.id, doomed.slice(i, i + 500).map((row) => row.id))).run()
+  }
+  let deletedBlobs = 0
+  for (const key of new Set(doomed.map((row) => row.blobKey))) {
+    if (blobKeyReferenced(key)) continue
+    try {
+      if (await storage.exists(key)) await storage.delete(key)
+      if (deleteBlobRowIfUnreferenced(key)) deletedBlobs++
+    } catch (err) {
+      log('warn', 'books.revision_prune_blob_failed', { error: err, meta: { key } })
+    }
+  }
+  return { prunedRevisions: doomed.length, deletedBlobs }
 }
 
 async function refreshCityProgress(

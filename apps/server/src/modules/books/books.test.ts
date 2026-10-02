@@ -45,6 +45,7 @@ import {
   previewAppendTxtBookContent,
   appendTxtBookContent,
   predictAppendStartIndex,
+  pruneOldContentRevisions,
   getBookContent,
   getBookChapterContent,
   getBookCover,
@@ -395,6 +396,71 @@ describe('uploadBook dedup flag', () => {
     expect((loaded.meta as Record<string, unknown>).fileName).toBe('my-old-book.txt')
   })
 
+})
+
+describe('pruneOldContentRevisions', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let memory: ReturnType<typeof createMemoryStorage>
+
+  beforeAll(() => {
+    registerParser(new TxtParser())
+  })
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    memory = createMemoryStorage()
+    vi.spyOn(storage, 'getStorage').mockReturnValue(memory.driver)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  function revisionsOf(bookId: string) {
+    return db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, bookId))
+      .orderBy(desc(schema.contentRevisions.revisionNo)).all()
+  }
+
+  it('keeps only the latest revision and collects old blobs', async () => {
+    const { book } = await uploadBook(ownerId, new File(['第一章\n甲'], 'a.txt', { type: 'text/plain' }))
+    await appendTxtBookContent(ownerId, book.id, '\n第二章\n乙')
+    await appendTxtBookContent(ownerId, book.id, '\n第三章\n丙')
+    const before = revisionsOf(book.id)
+    expect(before).toHaveLength(3)
+
+    const result = await pruneOldContentRevisions()
+    expect(result.prunedRevisions).toBe(2)
+    expect(result.deletedBlobs).toBe(2)
+
+    const after = revisionsOf(book.id)
+    expect(after).toHaveLength(1)
+    expect(after[0]!.id).toBe(before[0]!.id)
+    for (const row of before.slice(1)) {
+      expect(await memory.driver.exists(row.blobKey)).toBe(false)
+    }
+    expect(await memory.driver.exists(after[0]!.blobKey)).toBe(true)
+
+    const loaded = await getBook(ownerId, book.id)
+    expect(loaded.revisionId).toBe(after[0]!.id)
+    await expect(getBookContent(ownerId, book.id)).resolves.toContain('丙')
+
+    await expect(pruneOldContentRevisions())
+      .resolves.toEqual({ prunedRevisions: 0, deletedBlobs: 0 })
+  })
+
+  it('keeps revisions still pinned by a library card', async () => {
+    const { book } = await uploadBook(ownerId, new File(['第一章\n甲'], 'a.txt', { type: 'text/plain' }))
+    await appendTxtBookContent(ownerId, book.id, '\n第二章\n乙')
+    const [latest, oldest] = revisionsOf(book.id)
+    db.update(schema.libraryBookVersions).set({ pinnedRevisionId: oldest!.id })
+      .where(eq(schema.libraryBookVersions.bookVersionId, book.id)).run()
+
+    const result = await pruneOldContentRevisions()
+    expect(result.prunedRevisions).toBe(0)
+    expect(revisionsOf(book.id)).toHaveLength(2)
+    expect(await memory.driver.exists(oldest!.blobKey)).toBe(true)
+    expect(latest).toBeDefined()
+  })
 })
 
 describe('uploadBook membership', () => {

@@ -638,6 +638,7 @@ export function useSetWorkCategory() {
     onSuccess: (_res, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
     },
   })
 }
@@ -655,6 +656,7 @@ export function useUpdateCatalogBook() {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
     },
   })
 }
@@ -1738,6 +1740,7 @@ export function useUpdateBookMembership() {
       queryClient.invalidateQueries({ queryKey: ['books'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
+      queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       notify.success({ key: 'toast.membershipUpdated' })
     },
     onError: (error) => {
@@ -1772,6 +1775,7 @@ export function useMoveBooksToShelf() {
     onSuccess: (results, variables) => {
       queryClient.invalidateQueries({ queryKey: ['books'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
+      queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       const failed = results.filter((r) => r.status === 'rejected').length
       if (failed > 0) {
         notify.warning({

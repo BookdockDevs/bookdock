@@ -544,10 +544,11 @@ export default function SystemUpdateDialog({
               <>
                 <button
                   type="button"
-                  onClick={onClose}
-                  className="rounded-lg border border-stone-200/90 bg-white px-3.5 py-2 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300"
+                  onClick={onCancel}
+                  disabled={isCancelling || !status?.progressId}
+                  className="rounded-lg border border-stone-200/90 bg-white px-3.5 py-2 text-xs font-medium text-stone-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:pointer-events-none disabled:opacity-40 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-red-950/20 dark:hover:text-red-400"
                 >
-                  {_('settings.aboutUpdateClose')}
+                  {isCancelling ? _('settings.aboutUpdateCancelling') : _('settings.aboutUpdateCancel')}
                 </button>
                 <button
                   type="button"

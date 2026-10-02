@@ -2,6 +2,19 @@
 
 All notable changes to Bookdock are documented here.
 
+## [0.4.2] - Unreleased
+
+### Added
+
+- Content revisions are pruned by the boot/periodic sweep: only the newest revision per book version (plus any still pinned by a library card) is kept, and orphaned blobs are collected.
+
+### Fixed
+
+- A settled in-app update failure can now be dismissed from the update dialog instead of lingering until the next update.
+- Moving books to a shelf now refreshes the selection snapshot, so the batch organize dialog shows the current shelf instead of a stale uncategorized state.
+- The reader directory now pulls a bottom-edge current chapter up to the landing spot instead of leaving it at the viewport edge.
+- Interrupting a directory locate (wheel/touch) snaps to the landing spot instead of stranding the viewport mid-flight.
+
 ## [0.4.1] - 2026-10-02
 
 ### Highlights
@@ -495,6 +508,19 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [0.4.2] - 待发布
+
+#### 新增
+
+- 内容版本改为只保留最新：启动与定时清理会删除旧内容修订（书卡仍 pin 住的除外），并回收无引用的内容文件
+
+#### 修复
+
+- 应用内更新失败后，可在更新弹窗中取消关闭，旧记录不再残留到下次更新。
+- 目录切换章节时，卡在视口底边的当前章节也会被拉到上半部落点，不再只露个边
+- 目录定位中途被滚轮/触摸打断时，直接落到目标位置，不再停在半道
+- 把书拖到书架后，批量整理弹窗显示当前书架，不再是过期的未分类
 
 ### [0.4.1] - 2026-10-02
 

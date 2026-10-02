@@ -222,6 +222,15 @@ export function clearUpdateJob() {
   startReservation = null
 }
 
+async function dismissSavedState(progressId: string) {
+  const saved = await readFile(stateFile(), 'utf8')
+    .then((text) => readJsonFile<{ progressId?: unknown }>(text))
+    .catch(() => null)
+  if (saved?.progressId !== progressId) return false
+  await rm(stateFile(), { force: true })
+  return true
+}
+
 async function downloadPackage(tag: string, version: string, file: string, active: UpdateJob) {
   const overallTimeout = AbortSignal.timeout(PACKAGE_TIMEOUT_MS)
   setPhase(active, 'download', 'Connecting to release server')
@@ -475,7 +484,13 @@ function sanitizeUpdateError(error: unknown) {
 }
 
 export async function cancelUpdate(progressId: string) {
-  if (!job || job.progressId !== progressId) throw new AppError('UPDATE_NOT_AVAILABLE', 'No cancellable update matches this request')
+  if (!job || job.progressId !== progressId) {
+    // No live job matches: a settled failure can still sit on disk from an
+    // earlier run (containers keep DATA_DIR across updates). Let the owner
+    // dismiss that record by its progress id instead of staring at it.
+    if (await dismissSavedState(progressId)) return getUpdateStatus()
+    throw new AppError('UPDATE_NOT_AVAILABLE', 'No cancellable update matches this request')
+  }
   if (['promote', 'restarting'].includes(job.phase)) throw new AppError('UPDATE_IN_PROGRESS', 'Version switching has started; the launcher health check cannot be cancelled')
   job.cancelRequested = true
   job.action = 'Stopping update and cleaning temporary files'

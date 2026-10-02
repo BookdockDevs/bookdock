@@ -210,6 +210,17 @@ progress policy clears all of them, relying on the reader's existing
 `fraction` fallback. Percent and fraction survive; only the exact position is
 re-derived.
 
+Revision retention: only the newest revision per `BookVersion` is ever read
+(private reads resolve latest, shared reads resolve the moved-forward pin),
+so older revisions have no product use. `pruneOldContentRevisions`
+(`books.service.ts`) keeps the latest revision per version plus any revision
+still pinned by a library card, deletes the rest, and collects blobs nothing
+references anymore. It runs in the boot/periodic sweep (`index.ts`), never
+inside a content-write transaction, so a write can never strand its own
+previous bytes. `book_states.read_revision_id` is plain text precisely so a
+pruned revision dangles into "has an update" instead of violating a
+constraint.
+
 ### Hidden (visibility) boundary
 
 Hiding is a visibility switch, never deletion: hidden rows stay intact and are

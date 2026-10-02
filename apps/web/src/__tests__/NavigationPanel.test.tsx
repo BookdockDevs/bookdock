@@ -230,6 +230,44 @@ describe('NavigationPanel', () => {
     expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
   })
 
+  it('pulls a bottom-edge destination up to the landing spot when the chapter changes', async () => {
+    useReaderState.setState({
+      tocItems: Array.from({ length: 10 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
+      currentChapter: '第一章',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 0, currentIndex: 0, sessionId: READER_SESSION_ID } } },
+    })
+    render(<NavigationPanel bookId="book-1" open />)
+    vi.mocked(window.HTMLElement.prototype.scrollIntoView).mockClear()
+    await act(async () => {
+      useReaderState.getState().setCurrentChapter('第9章')
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    })
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
+  })
+
+  it('snaps to the landing spot instead of halting when a locate is interrupted', async () => {
+    useReaderState.setState({
+      tocItems: Array.from({ length: 10 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
+      currentChapter: '第一章',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 0, currentIndex: 0, sessionId: READER_SESSION_ID } } },
+    })
+    const view = render(<NavigationPanel bookId="book-1" open />)
+    const scrollIntoView = vi.mocked(window.HTMLElement.prototype.scrollIntoView)
+    scrollIntoView.mockClear()
+    act(() => {
+      useReaderState.getState().setCurrentChapter('第9章')
+    })
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: expect.any(String) })
+    const callsBeforeWheel = scrollIntoView.mock.calls.length
+    const list = view.container.querySelector('.overflow-y-auto') as HTMLElement
+    fireEvent.wheel(list)
+    expect(scrollIntoView.mock.calls.length).toBeGreaterThan(callsBeforeWheel)
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'start', behavior: 'instant' })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    })
+  })
+
   it('restores a visible entry offset after the TOC layout changes', () => {
     useReaderState.setState({
       tocItems: Array.from({ length: 30 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),

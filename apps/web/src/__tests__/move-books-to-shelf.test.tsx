@@ -44,4 +44,14 @@ describe('useMoveBooksToShelf', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(apiClient.apiPut).toHaveBeenCalledWith('/books/b1/shelves', { shelfId: null })
   })
+
+  it('invalidates the batch-selection snapshot so the organize dialog re-reads membership', async () => {
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+    const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
+
+    result.current.mutate({ bookIds: ['b1'], shelfId: 's1' })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['batch-selection'] })
+  })
 })
