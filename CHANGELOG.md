@@ -2,14 +2,21 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.4.2] - Unreleased
+## [0.4.2] - 2026-10-03
+
+### Highlights
+
+- Fonts can now be picked separately: reading font and CJK font are two choices in both the reader and share cards, uploaded fonts are auto-detected for CJK coverage, font names are localized, and the default reading font is now sans-serif.
+- Full-text search rewritten for large books: capped results with explicit truncation/failure notices, background regex matching with timeout, and Enter/Shift+Enter navigation from a reworked directory search UI.
+- Shared pins follow every content write with a 0037 repair for left-behind pins; freshly collected cards start without a false update mark, and shared-library writes retire stale reader caches.
+- Personal annotation ink redrawn with tapered strokes and theme-aware repaint; selection toolbar and idea editor share one placement kernel; AI reading scope simplified to two options; unrenamed bookmarks render a single clean excerpt.
 
 ### Added
 
 - Content revisions are pruned by the boot/periodic sweep: only the newest revision per book version (plus any still pinned by a library card) is kept, and orphaned blobs are collected.
 - Every content write moves all collected shared pins to the new revision in the same transaction (private/shared re-chaptering, private/catalog metadata resets); migration 0037 moves forward pins left behind by the removed re-pin flow, and freshly collected cards start without an unread-update mark.
 - Shared-library re-toc, append, and push retire version-scoped reader caches, so entering the reader no longer flashes the stale chapter list.
-- Separate CJK font companion in the reader and share cards: Latin-first fonts pair with a CJK companion chain, uploaded fonts are auto-detected for CJK coverage, and font names are localized.
+- Separate CJK font choice in the reader and share cards: Latin-first faces no longer rely on their own CJK coverage, uploaded fonts are auto-detected for CJK coverage, and font names are localized.
 - Reader full-text search rewritten for large books: capped results with explicit truncation/failure notices, background regex matching with timeout, and Enter/Shift+Enter navigation.
 
 ### Changed
@@ -528,14 +535,21 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.4.2] - 待发布
+### [0.4.2] - 2026-10-03
+
+#### 主要更新
+
+- 字体可以分开选：阅读器与分享卡片都能单独挑一款中文字体，上传字体自动识别是否含中文，字体名中英本地化，默认阅读字体改为黑体
+- 全文搜索重写，大书也能搜：结果上限并明确提示截断/失败，正则在后台线程匹配并带超时，目录搜索界面重做，Enter/Shift+Enter 直接跳转。
+- 共享 pin 跟随所有内容写入，迁移 0037 一次修复落后的 pin；刚收藏的书卡不再误标「有更新」，共享书库写入后同步失效阅读器缓存。
+- 个人标注墨水重绘（锥形笔画、随主题重绘），选中工具条与想法编辑器共用一套定位内核，AI 阅读范围简化为两档，未改名书签只显示一份干净摘录。
 
 #### 新增
 
 - 内容版本改为只保留最新：启动与定时清理会删除旧内容修订（书卡仍 pin 住的除外），并回收无引用的内容文件
 - 所有内容写入在同一事务内把已收藏共享 pin 推到新版本（私人/共享重建目录、私人/目录元数据重置）；迁移 0037 把旧手动跟进时代遗留的落后 pin 一次推到最新；新收藏默认没有未读更新标记
 - 共享书库重建目录/追写/推送后同步失效阅读器版本级缓存，进书不再闪旧目录
-- 阅读器与分享卡片支持"中文字体"伴侣：西文主字体自动搭配中文字体；上传字体自动识别是否含中文；字体名中英本地化
+- 字体可以分开选：阅读器与分享卡片都能单独挑一款中文字体，西文主字体不再指望自己覆盖中文；上传字体自动识别是否含中文；字体名中英本地化
 - 全文搜索重写：结果上限 2000 并明确提示截断/失败（正则超时、章节加载不全），正则在后台线程匹配，Enter/Shift+Enter 可直接跳转
 
 #### 变更

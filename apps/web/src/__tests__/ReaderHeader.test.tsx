@@ -8,6 +8,10 @@ import { AutoReadingSessionContext, IDLE_AUTO_READING_STATE } from '../features/
 import type { AutoReadingController } from '../features/reader/lib/auto-reading'
 import type { TtsController } from '../features/reader/lib/tts-controller'
 
+vi.mock('@/hooks/useTranslation', () => ({
+  useTranslation: () => (key: string) => key,
+}))
+
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: ReactNode }) => <a href="/">{children}</a>,
   useNavigate: () => vi.fn(),
