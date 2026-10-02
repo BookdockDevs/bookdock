@@ -164,10 +164,12 @@ export async function addToPrivateLibrary(
       // Collected, not started: the row exists so the card sorts and filters
       // like any other, and reading takes over from here. Reading the version in
       // the library first already created a state row, and that progress is worth
-      // more than a fresh 'wishlist', so never overwrite it.
+      // more than a fresh 'wishlist', so never overwrite it. A fresh row starts
+      // caught up at the pinned revision: the pin is the newest revision, so
+      // there is no update to report until the city writes again.
       tx.insert(bookStates).values({
         userId, bookVersionId: link.bookVersionId, readStatus: 'wishlist', percent: 0,
-        cfi: null, chapter: null, lastReadAt: null, updatedAt: now,
+        cfi: null, chapter: null, lastReadAt: null, readRevisionId: revision.id, updatedAt: now,
       }).onConflictDoNothing().run()
     })
   } catch (err) {

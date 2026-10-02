@@ -91,6 +91,17 @@ describe('bookmark cards', () => {
     expect(block.className).toContain('line-clamp-3')
   })
 
+  it('renders single clean excerpt without duplicating prefix title when bookmark is not renamed', () => {
+    renderOne({
+      text: '清晨的阳光透过窗棂洒在书桌上，微风轻轻吹拂着窗纱',
+      contextText: '清晨的阳光透过窗棂洒在书桌上，微风轻轻吹拂着窗纱，屋子里弥漫着淡淡的花香与草木气息…',
+    })
+    const elements = screen.getAllByText(/清晨的阳光透过窗棂洒在书桌上/)
+    expect(elements).toHaveLength(1)
+    const block = elements[0].closest('p')!
+    expect(block.className).toContain('line-clamp-4')
+  })
+
   it('uses compact paragraph gaps without highlighting blank separators', () => {
     const { container } = renderOne({ type: 'highlight', style: 'highlight', text: '第一段\n\n第二段\n行内换行' })
     const paragraphs = container.querySelectorAll('[data-note-paragraph]')
@@ -352,6 +363,19 @@ describe('NotesPanel', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
     expect(updateMutate).not.toHaveBeenCalled()
     expect(screen.getByText('书签丁')).toBeInTheDocument()
+  })
+
+  it('clears custom bookmark title when saved with an empty value', () => {
+    const item = makeAnnotation({ id: 'bm-custom', type: 'bookmark', text: '自定义标题', contextText: '这是一段正文内容' })
+    render(
+      <NotesPanel items={[item]} total={1} sort="chapter" onClose={vi.fn()} chapterOrder={[]} bookId="book-1" />,
+    )
+    fireEvent.click(screen.getByTitle('annotation.rename'))
+    const textarea = screen.getByPlaceholderText('annotation.renamePlaceholder')
+    expect(textarea).toHaveValue('自定义标题')
+    fireEvent.change(textarea, { target: { value: '' } })
+    fireEvent.click(screen.getByText('annotation.save'))
+    expect(updateMutate).toHaveBeenCalledWith({ id: 'bm-custom', body: { text: '' } })
   })
 
   it('cancels the inline editor on an outside click', () => {

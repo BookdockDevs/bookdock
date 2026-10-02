@@ -253,6 +253,13 @@
       "when": 1791400000000,
       "tag": "0036_bookmark_context",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791500000000,
+      "tag": "0037_shared_pin_follow",
+      "breakpoints": true
     }
   ]
 }

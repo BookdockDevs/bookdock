@@ -10,12 +10,12 @@ export interface ExcerptTypography {
 }
 
 const TYPO_TIERS = [
-  { max: 60, size: 28, lineHeight: 1.65, letterSpacing: '0.025em' },
-  { max: 160, size: 23, lineHeight: 1.75, letterSpacing: '0.01em' },
-  { max: 320, size: 19, lineHeight: 1.8, letterSpacing: 'normal' },
+  { max: 60, size: 26, lineHeight: 1.68, letterSpacing: '0.02em' },
+  { max: 160, size: 21, lineHeight: 1.78, letterSpacing: '0.005em' },
+  { max: 320, size: 18, lineHeight: 1.82, letterSpacing: 'normal' },
 ] as const
 
-export const EXCERPT_MIN_FONT_SIZE = 16
+export const EXCERPT_MIN_FONT_SIZE = 15.5
 
 /** Adaptive excerpt typography: adjusts font size, line height and letter spacing by length */
 export function excerptTypography(length: number): ExcerptTypography {

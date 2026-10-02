@@ -23,6 +23,7 @@ import ShareCard, { SHARE_CARD_WIDTH } from './ShareCard'
 import { BACKGROUND_OPTIONS, BRAND_OPTIONS, SHARE_CARD_TEMPLATES, loadShareCardPrefs, saveShareCardPrefs, type ShareCardPrefs } from './card-prefs'
 import { copyCardBlob, downloadCardBlob, getCardBlob } from './export-image'
 import { formatChineseDate, formatShareDate, shareFileName } from './share-text'
+import { formatAuthorList } from '@/lib/utils'
 
 interface ShareCardDialogProps {
   bookId: string
@@ -71,6 +72,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   }, [enabledFontOptions, prefs.font, shareTarget])
 
   const book = bookQuery.data?.data
+  const bookAuthor = useMemo(() => formatAuthorList(book?.authors, book?.author ?? ''), [book?.authors, book?.author])
 
   /** Snapshot of everything the exported image depends on — any change
    *  invalidates the cached render */
@@ -84,13 +86,13 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
         note: shareTarget?.note ?? null,
         text: shareTarget?.text ?? '',
         title: book?.title ?? '',
-        author: book?.author ?? '',
+        author: bookAuthor,
         chapter: shareTarget?.chapter ?? null,
         user: authorName,
         avatar: avatarKey ?? null,
         writtenAt: shareTarget?.createdAt ?? null,
       }),
-    [prefs, shareTarget, book, authorName, avatarKey],
+    [prefs, shareTarget, book?.title, bookAuthor, authorName, avatarKey],
   )
 
   useLayoutEffect(() => {
@@ -253,7 +255,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
                 ref={cardRef}
                 text={shareTarget.text}
                 title={book.title}
-                author={book.author}
+                author={bookAuthor}
                 chapter={shareTarget.chapter}
                 template={prefs.template}
                 fontStack={fontStack}

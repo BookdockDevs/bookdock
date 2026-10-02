@@ -1886,15 +1886,24 @@ async function rebuildTocBook(
     await storage.put(newFileKey, epubBuffer)
     const maxRevision = db.select({ revisionNo: contentRevisions.revisionNo }).from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+    const newRevisionId = createId('rev')
     try {
       db.transaction((tx) => {
         tx.insert(contentRevisions).values({
-          id: createId('rev'), bookVersionId: bookId, revisionNo: (maxRevision?.revisionNo ?? 0) + 1,
+          id: newRevisionId, bookVersionId: bookId, revisionNo: (maxRevision?.revisionNo ?? 0) + 1,
           blobKey: newFileKey, size: epubBuffer.length, wordCount, chapterCount: metaChapters.length,
           meta, createdAt: updatedAt,
         }).run()
         tx.insert(blobs).values({ key: newFileKey, size: epubBuffer.length, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
         tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, bookId)).run()
+        // Same follow-all rule as every other content write: a new revision
+        // moves every collected pin, otherwise the pin lags and the reader's
+        // acknowledgment can never catch the newest revision.
+        tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
+          .where(and(
+            eq(libraryBookVersions.bookVersionId, bookId),
+            eq(libraryBookVersions.kind, 'shared'),
+          )).run()
       })
     } catch (err) {
       await cleanupStagedUpload({ fileKey: newFileKey, coverKey: null })
@@ -1906,16 +1915,25 @@ async function rebuildTocBook(
       db.delete(blobs).where(eq(blobs.key, book.filePath)).run()
     }
   } else if (chaptersChanged) {
-    // Same bytes, new chapter map: record a new revision reusing the blob so
-    // pinned readers keep reading the split they pinned.
+    // Same bytes, new chapter map: record a new revision reusing the blob.
+    // Readers follow the new structure through the moved-forward pin and are
+    // told about it by their own unread-update flag.
     const latestRevision = db.select({ id: contentRevisions.id, revisionNo: contentRevisions.revisionNo, size: contentRevisions.size }).from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+    const newRevisionId = createId('rev')
     db.transaction((tx) => {
       tx.insert(contentRevisions).values({
-        id: createId('rev'), bookVersionId: bookId, revisionNo: (latestRevision?.revisionNo ?? 0) + 1,
+        id: newRevisionId, bookVersionId: bookId, revisionNo: (latestRevision?.revisionNo ?? 0) + 1,
         blobKey: book.filePath, size: latestRevision?.size ?? 0, wordCount, chapterCount: metaChapters.length,
         meta, createdAt: updatedAt,
       }).run()
+      // A new chapter map is new content for readers: collected pins follow
+      // it the same way they follow new bytes.
+      tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
+        .where(and(
+          eq(libraryBookVersions.bookVersionId, bookId),
+          eq(libraryBookVersions.kind, 'shared'),
+        )).run()
     })
   } else {
     // Boundaries unchanged: only the rule selection may differ. View prefs
@@ -2941,14 +2959,22 @@ export async function resetBookMetadata(userId: string, bookId: string, opts?: {
   if (latestRevision && JSON.stringify(parsedBookmeta) !== JSON.stringify(storedBookmeta)) {
     // Derived metadata changed: append a revision reusing the blob so the
     // previous description stays readable; an identical parse is a no-op.
+    // A new revision id still moves collected pins, keeping the pin == newest
+    // invariant the unread-update flag assumes.
+    const newRevisionId = createId('rev')
     db.transaction((tx) => {
       tx.insert(contentRevisions).values({
-        id: createId('rev'), bookVersionId: bookId, revisionNo: latestRevision.revisionNo + 1,
+        id: newRevisionId, bookVersionId: bookId, revisionNo: latestRevision.revisionNo + 1,
         blobKey: latestRevision.blobKey, size: latestRevision.size,
         wordCount: latestRevision.wordCount, chapterCount: latestRevision.chapterCount,
         meta: { ...((latestRevision.meta ?? {}) as Record<string, unknown>), bookmeta: parsedBookmeta },
         createdAt: Date.now(),
       }).run()
+      tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
+        .where(and(
+          eq(libraryBookVersions.bookVersionId, bookId),
+          eq(libraryBookVersions.kind, 'shared'),
+        )).run()
     })
   }
   let title = parsed.meta.title

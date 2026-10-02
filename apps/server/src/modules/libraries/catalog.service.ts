@@ -1074,15 +1074,23 @@ export async function resetCatalogVersionMetadata(
     const storedBookmeta = ((latestRevision.meta ?? {}) as Record<string, unknown>).bookmeta ?? {}
     if (JSON.stringify(parsedBookmeta) !== JSON.stringify(storedBookmeta)) {
       // Same discipline as resetBookMetadata: derived metadata changes append
-      // a revision reusing the blob; an identical parse is a no-op.
+      // a revision reusing the blob; an identical parse is a no-op. The new
+      // revision id moves collected pins, keeping the pin == newest invariant
+      // the unread-update flag assumes.
+      const newRevisionId = createId('rev')
       db.transaction((tx) => {
         tx.insert(contentRevisions).values({
-          id: createId('rev'), bookVersionId: link.bookVersionId, revisionNo: latestRevision.revisionNo + 1,
+          id: newRevisionId, bookVersionId: link.bookVersionId, revisionNo: latestRevision.revisionNo + 1,
           blobKey: latestRevision.blobKey, size: latestRevision.size,
           wordCount: latestRevision.wordCount, chapterCount: latestRevision.chapterCount,
           meta: { ...((latestRevision.meta ?? {}) as Record<string, unknown>), bookmeta: parsedBookmeta },
           createdAt: Date.now(),
         }).run()
+        tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
+          .where(and(
+            eq(libraryBookVersions.bookVersionId, link.bookVersionId),
+            eq(libraryBookVersions.kind, 'shared'),
+          )).run()
       })
     }
   }

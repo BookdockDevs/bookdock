@@ -1235,8 +1235,8 @@ export interface BookListItem {
   collected?: boolean
   /**
    * Stage 5, detail responses only: true when the version was published from
-   * a book the caller still holds privately while the city hasn't moved past
-   * the publish base. The UI renders it exactly like an already collected
+   * a book the caller still holds privately while the shared library hasn't
+   * moved past the publish base. The UI renders it exactly like an already collected
    * version instead of offering a duplicate collect.
    */
   ownsSource?: boolean
@@ -1337,14 +1337,14 @@ export interface BookDetailRes extends BookListItem {
   meta: BookMeta
   readerSettings: ReaderBookSettings
   /**
-   * Stage 5: city versions published from this private book, for the merged
+   * Stage 5: shared versions published from this private book, for the merged
    * publish dialog. Empty for anything that was never a publish source.
    * Detail-only; lists never carry it.
    */
   publishedTo?: PublishedLinkInfo[]
 }
 
-/** One city listing born from a private book: where it lives and whether it kept up. */
+/** One shared listing born from a private book: where it lives and whether it kept up. */
 export interface PublishedLinkInfo {
   libraryId: string
   libraryName: string | null

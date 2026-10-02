@@ -7,13 +7,25 @@ All notable changes to Bookdock are documented here.
 ### Added
 
 - Content revisions are pruned by the boot/periodic sweep: only the newest revision per book version (plus any still pinned by a library card) is kept, and orphaned blobs are collected.
+- Every content write moves all collected shared pins to the new revision in the same transaction (private/shared re-chaptering, private/catalog metadata resets); migration 0037 moves forward pins left behind by the removed re-pin flow, and freshly collected cards start without an unread-update mark.
+- Shared-library re-toc, append, and push retire version-scoped reader caches, so entering the reader no longer flashes the stale chapter list.
+
+### Changed
+
+- Share cards show the full author list instead of the first author only, use slightly smaller excerpt type with looser line spacing, and give the chapter a smaller, dimmer suffix after a semibold title.
 
 ### Fixed
 
-- A settled in-app update failure can now be dismissed from the update dialog instead of lingering until the next update.
-- Moving books to a shelf now refreshes the selection snapshot, so the batch organize dialog shows the current shelf instead of a stale uncategorized state.
 - The reader directory now pulls a bottom-edge current chapter up to the landing spot instead of leaving it at the viewport edge.
 - Interrupting a directory locate (wheel/touch) snaps to the landing spot instead of stranding the viewport mid-flight.
+- Snap page-turns absorb residual wheel momentum for 350ms after a chapter jump; reverse scroll, touch, or keys release immediately.
+- Unrenamed bookmarks render a single clean excerpt (no duplicated title) in notes, copy, and export; bookmark context aligns to sentence starts and prefers paragraph endings; custom bookmark titles can be cleared back to the excerpt.
+- A settled in-app update failure can now be dismissed from the update dialog instead of lingering until the next update.
+- Moving books to a shelf now refreshes the selection snapshot, so the batch organize dialog shows the current shelf instead of a stale uncategorized state.
+
+### Upgrade notes
+
+- Back up the complete `DATA_DIR` before upgrading. Migration 0037 applies automatically (shared pin follow-forward, idempotent).
 
 ## [0.4.1] - 2026-10-02
 
@@ -514,13 +526,25 @@ All notable changes to Bookdock are documented here.
 #### 新增
 
 - 内容版本改为只保留最新：启动与定时清理会删除旧内容修订（书卡仍 pin 住的除外），并回收无引用的内容文件
+- 所有内容写入在同一事务内把已收藏共享 pin 推到新版本（私人/共享重建目录、私人/目录元数据重置）；迁移 0037 把旧手动跟进时代遗留的落后 pin 一次推到最新；新收藏默认没有未读更新标记
+- 共享书库重建目录/追写/推送后同步失效阅读器版本级缓存，进书不再闪旧目录
+
+#### 变更
+
+- 分享卡片作者行显示完整作者列表（不再只显示首作者）；摘录字号略收紧、行距放宽；标题加粗，章节变为小字弱化后缀
 
 #### 修复
 
-- 应用内更新失败后，可在更新弹窗中取消关闭，旧记录不再残留到下次更新。
 - 目录切换章节时，卡在视口底边的当前章节也会被拉到上半部落点，不再只露个边
 - 目录定位中途被滚轮/触摸打断时，直接落到目标位置，不再停在半道
+- 跳章后 350ms 动量吸收期吞掉同次手势的残余滚轮，反向滚动、触屏或按键立即释放
+- 未改名书签在笔记、复制与导出中只显示一份干净摘录（标题不再复读正文）；书签上下文对齐句首、优先段落收尾；自定义书签标题可清空恢复摘录
+- 应用内更新失败后，可在更新弹窗中取消关闭，旧记录不再残留到下次更新。
 - 把书拖到书架后，批量整理弹窗显示当前书架，不再是过期的未分类
+
+#### 升级说明
+
+- 升级前请完整备份 `DATA_DIR`。迁移 0037 自动执行（共享 pin 跟进修复，幂等）。
 
 ### [0.4.1] - 2026-10-02
 

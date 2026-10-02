@@ -1372,6 +1372,9 @@ export class Paginator extends HTMLElement {
     #continuousBufferTimer = null
     #snapTurn = false
     #snapNavigating = false
+    #snapDirection = 0
+    #snapDrainUntil = 0
+    #snapLockPosition = null
     #wheelAccum = 0
     #autoSnapAccum = 0
     #snapCooldownUntil = 0
@@ -1416,6 +1419,7 @@ export class Paginator extends HTMLElement {
     #directionCache = new Map()
     static SNAP_DELTA_THRESHOLD = 150
     static SNAP_COOLDOWN = 600
+    static SNAP_DRAIN_DURATION = 350
     static PAGE_WHEEL_THRESHOLD = 40
     static PAGE_WHEEL_COOLDOWN = 200
     constructor() {
@@ -1623,6 +1627,14 @@ export class Paginator extends HTMLElement {
                 this.containerPosition = this.#selectionPosition
                 return
             }
+            if (this.#snapLockPosition != null && this.#snapTurn && !this.#continuous
+                && Math.abs(this.containerPosition - this.#snapLockPosition) > 0.5) {
+                if (Date.now() < this.#snapDrainUntil) {
+                    this.containerPosition = this.#snapLockPosition
+                    return
+                }
+                this.#snapLockPosition = null
+            }
             if (!this.#isAnimating) this.dispatchEvent(new Event('scroll'))
             if (this.scrolled) {
                 const position = this.#renderedStart
@@ -1681,7 +1693,7 @@ export class Paginator extends HTMLElement {
         this.addEventListener('touchmove', this.#onTouchMove.bind(this), opts)
         this.addEventListener('touchend', this.#onTouchEnd.bind(this))
         this.addEventListener('touchcancel', this.#onTouchCancel.bind(this))
-        this.addEventListener('wheel', e => this.#onWheel(e), { passive: true })
+        this.addEventListener('wheel', e => this.#onWheel(e), { passive: false })
         this.addEventListener('load', ({ detail: { doc } }) => {
             doc.addEventListener('touchstart', this.#onTouchStart.bind(this), opts)
             doc.addEventListener('touchmove', this.#onTouchMove.bind(this), opts)
@@ -1690,7 +1702,7 @@ export class Paginator extends HTMLElement {
             doc.addEventListener('wheel', e => {
                 this.dispatchEvent(new CustomEvent('docwheel', { bubbles: true, composed: true }))
                 this.#onWheel(e)
-            }, { passive: true })
+            }, { passive: false })
             doc.addEventListener('keydown', e => {
                 const target = e.target
                 const isEditable = target && (target.isContentEditable
@@ -1829,6 +1841,8 @@ export class Paginator extends HTMLElement {
                 this.#snapTurn = value !== null
                 this.#wheelAccum = 0
                 this.#autoSnapAccum = 0
+                this.#snapDrainUntil = 0
+                this.#snapLockPosition = null
                 break
             case 'continuous':
                 this.#clearContinuousBufferTimer()
@@ -2542,6 +2556,8 @@ export class Paginator extends HTMLElement {
         this.#scrollToPage(page, 'snap')
     }
     #onTouchStart(e) {
+        this.#snapDrainUntil = 0
+        this.#snapLockPosition = null
         const touch = e.changedTouches[0]
         this.#touchState = {
             x: touch?.screenX, y: touch?.screenY,
@@ -3503,6 +3519,18 @@ export class Paginator extends HTMLElement {
         const delta = e.deltaY * unit
         if (!Number.isFinite(delta) || delta === 0) return
         if (this.scrolled) {
+            if (this.#snapTurn && !this.#continuous) {
+                const now = Date.now()
+                if (this.#snapNavigating || now < this.#snapDrainUntil) {
+                    const direction = delta > 0 ? 1 : -1
+                    if (direction === this.#snapDirection) {
+                        e.preventDefault()
+                        return
+                    }
+                    this.#snapDrainUntil = 0
+                    this.#snapLockPosition = null
+                }
+            }
             if (this.#continuous) {
                 const direction = delta > 0 ? 1 : -1
                 this.#lastScrollDirection = direction
@@ -3537,11 +3565,22 @@ export class Paginator extends HTMLElement {
         const index = this.#adjacentIndex(step.direction)
         if (index == null) return
         this.#snapNavigating = true
+        this.#snapDirection = step.direction
+        this.#snapDrainUntil = now + Paginator.SNAP_COOLDOWN
+        this.#snapLockPosition = null
         this.#snapCooldownUntil = now + Paginator.SNAP_COOLDOWN
         this.#goTo({
             index,
             anchor: step.direction > 0 ? () => 0 : () => 1,
-        }).catch(() => {}).finally(() => { this.#snapNavigating = false })
+        }).then(() => {
+            this.#snapLockPosition = this.containerPosition
+            this.#snapDrainUntil = Date.now() + Paginator.SNAP_DRAIN_DURATION
+        }).catch(() => {
+            this.#snapLockPosition = null
+            this.#snapDrainUntil = 0
+        }).finally(() => {
+            this.#snapNavigating = false
+        })
     }
     #onWheelPage(delta) {
         if (this.#locked) return
@@ -3555,6 +3594,8 @@ export class Paginator extends HTMLElement {
         void this.#turnPage(step.direction)
     }
     #onDocKey(e) {
+        this.#snapDrainUntil = 0
+        this.#snapLockPosition = null
         const target = e.target
         if (target && (target.isContentEditable
             || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
@@ -4127,11 +4168,19 @@ export class Paginator extends HTMLElement {
             const index = this.#adjacentIndex(direction)
             if (index == null) return
             this.#snapNavigating = true
+            this.#snapDirection = direction
+            this.#snapDrainUntil = Date.now() + Paginator.SNAP_COOLDOWN
+            this.#snapLockPosition = null
             try {
                 await this.#goTo({
                     index,
                     anchor: direction > 0 ? () => 0 : () => 1,
                 })
+                this.#snapLockPosition = this.containerPosition
+                this.#snapDrainUntil = Date.now() + Paginator.SNAP_DRAIN_DURATION
+            } catch {
+                this.#snapLockPosition = null
+                this.#snapDrainUntil = 0
             } finally {
                 this.#snapNavigating = false
             }

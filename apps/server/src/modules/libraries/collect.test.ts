@@ -176,6 +176,31 @@ describe('add-to-private (7.x)', () => {
       .toBe(updated.data.revisionId)
   })
 
+  it('collects without an unread-update mark until the city writes again', async () => {
+    const city = await seedCityBook()
+    await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
+    const app = new Hono()
+    app.use('*', async (c, next) => {
+      c.set('user', { id: memberId, username: 'member', role: 'member', avatarKey: null })
+      c.set('guest', false)
+      await next()
+    })
+    app.onError(errorHandler)
+    app.route('/api/v1/books', booksRoutes)
+    const url = `/api/v1/books/${city.bookVersionId}`
+    // Nothing changed since the collect: pin == newest, so the fresh card
+    // starts caught up instead of crying update before its first read.
+    const first = await (await app.request(url)).json()
+    expect(first.data.kind).toBe('shared')
+    expect(first.data.hasUnreadUpdate).toBeUndefined()
+    expect(db.select().from(schema.bookStates)
+      .where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, city.bookVersionId))).get())
+      .toMatchObject({ readStatus: 'wishlist', readRevisionId: first.data.revisionId })
+    // A later city write still marks exactly once.
+    await appendCityVersionContent(ownerId, libraryId, city.libraryBookId, city.versionLinkId!, '第二章\n更新')
+    expect((await (await app.request(url)).json()).data.hasUnreadUpdate).toBe(true)
+  })
+
   it('collects a version into the private library with pinned source and metadata', async () => {
     const city = await seedCityBook()
     const result = await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)

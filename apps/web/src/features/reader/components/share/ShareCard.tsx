@@ -270,12 +270,12 @@ function TitleChapterAttribution({
   const alignClass = align === 'center' ? 'text-center' : 'text-left'
   return (
     <div className={`mt-8 ${alignClass}`}>
-      <p className="text-base font-medium tracking-wide" style={{ color: colors.text }}>
-        {title}
-        {chapter && <span className="font-normal opacity-75"> · {chapter}</span>}
+      <p className="tracking-wide" style={{ color: colors.text }}>
+        <span className="text-base font-semibold">{title}</span>
+        {chapter && <span className="ml-1.5 text-xs font-normal opacity-60">· {chapter}</span>}
       </p>
       {author && (
-        <p className="mt-1.5 text-xs tracking-wider opacity-65" style={{ color: colors.sub }}>
+        <p className="mt-1 text-xs tracking-wider opacity-80" style={{ color: colors.sub }}>
           {author}
         </p>
       )}

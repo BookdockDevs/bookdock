@@ -4,7 +4,7 @@ import type { BookFormat, ReadStatus } from './constants'
 import type { BookMetadata } from './contract'
 
 /**
- * Target library/city model (library-design-v1 v1.4).
+ * Target library model (library-design-v1 v1.4).
  * Wire shapes only: session tokens, scrypt password hashes and API tokens
  * never cross this boundary; they stay server-internal.
  *
@@ -169,7 +169,7 @@ export interface LibraryMembersRes {
 
 // ------------------------------------------------- Book layering (A / B / C)
 
-/** personal = A (own upload), shared = B (city reference), local = C (forked). */
+/** personal = A (own upload), shared = B (shared-library reference), local = C (forked). */
 export type LibraryVersionKind = 'personal' | 'shared' | 'local'
 export const libraryVersionKindSchema = z.enum(['personal', 'shared', 'local'])
 
@@ -210,7 +210,7 @@ export interface LibraryBookVersion {
   authors: string[] | null
   description: string | null
   coverKey: string | null
-  /** B only: the single source city/version this reference is bound to. */
+  /** B only: the single source shared library/version this reference is bound to. */
   sourceLibraryId: string | null
   sourceLibraryBookVersionId: string | null
   /** B only: pinned revision; never follows the source automatically. */
@@ -273,7 +273,7 @@ export interface CatalogVersion {
   collected?: boolean
   /**
    * Whether this version was published from a book the caller still holds
-   * privately while the city hasn't moved past the publish base. Collecting
+   * privately while the shared library hasn't moved past the publish base. Collecting
    * it would only duplicate that book.
    */
   ownsSource?: boolean
@@ -594,7 +594,7 @@ export const collectBookSchema = z.object({
 export type CollectBookReq = z.infer<typeof collectBookSchema>
 
 /**
- * Push a private draft to its published city version. Omits to the
+ * Push a private draft to its published shared version. Omits to the
  * publish-time base; an explicit source overrides it.
  */
 export const pushVersionSchema = z.object({
@@ -638,7 +638,7 @@ export interface BookSourceInfo {
 
 /**
  * Fork a private B into a local C (B rescue). The same card swaps to a new
- * independent BookVersion built from the pinned revision; the city copy and
+ * independent BookVersion built from the pinned revision; the shared copy and
  * other readers are untouched. The forker's own User x BookVersion reading
  * data moves to the new version.
  */

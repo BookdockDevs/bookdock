@@ -112,6 +112,16 @@ describe('annotation export', () => {
     expect(buildAnnotationCsv([item], book, options)).toContain('"First paragraph\n\nSecond ""quoted"" paragraph"')
   })
 
+  it('exports unrenamed bookmark as clean single excerpt without duplicated title', () => {
+    const item = { ...bookmark, text: 'First paragraph', contextText: 'First paragraph\n\nSecond "quoted" paragraph' }
+    const options = { includeDetails: false, includeTime: false, includeDeepLink: false }
+    const md = buildAnnotationMarkdown([item], book, options, labels)
+    expect(md).toContain('- 书签\n\n> First paragraph\n> \n> Second "quoted" paragraph')
+    expect(md).not.toContain('- First paragraph')
+    const txt = buildAnnotationText([item], book, options, labels)
+    expect(txt).toContain('First paragraph\n\nSecond "quoted" paragraph')
+  })
+
   it('keeps markdown-like source content literal inside exported quotes', () => {
     const item = { ...highlight, text: '<script>\n**bold** [link](url)' }
     const options = { includeDetails: false, includeTime: false, includeDeepLink: false }

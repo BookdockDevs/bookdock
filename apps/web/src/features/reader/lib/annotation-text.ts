@@ -50,19 +50,86 @@ export function bookmarkContext(range: Range, maxLength: number): string {
   if (paragraph) {
     const before = start.cloneRange()
     before.setStart(paragraph, 0)
-    const chars = Array.from(extractAnnotationText(before))
-    prefix = (chars.length > 60 ? '…' : '') + chars.slice(-60).join('')
+    const beforeText = extractAnnotationText(before)
+    const chars = Array.from(beforeText)
+    if (chars.length <= 60) {
+      prefix = beforeText
+    } else {
+      const windowStr = chars.slice(-60).join('')
+      const sentenceBreaks = [...windowStr.matchAll(/[。！？.!?](?:[”’"'])?|\n+/g)]
+      if (sentenceBreaks.length > 0) {
+        const lastBreak = sentenceBreaks.at(-1)!
+        const startIdx = lastBreak.index + lastBreak[0].length
+        prefix = windowStr.slice(startIdx).trimStart()
+      } else {
+        prefix = '…' + windowStr
+      }
+    }
     if (prefix && /[\t\r\n ]$/.test(before.toString())) prefix += ' '
   }
   const after = start.cloneRange()
   after.setEnd(body, body.childNodes.length)
-  const text = prefix + extractAnnotationText(after, maxLength * 2 + 2)
+  const afterText = extractAnnotationText(after, maxLength * 2 + 2)
+
+  let text = prefix
+  if (prefix && afterText) {
+    if (paragraph) {
+      const restOfParagraph = start.cloneRange()
+      restOfParagraph.setEnd(paragraph, paragraph.childNodes.length)
+      const restText = extractAnnotationText(restOfParagraph)
+      // If the current paragraph ends here and afterText starts a new paragraph
+      if (!restText && !prefix.endsWith('\n\n')) {
+        text = prefix.trimEnd() + '\n\n' + afterText.trimStart()
+      } else {
+        text = prefix + afterText
+      }
+    } else {
+      text = prefix + afterText
+    }
+  } else {
+    text = prefix || afterText
+  }
   const chars = Array.from(text)
   if (chars.length <= maxLength) return text
   const bounded = chars.slice(0, maxLength - 1).join('')
-  // Prefer a nearby sentence/paragraph ending without discarding most context.
-  const endings = [...bounded.matchAll(/[。！？.!?](?:[”’"'])?|\n\n/g)]
+  // Prefer a nearby paragraph ending if it retains sufficient context (>= 60%),
+  // otherwise fallback to a sentence ending (>= 70%).
+  const paragraphBreaks = [...bounded.matchAll(/\n\n+/g)]
+  const lastParagraphBreak = paragraphBreaks.at(-1)
+  if (lastParagraphBreak && lastParagraphBreak.index >= bounded.length * 0.6) {
+    return bounded.slice(0, lastParagraphBreak.index).trimEnd()
+  }
+
+  const endings = [...bounded.matchAll(/(?:[。！？.!?…]+|[—–-]{2,})(?:[”’"'])?/g)]
   const last = endings.at(-1)
   const end = last ? last.index + last[0].length : 0
-  return (end >= bounded.length * 0.7 ? bounded.slice(0, end).trimEnd() : bounded) + '…'
+  if (end >= bounded.length * 0.7) {
+    return bounded.slice(0, end).trimEnd()
+  }
+  return bounded.trimEnd() + '…'
+}
+
+export function isCustomBookmarkTitle(
+  annotation: { text?: string | null; contextText?: string | null; chapter?: string | null },
+  defaultLabel?: string,
+): boolean {
+  const text = annotation.text?.trim()
+  if (!text) return false
+  if (text === '书签' || text === 'Bookmark' || (defaultLabel && text.toLowerCase() === defaultLabel.trim().toLowerCase())) {
+    return false
+  }
+  if (annotation.chapter && text === annotation.chapter.trim()) {
+    return false
+  }
+  if (!annotation.contextText) {
+    return false
+  }
+  const firstLine = annotation.contextText.split(/\n/).map((l) => l.trim()).find(Boolean) || ''
+  const normText = text.replace(/\s+/g, '')
+  const normFirstLine = firstLine.replace(/\s+/g, '')
+  const normContext = annotation.contextText.replace(/\s+/g, '')
+  if (normText && (normFirstLine.startsWith(normText) || normContext.startsWith(normText))) {
+    return false
+  }
+  return true
 }

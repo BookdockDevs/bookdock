@@ -10,6 +10,7 @@ import { notify } from '@/lib/notifications'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { kindOf, type NoteSort } from '../hooks/useNotesFilter'
+import { isCustomBookmarkTitle } from '../lib/annotation-text'
 import { compareCfiPosition } from '../lib/cfi-overlap'
 import { buildChapterOrderLookup, type ChapterOrderItem } from '../lib/chapter-order'
 import { markEscConsumed } from '../lib/esc-consumed'
@@ -175,11 +176,13 @@ function autoGrow(el: HTMLTextAreaElement): void {
 function InlineEditor({
   initial,
   placeholder,
+  allowEmpty = false,
   onSave,
   onCancel,
 }: {
   initial: string
   placeholder: string
+  allowEmpty?: boolean
   onSave: (value: string) => void
   onCancel: () => void
 }) {
@@ -210,8 +213,12 @@ function InlineEditor({
   function submit() {
     const value = draft.trim()
     if (value) onSave(value)
+    else if (allowEmpty && initial.trim()) onSave('')
     else onCancel()
   }
+
+  const isChanged = draft.trim() !== initial.trim()
+  const canSave = allowEmpty ? isChanged : Boolean(draft.trim())
 
   return (
     <div ref={rootRef} className="p-3" onContextMenu={(e) => e.stopPropagation()}>
@@ -244,7 +251,7 @@ function InlineEditor({
         </button>
         <button
           onClick={submit}
-          disabled={!draft.trim()}
+          disabled={!canSave}
           className="rounded-md bg-blue-500 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-60"
         >
           {_('annotation.save')}
@@ -465,7 +472,19 @@ export const NotesPanel = memo(function NotesPanel({
 
   async function copyItem(item: AnnotationRes) {
     try {
-      await navigator.clipboard.writeText([kindOf(item) === 'idea' ? item.note : item.text, kindOf(item) === 'idea' ? item.text : item.contextText].filter(Boolean).join('\n\n'))
+      const parts: string[] = []
+      if (kindOf(item) === 'idea') {
+        if (item.note) parts.push(item.note)
+        if (item.text) parts.push(item.text)
+      } else if (item.type === 'bookmark') {
+        const hasCustom = isCustomBookmarkTitle(item, _('reader.bookmark'))
+        if (hasCustom && item.text) parts.push(item.text)
+        if (item.contextText) parts.push(item.contextText)
+        else if (!hasCustom && item.text) parts.push(item.text)
+      } else {
+        if (item.text) parts.push(item.text)
+      }
+      await navigator.clipboard.writeText(parts.filter(Boolean).join('\n\n'))
       notify.success({ key: 'reader.copied' })
     } catch {
       notify.error({ key: 'reader.copyFailed' })
@@ -499,6 +518,8 @@ export const NotesPanel = memo(function NotesPanel({
     const orphaned = orphanedKeys.includes(`${a.cfiRange}|${a.type}`)
     const isNoteExpanded = expandedCardIds.has(a.id)
     const isQuoteExpanded = expandedQuoteIds.has(a.id)
+    const isBookmark = kind === 'bookmark'
+    const hasCustomTitle = isBookmark && isCustomBookmarkTitle(a, _('reader.bookmark'))
     return (
       <div
         onContextMenu={(e) => handleContextMenu(e, a)}
@@ -518,8 +539,9 @@ export const NotesPanel = memo(function NotesPanel({
         )}
         {editingId === a.id ? (
           <InlineEditor
-            initial={a.type === 'bookmark' ? a.text : (a.note ?? '')}
+            initial={a.type === 'bookmark' ? (hasCustomTitle ? a.text : '') : (a.note ?? '')}
             placeholder={a.type === 'bookmark' ? _('annotation.renamePlaceholder') : _('annotation.notePlaceholder')}
+            allowEmpty={a.type === 'bookmark'}
             onSave={(value) => saveEdit(a, value)}
             onCancel={() => setEditingId(null)}
           />
@@ -547,26 +569,42 @@ export const NotesPanel = memo(function NotesPanel({
                     <BookmarkIcon />
                   </span>
                   <div className="min-w-0 flex-1 space-y-2">
-                    <ClampedText
-                      text={a.text || _('reader.bookmark')}
-                      clampClassName="line-clamp-4"
-                      className="text-sm font-medium leading-relaxed text-current whitespace-pre-wrap break-words"
-                      expanded={isQuoteExpanded}
-                      onToggle={(e) => toggleQuoteExpand(a.id, e)}
-                      expandLabel={_('annotation.expand')}
-                      collapseLabel={_('annotation.collapse')}
-                      minLengthForToggle={65}
-                    />
-                    {a.contextText && (
+                    {hasCustomTitle ? (
+                      <>
+                        <ClampedText
+                          text={a.text}
+                          clampClassName="line-clamp-2"
+                          className="text-sm font-medium leading-relaxed text-current whitespace-pre-wrap break-words"
+                          expanded={isQuoteExpanded}
+                          onToggle={(e) => toggleQuoteExpand(a.id, e)}
+                          expandLabel={_('annotation.expand')}
+                          collapseLabel={_('annotation.collapse')}
+                          minLengthForToggle={40}
+                        />
+                        {a.contextText && (
+                          <ClampedText
+                            text={a.contextText}
+                            clampClassName="line-clamp-3"
+                            className="leading-relaxed whitespace-pre-wrap break-words"
+                            wrapperClassName="rounded-lg border-l-2 border-blue-500/60 bg-stone-500/5 px-2.5 py-1.5 text-xs text-[var(--bd-read-sub)]"
+                            expanded={isNoteExpanded}
+                            onToggle={(e) => toggleNoteExpand(a.id, e)}
+                            expandLabel={_('annotation.expand')}
+                            collapseLabel={_('annotation.collapse')}
+                            minLengthForToggle={50}
+                          />
+                        )}
+                      </>
+                    ) : (
                       <ClampedText
-                        text={a.contextText}
-                        clampClassName="line-clamp-3"
-                        className="text-xs leading-relaxed text-[var(--bd-read-sub)] whitespace-pre-wrap break-words"
-                        expanded={isNoteExpanded}
-                        onToggle={(e) => toggleNoteExpand(a.id, e)}
+                        text={a.contextText || a.text || _('reader.bookmark')}
+                        clampClassName="line-clamp-4"
+                        className="text-sm leading-relaxed text-current whitespace-pre-wrap break-words"
+                        expanded={isQuoteExpanded}
+                        onToggle={(e) => toggleQuoteExpand(a.id, e)}
                         expandLabel={_('annotation.expand')}
                         collapseLabel={_('annotation.collapse')}
-                        minLengthForToggle={40}
+                        minLengthForToggle={65}
                       />
                     )}
                   </div>

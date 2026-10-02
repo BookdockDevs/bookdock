@@ -1033,3 +1033,44 @@ describe('bookmark context compatibility', () => {
     } finally { sqlite.close() }
   })
 })
+
+describe('shared pin follow migration', () => {
+  it('moves lagging collected pins to the newest revision and leaves the rest alone', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    try {
+      const db = drizzle(sqlite, { schema })
+      migrateUpTo(db, '0037_shared_pin_follow')
+      sqlite.exec(`
+        INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1);
+        INSERT INTO libraries (id, user_id, type, name, description, created_at, updated_at)
+          VALUES ('priv', 'u1', 'private', '', '', 1, 1), ('city', 'u1', 'shared', 'City', '', 1, 1);
+        INSERT INTO library_books (id, library_id, user_id, title, author, authors, description, meta, created_at, updated_at)
+          VALUES ('w1', 'priv', 'u1', 'B', '', '[]', '', '{}', 1, 1);
+        INSERT INTO book_versions (id, format, size, created_at, updated_at)
+          VALUES ('v-stale', 'txt', 1, 1, 1), ('v-current', 'txt', 1, 1, 1), ('v-null', 'txt', 1, 1, 1);
+        INSERT INTO content_revisions (id, book_version_id, revision_no, blob_key, size, chapter_count, meta, created_at)
+          VALUES ('r1-old', 'v-stale', 1, 'k1', 1, 1, '{}', 1),
+                 ('r1-new', 'v-stale', 2, 'k2', 1, 1, '{}', 2),
+                 ('r2-only', 'v-current', 1, 'k3', 1, 1, '{}', 1),
+                 ('r3-only', 'v-null', 1, 'k4', 1, 1, '{}', 1);
+        INSERT INTO library_book_versions
+          (id, library_id, library_book_id, book_version_id, kind, pinned_revision_id, created_at, updated_at)
+          VALUES ('b-stale', 'priv', 'w1', 'v-stale', 'shared', 'r1-old', 1, 1),
+                 ('b-current', 'priv', 'w1', 'v-current', 'shared', 'r2-only', 1, 1),
+                 ('b-null', 'priv', 'w1', 'v-null', 'shared', NULL, 1, 1),
+                 ('b-personal', 'city', 'w1', 'v-stale', 'personal', NULL, 1, 1);
+      `)
+
+      migrate(db, { migrationsFolder: migrationsDir })
+
+      const pin = (id: string) =>
+        sqlite.prepare('SELECT pinned_revision_id AS pin FROM library_book_versions WHERE id = ?').get(id)
+      expect(pin('b-stale')).toEqual({ pin: 'r1-new' })
+      expect(pin('b-current')).toEqual({ pin: 'r2-only' })
+      expect(pin('b-null')).toEqual({ pin: null })
+      expect(pin('b-personal')).toEqual({ pin: null })
+      expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    } finally { sqlite.close() }
+  })
+})

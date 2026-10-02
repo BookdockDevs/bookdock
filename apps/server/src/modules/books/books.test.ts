@@ -41,6 +41,7 @@ import {
   uploadBook,
   migrateTxtArtifacts,
   reTocBook,
+  resetBookMetadata,
   previewBookToc,
   previewAppendTxtBookContent,
   appendTxtBookContent,
@@ -2524,4 +2525,93 @@ describe('reTocBook', () => {
     })
   })
 
+})
+
+describe('revision writers move collected pins', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeAll(() => {
+    // parsers are registered in app.ts at runtime; register here for service-level tests.
+    // Uploaded TXTs are stored as derived .epub blobs, so the metadata reset
+    // path (which re-parses book.filePath) needs an epub parser too.
+    registerParser(new TxtParser())
+    registerParser({
+      match: (fileName) => fileName.toLowerCase().endsWith('.epub'),
+      parse: async (_data: Buffer | Readable) => ({
+        meta: { title: 'Repaired', cover: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+        chapters: [],
+      }),
+    })
+  })
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+  })
+
+  // A collected card sharing the writer's version: the topology where one
+  // version is both privately held and collected from a shared library. Without
+  // the follow-all move, the new revision below would leave this pin behind
+  // and the reader's acknowledgment could never clear the update mark.
+  function collectSharedPin(bookId: string, pinnedRevisionId: string) {
+    const otherId = seedUser(db, 'other')
+    const otherLib = ensureLibrary(db, otherId)
+    const workId = createId('lb')
+    db.insert(schema.libraryBooks).values({
+      id: workId, libraryId: otherLib, userId: otherId, categoryId: null,
+      title: 'Collected', author: '', description: '', coverKey: null, createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: createId('lbv'), libraryId: otherLib, libraryBookId: workId, bookVersionId: bookId,
+      kind: 'shared', sourceLibraryId: 'lib-elsewhere', pinnedRevisionId,
+      createdAt: 1, updatedAt: 1,
+    }).run()
+  }
+
+  function latestRevisionOf(bookId: string) {
+    return db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, bookId)).orderBy(desc(schema.contentRevisions.revisionNo)).all().at(0)!
+  }
+
+  function sharedPinOf(bookId: string) {
+    return db.select({ pinnedRevisionId: schema.libraryBookVersions.pinnedRevisionId }).from(schema.libraryBookVersions)
+      .where(and(eq(schema.libraryBookVersions.bookVersionId, bookId), eq(schema.libraryBookVersions.kind, 'shared'))).get()!.pinnedRevisionId
+  }
+
+  it('moves every collected pin when a private re-toc appends a revision', async () => {
+    const { book } = await uploadBook(ownerId, new File(['序言\n\n=== 第一章\n\n正文一\n\n=== 第二章\n\n正文二'], 'book.txt', { type: 'text/plain' }))
+    const rev1 = latestRevisionOf(book.id).id
+    collectSharedPin(book.id, rev1)
+    const rule = createTocRule(ownerId, {
+      name: 'custom',
+      patterns: [{ level: 1, regex: '^=== (.+)$', replacement: '$1' }],
+    })
+
+    await reTocBook(ownerId, book.id, rule.id)
+
+    const latest = latestRevisionOf(book.id)
+    expect(latest.id).not.toBe(rev1)
+    expect(sharedPinOf(book.id)).toBe(latest.id)
+  })
+
+  it('moves every collected pin when a metadata reset appends a revision', async () => {
+    const { book } = await uploadBook(ownerId, new File(['第一章\n正文内容'], 'book.txt', { type: 'text/plain' }))
+    const rev1 = latestRevisionOf(book.id)
+    collectSharedPin(book.id, rev1.id)
+    // The stored parse must differ from a fresh parse, otherwise the reset is
+    // a no-op by design.
+    db.update(schema.contentRevisions).set({ meta: { ...(rev1.meta ?? {}), bookmeta: { publisher: 'Stale Press' } } })
+      .where(eq(schema.contentRevisions.id, rev1.id)).run()
+
+    await resetBookMetadata(ownerId, book.id)
+
+    const rows = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).orderBy(desc(schema.contentRevisions.revisionNo)).all()
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.blobKey).toBe(rows[1]!.blobKey)
+    expect(sharedPinOf(book.id)).toBe(rows[0]!.id)
+  })
 })

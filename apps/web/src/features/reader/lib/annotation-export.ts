@@ -1,6 +1,7 @@
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
 import { formatDateTime } from '@/lib/format-date'
+import { isCustomBookmarkTitle } from './annotation-text'
 
 export type AnnotationExportFormat = 'markdown' | 'text' | 'csv'
 
@@ -82,9 +83,20 @@ export function buildAnnotationMarkdown(
       if (annotation.chapter) lines.push(`## ${annotation.chapter}`, '')
     }
     if (annotation.type === 'bookmark') {
-      const bookmarkText = (annotation.text || labels.unnamedBookmark).replace(/[\\`*_{}[\]<>#!|]/g, '\\$&').replace(/\r?\n/g, ' ')
-      lines.push(options.includeDetails ? `- **${labels.bookmark}**${labels.separator}${bookmarkText}` : `- ${bookmarkText}`)
-      if (annotation.contextText) lines.push('', `> ${annotation.contextText.replace(/[\\`*_{}[\]<>#!|]/g, '\\$&').replace(/\r?\n/g, '\n> ')}`)
+      if (annotation.contextText) {
+        const hasCustom = isCustomBookmarkTitle(annotation, labels.bookmark)
+        if (hasCustom && annotation.text) {
+          const bookmarkText = annotation.text.replace(/[\\`*_{}[\]<>#!|]/g, '\\$&').replace(/\r?\n/g, ' ')
+          lines.push(options.includeDetails ? `- **${labels.bookmark}**${labels.separator}${bookmarkText}` : `- ${bookmarkText}`)
+          lines.push('', `> ${annotation.contextText.replace(/[\\`*_{}[\]<>#!|]/g, '\\$&').replace(/\r?\n/g, '\n> ')}`)
+        } else {
+          lines.push(options.includeDetails ? `- **${labels.bookmark}**` : `- ${labels.bookmark}`)
+          lines.push('', `> ${annotation.contextText.replace(/[\\`*_{}[\]<>#!|]/g, '\\$&').replace(/\r?\n/g, '\n> ')}`)
+        }
+      } else {
+        const bookmarkText = (annotation.text || labels.unnamedBookmark).replace(/[\\`*_{}[\]<>#!|]/g, '\\$&').replace(/\r?\n/g, ' ')
+        lines.push(options.includeDetails ? `- **${labels.bookmark}**${labels.separator}${bookmarkText}` : `- ${bookmarkText}`)
+      }
     } else {
       lines.push(`> ${annotation.text.replace(/[\\`*_{}[\]<>#!|]/g, '\\$&').replace(/\r?\n/g, '\n> ')}`)
       if (annotation.note?.trim()) {
@@ -113,10 +125,24 @@ export function buildAnnotationText(
       chapterKey = nextChapterKey
       if (annotation.chapter) lines.push(annotation.chapter, '')
     }
-    const prefix = options.includeDetails ? `[${detailLabel(annotation, labels)}] ` : ''
-    lines.push(`${prefix}${annotation.text}`)
-    if (annotation.type === 'bookmark' && annotation.contextText) lines.push(annotation.contextText)
-    if (annotation.note?.trim()) lines.push(`${labels.idea}${labels.separator}${annotation.note}`)
+    if (annotation.type === 'bookmark') {
+      const prefix = options.includeDetails ? `[${detailLabel(annotation, labels)}] ` : ''
+      if (annotation.contextText) {
+        const hasCustom = isCustomBookmarkTitle(annotation, labels.bookmark)
+        if (hasCustom && annotation.text) {
+          lines.push(`${prefix}${annotation.text}`)
+          lines.push(annotation.contextText)
+        } else {
+          lines.push(`${prefix}${annotation.contextText}`)
+        }
+      } else {
+        lines.push(`${prefix}${annotation.text || labels.unnamedBookmark}`)
+      }
+    } else {
+      const prefix = options.includeDetails ? `[${detailLabel(annotation, labels)}] ` : ''
+      lines.push(`${prefix}${annotation.text}`)
+      if (annotation.note?.trim()) lines.push(`${labels.idea}${labels.separator}${annotation.note}`)
+    }
     if (options.includeTime) lines.push(`${labels.recordedAt}${labels.separator}${dateText(annotation.createdAt)}`)
     if (options.includeDeepLink) lines.push(`${labels.openInBook}${labels.separator}${annotationUrl(book, annotation)}`)
     lines.push('')

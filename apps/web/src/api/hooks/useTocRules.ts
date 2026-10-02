@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 
-import type { BookDetailRes, ReTocReq, TocPreviewReq, TocPreviewRes, TocRuleCreateReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
+import type { BookDetailRes, CatalogBook, ReTocReq, TocPreviewReq, TocPreviewRes, TocRuleCreateReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../client'
 
@@ -106,7 +106,7 @@ export function useReToc(target: TocTarget | undefined) {
   return useMutation({
     mutationFn: (body: ReTocReq) => {
       if (!target) throw new Error('re-toc requires a target')
-      return apiPost<{ data: BookDetailRes }>(`${tocBasePath(target)}/re-toc`, body)
+      return apiPost<{ data: BookDetailRes & { book?: CatalogBook } }>(`${tocBasePath(target)}/re-toc`, body)
     },
     onSuccess: (response) => {
       void queryClient.invalidateQueries({ queryKey: ['books'] })
@@ -118,9 +118,30 @@ export function useReToc(target: TocTarget | undefined) {
         void queryClient.invalidateQueries({ queryKey: ['progress', bookId] })
       } else {
         void queryClient.invalidateQueries({ queryKey: ['libraries', target.libraryId, 'catalog'] })
+        invalidateCityVersionQueries(queryClient, response.data.book, target.versionLinkId)
       }
     },
   })
+}
+
+/**
+ * Shared-library content writes answer the catalog work, not the private detail: resolve
+ * its version id to retire the same version-scoped caches private writes do.
+ * Without this the reader keeps painting the pre-write chapters (staleTime is
+ * Infinity) until its renderer re-parses the new bytes — a stale-TOC flash on
+ * every entry.
+ */
+export function invalidateCityVersionQueries(
+  queryClient: QueryClient,
+  book: CatalogBook | undefined,
+  versionLinkId: string,
+) {
+  const versionId = book?.versions.find((version) => version.id === versionLinkId)?.bookVersionId
+  if (!versionId) return
+  void queryClient.invalidateQueries({ queryKey: ['book', versionId] })
+  void queryClient.invalidateQueries({ queryKey: ['books', 'detail', versionId] })
+  void queryClient.invalidateQueries({ queryKey: ['chapters', versionId] })
+  void queryClient.invalidateQueries({ queryKey: ['progress', versionId] })
 }
 
 export function useTocPreview(

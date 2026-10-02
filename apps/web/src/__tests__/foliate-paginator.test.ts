@@ -207,4 +207,8 @@ describe('foliate paginator renderer contract', () => {
     expect(source).toContain('if (anchorOffset == null || !this.#restoreAnchorScrollOffset(anchorOffset))')
     expect(source).toContain('this.#scrollToAnchor(this.#anchor)')
   })
+
+  it('defines snap drain cooldown duration to absorb residual wheel ticks', () => {
+    expect(Paginator.SNAP_DRAIN_DURATION).toBe(350)
+  })
 })

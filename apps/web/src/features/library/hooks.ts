@@ -33,7 +33,7 @@ import {
 } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
-import { tocBasePath, type TocTarget } from '@/api/hooks/useTocRules'
+import { tocBasePath, invalidateCityVersionQueries, type TocTarget } from '@/api/hooks/useTocRules'
 import { withReveal } from '@/lib/reveal-hidden'
 import i18n from '@/i18n/i18n'
 import { getErrorKeyByCode, getUserErrorNotification } from '@/lib/error-message'
@@ -908,13 +908,14 @@ export function usePushVersion() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ libraryId, libraryBookId, versionLinkId }: { libraryId: string; libraryBookId: string; versionLinkId: string }) =>
-      apiPost<{ data: { revisionNo: number; alreadyUpToDate: boolean; diverged: boolean } }>(
+      apiPost<{ data: { revisionNo: number; alreadyUpToDate: boolean; diverged: boolean } & { book?: CatalogBook } }>(
         `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/push`,
         {},
       ),
-    onSuccess: (_res, vars) => {
+    onSuccess: (res, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['books'] })
+      invalidateCityVersionQueries(queryClient, res.data.book, vars.versionLinkId)
     },
   })
 }
@@ -1591,7 +1592,8 @@ export function useAppendBookContent() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (input: AppendContentInput) => appendContentRequest<{ data: BookDetailRes }>('append', input),
+    mutationFn: (input: AppendContentInput) =>
+      appendContentRequest<{ data: BookDetailRes & { book?: CatalogBook } }>('append', input),
     onSuccess: (result, input) => {
       if ('bookId' in input.target) {
         queryClient.setQueryData(['book', input.target.bookId], result)
@@ -1603,6 +1605,7 @@ export function useAppendBookContent() {
       } else {
         void queryClient.invalidateQueries({ queryKey: ['libraries', input.target.libraryId, 'catalog'] })
         void queryClient.invalidateQueries({ queryKey: ['books'] })
+        invalidateCityVersionQueries(queryClient, result.data.book, input.target.versionLinkId)
       }
     },
   })

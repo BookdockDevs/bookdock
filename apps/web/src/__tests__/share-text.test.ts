@@ -16,15 +16,15 @@ import {
 
 describe('excerptFontSize', () => {
   it('uses the largest size for short excerpts', () => {
-    expect(excerptFontSize(0)).toBe(28)
-    expect(excerptFontSize(60)).toBe(28)
+    expect(excerptFontSize(0)).toBe(26)
+    expect(excerptFontSize(60)).toBe(26)
   })
 
   it('uses medium sizes for intermediate excerpts', () => {
-    expect(excerptFontSize(61)).toBe(23)
-    expect(excerptFontSize(160)).toBe(23)
-    expect(excerptFontSize(161)).toBe(19)
-    expect(excerptFontSize(320)).toBe(19)
+    expect(excerptFontSize(61)).toBe(21)
+    expect(excerptFontSize(160)).toBe(21)
+    expect(excerptFontSize(161)).toBe(18)
+    expect(excerptFontSize(320)).toBe(18)
   })
 
   it('floors at the minimum size for long excerpts', () => {
