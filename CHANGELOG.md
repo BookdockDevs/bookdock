@@ -2,7 +2,14 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.4.1] - Unreleased
+## [0.4.1] - 2026-10-02
+
+### Highlights
+
+- Shared libraries grow up: member uploads, a publish dialog showing per-library sync state with push, in-place appends/re-chaptering, and "Updated" badges with a one-time notice for collectors.
+- Book details gain word counts, conditional updated-time rows, expandable/copyable metadata, and file-name parsing for authors and edition tags.
+- Reader behavior is refined: space pauses/resumes playback instead of turning pages, the TTS panel gains pause/resume plus stop, and paginated mode supports drag-to-select across pages with Up/Down-key turns.
+- Downloads move into a unified dialog with format/content choice and a per-user remembered preference; bookmarks keep a searchable context excerpt across renames.
 
 ### Added
 
@@ -489,7 +496,14 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.4.1] - 待发布
+### [0.4.1] - 2026-10-02
+
+#### 主要更新
+
+- 共享书库成型：成员上传、带同步状态可推送的发布弹窗、直接追写与重建目录，收藏者有「有更新」标记与一次性提示。
+- 书籍详情升级：字数与更新时间行、可展开可复制的元数据、文件名解析作者与版本标签。
+- 阅读行为打磨：空格只暂停/继续播报不再翻页，TTS 面板改为暂停/继续加独立停止，分页模式支持拖选跨页与 `↑/↓` 翻页。
+- 下载改为统一弹窗（格式/内容二选一，按用户记住选择）；书签上下文摘录改名不丢、可搜索。
 
 #### 新增
 

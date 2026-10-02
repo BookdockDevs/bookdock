@@ -84,12 +84,34 @@ async function persistJob(active: UpdateJob) {
   const write = persistChain.then(async () => {
     const file = stateFile()
     await mkdir(releasesDir(), { recursive: true })
-    const tmp = `${file}.${randomUUID()}.tmp`
-    await writeFile(tmp, `${JSON.stringify(safe)}\n`)
-    await rename(tmp, file)
+    await writeStateFileAtomic(file, `${JSON.stringify(safe)}\n`)
   })
   persistChain = write.catch(() => undefined)
   await write
+}
+
+function isTransientFsError(error: unknown) {
+  const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined
+  return code === 'EPERM' || code === 'EBUSY'
+}
+
+async function writeStateFileAtomic(file: string, body: string) {
+  // Tmp+rename keeps readers from seeing a half-written status, but virus
+  // scanners and indexers briefly lock brand-new files, so the rename can
+  // fail with EPERM/EBUSY on Windows. Persists are serialized through
+  // persistChain, so retrying the whole write is safe.
+  for (let attempt = 0; ; attempt += 1) {
+    const tmp = `${file}.${randomUUID()}.tmp`
+    try {
+      await writeFile(tmp, body)
+      await rename(tmp, file)
+      return
+    } catch (error) {
+      await rm(tmp, { force: true }).catch(() => undefined)
+      if (!isTransientFsError(error) || attempt >= 4) throw error
+      await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)))
+    }
+  }
 }
 
 function setPhase(active: UpdateJob, phase: UpdatePhase, action: string) {

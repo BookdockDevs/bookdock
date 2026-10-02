@@ -122,6 +122,11 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.useRealTimers()
   vi.clearAllMocks()
+  // The update job persists update-state.json fire-and-forget. Drain those
+  // writes before removing the data dir, otherwise a trailing mkdir/write
+  // can land inside rm's walk and fail teardown with ENOTEMPTY under load.
+  clearUpdateJob()
+  await getUpdateStatus().catch(() => undefined)
   await rm(config.dataDir, { recursive: true, force: true })
 })
 
