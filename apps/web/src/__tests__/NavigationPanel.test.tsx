@@ -51,6 +51,16 @@ vi.mock('@tanstack/react-query', async () => {
 
 describe('NavigationPanel', () => {
   beforeEach(() => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn()
+    vi.spyOn(window.HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400)
+    vi.spyOn(window.HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const container = this.closest('.overflow-y-auto') as HTMLElement | null
+      const rows = container ? Array.from(container.querySelectorAll('[data-toc-href]')) : []
+      const row = this.closest('[data-toc-href]')
+      const top = row ? 48 + rows.indexOf(row) * 34 - (container?.scrollTop ?? 0) : 48
+      const height = row ? 32 : 400
+      return { top, bottom: top + height, left: 0, right: 300, width: 300, height, x: 0, y: top, toJSON: () => ({}) } as DOMRect
+    })
     vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, clearSearch } })
     vi.mocked(useAnnotations).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useAnnotations>)
     window.localStorage.removeItem('bd-notes-display-types')
@@ -195,6 +205,79 @@ describe('NavigationPanel', () => {
     expect(display).toHaveBeenCalledWith('chapter:0')
   })
 
+  it('waits for the reader TOC instead of locating in the synthesized tree', async () => {
+    useReaderState.setState({ currentChapter: '第二章', tocItems: [], tocBookId: null })
+    render(<NavigationPanel bookId="book-1" open />)
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+    await act(async () => {
+      useReaderState.getState().setTocItems([
+        { label: '第一章', href: 'first' },
+        { label: '第二章', href: 'second' },
+      ], 'book-1')
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    })
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'instant' })
+  })
+
+  it('keeps an already visible destination in place when the chapter changes', () => {
+    useReaderState.setState({
+      tocItems: [{ label: '第一章', href: 'first' }, { label: '第二章', href: 'second' }, { label: '第三章', href: 'third' }],
+      currentChapter: '第二章',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 0, currentIndex: 1, sessionId: READER_SESSION_ID } } },
+    })
+    render(<NavigationPanel bookId="book-1" open />)
+    act(() => useReaderState.getState().setCurrentChapter('第三章'))
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('restores a visible entry offset after the TOC layout changes', () => {
+    useReaderState.setState({
+      tocItems: Array.from({ length: 30 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
+      currentChapter: '第15章',
+      sidebarScrollPositions: { 'book-1': { toc: {
+        top: 120, currentIndex: 14, sessionId: READER_SESSION_ID,
+        anchorHref: 'chapter:5', anchorOffset: 70,
+      } } },
+    })
+    const { container } = render(<NavigationPanel bookId="book-1" open />)
+    expect((container.querySelector('.overflow-y-auto') as HTMLElement).scrollTop).toBe(100)
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('flushes a manual scroll when unmounted before the debounce expires', () => {
+    useReaderState.setState({
+      tocItems: Array.from({ length: 30 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
+      currentChapter: '第15章',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 123, currentIndex: 14, sessionId: READER_SESSION_ID } } },
+    })
+    const view = render(<NavigationPanel bookId="book-1" open />)
+    const list = view.container.querySelector('.overflow-y-auto') as HTMLElement
+    list.scrollTop = 234
+    fireEvent.scroll(list)
+    view.unmount()
+    expect(useReaderState.getState().sidebarScrollPositions['book-1'].toc).toMatchObject({ top: 234, currentIndex: 14 })
+  })
+
+  it('expands a manually collapsed current chapter before explicit locate', async () => {
+    useReaderState.setState({
+      tocItems: [
+        { label: '第一卷', href: 'volume', level: 1 },
+        { label: '第一章', href: 'chapter', level: 2 },
+      ],
+      currentChapter: '第一章',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 0, currentIndex: 1, sessionId: READER_SESSION_ID } } },
+    })
+    render(<NavigationPanel bookId="book-1" open />)
+    fireEvent.click(screen.getByTitle('reader.collapseAll'))
+    expect(screen.queryByRole('button', { name: '第一章' })).toBeNull()
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('reader.locateChapter'))
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    })
+    expect(screen.getByRole('button', { name: '第一章' })).toBeInTheDocument()
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
+  })
+
   it('closes sidebar after navigation when not locked', () => {
     useReaderState.setState({
       tocItems: [{ label: '第一章 开篇', href: 'chapter:0' }],
@@ -314,15 +397,13 @@ describe('NavigationPanel', () => {
 
   it('restores TOC scroll position after switching to notes and back', async () => {
     const originalGetBoundingClientRect = window.HTMLElement.prototype.getBoundingClientRect
-    let callCount = 0
     window.HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
       const rect = originalGetBoundingClientRect.call(this)
       // The list container has overflow-y-auto; return a tall viewport.
       if (this.classList.contains('overflow-y-auto')) {
         return { ...rect, top: 0, left: 0, width: 300, height: 400, bottom: 400, right: 300 } as DOMRect
       }
-      // TOC item buttons: current item sits far down the list.
-      return { ...rect, top: 800 + callCount++, left: 0, width: 280, height: 30, bottom: 830, right: 280 } as DOMRect
+      return rect
     }
 
     try {
@@ -468,7 +549,7 @@ describe('NavigationPanel', () => {
       expect(input).toBeInTheDocument()
       expect(screen.getByText('reader.searchScopeBook')).toBeInTheDocument()
       fireEvent.change(input, { target: { value: '高中' } })
-      await new Promise((r) => setTimeout(r, 500))
+      await act(async () => { await new Promise((r) => setTimeout(r, 500)) })
 
       expect(search).toHaveBeenCalledWith('高中', { scope: 'book', matchCase: false, mode: 'contains' }, expect.any(Function))
       // consecutive results from the same chapter collapse into one group

@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
@@ -25,8 +25,8 @@ import { formatFullDateTime, formatRelativeTime } from './format-relative-time'
  *
  * A character count cannot answer that. The panel is resizable and the reader
  * picks their own font and size, so the same 80 characters take two lines on a
- * wide panel and five on a narrow one - and a bookmark always captures exactly
- * 80, so a count-only guess showed the toggle no matter what, then expanded into
+ * wide panel and five on a narrow one. A count-only guess showed the toggle
+ * no matter what, then expanded into
  * nothing but the padding reserved for the button. Only the rendered box knows,
  * so measure it and re-measure when it resizes.
  *
@@ -66,6 +66,7 @@ function ClampedText({
   const [clipped, setClipped] = useState(false)
   const [measurable, setMeasurable] = useState(false)
   const couldOverflow = text.length > minLengthForToggle || text.includes('\n')
+  const paragraphs = text.replace(/\r\n?/g, '\n').split(/\n(?:[\t ]*\n)+/)
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -95,7 +96,19 @@ function ClampedText({
       )}
     >
       <p ref={ref} className={cn(className, !expanded && clampClassName)}>
-        {renderText ? renderText(text) : text}
+        {paragraphs.map((paragraph, paragraphIndex) => {
+          const content = renderText ? paragraph.split('\n').map((line, lineIndex) => (
+            <Fragment key={lineIndex}>
+              {lineIndex > 0 && '\n'}
+              {line.trim() ? renderText(line) : line}
+            </Fragment>
+          )) : paragraph
+          return paragraphs.length === 1 ? content : (
+            <span key={paragraphIndex} className="block [&+span]:mt-[0.4em]" data-note-paragraph>
+              {content}
+            </span>
+          )
+        })}
       </p>
       {showToggle && (
         <button
@@ -452,7 +465,7 @@ export const NotesPanel = memo(function NotesPanel({
 
   async function copyItem(item: AnnotationRes) {
     try {
-      await navigator.clipboard.writeText(kindOf(item) === 'idea' ? (item.note ?? '') : item.text)
+      await navigator.clipboard.writeText([kindOf(item) === 'idea' ? item.note : item.text, kindOf(item) === 'idea' ? item.text : item.contextText].filter(Boolean).join('\n\n'))
       notify.success({ key: 'reader.copied' })
     } catch {
       notify.error({ key: 'reader.copyFailed' })
@@ -533,18 +546,30 @@ export const NotesPanel = memo(function NotesPanel({
                   <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-500 dark:text-blue-400">
                     <BookmarkIcon />
                   </span>
-                  {/* A bookmark always captures 80 characters, so four lines is
-                      what it takes to show them all. */}
-                  <ClampedText
-                    text={a.text || _('reader.bookmark')}
-                    clampClassName="line-clamp-4"
-                    className="text-sm font-medium leading-relaxed text-current"
-                    expanded={isQuoteExpanded}
-                    onToggle={(e) => toggleQuoteExpand(a.id, e)}
-                    expandLabel={_('annotation.expand')}
-                    collapseLabel={_('annotation.collapse')}
-                    minLengthForToggle={65}
-                  />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <ClampedText
+                      text={a.text || _('reader.bookmark')}
+                      clampClassName="line-clamp-4"
+                      className="text-sm font-medium leading-relaxed text-current whitespace-pre-wrap break-words"
+                      expanded={isQuoteExpanded}
+                      onToggle={(e) => toggleQuoteExpand(a.id, e)}
+                      expandLabel={_('annotation.expand')}
+                      collapseLabel={_('annotation.collapse')}
+                      minLengthForToggle={65}
+                    />
+                    {a.contextText && (
+                      <ClampedText
+                        text={a.contextText}
+                        clampClassName="line-clamp-3"
+                        className="text-xs leading-relaxed text-[var(--bd-read-sub)] whitespace-pre-wrap break-words"
+                        expanded={isNoteExpanded}
+                        onToggle={(e) => toggleNoteExpand(a.id, e)}
+                        expandLabel={_('annotation.expand')}
+                        collapseLabel={_('annotation.collapse')}
+                        minLengthForToggle={40}
+                      />
+                    )}
+                  </div>
                 </div>
               )}
               {kind === 'idea' && (
@@ -569,7 +594,7 @@ export const NotesPanel = memo(function NotesPanel({
                     <ClampedText
                       text={a.text}
                       clampClassName="line-clamp-2"
-                      className="leading-relaxed"
+                      className="leading-relaxed whitespace-pre-wrap break-words"
                       wrapperClassName="ml-7 rounded-lg border-l-2 border-[var(--bd-read-accent)]/70 bg-stone-500/5 px-2.5 py-1.5 text-xs text-[var(--bd-read-sub)]"
                       expanded={isQuoteExpanded}
                       onToggle={(e) => toggleQuoteExpand(a.id, e)}
@@ -590,7 +615,7 @@ export const NotesPanel = memo(function NotesPanel({
                   <ClampedText
                     text={a.text}
                     clampClassName="line-clamp-4"
-                    className="text-sm leading-relaxed text-current"
+                    className="text-sm leading-relaxed text-current whitespace-pre-wrap break-words"
                     buttonClassName="bottom-0 right-0 rounded-md px-1.5 py-0.5 text-[11px]"
                     renderText={(value) => <span style={highlightDecoration(a.style, hex)}>{value}</span>}
                     expanded={isNoteExpanded}

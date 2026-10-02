@@ -72,6 +72,8 @@ export default function Modal({
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]')
+      if (dialogs.length && dialogs[dialogs.length - 1] !== dialogRef.current) return
       const alertDialog = document.querySelector<HTMLElement>('[role="alertdialog"][aria-modal="true"]')
       if (alertDialog && !dialogRef.current?.contains(alertDialog)) return
       // A smart menu is only in the DOM while open; since it portals to body it

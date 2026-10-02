@@ -28,14 +28,20 @@ async function downloadExport(
 ) {
   const res = await fetch(withReveal(`${BASE_URL}/books/${bookId}/${endpoint}`))
   if (!res.ok) {
-    throw new ApiError(res.status === 404 ? 'BOOK_NOT_FOUND' : 'EXPORT_FAILED', 'Book export failed')
+    const body = await res.json().catch(() => null)
+    throw new ApiError(body?.error?.code ?? 'EXPORT_FAILED', body?.error?.message ?? 'Book export failed')
   }
   const blob = await res.blob()
   const safeName = title.replace(/[^\w　-〿＀-￯一-龥-]/g, '_')
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${safeName}${fileName}`
+  const serverName = res.headers.get('Content-Disposition')?.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  let filename = `${safeName}${fileName}`
+  if (serverName) {
+    try { filename = decodeURIComponent(serverName).replace(/[\\/:*?"<>|]/g, '_') } catch { /* Keep the fallback filename. */ }
+  }
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
@@ -61,17 +67,6 @@ export function downloadEpub(bookId: string, title: string, opts: { plain?: bool
     `export.epub${opts.plain ? '?plain=1' : ''}`,
     opts.plain ? '.epub' : '-校订版.epub',
   )
-}
-
-/** Default download for the card context menu: TXT books get a freshly
- *  generated EPUB (no rules ⇒ the server output equals the original), EPUB
- *  books keep the stored-file download. */
-export async function downloadDefault(book: { id: string; title: string; format: string }) {
-  if (book.format === 'txt') {
-    await downloadEpub(book.id, book.title)
-  } else {
-    await downloadBook(book.id, book.title)
-  }
 }
 
 async function convertBlobToPng(blob: Blob): Promise<Blob> {

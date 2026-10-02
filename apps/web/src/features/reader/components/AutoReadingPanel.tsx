@@ -100,7 +100,7 @@ export default function AutoReadingPanel({ readingMode, onStart }: AutoReadingPa
       return
     }
     if (state.status === 'paused') {
-      void controller.resume()
+      void controller.resume().finally(() => onStart?.())
       return
     }
     void controller.start().finally(() => onStart?.())

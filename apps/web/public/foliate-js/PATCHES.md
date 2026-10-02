@@ -1,5 +1,14 @@
 # foliate-js 本地差异与重放清单
 
+## Desktop selection corner continuation (2026-10-02)
+
+- Baseline: Readest foliate-js `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`.
+- Files: `selection-drag.js`, paginator load/render/navigation/destroy and selection turn callbacks.
+- Requirement: continue mouse text selection across paginated spreads in the same section, with corner thresholds 48px horizontally / 64px vertically including outer margins, 450ms initial dwell / 1200ms repeats, without page animation. Prevent native mousemove selection autoscroll and reject unexpected container scroll while the gesture owns the scroll position. Parent blur only cancels on actual document focus loss; unchanged attributes and no-op renders do not cancel the gesture.
+- Core ownership: the host cannot reliably infer multi-column section bounds or preserve the iframe DOM anchor. The disabled upstream pointer-selection branch is replaced; keyboard and touch paths remain intact.
+- Boundary: no native selection across section documents. A target spread must contain text columns of the originating section. Release outside the iframe emits `selection-drag-end` for adapter commit; cancellation and teardown remove pending work and listeners.
+- Verification: `selection-drag.test.ts` covers dwell, repeats, reversal, preserved anchor, external release, disabled flow, and chapter-boundary stop. The dev-only fixture at `/src/__tests__/fixtures/selection-drag-browser.html` drives held synthetic pointer events against the real paginator, CSS columns, and iframe; it checks single-spread movement, rejected unsolicited scrolling, repeat cadence, no-op rendering, repeated gestures, reverse continuation, and section boundaries. This supplements native mouse-drag testing rather than replacing it.
+
 > 本目录的通用阅读核心以上游增强版 `foliate-js` 为源码基线。本清单只记录 Bookdock 有意保留的差异和宿主适配契约；不能用早期历史快照作为当前核心证据。
 >
 > 每个差异都必须写明上游版本、文件/符号、Bookdock 需求、为什么不能只放在适配层、影响范围和验证用例。更新上游基线时先按本清单逐条重放，再运行实现地图和格式兼容台账中的完整验证。
@@ -124,7 +133,7 @@
 15. **`paginator.js` / continuous mode behavior**
     - 对应版本：Upstream parent `4512f39859280b8c1f1e6fefa4f104f9e09c55e5`、`packages/foliate-js` submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`；历史行为对照为 Bookdock `v0.2.2` tag `a326427a12579b5914b0be2f5404c0234464d320`。
     - 符号：`#onWheel`、`#onWheelSnap`、`#onWheelPage`、`#onDocKey`、`#scheduleBackwardBuffer`、`scrollByViewport`、`scrollByPixels`、`snapWheelStep`；`FoliateReader.applyContinuousScroll` 的 `continuous`/`no-continuous-scroll` 属性切换。
-    - 空格键：上游把空格当作下一页（paged flow 下 `e.key === ' '` 与 `ArrowRight`/`PageDown` 同分支），Bookdock 取消这一语义——空格归宿主所有，只用于播放暂停恢复与顶栏/底栏显隐，任何 flow 下都不翻页。`#onDocKey` 因此在两个 flow 分支之前统一拦下空格并 `preventDefault`：paged flow 不再翻页，scrolled flow 也不会落到浏览器原生空格滚动而把正文挪走。空格已从 `#onDocKey` 上方的 `isNavigationKey` 列表里摘除，所以 `dockeydown` 不再为它派发，这一次按键也不再被计为 `userInteraction`：空格从不移动正文，计入会与同一按键的暂停打架——rebase 先把 timed 计时的 `stepStartedAt` 清掉，`pause()` 就量不出剩余时间，恢复时整步重来、底部进度条被清空。阅读计时 ping 走 relocate，本来就不依赖这次按键。翻页改由方向键与 `PageUp`/`PageDown` 承担，语义不变。
+    - 空格键：上游把空格当作下一页（paged flow 下 `e.key === ' '` 与 `ArrowRight`/`PageDown` 同分支），Bookdock 取消这一语义——空格归宿主所有，只用于播放暂停恢复与顶栏/底栏显隐，任何 flow 下都不翻页。`#onDocKey` 因此在两个 flow 分支之前统一拦下空格并 `preventDefault`：paged flow 不再翻页，scrolled flow 也不会落到浏览器原生空格滚动而把正文挪走。空格已从 `#onDocKey` 上方的 `isNavigationKey` 列表里摘除，所以 `dockeydown` 不再为它派发，这一次按键也不再被计为 `userInteraction`：空格从不移动正文，计入会与同一按键的暂停打架——rebase 先把 timed 计时的 `stepStartedAt` 清掉，`pause()` 就量不出剩余时间，恢复时整步重来、底部进度条被清空。阅读计时 ping 走 relocate，本来就不依赖这次按键。翻页改由方向键（左/上上一页，右/下一页，与底栏上下按钮行为一致）与 `PageUp`/`PageDown` 承担。
     - 根因/需求：重基线的 paginator 没有迁回 v0.2.2 的 iframe wheel/keyboard 入口、跳章两阶段累计和连续边缘状态；adapter 直接写 `containerPosition` 又绕过了核心边界。另一个迁移遗漏是切换到长卷时只改属性、不启动最终状态下的 `#fillVisibleArea()`，造成“长卷已选中但仍单章”。自动阅读还曾在启动时移除 `snap-turn`，导致跳章模式到章尾既不累计切章也不返回停止信号。关闭模式只允许明确导航切章；跳章第一次到边界、再次同向达到阈值才切章；长卷向下追加、向上非对称回读/回收；滚动模式上下键跳视口、左右键切章。
     - 为什么不能仅放适配层：iframe 事件、section 边界、`#views` 装载/销毁、scroll compensation、主视图计算和模式属性回调都属于 paginator 的 shadow DOM 私有状态；在 React 适配层复制会形成第二套导航和阈值状态。
     - 影响范围：只改变 page/scrolled 的滚轮、iframe 键盘、continuous buffer、模式切换初始化和自动滚动边界；不改变 EPUB 内容、CFI、Range、搜索或标注数据。连续模式历史边缘补章仍只在到达保留窗口边缘并再次同向操作后触发；有 wheel 距离时只回放实际累积距离，没有可测 wheel 距离的触屏场景最多续接一个视口，避免加载完成后停在当前章顶部。显式章节导航不主动加载更上一章，待用户继续向上到历史边缘后再触发。`scrollByPixels` 返回 `false` 表示当前模式阻止继续自动移动，避免关闭模式在章尾无动作空转。

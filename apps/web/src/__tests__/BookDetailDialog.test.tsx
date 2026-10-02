@@ -9,6 +9,9 @@ import i18n from '../i18n/i18n'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { downloadBook, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../features/library/download'
 import BookDetailDialog from '../features/library/components/BookDetailDialog'
+import DownloadDialogHost from '../features/library/components/DownloadDialogHost'
+import { useDownloadStore } from '../stores/download.store'
+import { useAuthStore } from '../stores/auth.store'
 import { formatDate } from '../lib/utils'
 
 const apiPatch = vi.fn()
@@ -108,7 +111,7 @@ function withMeta(bookmeta: Record<string, unknown>) {
 }
 
 function wrapper({ children }: { children: ReactNode }) {
-  return <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+  return <QueryClientProvider client={new QueryClient()}>{children}<DownloadDialogHost /></QueryClientProvider>
 }
 
 function renderDialog() {
@@ -117,6 +120,9 @@ function renderDialog() {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  useDownloadStore.getState().close()
+  useAuthStore.setState({ user: { id: "test-user", username: "owner", role: "owner" } })
+  localStorage.removeItem("bd-download-choice:test-user")
   apiPatch.mockResolvedValue({})
   apiPut.mockResolvedValue({})
   apiDelete.mockResolvedValue({})
@@ -802,107 +808,61 @@ describe('BookDetailDialog TOC rule menu', () => {
   })
 })
 
-describe('BookDetailDialog download menu (2×2)', () => {
-  const transformRule = (overrides: Record<string, unknown> = {}) => ({
-    id: 'r1',
-    bookId: null,
-    scope: 'global',
-    matchType: 'pattern',
-    pattern: 'x',
-    replacement: null,
-    isRegex: false,
-    caseSensitive: true,
-    enabled: true,
-    name: null,
-    group: null,
-    spineHref: null,
-    textOffset: null,
-    originalText: null,
-    createdAt: 1,
-    updatedAt: 1,
-    ...overrides,
-  })
-
-  function mockEffectiveRules() {
-    vi.mocked(useBookReplacements).mockReturnValue({
-      data: { data: [transformRule({ enabled: true, effectiveEnabled: true })] },
-    } as ReturnType<typeof useBookReplacements>)
+describe('BookDetailDialog download dialog', () => {
+  function openDownload() {
+    fireEvent.click(screen.getByRole('button', { name: '下载' }))
+    return within(screen.getByRole('dialog', { name: /^下载《/ }))
   }
 
-  // 原文/校订版 rows only render inside the SmartMenu; their format submenus
-  // open on click (the flyout toggles), then the EPUB/TXT row fires.
-  function openFormatMenu(version: '原文' | '校订版') {
-    fireEvent.click(screen.getByRole('button', { name: '下载' }))
-    fireEvent.click(screen.getByText(version))
-  }
-
-  it('shows both 校订版 and 原文 branches for a txt book with effective rules', () => {
-    mockEffectiveRules()
-    bookDetail = { data: { ...book, format: 'txt' } }
+  it('opens an EPUB download dialog without starting a download', () => {
     renderDialog()
-
-    fireEvent.click(screen.getByRole('button', { name: '下载' }))
-    expect(screen.getByText('校订版')).toBeInTheDocument()
-    expect(screen.getByText('原文')).toBeInTheDocument()
-  })
-
-  it('shows only the 原文 branch for a txt book without rules', () => {
-    bookDetail = { data: { ...book, format: 'txt' } }
-    renderDialog()
-
-    fireEvent.click(screen.getByRole('button', { name: '下载' }))
-    expect(screen.getByText('原文')).toBeInTheDocument()
-    expect(screen.queryByText('校订版')).not.toBeInTheDocument()
-  })
-
-  it('never opens the menu for an EPUB book (stored-file download)', () => {
-    mockEffectiveRules()
-    renderDialog()
-
-    fireEvent.click(screen.getByRole('button', { name: '下载' }))
-    expect(screen.queryByText('校订版')).not.toBeInTheDocument()
-    expect(screen.queryByText('原文')).not.toBeInTheDocument()
+    const dialog = openDownload()
+    expect(dialog.getByRole('button', { name: 'EPUB' })).toHaveAttribute('aria-pressed', 'true')
+    expect(downloadBook).not.toHaveBeenCalled()
+    fireEvent.click(dialog.getByRole('button', { name: '下载' }))
     expect(downloadBook).toHaveBeenCalledWith('book-1', 'Test Book')
   })
 
-  it('exports the edited epub from the 校订版 branch', () => {
-    mockEffectiveRules()
-    bookDetail = { data: { ...book, format: 'txt' } }
+  it('offers TXT for an EPUB and downloads extracted original text', () => {
     renderDialog()
-
-    openFormatMenu('校订版')
-    fireEvent.click(screen.getByRole('button', { name: 'EPUB' }))
-    expect(downloadEpub).toHaveBeenCalledWith('book-1', 'Test Book', { plain: false })
+    const dialog = openDownload()
+    fireEvent.click(dialog.getByRole('button', { name: 'TXT' }))
+    fireEvent.click(dialog.getByRole('button', { name: '下载' }))
+    expect(downloadOriginalTxt).toHaveBeenCalledWith('book-1', 'Test Book')
   })
 
-  it('exports the edited txt from the 校订版 branch', () => {
-    mockEffectiveRules()
+  it.each(['epub', 'txt'] as const)('offers edited %s for a TXT source', (format) => {
+    vi.mocked(useBookReplacements).mockReturnValue({ data: { data: [{ enabled: true, effectiveEnabled: true }] } } as ReturnType<typeof useBookReplacements>)
     bookDetail = { data: { ...book, format: 'txt' } }
     renderDialog()
+    const dialog = openDownload()
+    fireEvent.click(dialog.getByRole('button', { name: format.toUpperCase() }))
+    fireEvent.click(dialog.getByRole('radio', { name: '校订版' }))
+    fireEvent.click(dialog.getByRole('button', { name: '下载' }))
+    if (format === 'epub') expect(downloadEpub).toHaveBeenCalledWith('book-1', 'Test Book', { plain: false })
+    else expect(downloadEditedTxt).toHaveBeenCalledWith('book-1', 'Test Book')
+  })
 
-    openFormatMenu('校订版')
-    fireEvent.click(screen.getByRole('button', { name: 'TXT' }))
+  it('hides edited EPUB for uploaded EPUB but offers edited TXT', () => {
+    vi.mocked(useBookReplacements).mockReturnValue({ data: { data: [{ enabled: true, effectiveEnabled: true }] } } as ReturnType<typeof useBookReplacements>)
+    renderDialog()
+    const dialog = openDownload()
+    expect(dialog.queryByRole('radio', { name: '校订版' })).not.toBeInTheDocument()
+    fireEvent.click(dialog.getByRole('button', { name: 'TXT' }))
+    fireEvent.click(dialog.getByRole('radio', { name: '校订版' }))
+    fireEvent.click(dialog.getByRole('button', { name: '下载' }))
     expect(downloadEditedTxt).toHaveBeenCalledWith('book-1', 'Test Book')
   })
 
-  it('downloads the original epub from the 原文 branch', () => {
-    mockEffectiveRules()
-    bookDetail = { data: { ...book, format: 'txt' } }
+  it('closes only the download dialog on Escape and restores focus', () => {
     renderDialog()
-
-    openFormatMenu('原文')
-    fireEvent.click(screen.getByRole('button', { name: 'EPUB' }))
-    expect(downloadEpub).toHaveBeenCalledWith('book-1', 'Test Book', { plain: true })
-  })
-
-  it('downloads the original txt from the 原文 branch', () => {
-    mockEffectiveRules()
-    bookDetail = { data: { ...book, format: 'txt' } }
-    renderDialog()
-
-    openFormatMenu('原文')
-    fireEvent.click(screen.getByRole('button', { name: 'TXT' }))
-    expect(downloadOriginalTxt).toHaveBeenCalledWith('book-1', 'Test Book')
+    const trigger = screen.getByRole('button', { name: '下载' })
+    trigger.focus()
+    openDownload()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: /^下载《/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
+    expect(document.activeElement).toBe(trigger)
   })
 })
 
@@ -1145,6 +1105,20 @@ describe('BookDetailDialog shared work mode', () => {
     expect(boxes).toHaveLength(2)
     expect(boxes[1]!.checked).toBe(true)
     expect(boxes[0]!.checked).toBe(false)
+  })
+
+  it('downloads the selected shared version with its effective title and version label', async () => {
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ name: '初版' }),
+      catalogVersion({ id: 'lbv2', bookVersionId: 'v2', name: '修订版', format: 'epub', effective: { title: '修订书名', author: 'Someone', description: '', coverKey: null, bookmeta: {}, fileName: null } }),
+    ] }), { canManage: true })
+    fireEvent.click(screen.getByRole('tab', { name: /修订版/ }))
+    fireEvent.click(screen.getByRole('button', { name: '下载' }))
+    const dialog = within(screen.getByRole('dialog', { name: /^下载《/ }))
+    expect(dialog.getByRole('heading', { name: '下载《修订书名》' })).toBeInTheDocument()
+    expect(dialog.getByText('修订版')).toBeInTheDocument()
+    fireEvent.click(dialog.getByRole('button', { name: '下载' }))
+    await waitFor(() => expect(downloadBook).toHaveBeenCalledWith('v2', '修订书名'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^下载《/ })).not.toBeInTheDocument())
   })
 
   it('keeps shared actions in private-detail order and dates the selected version', () => {

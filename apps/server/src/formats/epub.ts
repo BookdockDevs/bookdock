@@ -830,6 +830,44 @@ export async function extractEpubChapterText(buffer: Buffer, chapterIndex: numbe
   return body ? normalizeReadingText(collectReadingText(body)) : ''
 }
 
+/** Read each spine document once; navigation entries are not book content. */
+export async function loadEpubSpineMarkup(buffer: Buffer): Promise<{ href: string; markup: string; coverPage: boolean }[]> {
+  const zip = await JSZip.loadAsync(buffer)
+  const findFile = createArchiveFileLookup(zip)
+  const container = findFile('META-INF/container.xml')
+  if (!container) throw new Error('Missing EPUB container')
+  const containerDoc = new DOMParser().parseFromString(await readArchiveText(container), 'application/xml')
+  const rootfile = elementsByLocalName(containerDoc, 'rootfile')[0]
+  const opfPath = normalizeArchivePath(rootfile ? getAttribute(rootfile, 'full-path') ?? '' : '')
+  const opfFile = findFile(opfPath)
+  if (!opfFile) throw new Error('Missing EPUB package document')
+  const opf = new DOMParser().parseFromString(await readArchiveText(opfFile), 'application/xml')
+  const manifest = new Map<string, ManifestItem>()
+  for (const item of elementsByLocalName(opf, 'item')) {
+    const id = getAttribute(item, 'id')
+    const href = getAttribute(item, 'href')
+    if (!id || !href) continue
+    manifest.set(id, {
+      id, href: joinPath(opfPath, href), mediaType: getAttribute(item, 'media-type') ?? '',
+      properties: getAttribute(item, 'properties') ?? undefined,
+    })
+  }
+  const coverPaths = new Set(elementsByLocalName(opf, 'reference')
+    .filter((reference) => (getAttribute(reference, 'type') ?? '').toLowerCase() === 'cover')
+    .map((reference) => joinPath(opfPath, getAttribute(reference, 'href') ?? '')))
+  const sections: { href: string; markup: string; coverPage: boolean }[] = []
+  const visited = new Set<string>()
+  for (const itemref of elementsByLocalName(opf, 'itemref')) {
+    const item = manifest.get(getAttribute(itemref, 'idref') ?? '')
+    if (!item || !isMarkupMediaType(item.mediaType) || hasManifestProperty(item, 'nav') || visited.has(item.href)) continue
+    visited.add(item.href)
+    const file = findFile(item.href)
+    if (!file) throw new Error('Missing EPUB spine document')
+    sections.push({ href: item.href, markup: await readArchiveText(file), coverPage: coverPaths.has(item.href) })
+  }
+  return sections
+}
+
 export class EpubParser implements FormatParser {
   match(fileName: string, mime: string): boolean {
     const normalizedMime = mime.trim().toLowerCase().split(';', 1)[0]

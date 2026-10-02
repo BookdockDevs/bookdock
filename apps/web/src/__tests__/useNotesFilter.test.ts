@@ -115,4 +115,13 @@ describe('useNotesFilter', () => {
     const { result } = renderHook(() => useNotesFilter(ITEMS))
     expect(result.current.sort).toBe('chapter')
   })
+  it('searches independent bookmark context and chapter labels', () => {
+    const items = [makeAnnotation({ type: 'bookmark', text: 'Title', contextText: '独立上下文', chapter: '第三章' })]
+    const { result } = renderHook(() => useNotesFilter(items))
+    act(() => result.current.setQuery('上下文'))
+    expect(result.current.filtered).toHaveLength(1)
+    act(() => result.current.setQuery('第三章'))
+    expect(result.current.filtered).toHaveLength(1)
+  })
+
 })

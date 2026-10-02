@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
+import { ANNOTATION_MAX_TEXT_LENGTH, ErrorCode } from '@bookdock/shared'
 import type { AnnotationRes, AnnotationCreateReq, AnnotationUpdateReq } from '@bookdock/shared'
 
-import { apiGet, apiPost, apiPut, apiDelete } from '@/api/client'
+import { ApiError, apiGet, apiPost, apiPut, apiDelete } from '@/api/client'
 import { withReveal } from '@/lib/reveal-hidden'
 
 import { cfiRangesOverlap, loadCfiModule } from '../lib/cfi-overlap'
@@ -24,6 +25,9 @@ export function useCreateAnnotation(bookId: string) {
     mutationFn: (body: AnnotationCreateReq) =>
       apiPost<{ data: AnnotationRes }>(withReveal(`/annotations/book/${bookId}`), body),
     onMutate: async (body) => {
+      if ((body.text?.length ?? 0) > ANNOTATION_MAX_TEXT_LENGTH) {
+        throw new ApiError(ErrorCode.ANNOTATION_TEXT_TOO_LONG, 'Annotation text exceeds the maximum length')
+      }
       await queryClient.cancelQueries({ queryKey: key })
       const previous = queryClient.getQueryData<AnnotationsCache>(key)
       const now = Date.now()
@@ -36,6 +40,7 @@ export function useCreateAnnotation(bookId: string) {
         color: body.color ?? 'yellow',
         style: body.style ?? 'underline',
         text: body.text ?? '',
+        contextText: body.contextText ?? null,
         note: body.note ?? null,
         chapter: body.chapter ?? null,
         chapterHref: body.chapterHref ?? null,
@@ -93,6 +98,9 @@ export function useUpdateAnnotation(bookId: string) {
     mutationFn: ({ id, body }: { id: string; body: AnnotationUpdateReq }) =>
       apiPut<{ data: AnnotationRes }>(`/annotations/${id}`, body),
     onMutate: async ({ id, body }) => {
+      if ((body.text?.length ?? 0) > ANNOTATION_MAX_TEXT_LENGTH) {
+        throw new ApiError(ErrorCode.ANNOTATION_TEXT_TOO_LONG, 'Annotation text exceeds the maximum length')
+      }
       await queryClient.cancelQueries({ queryKey: key })
       const previous = queryClient.getQueryData<AnnotationsCache>(key)
       queryClient.setQueryData<AnnotationsCache>(key, (old) =>

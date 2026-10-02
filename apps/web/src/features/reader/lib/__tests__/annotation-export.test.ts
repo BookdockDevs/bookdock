@@ -75,7 +75,7 @@ describe('annotation export', () => {
 
   it('keeps structured fields and escapes CSV cells', () => {
     const output = buildAnnotationCsv([annotation], book, { includeDetails: true, includeTime: true, includeDeepLink: false })
-    expect(output).toContain('Book,Author,Chapter,Text,Note,Type,Color,Style')
+    expect(output).toContain('Book,Author,Chapter,Text,Note,Bookmark Context,Type,Color,Style')
     expect(output).toContain('"摘录\n第二行"')
     expect(output).toContain('idea,blue,highlight')
     expect(output).toContain('Created At,Updated At')
@@ -104,4 +104,21 @@ describe('annotation export', () => {
     )
     expect(output.match(/## 第一章/g)).toHaveLength(2)
   })
+  it('exports bookmark context independently of the title in every format', () => {
+    const item = { ...bookmark, text: 'Renamed title', contextText: 'First paragraph\n\nSecond "quoted" paragraph' }
+    const options = { includeDetails: false, includeTime: false, includeDeepLink: false }
+    expect(buildAnnotationMarkdown([item], book, options, labels)).toContain('> First paragraph\n> \n> Second "quoted" paragraph')
+    expect(buildAnnotationText([item], book, options, labels)).toContain('Renamed title\nFirst paragraph\n\nSecond "quoted" paragraph')
+    expect(buildAnnotationCsv([item], book, options)).toContain('"First paragraph\n\nSecond ""quoted"" paragraph"')
+  })
+
+  it('keeps markdown-like source content literal inside exported quotes', () => {
+    const item = { ...highlight, text: '<script>\n**bold** [link](url)' }
+    const options = { includeDetails: false, includeTime: false, includeDeepLink: false }
+    const output = buildAnnotationMarkdown([item], book, options, labels)
+    expect(output).toContain('\\<script\\>')
+    expect(output).toContain('\\*\\*bold\\*\\*')
+    expect(output).toContain('\\[link\\]')
+  })
+
 })

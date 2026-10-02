@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Selection continuation browser regression fixture</title>
+<!-- Use the Vite dev server: /src/__tests__/fixtures/selection-drag-browser.html.
+     Synthetic held pointer events exercise real column layout without account data. -->
+<style>
+body { margin: 20px; font: 16px sans-serif; }
+foliate-paginator { display: block; width: 800px; height: 560px; background: white; border: 1px solid; }
+pre { position: fixed; left: 850px; top: 20px; width: 420px; white-space: pre-wrap; }
+</style>
+<button id="run">Run browser checks</button>
+<pre id="result">Ready</pre>
+<foliate-paginator></foliate-paginator>
+<script type="module">
+import '/foliate-js/paginator.js'
+const renderer = document.querySelector('foliate-paginator')
+const result = document.querySelector('#result')
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
+const frame = () => new Promise(resolve => requestAnimationFrame(resolve))
+const lines = []
+function check(condition, label) {
+    lines.push(`${condition ? 'PASS' : 'FAIL'} ${label}`)
+    result.textContent = lines.join('\n')
+    if (!condition) throw new Error(label)
+}
+const paragraph = 'Native column selection must keep the original anchor, move exactly one spread, and stop when the mouse is released. '
+const markup = '<html><head><title>Selection fixture</title><style>body { margin:0; font:20px/1.8 serif; } p { margin:0 0 20px; }</style></head><body>'
+    + Array.from({length: 60}, (_, i) => `<p>Paragraph ${i + 1}. ${paragraph.repeat(3)}</p>`).join('') + '</body></html>'
+const url = URL.createObjectURL(new Blob([markup], { type: 'text/html' }))
+renderer.setAttribute('flow', 'paginated')
+renderer.setAttribute('max-column-count', '2')
+renderer.setAttribute('max-inline-size', '900')
+renderer.setAttribute('gutter', '0')
+renderer.setAttribute('top-margin', '0')
+renderer.setAttribute('bottom-margin', '0')
+renderer.setAttribute('no-preload', '')
+renderer.setAttribute('animated', '')
+renderer.open({ dir: 'ltr', sections: [{ linear: 'yes', load: async () => url, loadContent: async () => markup }] })
+await renderer.goTo({ index: 0 })
+await wait(300)
+document.querySelector('#run').onclick = async () => {
+    lines.length = 0
+    try {
+        await renderer.goTo({ index: 0, anchor: () => 0 })
+        const [{ doc }] = renderer.getContents()
+        const node = doc.querySelector('p').firstChild
+        const container = renderer.shadowRoot.querySelector('#container')
+        const bounds = container.getBoundingClientRect()
+        const width = bounds.width
+        const event = (target, type, x, y) => target.dispatchEvent(new PointerEvent(type, {
+            pointerType: 'mouse', pointerId: 1, button: 0, buttons: type === 'pointerup' ? 0 : 1,
+            clientX: x, clientY: y, bubbles: true,
+        }))
+        const start = () => {
+            event(doc, 'pointerdown', 20, 20)
+            doc.getSelection().setBaseAndExtent(node, 0, node, 2)
+            // Include the footer margin outside the content viewport.
+            event(window, 'pointermove', bounds.right - 10, bounds.bottom + 30)
+        }
+        start()
+        // Focusing a chapter iframe is not a loss of application focus.
+        doc.defaultView.focus()
+        const initially = container.scrollLeft
+        await wait(550)
+        check(Math.abs(container.scrollLeft - initially - width) < 2, 'first dwell moves exactly one real CSS-column spread')
+        check(doc.getSelection().anchorNode === node && doc.getSelection().anchorOffset === 0, 'original DOM anchor survives the turn')
+        const selectedOnce = doc.getSelection().toString().length
+        check(selectedOnce > 2, 'selection extends into newly visible text')
+        const once = container.scrollLeft
+        container.scrollLeft += width * 3
+        await frame(); await frame()
+        check(Math.abs(container.scrollLeft - once) < 2, 'unsolicited drag autoscroll is rejected')
+        renderer.render()
+        renderer.setAttribute('flow', 'paginated')
+        await wait(500)
+        check(Math.abs(container.scrollLeft - once) < 2, 'no burst of turns before the repeat interval')
+        await wait(800)
+        check(Math.abs(container.scrollLeft - once - width) < 2, 'stationary repeat survives no-op render and unchanged flow')
+        check(doc.getSelection().toString().length > selectedOnce, 'stationary repeat extends the same selection')
+        const twice = container.scrollLeft
+        event(window, 'pointerup', bounds.right - 10, bounds.bottom + 30)
+        await wait(1350)
+        check(Math.abs(container.scrollLeft - twice) < 2, 'external mouse release stops all future turns')
+        // Repeat a fresh drag to verify that the first success is repeatable.
+        start()
+        await wait(550)
+        check(Math.abs(container.scrollLeft - twice - width) < 2, `a second fresh drag also turns one spread (before=${twice}, after=${container.scrollLeft}, width=${width})`)
+        event(window, 'pointerup', bounds.right - 10, bounds.bottom + 30)
+        const backwardFrom = container.scrollLeft
+        const frameRect = doc.defaultView.frameElement.getBoundingClientRect()
+        const caret = doc.caretRangeFromPoint(bounds.left + 100 - frameRect.left,
+            bounds.top + 100 - frameRect.top)
+        event(doc, 'pointerdown', 20, 20)
+        const anchorOffset = Math.min(caret.startContainer.length, caret.startOffset + 2)
+        doc.getSelection().setBaseAndExtent(caret.startContainer, anchorOffset,
+            caret.startContainer, caret.startOffset)
+        event(window, 'pointermove', bounds.left - 10, bounds.top - 20)
+        await wait(550)
+        check(Math.abs(container.scrollLeft - backwardFrom + width) < 2, 'upper left margin turns one spread backward')
+        check(doc.getSelection().anchorNode === caret.startContainer
+            && doc.getSelection().anchorOffset === anchorOffset, 'backward continuation preserves its anchor')
+        event(window, 'pointerup', bounds.left - 10, bounds.top - 20)
+        await renderer.goTo({ index: 0, anchor: () => 1 })
+        const lastPage = container.scrollLeft
+        start()
+        await wait(1800)
+        check(Math.abs(container.scrollLeft - lastPage) < 2, 'selection stops at the section boundary')
+        event(window, 'pointerup', bounds.right - 10, bounds.bottom + 30)
+        lines.push('DONE')
+        result.textContent = lines.join('\n')
+    } catch (error) {
+        result.textContent = lines.join('\n') + '\nERROR ' + error.message
+    }
+}
+</script>
+</html>

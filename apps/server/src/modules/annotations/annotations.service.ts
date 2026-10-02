@@ -19,6 +19,7 @@ function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   text?: string | null
   note?: string | null
   title?: string | null
+  contextText?: string | null
   chapter?: string | null
   chapterHref?: string | null
   createdAt: number
@@ -37,7 +38,7 @@ function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
     return {
       id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfi ?? '', cfiAnchor: null,
       type: 'bookmark', color: 'yellow', style: 'underline',
-      text: row.title ?? '', note: null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
+      text: row.title ?? '', contextText: row.contextText ?? null, note: null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
       createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
     }
   }
@@ -94,6 +95,7 @@ export async function searchAnnotations(userId: string, bookId: string, query: s
       sql`(
         instr(lower(coalesce(${bookmarks.title}, '')), lower(${normalized})) > 0
         OR instr(lower(coalesce(${bookmarks.chapter}, '')), lower(${normalized})) > 0
+        OR instr(lower(coalesce(${bookmarks.contextText}, '')), lower(${normalized})) > 0
       )`,
     ))
     .orderBy(desc(bookmarks.updatedAt), desc(bookmarks.id))
@@ -182,6 +184,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
         // Restoring refreshes the snippet like the legacy path did: an
         // explicit new text wins, otherwise the surviving title stays.
         title: data.text ?? existing.title,
+        contextText: data.contextText ?? existing.contextText,
         deletedAt: null,
         updatedAt: now,
       }).where(eq(bookmarks.id, existing.id)).run()
@@ -196,6 +199,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
       chapter: data.chapter ?? null,
       chapterHref: data.chapterHref ?? null,
       title: data.text ?? null,
+      contextText: data.contextText ?? null,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,

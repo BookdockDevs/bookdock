@@ -209,7 +209,7 @@ booksRoutes.get('/:id/epub', async (c) => {
 })
 
 // P4: edited TXT export — the book's normalized text with the requesting
-// user's effective replacements applied. TXT books only. `?plain=1` skips the
+// user's effective replacements applied. Both formats support TXT. `?plain=1` skips the
 // replacements; without effective rules the filename falls back to 原文 too
 // (the content is identical, the 校订版 label would be dishonest).
 booksRoutes.get('/:id/export.txt', async (c) => {

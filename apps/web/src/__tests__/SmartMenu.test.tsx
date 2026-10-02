@@ -35,4 +35,36 @@ describe('SmartMenu', () => {
     fireEvent.click(trigger)
     expect(screen.queryByText('menu content')).toBeNull()
   })
+
+  it('stops pointerdown propagation so parent draggable listeners are not triggered', () => {
+    const parentPointerDown = vi.fn()
+
+    function NestedHarness() {
+      const menu = useContextMenu()
+      return (
+        <div onPointerDown={parentPointerDown}>
+          <button ref={menu.btnRef} type="button" onClick={() => menu.toggleFromButton()}>
+            toggle
+          </button>
+          <SmartMenu
+            triggerRef={menu.btnRef}
+            innerRef={menu.menuRef}
+            position={{ left: 10, top: 10, dir: 'down' }}
+            onClose={menu.close}
+          >
+            <button type="button">menu item</button>
+          </SmartMenu>
+        </div>
+      )
+    }
+
+    render(<NestedHarness />)
+    const trigger = screen.getByRole('button', { name: 'toggle' })
+    fireEvent.click(trigger)
+
+    const menuItem = screen.getByRole('button', { name: 'menu item' })
+    fireEvent.pointerDown(menuItem)
+
+    expect(parentPointerDown).not.toHaveBeenCalled()
+  })
 })

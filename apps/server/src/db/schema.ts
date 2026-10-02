@@ -748,6 +748,7 @@ export const bookmarks = sqliteTable('bookmarks', {
   chapter: text('chapter'),
   chapterHref: text('chapter_href'),
   title: text('title'),
+  contextText: text('context_text'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
   deletedAt: integer('deleted_at'),

@@ -10,7 +10,7 @@ import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { describe, expect, it } from 'vitest'
 
 import * as schema from './schema'
-import { reconcileConsolidatedMigrationLedger, repairBookmarkFields, repairIdeaStyle, repairLegacyTextReplacementSchema, repairLibraryBooksDeletedAt, repairLibraryInvitesSchema, retargetBookIdReferences } from './client'
+import { reconcileConsolidatedMigrationLedger, repairBookmarkContextSchema, repairBookmarkFields, repairIdeaStyle, repairLegacyTextReplacementSchema, repairLibraryBooksDeletedAt, repairLibraryInvitesSchema, retargetBookIdReferences } from './client'
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
 const baselineFile = path.join(migrationsDir, '0000_baseline.sql')
@@ -1008,5 +1008,28 @@ describe('member upload migration', () => {
       .toEqual({ allow_member_upload: 0 })
     expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([])
     sqlite.close()
+  })
+})
+
+describe('bookmark context compatibility', () => {
+  it('upgrades existing bookmarks without changing titles and repairs skipped migrations idempotently', () => {
+    const sqlite = new Database(':memory:')
+    try {
+      const db = drizzle(sqlite, { schema })
+      migrateUpTo(db, '0036_bookmark_context')
+      expect(sqlite.prepare('PRAGMA table_info(bookmarks)').all()).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'context_text' })]))
+      repairBookmarkContextSchema(db)
+      repairBookmarkContextSchema(db)
+      expect(sqlite.prepare('PRAGMA table_info(bookmarks)').all()).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'context_text' })]))
+    } finally { sqlite.close() }
+  })
+
+  it('adds nullable context to a fresh database', () => {
+    const sqlite = new Database(':memory:')
+    try {
+      const db = drizzle(sqlite, { schema })
+      migrate(db, { migrationsFolder: migrationsDir })
+      expect(sqlite.prepare('PRAGMA table_info(bookmarks)').all()).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'context_text', notnull: 0 })]))
+    } finally { sqlite.close() }
   })
 })

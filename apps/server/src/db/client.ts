@@ -179,6 +179,7 @@ export async function runMigrations(hooks?: RunMigrationsHooks) {
   repairLibraryInvitesSchema(db)
   migrate(db, { migrationsFolder })
   repairLegacyTextReplacementSchema(db)
+  repairBookmarkContextSchema(db)
 
   const tagColumns = db.all(sql.raw('PRAGMA table_info(tags)')) as Array<{ name: string }>
   // The private baseline was rebased after some local databases had already
@@ -578,4 +579,11 @@ export function repairIdeaStyle(db: ReturnType<typeof drizzle<typeof schema>>) {
     WHERE EXISTS (
       SELECT 1 FROM "annotations" WHERE "annotations"."id" = "ideas"."id" AND "annotations"."type" = 'note'
     )`))
+}
+
+export function repairBookmarkContextSchema(db: ReturnType<typeof drizzle<typeof schema>>) {
+  const columns = db.all(sql.raw('PRAGMA table_info(bookmarks)')) as Array<{ name: string }>
+  if (columns.length > 0 && !columns.some((column) => column.name === 'context_text')) {
+    db.run(sql.raw('ALTER TABLE "bookmarks" ADD COLUMN "context_text" TEXT'))
+  }
 }

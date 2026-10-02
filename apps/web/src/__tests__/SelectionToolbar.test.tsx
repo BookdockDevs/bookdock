@@ -76,14 +76,14 @@ describe('SelectionToolbar', () => {
     expect(createMutate.mock.calls[0][0].text).toBe('第一段\n\n第二段')
   })
 
-  it('slices overlong rawText to the 800-char annotation cap', async () => {
+  it('keeps the complete rawText beyond the former 800-character cap', async () => {
     act(() => useReaderState.setState({
       selection: { cfiRange: 'epubcfi(/6/4!/2)', text: 'x'.repeat(800), rawText: 'y'.repeat(900), rect: RECT },
     }))
     render(<SelectionToolbar bookId="b1" />)
     fireEvent.click(screen.getByTitle('annotation.drawHighlight'))
     await waitFor(() => expect(createMutate).toHaveBeenCalledTimes(1))
-    expect(createMutate.mock.calls[0][0].text).toBe('y'.repeat(800))
+    expect(createMutate.mock.calls[0][0].text).toBe('y'.repeat(900))
   })
 
   it('stores the raw selection text when creating a note', async () => {

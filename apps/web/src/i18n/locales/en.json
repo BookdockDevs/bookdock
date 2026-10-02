@@ -467,6 +467,13 @@
     "scrollRight": "Scroll right",
     "finished": "Finished",
     "moreActions": "More Actions",
+    "downloadPreparing": "Preparing…",
+    "downloadTitle": "Download {{title}}",
+    "downloadFormat": "File format",
+    "downloadContent": "Text version",
+    "downloadEditedHint": "Apply your enabled text replacement rules for this book.",
+    "downloadRulesFailed": "Could not load text replacement rules. Please retry.",
+    "downloadNoText": "This book has no text to export. It may contain only images or scanned pages.",
     "download": "Download",
     "original": "Original",
     "edited": "Edited",
@@ -1730,6 +1737,7 @@
     "tocReTocFailed": "Re-splitting failed"
   },
   "annotation": {
+    "selectionTooLong": "Selection is too long. Select a smaller passage (up to 100,000 characters).",
     "highlight": "Highlight",
     "note": "Note",
     "bookmark": "Bookmark",

@@ -5,14 +5,12 @@ import type { BookListItem } from '@bookdock/shared'
 import { useNavigate } from '@tanstack/react-router'
 import MenuFlyout from '@/components/ui/MenuFlyout'
 import { useTranslation } from '@/hooks/useTranslation'
-import { getUserErrorNotification } from '@/lib/error-message'
-import { notify } from '@/lib/notifications'
 import { formatAuthorList } from '@/lib/utils'
 
 import { useUpdateBook } from '../hooks'
 import { getHiddenCause } from '../hidden-status'
 
-import { downloadDefault } from '../download'
+import { useDownloadStore } from '@/stores/download.store'
 
 import { READ_STATUS_OPTIONS, STATUS_DOT } from './read-status'
 import { MenuHeader } from './RowMenuChrome'
@@ -230,9 +228,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
               e.preventDefault()
               e.stopPropagation()
               onClose()
-              void downloadDefault(book).catch((err) => {
-                notify.error(getUserErrorNotification(err, 'errors.downloadFailed'))
-              })
+              useDownloadStore.getState().open({ id: book.id, title: book.title, format: book.format })
             }}
             className={itemClass}
           >

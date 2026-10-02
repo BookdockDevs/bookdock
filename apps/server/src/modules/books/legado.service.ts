@@ -1,7 +1,7 @@
 import { DOMParser, Element as XmlElement } from '@xmldom/xmldom'
 import { and, asc, eq, inArray, or, sql } from 'drizzle-orm'
 
-import { applyRuleToRuns, applyTitleReplacements, findPointMatch, applyPointMatch, type LegadoExploreConfigRes, type LegadoExploreLibrary, type TextRun } from '@bookdock/shared'
+import { applyTitleReplacements, type LegadoExploreConfigRes, type LegadoExploreLibrary, type TextRun } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { contentRevisions, libraryCategories, libraryMemberships, libraryTags, libraries } from '../../db/schema'
@@ -18,7 +18,7 @@ import {
   getBookChapters,
   getBookEpubBuffer,
 } from './books.service'
-import { applyChapterReplacements, loadEffectiveBookReplacementRules, type BookReplacementRule } from './replacement-rules'
+import { applyEpubChapterReplacements, applyChapterReplacements, loadEffectiveBookReplacementRules, type BookReplacementRule } from './replacement-rules'
 
 const SKIPPED_TAGS = new Set(['script', 'style', 'head'])
 const TITLE_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'title'])
@@ -209,80 +209,6 @@ function isSkippedNode(node: EpubNode): boolean {
     parent = parent.parentNode
   }
   return false
-}
-
-function isTitleNode(node: EpubNode): boolean {
-  let parent = node.parentNode
-  while (parent) {
-    if (TITLE_TAGS.has(nodeTag(parent))) return true
-    parent = parent.parentNode
-  }
-  return false
-}
-
-function collectTextNodes(root: EpubNode): EpubNode[] {
-  const nodes: EpubNode[] = []
-  const visit = (node: EpubNode) => {
-    if (node.nodeType === 3) {
-      if (!isSkippedNode(node) && node.nodeValue) nodes.push(node)
-      return
-    }
-    for (const child of Array.from(node.childNodes ?? [])) visit(child)
-  }
-  visit(root)
-  return nodes
-}
-
-function applyPatternRules(runs: TextRun[], rules: BookReplacementRule[]): void {
-  for (const rule of rules) {
-    try {
-      applyRuleToRuns(runs, rule)
-    } catch {
-      // One malformed rule must not make a chapter unavailable.
-    }
-  }
-}
-
-function applyEpubChapterReplacements(doc: ReturnType<DOMParser['parseFromString']>, rules: BookReplacementRule[], href: string): void {
-  const nodes = collectTextNodes(doc as unknown as EpubNode)
-  const patternRules = rules.filter((rule) => rule.matchType === 'pattern' && rule.effectiveEnabled && rule.pattern)
-  const contentNodes = nodes.filter((node) => !isTitleNode(node))
-  const contentRuns = contentNodes.map((node) => ({ text: node.nodeValue ?? '' }))
-  applyPatternRules(contentRuns, patternRules.filter((rule) => rule.applyTo !== 'title'))
-  for (let index = 0; index < contentNodes.length; index += 1) {
-    contentNodes[index]!.nodeValue = contentRuns[index]!.text
-  }
-
-  const titleGroups = new Map<EpubNode, EpubNode[]>()
-  for (const node of nodes) {
-    if (!isTitleNode(node)) continue
-    let title = node.parentNode
-    while (title && !TITLE_TAGS.has(nodeTag(title))) title = title.parentNode
-    if (!title) continue
-    const group = titleGroups.get(title) ?? []
-    group.push(node)
-    titleGroups.set(title, group)
-  }
-  for (const group of titleGroups.values()) {
-    const runs = group.map((node) => ({ text: node.nodeValue ?? '' }))
-    applyPatternRules(runs, patternRules.filter((rule) => rule.applyTo !== 'content'))
-    for (let index = 0; index < group.length; index += 1) {
-      group[index]!.nodeValue = runs[index]!.text
-    }
-  }
-
-  const pointRuns = nodes.map((node) => ({ text: node.nodeValue ?? '' }))
-  for (const patch of rules) {
-    if (patch.matchType !== 'point' || !patch.effectiveEnabled || patch.spineHref !== href) continue
-    const snapshot = patch.originalText ?? ''
-    if (!snapshot || patch.textOffset == null) continue
-    const found = findPointMatch(pointRuns, snapshot, patch.textOffset)
-    if (!found) continue
-    applyPointMatch(pointRuns, found, patch.replacement ?? '')
-  }
-  for (let index = 0; index < nodes.length; index += 1) {
-    nodes[index]!.nodeValue = pointRuns[index]!.text
-  }
 }
 
 function collectReadingText(node: EpubNode): string {

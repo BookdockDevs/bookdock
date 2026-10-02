@@ -234,13 +234,30 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   // satisfy the auto-scroll guard: the reopen earns its own locate scroll.
   // A fresh (same-session) position replays exactly and suppresses it.
   const lastScrolledIndex = useRef<number | null>(tocPositionFresh ? (rememberedTocPosition?.currentIndex ?? null) : null)
+  const savedTocPosition = useRef(tocPositionFresh ? rememberedTocPosition : undefined)
+  const locateFrame = useRef<number | null>(null)
+  const hasPositioned = useRef(false)
 
-  const rememberSidebarScroll = useCallback((tabToRemember: NavTab, top: number, index?: number) => {
+  const rememberSidebarScroll = useCallback((tabToRemember: NavTab, top: number, index?: number, persist = true) => {
     savedScrollTop.current[tabToRemember] = top
-    setSidebarScrollPosition(bookId, tabToRemember, {
+    const position = {
       top,
       ...(tabToRemember === 'toc' && index !== undefined && index >= 0 ? { currentIndex: index } : {}),
-    })
+    }
+    if (tabToRemember === 'toc') {
+      const container = listRef.current
+      const viewportTop = container?.getBoundingClientRect().top ?? 0
+      const anchor = container && Array.from(container.querySelectorAll<HTMLElement>('[data-toc-href]'))
+        .find((row) => {
+          const rect = row.getBoundingClientRect()
+          return rect.top >= viewportTop + 40 && rect.top < viewportTop + container.clientHeight
+        })
+      savedTocPosition.current = {
+        ...position,
+        ...(anchor ? { anchorHref: anchor.dataset.tocHref, anchorOffset: anchor.getBoundingClientRect().top - viewportTop } : {}),
+      }
+      if (persist) setSidebarScrollPosition(bookId, tabToRemember, savedTocPosition.current)
+    } else if (persist) setSidebarScrollPosition(bookId, tabToRemember, position)
   }, [bookId, setSidebarScrollPosition])
 
   const annotationItems = useMemo(() => annotations?.data ?? [], [annotations?.data])
@@ -426,7 +443,13 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   useEffect(() => () => {
     if (scrollDebounceTimer.current) clearTimeout(scrollDebounceTimer.current)
     if (stuckVolumeRaf.current !== null) cancelAnimationFrame(stuckVolumeRaf.current)
-  }, [])
+    if (locateFrame.current !== null) cancelAnimationFrame(locateFrame.current)
+    if (savedTocPosition.current) setSidebarScrollPosition(bookId, 'toc', savedTocPosition.current)
+    for (const savedTab of ['notes', 'stats', 'ai'] as const) {
+      const top = savedScrollTop.current[savedTab]
+      if (top !== undefined) setSidebarScrollPosition(bookId, savedTab, { top })
+    }
+  }, [bookId, setSidebarScrollPosition])
 
   useImperativeHandle(ref, () => ({
     saveScroll: () => {
@@ -435,12 +458,12 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         scrollDebounceTimer.current = null
       }
       const container = listRef.current
-      if (container && tab !== 'ai') {
+      if (container && open && container.clientHeight > 0 && tab !== 'ai') {
         savedScrollTop.current[tab] = container.scrollTop
         rememberSidebarScroll(tab, container.scrollTop, tab === 'toc' ? currentIndex : undefined)
       }
     },
-  }), [currentIndex, rememberSidebarScroll, tab])
+  }), [currentIndex, open, rememberSidebarScroll, tab])
 
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
 
@@ -464,7 +487,11 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     if (tab !== 'toc' || !open || currentIndex < 0 || searchExpanded) return
     const item = itemRefs.current.get(currentIndex)
     const container = listRef.current
-    if (!item || !container || typeof IntersectionObserver === 'undefined') return
+    if (!item) {
+      setCurrentInView(false)
+      return
+    }
+    if (!container || typeof IntersectionObserver === 'undefined') return
     const observer = new IntersectionObserver(
       (entries) => setCurrentInView(entries[0]?.isIntersecting ?? true),
       { root: container },
@@ -476,6 +503,8 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const showLocate = tab === 'toc' && currentIndex >= 0 && !searchExpanded && !currentInView
 
   const [flashChapterIndex, setFlashChapterIndex] = useState<number | null>(null)
+  const [locateRequest, setLocateRequest] = useState(0)
+  const handledLocateRequest = useRef(0)
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -485,20 +514,46 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   }, [])
 
   // Same landing spot as the chapter-change auto-scroll: item at top 1/4 of the viewport
-  const scrollToCurrentChapter = useCallback(() => {
+  const scrollToCurrentChapter = useCallback((smooth = true) => {
     const item = itemRefs.current.get(currentIndex)
     const container = listRef.current
     if (!item || !container) return
     const containerRect = container.getBoundingClientRect()
-    const itemRect = item.getBoundingClientRect()
+    // Deferred descendants can have stale bounds; the stable row stays in flow.
+    const row = item.closest('li') ?? item
+    const itemRect = row.getBoundingClientRect()
     const target = Math.max(0, container.scrollTop + (itemRect.top - containerRect.top) - container.clientHeight * 0.25)
+    if (locateFrame.current !== null) cancelAnimationFrame(locateFrame.current)
     if (typeof container.scrollTo === 'function') {
-      container.scrollTo({ top: target, behavior: 'smooth' })
+      container.scrollTo({ top: target, behavior: smooth ? 'smooth' : 'instant' })
     } else {
-      item.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      item.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'instant' })
     }
-    lastScrolledIndex.current = currentIndex
-    rememberSidebarScroll('toc', target, currentIndex)
+    const started = performance.now()
+    let previousTop = container.scrollTop
+    let stableFrames = 0
+    const settle = () => {
+      stableFrames = Math.abs(container.scrollTop - previousTop) < 0.5 ? stableFrames + 1 : 0
+      previousTop = container.scrollTop
+      if (stableFrames < 3 && performance.now() - started < 1500) {
+        locateFrame.current = requestAnimationFrame(settle)
+        return
+      }
+      const bounds = row.getBoundingClientRect()
+      const viewport = container.getBoundingClientRect()
+      const topInset = tree[currentIndex]?.parent === null ? 0 : 40
+      if (bounds.top < viewport.top + topInset || bounds.top + 32 > viewport.bottom) {
+        container.scrollTop = Math.max(0, container.scrollTop + bounds.top - viewport.top - container.clientHeight * 0.25)
+      }
+      const finalBounds = row.getBoundingClientRect()
+      if (finalBounds.top >= viewport.top && finalBounds.top + 32 <= viewport.bottom) {
+        lastScrolledIndex.current = currentIndex
+        hasPositioned.current = true
+      }
+      locateFrame.current = null
+      rememberSidebarScroll('toc', container.scrollTop, lastScrolledIndex.current ?? undefined)
+    }
+    locateFrame.current = requestAnimationFrame(settle)
 
     // Trigger pulse/flash highlight on the located chapter
     setFlashChapterIndex(currentIndex)
@@ -506,7 +561,17 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     flashTimerRef.current = setTimeout(() => {
       setFlashChapterIndex(null)
     }, 1200)
-  }, [currentIndex, rememberSidebarScroll])
+  }, [currentIndex, rememberSidebarScroll, tree])
+
+  const cancelLocate = useCallback(() => {
+    if (locateFrame.current === null) return
+    cancelAnimationFrame(locateFrame.current)
+    locateFrame.current = null
+    const container = listRef.current
+    if (container) container.scrollTo?.({ top: container.scrollTop, behavior: 'instant' })
+    lastScrolledIndex.current = currentIndex
+    hasPositioned.current = true
+  }, [currentIndex])
 
   // Collapsing only hides the bar — query and results survive the round trip,
   // so reopening restores the search instantly instead of re-running it.
@@ -530,6 +595,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   // Auto-expand path to current chapter when it changes or the panel opens.
   useEffect(() => {
     if (!open || tab !== 'toc' || currentIndex < 0) return
+    if (currentIndex === lastScrolledIndex.current) return
     const next = new Set<number>()
     let node: TocNode | undefined = tree[currentIndex]
     while (node) {
@@ -633,8 +699,8 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   // move the user to a different position when they return.
   function handleScroll() {
     const container = listRef.current
-    if (container && open && tab !== 'ai' && !(tab === 'toc' && searchExpanded)) {
-      savedScrollTop.current[tab] = container.scrollTop
+    if (container && container.clientHeight > 0 && open && tab !== 'ai' && !(tab === 'toc' && searchExpanded) && locateFrame.current === null) {
+      rememberSidebarScroll(tab, container.scrollTop, tab === 'toc' ? currentIndex : undefined, false)
       if (scrollDebounceTimer.current) clearTimeout(scrollDebounceTimer.current)
       scrollDebounceTimer.current = setTimeout(() => {
         rememberSidebarScroll(tab, container.scrollTop, tab === 'toc' ? currentIndex : undefined)
@@ -655,33 +721,69 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   // On reopen or tab change, restore the saved side-page position. When the
   // chapter changes, the TOC auto-scroll effect below takes precedence.
   // useLayoutEffect restores before paint so the panel doesn't flash at the wrong position.
+  const restoredPanel = useRef<NavTab | null>(null)
   useLayoutEffect(() => {
     const container = listRef.current
-    if (!container || !open || tab === 'ai' || (tab === 'toc' && searchExpanded)) return
+    if (!container || !open || (tab === 'toc' && searchExpanded)) {
+      restoredPanel.current = null
+      return
+    }
+    if (tab === 'ai' || restoredPanel.current === tab) return
+    if (tab === 'toc' && (!tocItems.length || (tocBookId !== null && tocBookId !== bookId))) return
     const saved = savedScrollTop.current[tab]
     if (tab === 'toc') {
       if (saved !== undefined && currentIndex === lastScrolledIndex.current) {
         container.scrollTop = saved
+        const position = savedTocPosition.current
+        const anchorIndex = position?.anchorHref ? tree.findIndex((node) => node.href === position.anchorHref) : -1
+        const anchor = itemRefs.current.get(anchorIndex)?.closest('li')
+        if (anchor && position?.anchorOffset !== undefined) {
+          container.scrollTop += anchor.getBoundingClientRect().top - container.getBoundingClientRect().top - position.anchorOffset
+        }
+        restoredPanel.current = tab
+        hasPositioned.current = true
       }
       return
     }
     container.scrollTop = saved ?? 0
-  }, [annotationItems.length, currentIndex, open, searchExpanded, statsTotalSeconds, tab, tocItems.length])
+    restoredPanel.current = tab
+  }, [bookId, currentIndex, open, searchExpanded, tab, tocBookId, tocItems.length, tree])
 
-  // Scroll the current chapter into view when the panel opens or current chapter changes.
-  // Position the current item at roughly the top 1/4 of the panel viewport for better context.
-  // `tree` is a dep on purpose: on cold open the tree swaps from the synthesized
-  // chapter list to the parsed TOC, and a timer that fired mid-swap drops its
-  // scroll when the target row is not mounted yet. The swap re-arms the attempt;
-  // the lastScrolledIndex guard still suppresses duplicate scrolls.
+  // The parsed TOC is authoritative; a synthesized tree must not consume startup positioning.
   useEffect(() => {
     if (tab !== 'toc' || !open || currentIndex < 0 || searchExpanded) return
+    if (!tocItems.length || (tocBookId !== null && tocBookId !== bookId)) return
     if (currentIndex === lastScrolledIndex.current) return
-    const timer = setTimeout(() => {
-      scrollToCurrentChapter()
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [tab, open, currentIndex, collapsed, searchExpanded, scrollToCurrentChapter, tree])
+    const item = itemRefs.current.get(currentIndex)
+    const container = listRef.current
+    if (!item || !container) return
+    const bounds = (item.closest('li') ?? item).getBoundingClientRect()
+    const viewport = container.getBoundingClientRect()
+    const topInset = tree[currentIndex]?.parent === null ? 0 : 40
+    if (lastScrolledIndex.current !== null && bounds.top >= viewport.top + topInset && bounds.top + 32 <= viewport.bottom) {
+      lastScrolledIndex.current = currentIndex
+      hasPositioned.current = true
+      rememberSidebarScroll('toc', container.scrollTop, currentIndex)
+      return
+    }
+    scrollToCurrentChapter(hasPositioned.current)
+    restoredPanel.current = 'toc'
+    return () => {
+      if (locateFrame.current !== null) cancelAnimationFrame(locateFrame.current)
+      locateFrame.current = null
+    }
+  }, [bookId, tab, open, currentIndex, collapsed, searchExpanded, scrollToCurrentChapter, rememberSidebarScroll, tocBookId, tocItems.length, tree])
+
+  useEffect(() => {
+    if (locateRequest === handledLocateRequest.current) return
+    handledLocateRequest.current = locateRequest
+    if (!open || tab !== 'toc' || searchExpanded) return
+    scrollToCurrentChapter()
+    return () => {
+      if (locateFrame.current !== null) cancelAnimationFrame(locateFrame.current)
+      locateFrame.current = null
+    }
+  }, [locateRequest, open, tab, searchExpanded, scrollToCurrentChapter])
 
   const pendingSearchQuery = useReaderState((s) => s.pendingSearchQuery)
   const setPendingSearchQuery = useReaderState((s) => s.setPendingSearchQuery)
@@ -814,6 +916,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           return (
             <li
               key={index}
+              data-toc-href={node.href}
               ref={
                 isVolume
                   ? (el) => handleRegisterVolumeLiRef(index, el)
@@ -821,7 +924,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
               }
               className={cn(
                 isVolume && 'mt-1.5 first:mt-0',
-                !isVolume && '[content-visibility:auto] [contain-intrinsic-size:0_36px]',
+                !hasChildren && 'h-8 [content-visibility:auto] [contain-intrinsic-size:0_32px]',
               )}
             >
               <VolumeHeaderItem
@@ -1030,7 +1133,18 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             {showLocate && (
               <button
                 type="button"
-                onClick={scrollToCurrentChapter}
+                onClick={() => {
+                  setCollapsed((prev) => {
+                    const next = new Set(prev)
+                    let parent = tree[currentIndex]?.parent
+                    while (parent != null) {
+                      next.delete(parent)
+                      parent = tree[parent]?.parent
+                    }
+                    return next
+                  })
+                  setLocateRequest((request) => request + 1)
+                }}
                 title={_('reader.locateChapter')}
                 aria-label={_('reader.locateChapter')}
                 className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
@@ -1378,6 +1492,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         <div
           ref={listRef}
           onScroll={handleScroll}
+          onWheelCapture={cancelLocate}
+          onTouchStart={cancelLocate}
+          onPointerDown={cancelLocate}
           className={cn(
             'flex-1',
             tab === 'ai'

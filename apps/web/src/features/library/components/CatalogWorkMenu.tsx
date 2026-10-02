@@ -11,7 +11,8 @@ import { notify } from '@/lib/notifications'
 
 import type { SmartPosition } from '@/lib/position'
 
-import { downloadDefault } from '../download'
+import { useDownloadStore } from '@/stores/download.store'
+import { versionOrdinal, versionTabLabel } from '../book-row'
 import { useCollectBook, useUpdateCatalogBook } from '../hooks'
 import { getHiddenCause } from '../hidden-status'
 import { ApiError } from '@/api/client'
@@ -161,8 +162,8 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
           icon={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>}
           onClick={() => {
             onClose()
-            void downloadDefault({ id: first.bookVersionId, title: first.effective.title, format: first.format }).catch((err) => {
-              notify.error(getUserErrorNotification(err, 'errors.downloadFailed'))
+            useDownloadStore.getState().open({ id: first.bookVersionId, title: first.effective.title, format: first.format,
+              versionLabel: versionTabLabel(first.name, _('library.versionFallback', { n: versionOrdinal(work.versions, first.id) })),
             })
           }}
         />

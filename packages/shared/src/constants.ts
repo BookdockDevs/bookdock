@@ -1,3 +1,6 @@
+export const ANNOTATION_MAX_TEXT_LENGTH = 100_000
+export const BOOKMARK_CONTEXT_MAX_LENGTH = 240
+
 export type BookFormat = 'epub' | 'txt'
 
 export const BOOK_FORMATS: BookFormat[] = ['epub', 'txt']

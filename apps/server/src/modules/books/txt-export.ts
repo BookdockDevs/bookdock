@@ -1,10 +1,15 @@
+import { DOMParser } from '@xmldom/xmldom'
 import JSZip from 'jszip'
+
+import { loadEpubSpineMarkup } from '../../formats/epub'
 import { getStorage } from '../../storage'
 import { AppError } from '../../middleware/error'
 import { convertTxtToEpub, type TxtToEpubCover } from '../../lib/txt-to-epub'
 
 import { bufferFromStream, getActiveBook } from './books.service'
-import { applyChapterReplacements, loadEffectiveBookReplacementRules, type BookReplacementRule } from './replacement-rules'
+import { applyEpubChapterReplacements, applyChapterReplacements, loadEffectiveBookReplacementRules, type BookReplacementRule } from './replacement-rules'
+
+import { extractEpubTextBlocks, formatTxtBlocks, type TxtBlock } from './txt-layout'
 
 export type ExportRule = BookReplacementRule
 export { applyChapterReplacements } from './replacement-rules'
@@ -35,18 +40,11 @@ export function extractChapterRuns(xhtml: string): { title: string; paragraphs: 
   return { title: titles.join(''), paragraphs }
 }
 
-// Apply the effective rules to one chapter's runs: title and content use their
-// own logical streams, then point patches search the complete section stream.
-// Chapter = title line + blank line + paragraphs (one line each, no blank
-// lines between them — the layout the reader shows); chapters joined with
-// two blank lines (more separation than the paragraph blocks); single
-// trailing newline. Trade-off: re-uploading the export flattens each chapter
-// into one paragraph (the txt parser splits paragraphs on blank lines), which
-// the reading-first layout is willing to pay.
 export function assembleTxt(chapters: { title: string; paragraphs: string[] }[]): string {
-  const parts = chapters.map((c) =>
-    c.paragraphs.length ? `${c.title}\n\n${c.paragraphs.join('\n')}` : c.title)
-  return parts.join('\n\n\n') + '\n'
+  return formatTxtBlocks(chapters.flatMap((chapter): TxtBlock[] => [
+    { kind: 'heading', text: chapter.title },
+    ...chapter.paragraphs.map((text): TxtBlock => ({ kind: text.includes('\n') ? 'structured' : 'paragraph', text })),
+  ]))
 }
 
 // The shared middle of export.txt / export.epub: read the stored EPUB's
@@ -88,7 +86,7 @@ export async function extractReplacedChapters(
   return chapters
 }
 
-// Ownership + TXT-only gate shared by both export variants.
+// Regenerating EPUB remains limited to TXT-source books.
 async function getExportableTxtBook(userId: string, bookId: string, opts?: { showHidden?: boolean }) {
   const book = await getActiveBook(userId, bookId, opts)
   if (book.format !== 'txt') {
@@ -100,7 +98,7 @@ async function getExportableTxtBook(userId: string, bookId: string, opts?: { sho
 // Load the rules and read the stored EPUB for an export. `plain` skips the
 // rule query entirely — the 原文 variant never applies replacements.
 async function loadExportInput(userId: string, bookId: string, plain: boolean, opts?: { showHidden?: boolean }) {
-  const book = await getExportableTxtBook(userId, bookId, opts)
+  const book = await getActiveBook(userId, bookId, opts)
   const rules: ExportRule[] = plain ? [] : await loadEffectiveBookReplacementRules(userId, bookId)
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) {
@@ -110,14 +108,8 @@ async function loadExportInput(userId: string, bookId: string, plain: boolean, o
   return { book, rules, buffer }
 }
 
-// P4: TXT edited export — the stored file is the generated EPUB, from which
-// the normalized text is recovered losslessly (the server wrote it). Applies
-// the requesting user's effective rules (or not, when plain) and returns the
-// assembled text plus the book title (for the download filename). `plain`
-// powers the "原文" path for TXT books: the original bytes were never
-// stored, so the closest to the original is the unreplaced normalized text.
-// `edited` reports whether any effective rule was applied — routes use it to
-// keep the filename honest (原文 name when nothing was changed).
+// Uploaded TXT bytes are not retained: its original export is recovered text.
+// Apply rules before adding indentation so point-patch offsets stay meaningful.
 export async function exportTxtBook(
   userId: string,
   bookId: string,
@@ -125,22 +117,38 @@ export async function exportTxtBook(
   opts?: { showHidden?: boolean },
 ): Promise<{ text: string; title: string; edited: boolean }> {
   const { book, rules, buffer } = await loadExportInput(userId, bookId, plain, opts)
-  const chapters = await extractReplacedChapters(buffer, rules)
-  return { text: assembleTxt(chapters), title: book.title, edited: rules.some((r) => r.effectiveEnabled) }
+  let text: string
+  if (book.format === 'txt') {
+    text = assembleTxt(await extractReplacedChapters(buffer, rules))
+  } else {
+    let sections: Awaited<ReturnType<typeof loadEpubSpineMarkup>>
+    try {
+      sections = await loadEpubSpineMarkup(buffer)
+    } catch {
+      throw new AppError('BOOK_FILE_MISSING', 'Book package or spine document is missing or invalid')
+    }
+    const parts: string[] = []
+    for (const section of sections) {
+      const doc = new DOMParser().parseFromString(section.markup, 'application/xml')
+      applyEpubChapterReplacements(doc, rules, section.href)
+      const part = formatTxtBlocks(extractEpubTextBlocks(doc, section.coverPage)).trimEnd()
+      if (part) parts.push(part)
+    }
+    text = parts.length ? parts.join('\n\n\n') + '\n' : ''
+  }
+  if (!text.trim()) throw new AppError('NO_EXPORTABLE_TEXT', 'Book has no readable text to export')
+  return { text, title: book.title, edited: rules.some((r) => r.effectiveEnabled) }
 }
 
-// P4: EPUB export — regenerated on demand from the stored book's chapters
-// with the requesting user's effective rules applied (or not, when plain).
-// Metadata (title/author) and the cover come from the DB's current values so
-// edits made after upload show up immediately. TXT books only; uploaded EPUB
-// books keep their stored file. The output is the plain txt-to-epub template
-// product — the original upload's formatting is not recoverable.
+// TXT-source EPUBs are regenerated with current metadata and cover; uploaded
+// EPUBs must keep their package structure and use the stored-file endpoint.
 export async function exportEpubBook(
   userId: string,
   bookId: string,
   plain = false,
   opts?: { showHidden?: boolean },
 ): Promise<{ buffer: Buffer; title: string; edited: boolean }> {
+  await getExportableTxtBook(userId, bookId, opts)
   const { book, rules, buffer } = await loadExportInput(userId, bookId, plain, opts)
   const chapters = await extractReplacedChapters(buffer, rules)
 

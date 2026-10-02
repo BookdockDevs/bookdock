@@ -1732,6 +1732,7 @@ export type AnnotationCreateReq = {
   color?: string
   style?: AnnotationStyle
   text?: string
+  contextText?: string
   note?: string
   chapter?: string
   chapterHref?: string
@@ -1753,6 +1754,7 @@ export interface AnnotationRes {
   color: string
   style: AnnotationStyle
   text: string
+  contextText?: string | null
   note: string | null
   chapter: string | null
   chapterHref?: string | null

@@ -139,7 +139,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         style: last.style,
         // rawText keeps block-level line breaks; `text` is whitespace-collapsed
         // and would squash the quote into one paragraph on the idea/share cards
-        text: (selection.rawText ?? selection.text).slice(0, 800),
+        text: selection.rawText ?? selection.text,
         chapter: currentChapter ?? undefined,
         ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
       })
@@ -209,7 +209,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           type: 'note',
           color: last.color,
           style: last.style,
-          text: (selection.rawText ?? selection.text).slice(0, 800),
+          text: selection.rawText ?? selection.text,
           chapter: currentChapter ?? undefined,
           ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
           note: note || undefined,

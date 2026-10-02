@@ -10,6 +10,8 @@ export interface AiPendingQuickCommand {
 export interface SidebarScrollPosition {
   top: number
   currentIndex?: number
+  anchorHref?: string
+  anchorOffset?: number
   /** Page-load token tagging the save. The loader drops it, so a position
    *  restored from a previous load reads as stale: stale positions must not
    *  suppress the TOC locate-on-open. */
@@ -43,9 +45,13 @@ function loadSidebarScrollPositions(): SidebarScrollPositions {
         const top = (rawPosition as Record<string, unknown>).top
         if (typeof top !== 'number' || !Number.isFinite(top) || top < 0) continue
         const currentIndex = (rawPosition as Record<string, unknown>).currentIndex
+        const anchorHref = (rawPosition as Record<string, unknown>).anchorHref
+        const anchorOffset = (rawPosition as Record<string, unknown>).anchorOffset
         tabs[tab] = {
           top,
           ...(typeof currentIndex === 'number' && Number.isInteger(currentIndex) && currentIndex >= 0 ? { currentIndex } : {}),
+          ...(typeof anchorHref === 'string' && typeof anchorOffset === 'number' && Number.isFinite(anchorOffset)
+            ? { anchorHref, anchorOffset } : {}),
         }
       }
       if (Object.keys(tabs).length > 0) positions[bookId] = tabs
@@ -145,7 +151,10 @@ export const useReaderState = create<ReaderState>((set) => ({
   setCurrentChapterIndex: (currentChapterIndex) => set({ currentChapterIndex }),
   setSidebarScrollPosition: (bookId, tab, position) => set((state) => {
     if (state.sidebarScrollPositions[bookId]?.[tab]?.top === position.top
-      && state.sidebarScrollPositions[bookId]?.[tab]?.currentIndex === position.currentIndex) return state
+      && state.sidebarScrollPositions[bookId]?.[tab]?.currentIndex === position.currentIndex
+      && state.sidebarScrollPositions[bookId]?.[tab]?.anchorHref === position.anchorHref
+      && state.sidebarScrollPositions[bookId]?.[tab]?.anchorOffset === position.anchorOffset
+      && state.sidebarScrollPositions[bookId]?.[tab]?.sessionId === READER_SESSION_ID) return state
     const tagged = { ...position, sessionId: READER_SESSION_ID }
     const sidebarScrollPositions = {
       ...state.sidebarScrollPositions,

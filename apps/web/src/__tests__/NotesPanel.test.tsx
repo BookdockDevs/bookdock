@@ -81,6 +81,27 @@ describe('bookmark cards', () => {
     )
   }
 
+  it('shows bookmark context independently of the renamed title', () => {
+    renderOne({ text: 'Renamed title', contextText: 'First paragraph\n\nSecond paragraph' })
+    expect(screen.getByText('Renamed title')).toBeTruthy()
+    const context = screen.getByText(/First paragraph/)
+    const block = context.closest('p')!
+    expect(Array.from(block.querySelectorAll('[data-note-paragraph]')).map((el) => el.textContent)).toEqual(['First paragraph', 'Second paragraph'])
+    expect(block.className).toContain('whitespace-pre-wrap')
+    expect(block.className).toContain('line-clamp-3')
+  })
+
+  it('uses compact paragraph gaps without highlighting blank separators', () => {
+    const { container } = renderOne({ type: 'highlight', style: 'highlight', text: '第一段\n\n第二段\n行内换行' })
+    const paragraphs = container.querySelectorAll('[data-note-paragraph]')
+    expect(paragraphs).toHaveLength(2)
+    expect(paragraphs[1].className).toContain('mt-[0.4em]')
+    expect(paragraphs[1].textContent).toBe('第二段\n行内换行')
+    const decorated = Array.from(container.querySelectorAll('p span[style]')).filter((el) => (el as HTMLElement).style.backgroundColor)
+    expect(decorated.map((el) => el.textContent)).toEqual(['第一段', '第二段', '行内换行'])
+    expect(decorated.every((el) => !el.textContent?.includes('\n'))).toBe(true)
+  })
+
   it('gives the snippet four lines, not two', () => {
     const { container } = renderOne({ text: LONG })
     const snippet = screen.getByText(LONG)
@@ -370,7 +391,7 @@ describe('NotesPanel', () => {
     renderPanel()
     fireEvent.contextMenu(screen.getByText('我的想法丙'))
     fireEvent.click(screen.getByText('annotation.copy'))
-    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('我的想法丙'))
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('我的想法丙\n\n想法原文丙'))
   })
 
   it('reveals time and action buttons on hover', () => {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { useReaderState } from '../features/reader/state/reader-state'
+import { READER_SESSION_ID, useReaderState } from '../features/reader/state/reader-state'
 
 describe('reader-state resetForBook', () => {
   beforeEach(() => {
@@ -45,5 +45,11 @@ describe('reader-state resetForBook', () => {
     expect(JSON.parse(localStorage.getItem('bd-reader-sidebar-scroll-v1') ?? '{}')).toEqual({
       'book-1': { stats: { top: 789, sessionId: expect.any(String) } },
     })
+  })
+
+  it('refreshes a stale session tag even when the saved coordinates are unchanged', () => {
+    useReaderState.setState({ sidebarScrollPositions: { 'book-1': { toc: { top: 123, currentIndex: 14 } } } })
+    useReaderState.getState().setSidebarScrollPosition('book-1', 'toc', { top: 123, currentIndex: 14 })
+    expect(useReaderState.getState().sidebarScrollPositions['book-1'].toc?.sessionId).toBe(READER_SESSION_ID)
   })
 })

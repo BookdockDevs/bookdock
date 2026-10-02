@@ -16,6 +16,9 @@ All notable changes to Bookdock are documented here.
 - Shared-library updates surface an "Updated" badge in detail and reader with a one-time notice; reading clears the mark.
 - Shared versions published from a book already in the private library read as already collected instead of offering a duplicate collect.
 - Hide causes are consistent everywhere: taxonomy-hidden works show an inert control naming the shelf, category, or tag responsible.
+- Downloads use a unified dialog with format/content choice, a per-user remembered choice, and a version label for shared works; EPUB sources also offer TXT extraction.
+- Bookmarks carry a context excerpt: renames keep the text, search matches it, and copy/export include it.
+- Paginated mode supports mouse drag-to-select across pages with edge-dwell page turns; Up/Down keys turn pages in page mode.
 
 ### Changed
 
@@ -26,12 +29,17 @@ All notable changes to Bookdock are documented here.
 - Default reading layout for new users updated (type size, spacing, snap scrolling).
 - The reader toolbar is locked by default.
 - TXT chapter detection no longer treats "第X节" lines as chapters.
+- TXT export layout is unified (Chinese paragraph indent, heading/separator rules); both formats support original/edited TXT.
+- Notes render paragraph breaks with bookmark title and text shown separately, copy carries both parts; annotation export escapes Markdown and the CSV gains a Bookmark Context column.
 - Delete-user confirmation no longer claims shared-library content is unaffected.
 
 ### Fixed
 
 - Upgrading no longer refuses to boot over books whose source files are already gone; they are skipped with a migration anomaly while the rest of the library migrates.
 - Reopening a book now scrolls the directory to the current chapter instead of replaying its stale position.
+- The directory locate restores the sidebar scroll position and expands collapsed ancestors.
+- Stacked dialogs no longer both close on Escape; menu clicks no longer trigger a parent drag.
+- A corrupt EPUB export reports a missing file instead of an unsupported format; image-only books report no exportable text.
 - The reader sidebar dock no longer flashes when toggling tabs, and the scrolled position holds across re-renders.
 - Switching accounts after logout no longer lets reset defaults overwrite server reading settings.
 - Paginated mode no longer opens short chapters half-empty or lands jumps on the wrong chapter.
@@ -41,7 +49,7 @@ All notable changes to Bookdock are documented here.
 
 ### Upgrade notes
 
-- Back up the complete `DATA_DIR` before upgrading. Migrations 0032–0035 apply automatically (member uploads, publish source base, read acknowledgements).
+- Back up the complete `DATA_DIR` before upgrading. Migrations 0032–0036 apply automatically (member uploads, publish source base, read acknowledgements, bookmark context).
 
 ## [0.4.0] - 2026-09-30
 
@@ -495,6 +503,9 @@ All notable changes to Bookdock are documented here.
 - 共享书库内容更新后，收藏者将在书籍详情与阅读器中看到「有更新」标记与更新提示，阅读后消失。
 - 与私人书库藏书同源的共享版本直接显示为「已在书库中」，不再重复收藏。
 - 连带隐藏的原因在各处保持一致：被书架、分类或标签隐藏时，操作入口置灰并注明原因。
+- 下载改为统一弹窗：自选格式（EPUB/TXT）与内容（校订版/原文），成功后按用户记住选择；共享版本带版本标注；EPUB 源也可导出 TXT。
+- 书签新增上下文摘录：改名保留正文，可搜索，复制与导出会带上。
+- 分页模式支持鼠标拖选跨页（边缘停留翻页）；分页模式下 `↑/↓` 键翻页。
 
 #### 变更
 
@@ -505,12 +516,17 @@ All notable changes to Bookdock are documented here.
 - 新用户默认阅读排版更新（字号、行距、段距等）。
 - 阅读器工具栏默认锁定。
 - TXT 目录识别不再将「第X节」识别为章节。
+- TXT 导出排版统一：中文段首空两格，标题/分隔符规则一致；两种格式都支持原文/校订版 TXT。
+- 笔记按段落渲染，书签标题与正文分开显示，复制同时带两部分；标注导出转义 Markdown，CSV 新增书签上下文列。
 - 删除用户确认文案不再声称共享书库内容不受影响。
 
 #### 修复
 
 - 源文件已丢失的书不再阻塞升级启动；它们记为迁移异常跳过，其余书正常迁移。
 - 重开书籍时目录会定位到当前章节，不再停在上次记住的旧位置。
+- 目录定位恢复侧栏滚动位置并自动展开折叠的祖先。
+- 堆叠弹窗按 Esc 只关顶层；菜单点击不再触发父级拖拽。
+- 损坏的 EPUB 导出报文件缺失而非格式不支持；纯图片书报无可导出文字。
 - 阅读器侧栏切换不再闪烁；滚动位置在重排后保持。
 - 退出登录后再次登录，阅读设置不再被重置时的默认值覆盖。
 - 分页模式下，短章节首屏不再半空，跳转不再落到书首或跳章。
@@ -520,7 +536,7 @@ All notable changes to Bookdock are documented here.
 
 #### 升级说明
 
-- 升级前请完整备份 `DATA_DIR`。迁移 0032–0035 自动执行（成员上传、发布来源、更新提醒）。
+- 升级前请完整备份 `DATA_DIR`。迁移 0032–0036 自动执行（成员上传、发布来源、更新提醒、书签上下文）。
 
 ### [0.4.0] - 2026-09-30
 

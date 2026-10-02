@@ -461,6 +461,13 @@
     "recentlyRead": "最近阅读",
     "finished": "已完成",
     "moreActions": "更多操作",
+    "downloadPreparing": "正在准备…",
+    "downloadTitle": "下载《{{title}}》",
+    "downloadFormat": "文件格式",
+    "downloadContent": "文本版本",
+    "downloadEditedHint": "应用你为本书启用的文本替换规则。",
+    "downloadRulesFailed": "文本替换规则加载失败，请重试。",
+    "downloadNoText": "这本书没有可导出的文字，可能是图片或扫描书。",
     "download": "下载",
     "original": "原文",
     "edited": "校订版",
@@ -1723,6 +1730,7 @@
     "resetMetadataFailed": "重置元数据失败"
   },
   "annotation": {
+    "selectionTooLong": "选区过长，请缩小范围（最多 10 万字符）",
     "highlight": "高亮",
     "note": "笔记",
     "bookmark": "书签",

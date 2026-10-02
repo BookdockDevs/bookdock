@@ -138,7 +138,8 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
   useEffect(() => {
     if (!book) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) closeDialog()
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]')
+      if (e.key === 'Escape' && !e.defaultPrevented && dialogs.length <= 1) closeDialog()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

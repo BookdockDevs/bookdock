@@ -1,11 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 
 import { useNavigate } from '@tanstack/react-router'
 import i18n from 'i18next'
 
 import type { CatalogBook, Library } from '@bookdock/shared'
 
-import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -14,8 +13,8 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 
-import { catalogWorkRow, rowCover } from '../book-row'
-import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../download'
+import { catalogWorkRow, rowCover, versionOrdinal, versionTabLabel } from '../book-row'
+import { copyCover, downloadCover } from '../download'
 import { useCollectBook, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
 import { getHiddenCause } from '../hidden-status'
 import BookCover from './BookCover'
@@ -95,14 +94,6 @@ export default function WorkDetailBody({
   const readable = Boolean(selected) && (canManage || !selectedHidden)
   const canDownload = canCollect && readable && Boolean(selected)
 
-  // The edited-export menu is the only consumer: skip the request for guests,
-  // unlisted versions and anyone who cannot download anyway.
-  const { data: replacementsData } = useBookReplacements(canDownload ? selected?.bookVersionId : undefined)
-  const canExportEdited = useMemo(
-    () => (replacementsData?.data ?? []).some((r) => (r.effectiveEnabled ?? r.enabled)),
-    [replacementsData],
-  )
-
   function goToFilter(search: { author?: string; tag?: string; series?: string }) {
     onClose()
     void navigate({ to: '/', search: { libraryId: library.id, ...search } })
@@ -136,28 +127,6 @@ export default function WorkDetailBody({
     }
   }
 
-  async function onExport(format: 'epub' | 'txt', plain: boolean) {
-    if (!selected) return
-    const title = selected.effective.title
-    try {
-      if (format === 'epub') {
-        await downloadEpub(selected.bookVersionId, title, { plain })
-      } else if (plain) {
-        await downloadOriginalTxt(selected.bookVersionId, title)
-      } else {
-        await downloadEditedTxt(selected.bookVersionId, title)
-      }
-    } catch (err) {
-      notify.error(getUserErrorNotification(err, 'errors.downloadFailed'))
-    }
-  }
-
-  function downloadSelected() {
-    if (!selected) return
-    void Promise.resolve(downloadBook(selected.bookVersionId, selected.effective.title)).catch((err) =>
-      notify.error(getUserErrorNotification(err, 'errors.downloadFailed')),
-    )
-  }
   function togglePublish() {
     if (!selected) return
     // A one-version work has no version-level meaning to toggle: the control
@@ -352,10 +321,10 @@ export default function WorkDetailBody({
               )}
               {canDownload && (
                 <DownloadMenu
+                  bookId={selected.bookVersionId}
+                  title={selected.effective.title}
                   format={selected.format}
-                  canExportEdited={canExportEdited}
-                  onDownloadFile={downloadSelected}
-                  onExport={(format, plain) => void onExport(format, plain)}
+                  versionLabel={versionTabLabel(selected.name, _('library.versionFallback', { n: versionOrdinal(work.versions, selected.id) }))}
                 />
               )}
               {(canManage || canContribute) && (

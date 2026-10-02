@@ -1,3 +1,4 @@
+import DownloadDialogHost from '@/features/library/components/DownloadDialogHost'
 import { useEffect, type ReactNode } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
@@ -43,6 +44,7 @@ export default function AppProviders({ children }: { children?: ReactNode }) {
       <SettingsSync />
       <RouterProvider router={router} />
       <Toast />
+      <DownloadDialogHost />
       {children}
     </QueryClientProvider>
   )

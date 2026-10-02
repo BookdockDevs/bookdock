@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERMISSIONS } from './access-tokens'
 import { BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, LIBRARY_SORT_MODES, RECENTLY_READ_STYLES } from './contract'
-import { AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
+import { ANNOTATION_MAX_TEXT_LENGTH, BOOKMARK_CONTEXT_MAX_LENGTH, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 import { authorListSchema } from './library'
 
@@ -465,8 +465,9 @@ export const annotationCreateSchema = z.object({
   type: z.enum(['highlight', 'note', 'bookmark']),
   color: z.string().optional().default('yellow'),
   style: z.enum(['underline', 'squiggly', 'highlight']).optional().default('underline'),
-  text: z.string().optional().default(''),
+  text: z.string().max(ANNOTATION_MAX_TEXT_LENGTH).optional().default(''),
   note: z.string().optional(),
+  contextText: z.string().refine((value) => Array.from(value).length <= BOOKMARK_CONTEXT_MAX_LENGTH).optional(),
   chapter: z.string().optional(),
   chapterHref: z.string().max(2000).optional(),
 })
@@ -475,7 +476,7 @@ export const annotationUpdateSchema = z.object({
   color: z.string().optional(),
   style: z.enum(['underline', 'squiggly', 'highlight']).optional(),
   note: z.string().optional(),
-  text: z.string().optional(),
+  text: z.string().max(ANNOTATION_MAX_TEXT_LENGTH).optional(),
 })
 
 const replacementFields = {

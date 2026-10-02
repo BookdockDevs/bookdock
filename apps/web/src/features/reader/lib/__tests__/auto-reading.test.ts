@@ -290,6 +290,31 @@ describe('AutoReadingController', () => {
     expect(controller.getSnapshot().status).toBe('idle')
     controller.dispose()
   })
+
+  it('resumes scrolling after navigatePending ends', async () => {
+    const fake = fakeRenderer()
+    const controller = new AutoReadingController(fake.renderer, { mode: 'smooth', speed: 30, readingMode: 'scroll' })
+    await controller.start()
+    expect(controller.getSnapshot().status).toBe('running')
+
+    // Simulate chapter switch / navigation start
+    fake.emit('navigatePending', { pending: true, started: true })
+    fake.emit('userInteraction')
+
+    // Wait past user interaction settle time while navigation is still pending
+    await vi.advanceTimersByTimeAsync(300)
+    expect(controller.getSnapshot().status).toBe('running')
+
+    // Navigation ends: scheduleInteractionResume sets USER_INTERACTION_SETTLE_MS (250ms)
+    fake.emit('navigatePending', { pending: false })
+    await vi.advanceTimersByTimeAsync(250)
+    // Advance frame time for smooth scrollByPixels
+    await vi.advanceTimersByTimeAsync(150)
+
+    // Verify auto reading resumed scrolling
+    expect(fake.renderer.scrollByPixels).toHaveBeenCalled()
+    controller.dispose()
+  })
 })
 
 describe('ReaderPlaybackCoordinator', () => {

@@ -1,3 +1,5 @@
+import { SelectionDrag } from './selection-drag.js'
+
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 export const snapWheelStep = (accumulated, delta, threshold) => {
@@ -1326,6 +1328,42 @@ export class Paginator extends HTMLElement {
     #touchState
     #touchScrolled
     #lastVisibleRange
+    #selectionPosition = 0
+    #selectionDrag = new SelectionDrag({
+        enabled: () => !this.scrolled,
+        start: () => { this.#selectionPosition = this.containerPosition },
+        rtl: () => this.#rtl,
+        bounds: () => this.#container.getBoundingClientRect(),
+        visible: doc => {
+            const entry = this.#sortedViews.find(([, view]) => view.document === doc)
+            if (!entry) return
+            const [index, view] = entry
+            const offset = this.#getViewOffset(index)
+            return getVisibleRange(doc, this.#renderedStart - offset,
+                this.#renderedEnd - offset, this.#getRectMapper(view))
+        },
+        turn: async (doc, direction) => {
+            const entry = this.#sortedViews.find(([, view]) => view.document === doc)
+            if (!entry || this.scrolled || this.#locked) return false
+            const [index, view] = entry
+            // Native autoscroll may have written an offset before its queued
+            // scroll event restores it. Step from the gesture's owned position.
+            const page = Math.floor(Math.abs(this.#selectionPosition) / this.size + 0.5) + direction
+            const offset = this.#getViewOffset(index)
+            const end = offset + view.contentPages * this.size / this.columnCount
+            if (page < 0 || page >= this.#renderedPages
+                || page * this.size >= end - 1
+                || (page + 1) * this.size <= offset + 1) return false
+            this.#locked = true
+            try {
+                this.#selectionPosition = this.size * (this.#rtl && !this.#vertical ? -page : page)
+                await this.#scrollToPage(page, 'selection-drag', false)
+                return true
+            } finally {
+                this.#locked = false
+            }
+        },
+    })
     #scrollLocked = false
     #lastScrollPosition = null
     #lastScrollDirection = null
@@ -1580,6 +1618,11 @@ export class Paginator extends HTMLElement {
             }
         }, 250)
         this.#container.addEventListener('scroll', () => {
+            if (this.#selectionDrag.active
+                && Math.abs(this.containerPosition - this.#selectionPosition) > 0.5) {
+                this.containerPosition = this.#selectionPosition
+                return
+            }
             if (!this.#isAnimating) this.dispatchEvent(new Event('scroll'))
             if (this.scrolled) {
                 const position = this.#renderedStart
@@ -1674,19 +1717,9 @@ export class Paginator extends HTMLElement {
                 else setSelectionTo(this.#anchor, -1)
             }
         })
-        const checkPointerSelection = debounce((range, sel) => {
-            if (!sel.rangeCount) return
-            const selRange = sel.getRangeAt(0)
-            const backward = selectionIsBackward(sel)
-            if (backward && selRange.compareBoundaryPoints(Range.START_TO_START, range) < 0)
-                this.prev()
-            else if (!backward && selRange.compareBoundaryPoints(Range.END_TO_END, range) > 0)
-                this.next()
-        }, 700)
         this.addEventListener('load', ({ detail: { doc } }) => {
-            let isPointerSelecting = false
-            doc.addEventListener('pointerdown', () => isPointerSelecting = true)
-            doc.addEventListener('pointerup', () => isPointerSelecting = false)
+            const entry = this.#sortedViews.find(([, view]) => view.document === doc)
+            if (entry) entry[1].selectionDragCleanup = this.#selectionDrag.attach(doc)
             let isKeyboardSelecting = false
             doc.addEventListener('keydown', () => isKeyboardSelecting = true)
             doc.addEventListener('keyup', () => isKeyboardSelecting = false)
@@ -1696,10 +1729,7 @@ export class Paginator extends HTMLElement {
                 if (!range) return
                 const sel = doc.getSelection()
                 if (!sel.rangeCount) return
-                // FIXME: this won't work on Android WebView, disable for now
-                if (!isPointerSelecting && isPointerSelecting && sel.type === 'Range')
-                    checkPointerSelection(range, sel)
-                else if (isKeyboardSelecting) {
+                if (isKeyboardSelecting) {
                     const selRange = sel.getRangeAt(0).cloneRange()
                     const backward = selectionIsBackward(sel)
                     if (!backward) selRange.collapse()
@@ -1752,7 +1782,9 @@ export class Paginator extends HTMLElement {
         const result = this.#getVisibleRange()
         if (result?.range && !result.range.collapsed) this.#anchor = result.range
     }
-    attributeChangedCallback(name, _, value) {
+    attributeChangedCallback(name, oldValue, value) {
+        if (oldValue === value) return
+        if (name === 'flow') this.#selectionDrag.stop(true)
         switch (name) {
             case 'flow':
                 this.#clearContinuousBufferTimer()
@@ -1914,6 +1946,7 @@ export class Paginator extends HTMLElement {
     #destroyView(index) {
         const view = this.#views.get(index)
         if (!view) return
+        view.selectionDragCleanup?.()
         view.destroy()
         this.#container.removeChild(view.element)
         this.#views.delete(index)
@@ -2228,6 +2261,7 @@ export class Paginator extends HTMLElement {
         this.#setMarginalTexts()
     }
     render() {
+        const previousLayout = this.#lastLayout
         if (this.#views.size === 0) return
         const primaryView = this.#primaryView
         if (!primaryView) return
@@ -2250,6 +2284,8 @@ export class Paginator extends HTMLElement {
             vertical: this.#vertical,
             rtl: this.#rtl,
         })
+        if (!previousLayout || Object.keys(layout).some(key => layout[key] !== previousLayout[key]))
+            this.#selectionDrag.stop(true)
         for (const [, view] of this.#views) {
             if (view.document) view.render(layout)
         }
@@ -3547,10 +3583,10 @@ export class Paginator extends HTMLElement {
             }
             return
         }
-        if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown') {
             e.preventDefault()
             void this.next()
-        } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
             e.preventDefault()
             void this.prev()
         }
@@ -3890,6 +3926,7 @@ export class Paginator extends HTMLElement {
         return index >= 0 && index <= this.sections.length - 1
     }
     async #goTo({ index, anchor, select }) {
+        this.#selectionDrag.stop(true)
         const generation = ++this.#displayGeneration
         const isCurrent = () => generation === this.#displayGeneration
         this.#clearContinuousBufferTimer()
@@ -4165,6 +4202,7 @@ export class Paginator extends HTMLElement {
             if (this.sections[index]?.linear !== 'no') return index
     }
     async #turnPage(dir, distance) {
+        this.#selectionDrag.stop(true)
         if (this.#locked) return
         this.#locked = true
         try {
@@ -4265,6 +4303,7 @@ export class Paginator extends HTMLElement {
         this.#primaryView?.destroyLoupe()
     }
     destroy() {
+        this.#selectionDrag.destroy()
         this.#clearContinuousBufferTimer()
         const transition = (this.#vtDrag ?? this.#vtFinishing)?.transition
             ?? this.#vtProgrammatic?.transition

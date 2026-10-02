@@ -59,7 +59,7 @@ export function useNotesFilter(items: AnnotationRes[], displayTypes?: Set<ItemKi
     if (colorFilter.size > 0) result = result.filter((a) => a.type !== 'bookmark' && colorFilter.has(a.color))
     if (query.trim()) {
       const q = query.trim().toLowerCase()
-      result = result.filter((a) => a.text.toLowerCase().includes(q) || a.note?.toLowerCase().includes(q))
+      result = result.filter((a) => a.text.toLowerCase().includes(q) || a.note?.toLowerCase().includes(q) || a.contextText?.toLowerCase().includes(q) || a.chapter?.toLowerCase().includes(q))
     }
     return result
   }, [items, displayTypes, styleFilter, colorFilter, query])

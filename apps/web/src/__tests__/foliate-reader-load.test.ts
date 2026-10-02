@@ -355,7 +355,7 @@ describe('FoliateReader book-style overrides', () => {
     }))
   })
 
-  it('starts a fallback bookmark snippet at the visible range start', () => {
+  it('includes nearby paragraph context around the visible range start', () => {
     const reader = new FoliateReader('')
     const doc = document.implementation.createHTMLDocument()
     const paragraph = doc.createElement('p')
@@ -368,7 +368,7 @@ describe('FoliateReader book-style overrides', () => {
     range.setEnd(text, text.textContent?.length ?? 0)
     ;(reader as any).lastRange = range
 
-    expect(reader.getSnippet('chapter:0:0.5', 80)).toBe('视口开始的文字以及后续内容')
+    expect(reader.getSnippet('chapter:0:0.5', 80)).toBe('视口上方的文字视口开始的文字以及后续内容')
   })
 
   it('sets line-height directly on paragraphs when layout override is enabled', () => {

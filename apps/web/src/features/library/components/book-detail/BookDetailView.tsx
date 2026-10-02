@@ -1,11 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 
 import type { BookDetailRes, BookListItem } from '@bookdock/shared'
 
-import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { ApiError, apiPatch } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
@@ -14,7 +13,7 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 
-import { copyCover, downloadBook, downloadCover, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../../download'
+import { copyCover, downloadCover } from '../../download'
 import { useCollectBook, useForkBook } from '../../hooks'
 import { getHiddenCause } from '../../hidden-status'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -68,13 +67,6 @@ export default function BookDetailView({
   const isPrivateB = !readOnly && Boolean(displayBook.source) && displayBook.collected !== false
   const bookmeta = detail?.meta?.bookmeta
 
-  const { data: replacementsData } = useBookReplacements(book.id)
-  const hasEffectiveRules = useMemo(
-    () => (replacementsData?.data ?? []).some((r) => (r.effectiveEnabled ?? r.enabled)),
-    [replacementsData],
-  )
-  const canExportEdited = displayBook.format === 'txt' && hasEffectiveRules
-
   const [forkConfirmOpen, setForkConfirmOpen] = useState(false)
 
   const hasCoverImage = Boolean(displayBook.coverKey || displayBook.format === 'epub')
@@ -110,20 +102,6 @@ export default function BookDetailView({
       void queryClient.invalidateQueries({ queryKey: ['books'] })
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'toast.updateBookFailed'))
-    }
-  }
-
-  async function onExport(format: 'epub' | 'txt', plain: boolean) {
-    try {
-      if (format === 'epub') {
-        await downloadEpub(book.id, book.title, { plain })
-      } else if (plain) {
-        await downloadOriginalTxt(book.id, book.title)
-      } else {
-        await downloadEditedTxt(book.id, book.title)
-      }
-    } catch (err) {
-      notify.error(getUserErrorNotification(err, 'errors.downloadFailed'))
     }
   }
 
@@ -322,16 +300,7 @@ export default function BookDetailView({
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
               </ActionIcon>}
               {!readOnly && (
-                <DownloadMenu
-                  format={displayBook.format}
-                  canExportEdited={canExportEdited}
-                  onDownloadFile={() =>
-                    void Promise.resolve(downloadBook(book.id, book.title)).catch((err) =>
-                      notify.error(getUserErrorNotification(err, 'errors.downloadFailed')),
-                    )
-                  }
-                  onExport={(format, plain) => void onExport(format, plain)}
-                />
+                <DownloadMenu bookId={book.id} title={displayBook.title} format={displayBook.format} />
               )}
               {isPrivateB && !displayBook.sourceUnavailable && (
                 <ActionIcon

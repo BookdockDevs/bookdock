@@ -243,4 +243,23 @@ describe('annotations service', () => {
     const listed = await listAnnotations(ownerId, bookId)
     expect(listed.find((a) => a.id === saved.id)).toMatchObject({ color: 'red', style: 'underline' })
   })
+  it('preserves long multi-paragraph quotes through creation and listing', async () => {
+    const text = '　　第一段' + '正文'.repeat(1000) + '\n\n第二段\n换行';
+    for (const type of ['highlight', 'note'] as const) {
+      const saved = await createAnnotation(ownerId, bookId, { type, cfiRange: `long-${type}`, text, note: type === 'note' ? 'idea' : undefined })
+      expect(saved.text).toBe(text)
+      expect((await listAnnotations(ownerId, bookId)).find((item) => item.id === saved.id)?.text).toBe(text)
+    }
+  })
+
+  it('keeps independent bookmark context after rename and finds it in search', async () => {
+    const saved = await createAnnotation(ownerId, bookId, { type: 'bookmark', cfiRange: 'context-cfi', text: 'Title', contextText: '第一段\n\ncontext-only phrase' })
+    expect(saved.contextText).toBe('第一段\n\ncontext-only phrase')
+    const renamed = await updateAnnotation(ownerId, saved.id, { text: 'New title' })
+    expect(renamed.contextText).toBe(saved.contextText)
+    expect((await searchAnnotations(ownerId, bookId, 'context-only phrase')).map((item) => item.id)).toContain(saved.id)
+    expect((await listAnnotations(ownerId, bookId)).find((item) => item.id === saved.id)?.contextText).toBe(saved.contextText)
+    await expect(updateAnnotation(otherId, saved.id, { text: 'Unauthorized' })).rejects.toThrow()
+  })
+
 })

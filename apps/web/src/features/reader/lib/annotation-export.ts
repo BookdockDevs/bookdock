@@ -82,10 +82,11 @@ export function buildAnnotationMarkdown(
       if (annotation.chapter) lines.push(`## ${annotation.chapter}`, '')
     }
     if (annotation.type === 'bookmark') {
-      const bookmarkText = annotation.text || labels.unnamedBookmark
+      const bookmarkText = (annotation.text || labels.unnamedBookmark).replace(/[\\`*_{}[\]<>#!|]/g, '\\$&').replace(/\r?\n/g, ' ')
       lines.push(options.includeDetails ? `- **${labels.bookmark}**${labels.separator}${bookmarkText}` : `- ${bookmarkText}`)
+      if (annotation.contextText) lines.push('', `> ${annotation.contextText.replace(/[\\`*_{}[\]<>#!|]/g, '\\$&').replace(/\r?\n/g, '\n> ')}`)
     } else {
-      lines.push(`> ${annotation.text.replace(/\r?\n/g, '\n> ')}`)
+      lines.push(`> ${annotation.text.replace(/[\\`*_{}[\]<>#!|]/g, '\\$&').replace(/\r?\n/g, '\n> ')}`)
       if (annotation.note?.trim()) {
         lines.push('', `**${labels.idea}**${labels.separator}${annotation.note.replace(/\r?\n/g, '\n')}`)
       }
@@ -114,6 +115,7 @@ export function buildAnnotationText(
     }
     const prefix = options.includeDetails ? `[${detailLabel(annotation, labels)}] ` : ''
     lines.push(`${prefix}${annotation.text}`)
+    if (annotation.type === 'bookmark' && annotation.contextText) lines.push(annotation.contextText)
     if (annotation.note?.trim()) lines.push(`${labels.idea}${labels.separator}${annotation.note}`)
     if (options.includeTime) lines.push(`${labels.recordedAt}${labels.separator}${dateText(annotation.createdAt)}`)
     if (options.includeDeepLink) lines.push(`${labels.openInBook}${labels.separator}${annotationUrl(book, annotation)}`)
@@ -124,7 +126,7 @@ export function buildAnnotationText(
 
 function csvCell(value: string | number): string {
   const text = String(value)
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 
 export function buildAnnotationCsv(
@@ -132,7 +134,7 @@ export function buildAnnotationCsv(
   book: AnnotationExportBook,
   options: AnnotationExportOptions,
 ): string {
-  const header = ['Book', 'Author', 'Chapter', 'Text', 'Note']
+  const header = ['Book', 'Author', 'Chapter', 'Text', 'Note', 'Bookmark Context']
   if (options.includeDetails) header.push('Type', 'Color', 'Style')
   header.push('Annotation ID', 'CFI')
   if (options.includeTime) header.push('Created At', 'Updated At')
@@ -144,6 +146,7 @@ export function buildAnnotationCsv(
       annotation.chapter ?? '',
       annotation.text,
       annotation.note ?? '',
+      annotation.type === 'bookmark' ? annotation.contextText ?? '' : '',
     ]
     if (options.includeDetails) row.push(kindValue(annotation), annotation.color, annotation.style)
     row.push(annotation.id, annotation.cfiRange || annotation.cfiAnchor || '')

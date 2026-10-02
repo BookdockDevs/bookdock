@@ -83,6 +83,7 @@ export default function SmartMenu({
       id={id}
       ref={innerRef}
       data-smart-menu="true"
+      onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => {
         e.preventDefault()

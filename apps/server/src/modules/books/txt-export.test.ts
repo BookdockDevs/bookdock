@@ -140,6 +140,23 @@ function seedBook(
   return book
 }
 
+
+async function makeEpub(first = '<h1>第一章</h1><p>中文<span>正文</span> &amp; 文字</p><p>第二段正文</p>', second = '<h1>Unlisted chapter</h1><p>English paragraph one.</p><p>English paragraph two.</p>') {
+  const zip = new JSZip()
+  zip.file('META-INF/container.xml', '<container><rootfiles><rootfile full-path="Text/book.opf"/></rootfiles></container>')
+  zip.file('Text/book.opf', `<package><manifest>
+    <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="two" href="chapters/two.xhtml" media-type="application/xhtml+xml"/>
+    <item id="nav" href="navigation.xhtml" properties="nav" media-type="application/xhtml+xml"/>
+    <item id="one" href="chapters/one.xhtml" media-type="application/xhtml+xml"/>
+    </manifest><spine><itemref idref="cover"/><itemref idref="nav"/><itemref idref="one"/><itemref idref="one"/><itemref idref="two"/></spine><guide><reference type="cover" href="cover.xhtml"/></guide></package>`)
+  zip.file('Text/cover.xhtml', '<html><head><title>Cover</title></head><body><h1>Cover</h1></body></html>')
+  zip.file('Text/navigation.xhtml', '<html><body><p>Navigation only</p><a href="chapters/one.xhtml#a">First</a><a href="chapters/one.xhtml#b">Second</a></body></html>')
+  zip.file('Text/chapters/one.xhtml', `<html><head><title>Hidden metadata</title><style>.text{color:red}</style></head><body>${first}</body></html>`)
+  zip.file('Text/chapters/two.xhtml', `<html><body>${second}</body></html>`)
+  return zip.generateAsync({ type: 'nodebuffer' })
+}
+
 const rule = (overrides: Partial<ExportRule> = {}): ExportRule => ({
   id: 'r1',
   matchType: 'pattern',
@@ -240,7 +257,7 @@ describe('txt export engine', () => {
     expect(assembleTxt([
       { title: '第1章', paragraphs: ['甲', '乙'] },
       { title: '第2章', paragraphs: ['丙'] },
-    ])).toBe('第1章\n\n甲\n乙\n\n\n第2章\n\n丙\n')
+    ])).toBe('第1章\n\n　　甲\n　　乙\n\n\n第2章\n\n　　丙\n')
   })
 })
 
@@ -267,7 +284,7 @@ describe('exportTxtBook', () => {
 
   it('returns the plain normalized text when there are no rules', async () => {
     const { text } = await exportTxtBook(ownerId, bookId)
-    expect(text).toBe('第1章\n\n第一段文字内容\n第二段文字内容\n')
+    expect(text).toBe('第1章\n\n　　第一段文字内容\n　　第二段文字内容\n')
   })
 
   it('applies effective pattern rules and anchored point patches', async () => {
@@ -290,7 +307,7 @@ describe('exportTxtBook', () => {
     })
 
     const { text } = await exportTxtBook(ownerId, bookId)
-    expect(text).toBe('第1章\n\n改后段文字内容\n测试一处\n')
+    expect(text).toBe('第1章\n\n　　改后段文字内容\n　　测试一处\n')
   })
 
   it('honors per-book overrides in the export', async () => {
@@ -307,13 +324,13 @@ describe('exportTxtBook', () => {
     }).run()
 
     const { text } = await exportTxtBook(ownerId, bookId)
-    expect(text).toBe('第1章\n\n第一段文字内容\n第二段文字内容\n')
+    expect(text).toBe('第1章\n\n　　第一段文字内容\n　　第二段文字内容\n')
   })
 
   it('returns the unreplaced text for the plain (原文) variant even with rules', async () => {
     await createReplacement(ownerId, { pattern: '第一段', replacement: '改后段' })
     const { text } = await exportTxtBook(ownerId, bookId, true)
-    expect(text).toBe('第1章\n\n第一段文字内容\n第二段文字内容\n')
+    expect(text).toBe('第1章\n\n　　第一段文字内容\n　　第二段文字内容\n')
   })
 
   it('reports edited=false when no rule is effectively enabled', async () => {
@@ -341,10 +358,43 @@ describe('exportTxtBook', () => {
     expect(edited).toBe(false)
   })
 
-  it('rejects EPUB books with UNSUPPORTED_FORMAT', async () => {
+  it('exports EPUB spine content once, including documents omitted from the TOC', async () => {
+    const epub = seedBook(db, ownerId, { format: 'epub' })
+    mem.files.set(epub.filePath, await makeEpub())
+    const { text } = await exportTxtBook(ownerId, epub.id, true)
+    expect(text).toContain('第一章\n\n　　中文正文 & 文字\n　　第二段正文')
+    expect(text).toContain('Unlisted chapter\n\nEnglish paragraph one.\n\nEnglish paragraph two.')
+    expect(text.match(/中文正文/g)).toHaveLength(1)
+    expect(text).not.toContain('Navigation only')
+    expect(text).not.toContain('Cover')
+    expect(text.indexOf('第一章')).toBeLessThan(text.indexOf('Unlisted chapter'))
+  })
+
+  it('applies scoped EPUB replacements and full-path point patches before layout', async () => {
+    const epub = seedBook(db, ownerId, { format: 'epub' })
+    mem.files.set(epub.filePath, await makeEpub())
+    await createReplacement(ownerId, { pattern: '中文正文', replacement: '校订正文', applyTo: 'content' })
+    await createReplacement(ownerId, { pattern: '第一章', replacement: '新标题', applyTo: 'title' })
+    await createReplacement(ownerId, { matchType: 'point', bookId: epub.id, spineHref: 'Text/chapters/one.xhtml', textOffset: 3,
+      originalText: '校订正文', replacement: '定点正文' })
+    const edited = await exportTxtBook(ownerId, epub.id)
+    expect(edited.text).toContain('新标题\n\n　　定点正文 & 文字')
+    expect(edited.edited).toBe(true)
+    const plain = await exportTxtBook(ownerId, epub.id, true)
+    expect(plain.text).toContain('第一章\n\n　　中文正文 & 文字')
+    expect(plain.edited).toBe(false)
+  })
+
+  it('reports no exportable text for image-only EPUBs', async () => {
+    const epub = seedBook(db, ownerId, { format: 'epub' })
+    mem.files.set(epub.filePath, await makeEpub('<p><img src="scan.jpg"/></p>', ''))
+    await expect(exportTxtBook(ownerId, epub.id)).rejects.toMatchObject({ code: 'NO_EXPORTABLE_TEXT' })
+  })
+
+  it('reports an invalid EPUB without silently exporting partial text', async () => {
     const epub = seedBook(db, ownerId, { format: 'epub' })
     mem.files.set(epub.filePath, Buffer.from('not a real epub'))
-    await expect(exportTxtBook(ownerId, epub.id)).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
+    await expect(exportTxtBook(ownerId, epub.id)).rejects.toMatchObject({ code: 'BOOK_FILE_MISSING' })
   })
 
   it('rejects another user\'s book with BOOK_NOT_FOUND', async () => {
@@ -474,16 +524,29 @@ describe('GET /books/:id/export.txt', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('Content-Type')).toContain('text/plain')
     expect(res.headers.get('Content-Disposition')).toContain(encodeURIComponent('book.校订版.txt'))
-    expect(await res.text()).toBe('第1章\n\n改文内容\n')
+    expect(await res.text()).toBe('第1章\n\n　　改文内容\n')
   })
 
-  it('rejects EPUB books with 415 UNSUPPORTED_FORMAT', async () => {
-    const epub = seedBook(db, ownerId, { format: 'epub', filePath: `blobs/te/${createId('hash')}.epub` })
-    mem.files.set(epub.filePath, Buffer.from('x'))
-    const res = await createFileApp().request(`/api/v1/books/${epub.id}/export.txt`)
-    expect(res.status).toBe(415)
-    expect((await res.json() as { error: { code: string } }).error.code).toBe('UNSUPPORTED_FORMAT')
+  it('exports an EPUB as a UTF-8 TXT attachment', async () => {
+    const epub = seedBook(db, ownerId, { format: 'epub' })
+    mem.files.set(epub.filePath, await makeEpub())
+    const res = await createFileApp().request(`/api/v1/books/${epub.id}/export.txt?plain=1`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Content-Type')).toContain('text/plain')
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(res.headers.get('Content-Disposition')).toContain('Test_Book.txt')
+    expect(await res.text()).toContain('中文正文 & 文字')
   })
+
+  it('rejects guest exports', async () => {
+    const epub = seedBook(db, ownerId, { format: 'epub' })
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('*', async (c, next) => { c.set('user', { id: ownerId, username: 'guest', role: 'guest', avatarKey: null }); return next() })
+    app.route('/api/v1/books', booksRoutes)
+    expect((await app.request(`/api/v1/books/${epub.id}/export.txt`)).status).toBe(403)
+  })
+
 })
 
 describe('GET /books/:id/export.epub', () => {

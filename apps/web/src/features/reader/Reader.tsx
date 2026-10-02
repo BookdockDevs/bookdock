@@ -58,6 +58,7 @@ import type { FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, ReaderAnnota
 import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
 import { FootnotePopup } from './components/FootnotePopup'
 import { ImageViewer } from './components/ImageViewer'
+import { BOOKMARK_CONTEXT_MAX_LENGTH } from '@bookdock/shared'
 import type { BookDetailRes, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 
 export default function Reader() {
@@ -864,12 +865,12 @@ export default function Reader() {
         cfiAnchor: e.cfiRange,
         type: 'highlight',
         // Same rawText preference as the toolbar — see SelectionToolbar.highlight
-        text: (e.rawText ?? e.text).slice(0, 500),
+        text: e.rawText ?? e.text,
         color: lastStyle.color,
         style: lastStyle.style,
         chapter: currentChapter ?? undefined,
         ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
-      })
+      }, { onError: (err) => notify.error(getUserErrorNotification(err, 'annotation.saveFailed')) })
       // "选中即划" keeps the toolbar open so the fresh highlight can be restyled
       if (!e.keepSelection) setSelection(null)
     },
@@ -1182,18 +1183,27 @@ export default function Reader() {
   }, [])
 
   // Starting playback means eyes on the text: starting from either panel drops
-  // a pinned chrome along with the popover so both leave the same clean view.
-  // Hover-summoned chrome is untouched — it hides on its own 180ms timer — and
-  // a plain dismiss (Esc, outside click, toggle button) never unpins.
+  // a pinned chrome along with the popover and retracts the header so the view
+  // is immediately clean.
   const onAutoReadingStart = useCallback(() => {
     keepChromePinnedRef.current = false
     setChromePinned(false)
+    setHeaderSummon(false)
+    if (headerLeaveTimerRef.current) {
+      clearTimeout(headerLeaveTimerRef.current)
+      headerLeaveTimerRef.current = null
+    }
     setAutoReadingOpen(false)
   }, [])
 
   const onTtsStart = useCallback(() => {
     keepChromePinnedRef.current = false
     setChromePinned(false)
+    setHeaderSummon(false)
+    if (headerLeaveTimerRef.current) {
+      clearTimeout(headerLeaveTimerRef.current)
+      headerLeaveTimerRef.current = null
+    }
     setTtsOpen(false)
   }, [])
 
@@ -1221,12 +1231,13 @@ export default function Reader() {
     // yet — ignore the press until relocate lands the destination
     if (navInFlightRef.current) return
     try {
-      const snippet = rendererRef.current?.getSnippet?.(bookmarkCfi, 80)
+      const snippet = rendererRef.current?.getSnippet?.(bookmarkCfi, BOOKMARK_CONTEXT_MAX_LENGTH)
       await createAnnotation.mutateAsync({
         cfiRange: bookmarkCfi,
         cfiAnchor: bookmarkCfi,
         type: 'bookmark',
-        text: snippet?.trim() || currentChapter || _('reader.bookmark'),
+        text: Array.from(snippet?.split(/\n/).find((line) => line.trim())?.trim() || currentChapter || _('reader.bookmark')).slice(0, 40).join(''),
+        contextText: snippet || undefined,
         chapter: currentChapter ?? undefined,
         ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
       })
@@ -1277,14 +1288,14 @@ export default function Reader() {
         else toggleChrome()
         return
       }
-      if (e.key === 'ArrowLeft') {
+      if (e.key === 'ArrowLeft' || (readingMode === 'page' && e.key === 'ArrowUp')) {
         e.preventDefault()
         if (readingMode === 'page' && rendererRef.current?.scrollByPages) {
           void rendererRef.current.scrollByPages(-1)
         } else {
           void rendererRef.current?.prev()
         }
-      } else if (e.key === 'ArrowRight') {
+      } else if (e.key === 'ArrowRight' || (readingMode === 'page' && e.key === 'ArrowDown')) {
         e.preventDefault()
         if (readingMode === 'page' && rendererRef.current?.scrollByPages) {
           void rendererRef.current.scrollByPages(1)
@@ -1294,9 +1305,8 @@ export default function Reader() {
       } else if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'ArrowUp' || e.key === 'PageUp') {
         // scroll mode: one screen per key (0.92 viewport overlap, same as the
         // bottom-bar buttons); page mode: PageUp/Down turn pages like the
-        // in-iframe handler, plain arrows stay unbound. Handled here so keys
-        // keep working after a keyboard chapter switch drops focus to body.
-        if (readingMode === 'page' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return
+        // in-iframe handler. Handled here so keys keep working after a keyboard
+        // chapter switch drops focus to body.
         e.preventDefault()
         const dir = (e.key === 'ArrowDown' || e.key === 'PageDown') ? 1 : -1
         void rendererRef.current?.scrollByPages(dir)

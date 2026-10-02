@@ -30,13 +30,14 @@ import type {
   TtsSegment,
 } from '../types'
 import { FONT_OPTIONS } from '../types'
+import { bookmarkContext, extractAnnotationText } from '../lib/annotation-text'
 import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
 import { MediaOverlaySection, type MediaOverlayCue } from '../lib/media-overlay'
 import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, textContentRangeNearOffset, type TextReplacementRule } from '../lib/text-replacements'
 import { NavigationPending, type NavigationTarget } from '../lib/navigation-pending'
 import { chapterTextNamespaceFromUrl, withTextCache } from '../lib/chapter-text-cache'
 import { chapterIndexAtFraction, sectionFractionBoundaries } from '../lib/progress-model'
-import { applyTitleReplacements, type BookFormat } from '@bookdock/shared'
+import { BOOKMARK_CONTEXT_MAX_LENGTH, applyTitleReplacements, type BookFormat } from '@bookdock/shared'
 
 import {
   extractChapterText,
@@ -2444,6 +2445,7 @@ export class FoliateReader implements BookReader {
     // The content has become visible at this point. Do not keep a spinner up
     // while a paginator background-fill or font/layout promise finishes.
     this.navigationPending.settle()
+    this.emit('navigatePending', { pending: false })
     // Firefox can report the old section iframe losing focus while a user
     // jump is loading. Once the destination is visible, that blur belongs to
     // the internal section swap, not to an OS reactivation.
@@ -2620,6 +2622,7 @@ export class FoliateReader implements BookReader {
         if (opts?.internal && !opts.showPending) throw err
       } finally {
         this.navigationPending.end(gen)
+        this.emit('navigatePending', { pending: false })
         this.pendingJumpFrom = null
       }
       return
@@ -2834,7 +2837,10 @@ export class FoliateReader implements BookReader {
       console.warn('[FoliateReader] next navigation failed:', error)
       this.emit('navigateError', { target: `chapter:${nextIndex}`, sectionIndex: nextIndex, error })
     } finally {
-      if (pending !== null) this.navigationPending.end(pending)
+      if (pending !== null) {
+        this.navigationPending.end(pending)
+        this.emit('navigatePending', { pending: false })
+      }
     }
   }
 
@@ -2868,7 +2874,10 @@ export class FoliateReader implements BookReader {
       console.warn('[FoliateReader] previous navigation failed:', error)
       this.emit('navigateError', { target: `chapter:${prevIndex}`, sectionIndex: prevIndex, error })
     } finally {
-      if (pending !== null) this.navigationPending.end(pending)
+      if (pending !== null) {
+        this.navigationPending.end(pending)
+        this.emit('navigatePending', { pending: false })
+      }
     }
   }
 
@@ -3105,6 +3114,7 @@ export class FoliateReader implements BookReader {
       console.warn('[FoliateReader] progress seek failed:', err)
     } finally {
       this.navigationPending.end(gen)
+      this.emit('navigatePending', { pending: false })
       this.pendingJumpFrom = null
     }
   }
@@ -3569,7 +3579,7 @@ export class FoliateReader implements BookReader {
         const sel = doc.defaultView?.getSelection?.()
         const range = sel && !sel.isCollapsed && sel.rangeCount > 0 ? sel.getRangeAt(0) : null
         const text = range?.toString().replace(/\s+/g, ' ').trim() ?? ''
-        const rawText = sel?.toString().trim() ?? ''
+        const rawText = range ? extractAnnotationText(range) : ''
         if (!range || !text) {
           if (this.selectionActive) {
             this.selectionActive = false
@@ -3583,6 +3593,13 @@ export class FoliateReader implements BookReader {
         const startNode = range.startContainer
         const beforeText = textBeforeSelection(doc, range)
         const paragraphText = textParagraphSelection(range)
+        const frameRect = doc.defaultView?.frameElement?.getBoundingClientRect()
+        const viewport = this.container?.getBoundingClientRect()
+        const visibleRects = frameRect && viewport ? Array.from(range.getClientRects()).filter(rect =>
+          rect.bottom + frameRect.top > viewport.top && rect.top + frameRect.top < viewport.bottom
+          && rect.right + frameRect.left > viewport.left && rect.left + frameRect.left < viewport.right,
+        ) : []
+        const backward = sel?.focusNode === range.startContainer && sel?.focusOffset === range.startOffset
         const info: SelectionInfo = {
           cfiRange,
           text: text.slice(0, 500),
@@ -3590,7 +3607,7 @@ export class FoliateReader implements BookReader {
           chapterIndex: index,
           ...(beforeText ? { beforeText } : {}),
           ...(paragraphText ? { paragraphText } : {}),
-          rect: this.popupRect(doc, range),
+          rect: this.popupRect(doc, range, backward ? visibleRects[0] : visibleRects.at(-1)),
           pointText: textContentSelection(doc, range),
           // Point-patch anchors (P2): the offset is counted on the rendered
           // document (conversion is length-preserving, so it equals the
@@ -4064,7 +4081,7 @@ export class FoliateReader implements BookReader {
     return chapterText.text
   }
 
-  getSnippet(cfi: string, maxLength = 80): string {
+  getSnippet(cfi: string, maxLength = BOOKMARK_CONTEXT_MAX_LENGTH): string {
     try {
       // chapter:{index}:{fraction} — scrolled-mode positions without a content CFI
       if (cfi.startsWith('chapter:')) {
@@ -4090,27 +4107,9 @@ export class FoliateReader implements BookReader {
     return this.lastRange ? textParagraphSelection(this.lastRange, maxLength) : ''
   }
 
-  // Text starting at the range's start point. Location CFIs collapse to a
-  // point, so walk forward through text nodes when the range itself is empty.
+  // Context surrounds the content anchor and remains independent of its title.
   private snippetFromRange(range: Range, maxLength: number): string {
-    const direct = range.toString().replace(/\s+/g, ' ').trim()
-    if (direct) return direct.slice(0, maxLength)
-    const doc = range.startContainer.ownerDocument
-    if (!doc?.body) return ''
-    let text = ''
-    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
-    if (range.startContainer.nodeType === Node.TEXT_NODE) {
-      text += (range.startContainer.textContent ?? '').slice(range.startOffset)
-      walker.currentNode = range.startContainer
-    } else {
-      const node = range.startContainer.childNodes[range.startOffset] ?? range.startContainer
-      walker.currentNode = node
-    }
-    let next: Node | null
-    while (text.length < maxLength && (next = walker.nextNode())) {
-      text += next.textContent ?? ''
-    }
-    return text.replace(/\s+/g, ' ').trim().slice(0, maxLength)
+    return bookmarkContext(range, maxLength)
   }
 
   private buildTocIndex() {
@@ -4166,6 +4165,7 @@ export class FoliateReader implements BookReader {
           if (sel) {
             doc.removeEventListener('pointerdown', sel.startHandler)
             doc.removeEventListener('mouseup', sel.handler)
+            doc.removeEventListener('selection-drag-end', sel.handler)
             doc.removeEventListener('keyup', sel.handler)
             doc.removeEventListener('selectionchange', sel.selectionChangeHandler)
             doc.removeEventListener('touchend', sel.handler)
@@ -4219,6 +4219,7 @@ export class FoliateReader implements BookReader {
         }
         doc.addEventListener('pointerdown', startHandler)
         doc.addEventListener('mouseup', handler)
+        doc.addEventListener('selection-drag-end', handler)
         doc.addEventListener('keyup', handler)
         doc.addEventListener('selectionchange', selectionChangeHandler)
         doc.addEventListener('touchend', handler, { passive: true })
@@ -4322,6 +4323,7 @@ export class FoliateReader implements BookReader {
       const sel = this.selectionDocs.get(doc)
       if (sel) {
         doc.removeEventListener('mouseup', sel.handler)
+        doc.removeEventListener('selection-drag-end', sel.handler)
         doc.removeEventListener('keyup', sel.handler)
         doc.removeEventListener('selectionchange', sel.handler)
         doc.removeEventListener('touchend', sel.handler)
