@@ -26,6 +26,7 @@ import type {
   RendererEvents,
   SearchOptions,
   SearchResult,
+  SearchStatus,
   SelectionInfo,
   TtsSegment,
 } from '../types'
@@ -37,21 +38,24 @@ import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, te
 import { NavigationPending, type NavigationTarget } from '../lib/navigation-pending'
 import { chapterTextNamespaceFromUrl, withTextCache } from '../lib/chapter-text-cache'
 import { chapterIndexAtFraction, sectionFractionBoundaries } from '../lib/progress-model'
+import { getSelectionGeometry } from '../lib/selection-geometry'
 import { BOOKMARK_CONTEXT_MAX_LENGTH, applyTitleReplacements, type BookFormat } from '@bookdock/shared'
 
 import {
+  createExcerptBuilder,
   extractChapterText,
-  findMatches,
+  findMatchesSafely,
   getChapterText,
   mapMatchTextsToOffsets,
-  makeExcerpt,
   offsetsToRange,
+  prepareSearchDocument,
   type SearchMatch,
 } from '../lib/book-search'
 import { convertChinese } from '@/lib/chinese'
 import { mix, isDark } from '@/lib/color'
 
 const ANNOTATION_COLORS: Record<string, string> = {
+  amber: '#f59e0b',
   yellow: '#eab308',
   red: '#ef4444',
   purple: '#a855f7',
@@ -1125,10 +1129,13 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
 // survives leaving and re-entering the book (parseCache lifecycle), capped by
 // LRU — stale entries for evicted books only waste a slot.
 const SEARCH_CACHE_MAX = 20
+const SEARCH_RESULT_LIMIT = 2000
+const SEARCH_CHAPTER_CONCURRENCY = 4
 interface SearchCacheEntry {
   results: SearchResult[]
   matches: Map<number, SearchMatch[]>
   matchTexts: Map<number, string[]>
+  status: SearchStatus
 }
 const searchCache = new Map<string, SearchCacheEntry>()
 
@@ -1695,6 +1702,7 @@ export class FoliateReader implements BookReader {
   // or destroying bumps it, and the search loop stops at the next chapter
   // boundary when its own generation goes stale
   private searchGen = 0
+  private searchAbort: AbortController | null = null
   // Latest search's matches per section (plain-text offsets), kept so
   // highlights can be drawn lazily when a section gets rendered
   private searchMatchOffsets = new Map<number, SearchMatch[]>()
@@ -2948,6 +2956,10 @@ export class FoliateReader implements BookReader {
     this.view.renderer.setAttribute('background-color', theme.bg)
     this.syncActiveDocsTheme()
     this.applyStyles()
+    for (const value of this.renderedAnnotations.keys()) {
+      const annotation = this.annotationMap.get(value)
+      if (annotation?.style === 'highlight' || annotation?.type === 'note') this.addAnnotationValue(value, false)
+    }
   }
 
   private syncActiveDocsTheme() {
@@ -3014,6 +3026,7 @@ export class FoliateReader implements BookReader {
 
   applyChineseConversion(mode: ChineseConversion): Promise<void> {
     if (mode === this.conversion) return this.conversionReload
+    this.searchAbort?.abort()
     this.conversion = mode
     this.emit('readingSettingsChanged')
     conversionMode = mode
@@ -3034,6 +3047,7 @@ export class FoliateReader implements BookReader {
     this.replacements = rules
     const json = JSON.stringify(rules)
     if (json === this.replacementsJson) return this.conversionReload
+    this.searchAbort?.abort()
     this.replacementsJson = json
     this.emit('readingSettingsChanged')
     setActiveReplacements(rules)
@@ -3593,13 +3607,16 @@ export class FoliateReader implements BookReader {
         const startNode = range.startContainer
         const beforeText = textBeforeSelection(doc, range)
         const paragraphText = textParagraphSelection(range)
-        const frameRect = doc.defaultView?.frameElement?.getBoundingClientRect()
         const viewport = this.container?.getBoundingClientRect()
-        const visibleRects = frameRect && viewport ? Array.from(range.getClientRects()).filter(rect =>
-          rect.bottom + frameRect.top > viewport.top && rect.top + frameRect.top < viewport.bottom
-          && rect.right + frameRect.left > viewport.left && rect.left + frameRect.left < viewport.right,
-        ) : []
-        const backward = sel?.focusNode === range.startContainer && sel?.focusOffset === range.startOffset
+        const geometry = viewport && sel ? getSelectionGeometry(
+          doc, range, sel, viewport,
+          this.readingMode === 'page' ? this.view?.renderer?.columnCount ?? 1 : 1,
+        ) : undefined
+        if (viewport && !geometry) {
+          this.selectionActive = false
+          this.emit('selected', null)
+          return
+        }
         const info: SelectionInfo = {
           cfiRange,
           text: text.slice(0, 500),
@@ -3607,7 +3624,8 @@ export class FoliateReader implements BookReader {
           chapterIndex: index,
           ...(beforeText ? { beforeText } : {}),
           ...(paragraphText ? { paragraphText } : {}),
-          rect: this.popupRect(doc, range, backward ? visibleRects[0] : visibleRects.at(-1)),
+          rect: geometry ? (geometry.backward ? geometry.rects[0] : geometry.rects.at(-1)) : undefined,
+          geometry,
           pointText: textContentSelection(doc, range),
           // Point-patch anchors (P2): the offset is counted on the rendered
           // document (conversion is length-preserving, so it equals the
@@ -3713,18 +3731,27 @@ export class FoliateReader implements BookReader {
   }
 
   private handleDrawAnnotation(detail: any) {
-    const { draw, annotation } = detail ?? {}
+    const { draw, annotation, doc, range } = detail ?? {}
     if (!draw || !annotation?.value || !this.foliateOverlayer) return
     const ann = this.annotationMap.get(annotation.value)
     if (!ann) return // skip if annotation data isn't in map yet — syncAnnotations will re-trigger
     const color = ANNOTATION_COLORS[ann.color ?? ''] ?? DEFAULT_ANNOTATION_COLOR
+    const element = range?.startContainer?.nodeType === 1 ? range.startContainer : range?.startContainer?.parentElement
+    const writingMode = element && doc?.defaultView?.getComputedStyle(element).writingMode
     if (ann.type === 'note') {
-      // Ideas always render as a dashed underline in their theme color (WeChat Reading style)
-      draw(this.foliateOverlayer.dashedUnderline, { color })
+      draw(this.foliateOverlayer.ink, {
+        color, style: 'dashed', writingMode,
+        opacity: isLightCssColor(this.theme.bg) ? 0.68 : 0.85,
+      })
     } else if (ann.style === 'highlight') {
-      draw(this.foliateOverlayer.highlight, { color: `${color}55` })
+      const dark = !isLightCssColor(this.theme.bg)
+      draw(this.foliateOverlayer.highlight, {
+        color, fillOpacity: dark ? 0.28 : 0.21, pen: true,
+        blendMode: dark ? 'screen' : 'multiply',
+        vertical: writingMode === 'vertical-rl' || writingMode === 'vertical-lr',
+      })
     } else {
-      draw(ann.style === 'squiggly' ? this.foliateOverlayer.squiggly : this.foliateOverlayer.underline, { color })
+      draw(this.foliateOverlayer.ink, { color, style: ann.style, writingMode })
     }
     performance.mark('bd:ann:draw')
     this.reportHighlightTiming()
@@ -3768,38 +3795,58 @@ export class FoliateReader implements BookReader {
   async search(
     query: string,
     opts?: SearchOptions,
-    onProgress?: (results: SearchResult[], progress: number | null) => void,
+    onProgress?: (results: SearchResult[], progress: number | null, status?: SearchStatus) => void,
   ): Promise<SearchResult[]> {
     const q = query.trim()
     if (!q || !this.view || !this.book) return []
     // New search supersedes any in-flight one: the old loop observes the
     // generation bump and stops consuming chapters at the next boundary
     const gen = ++this.searchGen
+    this.searchAbort?.abort()
+    const controller = new AbortController()
+    this.searchAbort = controller
     this.clearSearchHighlights()
+    const book = this.book
+    const conversion = this.conversion
+    const replacements = [...this.replacements]
+    const started = performance.now()
+    const timings = { load: 0, parse: 0, replacements: 0, conversion: 0, extract: 0, chapterCacheHits: 0 }
+    let matchingMs = 0
+    let excerptMs = 0
+    let highlightMs = 0
+    let firstResultMs: number | null = null
+    let longestBatchMs = 0
 
     // Session cache hit: replay the results and restore highlight state for
     // the currently rendered sections (chapter-scoped searches are instant and
     // their key would need the section index, so they're never cached)
     const cacheable = opts?.scope !== 'chapter'
-    const replacementKey = JSON.stringify(this.replacements)
+    const replacementKey = JSON.stringify(replacements)
     const cacheKey = cacheable
-      ? `${this.url}|${opts?.scope ?? 'book'}|${opts?.mode ?? 'contains'}|${opts?.matchCase ?? false}|${this.conversion}|${replacementKey}|${q}`
+      ? `${this.url}|${opts?.scope ?? 'book'}|${opts?.mode ?? 'contains'}|${opts?.matchCase ?? false}|${conversion}|${replacementKey}|${q}`
       : ''
     const cached = cacheable ? searchCache.get(cacheKey) : undefined
     if (cached) {
       // refresh recency
       searchCache.delete(cacheKey)
       searchCache.set(cacheKey, cached)
+      const highlightStarted = performance.now()
       for (const [index, matches] of cached.matches) {
         this.searchMatchOffsets.set(index, matches)
         this.searchMatchTexts.set(index, cached.matchTexts.get(index) ?? [])
         this.drawSearchHighlights(index, matches)
       }
-      if (onProgress) onProgress(cached.results, 1)
+      highlightMs = performance.now() - highlightStarted
+      if (onProgress) onProgress(cached.results, 1, { ...cached.status })
+      if (import.meta.env.DEV) console.debug('[bd] reader search', {
+        resultCacheHit: true, totalMs: performance.now() - started,
+        highlightSubmissionMs: highlightMs, results: cached.results.length,
+      })
+      if (this.searchAbort === controller) this.searchAbort = null
       return cached.results
     }
 
-    const sections: any[] = this.book.sections ?? []
+    const sections: any[] = book.sections ?? []
     const indices: number[] = []
     if (opts?.scope === 'chapter') {
       if (sections[this.currentSectionIndex]?.id) indices.push(this.currentSectionIndex)
@@ -3812,6 +3859,8 @@ export class FoliateReader implements BookReader {
     }
 
     const results: SearchResult[] = []
+    let scannedChapters = 0
+    const status: SearchStatus = { truncated: false, incomplete: false }
     let progress: number | null = null
     let lastEmit = 0
     // Throttle partial-result emits: hundreds of matches arrive in quick bursts
@@ -3820,24 +3869,52 @@ export class FoliateReader implements BookReader {
       const now = Date.now()
       if (!force && now - lastEmit < 80) return
       lastEmit = now
-      onProgress([...results], progress)
+      if (results.length && firstResultMs === null) firstResultMs = performance.now() - started
+      onProgress([...results], progress, { ...status })
     }
-    const stale = () => gen !== this.searchGen || this.destroyed
+    const stale = () => gen !== this.searchGen || this.destroyed || controller.signal.aborted
+      || book !== this.book || conversion !== this.conversion || replacementKey !== this.replacementsJson
+    let batchStarted = performance.now()
+    const pendingChapters = new Map<number, ReturnType<typeof getChapterText>>()
+    let nextChapter = 0
 
     for (let done = 0; done < indices.length; done++) {
       if (stale()) break
+      // Bound both active loads and completed chapters waiting behind a slow one.
+      while (nextChapter < indices.length && pendingChapters.size < SEARCH_CHAPTER_CONCURRENCY) {
+        pendingChapters.set(nextChapter, getChapterText(book, indices[nextChapter]!, {
+          chineseConversion: conversion,
+          replacements,
+        }, timings))
+        nextChapter++
+      }
       const index = indices[done]!
-      const chapterText = await getChapterText(this.book, index, {
-        chineseConversion: this.conversion,
-        replacements: this.replacements,
-      })
+      const chapterText = await pendingChapters.get(done)!
+      pendingChapters.delete(done)
       if (stale()) break
+      if (!chapterText) status.incomplete = true
+      scannedChapters++
       if (chapterText?.text) {
-        const matches = findMatches(chapterText.text, q, { mode: opts?.mode, matchCase: opts?.matchCase })
+        const matchingStarted = performance.now()
+        const found = await findMatchesSafely(chapterText.text, q, {
+          mode: opts?.mode, matchCase: opts?.matchCase, limit: SEARCH_RESULT_LIMIT - results.length + 1,
+        }, controller.signal)
+        matchingMs += performance.now() - matchingStarted
+        if (stale()) break
+        if (found.error) {
+          status.incomplete = true
+          status.error = found.error
+          break
+        }
+        const remaining = SEARCH_RESULT_LIMIT - results.length
+        status.truncated = found.matches.length > remaining
+        const matches = found.matches.slice(0, remaining)
         if (matches.length) {
           const chapter = this.chapterLabel(index)
+          const excerptStarted = performance.now()
+          const excerptFor = createExcerptBuilder(chapterText.text)
           for (const m of matches) {
-            const excerpt = makeExcerpt(chapterText.text, m.start, m.end)
+            const excerpt = excerptFor(m.start, m.end)
             results.push({
               // not a CFI — a lazy jump target resolved by display()
               cfi: `search-hit:${index}:${m.start}:${m.end}`,
@@ -3847,25 +3924,36 @@ export class FoliateReader implements BookReader {
               excerpt,
             })
           }
+          excerptMs += performance.now() - excerptStarted
           this.searchMatchTexts.set(
             index,
             matches.map((match) => chapterText.text.slice(match.start, match.end)),
           )
           this.searchMatchOffsets.set(index, matches)
+          const highlightStarted = performance.now()
           this.drawSearchHighlights(index, matches)
+          highlightMs += performance.now() - highlightStarted
         }
       }
       progress = (done + 1) / indices.length
       emit()
+      const batchMs = performance.now() - batchStarted
+      longestBatchMs = Math.max(longestBatchMs, batchMs)
+      if (status.truncated) break
+      if (batchMs >= 12) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        batchStarted = performance.now()
+      }
     }
     if (!stale()) {
-      if (cacheable) {
+      if (cacheable && !status.incomplete) {
         const entry: SearchCacheEntry = {
           results: results.slice(),
           matches: new Map(this.searchMatchOffsets),
           matchTexts: new Map(
             [...this.searchMatchTexts].map(([index, matchTexts]) => [index, [...matchTexts]]),
           ),
+          status: { ...status },
         }
         searchCache.set(cacheKey, entry)
         while (searchCache.size > SEARCH_CACHE_MAX) {
@@ -3874,8 +3962,16 @@ export class FoliateReader implements BookReader {
           searchCache.delete(oldest)
         }
       }
+      if (!status.truncated && !status.incomplete) progress = 1
       emit(true)
     }
+    if (import.meta.env.DEV) console.debug('[bd] reader search', {
+      ...timings, matchingMs, excerptMs, highlightSubmissionMs: highlightMs,
+      firstResultEmissionMs: firstResultMs, totalMs: performance.now() - started,
+      resultCacheHit: false, longestBatchWallMs: longestBatchMs, results: results.length, scannedChapters,
+      canceled: stale(), ...status,
+    })
+    if (this.searchAbort === controller) this.searchAbort = null
     return results
   }
 
@@ -3888,14 +3984,14 @@ export class FoliateReader implements BookReader {
       const content = contents.find((c) => c.index === index && c.doc)
       if (!content?.doc) return
       const values: string[] = []
-      const liveText = extractChapterText(content.doc).text
-      const liveRanges = mapMatchTextsToOffsets(liveText, this.searchMatchTexts.get(index) ?? [])
+      const prepared = prepareSearchDocument(content.doc)
+      const liveRanges = mapMatchTextsToOffsets(prepared.text, this.searchMatchTexts.get(index) ?? [])
       let activeRange: Range | null = null
       for (const [matchIndex, m] of matches.entries()) {
         const liveMatch = liveRanges[matchIndex]
         const range = liveMatch
-          ? offsetsToRange(content.doc, liveMatch.start, liveMatch.end)
-          : offsetsToRange(content.doc, m.start, m.end)
+          ? prepared.toRange(liveMatch.start, liveMatch.end)
+          : prepared.toRange(m.start, m.end)
         if (!range) continue
         const cfi = this.view.getCFI(index, range)
         if (cfi) values.push(`${SEARCH_ANNOTATION_PREFIX}${cfi}`)
@@ -3972,6 +4068,8 @@ export class FoliateReader implements BookReader {
   clearSearch() {
     // bump the generation so an in-flight search loop stops feeding results
     this.searchGen++
+    this.searchAbort?.abort()
+    this.searchAbort = null
     this.clearSearchHighlights()
     try { this.view?.clearSearch?.() } catch { /* view may be partially initialized */ }
   }
@@ -4288,6 +4386,8 @@ export class FoliateReader implements BookReader {
     // stop any in-flight search loop at the next chapter boundary; the
     // highlight overlays die with the view, so only the bookkeeping is dropped
     this.searchGen++
+    this.searchAbort?.abort()
+    this.searchAbort = null
     this.activeSearchTarget = null
     this.activeSearchValue = null
     if (this.activeSearchClearTimer) clearTimeout(this.activeSearchClearTimer)

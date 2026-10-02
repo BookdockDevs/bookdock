@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { FontListItem } from '@bookdock/shared'
 
@@ -6,15 +6,23 @@ import {
   BUILTIN_FONTS,
   buildFontOptions,
   builtinImportCss,
+  canRenderCjk,
   ensureBuiltinFontLoaded,
+  ensureUploadedFontLoaded,
   fontCssFor,
   isBuiltinFontLoaded,
+  isCjkFontName,
+  resolveCjkFont,
+  resolveDualFont,
   resolveFont,
+  stackFirstFamily,
   uploadedFaceCss,
   uploadedFontAlias,
   useFontLoaderStore,
 } from '../features/reader/fonts'
 import { FONT_OPTIONS, READER_GLYPH_FALLBACK } from '../features/reader/types'
+
+import i18n from '../i18n/i18n'
 
 const uploadedFont: FontListItem = {
   id: 'abc123',
@@ -27,9 +35,10 @@ const uploadedFont: FontListItem = {
   createdAt: 0,
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await i18n.changeLanguage('zh-CN')
   localStorage.clear()
-  useFontLoaderStore.setState({ loadedIds: [], loadingIds: [] })
+  useFontLoaderStore.setState({ loadedIds: [], loadingIds: [], latinIds: [] })
 })
 
 describe('resolveFont', () => {
@@ -65,16 +74,87 @@ describe('resolveFont', () => {
   it('prefers system stacks over builtin ids and uploaded rows', () => {
     const resolved = resolveFont('serif', [{ ...uploadedFont, id: 'serif' }])
     expect(resolved.uploaded).toBeUndefined()
-    expect(resolved.stack).toBe(FONT_OPTIONS[0].value)
+    expect(resolved.stack).toBe(FONT_OPTIONS.find((f) => f.id === 'serif')!.value)
   })
 
   it('falls back when the selected font is disabled', () => {
     const resolved = resolveFont('kaiti', [], {
       kaiti: { enabled: false },
-      serif: { displayName: '正文' },
+      'sans-serif': { displayName: '正文' },
     })
     expect(resolved.name).toBe('正文')
-    expect(resolved.stack).toBe(FONT_OPTIONS[0].value)
+    expect(resolved.stack).toBe(FONT_OPTIONS.find((f) => f.id === 'sans-serif')!.value)
+  })
+})
+
+describe('resolveDualFont', () => {
+  it('keeps a CJK primary untouched when it already is the companion', () => {
+    const dual = resolveDualFont('serif', 'serif', [])
+    expect(dual.stack).toBe(FONT_OPTIONS.find((f) => f.id === 'serif')!.value)
+    expect(dual.css).toBe('')
+    expect(dual.name).toBe('宋体')
+  })
+
+  it('leads with the latin face and follows with the CJK companion chain', () => {
+    const dual = resolveDualFont('literata', 'lxgw-wenkai', [])
+    expect(dual.stack.startsWith('"Literata Variable", ')).toBe(true)
+    expect(dual.stack).toContain('"LXGW WenKai"')
+    expect(dual.css).toContain('fontsource-variable/literata')
+    expect(dual.css).toContain('lxgw-wenkai-webfont')
+  })
+
+  it('combines css only for the non-system faces in use', () => {
+    const dual = resolveDualFont('serif-en', 'serif', [])
+    expect(dual.stack.startsWith('"Georgia", ')).toBe(true)
+    expect(dual.css).toBe('')
+  })
+
+  it('never resolves the companion to a latin entry', () => {
+    const companion = resolveCjkFont('serif-en', [])
+    expect(companion.stack).not.toContain('Georgia')
+    expect(stackFirstFamily('ui-monospace, "SF Mono", serif')).toBe('ui-monospace')
+  })
+})
+
+describe('uploaded CJK detection', () => {
+  it('classifies family names by readest CJK signals', () => {
+    expect(isCjkFontName('Noto Serif SC')).toBe(true)
+    expect(isCjkFontName('Source Han Serif SC')).toBe(true)
+    expect(isCjkFontName('霞鹜文楷')).toBe(true)
+    expect(isCjkFontName('LXGW WenKai')).toBe(true)
+    expect(isCjkFontName('Literata')).toBe(false)
+    expect(isCjkFontName('Georgia')).toBe(false)
+    expect(isCjkFontName('STIX Two Text')).toBe(false)
+    expect(isCjkFontName('')).toBe(false)
+  })
+
+  it('marks store-flagged uploads as latin and keeps them out of the CJK companion', () => {
+    useFontLoaderStore.setState({ loadedIds: [], loadingIds: [], latinIds: ['abc123'] })
+    const options = buildFontOptions([uploadedFont])
+    expect(options.find((o) => o.id === 'abc123')?.latin).toBe(true)
+    expect(resolveCjkFont('abc123', [uploadedFont]).stack).not.toContain('bd-font-abc123')
+  })
+
+  it('pre-marks by name and corrects after the face loads', async () => {
+    const load = vi.fn().mockResolvedValue([])
+    const check = vi.fn().mockReturnValue(true)
+    Object.defineProperty(document, 'fonts', { value: { load, check }, configurable: true, writable: true })
+    try {
+      // English-looking name pre-marks latin, then check() proves CJK and clears it
+      await ensureUploadedFontLoaded({ ...uploadedFont, id: 'pre-mark', family: 'My English Font' })
+      expect(load).toHaveBeenCalled()
+      expect(useFontLoaderStore.getState().latinIds).not.toContain('pre-mark')
+      // CJK name never pre-marks
+      await ensureUploadedFontLoaded({ ...uploadedFont, id: 'cjk-face', family: '思源测试体' })
+      expect(useFontLoaderStore.getState().latinIds).not.toContain('cjk-face')
+      // a failing check marks latin afterwards
+      check.mockReturnValue(false)
+      expect(canRenderCjk('whatever')).toBe(false)
+      await ensureUploadedFontLoaded({ ...uploadedFont, id: 'latin-face', family: 'My English Font 2' })
+      expect(useFontLoaderStore.getState().latinIds).toContain('latin-face')
+    } finally {
+      Reflect.deleteProperty(document, 'fonts')
+    }
   })
 })
 
@@ -142,13 +222,16 @@ describe('buildFontOptions', () => {
   it('orders system → builtin → uploaded by default', () => {
     const options = buildFontOptions([uploadedFont])
     expect(options.map((o) => o.id)).toEqual([
-      'serif',
       'sans-serif',
-      'kaiti',
-      'fangsong',
-      'lxgw-wenkai',
+      'serif',
       'noto-serif-sc',
       'noto-sans-sc',
+      'lxgw-wenkai',
+      'kaiti',
+      'fangsong',
+      'literata',
+      'serif-en',
+      'sans-en',
       'abc123',
     ])
     expect(options.at(-1)).toMatchObject({
@@ -169,6 +252,9 @@ describe('buildFontOptions', () => {
       'sans-serif',
       'kaiti',
       'fangsong',
+      'serif-en',
+      'sans-en',
+      'literata',
     ])
     expect(options.map((option) => option.id)).toEqual([
       'abc123',
@@ -179,16 +265,19 @@ describe('buildFontOptions', () => {
       'sans-serif',
       'kaiti',
       'fangsong',
+      'serif-en',
+      'sans-en',
+      'literata',
     ])
   })
 
   it('derives the builtin status tri-state from the loader store', () => {
     expect(buildFontOptions().find((o) => o.id === 'lxgw-wenkai')?.status).toBe('idle')
 
-    useFontLoaderStore.setState({ loadedIds: [], loadingIds: ['lxgw-wenkai'] })
+    useFontLoaderStore.setState({ loadedIds: [], loadingIds: ['lxgw-wenkai'], latinIds: [] })
     expect(buildFontOptions().find((o) => o.id === 'lxgw-wenkai')?.status).toBe('loading')
 
-    useFontLoaderStore.setState({ loadedIds: ['lxgw-wenkai'], loadingIds: [] })
+    useFontLoaderStore.setState({ loadedIds: ['lxgw-wenkai'], loadingIds: [], latinIds: [] })
     expect(buildFontOptions().find((o) => o.id === 'lxgw-wenkai')?.status).toBe('ready')
   })
 
@@ -213,5 +302,32 @@ describe('buildFontOptions', () => {
     const sans = BUILTIN_FONTS.find((f) => f.id === 'noto-sans-sc')!
     expect(sans.cssUrl).toContain('@fontsource-variable/noto-sans-sc')
     expect(sans.family).toContain('Noto Sans SC Variable')
+  })
+
+  it('exposes the wenkai and an English serif CDN entry', () => {
+    const wenkai = BUILTIN_FONTS.find((f) => f.id === 'lxgw-wenkai')!
+    expect(wenkai.cssUrl).toContain('lxgw-wenkai-webfont')
+    expect(wenkai.family).toContain('LXGW WenKai')
+    const literata = BUILTIN_FONTS.find((f) => f.id === 'literata')!
+    expect(literata.cssUrl).toContain('@fontsource-variable/literata')
+    expect(literata.family).toContain('Literata Variable')
+  })
+
+  it('keeps system songti/hei stacks on local fonts ahead of Noto', () => {
+    const serif = FONT_OPTIONS.find((f) => f.id === 'serif')!
+    expect(serif.name).toBe('宋体')
+    expect(serif.value.indexOf('"Songti SC"')).toBeLessThan(serif.value.indexOf('"Noto Serif SC"'))
+    const sans = FONT_OPTIONS.find((f) => f.id === 'sans-serif')!
+    expect(sans.name).toBe('黑体')
+    expect(sans.value.indexOf('"PingFang SC"')).toBeLessThan(sans.value.indexOf('"Noto Sans SC"'))
+  })
+
+  it('marks only the western entries as latin', () => {
+    const options = buildFontOptions()
+    expect(options.filter((o) => o.latin).map((o) => o.id).sort()).toEqual(
+      ['literata', 'sans-en', 'serif-en'].sort(),
+    )
+    expect(options.find((o) => o.id === 'serif')?.latin).toBe(false)
+    expect(options.find((o) => o.id === 'lxgw-wenkai')?.latin).toBe(false)
   })
 })

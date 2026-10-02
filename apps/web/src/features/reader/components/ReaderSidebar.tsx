@@ -307,6 +307,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
           bookId={bookId}
           open={sidebarOpen}
           locked={panelLocked}
+          sidebarWidth={panelWidth}
           statsDisabled={statsDisabled}
           guestReadOnly={guestReadOnly}
           footerVisible={footerVisible}

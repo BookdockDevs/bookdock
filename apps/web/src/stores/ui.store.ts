@@ -80,6 +80,7 @@ interface UiState {
   lightReadingThemeId: string
   customThemes: CustomReadingTheme[]
   fontFamily: FontFamily
+  cjkFontFamily: FontFamily
   fontPreferences: FontPreferences
   fontOrder: string[]
   fontSize: number
@@ -237,6 +238,7 @@ interface UiState {
    */
   resetUserScopedPrefs: () => void
   setFontFamily: (f: FontFamily) => void
+  setCjkFontFamily: (f: FontFamily) => void
   setFontPreference: (id: string, preference: FontPreferences[string]) => void
   removeFontPreference: (id: string) => void
   setFontOrder: (order: string[]) => void
@@ -411,7 +413,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   readingThemeId: getInitial<string>('bd-read-theme', 'paper'),
   lightReadingThemeId: getInitial<string>('bd-read-theme-light', 'paper'),
   customThemes: getInitialCustomThemes(),
-  fontFamily: getInitial<FontFamily>('bd-font-family', 'serif'),
+  fontFamily: getInitial<FontFamily>('bd-font-family', 'sans-serif'),
+  cjkFontFamily: getInitial<FontFamily>('bd-cjk-font-family', 'sans-serif'),
   fontPreferences: {},
   fontOrder: [],
   fontSize: getInitialNumber('bd-font-size', 18, 12, 64),
@@ -682,6 +685,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setFontFamily: (fontFamily) => {
     setStorage('bd-font-family', fontFamily)
     set({ fontFamily })
+  },
+  setCjkFontFamily: (cjkFontFamily) => {
+    setStorage('bd-cjk-font-family', cjkFontFamily)
+    set({ cjkFontFamily })
   },
   setFontPreference: (id, preference) => {
     const current = get().fontPreferences[id] ?? {}

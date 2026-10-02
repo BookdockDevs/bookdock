@@ -8,6 +8,34 @@ const PAGE_SIZE = { width: 400, height: 340 }
 const MARGIN = 12
 const GAP = 14
 
+describe('selection-fragment editor placement', () => {
+  it('avoids multi-line fragments inside the reading viewport', () => {
+    const rects = [{ left: 340, top: 250, width: 540, height: 30 }, { left: 340, top: 290, width: 200, height: 30 }]
+    const pos = noteEditorPosition(rects[1], 'scroll', { width: 400, height: 200 }, VIEWPORT, {
+      rects, bounds: { left: 320, top: 40, width: 640, height: 700 }, backward: false, focusX: 540,
+    })
+    expect(pos.left).toBeGreaterThanOrEqual(320)
+    expect(pos.left + pos.width!).toBeLessThanOrEqual(960)
+    for (const rect of rects) {
+      const overlap = Math.max(0, Math.min(pos.left + pos.width!, rect.left + rect.width) - Math.max(pos.left, rect.left))
+        * Math.max(0, Math.min(pos.top + 200, rect.top + rect.height) - Math.max(pos.top, rect.top))
+      expect(overlap).toBe(0)
+    }
+  })
+
+  it('fits a narrow keyboard-reduced viewport and hides misleading arrows', () => {
+    const bounds = { left: 0, top: 100, width: 320, height: 160 }
+    const rect = { left: 20, top: 150, width: 270, height: 30 }
+    const pos = noteEditorPosition(rect, 'page', { width: 296, height: 380 }, VIEWPORT, {
+      bounds, rects: [rect], backward: true, focusX: 20,
+    })
+    expect(pos.top).toBeGreaterThanOrEqual(bounds.top)
+    expect(pos.top + pos.maxHeight!).toBeLessThanOrEqual(bounds.top + bounds.height)
+    expect(pos.left + pos.width!).toBeLessThanOrEqual(320)
+    expect(pos.arrowOffset).toBeNull()
+  })
+})
+
 describe('noteEditorPosition — scroll mode (stacked)', () => {
   it('places the bubble below the selection when there is room', () => {
     const rect = { left: 360, top: 120, width: 200, height: 40 }

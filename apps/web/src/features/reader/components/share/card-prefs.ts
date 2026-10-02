@@ -42,6 +42,7 @@ export function cardColors(id: ShareCardBackground): CardColors {
 export interface ShareCardPrefs {
   template: ShareCardTemplate
   font: FontFamily
+  cjkFont: FontFamily
   background: ShareCardBackground
   /** Footer brand zone: hidden / "Bookdock" / "书坞". QR codes are a documented
    *  future seam (book sharing), decided against for now */
@@ -60,6 +61,7 @@ export function nextBrand(brand: ShareCardBrand): ShareCardBrand {
 export const DEFAULT_SHARE_CARD_PREFS: ShareCardPrefs = {
   template: 'classic',
   font: 'serif',
+  cjkFont: 'serif',
   background: 'cream',
   brand: 'en',
 }
@@ -83,6 +85,9 @@ export function loadShareCardPrefs(): ShareCardPrefs {
       font: typeof parsed.font === 'string' && parsed.font !== ''
         ? parsed.font
         : DEFAULT_SHARE_CARD_PREFS.font,
+      cjkFont: typeof parsed.cjkFont === 'string' && parsed.cjkFont !== ''
+        ? parsed.cjkFont
+        : DEFAULT_SHARE_CARD_PREFS.cjkFont,
       background: BACKGROUND_IDS.includes(parsed.background as ShareCardBackground)
         ? (parsed.background as ShareCardBackground)
         : DEFAULT_SHARE_CARD_PREFS.background,

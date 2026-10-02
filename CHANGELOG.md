@@ -9,10 +9,17 @@ All notable changes to Bookdock are documented here.
 - Content revisions are pruned by the boot/periodic sweep: only the newest revision per book version (plus any still pinned by a library card) is kept, and orphaned blobs are collected.
 - Every content write moves all collected shared pins to the new revision in the same transaction (private/shared re-chaptering, private/catalog metadata resets); migration 0037 moves forward pins left behind by the removed re-pin flow, and freshly collected cards start without an unread-update mark.
 - Shared-library re-toc, append, and push retire version-scoped reader caches, so entering the reader no longer flashes the stale chapter list.
+- Separate CJK font companion in the reader and share cards: Latin-first fonts pair with a CJK companion chain, uploaded fonts are auto-detected for CJK coverage, and font names are localized.
+- Reader full-text search rewritten for large books: capped results with explicit truncation/failure notices, background regex matching with timeout, and Enter/Shift+Enter navigation.
 
 ### Changed
 
+- Default reading font is now sans-serif; existing choices are preserved.
+- AI reading scope simplified to two options (to here / full book); stored current-chapter values fall back to the default.
 - Share cards show the full author list instead of the first author only, use slightly smaller excerpt type with looser line spacing, and give the chapter a smaller, dimmer suffix after a semibold title.
+- Personal annotation ink redrawn with tapered strokes (dashed ideas, pen-style highlights repainted on theme change); notes-list styling unified.
+- Selection toolbar and idea editor share one placement kernel; the idea editor is a single compact style without a pointer arrow.
+- Directory search UI reworked: persistent header controls, full-width input, keyboard result navigation, and an always-visible compact result capsule.
 
 ### Fixed
 
@@ -528,10 +535,17 @@ All notable changes to Bookdock are documented here.
 - 内容版本改为只保留最新：启动与定时清理会删除旧内容修订（书卡仍 pin 住的除外），并回收无引用的内容文件
 - 所有内容写入在同一事务内把已收藏共享 pin 推到新版本（私人/共享重建目录、私人/目录元数据重置）；迁移 0037 把旧手动跟进时代遗留的落后 pin 一次推到最新；新收藏默认没有未读更新标记
 - 共享书库重建目录/追写/推送后同步失效阅读器版本级缓存，进书不再闪旧目录
+- 阅读器与分享卡片支持"中文字体"伴侣：西文主字体自动搭配中文字体；上传字体自动识别是否含中文；字体名中英本地化
+- 全文搜索重写：结果上限 2000 并明确提示截断/失败（正则超时、章节加载不全），正则在后台线程匹配，Enter/Shift+Enter 可直接跳转
 
 #### 变更
 
+- 默认阅读字体改为黑体；已有选择不受影响
+- AI 阅读范围简化为两档（读到此处/全书），旧的"当前章节"存量回退默认
 - 分享卡片作者行显示完整作者列表（不再只显示首作者）；摘录字号略收紧、行距放宽；标题加粗，章节变为小字弱化后缀
+- 个人标注墨水重绘（虚线想法、钢笔感高亮随主题重绘）；笔记列表样式统一
+- 选中工具条与想法编辑器共用一套定位内核；想法编辑器统一为紧凑单一样式（无小箭头）
+- 目录搜索栏重做：常驻头部控件、全宽输入、键盘上下条跳转、常驻紧凑结果胶囊
 
 #### 修复
 

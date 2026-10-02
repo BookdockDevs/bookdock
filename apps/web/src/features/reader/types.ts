@@ -87,6 +87,7 @@ export interface SelectionInfo {
   rawText?: string
   anchor?: string
   rect?: PopupRect
+  geometry?: SelectionGeometry
   /** Point-patch anchor: character offset of the selection start in the
    * section's text content (same traversal applyReplacements counts). */
   startOffset?: number
@@ -99,6 +100,14 @@ export interface SelectionInfo {
   /** When set on instantAnnotation, the selection toolbar stays open so the
    * user can restyle right after auto-marking ("选中即划" mode). */
   keepSelection?: boolean
+}
+
+export interface SelectionGeometry {
+  rects: PopupRect[]
+  bounds: PopupRect
+  columnBounds?: PopupRect
+  backward: boolean
+  focusX: number
 }
 
 export interface AiIndexCorpus {
@@ -239,7 +248,7 @@ export interface BookReader {
   search(
     query: string,
     opts?: SearchOptions,
-    onProgress?: (results: SearchResult[], progress: number | null) => void,
+    onProgress?: (results: SearchResult[], progress: number | null, status?: SearchStatus) => void,
   ): Promise<SearchResult[]>
   getSnippet(cfi: string, maxLength?: number): string
   /** Read the visible paragraph at the current reading position. */
@@ -301,6 +310,12 @@ export interface SearchOptions {
   mode?: 'contains' | 'regex'
 }
 
+export interface SearchStatus {
+  truncated: boolean
+  incomplete: boolean
+  error?: 'regex-timeout' | 'regex-unavailable' | 'regex-failed'
+}
+
 export interface SearchResult {
   cfi: string
   text: string
@@ -313,7 +328,7 @@ export interface SearchResult {
 export type NavTab = 'toc' | 'notes' | 'stats' | 'ai'
 export type PageWidth = number
 
-// Font ids: the four system stacks below, builtin CDN ids (fonts.ts), or
+// Font ids: the system stacks below, builtin CDN ids (fonts.ts), or
 // uploaded font ids — the registry resolves any id to a concrete stack
 export type FontFamily = string
 
@@ -324,11 +339,13 @@ export type FontFamily = string
  */
 export const READER_GLYPH_FALLBACK = '"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI Symbol", "Noto Sans Symbols 2", "Noto Sans Symbols", "Arial Unicode MS"'
 
-export const FONT_OPTIONS: { id: FontFamily; name: string; value: string }[] = [
-  { id: 'serif', name: '宋体', value: `"Noto Serif SC", "Source Han Serif SC", "Source Han Serif", "Songti SC", "SimSun", ${READER_GLYPH_FALLBACK}, serif` },
-  { id: 'sans-serif', name: '黑体', value: `"Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", ${READER_GLYPH_FALLBACK}, sans-serif` },
+export const FONT_OPTIONS: { id: FontFamily; name: string; value: string; latin?: boolean }[] = [
+  { id: 'sans-serif', name: '黑体', value: `"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Microsoft YaHei UI", "Noto Sans SC", "Source Han Sans SC", ${READER_GLYPH_FALLBACK}, sans-serif` },
+  { id: 'serif', name: '宋体', value: `"Songti SC", "SimSun", "Noto Serif SC", "Source Han Serif SC", "Source Han Serif", ${READER_GLYPH_FALLBACK}, serif` },
   { id: 'kaiti', name: '楷体', value: `"KaiTi", "KaiTi_GB2312", "STKaiti", "BiauKai", ${READER_GLYPH_FALLBACK}, serif` },
   { id: 'fangsong', name: '仿宋', value: `"FangSong", "FangSong_GB2312", "STFangsong", ${READER_GLYPH_FALLBACK}, serif` },
+  { id: 'serif-en', name: '西文衬线', latin: true, value: `"Georgia", "Times New Roman", "Songti SC", "SimSun", ${READER_GLYPH_FALLBACK}, serif` },
+  { id: 'sans-en', name: '西文无衬线', latin: true, value: `"Inter", "Helvetica Neue", "Helvetica", "Arial", "PingFang SC", "Microsoft YaHei", ${READER_GLYPH_FALLBACK}, sans-serif` },
 ]
 
 export interface FontConfig {

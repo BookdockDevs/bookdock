@@ -312,10 +312,13 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
   const uploadedFonts = useMemo(() => fontsData?.data ?? [], [fontsData])
   const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
   const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
+  const fontLatinIds = useFontLoaderStore((s) => s.latinIds)
 
   const {
     fontFamily,
     setFontFamily,
+    cjkFontFamily,
+    setCjkFontFamily,
     fontPreferences,
     fontOrder,
     fontSize,
@@ -393,17 +396,24 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
   const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
 
   const fontOptions = useMemo(
-    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds }, fontPreferences, fontOrder),
+    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds, latinIds: fontLatinIds }, fontPreferences, fontOrder),
     // loaded/loading ids feed a builtin option's status icon
-    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontPreferences, fontOrder],
+    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontLatinIds, fontPreferences, fontOrder],
   )
   const enabledFontOptions = useMemo(() => fontOptions.filter((option) => option.enabled), [fontOptions])
+  const enabledCjkOptions = useMemo(() => enabledFontOptions.filter((option) => !option.latin), [enabledFontOptions])
   const [fontsExpanded, setFontsExpanded] = useState(false)
+  const [cjkExpanded, setCjkExpanded] = useState(false)
 
   // Selecting applies immediately (font-display: swap renders the fallback
   // first); the click only kicks off the download as visual feedback
   function onSelectFont(opt: FontOption) {
     setFontFamily(opt.id)
+    if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
+  }
+
+  function onSelectCjkFont(opt: FontOption) {
+    setCjkFontFamily(opt.id)
     if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
   }
 
@@ -421,8 +431,15 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
     if (fallback) setFontFamily(fallback.id)
   }, [enabledFontOptions, fontFamily, setFontFamily])
 
-  let visibleFontOptions = fontsExpanded ? enabledFontOptions : enabledFontOptions.slice(0, FONT_CHIPS_VISIBLE)
-  if (!fontsExpanded) {
+  useEffect(() => {
+    if (enabledCjkOptions.some((option) => option.id === cjkFontFamily)) return
+    const fallback = enabledCjkOptions[0] ?? enabledFontOptions[0]
+    if (fallback) setCjkFontFamily(fallback.id)
+  }, [enabledCjkOptions, enabledFontOptions, cjkFontFamily, setCjkFontFamily])
+
+  const shouldCollapsePrimary = enabledFontOptions.length > FONT_CHIPS_VISIBLE + 1
+  let visibleFontOptions = (!shouldCollapsePrimary || fontsExpanded) ? enabledFontOptions : enabledFontOptions.slice(0, FONT_CHIPS_VISIBLE)
+  if (shouldCollapsePrimary && !fontsExpanded) {
     const selectedIndex = enabledFontOptions.findIndex((o) => o.id === fontFamily)
     if (selectedIndex >= FONT_CHIPS_VISIBLE) {
       // The selection must stay visible: it takes the last visible slot and
@@ -430,6 +447,20 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
       visibleFontOptions = [...enabledFontOptions.slice(0, FONT_CHIPS_VISIBLE - 1), enabledFontOptions[selectedIndex]]
     }
   }
+
+  const shouldCollapseCjk = enabledCjkOptions.length > FONT_CHIPS_VISIBLE + 1
+  let visibleCjkOptions = (!shouldCollapseCjk || cjkExpanded) ? enabledCjkOptions : enabledCjkOptions.slice(0, FONT_CHIPS_VISIBLE)
+  if (shouldCollapseCjk && !cjkExpanded) {
+    const selectedIndex = enabledCjkOptions.findIndex((o) => o.id === cjkFontFamily)
+    if (selectedIndex >= FONT_CHIPS_VISIBLE) {
+      // The selection must stay visible: it takes the last visible slot and
+      // the original occupant shifts into the hidden tail
+      visibleCjkOptions = [...enabledCjkOptions.slice(0, FONT_CHIPS_VISIBLE - 1), enabledCjkOptions[selectedIndex]]
+    }
+  }
+
+  const selectedPrimaryFont = enabledFontOptions.find((o) => o.id === fontFamily)
+  const showCjkFontPicker = selectedPrimaryFont?.latin ?? false
 
   // Per-book layer (F1): when inside the reader, the first-batch settings
   // display the merged effective values and writes route to the per-book diff
@@ -530,7 +561,9 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
       {section === 'font' && (
         <div>
           <div className="mb-5">
-            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.sectionFont')}</label>
+            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">
+              {showCjkFontPicker ? _('reader.primaryFont') : _('reader.sectionFont')}
+            </label>
             <div className="grid grid-cols-2 gap-2">
               {visibleFontOptions.map((opt) => (
                 <button
@@ -544,13 +577,37 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
                   {opt.status === 'loading' && <SpinnerIcon size={12} />}
                 </button>
               ))}
-              {enabledFontOptions.length > FONT_CHIPS_VISIBLE && (
+              {shouldCollapsePrimary && (
                 <button onClick={() => setFontsExpanded((v) => !v)} className={fontChipClass(false)}>
                   {_(fontsExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
                 </button>
               )}
             </div>
           </div>
+          {showCjkFontPicker && (
+            <div className="mb-5">
+              <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.cjkFont')}</label>
+              <div className="grid grid-cols-2 gap-2">
+                {visibleCjkOptions.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => onSelectCjkFont(opt)}
+                    className={fontChipClass(cjkFontFamily === opt.id)}
+                    style={{ fontFamily: opt.stack }}
+                  >
+                    {opt.name}
+                    {opt.status === 'idle' && <DownloadIcon size={12} />}
+                    {opt.status === 'loading' && <SpinnerIcon size={12} />}
+                  </button>
+                ))}
+                {shouldCollapseCjk && (
+                  <button onClick={() => setCjkExpanded((v) => !v)} className={fontChipClass(false)}>
+                    {_(cjkExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           <SliderRow
             label={_('reader.fontSize')}

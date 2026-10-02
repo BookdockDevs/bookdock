@@ -86,7 +86,7 @@ export function normalizeAiToolName(value: unknown): AiToolName | undefined {
   return AI_TOOL_NAME_ALIASES[value]
 }
 
-export const AI_READING_SCOPES = ['to_here', 'current_chapter', 'full_book'] as const
+export const AI_READING_SCOPES = ['to_here', 'full_book'] as const
 export type AiReadingScope = (typeof AI_READING_SCOPES)[number]
 export const AI_DEFAULT_READING_SCOPE: AiReadingScope = 'to_here'
 

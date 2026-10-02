@@ -326,7 +326,6 @@ describe('ai routes', () => {
     vi.mocked(getProgress).mockResolvedValue({ chapterIndex: 1 } as never)
 
     await expect(getAiReadingBoundary('member-1', 'book-1', 'to_here')).resolves.toEqual({ minChapterIndex: 0, maxChapterIndex: 1, currentChapterIndex: 1, readingScope: 'to_here' })
-    await expect(getAiReadingBoundary('member-1', 'book-1', 'current_chapter')).resolves.toEqual({ minChapterIndex: 1, maxChapterIndex: 1, currentChapterIndex: 1, readingScope: 'current_chapter' })
     await expect(getAiReadingBoundary('member-1', 'book-1', 'full_book')).resolves.toEqual({ minChapterIndex: 0, maxChapterIndex: 2, currentChapterIndex: 1, readingScope: 'full_book' })
   })
 
@@ -887,7 +886,7 @@ describe('ai routes', () => {
   it('persists the latest conversation settings for new threads', async () => {
     const app = createApp({ id: 'member-1', role: 'member' })
     const latestSettings = {
-      readingScope: 'current_chapter',
+      readingScope: 'full_book',
       enabledTools: ['search_book'],
       assistantModeId: 'assistant',
     }
@@ -1581,7 +1580,7 @@ describe('ai routes', () => {
       body: JSON.stringify({
         ...requestBody,
         enabledTools: ['search_book'],
-        readingScope: 'current_chapter',
+        readingScope: 'full_book',
         assistantMode: '书评人',
         context: { ...requestBody.context, chapterReferences: [{ chapterIndex: 2, chapterTitle: '第三章', text: '显式章节' }] },
       }),
@@ -1590,7 +1589,7 @@ describe('ai routes', () => {
     expect(response.status).toBe(200)
     const stream = await response.text()
     expect(stream).toContain('我会只根据已启用的能力回答。')
-    expect(stream).toContain('"readingScope":"current_chapter"')
+    expect(stream).toContain('"readingScope":"full_book"')
     expect(stream).toContain('"enabledTools":["search_book"]')
     expect(stream).toContain('"assistantMode":"书评人"')
     expect(stream).toContain('"directChapterReferences":[{"chapterIndex":2,"chapterTitle":"第三章"}]')

@@ -273,8 +273,8 @@ function storedAssistantModes(value: StoredAiConfig): AiAssistantMode[] {
 
 function normalizeConversationSettings(value: unknown, modes: readonly AiAssistantMode[]): AiConversationSettings {
   const raw = value && typeof value === 'object' ? value as { readingScope?: unknown; enabledTools?: unknown; assistantModeId?: unknown } : {}
-  const readingScope = raw.readingScope === 'current_chapter' || raw.readingScope === 'full_book'
-    ? raw.readingScope
+  const readingScope: AiReadingScope = raw.readingScope === 'full_book'
+    ? 'full_book'
     : DEFAULT_LAST_USED_CONVERSATION_SETTINGS.readingScope
   const storedTools = Array.isArray(raw.enabledTools) ? raw.enabledTools : null
   const enabledTools = storedTools
@@ -1845,9 +1845,7 @@ export async function getAiReadingBoundary(userId: string, bookId: string, readi
   }
   currentChapterIndex = Math.max(0, Math.min(currentChapterIndex, Math.max(0, lastChapterIndex)))
   if (readingScope === 'full_book') return { minChapterIndex: 0, maxChapterIndex: lastChapterIndex, currentChapterIndex, readingScope }
-  return readingScope === 'current_chapter'
-    ? { minChapterIndex: currentChapterIndex, maxChapterIndex: currentChapterIndex, currentChapterIndex, readingScope }
-    : { minChapterIndex: 0, maxChapterIndex: currentChapterIndex, currentChapterIndex, readingScope }
+  return { minChapterIndex: 0, maxChapterIndex: currentChapterIndex, currentChapterIndex, readingScope: 'to_here' }
 }
 
 export async function getAiSearchChapterLimit(userId: string, bookId: string) {

@@ -1,17 +1,15 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore } from '@/stores/ui.store'
 
-import type { PopupRect } from '../types'
+import type { PopupRect, SelectionGeometry } from '../types'
 import { markEscConsumed } from '../lib/esc-consumed'
 import { BulbIcon, CloseIcon } from './annotation-icons'
 import { noteEditorPosition, type NotePlacement } from './note-editor-position'
 
 const VIEWPORT_MARGIN = 12
-const SCROLL_SIZE = { width: 560, height: 300 }
-const PAGE_SIZE = { width: 400, height: 340 }
-const ARROW_SIZE = 14
+const EDITOR_WIDTH = 400
 
 /** Enter-animation start offset: the bubble slides in from the selection side */
 const ANIMATION_OFFSET: Record<NotePlacement, { dx: string; dy: string }> = {
@@ -21,37 +19,29 @@ const ANIMATION_OFFSET: Record<NotePlacement, { dx: string; dy: string }> = {
   left: { dx: '8px', dy: '0px' },
 }
 
-function arrowStyle(placement: NotePlacement, offset: number): CSSProperties {
-  const half = ARROW_SIZE / 2
-  switch (placement) {
-    case 'right':
-      return { left: -half, top: offset - half }
-    case 'left':
-      return { right: -half, top: offset - half }
-    case 'below':
-      return { top: -half, left: offset - half }
-    case 'above':
-      return { bottom: -half, left: offset - half }
-  }
-}
-
 interface NoteEditorPopupProps {
   rect?: PopupRect
+  geometry?: SelectionGeometry
   initialNote: string
   saving: boolean
   onSave: (note: string) => void
   onClose: () => void
 }
 
-export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: NoteEditorPopupProps) {
+export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, onClose }: NoteEditorPopupProps) {
   const _ = useTranslation()
   const readingMode = useUiStore((s) => s.readingMode)
   const [draft, setDraft] = useState(initialNote)
   const [viewport, setViewport] = useState(() => ({
     width: window.visualViewport?.width ?? window.innerWidth,
     height: window.visualViewport?.height ?? window.innerHeight,
+    left: window.visualViewport?.offsetLeft ?? 0,
+    top: window.visualViewport?.offsetTop ?? 0,
+    bounds: geometry?.bounds,
   }))
   const rootRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [contentHeight, setContentHeight] = useState(88)
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -73,29 +63,59 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
 
   useEffect(() => {
     const visualViewport = window.visualViewport
+    const readingViewport = document.querySelector('[data-reader-viewport]')
     const updateViewport = () => {
+      const bounds = readingViewport?.getBoundingClientRect()
       setViewport({
         width: visualViewport?.width ?? window.innerWidth,
         height: visualViewport?.height ?? window.innerHeight,
+        left: visualViewport?.offsetLeft ?? 0,
+        top: visualViewport?.offsetTop ?? 0,
+        bounds: bounds && bounds.width > 0 ? { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height } : geometry?.bounds,
       })
     }
     updateViewport()
     window.addEventListener('resize', updateViewport)
     visualViewport?.addEventListener('resize', updateViewport)
     visualViewport?.addEventListener('scroll', updateViewport)
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateViewport) : null
+    if (readingViewport) observer?.observe(readingViewport)
     return () => {
       window.removeEventListener('resize', updateViewport)
       visualViewport?.removeEventListener('resize', updateViewport)
       visualViewport?.removeEventListener('scroll', updateViewport)
+      observer?.disconnect()
     }
-  }, [])
+  }, [geometry?.bounds])
 
-  const isPage = readingMode === 'page'
-  const base = isPage ? PAGE_SIZE : SCROLL_SIZE
-  const size = { width: Math.min(base.width, viewport.width - VIEWPORT_MARGIN * 2), height: base.height }
-  const pos = noteEditorPosition(rect, readingMode, size, viewport)
-  const arrowOffset = pos.arrowOffset ?? 0
-  const showArrow = isPage && pos.arrowOffset !== null
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const previous = textarea.style.height
+    const previousFlex = textarea.style.flex
+    textarea.style.flex = 'none'
+    textarea.style.height = '0px'
+    setContentHeight(Math.max(88, textarea.scrollHeight))
+    textarea.style.height = previous
+    textarea.style.flex = previousFlex
+  }, [draft, viewport.width, viewport.bounds?.width])
+
+  const available = viewport.bounds
+  const left = Math.max(viewport.left, available?.left ?? viewport.left)
+  const top = Math.max(viewport.top, available?.top ?? viewport.top)
+  const right = Math.min(viewport.left + viewport.width, available ? available.left + available.width : viewport.left + viewport.width)
+  const bottom = Math.min(viewport.top + viewport.height, available ? available.top + available.height : viewport.top + viewport.height)
+  const bounds = { left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) }
+  const size = {
+    width: Math.max(1, Math.min(EDITOR_WIDTH, bounds.width - VIEWPORT_MARGIN * 2)),
+    height: Math.min(380, Math.max(200, contentHeight + 112)),
+  }
+  const liveGeometry: SelectionGeometry = {
+    rects: geometry?.rects ?? (rect ? [rect] : []), bounds,
+    backward: geometry?.backward ?? false,
+    focusX: geometry?.focusX ?? (rect ? rect.left + rect.width / 2 : left + bounds.width / 2),
+  }
+  const pos = noteEditorPosition(rect, readingMode, size, viewport, liveGeometry)
   const anim = ANIMATION_OFFSET[pos.placement]
 
   function submit() {
@@ -104,6 +124,7 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
 
   const textarea = (
     <textarea
+      ref={textareaRef}
       autoFocus
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
@@ -131,12 +152,14 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
   return (
     <div
       ref={rootRef}
-      className="fixed z-50"
+      role="dialog"
+      aria-label={_('annotation.noteTitle')}
+      className="fixed z-[70]"
       style={
         {
           left: pos.left,
           top: pos.top,
-          width: size.width,
+          width: pos.width ?? size.width,
           height: pos.maxHeight ?? size.height,
           animation: 'note-editor-in 140ms ease-out forwards',
           '--note-dx': anim.dx,
@@ -144,61 +167,24 @@ export function NoteEditorPopup({ rect, initialNote, saving, onSave, onClose }: 
         } as CSSProperties
       }
     >
-      {showArrow && (
-        <span
-          className="absolute rotate-45 border border-[var(--bd-read-accent)]/80 shadow-2xl"
-          style={{
-            width: ARROW_SIZE,
-            height: ARROW_SIZE,
-            backgroundColor: 'var(--bd-read-bg)',
-            ...arrowStyle(pos.placement, arrowOffset),
-          }}
-        />
-      )}
-      {isPage ? (
-        <div
-          className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-[var(--bd-read-accent)]/80 shadow-2xl"
-          style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)' }}
-        >
-          <div className="relative flex h-11 shrink-0 items-center justify-center border-b border-[var(--bd-read-accent)]/60">
-            <span className="text-sm font-medium">{_('annotation.noteTitle')}</span>
-            <button
-              onClick={onClose}
-              title={_('annotation.cancel')}
-              className="absolute right-3 flex h-7 w-7 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
-            >
-              <CloseIcon />
-            </button>
-          </div>
-          <div className="flex min-h-0 flex-1 gap-2 px-4 py-3">
-            <span className="mt-0.5 shrink-0 text-[var(--bd-read-sub)]">
-              <BulbIcon />
-            </span>
-            {textarea}
-          </div>
-          <div className="flex shrink-0 items-center justify-end px-4 pb-3.5">{publishButton}</div>
-        </div>
-      ) : (
-        <div
-          className="relative flex h-full flex-col rounded-2xl border border-[var(--bd-read-accent)]/80 shadow-2xl"
-          style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)' }}
-        >
+      <div
+        className="relative flex h-full flex-col overflow-hidden rounded-xl border border-[var(--bd-read-accent)]/80 shadow-lg"
+        style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)' }}
+      >
+        <div className="relative flex h-10 shrink-0 items-center gap-2 border-b border-[var(--bd-read-accent)]/40 px-4">
+          <span className="text-amber-500 dark:text-amber-400"><BulbIcon /></span>
+          <span className="text-sm font-medium">{_('annotation.noteTitle')}</span>
           <button
             onClick={onClose}
             title={_('annotation.cancel')}
-            className="absolute right-3.5 top-3.5 z-10 flex h-7 w-7 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+            className="absolute right-3 flex h-7 w-7 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
           >
             <CloseIcon />
           </button>
-          <div className="flex min-h-0 flex-1 gap-2.5 px-5 pb-3 pt-4 pr-12">
-            <span className="mt-0.5 shrink-0 text-[var(--bd-read-sub)]">
-              <BulbIcon />
-            </span>
-            {textarea}
-          </div>
-          <div className="flex shrink-0 items-center justify-end px-5 pb-4">{publishButton}</div>
         </div>
-      )}
+        <div className="flex min-h-0 flex-1 px-4 py-3">{textarea}</div>
+        <div className="flex shrink-0 items-center justify-end px-4 pb-3.5">{publishButton}</div>
+      </div>
     </div>
   )
 }

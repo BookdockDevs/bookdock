@@ -1,5 +1,7 @@
 import type { AnnotationStyle } from '@bookdock/shared'
 
+import type { PopupRect, SelectionGeometry } from '../types'
+
 export interface HighlightColor {
   name: string
   hex: string
@@ -34,6 +36,7 @@ export function highlightHex(name: string): string | undefined {
 }
 
 export const DEFAULT_HIGHLIGHT_COLOR = 'yellow'
+export const DEFAULT_IDEA_COLOR = 'amber'
 export const DEFAULT_HIGHLIGHT_STYLE: AnnotationStyle = 'underline'
 
 const LAST_STYLE_KEY = 'bd-reader-highlight-style'
@@ -88,28 +91,73 @@ export function setLastHighlightStyle(color: string, style: AnnotationStyle) {
   }
 }
 
-/** Position a popup above (or below, when near the viewport top) a content rect */
+/** Keep the complete toolbar group visible while minimizing selected-text overlap. */
 export function popupPosition(
-  rect: { left: number; top: number; width: number; height: number } | undefined,
+  rect: PopupRect | undefined,
   popupWidth: number,
   popupHeight: number,
   extraHeight = 0,
+  geometry?: SelectionGeometry,
+  styleWidth = popupWidth,
 ) {
   const gap = 10
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const effectiveWidth = Math.min(popupWidth, Math.max(32, vw - 16))
-  if (!rect) {
-    return { left: Math.max(8, (vw - popupWidth) / 2), top: 80, caretLeft: effectiveWidth / 2, dir: 'above' as const }
+  const visual = window.visualViewport
+  const screenLeft = visual?.offsetLeft ?? 0
+  const screenTop = visual?.offsetTop ?? 0
+  const screenRight = screenLeft + (visual?.width ?? window.innerWidth)
+  const screenBottom = screenTop + (visual?.height ?? window.innerHeight)
+  const reading = geometry?.bounds
+  let bounds = {
+    left: Math.max(screenLeft, reading?.left ?? screenLeft),
+    top: Math.max(screenTop, reading?.top ?? screenTop),
+    right: Math.min(screenRight, reading ? reading.left + reading.width : screenRight),
+    bottom: Math.min(screenBottom, reading ? reading.top + reading.height : screenBottom),
   }
-  const center = rect.left + rect.width / 2
-  const left = Math.min(Math.max(8, center - popupWidth / 2), Math.max(8, vw - popupWidth - 8))
+  const column = geometry?.columnBounds
+  const naturalWidth = Math.max(popupWidth, extraHeight ? styleWidth : 0)
+  if (column && naturalWidth <= column.width - 16) {
+    bounds = { ...bounds, left: Math.max(bounds.left, column.left), right: Math.min(bounds.right, column.left + column.width) }
+  }
+  const width = Math.min(popupWidth, Math.max(0, bounds.right - bounds.left - 16))
+  const effectiveStyleWidth = Math.min(styleWidth, Math.max(0, bounds.right - bounds.left - 16))
+  const groupWidth = Math.max(width, extraHeight ? effectiveStyleWidth : 0)
   const totalHeight = popupHeight + extraHeight
-  const above = rect.top - totalHeight - gap
-  const isAbove = above >= 8
-  const top = isAbove
-    ? rect.top - popupHeight - gap
-    : Math.min(rect.top + rect.height + gap, Math.max(8, vh - totalHeight - 8))
-  const caretLeft = Math.min(Math.max(16, center - left), effectiveWidth - 16)
-  return { left, top, caretLeft, dir: isAbove ? 'above' as const : 'below' as const }
+  const anchor = rect ?? { left: (bounds.left + bounds.right) / 2, top: bounds.top + 80 + popupHeight + gap, width: 0, height: 0 }
+  const multiline = geometry?.rects.some(r => Math.abs(r.top - anchor.top) > Math.min(r.height, anchor.height) / 2) ?? false
+  const preferred = multiline && !geometry?.backward ? 'below' : 'above'
+  const center = geometry && anchor.width > width / 2 ? geometry.focusX : anchor.left + anchor.width / 2
+  const selectedTop = geometry?.rects.reduce((value, r) => Math.min(value, r.top), anchor.top) ?? anchor.top
+  const selectedBottom = geometry?.rects.reduce((value, r) => Math.max(value, r.top + r.height), anchor.top + anchor.height) ?? anchor.top + anchor.height
+  const candidates = []
+  for (const dir of [preferred, preferred === 'above' ? 'below' : 'above'] as const) {
+    const idealTop = dir === 'above' ? anchor.top - totalHeight - gap : anchor.top + anchor.height + gap
+    // At a viewport edge, the other end of a short selection may be the only clear space.
+    const boundaryTop = dir === 'above' ? selectedTop - totalHeight - gap : selectedBottom + gap
+    const centers = geometry ? [center, anchor.left - gap - groupWidth / 2, anchor.left + anchor.width + gap + groupWidth / 2] : [center]
+    for (const y of new Set([idealTop, boundaryTop])) {
+      const groupTop = Math.min(Math.max(bounds.top + 8, y), Math.max(bounds.top + 8, bounds.bottom - totalHeight - 8))
+      for (const x of centers) {
+        const groupLeft = Math.min(Math.max(bounds.left + 8, x - groupWidth / 2), Math.max(bounds.left + 8, bounds.right - groupWidth - 8))
+        const left = groupLeft + (groupWidth - width) / 2
+        const top = groupTop + (dir === 'above' ? extraHeight : 0)
+        const styleLeft = groupLeft + (groupWidth - effectiveStyleWidth) / 2
+        const styleTop = dir === 'above' ? groupTop : top + popupHeight + 8
+        const boxes = [{ left, top, width, height: popupHeight }]
+        if (extraHeight) boxes.push({ left: styleLeft, top: styleTop, width: effectiveStyleWidth, height: extraHeight - 8 })
+        let overlap = 0
+        for (const selected of geometry?.rects ?? []) {
+          for (const box of boxes) {
+            overlap += Math.max(0, Math.min(box.left + box.width, selected.left + selected.width) - Math.max(box.left, selected.left))
+              * Math.max(0, Math.min(box.top + box.height, selected.top + selected.height) - Math.max(box.top, selected.top))
+          }
+        }
+        candidates.push({ left, top, styleLeft, styleTop, width, styleWidth: effectiveStyleWidth, dir,
+          overlap, displacement: Math.abs(groupTop - idealTop) + Math.abs(groupLeft + groupWidth / 2 - center) })
+      }
+    }
+  }
+  candidates.sort((a, b) => a.overlap - b.overlap || a.displacement - b.displacement)
+  const best = candidates[0]!
+  const caretLeft = Math.min(Math.max(16, center - best.left), Math.max(16, width - 16))
+  return { ...best, caretLeft }
 }

@@ -1,5 +1,15 @@
 # foliate-js 本地差异与重放清单
 
+## Personal annotation ink (2026-10-03)
+
+- Ideas additionally opt into `Overlayer.ink({ style: 'dashed' })` for softly tapered dash segments. Generic `dashedUnderline` remains unchanged. The host maps new amber ideas independently of highlight preferences, preserves existing colors, and repaints ideas on reading-theme changes.
+
+- Baseline: Readest foliate-js `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`.
+- Files/symbols: `overlayer.js:Overlayer.ink`, opt-in `Overlayer.highlight({ pen, blendMode })`; host `FoliateReader.handleDrawAnnotation`.
+- Requirement: deterministic tapered straight/wavy marks and gently slanted marker ends. Personal highlights use one explicit theme-aware fill opacity rather than multiplying alpha twice.
+- Core ownership: fragment geometry, SVG placement and repaint belong to the overlayer. The adapter selects the personal ink renderer; existing generic highlight/underline/squiggly defaults, search/TTS and hit-test rectangles remain unchanged.
+- Verification: `foliate-overlayer.test.ts` covers baseline compatibility, single marker opacity, deterministic multi-line/short/vertical ink and finite paths. `NotesPanel.test.tsx` covers list decoration and bottom clearance; `foliate-reader-load.test.ts` covers marker repaint on theme changes. The live reader was checked in light/dark themes with existing multi-line yellow highlights, red straight strokes and green waves.
+
 ## Desktop selection corner continuation (2026-10-02)
 
 - Baseline: Readest foliate-js `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`.

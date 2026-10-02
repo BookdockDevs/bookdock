@@ -17,7 +17,7 @@ import { useUiStore } from '@/stores/ui.store'
 import { markEscConsumed } from '../../lib/esc-consumed'
 
 import { useReaderState } from '../../state/reader-state'
-import { buildFontOptions, ensureBuiltinFontLoaded, ensureBuiltinFontsLoaded, ensureUploadedFontLoaded, resolveFont, useFontLoaderStore, type FontOption } from '../../fonts'
+import { buildFontOptions, ensureBuiltinFontLoaded, ensureBuiltinFontsLoaded, ensureUploadedFontLoaded, resolveDualFont, useFontLoaderStore, type FontOption } from '../../fonts'
 import { CloseIcon, CopyIcon, DownloadIcon, SpinnerIcon } from '../annotation-icons'
 import ShareCard, { SHARE_CARD_WIDTH } from './ShareCard'
 import { BACKGROUND_OPTIONS, BRAND_OPTIONS, SHARE_CARD_TEMPLATES, loadShareCardPrefs, saveShareCardPrefs, type ShareCardPrefs } from './card-prefs'
@@ -50,12 +50,14 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const uploadedFonts = useMemo(() => fontsData?.data ?? [], [fontsData])
   const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
   const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
+  const fontLatinIds = useFontLoaderStore((s) => s.latinIds)
   const fontOptions = useMemo(
-    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds }, fontPreferences, fontOrder),
+    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds, latinIds: fontLatinIds }, fontPreferences, fontOrder),
     // loaded/loading ids feed a builtin option's status icon
-    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontPreferences, fontOrder],
+    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontLatinIds, fontPreferences, fontOrder],
   )
   const enabledFontOptions = useMemo(() => fontOptions.filter((option) => option.enabled), [fontOptions])
+  const enabledCjkOptions = useMemo(() => enabledFontOptions.filter((option) => !option.latin), [enabledFontOptions])
 
   const previewRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
@@ -66,10 +68,14 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const [prefs, setPrefs] = useState<ShareCardPrefs>(loadShareCardPrefs)
 
   useEffect(() => {
-    if (!shareTarget || enabledFontOptions.some((option) => option.id === prefs.font)) return
-    const fallback = enabledFontOptions[0]
-    if (fallback) setPrefs((current) => ({ ...current, font: fallback.id }))
-  }, [enabledFontOptions, prefs.font, shareTarget])
+    if (!shareTarget) return
+    const primaryFallback = enabledFontOptions[0]
+    const cjkFallback = enabledCjkOptions[0] ?? primaryFallback
+    const patch: Partial<ShareCardPrefs> = {}
+    if (!enabledFontOptions.some((option) => option.id === prefs.font) && primaryFallback) patch.font = primaryFallback.id
+    if (!enabledCjkOptions.some((option) => option.id === prefs.cjkFont) && cjkFallback) patch.cjkFont = cjkFallback.id
+    if (Object.keys(patch).length > 0) setPrefs((current) => ({ ...current, ...patch }))
+  }, [enabledFontOptions, enabledCjkOptions, prefs.font, prefs.cjkFont, shareTarget])
 
   const book = bookQuery.data?.data
   const bookAuthor = useMemo(() => formatAuthorList(book?.authors, book?.author ?? ''), [book?.authors, book?.author])
@@ -81,6 +87,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
       JSON.stringify({
         template: prefs.template,
         font: prefs.font,
+        cjkFont: prefs.cjkFont,
         background: prefs.background,
         brand: prefs.brand,
         note: shareTarget?.note ?? null,
@@ -128,12 +135,14 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   useEffect(() => {
     if (!shareTarget) return
     const fonts = fontsData?.data ?? []
-    const resolved = resolveFont(prefs.font, fonts, fontPreferences, fontOrder)
-    if (resolved.builtin) ensureBuiltinFontLoaded(resolved.builtin.id)
-    if (resolved.uploaded) void ensureUploadedFontLoaded(resolved.uploaded)
+    const resolved = resolveDualFont(prefs.font, prefs.cjkFont, fonts, fontPreferences, fontOrder)
+    for (const face of [resolved.primary, resolved.companion]) {
+      if (face.builtin) ensureBuiltinFontLoaded(face.builtin.id)
+      if (face.uploaded) void ensureUploadedFontLoaded(face.uploaded)
+    }
     ensureBuiltinFontsLoaded()
     fonts.forEach((f) => void ensureUploadedFontLoaded(f))
-  }, [shareTarget, prefs.font, fontsData, fontPreferences, fontOrder])
+  }, [shareTarget, prefs.font, prefs.cjkFont, fontsData, fontPreferences, fontOrder])
 
   useEffect(() => {
     if (!shareTarget) return
@@ -176,7 +185,9 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   if (!book) return null
 
   const fileName = shareFileName(book.title)
-  const fontStack = resolveFont(prefs.font, uploadedFonts, fontPreferences, fontOrder).stack
+  const fontStack = resolveDualFont(prefs.font, prefs.cjkFont, uploadedFonts, fontPreferences, fontOrder).stack
+  const selectedPrimaryFont = enabledFontOptions.find((opt) => opt.id === prefs.font)
+  const showCjkFontPicker = selectedPrimaryFont?.latin ?? false
 
   function patchPrefs(patch: Partial<ShareCardPrefs>) {
     setPrefs((prev) => {
@@ -190,6 +201,11 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   // off the builtin download as visual feedback
   function onSelectFont(opt: FontOption) {
     patchPrefs({ font: opt.id })
+    if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
+  }
+
+  function onSelectCjkFont(opt: FontOption) {
+    patchPrefs({ cjkFont: opt.id })
     if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
   }
 
@@ -276,7 +292,12 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
               <span className="w-8 shrink-0 text-xs font-medium text-stone-400 dark:text-stone-500">
                 {_('share.templateLabel')}
               </span>
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-0.5">
+              <div
+                onWheel={(e) => {
+                  if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY
+                }}
+                className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-0.5"
+              >
                 {SHARE_CARD_TEMPLATES.map((t) => {
                   const active = prefs.template === t
                   return (
@@ -300,7 +321,12 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
               <span className="w-8 shrink-0 text-xs font-medium text-stone-400 dark:text-stone-500">
                 {_('share.font')}
               </span>
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-0.5">
+              <div
+                onWheel={(e) => {
+                  if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY
+                }}
+                className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-0.5"
+              >
                 {enabledFontOptions.map((opt) => {
                   const active = prefs.font === opt.id
                   return (
@@ -327,11 +353,54 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
                 })}
               </div>
             </div>
+            {showCjkFontPicker && (
+              <div className="flex items-center gap-2">
+                <span className="w-8 shrink-0 text-xs font-medium text-stone-400 dark:text-stone-500">
+                  {_('share.cjkFont')}
+                </span>
+                <div
+                  onWheel={(e) => {
+                    if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY
+                  }}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-0.5"
+                >
+                  {enabledCjkOptions.map((opt) => {
+                    const active = prefs.cjkFont === opt.id
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => onSelectCjkFont(opt)}
+                        style={{ fontFamily: opt.stack }}
+                        className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs transition-all ${
+                          active
+                            ? 'bg-stone-900 font-medium text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
+                            : 'border border-stone-300/80 bg-white text-stone-700 hover:border-stone-400 hover:text-stone-900 dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300 dark:hover:border-stone-500 dark:hover:text-stone-100'
+                        }`}
+                      >
+                        <span>{opt.name}</span>
+                        {opt.status === 'idle' && (
+                          <span className={active ? 'text-stone-300 dark:text-stone-600' : 'text-stone-400 dark:text-stone-500'}>
+                            <DownloadIcon size={12} />
+                          </span>
+                        )}
+                        {opt.status === 'loading' && <SpinnerIcon size={12} />}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <span className="w-8 shrink-0 text-xs font-medium text-stone-400 dark:text-stone-500">
                 {_('share.background')}
               </span>
-              <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar py-2.5 px-1.5">
+              <div
+                onWheel={(e) => {
+                  if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY
+                }}
+                className="flex min-w-0 flex-1 items-center gap-2.5 overflow-x-auto no-scrollbar py-2.5 px-1.5"
+              >
                 {BACKGROUND_OPTIONS.map((b) => {
                   const active = prefs.background === b.id
                   return (

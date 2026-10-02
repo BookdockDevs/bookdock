@@ -6,6 +6,7 @@ import { formatCardExcerpt } from '../features/reader/lib/book-search'
 import { READER_SESSION_ID, useReaderState } from '../features/reader/state/reader-state'
 import { useReaderApi } from '../features/reader/hooks/useReaderApi'
 import { useAnnotations } from '../features/reader/hooks/useAnnotations'
+import type { SearchResult, SearchStatus } from '../features/reader/types'
 
 const display = vi.fn()
 const clearSearch = vi.fn()
@@ -585,7 +586,7 @@ describe('NavigationPanel', () => {
       fireEvent.click(screen.getByTitle('reader.search'))
       const input = screen.getByPlaceholderText('reader.searchPlaceholder')
       expect(input).toBeInTheDocument()
-      expect(screen.getByText('reader.searchScopeBook')).toBeInTheDocument()
+      expect(screen.getByTitle('reader.searchScopeBook')).toBeInTheDocument()
       fireEvent.change(input, { target: { value: '高中' } })
       await act(async () => { await new Promise((r) => setTimeout(r, 500)) })
 
@@ -593,8 +594,8 @@ describe('NavigationPanel', () => {
       // consecutive results from the same chapter collapse into one group
       expect(screen.getByText('第二章 图穷匕见')).toBeInTheDocument()
       expect(screen.getByText('第五章 死鱼眼')).toBeInTheDocument()
-      // 3 result marks plus the keyword in the bottom nav card
-      expect(screen.getAllByText('高中')).toHaveLength(4)
+      // 3 result marks in the list
+      expect(screen.getAllByText('高中')).toHaveLength(3)
       // verify theme-adaptive mark highlight styling
       const marks = container.querySelectorAll('mark')
       expect(marks.length).toBeGreaterThan(0)
@@ -624,7 +625,7 @@ describe('NavigationPanel', () => {
       expect(screen.queryByText('第一章 开篇')).toBeNull()
 
       fireEvent.click(screen.getByLabelText('清除'))
-      expect(screen.getByText('reader.searchScopeBook')).toBeInTheDocument()
+      expect(screen.getByTitle('reader.searchScopeBook')).toBeInTheDocument()
 
       fireEvent.click(screen.getByTitle('reader.backToToc'))
       expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
@@ -637,7 +638,7 @@ describe('NavigationPanel', () => {
       fireEvent.change(input, { target: { value: '高中' } })
       await new Promise((r) => setTimeout(r, 500))
       expect(search).toHaveBeenCalledTimes(1)
-      expect(screen.getAllByText('高中')).toHaveLength(4)
+      expect(screen.getAllByText('高中')).toHaveLength(3)
 
       // return to TOC via back button: the search panel hides and the TOC returns, but nothing is discarded
       fireEvent.click(screen.getByTitle('reader.backToToc'))
@@ -648,7 +649,7 @@ describe('NavigationPanel', () => {
       fireEvent.click(screen.getByTitle('reader.search'))
       const reopenedInput = screen.getByPlaceholderText('reader.searchPlaceholder')
       expect(reopenedInput).toHaveValue('高中')
-      expect(screen.getAllByText('高中')).toHaveLength(4)
+      expect(screen.getAllByText('高中')).toHaveLength(3)
       expect(search).toHaveBeenCalledTimes(1)
     })
 
@@ -660,7 +661,7 @@ describe('NavigationPanel', () => {
       expect(search).toHaveBeenCalledTimes(1)
 
       fireEvent.click(screen.getByTitle('reader.next'))
-      expect(screen.getByText('2/3')).toBeInTheDocument()
+      expect(screen.getByText('1/3')).toBeInTheDocument()
 
       // closing and reopening the panel must not re-run the search or reset the pointer
       rerender(<NavigationPanel bookId="book-1" open={false} />)
@@ -669,8 +670,8 @@ describe('NavigationPanel', () => {
       await new Promise((r) => setTimeout(r, 500))
 
       expect(search).toHaveBeenCalledTimes(1)
-      expect(screen.getAllByText('高中')).toHaveLength(4)
-      expect(screen.getByText('2/3')).toBeInTheDocument()
+      expect(screen.getAllByText('高中')).toHaveLength(3)
+      expect(screen.getByText('1/3')).toBeInTheDocument()
     })
 
     it('keeps the results and the pointer when switching to notes and back', async () => {
@@ -681,7 +682,7 @@ describe('NavigationPanel', () => {
       expect(search).toHaveBeenCalledTimes(1)
 
       fireEvent.click(screen.getByTitle('reader.next'))
-      expect(screen.getByText('2/3')).toBeInTheDocument()
+      expect(screen.getByText('1/3')).toBeInTheDocument()
 
       // switching tabs must not re-run the search or reset the pointer
       await act(async () => {
@@ -694,8 +695,8 @@ describe('NavigationPanel', () => {
       await new Promise((r) => setTimeout(r, 500))
 
       expect(search).toHaveBeenCalledTimes(1)
-      expect(screen.getAllByText('高中')).toHaveLength(4)
-      expect(screen.getByText('2/3')).toBeInTheDocument()
+      expect(screen.getAllByText('高中')).toHaveLength(3)
+      expect(screen.getByText('1/3')).toBeInTheDocument()
     })
 
     it('streams partial results with a progress indicator while searching', async () => {
@@ -722,23 +723,68 @@ describe('NavigationPanel', () => {
       await new Promise((r) => setTimeout(r, 500))
 
       // partial results and the progress bar are visible before completion
-      expect(screen.getAllByText('高中')).toHaveLength(2)
+      expect(screen.getAllByText('高中')).toHaveLength(1)
       expect(screen.getByTestId('search-progress').style.width).toBe('50%')
 
       await act(async () => {
         resolveSearch(full)
       })
-      expect(screen.getAllByText('高中')).toHaveLength(3)
+      expect(screen.getAllByText('高中')).toHaveLength(2)
       expect(screen.queryByTestId('search-progress')).toBeNull()
     })
 
-    it('toggles search options directly via filter pills', async () => {
+    it.each([
+      [{ truncated: true, incomplete: false }, 'reader.searchTruncated'],
+      [{ truncated: false, incomplete: true, error: 'regex-timeout' }, 'reader.searchRegexTimeout'],
+      [{ truncated: false, incomplete: true }, 'reader.searchIncomplete'],
+    ] as const)('shows search status %s without claiming no matches', async (status, message) => {
+      const statusSearch = vi.fn(async (
+        _query: string, _opts: unknown,
+        onProgress?: (results: SearchResult[], progress: number | null, status?: SearchStatus) => void,
+      ) => {
+        onProgress?.([], 0.5, status)
+        return []
+      })
+      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search: statusSearch, clearSearch } })
       render(<NavigationPanel bookId="book-1" open />)
       fireEvent.click(screen.getByTitle('reader.search'))
-      const chapterPill = screen.getByText('reader.searchScopeChapter')
-      expect(chapterPill).not.toHaveClass('font-medium')
-      fireEvent.click(chapterPill)
-      expect(chapterPill).toHaveClass('font-medium')
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: 'x' } })
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)) })
+      expect(screen.getByRole('status')).toHaveTextContent(message)
+      if (status.incomplete) expect(screen.queryByText('reader.noMatches')).toBeNull()
+      fireEvent.click(screen.getByTitle('reader.clear'))
+      expect(screen.queryByRole('status')).toBeNull()
+    })
+
+    it('toggles search options directly via header controls', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      const scopeBtn = screen.getByTitle('reader.searchScopeBook')
+      fireEvent.click(scopeBtn)
+      expect(screen.getByTitle('reader.searchScopeChapter')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText('reader.searchPlaceholderChapter')).toBeInTheDocument()
+      fireEvent.click(screen.getByTitle('reader.searchMatchCase'))
+      expect(screen.getByTitle('reader.searchMatchCase')).toHaveClass('bg-[var(--bd-read-primary)]/20')
+      fireEvent.click(screen.getByTitle('reader.searchModeRegex'))
+      expect(screen.getByTitle('reader.searchModeRegex')).toHaveClass('bg-[var(--bd-read-primary)]/20')
+    })
+
+    it('cancels an in-flight search when the input is emptied with the keyboard', async () => {
+      let resolve!: (results: SearchResult[]) => void
+      const pendingSearch = vi.fn(() => new Promise<SearchResult[]>((done) => { resolve = done }))
+      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search: pendingSearch, clearSearch } })
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
+      fireEvent.change(input, { target: { value: 'old' } })
+      await act(async () => { await new Promise((done) => setTimeout(done, 500)) })
+      clearSearch.mockClear()
+      fireEvent.change(input, { target: { value: '' } })
+      expect(clearSearch).toHaveBeenCalledOnce()
+      await act(async () => { resolve([{ cfi: 'old:1', text: 'old result', index: 0 }]) })
+      fireEvent.change(input, { target: { value: 'new' } })
+      expect(screen.queryByText('old result')).toBeNull()
+      expect(screen.queryByTestId('search-nav-capsule')).toBeNull()
     })
 
     it('enters search mode from a pending selection query', async () => {
@@ -758,6 +804,10 @@ describe('NavigationPanel', () => {
       await new Promise((r) => setTimeout(r, 500))
 
       expect(screen.getByTestId('search-nav-capsule')).toBeInTheDocument()
+      expect(screen.getByText('reader.matchTotal')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTitle('reader.next'))
+      expect(display).toHaveBeenCalledWith('cfi:1')
       expect(screen.getByText('1/3')).toBeInTheDocument()
 
       fireEvent.click(screen.getByTitle('reader.next'))
@@ -766,6 +816,43 @@ describe('NavigationPanel', () => {
 
       // wraps around to the last result
       fireEvent.click(screen.getByTitle('reader.prev'))
+      fireEvent.click(screen.getByTitle('reader.prev'))
+      expect(display).toHaveBeenCalledWith('cfi:3')
+      expect(screen.getByText('3/3')).toBeInTheDocument()
+    })
+
+    it('supports Enter key navigation and prev jump from unvisited state', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
+      fireEvent.change(input, { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+
+      expect(screen.getByTestId('search-nav-capsule')).toBeInTheDocument()
+      expect(screen.getByText('reader.matchTotal')).toBeInTheDocument()
+
+      // Press Enter jumps to first result
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(display).toHaveBeenCalledWith('cfi:1')
+      expect(screen.getByText('1/3')).toBeInTheDocument()
+
+      // Next Enter advances to second result
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(display).toHaveBeenCalledWith('cfi:2')
+      expect(screen.getByText('2/3')).toBeInTheDocument()
+
+      // Shift+Enter goes backwards
+      fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+      expect(display).toHaveBeenCalledWith('cfi:1')
+      expect(screen.getByText('1/3')).toBeInTheDocument()
+    })
+
+    it('navigates directly to the last match when clicking prev on unvisited capsule', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+
       fireEvent.click(screen.getByTitle('reader.prev'))
       expect(display).toHaveBeenCalledWith('cfi:3')
       expect(screen.getByText('3/3')).toBeInTheDocument()
@@ -781,6 +868,7 @@ describe('NavigationPanel', () => {
       fireEvent.click(screen.getByTitle('annotation.cancel'))
       expect(screen.queryByTestId('search-nav-capsule')).toBeNull()
       expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
+      expect(clearSearch).toHaveBeenCalled()
     })
   })
 

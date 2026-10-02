@@ -1,4 +1,6 @@
-import type { PopupRect, ReadingMode } from '../types'
+import type { PopupRect, ReadingMode, SelectionGeometry } from '../types'
+
+import { popupPosition } from './annotation-colors'
 
 export type NotePlacement = 'above' | 'below' | 'left' | 'right'
 
@@ -11,6 +13,7 @@ export interface NoteEditorPosition {
   arrowOffset: number | null
   /** Constrained bubble height when viewport space is tight */
   maxHeight: number | null
+  width?: number
 }
 
 export interface Size {
@@ -29,16 +32,33 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * Position the note editor bubble around a selection rect.
- * Scroll mode stacks the bubble above/below the selection; page mode pops it
- * out to the side with more room and falls back to stacking on narrow screens.
+ * Visible selection fragments share the toolbar placement rules. Rect-only
+ * callers retain mode-specific positioning when live geometry is unavailable.
  */
 export function noteEditorPosition(
   rect: PopupRect | undefined,
   mode: ReadingMode,
   bubble: Size,
   viewport: Size,
+  geometry?: SelectionGeometry,
 ): NoteEditorPosition {
+  if (geometry) {
+    const height = Math.max(1, Math.min(bubble.height, geometry.bounds.height - 24))
+    const positioned = popupPosition(rect, bubble.width, height, 0, geometry)
+    const fragments = geometry.rects.length ? geometry.rects : rect ? [rect] : []
+    const top = Math.min(...fragments.map(r => r.top))
+    const bottom = Math.max(...fragments.map(r => r.top + r.height))
+    const separate = fragments.length > 0 && (positioned.dir === 'above'
+      ? positioned.top + height <= top - 4
+      : positioned.top >= bottom + 4)
+    const offset = geometry.focusX - positioned.left
+    return {
+      left: positioned.left, top: positioned.top, width: positioned.width,
+      placement: positioned.dir,
+      arrowOffset: separate && offset >= ARROW_EDGE_INSET && offset <= positioned.width - ARROW_EDGE_INSET ? offset : null,
+      maxHeight: height < bubble.height ? height : null,
+    }
+  }
   const { width: vw, height: vh } = viewport
   if (!rect) {
     return {

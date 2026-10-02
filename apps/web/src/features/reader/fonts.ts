@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import type { FontListItem, FontPreferences } from '@bookdock/shared'
 
 import { BASE_URL } from '@/api/client'
+import i18n from '@/i18n/i18n'
 
 import { FONT_OPTIONS, READER_GLYPH_FALLBACK } from './types'
 
@@ -13,6 +14,8 @@ export interface BuiltinFont {
   family: string
   cssUrl: string
   license: { name: string; url: string }
+  /** Latin-first entries pair with a CJK companion instead of covering CJK */
+  latin?: boolean
 }
 
 export const BUILTIN_FONTS: BuiltinFont[] = [
@@ -38,6 +41,14 @@ export const BUILTIN_FONTS: BuiltinFont[] = [
     family: `"Noto Sans SC Variable", ${READER_GLYPH_FALLBACK}, sans-serif`,
     cssUrl: 'https://cdn.jsdelivr.net/npm/@fontsource-variable/noto-sans-sc@5.3.0/index.css',
     license: { name: 'OFL-1.1', url: 'https://fonts.google.com/noto/specimen/Noto+Sans+SC/license' },
+  },
+  {
+    id: 'literata',
+    name: 'Literata',
+    latin: true,
+    family: `"Literata Variable", ${READER_GLYPH_FALLBACK}, serif`,
+    cssUrl: 'https://cdn.jsdelivr.net/npm/@fontsource-variable/literata@5.3.0/index.css',
+    license: { name: 'OFL-1.1', url: 'https://fonts.google.com/specimen/Literata/license' },
   },
 ]
 
@@ -76,6 +87,68 @@ export function resolveFont(
     stack: option.stack,
     builtin: option.builtin,
     uploaded: option.uploaded,
+  }
+}
+
+/** First family of a stack: the authoritative face, the rest is fallback */
+export function stackFirstFamily(stack: string): string {
+  return stack.split(',')[0].trim()
+}
+
+export interface DualFont {
+  /** Primary display name (the CJK companion is fallback, not the title) */
+  name: string
+  /** Ready-to-use CSS font-family stack: primary face + CJK companion chain */
+  stack: string
+  /** Combined @font-face/@import snippet for every non-system face used */
+  css: string
+  primary: ResolvedFont
+  companion: ResolvedFont
+}
+
+/** CJK companion resolution: only non-Latin enabled entries qualify, so a
+ *  Latin primary never falls back to another Latin face for CJK glyphs */
+export function resolveCjkFont(
+  id: string,
+  uploaded: FontListItem[] = [],
+  preferences: FontPreferences = {},
+  fontOrder: string[] = [],
+): ResolvedFont {
+  const options = buildFontOptions(uploaded, useFontLoaderStore.getState(), preferences, fontOrder)
+  const cjk = options.filter((option) => !option.latin)
+  const selected = cjk.find((option) => option.id === id && option.enabled)
+    ?? cjk.find((option) => option.enabled)
+    ?? options.find((option) => option.enabled)
+    ?? options[0]
+  return {
+    name: selected.name,
+    stack: selected.stack,
+    builtin: selected.builtin,
+    uploaded: selected.uploaded,
+  }
+}
+
+/** Primary + CJK companion composition. A CJK primary keeps its own stack
+ *  untouched when it already is the companion; otherwise the primary face
+ *  leads and the companion chain covers CJK glyphs */
+export function resolveDualFont(
+  primaryId: string,
+  cjkId: string,
+  uploaded: FontListItem[] = [],
+  preferences: FontPreferences = {},
+  fontOrder: string[] = [],
+): DualFont {
+  const primary = resolveFont(primaryId, uploaded, preferences, fontOrder)
+  const companion = resolveCjkFont(cjkId, uploaded, preferences, fontOrder)
+  if (primary.stack === companion.stack) {
+    return { name: primary.name, stack: primary.stack, css: fontCssFor(primary), primary, companion }
+  }
+  return {
+    name: primary.name,
+    stack: `${stackFirstFamily(primary.stack)}, ${companion.stack}`,
+    css: [fontCssFor(primary), fontCssFor(companion)].filter(Boolean).join('\n'),
+    primary,
+    companion,
   }
 }
 
@@ -132,11 +205,15 @@ interface FontLoaderState {
   loadedIds: string[]
   /** Builtin ids with an in-flight stylesheet */
   loadingIds: string[]
+  /** Uploaded font ids proven to lack CJK glyphs (session-only: re-tested on
+   *  every load via document.fonts.check, so no persistence to go stale) */
+  latinIds: string[]
 }
 
 export const useFontLoaderStore = create<FontLoaderState>(() => ({
   loadedIds: readLoadedIds(),
   loadingIds: [],
+  latinIds: [],
 }))
 
 export function isBuiltinFontLoaded(id: string): boolean {
@@ -206,6 +283,29 @@ export function ensureBuiltinFontsLoaded(): void {
 
 const injectedUploadedIds = new Set<string>()
 
+/** CJK name signals, ported from readest `CJK_FONTS_PATTENS` /
+ *  `CJK_EXCLUDE_PATTENS` (services/constants.ts) + `isCJKStr` (utils/lang.ts):
+ *  readest classifies custom fonts by family name, never by binary coverage.
+ *  Kept verbatim including its known-loose ends (`Min` also matches Minion,
+ *  `Yan` matches Yanone) — `canRenderCjk` corrects those after the face loads. */
+const CJK_NAME_EXCLUDE_PATTERN = /AlBayan|STIX|Kailasa|ITCTT|Luminari|Myanmar/i
+const CJK_NAME_PATTERN = /CJK|TC$|SC$|HK|JP|TW|Sim|Kai|Hei|Yan|Min|Khai|Yuan|Song|Ming|FZ|Huiwen|KingHwa|FangZheng|WenQuanYi|PingFang|Hiragino|Meiryo|Source\s?Han|Yu\s?Gothic|Yu\s?Mincho|Mincho|Nanum|Malgun|Gulim|Dotum|Batang|Gungsuh|OPPO sans|MiSans|Fallback/i
+const CJK_CHAR_PATTERN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+
+export function isCjkFontName(name: string): boolean {
+  if (!name) return false
+  if (CJK_NAME_EXCLUDE_PATTERN.test(name)) return false
+  return CJK_NAME_PATTERN.test(name) || CJK_CHAR_PATTERN.test(name)
+}
+
+function setUploadedLatin(id: string, latin: boolean): void {
+  useFontLoaderStore.setState((s) => ({
+    latinIds: latin
+      ? (s.latinIds.includes(id) ? s.latinIds : [...s.latinIds, id])
+      : s.latinIds.filter((v) => v !== id),
+  }))
+}
+
 /** Idempotently register an uploaded font in the main document via an inline
  *  @font-face rule (settings panel / share card previews live outside the
  *  reader iframe). Injected as CSS rather than the FontFace API on purpose:
@@ -215,6 +315,9 @@ const injectedUploadedIds = new Set<string>()
 export async function ensureUploadedFontLoaded(font: FontListItem): Promise<void> {
   if (injectedUploadedIds.has(font.id)) return
   injectedUploadedIds.add(font.id)
+  // Instant pre-classification by family name so the CJK row never flashes an
+  // English-only upload; corrected below once the face itself can be tested
+  if (!isCjkFontName(font.family)) setUploadedLatin(font.id, true)
   try {
     const style = document.createElement('style')
     style.dataset.bdUploadedFont = font.id
@@ -222,11 +325,25 @@ export async function ensureUploadedFontLoaded(font: FontListItem): Promise<void
     document.head.appendChild(style)
     if (typeof document.fonts?.load === 'function') {
       await document.fonts.load(`16px "${uploadedFontAlias(font.id)}"`)
+      setUploadedLatin(font.id, !canRenderCjk(uploadedFontAlias(font.id)))
     }
   } catch (err) {
     // drop the marker so a later attempt can retry
     injectedUploadedIds.delete(font.id)
     console.warn(`[fonts] failed to load uploaded font ${font.id}:`, err)
+  }
+}
+
+/** Ground truth for CJK coverage, answered by the browser instead of a binary
+ *  sfnt parse: the face is already loaded for preview, so this costs no extra
+ *  bytes. Any doubt keeps the current CJK treatment — the fallback chain
+ *  stays readable. */
+export function canRenderCjk(familyAlias: string): boolean {
+  try {
+    if (typeof document.fonts?.check !== 'function') return true
+    return document.fonts.check(`16px "${familyAlias}"`, BUILTIN_SAMPLE_TEXT)
+  } catch {
+    return true
   }
 }
 
@@ -242,28 +359,46 @@ export interface FontOption {
   source: FontOptionSource
   status: FontOptionStatus
   enabled: boolean
+  /** Latin-first entries pair with a CJK companion instead of covering CJK */
+  latin: boolean
   builtin?: BuiltinFont
   uploaded?: FontListItem
 }
 
 function fontPresentation(id: string, fallbackName: string, preferences: FontPreferences) {
   const preference = preferences[id]
+  const i18nKey = `reader.fontNames.${id}`
+  const localized = i18n.isInitialized && i18n.exists(i18nKey) ? i18n.t(i18nKey) : fallbackName
   return {
-    name: preference?.displayName?.trim() || fallbackName,
+    name: preference?.displayName?.trim() || localized,
     enabled: preference?.enabled !== false,
   }
 }
+
+export const DEFAULT_FONT_ORDER: string[] = [
+  'sans-serif',
+  'serif',
+  'noto-serif-sc',
+  'noto-sans-sc',
+  'lxgw-wenkai',
+  'kaiti',
+  'fangsong',
+  'literata',
+  'serif-en',
+  'sans-en',
+]
 
 /** Single ordered list shared by the settings page and both font pickers.
  *  The loader snapshot is an explicit parameter so callers can memoize on it
  *  (default: current store state). */
 export function buildFontOptions(
   uploaded: FontListItem[] = [],
-  loader: Pick<FontLoaderState, 'loadedIds' | 'loadingIds'> = useFontLoaderStore.getState(),
+  loader: Pick<FontLoaderState, 'loadedIds' | 'loadingIds'> & { latinIds?: string[] } = useFontLoaderStore.getState(),
   preferences: FontPreferences = {},
   fontOrder: string[] = [],
 ): FontOption[] {
   const { loadedIds, loadingIds } = loader
+  const latinIds = loader.latinIds ?? []
   const options: FontOption[] = [
     ...FONT_OPTIONS.map((f) => ({
       id: f.id,
@@ -271,6 +406,7 @@ export function buildFontOptions(
       stack: f.value,
       source: 'system' as const,
       status: 'ready' as const,
+      latin: f.latin ?? false,
     })),
     ...BUILTIN_FONTS.map((f) => ({
       id: f.id,
@@ -282,6 +418,7 @@ export function buildFontOptions(
         : loadedIds.includes(f.id)
           ? ('ready' as const)
           : ('idle' as const),
+      latin: f.latin ?? false,
       builtin: f,
     })),
     ...uploaded.map((f) => ({
@@ -290,12 +427,13 @@ export function buildFontOptions(
       stack: `"${uploadedFontAlias(f.id)}", ${READER_GLYPH_FALLBACK}, serif`,
       source: 'uploaded' as const,
       status: 'ready' as const,
+      latin: latinIds.includes(f.id),
       uploaded: f,
     })),
   ]
 
-  if (fontOrder.length === 0) return options
-  const positions = new Map(fontOrder.map((id, index) => [id, index]))
+  const activeOrder = fontOrder.length > 0 ? fontOrder : DEFAULT_FONT_ORDER
+  const positions = new Map(activeOrder.map((id, index) => [id, index]))
   return [...options].sort((left, right) => {
     const leftPosition = positions.get(left.id)
     const rightPosition = positions.get(right.id)

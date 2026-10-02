@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import { SettingsPanel } from '../features/reader/components/SettingsPanel'
 import { useFontLoaderStore } from '../features/reader/fonts'
@@ -29,9 +29,10 @@ describe('SettingsPanel', () => {
     await i18n.changeLanguage('zh-CN')
     localStorage.removeItem('bd-settings-section')
     mockUploadedFonts([])
-    useFontLoaderStore.setState({ loadedIds: [], loadingIds: [] })
+    useFontLoaderStore.setState({ loadedIds: [], loadingIds: [], latinIds: [] })
     useUiStore.setState({
-      fontFamily: 'serif',
+      fontFamily: 'sans-serif',
+      cjkFontFamily: 'sans-serif',
       fontSize: 18,
       fontWeight: 400,
       lineHeight: 1.8,
@@ -59,10 +60,15 @@ describe('SettingsPanel', () => {
     })
   })
 
-  it('renders font section by default', () => {
+  const primaryRow = () => (screen.queryByText('主字体') ?? screen.getByText('字体')).parentElement!
+  const cjkRow = () => screen.getByText('中文字体').parentElement!
+  const chipNames = (row: HTMLElement) => Array.from(row.querySelectorAll('button')).map((b) => b.textContent)
+
+  it('renders font section by default without CJK companion for CJK primary font', () => {
     render(<SettingsPanel />)
 
-    expect(screen.getByText('宋体')).toBeInTheDocument()
+    expect(screen.getByText('字体')).toBeInTheDocument()
+    expect(screen.queryByText('中文字体')).not.toBeInTheDocument()
     expect(screen.getByText('字号')).toBeInTheDocument()
     expect(screen.getByText('信息栏字号')).toBeInTheDocument()
     expect(screen.getByText('字体粗细')).toBeInTheDocument()
@@ -77,18 +83,27 @@ describe('SettingsPanel', () => {
     expect(screen.queryByText('信息栏字号')).not.toBeInTheDocument()
   })
 
-  it('renders a single font list without group labels', () => {
+  it('reveals CJK companion row when a Latin primary font is selected', () => {
+    useUiStore.setState({ fontFamily: 'serif-en' })
     render(<SettingsPanel />)
 
-    expect(screen.getByText('霞鹜文楷')).toBeInTheDocument()
-    expect(screen.getByText('思源宋体')).toBeInTheDocument()
-    expect(screen.getByText('思源黑体')).toBeInTheDocument()
-    expect(screen.getByText('宋体')).toBeInTheDocument()
     expect(screen.queryByText('在线字体')).not.toBeInTheDocument()
     expect(screen.queryByText('系统字体')).not.toBeInTheDocument()
     expect(screen.queryByText('我的字体')).not.toBeInTheDocument()
-    // 3 builtin + 4 system = exactly the visible window — no More chip
-    expect(screen.queryByText('更多')).not.toBeInTheDocument()
+    expect(screen.getByText('主字体')).toBeInTheDocument()
+    expect(screen.getByText('中文字体')).toBeInTheDocument()
+    // primary: 4 online + 6 system = 10 options, first 6 chips + promoted selected font '西文衬线' + 更多
+    expect(chipNames(primaryRow())).toEqual(['黑体', '宋体', '思源宋体', '思源黑体', '霞鹜文楷', '楷体', '西文衬线', '更多'])
+    expect(within(primaryRow()).getByText('霞鹜文楷')).toBeInTheDocument()
+    // cjk: 4 system + 3 online = 7 options, all 7 chips fit without a More chip
+    expect(within(cjkRow()).getByText('霞鹜文楷')).toBeInTheDocument()
+    expect(within(cjkRow()).getByText('思源宋体')).toBeInTheDocument()
+    expect(within(cjkRow()).getByText('思源黑体')).toBeInTheDocument()
+
+    fireEvent.click(within(primaryRow()).getByText('更多'))
+    expect(within(primaryRow()).getByText('收起')).toBeInTheDocument()
+    expect(within(primaryRow()).getByText('仿宋')).toBeInTheDocument()
+    expect(within(primaryRow()).getByText('西文无衬线')).toBeInTheDocument()
   })
 
   it('collapses to 7 chips plus More, and expands in place', () => {
@@ -98,22 +113,24 @@ describe('SettingsPanel', () => {
     ])
     render(<SettingsPanel />)
 
-    // 9 options total; the two uploaded fonts are hidden behind the More chip
-    expect(screen.getByText('霞鹜文楷')).toBeInTheDocument()
-    expect(screen.getByText('更多')).toBeInTheDocument()
-    expect(screen.getByText('楷体')).toBeInTheDocument()
-    expect(screen.getByText('仿宋')).toBeInTheDocument()
-    expect(screen.queryByText('我的手写体')).not.toBeInTheDocument()
+    // 12 primary options; entries past slot 7 hide behind More
+    expect(within(primaryRow()).getByText('黑体')).toBeInTheDocument()
+    expect(within(primaryRow()).getByText('宋体')).toBeInTheDocument()
+    expect(within(primaryRow()).getByText('更多')).toBeInTheDocument()
+    expect(within(primaryRow()).getByText('楷体')).toBeInTheDocument()
+    expect(within(primaryRow()).getByText('仿宋')).toBeInTheDocument()
+    expect(within(primaryRow()).getByText('霞鹜文楷')).toBeInTheDocument()
+    expect(within(primaryRow()).queryByText('我的手写体')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('更多'))
-    expect(screen.getByText('收起')).toBeInTheDocument()
-    expect(screen.getByText('我的手写体')).toBeInTheDocument()
-    expect(screen.getByText('另一款字体')).toBeInTheDocument()
+    fireEvent.click(within(primaryRow()).getByText('更多'))
+    expect(within(primaryRow()).getByText('收起')).toBeInTheDocument()
+    expect(within(primaryRow()).getByText('我的手写体')).toBeInTheDocument()
+    expect(within(primaryRow()).getByText('另一款字体')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('收起'))
-    expect(screen.getByText('楷体')).toBeInTheDocument()
+    fireEvent.click(within(primaryRow()).getByText('收起'))
+    expect(within(primaryRow()).getByText('楷体')).toBeInTheDocument()
     expect(screen.queryByText('我的手写体')).not.toBeInTheDocument()
-    expect(screen.getByText('更多')).toBeInTheDocument()
+    expect(within(primaryRow()).getByText('更多')).toBeInTheDocument()
   })
 
   it('promotes a hidden selected font into the last visible slot', () => {
@@ -125,11 +142,11 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel />)
 
     // The selected second uploaded font is hidden by default and is promoted
-    // while the last visible builtin font shifts out.
+    // while the 7th default font (fangsong) shifts out
     expect(screen.getByText('另一款字体')).toBeInTheDocument()
-    expect(screen.getByText('黑体')).toBeInTheDocument()
-    expect(screen.getByText('楷体')).toBeInTheDocument()
-    expect(screen.queryByText('思源黑体')).not.toBeInTheDocument()
+    expect(screen.getAllByText('黑体')).toHaveLength(1)
+    expect(screen.getAllByText('宋体')).toHaveLength(1)
+    expect(screen.queryByText('仿宋')).not.toBeInTheDocument()
   })
 
   it('lists uploaded fonts at the end and selects them by id', () => {
@@ -138,16 +155,26 @@ describe('SettingsPanel', () => {
     ])
     render(<SettingsPanel />)
 
-    fireEvent.click(screen.getByText('更多'))
-    fireEvent.click(screen.getByText('我的手写体'))
+    fireEvent.click(within(primaryRow()).getByText('更多'))
+    fireEvent.click(within(primaryRow()).getByText('我的手写体'))
     expect(useUiStore.getState().fontFamily).toBe('up1')
   })
 
   it('selects a builtin font by id', () => {
     render(<SettingsPanel />)
 
-    fireEvent.click(screen.getByText('霞鹜文楷'))
+    fireEvent.click(within(primaryRow()).getByText('更多'))
+    fireEvent.click(within(primaryRow()).getByText('霞鹜文楷'))
     expect(useUiStore.getState().fontFamily).toBe('lxgw-wenkai')
+  })
+
+  it('selects a CJK companion without changing the primary font', () => {
+    useUiStore.setState({ fontFamily: 'serif-en' })
+    render(<SettingsPanel />)
+
+    fireEvent.click(within(cjkRow()).getByText('霞鹜文楷'))
+    expect(useUiStore.getState().cjkFontFamily).toBe('lxgw-wenkai')
+    expect(useUiStore.getState().fontFamily).toBe('serif-en')
   })
 
   it('switches to layout section', () => {

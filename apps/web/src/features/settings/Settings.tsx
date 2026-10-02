@@ -212,9 +212,9 @@ export default function Settings() {
           {visitedSections.has('reading') && (
             <div className={active === 'reading' ? 'flex flex-col gap-6' : 'hidden'}>
               {!isGuest && <TocRulesSettingsSection />}
-              <FontsSettingsSection />
               <TtsSettingsSection id="tts-settings" />
               <AiSettingsSection id="ai-settings" />
+              <FontsSettingsSection />
               {!isGuest && <ReplacementsSettingsSection />}
             </div>
           )}

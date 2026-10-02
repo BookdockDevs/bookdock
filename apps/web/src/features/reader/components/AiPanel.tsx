@@ -91,7 +91,6 @@ const AI_PERMISSION_OPTIONS: ReadonlyArray<{ id: string; toolNames: AiToolName[]
 
 const READING_SCOPE_OPTIONS: ReadonlyArray<{ id: AiReadingScope; labelKey: string }> = [
   { id: 'to_here', labelKey: 'reader.aiScopeToHere' },
-  { id: 'current_chapter', labelKey: 'reader.aiScopeCurrentChapter' },
   { id: 'full_book', labelKey: 'reader.aiScopeFullBook' },
 ]
 
@@ -130,27 +129,17 @@ function AttachmentIcon() {
 }
 
 function ReadingScopeIcon({ scope }: { scope: AiReadingScope }) {
-  if (scope === 'current_chapter') {
-    return (
-      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-        <path d="M14 2v6h6M9 13h6M9 17h4" />
-      </svg>
-    )
-  }
   if (scope === 'full_book') {
     return (
-      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
         <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
       </svg>
     )
   }
   return (
-    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-      <path d="M12 7v7l2-1.5 2 1.5V7" />
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" />
     </svg>
   )
 }
@@ -1214,11 +1203,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   }
 
   function cycleReadingScope() {
-    const nextScope = readingScope === 'to_here'
-      ? 'current_chapter'
-      : readingScope === 'current_chapter'
-        ? 'full_book'
-        : 'to_here'
+    const nextScope: AiReadingScope = readingScope === 'to_here' ? 'full_book' : 'to_here'
     setReadingScope(nextScope)
     rememberLatestConversationSettings({ readingScope: nextScope })
     setAttachmentOpen(false)
@@ -1784,7 +1769,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
             </div>
           )}
         </div>
-        <button type="button" onClick={cycleReadingScope} aria-label={_('reader.aiReadingScopeToggle', { scope: readingScopeLabel(readingScope, _) })} title={_('reader.aiReadingScopeCurrent', { scope: readingScopeLabel(readingScope, _) })} className={`ml-2 flex h-7 w-7 items-center justify-center rounded-md transition-all active:scale-95 hover:bg-stone-500/10 @max-[240px]/ai-panel:ml-1 ${readingScope === 'full_book' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'text-[var(--bd-read-sub)] hover:text-current'}`}>
+        <button type="button" onClick={cycleReadingScope} aria-label={_('reader.aiReadingScopeToggle', { scope: readingScopeLabel(readingScope, _) })} title={_('reader.aiReadingScopeCurrent', { scope: readingScopeLabel(readingScope, _) })} className={`ml-2 flex h-7 w-7 items-center justify-center rounded-lg transition-all active:scale-95 hover:bg-stone-500/10 @max-[240px]/ai-panel:ml-1 ${readingScope === 'full_book' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'text-[var(--bd-read-sub)] hover:text-current'}`}>
           <ReadingScopeIcon scope={readingScope} />
         </button>
         <div className="ml-auto flex items-center gap-2 text-[var(--bd-read-sub)] @max-[240px]/ai-panel:gap-1">

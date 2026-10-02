@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  createExcerptBuilder,
   extractChapterText,
   findMatches,
   getChapterText,
   mapMatchTextsToOffsets,
   makeExcerpt,
   offsetsToRange,
+  prepareSearchDocument,
 } from '../features/reader/lib/book-search'
 import type { TextReplacementRule } from '../features/reader/lib/text-replacements'
 
@@ -43,6 +45,11 @@ describe('extractChapterText', () => {
 })
 
 describe('findMatches', () => {
+  it('bounds overlapping contains and regex matches during matching', () => {
+    expect(findMatches('aaaa', 'aa', { limit: 2 })).toEqual([{ start: 0, end: 2 }, { start: 1, end: 3 }])
+    expect(findMatches('aaaa', 'a', { mode: 'regex', limit: 2 })).toHaveLength(2)
+    expect(findMatches('aaaa', 'a', { limit: 0 })).toEqual([])
+  })
   it('finds case-insensitive contains matches by default', () => {
     const matches = findMatches('Hello hELLo world HELLO', 'hello')
     expect(matches).toEqual([
@@ -121,6 +128,35 @@ describe('mapMatchTextsToOffsets', () => {
 })
 
 describe('makeExcerpt', () => {
+  it('preserves normalized context and ellipses across long whitespace runs', () => {
+    const contexts = ['', ' '.repeat(500), '前'.repeat(50), '前'.repeat(51), '\n\t  前\u00a0文\r\n', `前${' '.repeat(1000)}文`]
+    for (const before of contexts) {
+      for (const after of contexts) {
+        const text = `${before}命中${after}`
+        const pre = before.replace(/\s+/g, ' ').trimStart()
+        const post = after.replace(/\s+/g, ' ').trimEnd()
+        expect(makeExcerpt(text, before.length, before.length + 2)).toEqual({
+          pre: `${pre.length > 50 ? '…' : ''}${pre.slice(-50)}`,
+          match: '命中',
+          post: `${post.slice(0, 50)}${post.length > 50 ? '…' : ''}`,
+        })
+        expect(createExcerptBuilder(text)(before.length, before.length + 2)).toEqual(makeExcerpt(text, before.length, before.length + 2))
+      }
+    }
+  })
+
+  it('handles chapter-start and chapter-end hits', () => {
+    expect(makeExcerpt('命中正文', 0, 2)).toEqual({ pre: '', match: '命中', post: '正文' })
+    expect(makeExcerpt('正文命中', 2, 4)).toEqual({ pre: '正文', match: '命中', post: '' })
+  })
+
+  it('preserves context for repeated regex hits within one long whitespace run', () => {
+    const text = `前文${' \n\t'.repeat(10000)}后文`
+    const excerptFor = createExcerptBuilder(text)
+    for (const offset of [2, 3, 50, 500, 15000, text.length - 3]) {
+      expect(excerptFor(offset, offset + 1)).toEqual(makeExcerpt(text, offset, offset + 1))
+    }
+  })
   it('slices pre, match and post around the hit', () => {
     const excerpt = makeExcerpt('他是一个高中生', 4, 6)
     expect(excerpt).toEqual({ pre: '他是一个', match: '高中', post: '生' })
@@ -151,6 +187,18 @@ describe('makeExcerpt', () => {
 })
 
 describe('offsetsToRange', () => {
+  it('reuses one live text map for inline, overlapping, and cross-paragraph ranges', () => {
+    const doc = parseXhtml(`${XHTML_HEAD}<p>aa<b>aa</b></p><p>bb</p>${XHTML_TAIL}`)
+    const walk = vi.spyOn(doc, 'createTreeWalker')
+    const prepared = prepareSearchDocument(doc)
+    expect(prepared.text).toBe('aaaa bb')
+    expect(prepared.toRange(0, 2)?.toString()).toBe('aa')
+    expect(prepared.toRange(1, 3)?.toString()).toBe('aa')
+    expect(prepared.toRange(2, 7)?.toString()).toBe('aabb')
+    expect(prepared.toRange(4, 7)?.toString()).toBe('bb')
+    expect(prepared.toRange(0, 8)).toBeNull()
+    expect(walk).toHaveBeenCalledTimes(1)
+  })
   it('maps a plain-text span back to a DOM range', () => {
     const doc = parseXhtml(`${XHTML_HEAD}<p>春宵</p><p>一刻<b>值</b>千金</p>${XHTML_TAIL}`)
     const range = offsetsToRange(doc, 3, 7)

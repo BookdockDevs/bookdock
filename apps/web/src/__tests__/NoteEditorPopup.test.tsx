@@ -20,35 +20,54 @@ describe('NoteEditorPopup', () => {
     useUiStore.setState({ readingMode: 'page' })
   })
 
-  it('renders the WeChat-style bubble with title and adaptive arrow in page mode', () => {
+  it('renders a compact editor above the selection in page mode', () => {
     const { container } = renderPopup()
     expect(screen.getByText('annotation.noteTitle')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'annotation.publish' })).toBeInTheDocument()
-    // jsdom viewport is 1024x768 — the bubble pops out to the right of the selection
     const root = container.firstElementChild as HTMLElement
-    expect(root.style.left).toBe('314px') // rect.right + gap
-    expect(root.style.top).toBe('150px') // centered on selection
-    const arrow = container.querySelector('.rotate-45') as HTMLElement
-    expect(arrow).not.toBeNull()
-    expect(arrow.style.top).toBe('163px') // selection center 320 - top 150 - arrow half 7
+    expect(root).toHaveClass('z-[70]')
+    expect(parseFloat(root.style.left)).toBeGreaterThanOrEqual(0)
+    expect(parseFloat(root.style.top) + parseFloat(root.style.height)).toBeLessThan(RECT.top)
+    expect(container.querySelector('.rotate-45')).toBeNull()
   })
 
-  it('renders the dark sheet below the selection without an arrow in scroll mode', () => {
+  it('uses the same titled editor below the selection in scroll mode', () => {
     useUiStore.setState({ readingMode: 'scroll' })
     const { container } = renderPopup({ rect: { left: 100, top: 120, width: 200, height: 40 } })
-    expect(screen.queryByText('annotation.noteTitle')).toBeNull()
-    expect(container.querySelector('.rotate-45')).toBeNull()
-    expect(container.querySelector('.rounded-2xl')).not.toBeNull()
+    expect(screen.getByText('annotation.noteTitle')).toBeInTheDocument()
+    expect(container.querySelector('.rounded-xl')).not.toBeNull()
     const root = container.firstElementChild as HTMLElement
-    expect(root.style.top).toBe('174px') // rect.bottom + gap
+    expect(parseFloat(root.style.top)).toBeGreaterThan(160)
   })
 
   it('flips the sheet above the selection when space below is tight in scroll mode', () => {
     useUiStore.setState({ readingMode: 'scroll' })
     const { container } = renderPopup({ rect: { left: 100, top: 600, width: 200, height: 40 } })
     const root = container.firstElementChild as HTMLElement
-    expect(root.style.top).toBe('286px') // rect.top - gap - sheet height 300
+    expect(parseFloat(root.style.top) + parseFloat(root.style.height)).toBeLessThan(600)
+  })
+
+  it('stays inside the reading area beside an open sidebar', () => {
+    const { container } = renderPopup({ geometry: {
+      bounds: { left: 350, top: 40, width: 600, height: 680 },
+      rects: [{ left: 400, top: 300, width: 250, height: 30 }], backward: false, focusX: 650,
+    }, rect: { left: 400, top: 300, width: 250, height: 30 } })
+    const root = container.firstElementChild as HTMLElement
+    expect(parseFloat(root.style.left)).toBeGreaterThanOrEqual(350)
+    expect(parseFloat(root.style.left) + parseFloat(root.style.width)).toBeLessThanOrEqual(950)
+  })
+
+  it('grows for a long draft and limits the editor height', () => {
+    const { container } = renderPopup()
+    const root = container.firstElementChild as HTMLElement
+    const input = screen.getByPlaceholderText('annotation.notePlaceholder')
+    const initialHeight = parseFloat(root.style.height)
+    Object.defineProperty(input, 'scrollHeight', { configurable: true, value: 900 })
+    fireEvent.change(input, { target: { value: 'Long note '.repeat(100) } })
+    expect(parseFloat(root.style.height)).toBeGreaterThan(initialHeight)
+    expect(parseFloat(root.style.height)).toBeLessThanOrEqual(380)
+    expect(input.style.flex).toBe('')
   })
 
   it('prefills the draft and submits the trimmed note on publish', () => {

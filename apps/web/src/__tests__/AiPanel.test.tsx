@@ -181,8 +181,6 @@ describe('AiPanel', () => {
     renderPanel()
     const scopeButton = await screen.findByRole('button', { name: 'reader.aiReadingScopeToggle' })
     fireEvent.click(scopeButton)
-    expect(screen.getByRole('button', { name: 'reader.aiReadingScopeToggle' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'reader.aiReadingScopeToggle' }))
     expect(screen.getByRole('button', { name: 'reader.aiReadingScopeToggle' })).toHaveClass('text-amber-700')
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '请完整概括这本书' } })
     await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiSend' })).not.toBeDisabled())
@@ -206,7 +204,7 @@ describe('AiPanel', () => {
     await openTools()
     fireEvent.click(screen.getByRole('switch', { name: 'reader.aiToolListAnnotations' }))
     await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(2))
-    expect(latestSettings).toMatchObject({ readingScope: 'current_chapter', enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'search_annotations'] })
+    expect(latestSettings).toMatchObject({ readingScope: 'full_book', enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'search_annotations'] })
     first.unmount()
 
     renderPanel()
@@ -244,7 +242,7 @@ describe('AiPanel', () => {
 
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/ai/threads/thread-1', {
       settings: {
-        readingScope: 'current_chapter',
+        readingScope: 'full_book',
         enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'],
         assistantModeId: 'assistant',
       },
@@ -1156,7 +1154,7 @@ describe('AiPanel', () => {
         contextChars: 20,
         chapterTitle: '第二章',
         sourceCfi: 'epubcfi(/6/4!/2)',
-        readingScope: 'current_chapter',
+        readingScope: 'full_book',
         model: 'qwen3:8b',
         assistantMode: '书评人',
       } })

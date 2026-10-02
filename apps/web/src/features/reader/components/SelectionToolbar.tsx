@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
@@ -16,6 +16,7 @@ import type { IdeaEntry } from './IdeaOverlay'
 import { NoteEditorPopup } from './NoteEditorPopup'
 import {
   COLOR_LABEL_KEYS,
+  DEFAULT_IDEA_COLOR,
   HIGHLIGHT_COLORS,
   HIGHLIGHT_STYLES,
   STYLE_LABEL_KEYS,
@@ -67,6 +68,10 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   const [aiMenuAnchor, setAiMenuAnchor] = useState<{ left: number; top: number; bottom: number } | null>(null)
   const aiMenuButtonRef = useRef<HTMLButtonElement>(null)
   const aiMenuRef = useRef<HTMLDivElement>(null)
+  const barRef = useRef<HTMLDivElement>(null)
+  const styleRef = useRef<HTMLDivElement>(null)
+  const [barSize, setBarSize] = useState({ width: BAR_WIDTH, height: BAR_HEIGHT })
+  const [styleSize, setStyleSize] = useState({ width: STYLE_WIDTH, height: STYLE_HEIGHT })
   // A brand-new idea stays local until published — nothing hits the server
   // before the user commits, so cancels leave no placeholder row behind
   const [noteDraft, setNoteDraft] = useState(false)
@@ -108,8 +113,6 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     }
   }, [aiMenuAnchor])
 
-  if (!selection) return null
-
   const created = annotations?.data?.find((a) => a.id === createdLocal?.id) ?? createdLocal
   // A range can hold a highlight and an idea at once; the highlight wins when
   // both are clicked — the idea stays reachable from the notes side panel
@@ -119,6 +122,28 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       ?? null)
     : null
   const target = created ?? existing
+  const hasStyleBar = Boolean(target)
+  useLayoutEffect(() => {
+    const measure = () => {
+      for (const [element, setSize] of [[barRef.current, setBarSize], [styleRef.current, setStyleSize]] as const) {
+        if (!element) continue
+        const rect = element.getBoundingClientRect()
+        if (!rect.width || !rect.height) continue
+        // scrollWidth retains the natural action width when a narrow bar scrolls.
+        const width = Math.max(rect.width, element.scrollWidth + rect.width - element.clientWidth)
+        setSize(previous => previous.width === width && previous.height === rect.height
+          ? previous : { width, height: rect.height })
+      }
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    if (barRef.current) observer.observe(barRef.current)
+    if (styleRef.current) observer.observe(styleRef.current)
+    return () => observer.disconnect()
+  }, [selection?.cfiRange, hasStyleBar, noteEditing])
+
+  if (!selection) return null
 
   function close() {
     renderer?.clearSelection()
@@ -202,13 +227,12 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     if (!selection) return
     try {
       if (noteDraft) {
-        const last = getLastHighlightStyle()
         await create.mutateAsync({
           cfiRange: selection.cfiRange,
           cfiAnchor: selection.cfiRange,
           type: 'note',
-          color: last.color,
-          style: last.style,
+          color: DEFAULT_IDEA_COLOR,
+          style: 'underline',
           text: selection.rawText ?? selection.text,
           chapter: currentChapter ?? undefined,
           ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
@@ -346,22 +370,14 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     close()
   }
 
-  const hasStyleBar = Boolean(target)
-  const bar = popupPosition(selection.rect, BAR_WIDTH, BAR_HEIGHT, hasStyleBar ? STYLE_HEIGHT + 8 : 0)
-  const effectiveBarWidth = Math.min(BAR_WIDTH, Math.max(32, window.innerWidth - 16))
-  const effectiveStyleWidth = Math.min(STYLE_WIDTH, Math.max(32, window.innerWidth - 16))
-  const styleLeft = Math.min(
-    Math.max(8, bar.left + effectiveBarWidth / 2 - effectiveStyleWidth / 2),
-    Math.max(8, window.innerWidth - effectiveStyleWidth - 8),
-  )
-  const styleTop = bar.dir === 'above'
-    ? Math.max(8, bar.top - STYLE_HEIGHT - 8)
-    : Math.min(window.innerHeight - STYLE_HEIGHT - 8, bar.top + BAR_HEIGHT + 8)
+  const bar = popupPosition(selection.rect, barSize.width, barSize.height,
+    hasStyleBar ? styleSize.height + 8 : 0, selection.geometry, styleSize.width)
 
   if (noteEditing) {
     return (
       <NoteEditorPopup
         rect={selection.rect}
+        geometry={selection.geometry}
         initialNote={noteDraft ? '' : (target?.note ?? '')}
         saving={create.isPending || update.isPending}
         onSave={handleSaveNote}
@@ -443,8 +459,9 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     <>
       {target && (
         <div
+          ref={styleRef}
           className="fixed z-50 flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_6px_rgba(0,0,0,0.06),0_6px_16px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md dark:border-stone-700/80 dark:shadow-[0_4px_24px_rgba(0,0,0,0.65)] dark:ring-1 dark:ring-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          style={{ left: styleLeft, top: styleTop }}
+          style={{ left: bar.styleLeft, top: bar.styleTop, maxWidth: bar.styleWidth }}
         >
           {HIGHLIGHT_STYLES.map((s) => (
             <button
@@ -503,8 +520,9 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         </div>
       )}
       <div
+        ref={barRef}
         className="fixed z-50 flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_8px_rgba(0,0,0,0.08),0_10px_25px_-5px_rgba(0,0,0,0.18)] backdrop-blur-md dark:border-stone-700/80 dark:shadow-[0_4px_24px_rgba(0,0,0,0.65)] dark:ring-1 dark:ring-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        style={{ left: bar.left, top: bar.top }}
+        style={{ left: bar.left, top: bar.top, maxWidth: bar.width }}
       >
         {actions.map((a) => (
           <button

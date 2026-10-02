@@ -39,7 +39,6 @@ function ClampedText({
   clampClassName,
   className,
   wrapperClassName,
-  buttonClassName,
   renderText,
   expanded,
   onToggle,
@@ -52,8 +51,6 @@ function ClampedText({
   className: string
   /** Extra box treatment some call sites wrap the paragraph in. */
   wrapperClassName?: string
-  /** Keeps each site's existing toggle size and placement. */
-  buttonClassName?: string
   /** Lets a call site decorate the text (a highlight's underline) without
    *  giving up the plain string the length check needs. */
   renderText?: (text: string) => ReactNode
@@ -93,7 +90,6 @@ function ClampedText({
       className={cn(
         'group/clamp relative min-w-0 flex-1',
         wrapperClassName,
-        expanded && showToggle && 'pb-5',
       )}
     >
       <p ref={ref} className={cn(className, !expanded && clampClassName)}>
@@ -115,10 +111,7 @@ function ClampedText({
         <button
           type="button"
           onClick={onToggle}
-          className={cn(
-            'absolute inline-flex items-center gap-0.5 border border-stone-200/80 bg-[var(--bd-read-bg)]/95 text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover/clamp:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80',
-            buttonClassName ?? 'bottom-1 right-1.5 rounded px-1.5 py-0.5 text-[10px]',
-          )}
+          className="absolute bottom-1 right-1.5 inline-flex items-center gap-0.5 rounded border border-stone-200/80 bg-[var(--bd-read-bg)]/95 px-1.5 py-0.5 text-[10px] text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80"
         >
           <span>{expanded ? collapseLabel : expandLabel}</span>
           <svg
@@ -153,12 +146,18 @@ function highlightDecoration(style: AnnotationStyle, hex: string): CSSProperties
       WebkitBoxDecorationBreak: 'clone',
     }
   }
+  const path = style === 'squiggly'
+    ? 'M0 1.7 Q4 0.2 8 1.7 T16 1.7 L16 2.9 Q12 4.4 8 2.9 T0 2.9 Z'
+    : 'M0 2 Q2 1.25 5 1.25 L95 1.25 Q98 1.25 100 2 Q98 2.75 95 2.75 L5 2.75 Q2 2.75 0 2 Z'
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${style === 'squiggly' ? 16 : 100} 4" preserveAspectRatio="none"><path fill="${hex}" fill-opacity="0.85" d="${path}"/></svg>`
   return {
-    textDecoration: 'underline',
-    textDecorationColor: hex,
-    textDecorationStyle: style === 'squiggly' ? 'wavy' : 'solid',
-    textDecorationThickness: '1.5px',
-    textUnderlineOffset: '3px',
+    backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(svg)}")`,
+    backgroundRepeat: style === 'squiggly' ? 'repeat-x' : 'no-repeat',
+    backgroundSize: style === 'squiggly' ? '16px 4px' : '100% 4px',
+    backgroundPosition: 'left bottom',
+    paddingBottom: '4px',
+    boxDecorationBreak: 'clone',
+    WebkitBoxDecorationBreak: 'clone',
   }
 }
 
@@ -565,7 +564,7 @@ export const NotesPanel = memo(function NotesPanel({
               )}
               {kind === 'bookmark' && (
                 <div className="flex items-start gap-2.5">
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-500 dark:text-blue-400">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-blue-500/5 text-blue-500 dark:bg-blue-400/5 dark:text-blue-400">
                     <BookmarkIcon />
                   </span>
                   <div className="min-w-0 flex-1 space-y-2">
@@ -585,8 +584,8 @@ export const NotesPanel = memo(function NotesPanel({
                           <ClampedText
                             text={a.contextText}
                             clampClassName="line-clamp-3"
-                            className="leading-relaxed whitespace-pre-wrap break-words"
-                            wrapperClassName="rounded-lg border-l-2 border-blue-500/60 bg-stone-500/5 px-2.5 py-1.5 text-xs text-[var(--bd-read-sub)]"
+                            className="text-xs leading-relaxed text-[var(--bd-read-text)]/80 whitespace-pre-wrap break-words"
+                            wrapperClassName="rounded-md border-l-2 border-blue-300/40 bg-stone-500/3 px-2 py-1 dark:border-blue-400/25"
                             expanded={isNoteExpanded}
                             onToggle={(e) => toggleNoteExpand(a.id, e)}
                             expandLabel={_('annotation.expand')}
@@ -599,7 +598,8 @@ export const NotesPanel = memo(function NotesPanel({
                       <ClampedText
                         text={a.contextText || a.text || _('reader.bookmark')}
                         clampClassName="line-clamp-4"
-                        className="text-sm leading-relaxed text-current whitespace-pre-wrap break-words"
+                        className="text-xs leading-relaxed text-[var(--bd-read-text)]/80 whitespace-pre-wrap break-words"
+                        wrapperClassName="rounded-md border-l-2 border-blue-300/40 bg-stone-500/3 px-2 py-1 dark:border-blue-400/25"
                         expanded={isQuoteExpanded}
                         onToggle={(e) => toggleQuoteExpand(a.id, e)}
                         expandLabel={_('annotation.expand')}
@@ -613,14 +613,13 @@ export const NotesPanel = memo(function NotesPanel({
               {kind === 'idea' && (
                 <div className="space-y-2">
                   <div className="group/note flex items-start gap-2.5">
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-500 dark:text-amber-400">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-500/5 text-amber-500 dark:bg-amber-400/5 dark:text-amber-400">
                       <BulbIcon />
                     </span>
                     <ClampedText
                       text={a.note ?? ''}
                       clampClassName="line-clamp-3"
                       className="text-sm font-medium leading-relaxed text-current whitespace-pre-wrap break-words"
-                      buttonClassName="bottom-0 right-0 rounded-md px-1.5 py-0.5 text-[11px]"
                       expanded={isNoteExpanded}
                       onToggle={(e) => toggleNoteExpand(a.id, e)}
                       expandLabel={_('annotation.expand')}
@@ -632,8 +631,8 @@ export const NotesPanel = memo(function NotesPanel({
                     <ClampedText
                       text={a.text}
                       clampClassName="line-clamp-2"
-                      className="leading-relaxed whitespace-pre-wrap break-words"
-                      wrapperClassName="ml-7 rounded-lg border-l-2 border-[var(--bd-read-accent)]/70 bg-stone-500/5 px-2.5 py-1.5 text-xs text-[var(--bd-read-sub)]"
+                      className="text-xs leading-relaxed text-[var(--bd-read-text)]/80 whitespace-pre-wrap break-words"
+                      wrapperClassName="ml-7 rounded-md border-l-2 border-amber-300/40 bg-stone-500/3 px-2 py-1 dark:border-amber-400/25"
                       expanded={isQuoteExpanded}
                       onToggle={(e) => toggleQuoteExpand(a.id, e)}
                       expandLabel={_('annotation.expand')}
@@ -653,8 +652,7 @@ export const NotesPanel = memo(function NotesPanel({
                   <ClampedText
                     text={a.text}
                     clampClassName="line-clamp-4"
-                    className="text-sm leading-relaxed text-current whitespace-pre-wrap break-words"
-                    buttonClassName="bottom-0 right-0 rounded-md px-1.5 py-0.5 text-[11px]"
+                    className={cn('text-sm leading-relaxed text-current whitespace-pre-wrap break-words', a.style !== 'highlight' && 'pb-1')}
                     renderText={(value) => <span style={highlightDecoration(a.style, hex)}>{value}</span>}
                     expanded={isNoteExpanded}
                     onToggle={(e) => toggleNoteExpand(a.id, e)}

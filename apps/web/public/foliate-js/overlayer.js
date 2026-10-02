@@ -287,6 +287,56 @@ export class Overlayer {
         }
         return g
     }
+    static ink(rects, options = {}) {
+        const { color = 'red', style = 'underline', writingMode, opacity = 0.85 } = options
+        const g = createSVGElement('g')
+        g.setAttribute('fill', color)
+        g.setAttribute('fill-opacity', opacity)
+        const vertical = writingMode === 'vertical-rl' || writingMode === 'vertical-lr'
+        const fragments = style === 'dashed' ? rects.flatMap(rect => {
+            const length = vertical ? rect.height : rect.width
+            const size = vertical ? rect.width : rect.height
+            const dash = Math.max(5, size * 0.32)
+            const gap = Math.max(3, size * 0.18)
+            const segments = []
+            for (let offset = 0; offset < length; offset += dash + gap) {
+                const extent = Math.min(dash, length - offset)
+                if (extent < 1 && offset > 0) continue
+                segments.push(vertical
+                    ? { ...rect, top: rect.top + offset, height: extent }
+                    : { ...rect, left: rect.left + offset, width: extent })
+            }
+            return segments
+        }) : rects
+        for (const rect of fragments) {
+            const length = vertical ? rect.height : rect.width
+            if (length <= 0) continue
+            const fontSize = vertical ? rect.width : rect.height
+            const thickness = Math.max(1.4, Math.min(2.8, fontSize * 0.065))
+            const amplitude = style === 'squiggly' ? fontSize * 0.035 : fontSize * 0.003
+            const wavelength = Math.max(12, fontSize * 0.75)
+            const steps = Math.max(2, Math.ceil(length / 1.5))
+            const upper = [], lower = []
+            for (let i = 0; i <= steps; i++) {
+                const distance = length * i / steps
+                const taper = Math.min(1, distance / (thickness * 3), (length - distance) / (thickness * 3))
+                const half = thickness / 2 * (0.35 + 0.65 * taper)
+                    * (1 + 0.1 * Math.sin(distance / wavelength * 2.1))
+                const center = Math.sin(distance / wavelength * Math.PI * 2) * amplitude
+                const base = vertical ? rect.right + thickness : rect.bottom + thickness
+                upper.push(vertical
+                    ? `${base + center - half},${rect.top + distance}`
+                    : `${rect.left + distance},${base + center - half}`)
+                lower.push(vertical
+                    ? `${base + center + half},${rect.top + distance}`
+                    : `${rect.left + distance},${base + center + half}`)
+            }
+            const el = createSVGElement('path')
+            el.setAttribute('d', `M${upper.join(' L')} L${lower.reverse().join(' L')} Z`)
+            g.append(el)
+        }
+        return g
+    }
     static highlight(rects, options = {}) {
         const {
             color = 'red',
@@ -299,6 +349,8 @@ export class Overlayer {
             radius = 4,
             radiusPadding = 2,
             vertical = false,
+            pen = false,
+            blendMode,
         } = options
 
         const g = createSVGElement('g')
@@ -316,9 +368,31 @@ export class Overlayer {
                 g.setAttribute('stroke-opacity', String(strokeOpacity))
             }
         }
-        g.style.mixBlendMode = 'var(--overlayer-highlight-blend-mode, normal)'
+        g.style.mixBlendMode = blendMode ?? 'var(--overlayer-highlight-blend-mode, normal)'
 
         for (const [index, { left, top, height, width }] of rects.entries()) {
+            if (pen && width > 0 && height > 0) {
+                const el = createSVGElement('path')
+                const length = vertical ? height : width
+                const breadth = vertical ? width : height
+                const inset = Math.min(1.5, breadth * 0.035)
+                const tip = Math.min(2, length * 0.08)
+                const points = []
+                const steps = Math.max(1, Math.ceil(length / 24))
+                for (let i = 0; i <= steps; i++) {
+                    const along = length * i / steps
+                    points.push([along, inset + Math.sin(i * 1.7) * 0.35])
+                }
+                for (let i = steps; i >= 0; i--) {
+                    const along = Math.max(0, length * i / steps - tip)
+                    points.push([along, breadth - inset + Math.sin(i * 1.3) * 0.35])
+                }
+                el.setAttribute('d', `M${points.map(([along, across]) => vertical
+                    ? `${left + across},${top + along}`
+                    : `${left + along},${top + across}`).join(' L')} Z`)
+                g.append(el)
+                continue
+            }
             const isFirst = index === 0
             const isLast = index === rects.length - 1
 

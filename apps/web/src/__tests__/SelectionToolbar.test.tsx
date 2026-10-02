@@ -305,6 +305,7 @@ describe('SelectionToolbar', () => {
   })
 
   it('creates a separate idea annotation from the highlight bubble only on publish', async () => {
+    window.localStorage.setItem('bd-reader-highlight-style', JSON.stringify({ colors: { squiggly: 'red' }, style: 'squiggly' }))
     annotationsData = [ANNOTATION]
     setSelection(ANNOTATION.cfiRange)
     render(<SelectionToolbar bookId="b1" />)
@@ -317,7 +318,7 @@ describe('SelectionToolbar', () => {
     fireEvent.change(screen.getByPlaceholderText('annotation.notePlaceholder'), { target: { value: '我的想法' } })
     fireEvent.click(screen.getByRole('button', { name: 'annotation.publish' }))
     await waitFor(() => expect(createMutate).toHaveBeenCalledTimes(1))
-    expect(createMutate.mock.calls[0][0]).toMatchObject({ type: 'note', cfiRange: 'epubcfi(/6/4!/2)', note: '我的想法' })
+    expect(createMutate.mock.calls[0][0]).toMatchObject({ type: 'note', color: 'amber', style: 'underline', cfiRange: 'epubcfi(/6/4!/2)', note: '我的想法' })
     expect(updateMutate).not.toHaveBeenCalled()
     expect(useReaderState.getState().noteEditorRange).toBeNull()
   })

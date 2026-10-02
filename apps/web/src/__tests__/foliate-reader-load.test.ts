@@ -27,6 +27,22 @@ function ann(cfiRange: string, type: ReaderAnnotation['type'] = 'highlight'): Re
   return { cfiRange, type, color: 'yellow', style: 'underline', note: null }
 }
 
+describe('personal marker theme changes', () => {
+  it('reapplies existing marker ink when switching reading themes', () => {
+    const reader = new FoliateReader('')
+    const marker = { ...ann('marker'), style: 'highlight' as const }
+    ;(reader as any).view = { renderer: document.createElement('div') }
+    ;(reader as any).annotationMap = new Map([['marker|highlight', marker], ['line|highlight', ann('line')]])
+    ;(reader as any).renderedAnnotations = new Map([['marker|highlight', 'marker'], ['line|highlight', 'line']])
+    vi.spyOn(reader as any, 'applyStyles').mockImplementation(() => {})
+    const repaint = vi.spyOn(reader as any, 'addAnnotationValue').mockImplementation(() => {})
+
+    reader.applyReadingTheme({ bg: '#101010', text: '#ffffff' })
+
+    expect(repaint).toHaveBeenCalledExactlyOnceWith('marker|highlight', false)
+  })
+})
+
 describe('cfiSpinePrefix / sectionSpinePrefix', () => {
   it('extracts the spine part of a standard EPUB CFI', () => {
     expect(cfiSpinePrefix('epubcfi(/6/24!/4/2:58)')).toBe('/6/24')

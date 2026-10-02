@@ -5,7 +5,7 @@ import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { resolveReadingTheme } from '@/lib/reading-theme'
 import { FoliateReader } from '../renderers/FoliateReader'
-import { fontCssFor, resolveFont } from '../fonts'
+import { resolveDualFont } from '../fonts'
 import type { BookReader, ClickAreaMode, MarginalField, RendererEvents } from '../types'
 import type { EffectiveViewSettings } from '../lib/view-settings'
 
@@ -90,6 +90,7 @@ export function useReaderRenderer({
   const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
   const fontFamily = useUiStore((s) => s.fontFamily)
+  const cjkFontFamily = useUiStore((s) => s.cjkFontFamily)
   const fontPreferences = useUiStore((s) => s.fontPreferences)
   const fontOrder = useUiStore((s) => s.fontOrder)
   const storeFontSize = useUiStore((s) => s.fontSize)
@@ -140,9 +141,9 @@ export function useReaderRenderer({
   // fonts query is still loading an uploaded id resolves to the system
   // fallback; fontCss changing re-triggers the applyFont effect below.
   const { data: fontsData } = useFonts()
-  const resolvedFont = resolveFont(fontFamily, fontsData?.data ?? [], fontPreferences, fontOrder)
+  const resolvedFont = resolveDualFont(fontFamily, cjkFontFamily, fontsData?.data ?? [], fontPreferences, fontOrder)
   const fontStack = resolvedFont.stack
-  const fontCss = fontCssFor(resolvedFont)
+  const fontCss = resolvedFont.css
 
   const onRelocatedRef = useRef(onRelocated)
   const onReadyRef = useRef(onReady)
@@ -168,7 +169,7 @@ export function useReaderRenderer({
   const onFootnoteCloseRef = useRef(onFootnoteClose)
   const theme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [readingThemeId, customThemes])
   const themeRef = useRef(theme)
-  const fontRef = useRef({ fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
+  const fontRef = useRef({ fontFamily, cjkFontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
   const paragraphRef = useRef({ paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout })
   const pageWidthRef = useRef(pageWidth)
   const chineseConversionRef = useRef(chineseConversion)
@@ -209,7 +210,7 @@ export function useReaderRenderer({
   onFootnoteOpenRef.current = onFootnoteOpen
   onFootnoteCloseRef.current = onFootnoteClose
   themeRef.current = theme
-  fontRef.current = { fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont }
+  fontRef.current = { fontFamily, cjkFontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont }
   paragraphRef.current = { paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
   pageWidthRef.current = pageWidth
   chineseConversionRef.current = chineseConversion
@@ -352,7 +353,7 @@ export function useReaderRenderer({
     const current = rendererRef.current
     if (!current) return
     current.applyFont({ fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
-  }, [fontFamily, fontStack, fontCss, fontSize, lineHeight, fontWeight, overrideBookFont])
+  }, [fontFamily, cjkFontFamily, fontStack, fontCss, fontSize, lineHeight, fontWeight, overrideBookFont])
 
   useEffect(() => {
     const current = rendererRef.current

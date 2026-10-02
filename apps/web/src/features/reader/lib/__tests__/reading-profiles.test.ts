@@ -27,9 +27,11 @@ function configWith(preset: ReadingPreset): ReadingConfig {
 }
 
 describe('reading profiles', () => {
-  it('covers every reading-menu setting (45 keys)', () => {
-    expect(READING_PROFILE_KEYS).toHaveLength(45)
+  it('covers every reading-menu setting (46 keys)', () => {
+    expect(READING_PROFILE_KEYS).toHaveLength(46)
     expect(READING_PROFILE_KEYS).toContain('readingThemeMode')
+    expect(READING_PROFILE_KEYS).toContain('fontFamily')
+    expect(READING_PROFILE_KEYS).toContain('cjkFontFamily')
     expect(READING_PROFILE_KEYS).toContain('fontSize')
     expect(READING_PROFILE_KEYS).toContain('scrollPageWidth')
     expect(READING_PROFILE_KEYS).toContain('clickAreaMode')

@@ -2,15 +2,19 @@
 // contains/regex matching. Replaces foliate's `view.search` (segmenterSearch
 // is O(n×q) on the main thread — 5-20s for a sentence query over a full
 // book). Contains matching here is a lowercased `indexOf` sliding window
-// (O(n)); regex delegates to the native engine.
+// (O(n)); browser regex matching uses a disposable worker.
 //
 // Search text is derived from the same text-replacement and Chinese-conversion
 // pipeline as the rendered section, so result offsets can be mapped back to
 // the live transformed document.
 
-import type { ChineseConversion } from '../types'
+import type { ChineseConversion, SearchStatus } from '../types'
+import { findMatches, type SearchMatchOptions } from './book-search-match'
 import { convertChinese } from '@/lib/chinese'
 import { applyReplacementsWithWorker, type TextReplacementRule } from './text-replacements'
+
+export { findMatches } from './book-search-match'
+export type { SearchMatchOptions } from './book-search-match'
 
 // length for context in excerpts (mirrors foliate's search.js)
 const EXCERPT_CONTEXT_LENGTH = 50
@@ -50,9 +54,13 @@ export function mapMatchTextsToOffsets(
   })
 }
 
-export interface SearchMatchOptions {
-  mode?: 'contains' | 'regex'
-  matchCase?: boolean
+export interface SearchTimings {
+  load: number
+  parse: number
+  replacements: number
+  conversion: number
+  extract: number
+  chapterCacheHits: number
 }
 
 export interface ChapterTextOptions {
@@ -125,35 +133,44 @@ export function extractChapterText(doc: Document): ChapterText {
   return { text, nodeLengths }
 }
 
-export function findMatches(text: string, query: string, opts?: SearchMatchOptions): SearchMatch[] {
-  if (!text || !query) return []
-  const matches: SearchMatch[] = []
-  if (opts?.mode === 'regex') {
-    let re: RegExp
+export async function findMatchesSafely(
+  text: string,
+  query: string,
+  options: SearchMatchOptions,
+  signal: AbortSignal,
+): Promise<{ matches: SearchMatch[]; error?: SearchStatus['error'] }> {
+  if (signal.aborted) return { matches: [] }
+  if (options.mode !== 'regex') return { matches: findMatches(text, query, options) }
+  if (typeof Worker === 'undefined') return { matches: [], error: 'regex-unavailable' }
+  let worker: Worker
+  try {
+    worker = new Worker(new URL('./book-search.worker.ts', import.meta.url), { type: 'module' })
+  } catch {
+    return { matches: [], error: 'regex-unavailable' }
+  }
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (matches: SearchMatch[], error?: SearchStatus['error']) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      worker.terminate()
+      resolve({ matches, error })
+    }
+    const abort = () => finish([])
+    const timer = setTimeout(() => finish([], 'regex-timeout'), 3000)
+    signal.addEventListener('abort', abort, { once: true })
+    worker.onmessage = (event: MessageEvent<{ matches: SearchMatch[] }>) => finish(event.data.matches)
+    worker.onerror = () => finish([], 'regex-failed')
+    worker.onmessageerror = () => finish([], 'regex-failed')
     try {
-      re = new RegExp(query, opts?.matchCase ? 'gu' : 'giu')
+      worker.postMessage({ text, query, options })
     } catch {
-      // invalid pattern: no results, don't crash the whole search
-      return []
+      finish([], 'regex-failed')
     }
-    for (const m of text.matchAll(re)) {
-      // skip empty matches so `.*`-style patterns can't flood the result list
-      if (!m[0]) continue
-      matches.push({ start: m.index, end: m.index + m[0].length })
-    }
-    return matches
-  }
-  const haystack = opts?.matchCase ? text : text.toLowerCase()
-  const needle = opts?.matchCase ? query : query.toLowerCase()
-  if (!needle) return []
-  let index = -1
-  while ((index = haystack.indexOf(needle, index + 1)) > -1) {
-    matches.push({ start: index, end: index + needle.length })
-  }
-  return matches
+  })
 }
-
-const normalizeWhitespace = (str: string) => str.replace(/\s+/g, ' ')
 
 
 export function formatCardExcerpt(
@@ -173,26 +190,72 @@ export function makeExcerpt(
   text: string,
   start: number,
   end: number,
+  skipWhitespace?: (offset: number, backwards: boolean) => number,
 ): { pre: string; match: string; post: string } {
   const match = text.slice(start, end)
-  const trimmedPre = normalizeWhitespace(text.slice(0, start)).trimStart()
-  const trimmedPost = normalizeWhitespace(text.slice(end)).trimEnd()
-  const pre = `${trimmedPre.length > EXCERPT_CONTEXT_LENGTH ? '…' : ''}${trimmedPre.slice(-EXCERPT_CONTEXT_LENGTH)}`
-  const post = `${trimmedPost.slice(0, EXCERPT_CONTEXT_LENGTH)}${trimmedPost.length > EXCERPT_CONTEXT_LENGTH ? '…' : ''}`
+  const before: string[] = []
+  const after: string[] = []
+  for (let i = start - 1; i >= 0 && before.length <= EXCERPT_CONTEXT_LENGTH; i--) {
+    if (/\s/.test(text[i]!)) {
+      if (skipWhitespace) i = skipWhitespace(i, true)
+      else while (i >= 0 && /\s/.test(text[i]!)) i--
+      if (i < 0) break
+      before.push(' ')
+      i++
+    } else before.push(text[i]!)
+  }
+  for (let i = end; i < text.length && after.length <= EXCERPT_CONTEXT_LENGTH; i++) {
+    if (/\s/.test(text[i]!)) {
+      if (skipWhitespace) i = skipWhitespace(i, false)
+      else while (i < text.length && /\s/.test(text[i]!)) i++
+      if (i === text.length) break
+      after.push(' ')
+      i--
+    } else after.push(text[i]!)
+  }
+  const pre = `${before.length > EXCERPT_CONTEXT_LENGTH ? '…' : ''}${before.slice(0, EXCERPT_CONTEXT_LENGTH).reverse().join('')}`
+  const post = `${after.slice(0, EXCERPT_CONTEXT_LENGTH).join('')}${after.length > EXCERPT_CONTEXT_LENGTH ? '…' : ''}`
   return { pre, match, post }
+}
+
+export function createExcerptBuilder(text: string): (start: number, end: number) => ReturnType<typeof makeExcerpt> {
+  const runs = [...text.matchAll(/\s+/g)].map((match) => ({ start: match.index, end: match.index + match[0].length }))
+  // Regex hits inside one long whitespace run must not rescan that run for every excerpt.
+  const skipWhitespace = (offset: number, backwards: boolean) => {
+    let low = 0
+    let high = runs.length
+    while (low < high) {
+      const middle = (low + high) >>> 1
+      if (runs[middle]!.end <= offset) low = middle + 1
+      else high = middle
+    }
+    const run = runs[low]!
+    return backwards ? run.start - 1 : run.end
+  }
+  return (start, end) => makeExcerpt(text, start, end, skipWhitespace)
 }
 
 // Maps a [start, end) span of the concatenated plain text back to a DOM Range.
 // Walks `doc` fresh (rather than trusting cached offsets) so it stays correct
 // on the live rendered document, which may differ from the parsed source once
 // Chinese conversion has rewritten its text nodes.
-export function offsetsToRange(doc: Document, start: number, end: number): Range | null {
-  if (!doc.body || start < 0 || end < start) return null
+export function prepareSearchDocument(doc: Document): {
+  text: string
+  toRange: (start: number, end: number) => Range | null
+} {
   const extracted = collectSearchText(doc)
-  if (end > extracted.text.length || extracted.nodes.length === 0) return null
 
   const resolve = (offset: number, side: 'start' | 'end'): { node: Text; local: number } | null => {
-    for (const [index, entry] of extracted.nodes.entries()) {
+    let low = 0
+    let high = extracted.nodes.length
+    while (low < high) {
+      const middle = (low + high) >>> 1
+      if (extracted.nodes[middle]!.end < offset) low = middle + 1
+      else high = middle
+    }
+    const index = low
+    const entry = extracted.nodes[index]
+    if (entry) {
       if (offset >= entry.start && offset <= entry.end) {
         if (side === 'start' && offset === entry.end) {
           const next = extracted.nodes[index + 1]
@@ -210,13 +273,23 @@ export function offsetsToRange(doc: Document, start: number, end: number): Range
     return offset === last.end ? { node: last.node, local: last.node.length } : null
   }
 
-  const startPoint = resolve(start, 'start')
-  const endPoint = resolve(end, 'end')
-  if (!startPoint || !endPoint) return null
-  const range = doc.createRange()
-  range.setStart(startPoint.node, startPoint.local)
-  range.setEnd(endPoint.node, endPoint.local)
-  return range
+  return {
+    text: extracted.text,
+    toRange: (start, end) => {
+      if (!doc.body || start < 0 || end < start || end > extracted.text.length || !extracted.nodes.length) return null
+      const startPoint = resolve(start, 'start')
+      const endPoint = resolve(end, 'end')
+      if (!startPoint || !endPoint) return null
+      const range = doc.createRange()
+      range.setStart(startPoint.node, startPoint.local)
+      range.setEnd(endPoint.node, endPoint.local)
+      return range
+    },
+  }
+}
+
+export function offsetsToRange(doc: Document, start: number, end: number): Range | null {
+  return prepareSearchDocument(doc).toRange(start, end)
 }
 
 interface SearchableBook {
@@ -233,12 +306,16 @@ async function loadChapterText(
   book: SearchableBook,
   index: number,
   options?: ChapterTextOptions,
+  timings?: SearchTimings,
 ): Promise<ChapterText | null> {
   const section = book.sections?.[index]
   if (!section?.id || typeof book.loadSectionText !== 'function') return null
+  let started = performance.now()
   const markup = await book.loadSectionText(section.id)
+  if (timings) timings.load += performance.now() - started
   if (typeof markup !== 'string') return null
   const parser = new DOMParser()
+  started = performance.now()
   let docType: DOMParserSupportedType = 'application/xhtml+xml'
   let doc = parser.parseFromString(markup, docType)
   // Malformed XHTML fails hard under the XML parser; retry as lenient HTML
@@ -246,25 +323,36 @@ async function loadChapterText(
     docType = 'text/html'
     doc = parser.parseFromString(markup, docType)
   }
+  if (timings) timings.parse += performance.now() - started
   const conversion = options?.chineseConversion ?? 'off'
   const replacements = options?.replacements ?? []
-  if (!replacements.length && conversion === 'off') return extractChapterText(doc)
-
-  let transformedMarkup = replacements.length
-    ? await applyReplacementsWithWorker(markup, replacements, docType)
-    : markup
-  if (conversion !== 'off') transformedMarkup = await convertChinese(transformedMarkup, conversion)
-  doc = parser.parseFromString(transformedMarkup, docType)
-  if (docType === 'application/xhtml+xml' && doc.getElementsByTagName('parsererror').length > 0) {
-    doc = parser.parseFromString(transformedMarkup, 'text/html')
+  if (replacements.length || conversion !== 'off') {
+    started = performance.now()
+    let transformedMarkup = replacements.length
+      ? await applyReplacementsWithWorker(markup, replacements, docType)
+      : markup
+    if (timings) timings.replacements += performance.now() - started
+    started = performance.now()
+    if (conversion !== 'off') transformedMarkup = await convertChinese(transformedMarkup, conversion)
+    if (timings) timings.conversion += performance.now() - started
+    started = performance.now()
+    doc = parser.parseFromString(transformedMarkup, docType)
+    if (docType === 'application/xhtml+xml' && doc.getElementsByTagName('parsererror').length > 0) {
+      doc = parser.parseFromString(transformedMarkup, 'text/html')
+    }
+    if (timings) timings.parse += performance.now() - started
   }
-  return extractChapterText(doc)
+  started = performance.now()
+  const extracted = extractChapterText(doc)
+  if (timings) timings.extract += performance.now() - started
+  return extracted
 }
 
 export function getChapterText(
   book: SearchableBook,
   index: number,
   options?: ChapterTextOptions,
+  timings?: SearchTimings,
 ): Promise<ChapterText | null> {
   let cache = chapterTextCaches.get(book as object)
   if (!cache) {
@@ -276,9 +364,12 @@ export function getChapterText(
     replacements: options?.replacements ?? [],
   })}`
   const cached = cache.get(cacheKey)
-  if (cached) return cached
+  if (cached) {
+    if (timings) timings.chapterCacheHits++
+    return cached
+  }
   // Failures resolve to null but are evicted, so the next search retries
-  const promise = loadChapterText(book, index, options).catch(() => null)
+  const promise = loadChapterText(book, index, options, timings).catch(() => null)
   cache.set(cacheKey, promise)
   void promise.then((value) => {
     if (value === null && cache.get(cacheKey) === promise) cache.delete(cacheKey)

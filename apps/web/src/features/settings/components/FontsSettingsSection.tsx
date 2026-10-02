@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
-import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { SortableContext, arrayMove, rectSortingStrategy } from '@dnd-kit/sortable'
 
 import { useDeleteFont, useFonts, useUploadFont } from '@/api/hooks/useFonts'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -163,8 +163,8 @@ export default function FontsSettingsSection() {
         <QueryErrorState className="py-4" isRetrying={fontsQuery.isFetching} onRetry={fontsQuery.refetch} />
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-          <SortableContext items={displayFonts.map((font) => font.id)} strategy={verticalListSortingStrategy}>
-            <ul className="divide-y divide-stone-200 dark:divide-stone-800">
+          <SortableContext items={displayFonts.map((font) => font.id)} strategy={rectSortingStrategy}>
+            <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
               {displayFonts.map((font) => (
                 <FontRow
                   key={`${font.source}:${font.id}`}

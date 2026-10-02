@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Selection popup browser regression fixture</title>
+<!-- Open through Vite at /src/__tests__/fixtures/selection-popup-browser.html. -->
+<style>
+body { margin: 20px; font: 16px sans-serif; background: #f5f5f4; }
+foliate-paginator { display: block; margin: 20px 0 0 180px; width: 800px; height: 560px; background: white; }
+pre { position: fixed; top: 60px; right: 8px; z-index: 2; width: 280px; max-height: 150px; overflow: auto; white-space: pre-wrap; background: #f5f5f4; }
+.bar { position: fixed; display: flex; box-sizing: border-box; gap: 2px; padding: 3px 8px; border: 1px solid #a8a29e; border-radius: 16px; background: #fafaf9; overflow-x: auto; scrollbar-width: none; }
+#bar { height: 44px; }
+.bar button { flex-shrink: 0; width: 36px; height: 36px; border: 0; border-radius: 50%; background: #e7e5e4; }
+#style { display: none; height: 40px; }
+</style>
+<button id="run">Run popup checks</button>
+<select id="flow"><option value="paginated">Page</option><option value="scrolled">Scroll</option></select>
+<label><input id="restyle" type="checkbox">Style bar</label>
+<pre id="result">Ready: select text to inspect the popup.</pre>
+<foliate-paginator></foliate-paginator>
+<div id="bar" class="bar"></div><div id="style" class="bar"></div>
+<script type="module" src="/foliate-js/paginator.js"></script>
+<script type="module">
+import { getSelectionGeometry } from '../../features/reader/lib/selection-geometry.ts'
+import { popupPosition } from '../../features/reader/components/annotation-colors.ts'
+await customElements.whenDefined('foliate-paginator')
+const renderer = document.querySelector('foliate-paginator')
+const result = document.querySelector('#result')
+const bar = document.querySelector('#bar')
+const style = document.querySelector('#style')
+const restyle = document.querySelector('#restyle')
+const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve))
+const paragraph = 'Selection menus should stay near the focus without covering the selected lines. '
+const markup = '<html><head><style>body { margin:0; font:20px/1.8 serif; } p { margin:0 0 20px; }</style></head><body>'
+  + Array.from({ length: 30 }, (_, i) => `<p>Paragraph ${i + 1}. ${paragraph.repeat(8)}</p>`).join('') + '</body></html>'
+const url = URL.createObjectURL(new Blob([markup], { type: 'text/html' }))
+for (let i = 0; i < 9; i++) bar.appendChild(Object.assign(document.createElement('button'), { textContent: String(i + 1) }))
+for (let i = 0; i < 5; i++) style.appendChild(Object.assign(document.createElement('button'), { textContent: String(i + 1) }))
+renderer.setAttribute('flow', 'paginated')
+renderer.setAttribute('max-column-count', '2')
+renderer.setAttribute('max-inline-size', '900')
+renderer.setAttribute('gutter', '0')
+renderer.setAttribute('top-margin', '0')
+renderer.setAttribute('bottom-margin', '0')
+renderer.setAttribute('no-preload', '')
+renderer.open({ dir: 'ltr', sections: [{ linear: 'yes', load: async () => url, loadContent: async () => markup }] })
+await renderer.goTo({ index: 0 })
+
+function show(doc) {
+  const selection = doc.getSelection()
+  if (!selection.rangeCount || selection.isCollapsed) return
+  const range = selection.getRangeAt(0)
+  const geometry = getSelectionGeometry(doc, range, selection, renderer.getBoundingClientRect(), renderer.scrolled ? 1 : renderer.columnCount)
+  if (!geometry) return
+  const anchor = geometry.backward ? geometry.rects[0] : geometry.rects.at(-1)
+  bar.style.maxWidth = ''; style.style.maxWidth = ''
+  style.style.display = restyle.checked ? 'flex' : 'none'
+  const main = bar.getBoundingClientRect()
+  const colors = style.getBoundingClientRect()
+  const position = popupPosition(anchor, main.width, main.height, restyle.checked ? colors.height + 8 : 0, geometry, colors.width)
+  Object.assign(bar.style, { left: `${position.left}px`, top: `${position.top}px`, maxWidth: `${position.width}px` })
+  Object.assign(style.style, { left: `${position.styleLeft}px`, top: `${position.styleTop}px`, maxWidth: `${position.styleWidth}px` })
+  return { geometry, anchor, position }
+}
+const { doc } = renderer.getContents()[0]
+doc.addEventListener('mouseup', () => { show(doc) })
+restyle.onchange = () => { show(doc) }
+document.querySelector('#flow').onchange = async event => {
+  renderer.setAttribute('flow', event.target.value)
+  await nextFrame(); await nextFrame()
+  await renderer.goTo({ index: 0, anchor: () => 0 })
+  doc.getSelection().removeAllRanges()
+}
+
+document.querySelector('#run').onclick = async () => {
+  const lines = []
+  function check(condition, label) {
+    lines.push(`${condition ? 'PASS' : 'FAIL'} ${label}`)
+    result.textContent = lines.join('\n')
+    if (!condition) throw new Error(label)
+  }
+  try {
+    const text = doc.querySelector('p').firstChild
+    for (const flow of ['paginated', 'scrolled']) {
+      renderer.setAttribute('flow', flow)
+      await nextFrame(); await nextFrame()
+      await renderer.goTo({ index: 0, anchor: () => 0 })
+      for (const width of [800, 320]) {
+        renderer.style.width = `${width}px`
+        renderer.style.marginLeft = width === 320 ? '0' : '180px'
+        renderer.render()
+        await nextFrame(); await nextFrame()
+        await renderer.goTo({ index: 0, anchor: () => 0 })
+        for (const backward of [false, true]) {
+          for (const length of [6, 180, text.length]) {
+            doc.getSelection().setBaseAndExtent(text, backward ? length : 0, text, backward ? 0 : length)
+            for (const twoBars of [false, true]) {
+              restyle.checked = twoBars
+              const snapshot = show(doc)
+              check(Boolean(snapshot), `${flow} ${width}px ${backward ? 'backward' : 'forward'} ${length} chars ${twoBars ? 'two bars' : 'one bar'}: visible anchor`)
+              const { geometry, position } = snapshot
+              const boxes = [bar.getBoundingClientRect(), ...(twoBars ? [style.getBoundingClientRect()] : [])]
+              check(boxes.every(box => box.left >= geometry.bounds.left + 7.5 && box.right <= geometry.bounds.left + geometry.bounds.width - 7.5
+                && box.top >= geometry.bounds.top + 7.5 && box.bottom <= geometry.bounds.top + geometry.bounds.height - 7.5), 'whole group fits visible reading region')
+              if (length <= 180) check(position.overlap === 0, 'short selection remains unobstructed'
+                + (position.overlap ? ` ${JSON.stringify({ geometry, position })}` : ''))
+            }
+          }
+        }
+      }
+    }
+    renderer.style.width = '800px'; renderer.style.marginLeft = '180px'
+    renderer.setAttribute('flow', 'paginated'); renderer.render()
+    await nextFrame(); await nextFrame()
+    await renderer.goTo({ index: 0, anchor: () => 0 })
+    doc.getSelection().setBaseAndExtent(text, 0, text, 180)
+    restyle.checked = true; show(doc)
+    result.textContent = lines.join('\n') + '\nDONE'
+  } catch (error) { result.textContent = lines.join('\n') + '\nERROR ' + error.message }
+}
+</script>
+</html>

@@ -16,8 +16,8 @@ describe('loadShareCardPrefs', () => {
   })
 
   it('round-trips saved prefs', () => {
-    saveShareCardPrefs({ template: 'ink', font: 'kaiti', background: 'navy', brand: 'zh' })
-    expect(loadShareCardPrefs()).toEqual({ template: 'ink', font: 'kaiti', background: 'navy', brand: 'zh' })
+    saveShareCardPrefs({ template: 'ink', font: 'kaiti', cjkFont: 'serif', background: 'navy', brand: 'zh' })
+    expect(loadShareCardPrefs()).toEqual({ template: 'ink', font: 'kaiti', cjkFont: 'serif', background: 'navy', brand: 'zh' })
   })
 
   it('falls back to defaults on corrupt JSON', () => {
@@ -33,15 +33,21 @@ describe('loadShareCardPrefs', () => {
     expect(loadShareCardPrefs()).toEqual({
       template: DEFAULT_SHARE_CARD_PREFS.template,
       font: 'kaiti',
+      cjkFont: DEFAULT_SHARE_CARD_PREFS.cjkFont,
       background: DEFAULT_SHARE_CARD_PREFS.background,
       brand: DEFAULT_SHARE_CARD_PREFS.brand,
     })
   })
 
+  it('defaults cjkFont for prefs saved before the field existed', () => {
+    localStorage.setItem('bd-share-card-prefs', JSON.stringify({ template: 'ink', font: 'kaiti', background: 'navy' }))
+    expect(loadShareCardPrefs().cjkFont).toBe(DEFAULT_SHARE_CARD_PREFS.cjkFont)
+  })
+
   it('keeps any non-empty font id (builtin/uploaded registry ids)', () => {
-    saveShareCardPrefs({ template: 'ink', font: 'lxgw-wenkai', background: 'navy', brand: 'zh' })
+    saveShareCardPrefs({ template: 'ink', font: 'lxgw-wenkai', cjkFont: 'serif', background: 'navy', brand: 'zh' })
     expect(loadShareCardPrefs().font).toBe('lxgw-wenkai')
-    saveShareCardPrefs({ template: 'ink', font: 'some-uploaded-id', background: 'navy', brand: 'zh' })
+    saveShareCardPrefs({ template: 'ink', font: 'some-uploaded-id', cjkFont: 'serif', background: 'navy', brand: 'zh' })
     expect(loadShareCardPrefs().font).toBe('some-uploaded-id')
   })
 

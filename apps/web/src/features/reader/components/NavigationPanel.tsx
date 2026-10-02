@@ -4,7 +4,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { READER_SESSION_ID, useReaderState } from '../state/reader-state'
-import type { NavTab, SearchResult } from '../types'
+import type { NavTab, SearchResult, SearchStatus } from '../types'
 import { useAnnotations, useBatchDeleteAnnotations } from '../hooks/useAnnotations'
 import { useBookChapters } from '../hooks/useBookChapters'
 import { kindOf, useNotesFilter, type ItemKind } from '../hooks/useNotesFilter'
@@ -189,6 +189,7 @@ function isTocRowPlaced(rowTop: number, viewportTop: number, viewportBottom: num
 interface NavigationPanelProps {  bookId: string
   open: boolean
   locked?: boolean
+  sidebarWidth?: number
   statsDisabled?: boolean
   guestReadOnly?: boolean
   footerVisible?: boolean
@@ -198,7 +199,7 @@ interface NavigationPanelProps {  bookId: string
 }
 
 export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPanelProps>(function NavigationPanel(
-  { bookId, open, locked, statsDisabled, guestReadOnly = false, footerVisible = true, mobileDockVisible = false, onFooterSummon, onClose },
+  { bookId, open, locked, sidebarWidth, statsDisabled, guestReadOnly = false, footerVisible: _footerVisible = true, mobileDockVisible = false, onFooterSummon: _onFooterSummon, onClose },
   ref,
 ) {
   const _ = useTranslation()
@@ -823,7 +824,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searching, setSearching] = useState(false)
   const [searchProgress, setSearchProgress] = useState<number | null>(null)
-  const [searchIndex, setSearchIndex] = useState(0)
+  const [searchStatus, setSearchStatus] = useState<SearchStatus>({ truncated: false, incomplete: false })
+  const [searchIndex, setSearchIndex] = useState(-1)
+  const autoJumpOnCompleteRef = useRef(false)
   const [searchScope, setSearchScope] = useState<'book' | 'chapter'>('book')
   const [searchMatchCase, setSearchMatchCase] = useState(false)
   const [searchMode, setSearchMode] = useState<'contains' | 'regex'>('contains')
@@ -858,16 +861,18 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     const gen = ++searchGenRef.current
     setSearching(true)
     setSearchProgress(0)
+    setSearchStatus({ truncated: false, incomplete: false })
     setSearchResults([])
-    setSearchIndex(0)
+    setSearchIndex(-1)
     try {
       const results = await renderer.search(
         query.trim(),
         { scope: searchScope, matchCase: searchMatchCase, mode: searchMode },
-        (partial, progress) => {
+        (partial, progress, status) => {
           if (gen !== searchGenRef.current) return
           setSearchResults(partial)
           setSearchProgress(progress)
+          if (status) setSearchStatus(status)
         },
       )
       if (gen !== searchGenRef.current) return
@@ -878,6 +883,12 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           saveSearchHistory(bookId, next)
           return next
         })
+        if (autoJumpOnCompleteRef.current) {
+          autoJumpOnCompleteRef.current = false
+          setSearchIndex(0)
+          void renderer.display(results[0].cfi)
+          if (!locked) onClose?.()
+        }
       }
     } finally {
       if (gen === searchGenRef.current) {
@@ -888,13 +899,20 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   }
 
   function clearSearch() {
+    autoJumpOnCompleteRef.current = false
     setQuery('')
     setSearchResults([])
     searchGenRef.current++
     setSearching(false)
     setSearchProgress(null)
-    setSearchIndex(0)
+    setSearchStatus({ truncated: false, incomplete: false })
+    setSearchIndex(-1)
     renderer?.clearSearch()
+  }
+
+  function exitSearch() {
+    clearSearch()
+    setSearchExpanded(false)
   }
 
   // Navigate to a result — via list click or the prev/next card — keeping the
@@ -905,6 +923,18 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     setSearchIndex(index)
     void renderer?.display(r.cfi)
     if (!locked) onClose?.()
+  }
+
+  function handleNextResult() {
+    if (searchResults.length === 0) return
+    const nextIndex = searchIndex < 0 ? 0 : (searchIndex + 1) % searchResults.length
+    goToResult(nextIndex)
+  }
+
+  function handlePrevResult() {
+    if (searchResults.length === 0) return
+    const prevIndex = searchIndex < 0 ? searchResults.length - 1 : (searchIndex - 1 + searchResults.length) % searchResults.length
+    goToResult(prevIndex)
   }
 
   // Search as you type, debounced. Invalid regex just yields no results.
@@ -1025,80 +1055,35 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             </button>
           </div>
         </div>
-      ) : tab === 'toc' && searchExpanded ? (
-        <div
-          className="sticky top-0 z-10 flex h-12 items-center gap-1.5 border-b border-[var(--bd-read-accent)] px-3"
-          style={{ backgroundColor: 'var(--bd-read-bg)' }}
-        >
-          <button
-            type="button"
-            onClick={collapseSearchBar}
-            title={_('reader.backToToc')}
-            aria-label={_('reader.backToToc')}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current active:scale-95"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-          <div className="relative flex-1">
-            {searching ? (
-              <svg className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-[var(--bd-read-sub)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M12 3a9 9 0 1 1-9 9" />
-              </svg>
-            ) : (
-              <svg
-                className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--bd-read-sub)]"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              >
-                <circle cx="11" cy="11" r="7" />
-                <path d="m20 20-3.5-3.5" />
-              </svg>
-            )}
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={query}
-              onChange={(e) => {
-                const val = e.target.value
-                if (val.trim()) setQuery(val)
-                else clearSearch()
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  markEscConsumed()
-                  if (query) clearSearch()
-                  else collapseSearchBar()
-                }
-              }}
-              placeholder={_('reader.searchPlaceholder')}
-              className="h-9 w-full rounded-lg border border-stone-200/80 bg-stone-500/5 py-1.5 pl-8.5 pr-8.5 text-sm leading-normal text-current outline-none transition-all placeholder:text-[var(--bd-read-sub)] hover:border-stone-300 hover:bg-stone-500/10 focus:border-stone-400 focus:bg-transparent focus:ring-2 focus:ring-stone-400/20 dark:border-stone-800/80 dark:hover:border-stone-700 dark:focus:border-stone-600 dark:focus:ring-white/10"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={clearSearch}
-                className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-current active:scale-95"
-                title={_('reader.clear')}
-                aria-label="清除"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
       ) : tab !== 'ai' && (
         <div
-          className="sticky top-0 z-10 flex h-12 items-center border-b border-[var(--bd-read-accent)] px-4"
+          className="sticky top-0 z-10 flex h-12 items-center border-b border-[var(--bd-read-accent)] px-3"
           style={{ backgroundColor: 'var(--bd-read-bg)' }}
         >
-          {tab === 'toc' ? (
+          {tab === 'toc' && searchExpanded ? (
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm font-semibold text-current">{_('reader.search')}</span>
+              <button
+                type="button"
+                onClick={() => setSearchScope((s) => (s === 'book' ? 'chapter' : 'book'))}
+                title={searchScope === 'book' ? _('reader.searchScopeBook') : _('reader.searchScopeChapter')}
+                aria-label={searchScope === 'book' ? _('reader.searchScopeBook') : _('reader.searchScopeChapter')}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-all hover:bg-stone-500/10 hover:text-current active:scale-95"
+              >
+                {searchScope === 'book' ? (
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                  </svg>
+                ) : (
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 2v6h6M9 13h6M9 17h4" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          ) : tab === 'toc' ? (
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="text-sm font-semibold text-current">{_('reader.toc')}</span>
               {tree.length > 0 && (
@@ -1133,8 +1118,49 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             </span>
           )}
 
-          <div className="ml-auto flex items-center gap-1.5 shrink-0">
-            {tab === 'toc' && hasMultiLevel && (
+          <div className="ml-auto flex items-center gap-1 shrink-0">
+            {tab === 'toc' && searchExpanded ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSearchMatchCase((v) => !v)}
+                  title={_('reader.searchMatchCase')}
+                  aria-label={_('reader.searchMatchCase')}
+                  className={cn(
+                    'flex h-7 px-1.5 items-center justify-center rounded-lg text-xs font-semibold font-mono transition-colors active:scale-95',
+                    searchMatchCase
+                      ? 'bg-[var(--bd-read-primary)]/20 text-[var(--bd-read-primary)]'
+                      : 'text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current',
+                  )}
+                >
+                  Aa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSearchMode((m) => (m === 'regex' ? 'contains' : 'regex'))}
+                  title={_('reader.searchModeRegex')}
+                  aria-label={_('reader.searchModeRegex')}
+                  className={cn(
+                    'flex h-7 px-1.5 items-center justify-center rounded-lg text-xs font-mono font-bold transition-colors active:scale-95',
+                    searchMode === 'regex'
+                      ? 'bg-[var(--bd-read-primary)]/20 text-[var(--bd-read-primary)]'
+                      : 'text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current',
+                  )}
+                >
+                  .*
+                </button>
+                <button
+                  type="button"
+                  onClick={collapseSearchBar}
+                  title={_('reader.backToToc')}
+                  aria-label={_('reader.backToToc')}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current active:scale-95"
+                >
+                  <CloseIcon size={16} />
+                </button>
+              </>
+            ) : null}
+            {tab === 'toc' && !searchExpanded && hasMultiLevel && (
               <button
                 type="button"
                 onClick={toggleAllCollapse}
@@ -1181,7 +1207,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                 </svg>
               </button>
             )}
-            {tab === 'toc' && (
+            {tab === 'toc' && !searchExpanded && (
               <button
                 type="button"
                 onClick={toggleSearchBar}
@@ -1304,56 +1330,55 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       {/* Body: TOC Search Mode or Normal Tabs */}
       {tab === 'toc' && searchExpanded ? (
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Filter Pills - single intuitive way to filter */}
-          <div className="relative flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-[var(--bd-read-accent)]/20">
-            <button
-              type="button"
-              onClick={() => setSearchScope('book')}
-              className={cn(
-                'rounded-full px-2.5 py-1 text-xs transition-colors',
-                searchScope === 'book'
-                  ? 'bg-stone-500/20 text-current font-medium'
-                  : 'border border-stone-200/80 text-[var(--bd-read-sub)] hover:border-stone-400 hover:text-current dark:border-stone-800',
+          {/* Dedicated full-width search input & progress indicator */}
+          <div className="relative border-b border-[var(--bd-read-accent)]/20 px-3 py-2">
+            <div className="relative flex items-center">
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={query}
+                onChange={(e) => {
+                  autoJumpOnCompleteRef.current = false
+                  const val = e.target.value
+                  if (val.trim()) setQuery(val)
+                  else clearSearch()
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    markEscConsumed()
+                    if (query) clearSearch()
+                    else collapseSearchBar()
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (searchResults.length > 0) {
+                      if (e.shiftKey) {
+                        handlePrevResult()
+                      } else {
+                        handleNextResult()
+                      }
+                    } else if (query.trim()) {
+                      autoJumpOnCompleteRef.current = true
+                      if (!searching) {
+                        void doSearch()
+                      }
+                    }
+                  }
+                }}
+                placeholder={searchScope === 'book' ? _('reader.searchPlaceholder') : _('reader.searchPlaceholderChapter')}
+                className="h-9 w-full rounded-lg border border-stone-200/80 bg-stone-500/5 py-1.5 pl-3 pr-8 text-sm leading-normal text-current outline-none transition-all placeholder:text-[var(--bd-read-sub)] hover:border-stone-300 hover:bg-stone-500/10 focus:border-stone-400 focus:bg-transparent focus:ring-2 focus:ring-stone-400/20 dark:border-stone-800/80 dark:hover:border-stone-700 dark:focus:border-stone-600 dark:focus:ring-white/10"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-current active:scale-95"
+                  title={_('reader.clear')}
+                  aria-label="清除"
+                >
+                  <CloseIcon size={14} />
+                </button>
               )}
-            >
-              {_('reader.searchScopeBook')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSearchScope('chapter')}
-              className={cn(
-                'rounded-full px-2.5 py-1 text-xs transition-colors',
-                searchScope === 'chapter'
-                  ? 'bg-stone-500/20 text-current font-medium'
-                  : 'border border-stone-200/80 text-[var(--bd-read-sub)] hover:border-stone-400 hover:text-current dark:border-stone-800',
-              )}
-            >
-              {_('reader.searchScopeChapter')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSearchMatchCase((v) => !v)}
-              className={cn(
-                'rounded-full px-2.5 py-1 text-xs transition-colors',
-                searchMatchCase
-                  ? 'bg-stone-500/20 text-current font-medium'
-                  : 'border border-stone-200/80 text-[var(--bd-read-sub)] hover:border-stone-400 hover:text-current dark:border-stone-800',
-              )}
-            >
-              {_('reader.searchMatchCase')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSearchMode(searchMode === 'regex' ? 'contains' : 'regex')}
-              className={cn(
-                'rounded-full px-2.5 py-1 text-xs transition-colors',
-                searchMode === 'regex'
-                  ? 'bg-stone-500/20 text-current font-medium'
-                  : 'border border-stone-200/80 text-[var(--bd-read-sub)] hover:border-stone-400 hover:text-current dark:border-stone-800',
-              )}
-            >
-              {_('reader.searchModeRegex')}
-            </button>
+            </div>
             {/* Pinned Search Progress Bar (Hairline, zero layout shift) */}
             {searchProgress != null && searchProgress < 1 && (
               <div className="absolute inset-x-0 -bottom-[1px] h-0.5 overflow-hidden bg-stone-500/10">
@@ -1436,7 +1461,18 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                     )}
                   </div>
                 )}
-                {searchResults.length === 0 && !searching && (
+                {searchStatus.truncated && (
+                  <p role="status" className="px-1 text-xs text-[var(--bd-read-sub)]">
+                    {_('reader.searchTruncated', { count: searchResults.length })}
+                  </p>
+                )}
+                {searchStatus.incomplete && (
+                  <p role="status" className="px-1 text-xs text-[var(--bd-read-sub)]">
+                    {_(searchStatus.error === 'regex-timeout' ? 'reader.searchRegexTimeout'
+                      : searchStatus.error ? 'reader.searchRegexFailed' : 'reader.searchIncomplete')}
+                  </p>
+                )}
+                {searchResults.length === 0 && !searching && !searchStatus.incomplete && (
                   <p className="text-xs text-[var(--bd-read-sub)] px-1 py-8 text-center">{_('reader.noMatches')}</p>
                 )}
                 {searchResults.length === 0 && searching && (
@@ -1575,82 +1611,74 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         <div
           data-testid="search-nav-capsule"
           className={cn(
-            'fixed left-1/2 z-[60] flex h-10 -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 pl-3.5 pr-1.5 shadow-xl backdrop-blur-md transition-[bottom,transform,opacity] duration-300',
+            'fixed z-[60] flex h-11 -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 px-2 shadow-xl backdrop-blur-md transition-[left] duration-200 ease-out',
             mobileDockVisible
-              ? (footerVisible
-                  ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))] translate-y-0 opacity-100 pointer-events-auto'
-                  : 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))] translate-y-full opacity-0 pointer-events-none')
-              : (footerVisible
-                  ? 'bottom-14 translate-y-0 opacity-100 pointer-events-auto'
-                  : 'bottom-0 translate-y-full opacity-0 pointer-events-none'),
+              ? 'bottom-[calc(4.75rem+env(safe-area-inset-bottom))]'
+              : 'bottom-16',
           )}
-          style={{ animation: 'note-editor-in 140ms ease-out forwards', '--note-dx': '0px', '--note-dy': '8px' } as CSSProperties}
-          onPointerEnter={() => onFooterSummon?.(true)}
-          onPointerLeave={() => onFooterSummon?.(false)}
+          style={{
+            left: `calc(50% + ${(!mobileDockVisible && open ? 48 + (sidebarWidth ?? 288) : !mobileDockVisible ? 48 : 0) / 2}px)`,
+            animation: 'note-editor-in 140ms ease-out forwards',
+            '--note-dx': '0px',
+            '--note-dy': '6px',
+          } as CSSProperties}
         >
-          {/* Query & Counter */}
-          <div className="flex min-w-0 items-center gap-1.5 pr-1 text-sm text-[var(--bd-read-text)]">
+          {/* Search Icon & Count Badge */}
+          <div
+            className="flex items-center gap-1.5 pl-1 pr-1 text-xs text-[var(--bd-read-text)] select-none"
+            title={`${_('reader.search')}: “${query.trim()}”`}
+          >
             <svg
-              className="h-3.5 w-3.5 shrink-0 text-[var(--bd-read-sub)]"
+              className="h-4 w-4 shrink-0 text-[var(--bd-read-sub)]"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
               strokeLinecap="round"
+              strokeLinejoin="round"
               aria-hidden="true"
             >
               <circle cx="11" cy="11" r="7" />
               <path d="m20 20-3.5-3.5" />
             </svg>
-            <span className="flex max-w-44 items-center truncate font-medium select-none" title={query.trim()}>
-              <span className="shrink-0">“</span>
-              <span className="truncate">{query.trim()}</span>
-              <span className="shrink-0">”</span>
-            </span>
-            <span className="shrink-0 rounded-full bg-stone-500/10 px-2 py-0.5 text-xs font-mono tabular-nums text-[var(--bd-read-sub)]">
-              {searchIndex + 1}/{searchResults.length}
+            <span className="font-mono text-xs tabular-nums font-semibold">
+              {searchIndex >= 0
+                ? `${searchIndex + 1}/${searchResults.length}`
+                : _('reader.matchTotal', { count: searchResults.length })}
             </span>
           </div>
-
-          {/* Divider */}
-          <div className="h-3.5 w-px shrink-0 bg-[var(--bd-read-accent)]" aria-hidden="true" />
 
           {/* Navigation Stepper (Prev / Next) */}
-          <div className="flex items-center gap-0.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => goToResult((searchIndex - 1 + searchResults.length) % searchResults.length)}
-              title={_('reader.prev')}
-              aria-label={_('reader.prev')}
-              className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-current active:scale-95"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => goToResult((searchIndex + 1) % searchResults.length)}
-              title={_('reader.next')}
-              aria-label={_('reader.next')}
-              className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-current active:scale-95"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Divider */}
-          <div className="h-3.5 w-px shrink-0 bg-[var(--bd-read-accent)]" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={handlePrevResult}
+            title={_('reader.prev')}
+            aria-label={_('reader.prev')}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-current active:scale-95"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={handleNextResult}
+            title={_('reader.next')}
+            aria-label={_('reader.next')}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-current active:scale-95"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
 
           {/* Close button */}
           <button
             type="button"
-            onClick={collapseSearchBar}
+            onClick={exitSearch}
             title={_('annotation.cancel')}
             aria-label={_('annotation.cancel')}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-current active:scale-95"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-current active:scale-95"
           >
             <CloseIcon size={14} />
           </button>

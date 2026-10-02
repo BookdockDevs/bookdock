@@ -47,7 +47,7 @@ import ContentUpdateNotice from './components/ContentUpdateNotice'
 import HistoryCapsule from './components/HistoryCapsule'
 import ReaderFooterControls from './components/ReaderFooterControls'
 import AutoReadingProgressBar from './components/AutoReadingProgressBar'
-import { getLastHighlightStyle } from './components/annotation-colors'
+import { DEFAULT_IDEA_COLOR, getLastHighlightStyle } from './components/annotation-colors'
 import { setActiveReplacements, setAutoMarkSelectionMode } from './renderers/FoliateReader'
 import ReplacementForm from '../settings/components/ReplacementForm'
 import { ViewSettingsContext } from './view-settings-context'
@@ -935,7 +935,7 @@ export default function Reader() {
     // An idea being composed has no row yet; a pseudo note keeps the dashed
     // underline on its range while the editor is open
     if (noteEditorRange) {
-      list.push({ cfiRange: noteEditorRange, type: 'note', color: 'yellow', style: 'underline' })
+      list.push({ cfiRange: noteEditorRange, type: 'note', color: DEFAULT_IDEA_COLOR, style: 'underline' })
     }
     renderer.setAnnotations(list)
   }, [renderer, annotations?.data, noteEditorRange])
@@ -1457,6 +1457,7 @@ export default function Reader() {
             <Ribbon visible={!!currentBookmark} />
             <div
               ref={containerCallbackRef}
+              data-reader-viewport
               className={cn(
                 'flex-1',
                 readingMode === 'page' ? 'overflow-hidden' : 'overflow-y-auto',

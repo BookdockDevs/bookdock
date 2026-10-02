@@ -192,10 +192,9 @@ describe('bookmark cards', () => {
 
     fireEvent.click(screen.getByText('annotation.expand'))
 
-    // Expanded, the padding is what keeps the button off the last line, and the
-    // button has to stay to fold it back.
+    // The collapse action stays available without reserving another line.
     expect(container.innerHTML).toContain('annotation.collapse')
-    expect(container.innerHTML).toContain('pb-5')
+    expect(container.innerHTML).not.toContain('pb-5')
   })
 
   it('leaves a short snippet alone', () => {
@@ -242,11 +241,26 @@ describe('NotesPanel', () => {
     expect(screen.getByText('想法原文丙')).toBeInTheDocument()
   })
 
+  it('uses a compact hover overlay for idea quotes and keeps expansion working', () => {
+    const text = 'Quoted source paragraph. '.repeat(12)
+    render(<NotesPanel items={[makeAnnotation({ type: 'note', text, note: 'Idea' })]} total={1} sort="time-desc" onClose={vi.fn()} bookId="book-1" />)
+    const button = screen.getByText('annotation.expand').closest('button')!
+    expect(button).toHaveClass('absolute', 'group-hover:opacity-100', 'max-md:opacity-100')
+    expect(button.previousElementSibling?.tagName).toBe('P')
+    fireEvent.click(button)
+    expect(screen.getByText('annotation.collapse')).toBeInTheDocument()
+    expect(button.parentElement).not.toHaveClass('pb-5')
+    expect(screen.getByText(text.trim()).closest('p')).not.toHaveClass('line-clamp-2')
+  })
+
   it('renders highlight text with the decoration matching its style', () => {
     renderPanel()
     const squiggly = screen.getByText('波浪划线乙')
-    expect(squiggly.getAttribute('style')).toContain('wavy')
-    expect(squiggly.getAttribute('style')).toContain('rgb(239, 68, 68)')
+    expect(squiggly.style.backgroundImage).toContain('data:image/svg+xml')
+    expect(squiggly.style.backgroundRepeat).toBe('repeat-x')
+    expect(squiggly.style.paddingBottom).toBe('4px')
+    expect(squiggly.closest('p')).toHaveClass('pb-1')
+    expect(decodeURIComponent(squiggly.style.backgroundImage)).toContain('fill="#ef4444"')
     const tinted = screen.getByText('无章节划线')
     expect(tinted.getAttribute('style')).toContain('background-color')
   })

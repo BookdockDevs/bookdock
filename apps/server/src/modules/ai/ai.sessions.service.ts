@@ -30,8 +30,8 @@ interface AiThreadContext {
 
 function normalizeThreadSettings(value: unknown): AiThreadSettings {
   const raw = value && typeof value === 'object' ? value as { readingScope?: unknown; enabledTools?: unknown; assistantModeId?: unknown } : {}
-  const readingScope: AiReadingScope = raw.readingScope === 'current_chapter' || raw.readingScope === 'full_book'
-    ? raw.readingScope
+  const readingScope: AiReadingScope = raw.readingScope === 'full_book'
+    ? 'full_book'
     : DEFAULT_THREAD_SETTINGS.readingScope
   const enabledTools = Array.isArray(raw.enabledTools)
     ? Array.from(new Set(raw.enabledTools.map(normalizeAiToolName).filter((name): name is AiToolName => Boolean(name))))
