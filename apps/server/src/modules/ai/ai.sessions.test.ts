@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 
 import { createTestDb } from '../../__tests__/setup'
 import { getDb } from '../../db/client'
-import { aiMessageEvents, aiMessages, aiThreads, books, bookVersions, contentRevisions, libraryBooks, libraryBookVersions, libraries, users } from '../../db/schema'
+import { aiMessageEvents, aiMessages, aiThreads, books, bookVersions, contentRevisions, libraryBooks, libraryBookVersions, libraries, users } from '../../db/legacy-test-schema'
 
 vi.mock('../../db/client', () => ({ getDb: vi.fn() }))
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
 import { and, eq, sql } from 'drizzle-orm'
 import { Readable } from 'node:stream'
 import path from 'node:path'
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 import { readingRecordCreateSchema } from '@bookdock/shared'
 
-import * as schema from '../../db/schema'
+import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
@@ -142,7 +142,8 @@ describe('reading-records service', () => {
     // them — a legacy-only row is not a readable book (the reader itself
     // requires the version row).
     seedVersion(db, ownerId, bookId, 1000, 'Book One', 'Author A')
-    seedVersion(db, ownerId, book2Id, 500, 'Book Two', 'Author B')
+    const second = seedVersion(db, ownerId, book2Id, 500, 'Book Two', 'Author B')
+    db.update(schema.libraryBooks).set({ coverKey: 'covers/b.jpg' }).where(eq(schema.libraryBooks.id, second.libraryBookId)).run()
   })
 
   it('accumulates duration for the same user+book+day and separates other days', async () => {
@@ -219,6 +220,24 @@ describe('reading-records service', () => {
     const byBook = await getByBook(ownerId, {})
     expect(byBook.map((b) => b.bookId)).toEqual([book2Id, bookId])
     expect(byBook[0]).toMatchObject({ title: 'Book Two', author: 'Author B', coverKey: 'covers/b.jpg', durationSeconds: 700 })
+  })
+
+  it('counts each version once and uses the caller private metadata across multiple libraries', async () => {
+    await addReadingTime(ownerId, { bookId, date: '2026-10-03', durationSeconds: 90 })
+    const libraryId = createId('lib')
+    const workId = createId('lb')
+    db.insert(schema.libraries).values({
+      id: libraryId, userId: otherId, type: 'private', name: 'Other private library', createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.libraryBooks).values({
+      id: workId, libraryId, userId: otherId, title: 'Other private title', author: 'Private author', createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: createId('lbv'), libraryId, libraryBookId: workId, bookVersionId: bookId, kind: 'personal', createdAt: 1, updatedAt: 1,
+    }).run()
+    expect(await getByBook(ownerId, {})).toEqual([
+      expect.objectContaining({ bookId, title: 'Book One', author: 'Author A', durationSeconds: 90, days: 1 }),
+    ])
   })
 
   it('writes one session row per report, falling back to receive time for startedAt', async () => {

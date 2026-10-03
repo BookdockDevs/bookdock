@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
@@ -12,7 +12,7 @@ vi.hoisted(() => {
   process.env.JWT_SECRET = 'test-secret'
 })
 
-import * as schema from '../../db/schema'
+import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
 import { generateSessionToken, hashSessionToken } from '../../lib/token'

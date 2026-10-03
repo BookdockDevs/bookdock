@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { generateLibraryInviteToken, isLibraryInviteToken } from '../lib/token'
 import * as schema from './schema'
 import { config } from '../config'
+import { migrateBeforeBookRetirement } from './migration-stage'
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 
@@ -127,7 +128,7 @@ export function reconcileConsolidatedMigrationLedger(
   const tables = new Set(
     (db.all(sql.raw('SELECT name FROM sqlite_master WHERE type = \'table\'')) as Array<{ name: string }>).map(({ name }) => name),
   )
-  const requiredTables = ['users', 'books', 'tags', 'toc_rules', 'text_replacements', 'text_replacement_overrides', 'legado_access_keys']
+  const requiredTables = ['users', 'toc_rules', 'text_replacements', 'text_replacement_overrides', 'legado_access_keys']
   const missingTables = requiredTables.filter((table) => !tables.has(table))
   if (missingTables.length > 0) {
     throw new Error(`Cannot reconcile migration ledger; missing tables: ${missingTables.join(', ')}`)
@@ -168,7 +169,10 @@ export interface RunMigrationsHooks {
 }
 
 export async function runMigrations(hooks?: RunMigrationsHooks) {
-  const db = getDb()
+  return runDatabaseMigrations(getDb(), hooks)
+}
+
+export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?: RunMigrationsHooks) {
   // Resolved relative to this module so it works from src/ (dev) and the
   // bundled dist/ (production); the build copies migrations next to the bundle.
   const migrationsFolder = fileURLToPath(new URL('./migrations', import.meta.url))
@@ -177,21 +181,21 @@ export async function runMigrations(hooks?: RunMigrationsHooks) {
   // repair running afterwards could rescue it. Both this repair and 0024 are
   // idempotent, so whichever gets there first wins.
   repairLibraryInvitesSchema(db)
-  migrate(db, { migrationsFolder })
+  migrateBeforeBookRetirement(db, { migrationsFolder })
   repairLegacyTextReplacementSchema(db)
   repairBookmarkContextSchema(db)
-
-  const tagColumns = db.all(sql.raw('PRAGMA table_info(tags)')) as Array<{ name: string }>
-  // The private baseline was rebased after some local databases had already
-  // recorded a later migration timestamp. Drizzle can then skip a forward
-  // migration even though the column is absent from the physical table.
-  if (tagColumns.length > 0 && !tagColumns.some((column) => column.name === 'sort_order')) {
-    db.run(sql.raw('ALTER TABLE "tags" ADD COLUMN "sort_order" INTEGER NOT NULL DEFAULT 0'))
-  }
 
   const tocRuleColumns = db.all(sql.raw('PRAGMA table_info(toc_rules)')) as Array<{ name: string }>
   if (tocRuleColumns.length > 0 && !tocRuleColumns.some((column) => column.name === 'seed_key')) {
     db.run(sql.raw('ALTER TABLE "toc_rules" ADD COLUMN "seed_key" TEXT'))
+  }
+
+  // 0038 replacement execution order: same ledger-ahead hazard — a database
+  // can record the migration while the column is physically absent. Fresh
+  // databases carry it via 0038; the migration backfills per-user order.
+  const replacementColumns = db.all(sql.raw('PRAGMA table_info(text_replacements)')) as Array<{ name: string }>
+  if (replacementColumns.length > 0 && !replacementColumns.some((column) => column.name === 'sort_order')) {
+    db.run(sql.raw('ALTER TABLE "text_replacements" ADD COLUMN "sort_order" INTEGER NOT NULL DEFAULT 0'))
   }
 
   const tocRuleIndexes = db.all(sql.raw('PRAGMA index_list(toc_rules)')) as Array<{ name: string }>
@@ -247,8 +251,6 @@ export async function runMigrations(hooks?: RunMigrationsHooks) {
   }
 
   repairLibraryBooksDeletedAt(db)
-  repairBookmarkFields(db)
-  repairIdeaStyle(db)
   const libColumns = db.all(sql.raw('PRAGMA table_info("libraries")')) as Array<{ name: string }>
   if (libColumns.length > 0 && !libColumns.some((c) => c.name === 'access_password')) {
     db.run(sql.raw('ALTER TABLE "libraries" ADD COLUMN "access_password" TEXT'))
@@ -277,10 +279,21 @@ export async function runMigrations(hooks?: RunMigrationsHooks) {
       db.run(sql.raw('ALTER TABLE "instance" ADD COLUMN "allow_user_upload" INTEGER NOT NULL DEFAULT 1'))
     }
   }
-  await hooks?.beforeRetarget?.()
+  const legacyBooks = db.get(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'books'`)
+  if (legacyBooks) {
+    // Rebased historical ledgers can skip a column required by the bridge.
+    const tagColumns = db.all(sql.raw('PRAGMA table_info(tags)')) as Array<{ name: string }>
+    if (tagColumns.length > 0 && !tagColumns.some((column) => column.name === 'sort_order')) {
+      db.run(sql.raw('ALTER TABLE "tags" ADD COLUMN "sort_order" INTEGER NOT NULL DEFAULT 0'))
+    }
+    if (hooks?.beforeRetarget) await hooks.beforeRetarget()
+    else await (await import('../modules/libraries/startup-backfill')).runPhase2StartupBackfill()
+    await (await import('./retire-legacy-books')).prepareBookRetirement(db)
+  }
   retargetBookIdReferences(db)
 
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
+  migrate(db, { migrationsFolder })
 }
 
 /**
@@ -437,7 +450,7 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
     },
     {
       table: 'text_replacements',
-      columns: '`id`, `user_id`, `book_id`, `match_type`, `pattern`, `replacement`, `is_regex`, `enabled`, `name`, `group_name`, `spine_href`, `text_offset`, `original_text`, `created_at`, `updated_at`, `apply_to`, `book_version_id`',
+      columns: '`id`, `user_id`, `book_id`, `match_type`, `pattern`, `replacement`, `is_regex`, `enabled`, `name`, `group_name`, `spine_href`, `text_offset`, `original_text`, `created_at`, `updated_at`, `apply_to`, `sort_order`, `book_version_id`',
       create: `CREATE TABLE \`text_replacements_new\` (
 	\`id\` text PRIMARY KEY NOT NULL,
 	\`user_id\` text NOT NULL REFERENCES \`users\`(\`id\`) ON UPDATE no action ON DELETE cascade,
@@ -455,6 +468,7 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
 	\`created_at\` integer NOT NULL,
 	\`updated_at\` integer NOT NULL,
 	\`apply_to\` text NOT NULL DEFAULT 'content',
+	\`sort_order\` integer NOT NULL DEFAULT 0,
 	\`book_version_id\` text REFERENCES \`book_versions\`(\`id\`) ON UPDATE no action ON DELETE cascade
 )`,
       indexes: [
@@ -484,6 +498,7 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
   ]
   db.run(sql.raw('PRAGMA foreign_keys=OFF'))
   try {
+    db.transaction(() => {
     for (const spec of specs) {
       if (!tables.has(spec.table)) continue
       const refs = db.all(sql.raw(`PRAGMA foreign_key_list("${spec.table}")`)) as Array<{ from: string; table: string }>
@@ -496,18 +511,27 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
           `Cannot retarget ${spec.table}: ${orphans?.count} rows reference books without versions. Run the Phase 2 data migration first.`,
         )
       }
+      let sourceColumns = spec.columns
+      if (spec.table === 'text_replacements') {
+        const columns = db.all(sql.raw('PRAGMA table_info(text_replacements)')) as Array<{ name: string }>
+        // Manual legacy retargets may run before the sort-order migration.
+        if (!columns.some((column) => column.name === 'sort_order')) {
+          sourceColumns = sourceColumns.replace('`sort_order`', '0')
+        }
+      }
       db.run(sql.raw(spec.create))
-      db.run(sql.raw(`INSERT INTO "${spec.table}_new" (${spec.columns}) SELECT ${spec.columns} FROM "${spec.table}"`))
+      db.run(sql.raw(`INSERT INTO "${spec.table}_new" (${spec.columns}) SELECT ${sourceColumns} FROM "${spec.table}"`))
       db.run(sql.raw(`DROP TABLE "${spec.table}"`))
       db.run(sql.raw(`ALTER TABLE "${spec.table}_new" RENAME TO "${spec.table}"`))
       for (const index of spec.indexes) db.run(sql.raw(index))
     }
+    const violations = db.all(sql.raw('PRAGMA foreign_key_check')) as Array<unknown>
+    if (violations.length > 0) {
+      throw new Error(`Book-id retarget left ${violations.length} foreign-key violations; transaction rolled back.`)
+    }
+    })
   } finally {
     db.run(sql.raw('PRAGMA foreign_keys=ON'))
-  }
-  const violations = db.all(sql.raw('PRAGMA foreign_key_check')) as Array<unknown>
-  if (violations.length > 0) {
-    throw new Error(`Book-id retarget left ${violations.length} foreign-key violations; restore from backup.`)
   }
 }
 
@@ -523,62 +547,6 @@ export function repairLibraryBooksDeletedAt(db: ReturnType<typeof drizzle<typeof
   if (columns.length > 0 && !columns.some((column) => column.name === 'deleted_at')) {
     db.run(sql.raw('ALTER TABLE "library_books" ADD COLUMN "deleted_at" INTEGER'))
   }
-}
-
-/**
- * Bookmarks migrated while the annotation split dropped their text/href
- * (title written as null, no chapter_href column yet) read back as bare
- * "书签" cards. The frozen legacy annotations table still holds both, so
- * backfill them: title unconditionally where a legacy row matches (empty
- * text displays identically), href only where the legacy row actually has
- * one. Rows created after the migration have no legacy counterpart and are
- * never touched. Idempotent.
- */
-export function repairBookmarkFields(db: ReturnType<typeof drizzle<typeof schema>>) {
-  const tables = new Set(
-    (db.all(sql.raw('SELECT name FROM sqlite_master WHERE type = \'table\'')) as Array<{ name: string }>).map(({ name }) => name),
-  )
-  if (!tables.has('bookmarks') || !tables.has('annotations')) return
-  const columns = db.all(sql.raw('PRAGMA table_info(bookmarks)')) as Array<{ name: string }>
-  const hasHref = columns.some((column) => column.name === 'chapter_href')
-  db.run(sql.raw(`UPDATE "bookmarks" SET "title" = (
-    SELECT "text" FROM "annotations" WHERE "annotations"."id" = "bookmarks"."id"
-  ) WHERE "title" IS NULL AND EXISTS (
-    SELECT 1 FROM "annotations" WHERE "annotations"."id" = "bookmarks"."id" AND "annotations"."type" = 'bookmark'
-  )`))
-  if (hasHref) {
-    db.run(sql.raw(`UPDATE "bookmarks" SET "chapter_href" = (
-      SELECT "chapter_href" FROM "annotations" WHERE "annotations"."id" = "bookmarks"."id"
-    ) WHERE "chapter_href" IS NULL AND EXISTS (
-      SELECT 1 FROM "annotations" WHERE "annotations"."id" = "bookmarks"."id"
-        AND "annotations"."type" = 'bookmark' AND "annotations"."chapter_href" IS NOT NULL
-    )`))
-  }
-}
-
-/**
- * Ideas migrated while the annotation split dropped their color/style/anchor
- * read back with default looks. The frozen legacy annotations table still
- * holds all three; post-migration writes never persisted color/style (the
- * new paths dropped them too), so the legacy row is the truth for every
- * matched row and newer rows without a legacy counterpart stay untouched.
- * Idempotent.
- */
-export function repairIdeaStyle(db: ReturnType<typeof drizzle<typeof schema>>) {
-  const tables = new Set(
-    (db.all(sql.raw('SELECT name FROM sqlite_master WHERE type = \'table\'')) as Array<{ name: string }>).map(({ name }) => name),
-  )
-  if (!tables.has('ideas') || !tables.has('annotations')) return
-  const columns = db.all(sql.raw('PRAGMA table_info(ideas)')) as Array<{ name: string }>
-  const names = new Set(columns.map((column) => column.name))
-  if (!names.has('color') || !names.has('style') || !names.has('cfi_anchor')) return
-  db.run(sql.raw(`UPDATE "ideas" SET
-    "color" = (SELECT "color" FROM "annotations" WHERE "annotations"."id" = "ideas"."id"),
-    "style" = (SELECT "style" FROM "annotations" WHERE "annotations"."id" = "ideas"."id"),
-    "cfi_anchor" = (SELECT "cfi_anchor" FROM "annotations" WHERE "annotations"."id" = "ideas"."id")
-    WHERE EXISTS (
-      SELECT 1 FROM "annotations" WHERE "annotations"."id" = "ideas"."id" AND "annotations"."type" = 'note'
-    )`))
 }
 
 export function repairBookmarkContextSchema(db: ReturnType<typeof drizzle<typeof schema>>) {

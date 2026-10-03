@@ -5,11 +5,11 @@ import type { AdminUserRes, UpdateUserReq } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { blobKeyReferenced } from '../../db/blob-refs'
+import { avatarVariantKeys } from '../../lib/avatar'
 import { coverThumbnailKey } from '../../lib/cover'
 import { deleteProgressFile } from '../../lib/progress-file'
 import {
   blobs,
-  books,
   bookStates,
   bookVersions,
   contentRevisions,
@@ -22,8 +22,6 @@ import {
   instance,
   readingRecords,
   settings,
-  shelves,
-  tags,
   users,
 } from '../../db/schema'
 import { AppError } from '../../middleware/error'
@@ -43,10 +41,12 @@ export function listUsers(): AdminUserRes[] {
       disabled: users.disabled,
       createdAt: users.createdAt,
       avatarKey: users.avatarKey,
-      bookCount: count(books.id),
+      bookCount: count(libraryBookVersions.id),
     })
     .from(users)
-    .leftJoin(books, and(eq(books.userId, users.id), isNull(books.deletedAt)))
+    .leftJoin(libraries, and(eq(libraries.userId, users.id), eq(libraries.type, 'private')))
+    .leftJoin(libraryBooks, and(eq(libraryBooks.libraryId, libraries.id), isNull(libraryBooks.deletedAt)))
+    .leftJoin(libraryBookVersions, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
     // The shared guest account is managed via the allowGuestAccess instance
     // switch, has no server-side data, and carries no owner actions —
     // listing it only confuses user management.
@@ -221,7 +221,6 @@ export async function deleteUser(actorId: string, targetId: string, password?: s
         .where(inArray(libraryBookVersions.libraryBookId, [...userLibraryBookIds])).all()
       : []).map((row) => row.bookVersionId),
   )]
-  const bookRows = db.select().from(books).where(eq(books.userId, targetId)).all()
   const coverKeys = new Set<string>()
   for (const row of userLibraryBooks) {
     if (row.coverKey) coverKeys.add(row.coverKey)
@@ -233,12 +232,6 @@ export async function deleteUser(actorId: string, targetId: string, password?: s
       if (row.coverKey) coverKeys.add(row.coverKey)
     }
   }
-  for (const book of bookRows) {
-    if (book.coverKey) coverKeys.add(book.coverKey)
-  }
-  // New-model content keys: post-migration uploads write no legacy books
-  // row, so without this the account's exclusive blobs and registry rows
-  // would leak while the revisions themselves are gone.
   const revisionBlobKeys = userVersionIds.length > 0
     ? db.select({ blobKey: contentRevisions.blobKey }).from(contentRevisions)
       .where(inArray(contentRevisions.bookVersionId, userVersionIds)).all().map((row) => row.blobKey)
@@ -246,15 +239,11 @@ export async function deleteUser(actorId: string, targetId: string, password?: s
   // Positions are filed per user, so deleting an account removes exactly its own
   // and can no longer take another reader's place with it - which the old
   // book-keyed layout did as soon as someone collected the same version.
-  // Pre-0.4.0 files are still cleared for the books this account owned, since
-  // those are the only ones it can have a legacy claim on.
-  const legacyProgressKeys = bookRows.map((book) => `progress/${book.id}.json`)
   // A position exists exactly where the account has a card, a BookState or a
   // reading record. Cards and records point at versions, never at works: the
   // work ids used to sit here and matched no progress file at all.
   const progressVersionIds = new Set<string>([
     ...userVersionIds,
-    ...bookRows.map((row) => row.id),
     ...db.select({ bookVersionId: bookStates.bookVersionId }).from(bookStates)
       .where(eq(bookStates.userId, targetId)).all().map((row) => row.bookVersionId),
     ...db.select({ bookVersionId: readingRecords.bookVersionId }).from(readingRecords)
@@ -290,11 +279,8 @@ export async function deleteUser(actorId: string, targetId: string, password?: s
       tx.update(libraryTags).set({ userId: library.userId })
         .where(and(eq(libraryTags.libraryId, library.id), eq(libraryTags.userId, targetId))).run()
     }
-    tx.delete(shelves).where(eq(shelves.userId, targetId)).run()
-    tx.delete(tags).where(eq(tags.userId, targetId)).run()
     tx.delete(settings).where(eq(settings.userId, targetId)).run()
     tx.delete(fonts).where(eq(fonts.userId, targetId)).run()
-    tx.delete(books).where(eq(books.userId, targetId)).run()
     // Versions nobody else points at go with their revisions; anything still
     // referenced (shared catalog, other readers) survives with its blobs.
     for (const versionId of userVersionIds) {
@@ -312,7 +298,6 @@ export async function deleteUser(actorId: string, targetId: string, password?: s
   // library artwork, and avatar keys may be shared between users.
   const deletedBlobKeys = new Set<string>()
   const contentKeys = new Set<string>([
-    ...bookRows.map((book) => book.filePath),
     ...revisionBlobKeys,
   ])
   for (const key of contentKeys) {
@@ -335,14 +320,13 @@ export async function deleteUser(actorId: string, targetId: string, password?: s
     db.delete(blobs).where(inArray(blobs.key, [...deletedBlobKeys])).run()
   }
   if (target.avatarKey) {
-    const avatarKey = `avatars/${target.avatarKey}`
     const sharedAvatar = db.select({ id: users.id }).from(users).where(eq(users.avatarKey, target.avatarKey)).get()
-    if (!sharedAvatar && (await storage.exists(avatarKey))) {
-      await storage.delete(avatarKey)
+    if (!sharedAvatar) {
+      for (const key of avatarVariantKeys(target.avatarKey)) {
+        const storageKey = `avatars/${key}`
+        if (await storage.exists(storageKey)) await storage.delete(storageKey)
+      }
     }
-  }
-  for (const key of legacyProgressKeys) {
-    if (await storage.exists(key)) await storage.delete(key)
   }
   // Includes any version the account read through a library without collecting.
   for (const versionId of progressVersionIds) {

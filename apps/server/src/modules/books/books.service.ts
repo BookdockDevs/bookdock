@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 import { getDb } from '../../db/client'
 import { blobKeyReferenced, deleteBlobRowIfUnreferenced } from '../../db/blob-refs'
 import {
-  blobs, books, annotations, bookTags, bookVersions, bookStates, contentRevisions, libraries, libraryBooks,
+  blobs, bookVersions, bookStates, contentRevisions, libraries, libraryBooks,
   libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
   libraryMemberships, users as usersTable, tocRules,
   highlights, ideas, bookmarks, aiThreads, textReplacements,
@@ -1155,8 +1155,7 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
  * Phase 3 read core: the private book as the legacy books row shape, assembled
  * from library/version/revision/state rows. bookId IS the version id (0.3), so
  * every existing caller keeps working: routes, Legado, AI, exports and tests
- * see the same fields. Content truth comes from the latest revision; the
- * frozen legacy books row only backs meta for not-yet-backfilled rows.
+ * see the same fields. Content and metadata come from the latest revision.
  *
  * 0.4.0 adds one fallback: a version the caller has NOT collected but may read
  * in a shared library resolves here too, so browsing a library leads to the
@@ -1211,9 +1210,8 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
   if (!revision) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
   const state = db.select().from(bookStates)
     .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
-  const legacy = db.select().from(books).where(eq(books.id, bookId)).get()
   const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
-  const meta = Object.keys(revisionMeta).length > 0 ? revisionMeta : ((legacy?.meta ?? {}) as Record<string, unknown>)
+  const meta = revisionMeta
   // 7.7: the UI needs to know a card is library-owned (hide content edits) and
   // which city it came from. A deleted source keeps its id, loses its name.
   const sourceLibrary = lbv.sourceLibraryId
@@ -1357,8 +1355,6 @@ export async function getBookChapters(userId: string | null, bookId: string, opt
     )
     const meta: Record<string, unknown> = { ...(book.meta as Record<string, unknown>), epubTocLevelVersion: EPUB_TOC_LEVEL_VERSION }
     if (chapters.length > 0) meta.chapters = chapters
-    // Derived chapter cache lives on the latest revision now; the frozen
-    // legacy books row is read-only and keeps serving only pre-backfill rows.
     // Anonymous reads never warm that cache: persisting from a guest context
     // would be a server-side write with no owner.
     const latestRevision = userId === null ? undefined : getDb().select({ id: contentRevisions.id }).from(contentRevisions)
@@ -1703,59 +1699,6 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
   }
 
   return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, showHidden: true }))
-}
-
-const LEGACY_TXT_FONT_DECLARATION = /font-family\s*:\s*"Noto Serif SC"\s*,\s*"Source Han Serif SC"\s*,\s*"SimSun"\s*,\s*serif\s*;/i
-
-export interface TxtArtifactMigrationResult {
-  examined: number
-  migrated: number
-  skipped: number
-  failed: number
-}
-
-/** Upgrade stored TXT-derived EPUB styles without changing chapter files or CFIs. */
-export async function migrateTxtArtifacts(): Promise<TxtArtifactMigrationResult> {
-  const db = getDb()
-  const storage = getStorage()
-  const txtBooks = db.select().from(books).where(eq(books.format, 'txt')).all()
-  const result: TxtArtifactMigrationResult = { examined: txtBooks.length, migrated: 0, skipped: 0, failed: 0 }
-
-  for (const book of txtBooks) {
-    if (book.meta.txtArtifactVersion === TXT_EPUB_ARTIFACT_VERSION) {
-      result.skipped++
-      continue
-    }
-
-    try {
-      const buffer = await bufferFromStream(await storage.get(book.filePath))
-      const zip = await JSZip.loadAsync(buffer)
-      const styleEntry = zip.file('OEBPS/style.css')
-      let migratedBuffer: Buffer | null = null
-      if (styleEntry) {
-        const css = await styleEntry.async('string')
-        const migratedCss = css.replace(LEGACY_TXT_FONT_DECLARATION, '')
-        if (migratedCss !== css) {
-          zip.file('OEBPS/style.css', migratedCss)
-          migratedBuffer = await zip.generateAsync({ type: 'nodebuffer' })
-          await storage.put(book.filePath, migratedBuffer)
-        }
-      }
-
-      const meta = { ...book.meta, txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION }
-      db.update(books).set({
-        meta,
-        size: migratedBuffer?.length ?? book.size,
-        updatedAt: Date.now(),
-      }).where(eq(books.id, book.id)).run()
-      result.migrated++
-    } catch (error) {
-      result.failed++
-      log('error', 'books.txt_artifact_migration.failed', { error, meta: { bookId: book.id } })
-    }
-  }
-
-  return result
 }
 
 /**
@@ -3634,10 +3577,6 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
   const book = await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true, showHidden: true })
   const { libraryBookId } = resolveLibraryBook(userId, bookId)
 
-  // Legacy rows mirror the old delete path; the tables themselves freeze.
-  db.delete(annotations).where(eq(annotations.bookId, bookId)).run()
-  db.delete(bookTags).where(eq(bookTags.bookId, bookId)).run()
-
   const versionIds = db.select({ id: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
     .where(eq(libraryBookVersions.libraryBookId, libraryBookId)).all().map((row) => row.id)
   const revisionKeys = versionIds.length > 0
@@ -3694,10 +3633,8 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
   })
 
   // Content blobs are shared across versions; delete the physical file only
-  // when no remaining revision references the key. Legacy books rows stay
-  // frozen until Phase 12 and are deliberately not counted here: the new
-  // model owns liveness now. Keys of a kept version are still referenced,
-  // so they are skipped naturally.
+  // when no remaining revision references the key. Kept versions retain their
+  // references even when the caller removes its own card.
   for (const key of new Set(revisionKeys)) {
     const refs = db.select({ count: sql<number>`count(*)` }).from(contentRevisions)
       .where(eq(contentRevisions.blobKey, key)).get()

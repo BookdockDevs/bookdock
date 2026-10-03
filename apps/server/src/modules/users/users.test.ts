@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
@@ -11,11 +11,15 @@ vi.hoisted(() => {
   process.env.JWT_SECRET = 'test-secret'
 })
 
-import * as schema from '../../db/schema'
+import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
+import { sql } from 'drizzle-orm'
+import { retargetBookIdReferences } from '../../db/client'
+
 import { createId } from '../../lib/id'
+import { avatarVariantKeys } from '../../lib/avatar'
 import { errorHandler } from '../../middleware/error'
 import { resetAuthCaches } from '../../middleware/auth.guard'
 import { hashPassword, verifyPassword } from '../../lib/password'
@@ -52,20 +56,18 @@ async function insertUser(
 }
 
 function insertBook(db: TestDb, userId: string, deletedAt: number | null = null) {
-  db.insert(schema.books).values({
-    id: createId('book'),
-    userId,
-    title: 'Book',
-    author: 'Author',
-    format: 'txt',
-    filePath: 'books/x/x.txt',
-    coverKey: null,
-    size: 100,
-    meta: {},
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    deletedAt,
-  }).run()
+  const now = Date.now()
+  let library = db.select().from(schema.libraries).where(eq(schema.libraries.userId, userId)).get()
+  if (!library) {
+    const id = createId('lib')
+    db.insert(schema.libraries).values({ id, userId, type: 'private', name: '', createdAt: now, updatedAt: now }).run()
+    library = db.select().from(schema.libraries).where(eq(schema.libraries.id, id)).get()!
+  }
+  const bookId = createId('book')
+  const workId = createId('lb')
+  db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 100, createdAt: now, updatedAt: now }).run()
+  db.insert(schema.libraryBooks).values({ id: workId, libraryId: library.id, userId, title: 'Book', createdAt: now, updatedAt: now, deletedAt }).run()
+  db.insert(schema.libraryBookVersions).values({ id: createId('lbv'), libraryId: library.id, libraryBookId: workId, bookVersionId: bookId, kind: 'personal', createdAt: now, updatedAt: now }).run()
 }
 
 function createMemoryStorage() {
@@ -111,6 +113,12 @@ describe('users module', () => {
     db = createTestDb()
     vi.spyOn(client, 'getDb').mockReturnValue(db)
     resetAuthCaches()
+    retargetBookIdReferences(db)
+    db.run(sql.raw('DROP TABLE annotations'))
+    db.run(sql.raw('DROP TABLE book_tags'))
+    db.run(sql.raw('DROP TABLE books'))
+    db.run(sql.raw('DROP TABLE shelves'))
+    db.run(sql.raw('DROP TABLE tags'))
   })
 
   it('lists users with book counts (excluding trashed books and the guest account)', async () => {
@@ -380,23 +388,19 @@ describe('users module', () => {
       seedInstanceDb(ownerId)
       const memberId = await insertUser(db, { username: 'mem', password: 'password123' })
       const bookId = createId('book')
-      db.insert(schema.books).values({
-        id: bookId, userId: memberId, title: 'B', format: 'txt', filePath: 'books/mm/book.epub',
-        size: 8, meta: {}, createdAt: 1, updatedAt: 1, deletedAt: null,
-      }).run()
       mem.files.set('books/mm/book.epub', Buffer.from('data'))
-      mem.files.set(`progress/${bookId}.json`, Buffer.from('{}'))
+      mem.files.set(`progress/${memberId}/${bookId}.json`, Buffer.from('{}'))
       seedPrivateLibrary(memberId, bookId)
+      db.insert(schema.contentRevisions).values({ id: createId('rev'), bookVersionId: bookId, revisionNo: 1, blobKey: 'books/mm/book.epub', size: 8, chapterCount: 0, createdAt: 1 }).run()
       await insertUser(db, { username: 'ghost', role: 'guest' })
 
       expect((await deleteUser(memberId, memberId, 'password123')).id).toBe(memberId)
       expect(db.select().from(schema.users).where(eq(schema.users.id, memberId)).get()).toBeUndefined()
-      expect(db.select().from(schema.books).where(eq(schema.books.userId, memberId)).all()).toHaveLength(0)
       expect(db.select().from(schema.libraries).where(eq(schema.libraries.userId, memberId)).all()).toHaveLength(0)
       expect(db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, memberId)).all()).toHaveLength(0)
       expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, bookId)).get()).toBeUndefined()
       expect(mem.files.has('books/mm/book.epub')).toBe(false)
-      expect(mem.files.has(`progress/${bookId}.json`)).toBe(false)
+      expect(mem.files.has(`progress/${memberId}/${bookId}.json`)).toBe(false)
       // The owner, the guest row and other data survive.
       expect(db.select().from(schema.users).all()).toHaveLength(2)
     })
@@ -432,15 +436,12 @@ describe('users module', () => {
       const sharedKey = 'books/ab/shared.epub'
       const bookA = createId('book')
       const bookB = createId('book')
-      for (const [bookId, userId] of [[bookA, memberId], [bookB, otherId]] as const) {
-        db.insert(schema.books).values({
-          id: bookId, userId, title: 'B', format: 'txt', filePath: sharedKey,
-          size: 8, meta: {}, createdAt: 1, updatedAt: 1, deletedAt: null,
-        }).run()
-      }
       mem.files.set(sharedKey, Buffer.from('shared'))
       seedPrivateLibrary(memberId, bookA)
       seedPrivateLibrary(otherId, bookB)
+      for (const bookId of [bookA, bookB]) {
+        db.insert(schema.contentRevisions).values({ id: createId('rev'), bookVersionId: bookId, revisionNo: 1, blobKey: sharedKey, size: 8, chapterCount: 0, createdAt: 1 }).run()
+      }
 
       expect((await deleteUser(ownerId, memberId)).id).toBe(memberId)
       expect(db.select().from(schema.users).where(eq(schema.users.id, memberId)).get()).toBeUndefined()
@@ -448,6 +449,22 @@ describe('users module', () => {
       expect(mem.files.has(sharedKey)).toBe(true)
       expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, bookB)).get()).toBeDefined()
       expect(db.select().from(schema.bookVersions).where(eq(schema.bookVersions.id, bookA)).get()).toBeUndefined()
+    })
+
+    it('cleans all avatar variants only after the last account reference is deleted', async () => {
+      const ownerId = await insertUser(db, { username: 'owner', role: 'owner' })
+      seedInstanceDb(ownerId)
+      const firstId = await insertUser(db, { username: 'first' })
+      const secondId = await insertUser(db, { username: 'second' })
+      const key = `ab/${'ab'.repeat(32)}.gif`
+      db.update(schema.users).set({ avatarKey: key }).where(eq(schema.users.id, firstId)).run()
+      db.update(schema.users).set({ avatarKey: key }).where(eq(schema.users.id, secondId)).run()
+      const keys = avatarVariantKeys(key).map((variant) => `avatars/${variant}`)
+      for (const storageKey of keys) mem.files.set(storageKey, Buffer.from('image'))
+      await deleteUser(ownerId, firstId)
+      expect(keys.every((storageKey) => mem.files.has(storageKey))).toBe(true)
+      await deleteUser(ownerId, secondId)
+      expect(keys.every((storageKey) => !mem.files.has(storageKey))).toBe(true)
     })
 
     it('refuses the guest account and missing users', async () => {

@@ -483,6 +483,14 @@ librariesRoutes.post('/:id/books/:bookId/versions/:versionLinkId/reset-metadata'
   return c.json({ data: book })
 })
 
+librariesRoutes.get('/:id/books/:bookId/versions/:versionLinkId/metadata-source', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const { getCatalogVersionFileSource } = await import('./metadata-source.service')
+  const source = await getCatalogVersionFileSource(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'))
+  return c.json({ data: source })
+})
+
 librariesRoutes.post('/:id/books/:bookId/versions/:versionLinkId/push', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)

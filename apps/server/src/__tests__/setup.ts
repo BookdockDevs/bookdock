@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from '../db/migration-stage'
 import * as schema from '../db/schema'
 
 export function createTestDb() {

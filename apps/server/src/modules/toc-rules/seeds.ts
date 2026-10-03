@@ -9,6 +9,7 @@ import { createId } from '../../lib/id'
 /** Settings key that records that a user has been seeded (delete-all sticks). */
 const SEEDED_KEY = 'tocRuleSeeded'
 const SEED_ORDER_MIGRATED_KEY = 'tocRuleSeedOrderV8'
+const LEGACY_BACKFILL_KEY = 'tocRuleLegacyBackfillV1'
 const RETIRED_FLAT_SEED_KEY = 'toc.zh-flat'
 const MIGRATABLE_DEFAULT_ORDERS = [
   ['toc.zh-hierarchy', 'toc.zh-flat', 'toc.numeric', 'toc.en'],
@@ -189,6 +190,8 @@ function insertSeeds(userId: string, seeds: readonly SeedTocRule[] = SEED_TOC_RU
 
 function backfillLegacySeedKeys(userId: string) {
   const db = getDb()
+  const done = db.select().from(settings).where(and(eq(settings.userId, userId), eq(settings.key, LEGACY_BACKFILL_KEY))).get()
+  if (done) return
   const legacyRows = db.select().from(tocRules)
     .where(and(eq(tocRules.userId, userId), isNull(tocRules.seedKey)))
     .all()
@@ -197,6 +200,7 @@ function backfillLegacySeedKeys(userId: string) {
     const seed = SEED_TOC_RULES.find((candidate) => candidate.name === row.name && JSON.stringify(candidate.patterns) === JSON.stringify(row.patterns))
     if (seed) db.update(tocRules).set({ seedKey: seed.seedKey }).where(eq(tocRules.id, row.id)).run()
   }
+  db.insert(settings).values({ id: createId('setting'), userId, key: LEGACY_BACKFILL_KEY, value: 1 }).onConflictDoNothing().run()
 }
 
 function seedIfEmpty(userId: string) {

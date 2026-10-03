@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { and, desc, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import * as schema from '../../db/schema'
+import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
@@ -823,6 +823,25 @@ describe('shared library catalog', () => {
     expect(removed.coverKey).toBeNull()
     await expect(removeCatalogBookCover(memberId, libraryId, created.libraryBookId))
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+
+
+  it('masks inherited publication metadata with explicit null keys on all read projections', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('empty.txt', '第一章\n正文'), { title: 'Work', author: 'Work Author' })
+    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, { description: 'Work description', meta: { publisher: 'Work Press', seriesIndex: 5 } })
+    await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, {
+      authors: [], description: '', meta: { publisher: null, seriesIndex: null, identifier: 'keep' },
+    })
+    const version = (await getCatalogBook(memberId, libraryId, created.libraryBookId)).versions[0]
+    expect(version.effective.authors).toEqual([])
+    expect(version.effective.description).toBe('')
+    expect(version.effective.bookmeta).toEqual({ identifier: 'keep' })
+    expect(version.meta).toEqual({ publisher: null, seriesIndex: null, identifier: 'keep' })
+    expect(version.inherited).toMatchObject({ title: 'Work', authors: ['Work Author'], description: 'Work description', bookmeta: { publisher: 'Work Press', seriesIndex: 5 } })
+    expect((await listLibraryVersionEntries(memberId, libraryId, {})).items[0].bookmeta).toEqual({ identifier: 'keep' })
+    expect((await getLibraryVersionPublication(memberId, created.bookVersionId!))?.bookmeta).toEqual({ identifier: 'keep' })
+    await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, { meta: {} })
+    expect((await getCatalogBook(memberId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta.publisher).toBe('Work Press')
   })
 
   it('merges version meta over work meta and the revision bookmeta', async () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,13 +10,14 @@ import sharp from 'sharp'
 
 import type { AccountRes } from '@bookdock/shared'
 
-import * as schema from '../../db/schema'
+import { config } from '../../config'
+import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
-import { avatarThumbnailKey } from '../../lib/avatar'
+import { avatarFirstFrameKey, avatarThumbnailKey, avatarVariantKeys } from '../../lib/avatar'
 import { sha256 } from '../../lib/hash'
 import { avatarStorageKey } from './avatars.service'
 import avatarsRoutes from './avatars.routes'
@@ -85,6 +86,12 @@ function avatarKeyOf(content: Buffer, ext: string): string {
   return `${hash.slice(0, 2)}/${hash}.${ext}`
 }
 
+async function makeGif(width = 32, height = 64, frames = 2) {
+  return sharp(Array.from({ length: frames }, (_, index) => ({
+    create: { width, height, channels: 4 as const, background: index % 2 ? 'blue' : 'red' },
+  })), { join: { animated: true } }).gif({ delay: Array.from({ length: frames }, (_, index) => index % 2 ? 200 : 100), loop: 2, keepDuplicateFrames: true }).toBuffer()
+}
+
 describe('avatars routes', () => {
   let db: ReturnType<typeof createTestDb>
   let mem: ReturnType<typeof createMemoryStorage>
@@ -136,17 +143,158 @@ describe('avatars routes', () => {
     expect(body.error.code).toBe('UNSUPPORTED_FORMAT')
   })
 
-  it('rejects GIF: only JPEG, PNG and WebP are supported', async () => {
+  it('rejects malformed GIF without storing files or updating the avatar', async () => {
     const app = createApp(owner)
     const res = await app.request(uploadRequest(new File([Buffer.alloc(8)], 'a.gif', { type: 'image/gif' })))
-    expect(res.status).toBe(415)
+    expect(res.status).toBe(400)
     const body = (await res.json()) as { error: { code: string } }
-    expect(body.error.code).toBe('UNSUPPORTED_FORMAT')
+    expect(body.error.code).toBe('AVATAR_INVALID_IMAGE')
+    expect(mem.files.size).toBe(0)
+    expect(db.select().from(schema.users).get()?.avatarKey).toBeNull()
+  })
+
+  it('uploads GIF with animation and deterministic first frame while retaining the original', async () => {
+    const app = createApp(owner)
+    const content = await makeGif(600, 1200)
+    const upload = await app.request(uploadRequest(new File([content], 'me.gif', { type: 'image/gif' })))
+    expect(upload.status).toBe(201)
+    const { data } = await upload.json() as { data: AccountRes }
+    expect(data.avatarKey).toBe(avatarKeyOf(content, 'gif'))
+    expect(avatarVariantKeys(data.avatarKey!).every((key) => mem.files.has(avatarStorageKey(key)))).toBe(true)
+
+    const response = await app.request(`http://test/api/v1/avatars/${data.avatarKey}`)
+    const animated = Buffer.from(await response.arrayBuffer())
+    expect(response.headers.get('Content-Type')).toBe('image/webp')
+    expect(response.headers.get('Cache-Control')).toBe('private, immutable, max-age=31536000')
+    const metadata = await sharp(animated, { animated: true }).metadata()
+    expect(metadata).toMatchObject({ width: 128, pageHeight: 256, pages: 2, delay: [100, 200], loop: 2 })
+    const frame0 = await sharp(animated, { page: 0 }).raw().toBuffer()
+    const frame1 = await sharp(animated, { page: 1 }).raw().toBuffer()
+    expect(frame0[0]).toBeGreaterThan(240)
+    expect(frame1[2]).toBeGreaterThan(240)
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const still = await app.request(`http://test/api/v1/avatars/${data.avatarKey}?size=static`)
+      const buffer = Buffer.from(await still.arrayBuffer())
+      expect(buffer.equals(mem.files.get(avatarStorageKey(avatarFirstFrameKey(data.avatarKey!)))!)).toBe(true)
+      expect((await sharp(buffer).metadata()).pages ?? 1).toBe(1)
+      expect((await sharp(buffer).raw().toBuffer())[0]).toBeGreaterThan(240)
+    }
+    const original = await app.request(`http://test/api/v1/avatars/${data.avatarKey}?size=original`)
+    expect(original.headers.get('Content-Type')).toBe('image/gif')
+    expect(Buffer.from(await original.arrayBuffer()).equals(content)).toBe(true)
+  })
+
+  it('preserves GIF transparency and does not enlarge a small animation', async () => {
+    const transparent = { create: { width: 16, height: 16, channels: 4 as const, background: { r: 0, g: 0, b: 0, alpha: 0 } } }
+    const content = await sharp([transparent, { create: { width: 16, height: 16, channels: 4, background: 'blue' } }], { join: { animated: true } }).gif().toBuffer()
+    const app = createApp(owner)
+    const res = await app.request(uploadRequest(new File([content], 'alpha.gif', { type: 'image/gif' })))
+    expect(res.status).toBe(201)
+    const { data } = await res.json() as { data: AccountRes }
+    const thumb = mem.files.get(avatarStorageKey(avatarThumbnailKey(data.avatarKey!)))!
+    expect(await sharp(thumb, { animated: true }).metadata()).toMatchObject({ width: 16, pageHeight: 16, pages: 2, hasAlpha: true })
+    expect((await sharp(thumb, { page: 0 }).ensureAlpha().raw().toBuffer())[3]).toBe(0)
+    expect((await sharp(thumb, { page: 1 }).ensureAlpha().raw().toBuffer())[3]).toBe(255)
+  })
+
+  it('rejects a PNG mislabeled as GIF', async () => {
+    const content = await sharp({ create: { width: 1, height: 1, channels: 3, background: 'red' } }).png().toBuffer()
+    const res = await createApp(owner).request(uploadRequest(new File([content], 'fake.gif', { type: 'image/gif' })))
+    expect(res.status).toBe(400)
+    expect(mem.files.size).toBe(0)
+  })
+
+  it('accepts GIF uploads above the former 2 MiB limit up to the configured boundary', async () => {
+    const gif = await makeGif()
+    const content = Buffer.concat([gif, Buffer.alloc(config.avatarMaxBytes - gif.length)])
+    const res = await createApp(owner).request(uploadRequest(new File([content], 'limit.gif', { type: 'image/gif' })))
+    expect(res.status).toBe(201)
+    const { data } = await res.json() as { data: AccountRes }
+    expect(mem.files.get(avatarStorageKey(data.avatarKey!))?.length).toBe(config.avatarMaxBytes)
+  })
+
+  it('isolates GIF variants from legacy uploads of the same bytes with a different MIME', async () => {
+    const app = createApp(owner)
+    const legacyApp = createApp(seedUser(db, 'legacy', 'member'))
+    const gif = await makeGif()
+    const { data } = await (await app.request(uploadRequest(new File([gif], 'me.gif', { type: 'image/gif' })))).json() as { data: AccountRes }
+    const { data: legacy } = await (await legacyApp.request(uploadRequest(new File([gif], 'me.png', { type: 'image/png' })))).json() as { data: AccountRes }
+    await legacyApp.request(`http://test/api/v1/avatars/${legacy.avatarKey}`)
+    const thumbnail = mem.files.get(avatarStorageKey(avatarThumbnailKey(data.avatarKey!)))!
+    expect((await sharp(thumbnail, { animated: true }).metadata()).pages).toBe(2)
+    await legacyApp.request('http://test/api/v1/avatars', { method: 'DELETE' })
+    expect(avatarVariantKeys(data.avatarKey!).every((key) => mem.files.has(avatarStorageKey(key)))).toBe(true)
+  })
+
+  it.each([[2049, 1, 2], [1, 2049, 2], [1, 1, 201]])('rejects GIF dimensions/frames beyond limits (%i×%i, %i frames)', async (width, height, frames) => {
+    const content = await makeGif(width, height, frames)
+    const res = await createApp(owner).request(uploadRequest(new File([content], 'large.gif', { type: 'image/gif' })))
+    expect(res.status).toBe(413)
+    expect((await res.json()).error.code).toBe('AVATAR_ANIMATION_TOO_LARGE')
+    expect(mem.files.size).toBe(0)
+  })
+
+  it('accepts GIFs at the side and frame limits', async () => {
+    for (const content of [await makeGif(2048, 1), await makeGif(1, 1, 200)]) {
+      const res = await createApp(owner).request(uploadRequest(new File([content], 'limit.gif', { type: 'image/gif' })))
+      expect(res.status).toBe(201)
+    }
+  })
+
+  it('rejects excessive cumulative GIF pixels before decoding frames', async () => {
+    const content = await makeGif(1, 1, 10)
+    content.writeUInt16LE(2048, 6)
+    content.writeUInt16LE(2048, 8)
+    const res = await createApp(owner).request(uploadRequest(new File([content], 'pixels.gif', { type: 'image/gif' })))
+    expect(res.status).toBe(413)
+    expect((await res.json()).error.code).toBe('AVATAR_ANIMATION_TOO_LARGE')
+    expect(mem.files.size).toBe(0)
+  })
+
+  it('rejects oversized thumbnail output while preserving the previous avatar', async () => {
+    const app = createApp(owner)
+    const old = Buffer.from('old png')
+    await app.request(uploadRequest(new File([old], 'old.png', { type: 'image/png' })))
+    const content = await makeGif()
+    const encode = vi.spyOn(sharp.prototype, 'toBuffer').mockResolvedValueOnce(Buffer.alloc(2 * 1024 * 1024 + 1))
+    const res = await app.request(uploadRequest(new File([content], 'large.gif', { type: 'image/gif' })))
+    encode.mockRestore()
+    expect(res.status).toBe(413)
+    expect(db.select().from(schema.users).get()?.avatarKey).toBe(avatarKeyOf(old, 'png'))
+    expect(mem.files.size).toBe(1)
+  })
+
+  it('rebuilds missing GIF variants with animation instead of falling back to the original', async () => {
+    const app = createApp(owner)
+    const content = await makeGif()
+    const { data } = await (await app.request(uploadRequest(new File([content], 'me.gif', { type: 'image/gif' })))).json() as { data: AccountRes }
+    mem.files.delete(avatarStorageKey(avatarThumbnailKey(data.avatarKey!)))
+    mem.files.delete(avatarStorageKey(avatarFirstFrameKey(data.avatarKey!)))
+    const still = await app.request(`http://test/api/v1/avatars/${data.avatarKey}?size=static`)
+    expect(still.status).toBe(200)
+    expect((await sharp(Buffer.from(await still.arrayBuffer())).metadata()).pages ?? 1).toBe(1)
+    const cached = mem.files.get(avatarStorageKey(avatarThumbnailKey(data.avatarKey!)))!
+    expect((await sharp(cached, { animated: true }).metadata()).pages).toBe(2)
+  })
+
+  it('keeps shared GIF variants until the last reference is replaced or removed', async () => {
+    const app = createApp(owner)
+    const memberApp = createApp(seedUser(db, 'member', 'member'))
+    const content = await makeGif()
+    const upload = () => uploadRequest(new File([content], 'shared.gif', { type: 'image/gif' }))
+    const { data } = await (await app.request(upload())).json() as { data: AccountRes }
+    await memberApp.request(upload())
+    const keys = avatarVariantKeys(data.avatarKey!).map(avatarStorageKey)
+    await app.request(uploadRequest(new File([Buffer.from('replacement')], 'me.png', { type: 'image/png' })))
+    expect(keys.every((key) => mem.files.has(key))).toBe(true)
+    await memberApp.request('http://test/api/v1/avatars', { method: 'DELETE' })
+    expect(keys.every((key) => !mem.files.has(key))).toBe(true)
   })
 
   it('rejects files over the size limit with 413', async () => {
     const app = createApp(owner)
-    const big = new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' })
+    const big = new File([new Uint8Array(config.avatarMaxBytes + 1)], 'big.png', { type: 'image/png' })
     const res = await app.request(uploadRequest(big))
     expect(res.status).toBe(413)
     const body = (await res.json()) as { error: { code: string } }

@@ -1,4 +1,4 @@
-import { desc, eq, ne } from 'drizzle-orm'
+import { desc, eq, ne, sql } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import { libraryMigrationLog, users } from '../../db/schema'
@@ -56,6 +56,9 @@ export type StartupBackfillOutcome =
  */
 export async function runPhase2StartupBackfill(): Promise<StartupBackfillOutcome> {
   const db = getDb()
+  if (!db.get(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'books'`)) {
+    return { status: 'skipped-complete' }
+  }
   const realUsers = db.select({ id: users.id }).from(users).where(ne(users.role, 'guest')).all()
   if (realUsers.length === 0) {
     log('info', 'library.startup_backfill.skipped_fresh')

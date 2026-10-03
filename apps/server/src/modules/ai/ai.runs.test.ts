@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createTestDb } from '../../__tests__/setup'
 import { getDb } from '../../db/client'
-import { aiGenerationRuns, aiMessageEvents, aiMessages, aiThreads, books, bookVersions, contentRevisions, libraryBooks, libraryBookVersions, libraries, users } from '../../db/schema'
+import { aiGenerationRuns, aiMessageEvents, aiMessages, aiThreads, books, bookVersions, contentRevisions, libraryBooks, libraryBookVersions, libraries, users } from '../../db/legacy-test-schema'
 
 vi.mock('../../db/client', () => ({ getDb: vi.fn() }))
 

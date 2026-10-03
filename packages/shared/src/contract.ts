@@ -3,6 +3,7 @@ import type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, ReadStatus
 import type { ErrorCode } from './errors'
 import type { BookSourceInfo, HiddenReason, HiddenVia, LibraryVersionKind } from './library'
 import type { AnnotationStyle, AnnotationType, TocRulePattern, ReplacementMatchType, ReplacementScope, ViewSettings } from './domain'
+import type { ReplacementTransferFile, TocTransferFile } from './rule-transfer'
 
 export interface ApiResponse<T> {
   data: T
@@ -1614,6 +1615,8 @@ export interface TextReplacementRes {
   spineHref: string | null
   textOffset: number | null
   originalText: string | null
+  /** Execution + display order (ascending); new and imported rules append. */
+  sortOrder: number
   createdAt: number
   updatedAt: number
 }
@@ -1640,6 +1643,22 @@ export type TocRuleUpdateReq = {
 
 export type TocRuleReorderReq = {
   tocRuleIds: string[]
+}
+
+export type RuleBatchDeleteReq = {
+  ruleIds: string[]
+}
+
+export type TocRuleImportReq = TocTransferFile
+
+export interface TocRuleImportRes {
+  data: TocRuleRes[]
+}
+
+export type ReplacementImportReq = ReplacementTransferFile
+
+export interface ReplacementImportRes {
+  data: TextReplacementRes[]
 }
 
 export interface TocRuleRes {

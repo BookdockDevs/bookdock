@@ -212,6 +212,11 @@ export type {
   TocRuleCreateReq,
   TocRuleUpdateReq,
   TocRuleReorderReq,
+  RuleBatchDeleteReq,
+  TocRuleImportReq,
+  TocRuleImportRes,
+  ReplacementImportReq,
+  ReplacementImportRes,
   TocRuleRes,
   TocRuleListRes,
   TocPreviewReq,
@@ -271,6 +276,7 @@ export {
   tocRuleCreateSchema,
   tocRuleUpdateSchema,
   tocRuleReorderSchema,
+  ruleBatchDeleteSchema,
   tocPreviewSchema,
   reTocSchema,
   appendContentSchema,
@@ -395,6 +401,19 @@ export {
 } from './library'
 
 export type {
+  MetadataSourceField,
+  MetadataSourceProvenance,
+  MetadataSourceProvenanceMap,
+  MetadataSourceValues,
+  FileMetadataSourceRes,
+  SharedMetadataSourceRes,
+  BookMetadataSourceRes,
+  CatalogVersionMetadataSourceRes,
+} from './metadata-source'
+
+export { metadataSourceFieldSchema, metadataSourceProvenanceSchema, metadataSourceValuesSchema } from './metadata-source'
+
+export type {
   ExternalBook,
   ExternalBookDetail,
   ExternalBookListRes,
@@ -421,3 +440,31 @@ export {
   type ReplacementRuleLike,
   type TextRun,
 } from './text-replacement-engine'
+
+export {
+  TOC_TRANSFER_KIND,
+  REPLACEMENT_TRANSFER_KIND,
+  RULE_TRANSFER_FORMAT_VERSION,
+  RULE_TRANSFER_MAX_BYTES,
+  RULE_TRANSFER_MAX_RULES,
+  isValidTocRegex,
+  normalizeTransferName,
+  suggestImportName,
+  describeTransferIssues,
+  transferFileByteLength,
+  prepareRuleTransferExport,
+  serializeTocRulesForExport,
+  serializeReplacementsForExport,
+  tocTransferPatternSchema,
+  tocTransferPatternsSchema,
+  tocTransferRuleSchema,
+  tocTransferFileSchema,
+  replacementTransferRuleSchema,
+  replacementTransferFileSchema,
+  type TocTransferPattern,
+  type TocTransferRule,
+  type TocTransferFile,
+  type ReplacementTransferRule,
+  type ReplacementTransferFile,
+  type TransferIssue,
+} from './rule-transfer'

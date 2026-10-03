@@ -2,15 +2,14 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 import { and, desc, eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
-import JSZip from 'jszip'
 import sharp from 'sharp'
 
-import * as schema from '../../db/schema'
+import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
@@ -39,7 +38,6 @@ import {
   getPrivateBatchSelection,
   organizePrivateBatch,
   uploadBook,
-  migrateTxtArtifacts,
   reTocBook,
   resetBookMetadata,
   previewBookToc,
@@ -238,40 +236,6 @@ const coverlessParse = vi.fn(async () => ({ meta: { title: 'No Artwork' }, chapt
 
 beforeAll(() => {
   registerParser({ match: (fileName) => fileName.includes(COVERLESS_HASH), parse: coverlessParse })
-})
-
-describe('legacy TXT artifact migration', () => {
-  let db: ReturnType<typeof createTestDb>
-  let ownerId: string
-  let files: Map<string, Buffer>
-
-  beforeEach(() => {
-    db = createTestDb()
-    vi.spyOn(client, 'getDb').mockReturnValue(db)
-    const memory = createMemoryStorage()
-    files = memory.files
-    vi.spyOn(storage, 'getStorage').mockReturnValue(memory.driver)
-    ownerId = seedUser(db, 'owner')
-  })
-
-  it('removes the released TXT font declaration and records the artifact version', async () => {
-    const book = seedBook(db, ownerId, { meta: {} })
-    const zip = new JSZip()
-    zip.file('OEBPS/style.css', 'body {\n  font-family: "Noto Serif SC", "Source Han Serif SC", "SimSun", serif;\n  line-height: 1.8;\n}')
-    const legacyBuffer = await zip.generateAsync({ type: 'nodebuffer' })
-    files.set(book.filePath, legacyBuffer)
-
-    await expect(migrateTxtArtifacts()).resolves.toMatchObject({ examined: 1, migrated: 1, skipped: 0, failed: 0 })
-
-    const migratedZip = await JSZip.loadAsync(files.get(book.filePath)!)
-    const css = await migratedZip.file('OEBPS/style.css')!.async('string')
-    expect(css).not.toContain('font-family: "Noto Serif SC"')
-    const stored = db.select().from(schema.books).where(eq(schema.books.id, book.id)).get()!
-    expect(stored.meta.txtArtifactVersion).toBe(2)
-    expect(stored.size).toBe(files.get(book.filePath)!.length)
-
-    await expect(migrateTxtArtifacts()).resolves.toMatchObject({ examined: 1, migrated: 0, skipped: 1, failed: 0 })
-  })
 })
 
 describe('uploadBook dedup flag', () => {

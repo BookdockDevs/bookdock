@@ -7,10 +7,9 @@ import app from './app'
 import { config } from './config'
 import { runMigrations } from './db/client'
 import { log } from './lib/logger'
-import { migrateTxtArtifacts, pruneOldContentRevisions, purgeAllExpiredTrash } from './modules/books/books.service'
+import { pruneOldContentRevisions, purgeAllExpiredTrash } from './modules/books/books.service'
 import { purgeAllLibraryTrash } from './modules/libraries/catalog.service'
 import { interruptStaleAiGenerationRuns } from './modules/ai/ai.runs.service'
-import { runPhase2StartupBackfill } from './modules/libraries/startup-backfill'
 
 const TRASH_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000
 
@@ -37,19 +36,8 @@ async function start() {
 
   const migrationStartedAt = Date.now()
   try {
-    // Order matters: schema first, then the Phase 2 data backfill (legacy
-    // books become versions), and only then the book-id retarget inside
-    // runMigrations — retargeting before versions exist refuses to boot.
-    // Fresh installs skip the backfill (setup creates everything); blocked
-    // databases fail loud here instead of serving empty libraries.
-    await runMigrations({ beforeRetarget: runPhase2StartupBackfill })
+    await runMigrations()
     log('info', 'database.migration.completed', { durationMs: Date.now() - migrationStartedAt })
-    const txtArtifactMigrationStartedAt = Date.now()
-    const txtArtifactMigration = await migrateTxtArtifacts()
-    log('info', 'books.txt_artifact_migration.completed', {
-      durationMs: Date.now() - txtArtifactMigrationStartedAt,
-      meta: { ...txtArtifactMigration },
-    })
     const interruptedRuns = interruptStaleAiGenerationRuns()
     if (interruptedRuns > 0) log('info', 'ai.generation.stale_runs_interrupted', { meta: { count: interruptedRuns } })
   } catch (err) {

@@ -255,6 +255,8 @@ export interface CatalogVersion {
    * round-trip unknown keys through this object; consumers display `effective`.
    */
   meta: Record<string, unknown>
+  /** Values revealed when version overrides are removed. */
+  inherited?: { title: string; authors: string[]; description: string; bookmeta: BookMetadata }
   effective: {
     title: string
     author: string
@@ -503,7 +505,8 @@ export const catalogVersionUpdateSchema = z.object({
   /**
    * Version-level publication metadata overrides (publisher, language, ISBN,
    * subjects, series). Replaces the whole override object; null clears it
-   * back to inheriting the work default.
+   * back to inheriting the work default. Null values inside the object mask
+   * individual inherited fields; they are omitted from effective metadata.
    */
   meta: z.record(z.string(), z.unknown()).nullable().optional(),
 })

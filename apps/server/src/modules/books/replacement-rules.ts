@@ -1,6 +1,6 @@
 import type { DOMParser } from '@xmldom/xmldom'
 
-import { and, eq, isNull, or } from 'drizzle-orm'
+import { and, asc, eq, isNull, or } from 'drizzle-orm'
 
 import { applyPointMatch, applyRuleToRuns, findPointMatch, type TextRun } from '@bookdock/shared'
 
@@ -30,7 +30,7 @@ export async function loadEffectiveBookReplacementRules(userId: string, bookId: 
         eq(textReplacements.bookId, bookId),
       ),
     ),
-  ).all()
+  ).orderBy(asc(textReplacements.sortOrder), asc(textReplacements.createdAt)).all()
   const overrides = await db.select().from(textReplacementOverrides).where(
     and(eq(textReplacementOverrides.userId, userId), eq(textReplacementOverrides.bookId, bookId)),
   ).all()

@@ -1,6 +1,6 @@
-import { and, eq, isNull, or } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 
-import { compileReplacementRegex, type TextReplacementRes, type ReplacementCreateReq, type ReplacementOverrideReq, type ReplacementUpdateReq } from '@bookdock/shared'
+import { compileReplacementRegex, describeTransferIssues, normalizeTransferName, replacementTransferFileSchema, type TextReplacementRes, type ReplacementCreateReq, type ReplacementOverrideReq, type ReplacementUpdateReq } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { bookVersions, textReplacementOverrides, textReplacements } from '../../db/schema'
@@ -28,6 +28,7 @@ function toRes(row: ReplacementRow, override?: ReplacementOverrideRow | null): T
     spineHref: row.spineHref,
     textOffset: row.textOffset,
     originalText: row.originalText,
+    sortOrder: row.sortOrder,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -56,7 +57,8 @@ function getOwnedReplacement(userId: string, replacementId: string): Replacement
 export async function listReplacements(userId: string, bookId?: string) {
   const db = getDb()
   if (!bookId) {
-    const rows = await db.select().from(textReplacements).where(eq(textReplacements.userId, userId)).all()
+    const rows = await db.select().from(textReplacements).where(eq(textReplacements.userId, userId))
+      .orderBy(asc(textReplacements.sortOrder), asc(textReplacements.createdAt)).all()
     return rows.map((row) => toRes(row))
   }
   await assertReadableBook(userId, bookId)
@@ -70,7 +72,7 @@ export async function listReplacements(userId: string, bookId?: string) {
         eq(textReplacements.bookId, bookId),
       ),
     ),
-  ).all()
+  ).orderBy(asc(textReplacements.sortOrder), asc(textReplacements.createdAt)).all()
   const overrides = await db.select().from(textReplacementOverrides).where(
     and(eq(textReplacementOverrides.userId, userId), eq(textReplacementOverrides.bookId, bookId)),
   ).all()
@@ -100,6 +102,8 @@ export async function createReplacement(userId: string, data: ReplacementCreateR
   const version = bookId
     ? db.select({ id: bookVersions.id }).from(bookVersions).where(eq(bookVersions.id, bookId)).get()
     : null
+  const maxOrder = db.select({ max: sql<number>`max(${textReplacements.sortOrder})` }).from(textReplacements)
+    .where(eq(textReplacements.userId, userId)).get()?.max ?? -1
   const row: ReplacementRow = {
     id: createId('replacement'),
     userId,
@@ -115,6 +119,7 @@ export async function createReplacement(userId: string, data: ReplacementCreateR
     enabled: data.enabled === false ? 0 : 1,
     name: data.name ?? null,
     group: data.group ?? null,
+    sortOrder: maxOrder + 1,
     spineHref: data.spineHref ?? null,
     textOffset: data.textOffset ?? null,
     originalText: data.originalText ?? null,
@@ -123,6 +128,76 @@ export async function createReplacement(userId: string, data: ReplacementCreateR
   }
   db.insert(textReplacements).values(row).run()
   return toRes(row)
+}
+
+/** Batch import a transfer file: global pattern rules only, appended disabled. */
+export async function importReplacements(userId: string, file: unknown) {
+  const parsed = replacementTransferFileSchema.safeParse(file)
+  if (!parsed.success) {
+    throw new AppError('VALIDATION_ERROR', 'Invalid import file', { issues: describeTransferIssues(parsed.error) })
+  }
+  if (parsed.data.rules.length === 0) {
+    throw new AppError('VALIDATION_ERROR', 'No importable rules')
+  }
+  const db = getDb()
+  const maxOrder = db.select({ max: sql<number>`max(${textReplacements.sortOrder})` }).from(textReplacements)
+    .where(eq(textReplacements.userId, userId)).get()?.max ?? -1
+  const now = Date.now()
+  const rows: ReplacementRow[] = parsed.data.rules.map((rule, index) => ({
+    id: createId('replacement'),
+    userId,
+    bookId: null,
+    bookVersionId: null,
+    matchType: 'pattern' as const,
+    pattern: rule.pattern,
+    replacement: rule.replacement ?? null,
+    isRegex: rule.isRegex ? 1 : 0,
+    applyTo: rule.applyTo ?? 'content',
+    enabled: 0,
+    name: rule.name ?? null,
+    group: rule.group ?? null,
+    sortOrder: maxOrder + 1 + index,
+    spineHref: null,
+    textOffset: null,
+    originalText: null,
+    createdAt: now + index,
+    updatedAt: now + index,
+  }))
+
+  return db.transaction((tx) => {
+    const existingNames = new Set(
+      tx.select({ name: textReplacements.name }).from(textReplacements).where(and(
+        eq(textReplacements.userId, userId),
+        eq(textReplacements.matchType, 'pattern'),
+        isNull(textReplacements.bookId),
+      )).all()
+        .map((row) => normalizeTransferName(row.name))
+        .filter((key) => key.length > 0),
+    )
+    const seen = new Set<string>()
+    parsed.data.rules.forEach((rule, index) => {
+      if (rule.name !== undefined && rule.name !== null && rule.name.length > 200) {
+        throw new AppError('VALIDATION_ERROR', 'Invalid import file', {
+          issues: [{ ruleIndex: index, field: 'name', message: 'Name is too long' }],
+        })
+      }
+      const key = normalizeTransferName(rule.name)
+      if (!key) return
+      if (seen.has(key)) {
+        throw new AppError('VALIDATION_ERROR', 'Duplicate rule name in import file', {
+          issues: [{ ruleIndex: index, field: 'name', message: 'Duplicate rule name in import file' }],
+        })
+      }
+      seen.add(key)
+      if (existingNames.has(key)) {
+        throw new AppError('VALIDATION_ERROR', 'Rule name already exists', {
+          issues: [{ ruleIndex: index, field: 'name', message: 'Rule name already exists' }],
+        })
+      }
+    })
+    tx.insert(textReplacements).values(rows).run()
+    return rows.map((row) => toRes(row))
+  })
 }
 
 export async function updateReplacement(userId: string, replacementId: string, data: ReplacementUpdateReq) {
@@ -171,6 +246,17 @@ export async function deleteReplacement(userId: string, replacementId: string) {
   const existing = getOwnedReplacement(userId, replacementId)
   if (existing.bookId) await assertReadableBook(userId, existing.bookId)
   db.delete(textReplacements).where(eq(textReplacements.id, replacementId)).run()
+}
+
+export function deleteGlobalReplacements(userId: string, ruleIds: string[]) {
+  const db = getDb()
+  db.transaction((tx) => {
+    const targets = tx.select({ id: textReplacements.id }).from(textReplacements)
+      .where(and(eq(textReplacements.userId, userId), isNull(textReplacements.bookId),
+        eq(textReplacements.matchType, 'pattern'), inArray(textReplacements.id, ruleIds))).all()
+    if (ruleIds.length === 0 || targets.length !== ruleIds.length) throw new AppError('REPLACEMENT_NOT_FOUND')
+    tx.delete(textReplacements).where(and(eq(textReplacements.userId, userId), inArray(textReplacements.id, ruleIds))).run()
+  })
 }
 
 export async function setReplacementOverride(userId: string, replacementId: string, data: ReplacementOverrideReq) {

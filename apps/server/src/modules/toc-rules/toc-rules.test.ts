@@ -2,13 +2,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { Hono } from 'hono'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { tocRuleCreateSchema, tocRuleUpdateSchema, tocRuleReorderSchema } from '@bookdock/shared'
 
-import * as schema from '../../db/schema'
+import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
 import { errorHandler } from '../../middleware/error'
@@ -18,7 +18,9 @@ import {
   createTocRule,
   updateTocRule,
   deleteTocRule,
+  deleteTocRules,
   reorderTocRules,
+  importTocRules,
 } from './toc-rules.service'
 import { restoreTocRuleSeeds, SEED_TOC_RULES } from './seeds'
 
@@ -69,6 +71,16 @@ describe('toc-rules service', () => {
       ],
     }
   }
+
+  it('rejects mixed owned and foreign ids without deleting owned rules', () => {
+    const owned = listTocRules(ownerId)
+    const foreign = listTocRules(otherId)
+    expect(() => deleteTocRules(ownerId, [owned[0]!.id, foreign[0]!.id])).toThrow('TOC_RULE_NOT_FOUND')
+    expect(listTocRules(ownerId)).toEqual(owned)
+    expect(listTocRules(otherId)).toEqual(foreign)
+    expect(() => deleteTocRules(ownerId, [owned[0]!.id, 'missing'])).toThrow('TOC_RULE_NOT_FOUND')
+    expect(listTocRules(ownerId)).toEqual(owned)
+  })
 
   it('creates a rule with default enabled/sortOrder and defaults pattern fields', async () => {
     const created = createTocRule(ownerId, sampleRule())
@@ -287,15 +299,152 @@ describe('toc-rules service', () => {
   })
 })
 
+describe('toc-rules import', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+
+    ownerId = createId('user')
+    db.insert(schema.users).values({
+      id: ownerId,
+      username: 'owner',
+      passwordHash: null,
+      role: 'owner',
+      createdAt: Date.now(),
+    }).run()
+  })
+
+  function transferFile(names: string[]) {
+    return {
+      kind: 'bookdock.toc-rules' as const,
+      formatVersion: 1 as const,
+      rules: names.map((name, index) => ({
+        name,
+        enabled: true,
+        patterns: [
+          { level: 1, regex: `^第${index}章`, replacement: null, enabled: index % 2 === 0 },
+        ],
+      })),
+    }
+  }
+
+  it('appends file-order rules disabled while keeping per-level flags', async () => {
+    const seeded = await listTocRules(ownerId)
+    const beforeMax = Math.max(...seeded.map((r) => r.sortOrder))
+    const imported = importTocRules(ownerId, transferFile(['import-a', 'import-b']))
+    expect(imported).toHaveLength(2)
+    expect(imported.map((r) => r.name)).toEqual(['import-a', 'import-b'])
+    expect(imported.every((r) => r.enabled === false)).toBe(true)
+    expect(imported[0]?.patterns[0]?.enabled).toBe(true)
+    expect(imported[1]?.patterns[0]?.enabled).toBe(false)
+    expect(imported.map((r) => r.sortOrder)).toEqual([beforeMax + 1, beforeMax + 2])
+    expect(imported.every((r) => r.builtIn === false)).toBe(true)
+
+    const items = await listTocRules(ownerId)
+    expect(items.slice(-2).map((r) => r.name)).toEqual(['import-a', 'import-b'])
+  })
+
+  it('keeps imported built-in copies custom across list and restore', async () => {
+    await listTocRules(ownerId)
+    const seed = SEED_TOC_RULES[0]!
+    const imported = importTocRules(ownerId, {
+      kind: 'bookdock.toc-rules' as const,
+      formatVersion: 1 as const,
+      rules: [{ name: `${seed.name} copy`, enabled: true, patterns: seed.patterns }],
+    })
+    expect(imported[0]?.builtIn).toBe(false)
+
+    const relisted = await listTocRules(ownerId)
+    expect(relisted.find((r) => r.id === imported[0]?.id)?.builtIn).toBe(false)
+    restoreTocRuleSeeds(ownerId)
+    expect((await listTocRules(ownerId)).find((r) => r.id === imported[0]?.id)?.builtIn).toBe(false)
+  })
+
+  it('never re-identifies a new content-matching row as built-in after the one-time backfill', async () => {
+    await listTocRules(ownerId)
+    const seed = SEED_TOC_RULES[0]!
+    const now = Date.now()
+    const customId = createId('tocr')
+    db.insert(schema.tocRules).values({
+      id: customId,
+      userId: ownerId,
+      seedKey: null,
+      name: seed.name,
+      enabled: 1,
+      sortOrder: 99,
+      patterns: seed.patterns,
+      createdAt: now,
+      updatedAt: now,
+    }).run()
+
+    await listTocRules(ownerId)
+    restoreTocRuleSeeds(ownerId)
+    const found = (await listTocRules(ownerId)).find((r) => r.id === customId)
+    expect(found?.builtIn).toBe(false)
+  })
+
+  it('rejects an existing name (trimmed exact) and adds nothing', async () => {
+    await listTocRules(ownerId)
+    const before = (await listTocRules(ownerId)).length
+    expect(() => importTocRules(ownerId, transferFile(['  import-a  ', 'import-a'])))
+      .toThrowError(expect.objectContaining({ code: 'VALIDATION_ERROR' }))
+    const first = importTocRules(ownerId, transferFile(['import-a']))
+    expect(first).toHaveLength(1)
+    expect(() => importTocRules(ownerId, transferFile([' import-a '])))
+      .toThrowError(expect.objectContaining({ code: 'VALIDATION_ERROR' }))
+    expect((await listTocRules(ownerId)).length).toBe(before + 1)
+  })
+
+  it('treats names case-sensitively', () => {
+    importTocRules(ownerId, transferFile(['Case']))
+    const imported = importTocRules(ownerId, transferFile(['case']))
+    expect(imported).toHaveLength(1)
+  })
+
+  it('rejects blank names, invalid regex, gapped levels, wrong envelope, and empty rules without saving', async () => {
+    await listTocRules(ownerId)
+    const before = (await listTocRules(ownerId)).length
+    const badFiles = [
+      transferFile(['   ']),
+      { kind: 'bookdock.toc-rules', formatVersion: 1, rules: [{ name: 'bad-regex', enabled: true, patterns: [{ level: 1, regex: '([', replacement: null, enabled: true }] }] },
+      { kind: 'bookdock.toc-rules', formatVersion: 1, rules: [{ name: 'gapped', enabled: true, patterns: [{ level: 1, regex: '^a', replacement: null, enabled: true }, { level: 3, regex: '^b', replacement: null, enabled: true }] }] },
+      { kind: 'bookdock.text-replacements', formatVersion: 1, rules: [] },
+      { kind: 'bookdock.toc-rules', formatVersion: 2, rules: [] },
+      { kind: 'bookdock.toc-rules', formatVersion: 1, rules: [] },
+    ]
+    for (const file of badFiles) {
+      expect(() => importTocRules(ownerId, file)).toThrowError(expect.objectContaining({ code: 'VALIDATION_ERROR' }))
+    }
+    expect(await listTocRules(ownerId)).toHaveLength(before)
+  })
+
+  it('rolls back the whole batch when one rule is invalid', async () => {
+    await listTocRules(ownerId)
+    const before = (await listTocRules(ownerId)).length
+    expect(() => importTocRules(ownerId, {
+      kind: 'bookdock.toc-rules' as const,
+      formatVersion: 1 as const,
+      rules: [
+        { name: 'good', enabled: true, patterns: [{ level: 1, regex: '^good', replacement: null, enabled: true }] },
+        { name: 'bad', enabled: true, patterns: [{ level: 1, regex: '([', replacement: null, enabled: true }] },
+      ],
+    })).toThrowError(expect.objectContaining({ code: 'VALIDATION_ERROR' }))
+    expect(await listTocRules(ownerId)).toHaveLength(before)
+  })
+})
+
 describe('toc-rules routes', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
 
-  function createApp() {
+  function createApp(guest = false) {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('/api/v1/toc-rules/*', async (c, next) => {
-      c.set('user', { id: ownerId, username: 'owner', role: 'owner', avatarKey: null })
+      c.set('user', { id: ownerId, username: 'owner', role: guest ? 'guest' : 'owner', avatarKey: null })
       return next()
     })
     app.route('/api/v1/toc-rules', tocRuleRoutes)
@@ -313,6 +462,35 @@ describe('toc-rules routes', () => {
       role: 'owner',
       createdAt: Date.now(),
     }).run()
+  })
+
+  it('batch-deletes selected rules and preserves unselected rules', async () => {
+    const rules = listTocRules(ownerId)
+    const response = await createApp().request('http://test/api/v1/toc-rules/batch-delete', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ruleIds: rules.slice(0, 2).map((rule) => rule.id) }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ data: null })
+    expect(listTocRules(ownerId).map((rule) => rule.id)).toEqual(rules.slice(2).map((rule) => rule.id))
+  })
+
+  it.each([[], ['missing'], ['same', 'same']])('rejects invalid batch ids %j without deletion', async (ruleIds) => {
+    const rules = listTocRules(ownerId)
+    const response = await createApp().request('http://test/api/v1/toc-rules/batch-delete', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ruleIds }),
+    })
+    expect([400, 404]).toContain(response.status)
+    expect(listTocRules(ownerId)).toEqual(rules)
+  })
+
+  it('rejects guest batch deletion before writes', async () => {
+    const rules = listTocRules(ownerId)
+    const response = await createApp(true).request('http://test/api/v1/toc-rules/batch-delete', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ruleIds: [rules[0]!.id] }),
+    })
+    expect(response.status).toBe(403)
+    expect(listTocRules(ownerId)).toEqual(rules)
   })
 
   it('PUT /reorder is routed to the static handler, not PUT /:ruleId', async () => {
@@ -377,6 +555,45 @@ describe('toc-rules routes', () => {
     expect(res.status).toBe(404)
     const body = (await res.json()) as { error: { code: string } }
     expect(body.error.code).toBe('TOC_RULE_NOT_FOUND')
+  })
+
+  it('POST /import batch-creates disabled rules in file order', async () => {
+    const app = createApp()
+    const res = await app.request('http://test/api/v1/toc-rules/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'bookdock.toc-rules',
+        formatVersion: 1,
+        rules: [
+          { name: 'route-a', enabled: true, patterns: [{ level: 1, regex: '^a', replacement: null, enabled: true }] },
+          { name: 'route-b', enabled: true, patterns: [{ level: 1, regex: '^b', replacement: null, enabled: false }] },
+        ],
+      }),
+    })
+    expect(res.status).toBe(201)
+    const { data } = (await res.json()) as { data: { name: string; enabled: boolean }[] }
+    expect(data.map((r) => r.name)).toEqual(['route-a', 'route-b'])
+    expect(data.every((r) => r.enabled === false)).toBe(true)
+  })
+
+  it('POST /import rejects a conflicting name without saving', async () => {
+    const app = createApp()
+    createTocRule(ownerId, { name: 'taken', patterns: [{ level: 1, regex: '^taken' }] })
+    const res = await app.request('http://test/api/v1/toc-rules/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'bookdock.toc-rules',
+        formatVersion: 1,
+        rules: [
+          { name: 'fresh', enabled: true, patterns: [{ level: 1, regex: '^fresh', replacement: null, enabled: true }] },
+          { name: 'taken', enabled: true, patterns: [{ level: 1, regex: '^taken2', replacement: null, enabled: true }] },
+        ],
+      }),
+    })
+    expect(res.status).toBe(400)
+    expect((await listTocRules(ownerId)).some((r) => r.name === 'fresh')).toBe(false)
   })
 })
 

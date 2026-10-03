@@ -595,6 +595,12 @@ export const tocRuleReorderSchema = z.object({
   tocRuleIds: z.array(z.string().min(1)),
 })
 
+export const ruleBatchDeleteSchema = z.object({
+  ruleIds: z.array(z.string().min(1)).min(1).refine((ids) => new Set(ids).size === ids.length, {
+    message: 'Rule ids must be unique',
+  }),
+}).strict()
+
 export const tocPreviewSchema = z.object({
   tocRuleId: z.string().nullable().optional(),
   customPatterns: tocRulePatternsSchema.optional(),

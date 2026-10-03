@@ -5,12 +5,14 @@ import { fileURLToPath } from 'node:url'
 
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from './migration-stage'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
+import { migrate as migrateAll } from 'drizzle-orm/better-sqlite3/migrator'
 import { describe, expect, it } from 'vitest'
 
-import * as schema from './schema'
-import { reconcileConsolidatedMigrationLedger, repairBookmarkContextSchema, repairBookmarkFields, repairIdeaStyle, repairLegacyTextReplacementSchema, repairLibraryBooksDeletedAt, repairLibraryInvitesSchema, retargetBookIdReferences } from './client'
+import * as schema from './legacy-test-schema'
+import { repairBookmarkFields, repairIdeaStyle } from './legacy-book-repairs'
+import { reconcileConsolidatedMigrationLedger, repairBookmarkContextSchema, repairLegacyTextReplacementSchema, repairLibraryBooksDeletedAt, repairLibraryInvitesSchema, retargetBookIdReferences } from './client'
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
 const baselineFile = path.join(migrationsDir, '0000_baseline.sql')
@@ -533,6 +535,7 @@ describe('book id retarget repair', () => {
     // All rows survive with identical values.
     expect(sqlite.prepare('SELECT duration_seconds AS d FROM reading_records WHERE id = ?').get('r1')).toEqual({ d: 60 })
     expect(sqlite.prepare('SELECT enabled AS e FROM text_replacement_overrides WHERE id = ?').get('o1')).toEqual({ e: 0 })
+    expect(sqlite.prepare('SELECT sort_order AS s FROM text_replacements WHERE id = ?').get('t1')).toEqual({ s: 0 })
     expect(sqlite.prepare('SELECT text AS t FROM ai_chunks WHERE id = ?').get('c1')).toEqual({ t: 'first text' })
     // book_id now points at versions, not legacy rows.
     const refs = sqlite.prepare('PRAGMA foreign_key_list(reading_records)').all() as { from: string; table: string }[]
@@ -729,6 +732,8 @@ describe('text replacement migration', () => {
     sqlite.pragma('foreign_keys = ON')
     const db = drizzle(sqlite, { schema })
     migrate(db, { migrationsFolder: migrationsDir })
+    retargetBookIdReferences(db)
+    migrateAll(db, { migrationsFolder: migrationsDir })
     const before = sqlite.prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations').get()
     // Simulate a newer release having migrated further: an unknown record on
     // top makes the ledger longer than this code's journal.

@@ -21,7 +21,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().optional(),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(104857600),
   FONT_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
-  AVATAR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(2097152),
+  AVATAR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(5242880),
   AUTH_RPM: z.coerce.number().int().min(1).max(120).default(5),
   // Set by the container launcher for one boot; absent in dev, which disables
   // the internal version route.

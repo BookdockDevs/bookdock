@@ -8,19 +8,18 @@ import { config } from '../../config'
 import { getStorage } from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { AppError } from '../../middleware/error'
-import { avatarThumbnailKey } from '../../lib/avatar'
-import { avatarStorageKey, deleteAvatar, generateAvatarThumbnail, uploadAvatar } from './avatars.service'
+import { avatarFirstFrameKey, avatarThumbnailKey } from '../../lib/avatar'
+import { avatarStorageKey, deleteAvatar, generateAvatarThumbnail, generateGifAvatarThumbnails, uploadAvatar } from './avatars.service'
 
 const AVATAR_CONTENT_TYPES: Record<string, string> = {
   jpg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',
+  gif: 'image/gif',
 }
 
 // Keys are `<hh>/<sha256>.<ext>` — validated before storage is touched.
-// Only the three upload types exist: the service rejects anything else, so a
-// GIF key can never be produced.
-const AVATAR_KEY_PATTERN = /^[0-9a-f]{2}\/[0-9a-f]{64}\.(jpg|png|webp)$/
+const AVATAR_KEY_PATTERN = /^[0-9a-f]{2}\/[0-9a-f]{64}\.(jpg|png|webp|gif)$/
 
 async function readAll(storage: StorageDriver, storageKey: string): Promise<Buffer> {
   const chunks: Buffer[] = []
@@ -76,15 +75,30 @@ avatarsRoutes.get('/:key{.+}', async (c) => {
     payload = await readAll(storage, storageKey)
     contentType = AVATAR_CONTENT_TYPES[match[1]]
   } else {
-    const thumbKey = avatarStorageKey(avatarThumbnailKey(key))
+    const isGif = match[1] === 'gif'
+    const isStatic = c.req.query('size') === 'static'
+    const thumbKey = avatarStorageKey(isGif && isStatic ? avatarFirstFrameKey(key) : avatarThumbnailKey(key))
     if (await storage.exists(thumbKey)) {
       payload = await readAll(storage, thumbKey)
       contentType = 'image/webp'
     } else {
       const original = await readAll(storage, storageKey)
-      const thumb = await generateAvatarThumbnail(original)
+      let thumb: Buffer | null
+      if (isGif) {
+        const gif = await generateGifAvatarThumbnails(original)
+        for (const [variantKey, data] of [
+          [avatarThumbnailKey(key), gif.thumbnail],
+          [avatarFirstFrameKey(key), gif.firstFrame],
+        ] as const) {
+          const variantStorageKey = avatarStorageKey(variantKey)
+          if (!(await storage.exists(variantStorageKey))) await storage.put(variantStorageKey, data)
+        }
+        thumb = isStatic ? gif.firstFrame : gif.thumbnail
+      } else {
+        thumb = await generateAvatarThumbnail(original)
+      }
       if (thumb) {
-        await storage.put(thumbKey, thumb)
+        if (!isGif) await storage.put(thumbKey, thumb)
         payload = thumb
         contentType = 'image/webp'
       } else {

@@ -9,13 +9,13 @@ vi.hoisted(() => {
 
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from '../db/migration-stage'
 import { eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 
 import type { AccessTokenPermission } from '@bookdock/shared'
 
-import * as schema from '../db/schema'
+import * as schema from '../db/legacy-test-schema'
 import * as client from '../db/client'
 import { createId } from '../lib/id'
 import { generateSessionToken, hashSessionToken } from '../lib/token'

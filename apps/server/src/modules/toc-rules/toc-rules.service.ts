@@ -1,6 +1,7 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 
 import type { TocRuleCreateReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
+import { describeTransferIssues, normalizeTransferName, tocTransferFileSchema } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { tocRules } from '../../db/schema'
@@ -90,6 +91,16 @@ export function deleteTocRule(userId: string, ruleId: string) {
   db.delete(tocRules).where(eq(tocRules.id, ruleId)).run()
 }
 
+export function deleteTocRules(userId: string, ruleIds: string[]) {
+  const db = getDb()
+  db.transaction((tx) => {
+    const targets = tx.select({ id: tocRules.id }).from(tocRules)
+      .where(and(eq(tocRules.userId, userId), inArray(tocRules.id, ruleIds))).all()
+    if (ruleIds.length === 0 || targets.length !== ruleIds.length) throw new AppError('TOC_RULE_NOT_FOUND')
+    tx.delete(tocRules).where(and(eq(tocRules.userId, userId), inArray(tocRules.id, ruleIds))).run()
+  })
+}
+
 /** Reorder the whole rule list: ids in display order become sortOrder 0..n-1. */
 export function reorderTocRules(userId: string, ruleIds: string[]) {
   const db = getDb()
@@ -104,4 +115,65 @@ export function reorderTocRules(userId: string, ruleIds: string[]) {
     db.update(tocRules).set({ sortOrder: index, updatedAt: now }).where(eq(tocRules.id, id)).run()
   })
   return listTocRules(userId)
+}
+
+/** Batch import from a transfer file: file order appends at max(sortOrder)+1, all disabled. */
+export function importTocRules(userId: string, file: unknown) {
+  const parsed = tocTransferFileSchema.safeParse(file)
+  if (!parsed.success) {
+    throw new AppError('VALIDATION_ERROR', 'Invalid import file', { issues: describeTransferIssues(parsed.error) })
+  }
+  if (parsed.data.rules.length === 0) {
+    throw new AppError('VALIDATION_ERROR', 'No importable rules')
+  }
+  const db = getDb()
+  return db.transaction((tx) => {
+    ensureTocRuleSeeds(userId)
+    const maxOrder = db.select({ max: sql<number>`max(${tocRules.sortOrder})` }).from(tocRules)
+      .where(eq(tocRules.userId, userId)).get()?.max ?? -1
+    const now = Date.now()
+    const rows: TocRuleRow[] = parsed.data.rules.map((rule, index) => ({
+      id: createId('tocr'),
+      userId,
+      seedKey: null,
+      name: rule.name,
+      enabled: 0,
+      sortOrder: maxOrder + 1 + index,
+      patterns: rule.patterns.map((p) => ({
+        level: p.level,
+        regex: p.regex,
+        replacement: p.replacement ?? null,
+        enabled: p.enabled ?? true,
+      })),
+      createdAt: now + index,
+      updatedAt: now + index,
+    }))
+
+    const existingNames = new Set(
+      tx.select({ name: tocRules.name }).from(tocRules).where(eq(tocRules.userId, userId)).all()
+        .map((row) => normalizeTransferName(row.name)),
+    )
+    const seen = new Set<string>()
+    parsed.data.rules.forEach((rule, index) => {
+      const key = normalizeTransferName(rule.name)
+      if (!key) {
+        throw new AppError('VALIDATION_ERROR', 'Invalid import file', {
+          issues: [{ ruleIndex: index, field: 'name', message: 'Rule name must not be blank' }],
+        })
+      }
+      if (seen.has(key)) {
+        throw new AppError('VALIDATION_ERROR', 'Duplicate rule name in import file', {
+          issues: [{ ruleIndex: index, field: 'name', message: 'Duplicate rule name in import file' }],
+        })
+      }
+      seen.add(key)
+      if (existingNames.has(key)) {
+        throw new AppError('VALIDATION_ERROR', 'Rule name already exists', {
+          issues: [{ ruleIndex: index, field: 'name', message: 'Rule name already exists' }],
+        })
+      }
+    })
+    tx.insert(tocRules).values(rows).run()
+    return rows.map(toRes)
+  })
 }

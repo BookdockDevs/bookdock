@@ -1,22 +1,29 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { Hono } from 'hono'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { eq } from 'drizzle-orm'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { eq, sql } from 'drizzle-orm'
+import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { replacementCreateSchema, replacementOverrideSchema, replacementUpdateSchema } from '@bookdock/shared'
+import { applyRuleToText, replacementCreateSchema, replacementOverrideSchema, replacementUpdateSchema } from '@bookdock/shared'
 
-import * as schema from '../../db/schema'
+import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
+import { errorHandler } from '../../middleware/error'
+import { loadEffectiveBookReplacementRules } from '../books/replacement-rules'
+import replacementRoutes from './replacements.routes'
 import {
   listReplacements,
   createReplacement,
   updateReplacement,
   deleteReplacement,
+  deleteGlobalReplacements,
   setReplacementOverride,
+  importReplacements,
 } from './replacements.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -92,6 +99,36 @@ describe('replacements service', () => {
     otherBookId = createId('book')
     insertBook(otherBookId, ownerId, 'Other Book')
     mirrorPrivateBook(db, ownerId, [bookId, otherBookId])
+  })
+
+  it('deletes selected global rules and their overrides without affecting other rules', async () => {
+    const a = await createReplacement(ownerId, { pattern: 'a' })
+    const b = await createReplacement(ownerId, { pattern: 'b' })
+    const keep = await createReplacement(ownerId, { bookId, pattern: 'keep' })
+    await setReplacementOverride(ownerId, a.id, { bookId, enabled: false })
+    deleteGlobalReplacements(ownerId, [a.id, b.id])
+    expect((await listReplacements(ownerId)).map((rule) => rule.id)).toEqual([keep.id])
+    expect(db.select().from(schema.textReplacementOverrides).all()).toHaveLength(0)
+  })
+
+  it('rejects mixed foreign, missing, book-scoped, and point targets without deleting a valid global rule', async () => {
+    const global = await createReplacement(ownerId, { pattern: 'global' })
+    const foreign = await createReplacement(otherId, { pattern: 'foreign' })
+    const scoped = await createReplacement(ownerId, { bookId, pattern: 'book' })
+    const point = await createReplacement(ownerId, { bookId, matchType: 'point', spineHref: 'chapter.xhtml', textOffset: 0, originalText: 'old', replacement: 'new' })
+    for (const invalid of [foreign.id, scoped.id, point.id, 'missing']) {
+      expect(() => deleteGlobalReplacements(ownerId, [global.id, invalid])).toThrow('REPLACEMENT_NOT_FOUND')
+      expect((await listReplacements(ownerId)).some((rule) => rule.id === global.id)).toBe(true)
+    }
+  })
+
+  it('rolls back all rows when database deletion fails', async () => {
+    const a = await createReplacement(ownerId, { pattern: 'a', name: 'first' })
+    const b = await createReplacement(ownerId, { pattern: 'b', name: 'blocked' })
+    db.run(sql`CREATE TRIGGER reject_batch_delete BEFORE DELETE ON text_replacements
+      WHEN OLD.name = 'blocked' BEGIN SELECT RAISE(ABORT, 'test deletion failure'); END`)
+    expect(() => deleteGlobalReplacements(ownerId, [a.id, b.id])).toThrow('test deletion failure')
+    expect((await listReplacements(ownerId)).map((rule) => rule.id)).toEqual([a.id, b.id])
   })
 
   it('creates a pattern replacement as user-global and lists it with effective fields for a book', async () => {
@@ -391,6 +428,255 @@ describe('replacement overrides', () => {
       .rejects.toMatchObject({ code: 'REPLACEMENT_NOT_FOUND' })
     await expect(setReplacementOverride(ownerId, rule.id, { bookId: 'missing-book', enabled: false }))
       .rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
+  })
+})
+
+describe('replacement ordering and import', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let bookId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+
+    ownerId = createId('user')
+    db.insert(schema.users).values({
+      id: ownerId,
+      username: 'owner',
+      passwordHash: null,
+      role: 'owner',
+      createdAt: Date.now(),
+    }).run()
+
+    bookId = createId('book')
+    db.insert(schema.books).values({
+      id: bookId,
+      userId: ownerId,
+      title: 'Test Book',
+      author: 'Author',
+      format: 'txt',
+      filePath: 'books/test/test.txt',
+      coverKey: null,
+      size: 100,
+      meta: {},
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }).run()
+    mirrorPrivateBook(db, ownerId, [bookId])
+  })
+
+  function transferFile(names: Array<string | null>) {
+    return {
+      kind: 'bookdock.text-replacements' as const,
+      formatVersion: 1 as const,
+      rules: names.map((name, index) => ({
+        name,
+        group: index === 0 ? 'g' : null,
+        pattern: `p${index}`,
+        replacement: index === 0 ? null : `r${index}`,
+        isRegex: false,
+        applyTo: 'content' as const,
+        enabled: true,
+      })),
+    }
+  }
+
+  it('lists creations oldest-first and appends new rules at the end', async () => {
+    const a = await createReplacement(ownerId, { pattern: 'a', name: 'a' })
+    const b = await createReplacement(ownerId, { pattern: 'b', name: 'b' })
+    expect([a.sortOrder, b.sortOrder]).toEqual([0, 1])
+    const items = await listReplacements(ownerId)
+    expect(items.map((r) => r.name)).toEqual(['a', 'b'])
+  })
+
+  it('loads effective book rules in list order so chained replacements compose', async () => {
+    await createReplacement(ownerId, { pattern: 'x', replacement: 'y', name: 'first' })
+    await createReplacement(ownerId, { pattern: 'y', replacement: 'z', name: 'second' })
+    const rules = await loadEffectiveBookReplacementRules(ownerId, bookId)
+    expect(rules.map((r) => r.pattern)).toEqual(['x', 'y'])
+    let text = 'x'
+    for (const rule of rules) {
+      if (rule.matchType !== 'pattern' || !rule.pattern || !rule.effectiveEnabled) continue
+      text = applyRuleToText(text, { id: rule.id, pattern: rule.pattern, replacement: rule.replacement, isRegex: rule.isRegex })
+    }
+    expect(text).toBe('z')
+  })
+
+  it('imports global patterns disabled at the end, keeping group and delete semantics', async () => {
+    await createReplacement(ownerId, { pattern: 'existing', name: 'existing' })
+    const imported = await importReplacements(ownerId, transferFile(['n1', null]))
+    expect(imported.map((r) => r.name)).toEqual(['n1', null])
+    expect(imported.every((r) => r.enabled === false)).toBe(true)
+    expect(imported.every((r) => r.scope === 'global')).toBe(true)
+    expect(imported[0]).toMatchObject({ group: 'g', replacement: null, sortOrder: 1 })
+    const items = await listReplacements(ownerId)
+    expect(items.map((r) => r.pattern)).toEqual(['existing', 'p0', 'p1'])
+  })
+
+  it('rejects existing and file-internal name conflicts but allows repeated empty names', async () => {
+    await createReplacement(ownerId, { pattern: 'x', name: 'taken' })
+    const before = (await listReplacements(ownerId)).length
+    await expect(importReplacements(ownerId, transferFile([' fresh ', 'fresh'])))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(importReplacements(ownerId, transferFile(['taken'])))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(importReplacements(ownerId, transferFile([' taken '])))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    const unnamed = await importReplacements(ownerId, transferFile([null, null]))
+    expect(unnamed).toHaveLength(2)
+    expect((await listReplacements(ownerId)).length).toBe(before + 2)
+  })
+
+  it('rejects smuggled book scope, invalid regex, and empty files without saving', async () => {
+    const before = (await listReplacements(ownerId)).length
+    const badFiles = [
+      { kind: 'bookdock.text-replacements', formatVersion: 1, rules: [{ pattern: 'x', bookId, isRegex: false }] },
+      { kind: 'bookdock.text-replacements', formatVersion: 1, rules: [{ pattern: '([', isRegex: true }] },
+      { kind: 'bookdock.toc-rules', formatVersion: 1, rules: [] },
+      { kind: 'bookdock.text-replacements', formatVersion: 1, rules: [] },
+    ]
+    for (const file of badFiles) {
+      await expect(importReplacements(ownerId, file)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    }
+    expect(await listReplacements(ownerId)).toHaveLength(before)
+  })
+
+  it('backfills legacy rows per user in createdAt order (0038)', async () => {
+    const otherId = createId('user')
+    db.insert(schema.users).values({ id: otherId, username: 'other', passwordHash: null, role: 'owner', createdAt: Date.now() }).run()
+    const base = Date.now()
+    // Physical insertion order is newest-first so only createdAt may decide.
+    const seedRows = [
+      { id: createId('replacement'), createdAt: base + 30 },
+      { id: createId('replacement'), createdAt: base + 20 },
+      { id: createId('replacement'), createdAt: base + 10 },
+    ]
+    for (const [index, seed] of seedRows.entries()) {
+      db.insert(schema.textReplacements).values({
+        id: seed.id,
+        userId: ownerId,
+        pattern: `legacy-${index}`,
+        sortOrder: 0,
+        createdAt: seed.createdAt,
+        updatedAt: seed.createdAt,
+      }).run()
+    }
+    db.insert(schema.textReplacements).values({
+      id: createId('replacement'),
+      userId: otherId,
+      pattern: 'other',
+      sortOrder: 0,
+      createdAt: base + 99,
+      updatedAt: base + 99,
+    }).run()
+
+    const migrationSql = readFileSync(
+      path.join(__dirname, '..', '..', 'db', 'migrations', '0038_replacement_sort_order.sql'),
+      'utf8',
+    )
+    db.run(sql.raw(migrationSql.split('statement-breakpoint')[1]!))
+
+    const mine = db.select().from(schema.textReplacements).where(eq(schema.textReplacements.userId, ownerId)).all()
+      .sort((a, b) => a.createdAt - b.createdAt)
+    expect(mine.map((r) => r.sortOrder)).toEqual([0, 1, 2])
+    expect(mine.map((r) => r.pattern)).toEqual(['legacy-2', 'legacy-1', 'legacy-0'])
+    const theirs = db.select().from(schema.textReplacements).where(eq(schema.textReplacements.userId, otherId)).all()
+    expect(theirs.map((r) => r.sortOrder)).toEqual([0])
+  })
+})
+
+describe('replacement routes', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  function createApp(guest = false) {
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('/api/v1/replacements/*', async (c, next) => {
+      c.set('user', { id: ownerId, username: 'owner', role: guest ? 'guest' : 'owner', avatarKey: null })
+      return next()
+    })
+    app.route('/api/v1/replacements', replacementRoutes)
+    return app
+  }
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = createId('user')
+    db.insert(schema.users).values({
+      id: ownerId,
+      username: 'owner',
+      passwordHash: null,
+      role: 'owner',
+      createdAt: Date.now(),
+    }).run()
+  })
+
+  it('batch-deletes selected global rules through the route', async () => {
+    const a = await createReplacement(ownerId, { pattern: 'a' })
+    const b = await createReplacement(ownerId, { pattern: 'b' })
+    const response = await createApp().request('http://test/api/v1/replacements/batch-delete', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ruleIds: [a.id] }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ data: null })
+    expect((await listReplacements(ownerId)).map((rule) => rule.id)).toEqual([b.id])
+  })
+
+  it('rejects guest batch deletion', async () => {
+    const a = await createReplacement(ownerId, { pattern: 'a' })
+    const response = await createApp(true).request('http://test/api/v1/replacements/batch-delete', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ruleIds: [a.id] }),
+    })
+    expect(response.status).toBe(403)
+    expect(await listReplacements(ownerId)).toHaveLength(1)
+  })
+
+  it.each(['{"ruleIds":[]}', '{"ruleIds":["same","same"]}', '{'])('rejects invalid batch payload %s', async (body) => {
+    const a = await createReplacement(ownerId, { pattern: 'a' })
+    const response = await createApp().request('http://test/api/v1/replacements/batch-delete', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body,
+    })
+    expect(response.status).toBe(400)
+    expect((await listReplacements(ownerId)).map((rule) => rule.id)).toEqual([a.id])
+  })
+
+  it('POST /import batch-creates disabled global rules', async () => {
+    const app = createApp()
+    const res = await app.request('http://test/api/v1/replacements/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'bookdock.text-replacements',
+        formatVersion: 1,
+        rules: [{ name: 'r1', pattern: 'a', replacement: 'b', isRegex: false, applyTo: 'both', enabled: true }],
+      }),
+    })
+    expect(res.status).toBe(201)
+    const { data } = (await res.json()) as { data: { name: string; enabled: boolean; applyTo: string }[] }
+    expect(data).toHaveLength(1)
+    expect(data[0]).toMatchObject({ name: 'r1', enabled: false, applyTo: 'both' })
+  })
+
+  it('POST /import rejects conflicts without saving the valid subset', async () => {
+    const app = createApp()
+    await createReplacement(ownerId, { pattern: 'x', name: 'taken' })
+    const res = await app.request('http://test/api/v1/replacements/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'bookdock.text-replacements',
+        formatVersion: 1,
+        rules: [
+          { name: 'fresh', pattern: 'fresh', enabled: true },
+          { name: 'taken', pattern: 'taken2', enabled: true },
+        ],
+      }),
+    })
+    expect(res.status).toBe(400)
+    expect((await listReplacements(ownerId)).some((r) => r.pattern === 'fresh')).toBe(false)
   })
 })
 

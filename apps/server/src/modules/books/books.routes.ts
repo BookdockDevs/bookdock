@@ -38,6 +38,7 @@ import {
 } from './books.service'
 import { updateReaderBookSettings } from './reader-settings.service'
 import { forkLocalBook } from '../libraries/fork.service'
+import { getPrivateBookMetadataSource } from '../libraries/metadata-source.service'
 import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { getStorage } from '../../storage'
@@ -426,6 +427,12 @@ booksRoutes.post('/:id/reset-metadata', async (c) => {
   const id = c.req.param('id')
   const book = await resetBookMetadata(user.id, id, { normalizeTitle: isTitleNormalizeEnabled(user.id) })
   return c.json({ data: book })
+})
+
+booksRoutes.get('/:id/metadata-source', async (c) => {
+  const user = c.get('user')
+  const source = await getPrivateBookMetadataSource(user.id, c.req.param('id'))
+  return c.json({ data: source })
 })
 
 // B rescue: fork a collected reference into an independent local copy.

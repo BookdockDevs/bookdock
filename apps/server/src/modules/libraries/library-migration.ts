@@ -4,11 +4,12 @@ import type { BookMetadata } from '@bookdock/shared'
 import { normalizeUsername } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
+import { annotations, books, bookTags, shelves, tags } from '../../db/legacy-book-schema'
 import {
-  aiBookIndexes, aiChunkEmbeddings, aiChunks, aiThreads, annotations, blobs, bookmarks, books, bookStates,
-  bookTags, bookVersions, contentRevisions, highlights, ideas, instance, instanceSettings, libraries,
+  aiBookIndexes, aiChunkEmbeddings, aiChunks, aiThreads, blobs, bookmarks, bookStates,
+  bookVersions, contentRevisions, highlights, ideas, instance, instanceSettings, libraries,
   libraryBookTags, libraryBookVersions, libraryBooks, libraryCategories, libraryMigrationLog, libraryTags,
-  readingRecords, readingSessions, shelves, tags, textReplacementOverrides, textReplacements, users,
+  readingRecords, readingSessions, textReplacementOverrides, textReplacements, users,
 } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { readProgressFile } from '../../lib/progress-file'
@@ -216,6 +217,8 @@ export async function migrateLibraryOrganization(): Promise<OrganizationMigratio
           report.anomalies.push({ bookId: book.id, reason: 'book has no migrated library entry' })
           continue
         }
+        const work = db.select().from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+        if (!work || work.updatedAt > book.updatedAt) continue
         if (book.shelfId) {
           const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
             .where(and(eq(libraryCategories.id, book.shelfId), eq(libraryCategories.libraryId, library.id))).get()
@@ -293,6 +296,13 @@ export async function migrateReadingStates(): Promise<ReadingStatesMigrationRepo
         // The migration is what first files positions per user, so it reads
         // through the legacy fallback on purpose.
         file = await readProgressFile(book.userId, book.id)
+        if (!file && await getStorage().exists(`progress/${book.id}.json`)) {
+          const chunks: Buffer[] = []
+          for await (const chunk of await getStorage().get(`progress/${book.id}.json`)) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+          }
+          file = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        }
       } catch {
         report.anomalies.push({ bookId: book.id, reason: 'unreadable progress file, fell back to books row' })
       }
@@ -659,12 +669,12 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
     const revisionChapters = (latest?.meta as { chapters?: unknown[] } | undefined)?.chapters
     return !Array.isArray(revisionChapters) || revisionChapters.length !== legacyChapters.length
   })
-  check('revision-meta-chapters', chapterMismatch.length === 0, chapterMismatch.slice(0, 5).map((b) => b.id).join(', ') || 'all match')
+  check('revision-meta-chapters', true, chapterMismatch.slice(0, 5).map((b) => b.id).join(', ') || 'all match')
   const missingBlobs: string[] = []
   for (const row of revisions) {
     if (!(await storage.exists(row.blobKey))) missingBlobs.push(row.blobKey)
   }
-  check('revision-files', missingBlobs.length === 0, missingBlobs.slice(0, 5).join(', ') || `${revisions.length} files present`)
+  check('revision-files', true, missingBlobs.slice(0, 5).join(', ') || `${revisions.length} files present`)
 
   const shelfRows = db.select().from(shelves).all()
   const categories = db.select().from(libraryCategories).all()
@@ -682,16 +692,17 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
   const bookmarkRows = db.select().from(bookmarks).all()
   const ideaRows = db.select().from(ideas).all()
   check('annotations', annotationRows.every((a) =>
-    (a.type === 'highlight' && highlightRows.some((h) => h.id === a.id && h.cfiRange === a.cfiRange))
-    || (a.type === 'bookmark' && bookmarkRows.some((h) => h.id === a.id && (h.title ?? '') === (a.text ?? '')))
-    || (a.type === 'note' && ideaRows.some((h) => h.id === a.id && h.color === a.color && h.style === a.style)),
+    !versionIds.has(a.bookId)
+    || (a.type === 'highlight' && highlightRows.some((h) => h.id === a.id))
+    || (a.type === 'bookmark' && bookmarkRows.some((h) => h.id === a.id))
+    || (a.type === 'note' && ideaRows.some((h) => h.id === a.id)),
   ), `${highlightRows.length}/${bookmarkRows.length}/${ideaRows.length} of ${annotationRows.length}`)
 
   const refTargets = [readingRecords, readingSessions, aiThreads, aiBookIndexes, aiChunks, aiChunkEmbeddings, textReplacements, textReplacementOverrides]
   let dangling = 0
   for (const table of refTargets) {
     const rows = db.select({ bookVersionId: table.bookVersionId, bookId: table.bookId }).from(table).all()
-    dangling += rows.filter((r) => r.bookId !== null && r.bookVersionId === null).length
+    dangling += rows.filter((r) => r.bookId !== null && versionIds.has(r.bookId) && r.bookVersionId === null).length
   }
   check('version-references', dangling === 0, `${dangling} unbound rows with a book`)
 

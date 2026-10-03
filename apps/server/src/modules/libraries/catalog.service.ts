@@ -56,6 +56,11 @@ import {
  */
 export const CATALOG_PAGE_SIZE = 24
 
+function effectiveBookmeta(...layers: object[]): Record<string, unknown> {
+  // Null masks an inherited field without exposing invalid null values to readers.
+  return Object.fromEntries(Object.entries(Object.assign({}, ...layers)).filter(([, value]) => value !== null))
+}
+
 function getWork(libraryId: string, libraryBookId: string) {
   const db = getDb()
   const work = db.select().from(libraryBooks)
@@ -102,6 +107,10 @@ function toCatalogVersion(
     meta: (link.meta ?? {}) as Record<string, unknown>,
     // Inheritance (5.3): a null override reads the work default, and the
     // resolved value is never written back onto the version row.
+    inherited: {
+      title: work.title, authors: work.authors ?? [], description: work.description,
+      bookmeta: effectiveBookmeta(revisionMeta.bookmeta ?? {}, work.meta ?? {}),
+    },
     effective: {
       title: link.title ?? work.title,
       author: link.author ?? work.author,
@@ -112,11 +121,7 @@ function toCatalogVersion(
       // Version wins over work wins over parsed file: a version with its own
       // publication metadata is a distinct edition, and clearing an override
       // layer reveals the one beneath it.
-      bookmeta: {
-        ...(revisionMeta.bookmeta ?? {}),
-        ...((work.meta ?? {}) as Record<string, unknown>),
-        ...((link.meta ?? {}) as Record<string, unknown>),
-      },
+      bookmeta: effectiveBookmeta(revisionMeta.bookmeta ?? {}, work.meta ?? {}, link.meta ?? {}),
       fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
     },
     collected: collectedVersionIds?.has(link.bookVersionId) ?? false,
@@ -650,11 +655,7 @@ export async function listLibraryVersionEntries(
         // Merged in JS, the same way toCatalogVersion does it: SQLite's
         // json_patch applies one patch at a time, and the three layers live in
         // different tables anyway.
-        bookmeta: {
-          ...(revisionMeta.bookmeta ?? {}),
-          ...((row.workMeta ?? {}) as Record<string, unknown>),
-          ...((row.versionMeta ?? {}) as Record<string, unknown>),
-        },
+        bookmeta: effectiveBookmeta(revisionMeta.bookmeta ?? {}, row.workMeta ?? {}, row.versionMeta ?? {}),
         fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
         kind: row.kind,
         hidden: row.hidden,
@@ -748,11 +749,7 @@ export async function getLibraryVersionPublication(
       tags: tagNames,
       description: row.versionDescription ?? row.workDescription,
       // Same version-over-work-over-parsed merge the listing applies.
-      bookmeta: {
-        ...(revisionMeta.bookmeta ?? {}),
-        ...((row.workMeta ?? {}) as Record<string, unknown>),
-        ...((row.versionMeta ?? {}) as Record<string, unknown>),
-      },
+      bookmeta: effectiveBookmeta(revisionMeta.bookmeta ?? {}, row.workMeta ?? {}, row.versionMeta ?? {}),
       fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
     }
   }

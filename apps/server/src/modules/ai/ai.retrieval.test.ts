@@ -4,7 +4,7 @@ import { asc } from 'drizzle-orm'
 
 import { createTestDb } from '../../__tests__/setup'
 import { getDb } from '../../db/client'
-import { aiChunkEmbeddings, aiChunks, books, users } from '../../db/schema'
+import { aiChunkEmbeddings, aiChunks, books, users } from '../../db/legacy-test-schema'
 
 vi.mock('../../db/client', () => ({ getDb: vi.fn() }))
 

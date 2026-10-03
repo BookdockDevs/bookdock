@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import * as schema from '../../db/schema'
+import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
@@ -204,58 +204,16 @@ describe('progress service', () => {
     await expect(getProgress(strangerId, versionId)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
   })
 
-  it('migrates a pre-0.4.0 position file instead of losing it', async () => {
-    // The real instance has 17 books whose positions were written when the
-    // product was single-user. They must keep working, and must end up filed
-    // per user so the next reader of that version cannot claim them.
-    files.set(`progress/${bookId}.json`, Buffer.from(JSON.stringify({
-      cfi: 'chapter:3:0.5', chapter: 'Ch4', chapterIndex: 3, percent: 42, fraction: 0.42,
-      intervals: [[0, 0.42]], updatedAt: 1,
-    })))
-
-    const restored = await getProgress(ownerId, bookId)
-    expect(restored).toMatchObject({ percent: 42, cfi: 'chapter:3:0.5', chapterIndex: 3 })
-
-    // Read once more: the answer now comes from the user's own file, and the
-    // legacy one is gone rather than left as an orphan that a second reader
-    // could pick up.
-    expect(files.has(`progress/${bookId}.json`)).toBe(false)
-    expect(files.has(`progress/${ownerId}/${bookId}.json`)).toBe(true)
-    expect(await getProgress(ownerId, bookId)).toMatchObject({ percent: 42 })
-
-    // The owner keeps writing to their own file, and the migrated one is the
-    // only one that exists for this book.
-    await upsertProgress(ownerId, bookId, { percent: 55 })
-    expect((await getProgress(ownerId, bookId))?.percent).toBe(55)
-    expect([...files.keys()].filter((key) => key.startsWith('progress/'))).toEqual([
-      `progress/${ownerId}/${bookId}.json`,
-    ])
-  })
-
-  it('never hands a legacy position to a second reader', async () => {
-    files.set(`progress/${bookId}.json`, Buffer.from(JSON.stringify({
-      percent: 42, intervals: [[0, 0.42]], updatedAt: 1,
-    })))
-    // A reader who never owned the version sees nothing and leaves the file
-    // alone: no adoption, no deletion.
+  it('ignores legacy files after the startup bridge and isolates per-user files', async () => {
+    files.set(`progress/${bookId}.json`, Buffer.from(JSON.stringify({ percent: 42, intervals: [], updatedAt: 1 })))
+    expect(await readProgressFile(ownerId, bookId)).toBeNull()
     expect(await readProgressFile(otherId, bookId)).toBeNull()
-    expect(files.has(`progress/${bookId}.json`)).toBe(true)
-    // The owner adopts it on first sight; afterwards the readers are separate.
-    expect(await readProgressFile(ownerId, bookId)).toMatchObject({ percent: 42 })
-    expect(files.has(`progress/${bookId}.json`)).toBe(false)
-    await writeProgressFile(otherId, bookId, { percent: 7, intervals: [], updatedAt: 2 })
-    expect(await readProgressFile(ownerId, bookId)).toMatchObject({ percent: 42 })
-    expect(await readProgressFile(otherId, bookId)).toMatchObject({ percent: 7 })
-  })
-
-  it('lets only the private owner delete a not-yet-migrated legacy file', async () => {
-    files.set(`progress/${bookId}.json`, Buffer.from(JSON.stringify({
-      percent: 42, intervals: [], updatedAt: 1,
-    })))
+    await writeProgressFile(ownerId, bookId, { percent: 55, intervals: [], updatedAt: 2 })
     await deleteProgressFile(otherId, bookId)
-    expect(files.has(`progress/${bookId}.json`)).toBe(true)
+    expect(await readProgressFile(ownerId, bookId)).toMatchObject({ percent: 55 })
     await deleteProgressFile(ownerId, bookId)
-    expect(files.has(`progress/${bookId}.json`)).toBe(false)
+    expect(await readProgressFile(ownerId, bookId)).toBeNull()
+    expect(files.has(`progress/${bookId}.json`)).toBe(true)
   })
 
   it('should upsert and read progress for the book owner', async () => {

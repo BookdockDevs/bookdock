@@ -1,8 +1,11 @@
 import { Hono } from 'hono'
 
-import { tocRuleCreateSchema, tocRuleReorderSchema, tocRuleUpdateSchema } from '@bookdock/shared'
+import { ruleBatchDeleteSchema, tocRuleCreateSchema, tocRuleReorderSchema, tocRuleUpdateSchema } from '@bookdock/shared'
 
-import { createTocRule, deleteTocRule, listTocRules, reorderTocRules, updateTocRule } from './toc-rules.service'
+import { readRuleTransferFile } from '../../lib/rule-transfer'
+import { AppError } from '../../middleware/error'
+
+import { createTocRule, deleteTocRule, deleteTocRules, importTocRules, listTocRules, reorderTocRules, updateTocRule } from './toc-rules.service'
 import { restoreTocRuleSeeds } from './seeds'
 
 const tocRuleRoutes = new Hono()
@@ -32,6 +35,24 @@ tocRuleRoutes.post('/seed', async (c) => {
   restoreTocRuleSeeds(user.id)
   const items = listTocRules(user.id)
   return c.json({ data: items })
+})
+
+tocRuleRoutes.post('/batch-delete', async (c) => {
+  const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') throw new AppError('FORBIDDEN', 'Guest sessions cannot manage TOC rules')
+  const body = await c.req.json().catch(() => { throw new AppError('VALIDATION_ERROR', 'Invalid JSON') })
+  const parsed = ruleBatchDeleteSchema.safeParse(body)
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
+  deleteTocRules(user.id, parsed.data.ruleIds)
+  return c.json({ data: null })
+})
+
+tocRuleRoutes.post('/import', async (c) => {
+  const user = c.get('user')
+  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage TOC rules' } }, 403)
+  const body = await readRuleTransferFile(c)
+  const imported = importTocRules(user.id, body)
+  return c.json({ data: imported }, 201)
 })
 
 tocRuleRoutes.put('/reorder', async (c) => {

@@ -14,11 +14,11 @@ import type {
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { books, bookStates, bookVersions, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryTags, readingRecords, readingSessions } from '../../db/schema'
+import { bookStates, bookVersions, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryTags, readingRecords, readingSessions } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { unionLength } from '../../lib/intervals'
 import { mergeProgressInterval, readProgressFile } from '../../lib/progress-file'
-import { assertReadableBook } from '../books/books.service'
+import { assertReadableBook, getBook } from '../books/books.service'
 import { loadLibraryHiddenTaxonomy } from '../libraries/library-query'
 import { AppError } from '../../middleware/error'
 
@@ -259,24 +259,38 @@ export async function getHourly(userId: string, range: { from?: string; to?: str
 
 export async function getByBook(userId: string, range: { from?: string; to?: string }, showHidden = false): Promise<ReadingRecordBookItem[]> {
   const db = getDb()
-  return db.select({
+  const totals = db.select({
     bookId: readingRecords.bookId,
-    title: sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title}, ${books.title})`,
-    author: sql<string>`coalesce(${libraryBookVersions.author}, ${libraryBooks.author}, ${books.author})`,
-    coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey}, ${books.coverKey})`,
-    progress: sql<number>`coalesce(${bookStates.percent}, ${books.progress}, 0)`,
-    readStatus: sql<ReadingRecordBookItem['readStatus']>`coalesce(${bookStates.readStatus}, ${books.readStatus}, 'reading')`,
+    progress: sql<number>`coalesce(${bookStates.percent}, 0)`,
+    readStatus: sql<ReadingRecordBookItem['readStatus']>`coalesce(${bookStates.readStatus}, 'reading')`,
     durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
     days: sql<number>`count(distinct ${readingRecords.date})`,
   }).from(readingRecords)
-    .leftJoin(books, eq(readingRecords.bookId, books.id))
     .leftJoin(bookStates, and(eq(bookStates.bookVersionId, readingRecords.bookId), eq(bookStates.userId, userId)))
-    .leftJoin(libraryBookVersions, eq(libraryBookVersions.bookVersionId, readingRecords.bookId))
-    .leftJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
     .where(rangeConditions(userId, range, showHidden ? [] : hiddenBookVersionIds(db, userId)))
     .groupBy(readingRecords.bookId)
     .orderBy(desc(sql`sum(${readingRecords.durationSeconds})`))
     .all()
+  // Aggregate before resolving display data: a version can appear in many
+  // libraries, but each user's seconds must be counted exactly once.
+  return Promise.all(totals.map(async (row) => {
+    const privateCard = db.select({
+      title: sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title})`,
+      author: sql<string>`coalesce(${libraryBookVersions.author}, ${libraryBooks.author})`,
+      coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey})`,
+    }).from(libraryBookVersions)
+      .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
+      .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+      .where(and(eq(libraryBookVersions.bookVersionId, row.bookId), eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+    if (privateCard) return { ...row, ...privateCard }
+    try {
+      const book = await getBook(userId, row.bookId, { showHidden })
+      return { ...row, title: book.title, author: book.author, coverKey: book.coverKey }
+    } catch (error) {
+      if (!(error instanceof AppError) || !['BOOK_NOT_FOUND', 'BOOK_FILE_MISSING', 'FORBIDDEN'].includes(error.code)) throw error
+      return { ...row, title: 'Unavailable book', author: '', coverKey: null }
+    }
+  }))
 }
 
 export async function getBookRecords(userId: string, bookId: string, showHidden = false): Promise<ReadingRecordBookDetailRes> {

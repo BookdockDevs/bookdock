@@ -260,6 +260,20 @@
       "when": 1791500000000,
       "tag": "0037_shared_pin_follow",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791600000000,
+      "tag": "0038_replacement_sort_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791700000000,
+      "tag": "0039_retire_legacy_books",
+      "breakpoints": true
     }
   ]
 }
