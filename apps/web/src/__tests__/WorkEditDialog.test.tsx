@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 
 import i18n from '../i18n/i18n'
+import { notify } from '@/lib/notifications'
 import WorkEditDialog from '../features/library/components/WorkEditDialog'
 import { ApiError } from '../api/client'
 import type { CatalogBook, FileMetadataSourceRes } from '@bookdock/shared'
@@ -30,7 +31,7 @@ const HOOKS = vi.hoisted(() => ({
 }))
 
 vi.mock('../features/library/hooks', () => HOOKS)
-vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }))
+vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn(), info: vi.fn(), warning: vi.fn(), error: vi.fn() } }))
 
 // Mock URL.createObjectURL / revokeObjectURL for file upload preview
 global.URL.createObjectURL = vi.fn(() => 'blob:mock-cover-preview')
@@ -109,6 +110,29 @@ describe('WorkEditDialog', () => {
     expect(updateVersion).toHaveBeenCalledWith({
       libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { name: '精校版' },
     })
+  })
+
+  it('reports partially saved work and version changes without closing', async () => {
+    updateBook.mockResolvedValueOnce({ data: {} })
+    updateVersion.mockRejectedValueOnce(new Error('Offline'))
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: '作品信息' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '书名' }), { target: { value: 'Saved title' } })
+    fireEvent.click(screen.getByRole('button', { name: /版本 1/ }))
+    fireEvent.change(screen.getByPlaceholderText('版本 1'), { target: { value: 'Unsaved version' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(notify.warning).toHaveBeenCalledWith({ key: 'library.catalogSavePartial', params: { succeeded: 1, failed: 1 } }))
+    expect(notify.success).not.toHaveBeenCalled()
+    expect(screen.getByPlaceholderText('版本 1')).toHaveValue('Unsaved version')
+  })
+
+  it('reports no changes without sending a save request', async () => {
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(notify.info).toHaveBeenCalledWith({ key: 'library.catalogNoChanges' }))
+    expect(updateBook).not.toHaveBeenCalled()
+    expect(updateVersion).not.toHaveBeenCalled()
+    expect(notify.success).not.toHaveBeenCalled()
   })
 
   it('restores inheritance by following the work again', async () => {

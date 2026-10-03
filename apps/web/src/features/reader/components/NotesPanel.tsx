@@ -6,6 +6,7 @@ import SmartMenu from '@/components/ui/SmartMenu'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
+import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
@@ -176,12 +177,16 @@ function InlineEditor({
   initial,
   placeholder,
   allowEmpty = false,
+  saving,
+  error,
   onSave,
   onCancel,
 }: {
   initial: string
   placeholder: string
   allowEmpty?: boolean
+  saving: boolean
+  error: string | null
   onSave: (value: string) => void
   onCancel: () => void
 }) {
@@ -194,11 +199,11 @@ function InlineEditor({
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         markEscConsumed()
-        onCancel()
+        if (!saving) onCancel()
       }
     }
     function onPointerDown(e: globalThis.MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onCancel()
+      if (!saving && rootRef.current && !rootRef.current.contains(e.target as Node)) onCancel()
     }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('mousedown', onPointerDown)
@@ -207,9 +212,10 @@ function InlineEditor({
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('mousedown', onPointerDown)
     }
-  }, [onCancel])
+  }, [onCancel, saving])
 
   function submit() {
+    if (saving) return
     const value = draft.trim()
     if (value) onSave(value)
     else if (allowEmpty && initial.trim()) onSave('')
@@ -225,6 +231,7 @@ function InlineEditor({
         ref={textareaRef}
         rows={1}
         value={draft}
+        disabled={saving}
         onChange={(e) => {
           setDraft(e.target.value)
           autoGrow(e.target)
@@ -235,14 +242,16 @@ function InlineEditor({
             submit()
           } else if (e.key === 'Escape') {
             e.stopPropagation()
-            onCancel()
+            if (!saving) onCancel()
           }
         }}
         placeholder={placeholder}
         className="w-full resize-none bg-transparent text-sm leading-relaxed text-current outline-none placeholder:text-[var(--bd-read-sub)]"
       />
+      {error && <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
       <div className="mt-2 flex items-center justify-end gap-2">
         <button
+          disabled={saving}
           onClick={onCancel}
           className="rounded-md px-2 py-1 text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
         >
@@ -250,7 +259,7 @@ function InlineEditor({
         </button>
         <button
           onClick={submit}
-          disabled={!canSave}
+          disabled={saving || !canSave}
           className="rounded-md bg-blue-500 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-60"
         >
           {_('annotation.save')}
@@ -308,6 +317,8 @@ export const NotesPanel = memo(function NotesPanel({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: AnnotationRes } | null>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [editError, setEditError] = useState<string | null>(null)
+  const saveLock = useRef(false)
   const [internalSelectedIds, setInternalSelectedIds] = useState<Set<string>>(new Set())
   const selectedIds = externalSelectedIds ?? internalSelectedIds
   const [exportOpen, setExportOpen] = useState(false)
@@ -491,15 +502,29 @@ export const NotesPanel = memo(function NotesPanel({
   }
 
   function saveEdit(item: AnnotationRes, value: string) {
+    if (saveLock.current || updateAnnotation.isPending) return
+    saveLock.current = true
+    setEditError(null)
     updateAnnotation.mutate({
       id: item.id,
       body: item.type === 'bookmark' ? { text: value } : { note: value },
+    }, {
+      onSuccess: () => { saveLock.current = false; setEditingId(null) },
+      onError: (error) => { saveLock.current = false; setEditError(getUserErrorMessage(error, _, 'annotation.editSaveFailed')) },
     })
-    setEditingId(null)
+  }
+
+  function startEdit(id: string) {
+    if (saveLock.current || updateAnnotation.isPending) return
+    setEditError(null)
+    setEditingId(id)
   }
 
   function deleteItem(item: AnnotationRes) {
-    deleteAnnotation.mutate(item.id)
+    deleteAnnotation.mutate(item.id, {
+      onSuccess: () => notify.success({ key: item.type === 'bookmark' ? 'reader.bookmarkRemoved' : 'annotation.deleted' }),
+      onError: (error) => notify.error(getUserErrorNotification(error, 'annotation.deleteFailed')),
+    })
   }
 
   function shareItem(item: AnnotationRes) {
@@ -538,11 +563,13 @@ export const NotesPanel = memo(function NotesPanel({
         )}
         {editingId === a.id ? (
           <InlineEditor
+            saving={updateAnnotation.isPending}
+            error={editError}
             initial={a.type === 'bookmark' ? (hasCustomTitle ? a.text : '') : (a.note ?? '')}
             placeholder={a.type === 'bookmark' ? _('annotation.renamePlaceholder') : _('annotation.notePlaceholder')}
             allowEmpty={a.type === 'bookmark'}
             onSave={(value) => saveEdit(a, value)}
-            onCancel={() => setEditingId(null)}
+            onCancel={() => { setEditingId(null); setEditError(null) }}
           />
         ) : (
           <>
@@ -678,11 +705,11 @@ export const NotesPanel = memo(function NotesPanel({
                 <div className="flex-1" />
                 <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 max-md:opacity-100">
                   {a.type === 'bookmark' ? (
-                    <button onClick={() => setEditingId(a.id)} title={_('annotation.rename')} className={actionBtn}>
+                    <button onClick={() => startEdit(a.id)} title={_('annotation.rename')} className={actionBtn}>
                       <PencilIcon />
                     </button>
                   ) : kind === 'idea' ? (
-                    <button onClick={() => setEditingId(a.id)} title={_('annotation.editNote')} className={actionBtn}>
+                    <button onClick={() => startEdit(a.id)} title={_('annotation.editNote')} className={actionBtn}>
                       <PencilIcon />
                     </button>
                   ) : null}
@@ -856,7 +883,7 @@ export const NotesPanel = memo(function NotesPanel({
             <button
               type="button"
               onClick={() => {
-                setEditingId(contextMenu.item.id)
+                startEdit(contextMenu.item.id)
                 setContextMenu(null)
               }}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"
@@ -871,7 +898,7 @@ export const NotesPanel = memo(function NotesPanel({
             <button
               type="button"
               onClick={() => {
-                setEditingId(contextMenu.item.id)
+                startEdit(contextMenu.item.id)
                 setContextMenu(null)
               }}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"

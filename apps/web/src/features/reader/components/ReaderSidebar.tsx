@@ -235,6 +235,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
     <div
       ref={dockRef}
       data-testid="reader-tool-dock"
+      data-toast-obstacle={isTouch && mobileControlsVisible ? '' : undefined}
       className={cn(
         'flex shrink-0 border-[var(--bd-read-accent)]',
         isTouch

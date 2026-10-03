@@ -28,6 +28,7 @@ export default function ReaderFooterControls({
 }: ReaderFooterControlsProps) {
   return (
     <div
+      data-toast-obstacle={footerVisible ? 'contents' : undefined}
       className={cn(
         'absolute right-0 z-[60] flex h-24 w-max max-w-[calc(100vw-1rem)] items-end justify-end gap-2 pr-3 pb-3 transition-[bottom,translate] duration-300 pointer-events-none sm:pr-4',
         mobileDockVisible

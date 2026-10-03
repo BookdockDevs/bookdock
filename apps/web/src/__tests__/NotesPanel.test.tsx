@@ -340,7 +340,7 @@ describe('NotesPanel', () => {
     const textarea = screen.getByPlaceholderText('annotation.renamePlaceholder')
     fireEvent.change(textarea, { target: { value: '我的书签' } })
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
-    expect(updateMutate).toHaveBeenCalledWith({ id: 'b1', body: { text: '我的书签' } })
+    expect(updateMutate).toHaveBeenCalledWith({ id: 'b1', body: { text: '我的书签' } }, expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }))
   })
 
   it('renames a bookmark via the hover pencil and the save button', () => {
@@ -349,7 +349,7 @@ describe('NotesPanel', () => {
     const textarea = screen.getByPlaceholderText('annotation.renamePlaceholder')
     fireEvent.change(textarea, { target: { value: '新书签' } })
     fireEvent.click(screen.getByText('annotation.save'))
-    expect(updateMutate).toHaveBeenCalledWith({ id: 'b1', body: { text: '新书签' } })
+    expect(updateMutate).toHaveBeenCalledWith({ id: 'b1', body: { text: '新书签' } }, expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }))
   })
 
   it('edits an idea note inline via the hover pencil', () => {
@@ -358,7 +358,21 @@ describe('NotesPanel', () => {
     const textarea = screen.getByPlaceholderText('annotation.notePlaceholder')
     fireEvent.change(textarea, { target: { value: '新的想法' } })
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
-    expect(updateMutate).toHaveBeenCalledWith({ id: 'n1', body: { note: '新的想法' } })
+    expect(updateMutate).toHaveBeenCalledWith({ id: 'n1', body: { note: '新的想法' } }, expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }))
+  })
+
+  it('retains the draft on failed save and closes only after a successful retry', () => {
+    renderPanel()
+    fireEvent.click(screen.getByTitle('annotation.editNote'))
+    const textarea = screen.getByPlaceholderText('annotation.notePlaceholder')
+    fireEvent.change(textarea, { target: { value: 'Retry-safe draft' } })
+    fireEvent.click(screen.getByText('annotation.save'))
+    act(() => updateMutate.mock.calls.at(-1)![1].onError(new Error('Offline')))
+    expect(textarea).toHaveValue('Retry-safe draft')
+    expect(screen.getByRole('alert')).toHaveTextContent('annotation.editSaveFailed')
+    fireEvent.click(screen.getByText('annotation.save'))
+    act(() => updateMutate.mock.calls.at(-1)![1].onSuccess())
+    expect(screen.queryByPlaceholderText('annotation.notePlaceholder')).toBeNull()
   })
 
   it('cancels an inline edit on Escape without mutating', () => {
@@ -389,7 +403,7 @@ describe('NotesPanel', () => {
     expect(textarea).toHaveValue('自定义标题')
     fireEvent.change(textarea, { target: { value: '' } })
     fireEvent.click(screen.getByText('annotation.save'))
-    expect(updateMutate).toHaveBeenCalledWith({ id: 'bm-custom', body: { text: '' } })
+    expect(updateMutate).toHaveBeenCalledWith({ id: 'bm-custom', body: { text: '' } }, expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }))
   })
 
   it('cancels the inline editor on an outside click', () => {
@@ -405,7 +419,7 @@ describe('NotesPanel', () => {
     fireEvent.contextMenu(screen.getByText('直线划线甲'))
     expect(screen.queryByText('annotation.rename')).toBeNull()
     fireEvent.click(screen.getByText('reader.delete'))
-    expect(deleteMutate).toHaveBeenCalledWith('h1')
+    expect(deleteMutate).toHaveBeenCalledWith('h1', expect.objectContaining({ onError: expect.any(Function) }))
   })
 
   it('closes the context menu on a content-click relayed from the reading area', () => {

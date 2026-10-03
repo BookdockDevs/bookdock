@@ -10,6 +10,7 @@ All notable changes to Bookdock are documented here.
 - Rules become importable: text replacements and TOC presets support JSON import/export plus batch delete.
 - Book details become editable in place: fix one field at a time, restore values from the source file, and change the cover without opening the large edit dialog.
 - Dangerous actions ask for the name: deleting or transferring a library, and transferring the instance, now require typing the exact name.
+- Notifications reworked: queued past three, repeats merged, and toasts clear of bottom bars; dialog save errors now show inline.
 
 ### Added
 
@@ -26,6 +27,10 @@ All notable changes to Bookdock are documented here.
 - Replacement rules are now listed in the order they take effect, with position numbers; grouping is display-only.
 - Library deletion, library transfer, and instance transfer require typing the exact name, stay open and retryable on failure, and no longer confuse libraries when switching.
 - Read-status and shelf labels in book details: click to filter, right-click to change the value.
+- Toasts show at most three at once with the rest queuing; identical repeats update in place instead of stacking, and hover or keyboard focus pauses each independently.
+- Toasts float above bottom action bars (batch bar, uploads, dialog footers, reader controls) and clear when switching accounts.
+- Book-detail and append dialogs report save failures inline, flagging partial saves, instead of toasting.
+- Toast copy names the outcome: catalog visibility per work and version, trash-empty counts, already-in-sync pushes, and restored rule counts.
 
 ### Fixed
 
@@ -579,6 +584,7 @@ All notable changes to Bookdock are documented here.
 - 规则可导入导出：替换规则与目录预设支持 JSON 导入导出与批量删除。
 - 书籍详情可就地改：一次只改一个字段，可从来源恢复，封面不用进大编辑框。
 - 高危操作需输入名称：删库、转让书库、转让实例需输入准确名称。
+- 通知重做：超过三条排队，重复合并，不再遮挡底部操作栏；弹窗保存失败改为行内报错。
 
 #### 新增
 
@@ -595,6 +601,10 @@ All notable changes to Bookdock are documented here.
 - 替换规则按生效顺序展示并带序号，分组只做展示标签。
 - 删库、转让书库、转让实例需输入准确名称；失败留在框内可重试；中途切换书库不会串确认框。
 - 详情里的阅读状态与书架标签：左键筛选，右键改值。
+- 通知最多同时显示三条，多余排队；重复通知原位更新不再堆叠，悬停或键盘聚焦可暂停。
+- 通知浮于底部操作栏之上（批量操作栏、上传面板、弹窗底部、阅读器控件），切换账号清空通知。
+- 书籍详情与追写弹窗的保存失败改为行内报错，部分保存明确标出，不再弹通知。
+- 通知文案点名结果：目录显隐按作品/版本报告，清空回收站带数量，无变化的推送与实际补回的规则数如实报告。
 
 #### 修复
 

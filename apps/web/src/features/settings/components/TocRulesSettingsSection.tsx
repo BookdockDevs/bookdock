@@ -192,7 +192,14 @@ export default function TocRulesSettingsSection() {
             {sorting && <button
               type="button"
               disabled={busy || !listReady}
-              onClick={() => seedRules.mutate(undefined, { onSuccess: () => notify.success({ key: 'toast.tocRulesRestored' }), onError: showError })}
+              onClick={() => seedRules.mutate(undefined, {
+                onSuccess: (response) => {
+                  const added = response.data.filter((rule) => rule.builtIn && !serverRules.some((current) => current.id === rule.id)).length
+                  if (added === 0) notify.info({ key: 'toast.tocRulesAlreadyPresent' })
+                  else notify.success({ key: 'toast.tocRulesRestored', params: { count: added } })
+                },
+                onError: showError,
+              })}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
               aria-label={_('settings.tocRulesRestore')}
               title={_('settings.tocRulesRestore')}

@@ -165,7 +165,7 @@ export default function Modal({
         </div>
         <div className={`min-h-0 flex-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] overscroll-contain px-4 ${footer ? 'pb-4' : 'pb-[calc(1rem+env(safe-area-inset-bottom))]'} pt-4 sm:px-5`}>{children}</div>
         {footer && (
-          <div className={`flex shrink-0 items-center justify-between border-t px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:px-5 ${reader ? 'border-[var(--bd-read-accent)]' : 'border-stone-100 dark:border-stone-800'}`}>
+          <div data-toast-obstacle="" className={`flex shrink-0 items-center justify-between border-t px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:px-5 ${reader ? 'border-[var(--bd-read-accent)]' : 'border-stone-100 dark:border-stone-800'}`}>
             {footer}
           </div>
         )}

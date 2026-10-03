@@ -6,6 +6,7 @@ import type { BookListItem, LibraryListItem } from '@bookdock/shared'
 import i18n from '../i18n/i18n'
 import PublishBookDialog from '../features/library/components/PublishBookDialog'
 import { useAuthStore } from '../stores/auth.store'
+import { useToastStore } from '../stores/toast.store'
 
 const publishMutate = vi.fn()
 const pushMutate = vi.fn()
@@ -34,6 +35,7 @@ const libraries: LibraryListItem[] = [
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  useToastStore.getState().clearToasts()
   localStorage.clear()
   bookDetailData = undefined
   useAuthStore.setState({ user: { id: 'user-1', username: 'tester', role: 'owner' } })
@@ -41,6 +43,22 @@ beforeEach(async () => {
 })
 
 describe('PublishBookDialog', () => {
+  it.each([false, true])('distinguishes a push from already synchronized content (%s)', (alreadyUpToDate) => {
+    bookDetailData = { data: { publishedTo: [
+      { libraryId: 'shared-owner', libraryName: '馆主书库', libraryBookId: 'lb1', versionLinkId: 'lv1', versionName: '', inSync: false, cityMoved: false, sourceMoved: true },
+    ] } }
+    pushMutate.mockImplementation((_vars: unknown, callbacks: { onSuccess: (response: unknown) => void }) => {
+      callbacks.onSuccess({ data: { alreadyUpToDate, revisionNo: 2, diverged: false } })
+    })
+    render(<PublishBookDialog book={book} libraries={libraries} onClose={vi.fn()} onOpenLibrary={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '推送更新' }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '确认推送' }))
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ type: alreadyUpToDate ? 'info' : 'success', message: { key: alreadyUpToDate ? 'library.pushAlreadyUpToDate' : 'library.pushSuccess' } }),
+    ])
+    pushMutate.mockReset()
+  })
+
   it('only lists shared libraries the user can manage', () => {
     render(<PublishBookDialog book={book} libraries={libraries} onClose={vi.fn()} onOpenLibrary={vi.fn()} />)
 

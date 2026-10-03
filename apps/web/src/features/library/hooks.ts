@@ -798,7 +798,8 @@ export function useEmptyLibraryTrash() {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries'] })
-      notify.success({ key: 'library.trashEmptied', params: { count: result.data.count } })
+      if (result.data.count === 0) notify.info({ key: 'library.trashAlreadyEmpty' })
+      else notify.success({ key: 'library.trashEmptied', params: { count: result.data.count } })
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.emptyTrashFailed'))
@@ -1411,7 +1412,8 @@ export function useEmptyTrash() {
     mutationFn: () => apiDelete<{ data: { count: number } }>('/books/trash'),
     onSuccess: (result) => {
       for (const queryKey of BOOK_MEMBERSHIP_KEYS) queryClient.invalidateQueries({ queryKey })
-      notify.success({ key: 'library.trashEmptied', params: { count: result.data.count } })
+      if (result.data.count === 0) notify.info({ key: 'library.trashAlreadyEmpty' })
+      else notify.success({ key: 'library.trashEmptied', params: { count: result.data.count } })
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.emptyTrashFailed'))

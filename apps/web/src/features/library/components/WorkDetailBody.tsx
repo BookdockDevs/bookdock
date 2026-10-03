@@ -152,8 +152,8 @@ export default function WorkDetailBody({
         libraryBookId: work.id,
         patch: { hidden: !showing },
       }, {
-        onSuccess: () => notify.success(showing ? _('library.catalogShowWork') : _('library.catalogHideWork')),
-        onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogHideWork')),
+        onSuccess: () => notify.success({ key: showing ? 'library.catalogWorkShown' : 'library.catalogWorkHidden' }),
+        onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogVisibilityFailed')),
       })
       return
     }
@@ -171,8 +171,8 @@ export default function WorkDetailBody({
       versionLinkId: selected.id,
       patch: { status: publishing ? 'published' : 'unlisted' },
     }, {
-      onSuccess: () => notify.success(publishing ? _('library.catalogShowWork') : _('library.catalogHideWork')),
-      onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogHideWork')),
+      onSuccess: () => notify.success({ key: publishing ? 'library.catalogVersionShown' : 'library.catalogVersionHidden' }),
+      onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogVisibilityFailed')),
     })
   }
 
@@ -187,8 +187,8 @@ export default function WorkDetailBody({
       versionLinkId: selected.id,
       patch: { status: 'unlisted' },
     }, {
-      onSuccess: () => notify.success(_('library.catalogHideWork')),
-      onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogHideWork')),
+      onSuccess: () => notify.success({ key: 'library.catalogVersionHidden' }),
+      onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogVisibilityFailed')),
     })
   }
 

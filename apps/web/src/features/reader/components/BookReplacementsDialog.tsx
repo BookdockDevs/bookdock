@@ -104,7 +104,10 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
   function confirmDelete() {
     if (!pendingDelete) return
     deleteReplacement.mutate(pendingDelete.id, {
-      onSuccess: () => { if (form?.mode === 'edit' && form.rule.id === pendingDelete.id) setForm(null) },
+      onSuccess: () => {
+        if (form?.mode === 'edit' && form.rule.id === pendingDelete.id) setForm(null)
+        notify.success({ key: 'toast.rulesDeleted', params: { count: 1 } })
+      },
       onError: (err) => notify.error(getUserErrorNotification(err, 'reader.replacementDeleteFailed')),
     })
     setPendingDelete(null)

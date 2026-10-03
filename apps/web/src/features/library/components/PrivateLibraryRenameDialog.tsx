@@ -27,7 +27,7 @@ export default function PrivateLibraryRenameDialog({ library, onClose }: Private
     const trimmed = name.trim()
     if (!trimmed || trimmed === library.name || updateLibrary.isPending) return
     updateLibrary.mutate({ libraryId: library.id, patch: { name: trimmed } }, {
-      onSuccess: onClose,
+      onSuccess: () => { notify.success({ key: 'library.libraryRenamed' }); onClose() },
       onError: (error) => notify.error(getUserErrorNotification(error, 'library.renameLibraryFailed')),
     })
   }

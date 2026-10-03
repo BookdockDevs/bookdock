@@ -166,7 +166,7 @@ describe('CatalogListRow', () => {
     fireEvent.click(screen.getByText('置顶'))
     expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({
       libraryId: 'lib_city', libraryBookId: 'lb1', patch: { pinned: true },
-    }))
+    }), expect.objectContaining({ onError: expect.any(Function) }))
   })
 
   it('shows the same info line as a private row: category, tags, size, date', () => {
@@ -186,7 +186,7 @@ describe('CatalogListRow', () => {
     const unpinBtn = screen.getByLabelText('取消置顶')
     expect(unpinBtn).toBeInTheDocument()
     fireEvent.click(unpinBtn)
-    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
+    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }), expect.objectContaining({ onError: expect.any(Function) }))
   })
 
   it('renders read-only pin indicator in title for members without unpin affordance', () => {

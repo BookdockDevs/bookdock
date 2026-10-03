@@ -315,8 +315,9 @@ export default function Reader() {
         return { ...old, data: { ...old.data, readerSettings } }
       })
     },
-    onError: () => {
+    onError: (error) => {
       void queryClient.invalidateQueries({ queryKey: ['book', id] })
+      notify.error(getUserErrorNotification(error, 'reader.settingsSaveFailed'), { dedupeKey: `reader-settings:${id}` })
     },
   })
   const mutateViewSettingsRef = useRef(saveViewSettingsMutation.mutate)
@@ -355,8 +356,9 @@ export default function Reader() {
         return { ...old, data: { ...old.data, readerSettings } }
       })
     },
-    onError: () => {
+    onError: (error) => {
       void queryClient.invalidateQueries({ queryKey: ['book', id] })
+      notify.error(getUserErrorNotification(error, 'reader.settingsSaveFailed'), { dedupeKey: `reader-settings:${id}` })
     },
   })
   const setBoundPreset = useCallback((presetId: string | null) => {
@@ -1593,6 +1595,7 @@ export default function Reader() {
                 onPointerLeave={isTouch ? undefined : onFooterLeave}
               />
               <div
+                data-toast-obstacle={footerVisible && !isSelectingText ? '' : undefined}
                 className={cn('absolute inset-x-0 bottom-0', footerVisible && !isSelectingText ? 'pointer-events-auto' : 'pointer-events-none')}
                 onPointerEnter={isTouch || isSelectingText ? undefined : onFooterEnter}
                 onPointerLeave={isTouch ? undefined : onFooterLeave}

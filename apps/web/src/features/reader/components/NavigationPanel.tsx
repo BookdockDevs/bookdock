@@ -16,6 +16,8 @@ import { formatCardExcerpt } from '../lib/book-search'
 import { markEscConsumed } from '../lib/esc-consumed'
 import { useBookReadingRecords } from '@/api/hooks/reading-records'
 import { formatDuration } from '@/lib/format-duration'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import AnnotationExportDialog from './AnnotationExportDialog'
 import { NotesFilterPanel } from './NotesFilterPanel'
 import { NotesPanel } from './NotesPanel'
@@ -316,12 +318,24 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const [notesExportOpen, setNotesExportOpen] = useState(false)
   const [batchDeleteConfirmOpen, setBatchDeleteConfirmOpen] = useState(false)
   const batchDeleteMutation = useBatchDeleteAnnotations(bookId)
+  const batchDeleteLock = useRef(false)
 
   async function handleBatchDelete() {
-    if (selectedNoteIds.size === 0) return
-    await batchDeleteMutation.mutateAsync(Array.from(selectedNoteIds))
-    setSelectedNoteIds(new Set())
-    setBatchDeleteConfirmOpen(false)
+    if (selectedNoteIds.size === 0 || batchDeleteLock.current) return
+    batchDeleteLock.current = true
+    try {
+      const result = await batchDeleteMutation.mutateAsync(Array.from(selectedNoteIds))
+      setSelectedNoteIds(new Set(result.failedIds))
+      setBatchDeleteConfirmOpen(false)
+      if (result.failedIds.length) {
+        const showResult = result.succeeded > 0 ? notify.warning : notify.error
+        showResult({ key: 'annotation.batchDeletePartial', params: { succeeded: result.succeeded, failed: result.failedIds.length } })
+      } else notify.success({ key: 'annotation.batchDeleted', params: { count: result.succeeded } })
+    } catch (error) {
+      notify.error(getUserErrorNotification(error, 'annotation.deleteFailed'))
+    } finally {
+      batchDeleteLock.current = false
+    }
   }
 
   function enterNotesSelectionMode() {
@@ -1699,8 +1713,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           message={_('annotation.batchDeleteConfirm', { n: selectedNoteIds.size })}
           confirmLabel={_('annotation.batchDelete')}
           confirmVariant="danger"
+          confirmDisabled={batchDeleteMutation.isPending}
           onConfirm={handleBatchDelete}
-          onClose={() => setBatchDeleteConfirmOpen(false)}
+          onClose={() => { if (!batchDeleteLock.current) setBatchDeleteConfirmOpen(false) }}
         />
       )}
     </div>

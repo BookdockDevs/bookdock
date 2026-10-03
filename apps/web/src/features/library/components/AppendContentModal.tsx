@@ -44,6 +44,7 @@ export default function AppendContentModal({ target, onClose }: AppendContentMod
   const [selectedStartIndex, setSelectedStartIndex] = useState(0)
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => () => {
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current)
@@ -124,15 +125,17 @@ export default function AppendContentModal({ target, onClose }: AppendContentMod
   function handleFile(nextFile: File | undefined) {
     if (!nextFile) return
     if (!nextFile.name.toLowerCase().endsWith('.txt')) {
-      notify.error({ key: 'errors.unsupportedFormat' })
+      setSaveError('library.appendTxtOnly')
       return
     }
+    setSaveError(null)
     setFile(nextFile)
     setSource('file')
     schedulePreview({ file: nextFile }, 'file')
   }
 
   function handleTextChange(nextText: string) {
+    setSaveError(null)
     setText(nextText)
     setSource('text')
     if (!nextText.trim()) {
@@ -148,6 +151,7 @@ export default function AppendContentModal({ target, onClose }: AppendContentMod
   }
 
   function clearFile() {
+    setSaveError(null)
     fileCacheRef.current = null
     setFile(null)
     if (source === 'file') {
@@ -160,6 +164,7 @@ export default function AppendContentModal({ target, onClose }: AppendContentMod
   }
 
   function changeSource(nextSource: InputSource) {
+    setSaveError(null)
     setSource(nextSource)
     clearScheduledPreview()
     setPreviewError(null)
@@ -191,6 +196,7 @@ export default function AppendContentModal({ target, onClose }: AppendContentMod
 
   function handleStartChange(nextIndex: number) {
     if (!preview) return
+    setSaveError(null)
     const boundedIndex = Math.max(0, Math.min(nextIndex, preview.candidateChapters.length))
     setSelectedStartIndex(boundedIndex)
     if (source === 'file' && file && fileCacheRef.current?.file === file) {
@@ -229,6 +235,7 @@ export default function AppendContentModal({ target, onClose }: AppendContentMod
   function handleSave() {
     const input = inputFor()
     if (!input || appendMutation.isPending) return
+    setSaveError(null)
     clearScheduledPreview()
     const addedCount = appendStats?.addedChapterCount
     const startOffset = appendStats?.selectedStartOffset
@@ -241,7 +248,7 @@ export default function AppendContentModal({ target, onClose }: AppendContentMod
             : { key: 'library.appendSuccessNoChapter' })
           onClose()
         },
-        onError: (error) => notify.error(getUserErrorNotification(error, 'library.appendFailed')),
+        onError: (error) => setSaveError(getUserErrorNotification(error, 'library.appendFailed').key),
       },
     )
   }
@@ -463,7 +470,8 @@ export default function AppendContentModal({ target, onClose }: AppendContentMod
           </section>
         )}
 
-        <div className="flex items-center justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
+        {saveError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{_(saveError)}</p>}
+        <div data-toast-obstacle="" className="flex items-center justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
           <Button variant="secondary" onClick={onClose} disabled={isSaving}>{_('library.cancel')}</Button>
           <Button onClick={handleSave} disabled={!hasInput || isSaving}>
             {isSaving ? (

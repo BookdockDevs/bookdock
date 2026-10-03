@@ -3,6 +3,8 @@ import { useState } from 'react'
 import type { CatalogBook, GridCardField } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 
 import { catalogWorkRow } from '../book-row'
 import { getHiddenCause } from '../hidden-status'
@@ -74,7 +76,7 @@ export default function CatalogCard({
                     libraryId: book.libraryId,
                     libraryBookId: book.id,
                     patch: { pinned: false },
-                  })
+                  }, { onError: (error) => notify.error(getUserErrorNotification(error, 'library.catalogPinFailed')) })
                 }}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
                 aria-label={_('library.unpin')}

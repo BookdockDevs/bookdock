@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '../i18n/i18n'
 import AppendContentModal from '../features/library/components/AppendContentModal'
+import { useToastStore } from '../stores/toast.store'
 
 const mocks = vi.hoisted(() => ({
   previewMutate: vi.fn(),
@@ -39,12 +40,14 @@ describe('AppendContentModal', () => {
   beforeEach(async () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    useToastStore.getState().clearToasts()
     mocks.previewMutate.mockImplementation((_input, options: { onSuccess: (value: unknown) => void }) => options.onSuccess({ data: preview }))
     mocks.appendMutate.mockImplementation((_input, options: { onSuccess: () => void }) => options.onSuccess())
     await i18n.changeLanguage('zh-CN')
   })
 
   afterEach(() => {
+    useToastStore.getState().clearToasts()
     vi.useRealTimers()
   })
 
@@ -95,6 +98,31 @@ describe('AppendContentModal', () => {
 
     expect(mocks.previewMutate).toHaveBeenCalledWith({ target: { bookId: 'book-2' }, file }, expect.anything())
     expect(screen.getByText('update.txt')).toBeInTheDocument()
+  })
+
+  it('keeps format errors in the form instead of a global notification', () => {
+    render(<AppendContentModal target={{ bookId: 'book-2' }} onClose={vi.fn()} />, { wrapper })
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(['invalid'], 'update.epub')] } })
+    expect(screen.getByRole('alert')).toHaveTextContent('追加内容仅支持 TXT 文件，请重新选择')
+    expect(mocks.previewMutate).not.toHaveBeenCalled()
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('retains the draft and a readable inline failure until retry succeeds', async () => {
+    const onClose = vi.fn()
+    mocks.appendMutate.mockImplementationOnce((_input, callbacks: { onError: (error: unknown) => void }) => callbacks.onError(new TypeError('Network failed')))
+    render(<AppendContentModal target={{ bookId: 'book-1' }} onClose={onClose} />, { wrapper })
+    fireEvent.click(screen.getByRole('tab', { name: '粘贴文本' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '粘贴文本' }), { target: { value: '第二章 续篇\n\n正文' } })
+    await act(async () => { vi.advanceTimersByTime(350) })
+    fireEvent.click(screen.getByRole('button', { name: '追加并保存' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(String(i18n.t('errors.network')))
+    expect(screen.getByRole('textbox', { name: '粘贴文本' })).toHaveValue('第二章 续篇\n\n正文')
+    expect(onClose).not.toHaveBeenCalled()
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: '追加并保存' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(onClose).toHaveBeenCalledOnce()
   })
 
   it('uses the predicted start by default and lets the user choose another chapter', async () => {

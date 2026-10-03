@@ -286,7 +286,7 @@ export default function UploadSheet({
       </div>
 
       {items.length > 0 && (
-        <ul className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">
+        <ul data-toast-obstacle="" className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">
           {items.map((item) => {
             const key = statusLabel(item)
             const note = item.messageKey ? _(item.messageKey) : null
@@ -358,7 +358,7 @@ export default function UploadSheet({
           the close affordance is the header X, and adding files is the drop
           zone above, which is the bigger and more obvious of the two. */}
       {items.length > 0 && (
-        <div className="mt-6 flex justify-end gap-3">
+        <div data-toast-obstacle="" className="mt-6 flex justify-end gap-3">
           {hasPending ? (
             <Button onClick={() => startUpload(assignment)}>{_('library.upload')}</Button>
           ) : isUploading ? (

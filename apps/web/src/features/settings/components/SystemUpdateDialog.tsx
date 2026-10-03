@@ -6,6 +6,7 @@ import type { UpdatePhase, UpdateStatusRes } from '@bookdock/shared'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getErrorKeyByCode } from '@/lib/error-message'
 import { formatDate } from '@/lib/format-date'
+import { notify } from '@/lib/notifications'
 
 export interface SystemUpdateDialogProps {
   isOpen: boolean
@@ -170,7 +171,7 @@ export default function SystemUpdateDialog({
       setCopiedDiagnostic(true)
       setTimeout(() => setCopiedDiagnostic(false), 2000)
     } catch {
-      // Fallback
+      notify.error({ key: 'settings.diagnosticCopyFailed' })
     }
   }
 

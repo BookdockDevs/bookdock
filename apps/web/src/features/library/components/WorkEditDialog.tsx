@@ -558,10 +558,18 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
       }
 
       if (requests.length === 0) {
+        notify.info({ key: 'library.catalogNoChanges' })
         onClose()
         return
       }
-      await Promise.all(requests)
+      const results = await Promise.allSettled(requests)
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      if (failures.length) {
+        const succeeded = results.length - failures.length
+        if (succeeded > 0) notify.warning({ key: 'library.catalogSavePartial', params: { succeeded, failed: failures.length } })
+        else notify.error(getUserErrorNotification(failures[0].reason, 'library.catalogWorkSaveFailed'))
+        return
+      }
       notify.success(_('library.catalogWorkSaved'))
       onClose()
     } catch (err) {

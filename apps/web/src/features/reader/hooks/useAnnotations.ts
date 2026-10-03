@@ -146,7 +146,9 @@ export function useBatchDeleteAnnotations(bookId: string) {
   const key = ['annotations', bookId] as const
   return useMutation({
     mutationFn: async (ids: string[]) => {
-      await Promise.all(ids.map((id) => apiDelete(`/annotations/${id}`)))
+      const results = await Promise.allSettled(ids.map((id) => apiDelete(`/annotations/${id}`)))
+      const failedIds = ids.filter((_id, index) => results[index].status === 'rejected')
+      return { succeeded: ids.length - failedIds.length, failedIds }
     },
     onMutate: async (ids) => {
       await queryClient.cancelQueries({ queryKey: key })
@@ -159,6 +161,15 @@ export function useBatchDeleteAnnotations(bookId: string) {
     },
     onError: (_err, _ids, context) => {
       if (context?.previous) queryClient.setQueryData(key, context.previous)
+    },
+    onSuccess: (result, _ids, context) => {
+      if (context?.previous && result.failedIds.length) {
+        const failed = new Set(result.failedIds)
+        const restored = context.previous.data.filter((item) => failed.has(item.id))
+        queryClient.setQueryData<AnnotationsCache>(key, (old) => ({
+          data: [...(old?.data ?? []).filter((item) => !failed.has(item.id)), ...restored],
+        }))
+      }
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: key })

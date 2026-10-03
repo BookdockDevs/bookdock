@@ -232,6 +232,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
   return (
     <>
       <div
+        data-toast-obstacle=""
         className={cn(
           'pointer-events-none fixed inset-x-0 z-40 flex justify-center transition-[bottom] duration-200 select-none md:left-60',
           elevated

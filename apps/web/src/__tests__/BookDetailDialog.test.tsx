@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
 import type { BookListItem, CatalogBook, Category, Library } from '@bookdock/shared'
@@ -12,6 +12,7 @@ import BookDetailDialog from '../features/library/components/BookDetailDialog'
 import DownloadDialogHost from '../features/library/components/DownloadDialogHost'
 import { useDownloadStore } from '../stores/download.store'
 import { useAuthStore } from '../stores/auth.store'
+import { useToastStore } from '../stores/toast.store'
 import { formatDate } from '../lib/utils'
 
 const apiPatch = vi.fn()
@@ -137,6 +138,7 @@ function renderDialog() {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  useToastStore.getState().clearToasts()
   useDownloadStore.getState().close()
   useAuthStore.setState({ user: { id: "test-user", username: "owner", role: "owner" } })
   localStorage.removeItem("bd-download-choice:test-user")
@@ -162,6 +164,37 @@ beforeEach(async () => {
 })
 
 describe('BookDetailDialog shelf chips', () => {
+  it('waits for every save request and retains a partial result in the form for retry', async () => {
+    let finishShelf!: () => void
+    apiPut.mockImplementationOnce(() => new Promise((resolve) => { finishShelf = () => resolve({}) }))
+      .mockRejectedValueOnce(new TypeError('Network failed'))
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('button', { name: '保存...' })).toBeDisabled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await act(async () => { finishShelf() })
+    expect(screen.getByRole('alert')).toHaveTextContent('已保存 2 项，1 项未完成')
+    expect(screen.getByDisplayValue('Test Book')).toBeInTheDocument()
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    expect(useToastStore.getState().toasts).toHaveLength(1)
+  })
+
+  it('keeps a complete save failure as an inline error without reporting partial success', async () => {
+    apiPatch.mockRejectedValueOnce(new TypeError('Network failed'))
+    apiPut.mockRejectedValueOnce(new TypeError('Network failed')).mockRejectedValueOnce(new TypeError('Network failed'))
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(String(i18n.t('errors.network'))))
+    expect(screen.getByRole('alert')).not.toHaveTextContent('已保存')
+    expect(screen.getByDisplayValue('Test Book')).toBeInTheDocument()
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+  })
+
   it('keeps personal status, source, shelf and tags together without update or collection notices', () => {
     membershipShelf = 'shelf-1'
     membershipTags = ['tag-1']

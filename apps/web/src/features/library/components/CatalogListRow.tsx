@@ -5,6 +5,8 @@ import { Link } from '@tanstack/react-router'
 import type { CatalogBook } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { formatAuthorList } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover } from '../book-row'
@@ -94,7 +96,7 @@ export default function CatalogListRow({
                     libraryId: work.libraryId,
                     libraryBookId: work.id,
                     patch: { pinned: false },
-                  })
+                  }, { onError: (error) => notify.error(getUserErrorNotification(error, 'library.catalogPinFailed')) })
                 }}
                 className="shrink-0 rounded-md p-1 text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 md:opacity-0 md:group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-stone-700 dark:hover:text-stone-200"
                 aria-label={_('library.unpin')}

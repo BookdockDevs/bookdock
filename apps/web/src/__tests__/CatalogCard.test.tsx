@@ -240,7 +240,7 @@ describe('CatalogCard', () => {
     fireEvent.click(screen.getByText('置顶'))
     expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({
       libraryId: 'lib_city', libraryBookId: 'lb1', patch: { pinned: true },
-    }))
+    }), expect.objectContaining({ onError: expect.any(Function) }))
     // Deleting the last version removes the whole work: confirmed first.
     openMenu(container)
     fireEvent.click(screen.getByText('删除'))
@@ -274,7 +274,7 @@ describe('CatalogCard', () => {
     const { container, updateBook } = renderCard(work({ pinnedAt: 99 }), { canManage: true })
     openMenu(container)
     fireEvent.click(screen.getByText('取消置顶'))
-    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
+    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }), expect.objectContaining({ onError: expect.any(Function) }))
   })
 
   it('offers no read-status item, because a work has none', () => {
@@ -290,7 +290,7 @@ describe('CatalogCard', () => {
     const unpinBtn = screen.getByLabelText('取消置顶')
     expect(unpinBtn).toBeInTheDocument()
     fireEvent.click(unpinBtn)
-    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }))
+    expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { pinned: false } }), expect.objectContaining({ onError: expect.any(Function) }))
   })
 
   it('renders read-only pin indicator on the card for members without unpin affordance', () => {

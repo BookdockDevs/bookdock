@@ -3,8 +3,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import type { FontListItem } from '@bookdock/shared'
 
-import { useFonts, useDeleteFont, useUpdateFontScope } from '@/api/hooks/useFonts'
+import { useFonts, useDeleteFont, useUpdateFontScope, useUploadFont } from '@/api/hooks/useFonts'
 import i18n from '../i18n/i18n'
+import { notify } from '@/lib/notifications'
 import FontsSettingsSection from '../features/settings/components/FontsSettingsSection'
 import { useAuthStore } from '../stores/auth.store'
 import { useUiStore } from '../stores/ui.store'
@@ -15,6 +16,8 @@ vi.mock('@/api/hooks/useFonts', () => ({
   useDeleteFont: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useUpdateFontScope: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }))
+
+vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn(), info: vi.fn(), warning: vi.fn(), error: vi.fn() } }))
 
 const fonts: FontListItem[] = [
   { id: 'f1', family: '我的手写体', fileName: 'hand.ttf', format: 'ttf', size: 2 * 1024 * 1024, scope: 'user', mine: true, createdAt: 0 },
@@ -27,6 +30,7 @@ const mockFonts = (list: FontListItem[]) => {
 
 describe('FontsSettingsSection', () => {
   beforeEach(async () => {
+    vi.clearAllMocks()
     await i18n.changeLanguage('zh-CN')
     useAuthStore.setState({ user: null })
     useUiStore.setState({ fontPreferences: {}, fontOrder: [], fontFamily: 'serif' })
@@ -172,4 +176,24 @@ describe('FontsSettingsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: '上传字体' }))
     expect(clickSpy).toHaveBeenCalled()
   })
+  it('summarizes a mixed font upload once after all files finish', async () => {
+    const upload = vi.fn().mockResolvedValueOnce({ data: { id: 'new-font' } }).mockRejectedValueOnce(new Error('Invalid font'))
+    vi.mocked(useUploadFont).mockReturnValue({ mutateAsync: upload, isPending: false } as unknown as ReturnType<typeof useUploadFont>)
+    render(<FontsSettingsSection />)
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(['a'], 'a.ttf'), new File(['b'], 'b.ttf')] } })
+    await waitFor(() => expect(notify.warning).toHaveBeenCalledWith({ key: 'settings.fontUploadPartial', params: { succeeded: 1, duplicated: 0, failed: 1 } }))
+    expect(upload).toHaveBeenCalledTimes(2)
+    expect(notify.error).not.toHaveBeenCalled()
+    expect(notify.success).not.toHaveBeenCalled()
+  })
+
+  it('treats repeated uploads as existing fonts rather than newly added fonts', async () => {
+    const upload = vi.fn().mockResolvedValue({ data: fonts[0] })
+    vi.mocked(useUploadFont).mockReturnValue({ mutateAsync: upload, isPending: false } as unknown as ReturnType<typeof useUploadFont>)
+    render(<FontsSettingsSection />)
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(['a'], 'a.ttf'), new File(['a'], 'a.ttf')] } })
+    await waitFor(() => expect(notify.info).toHaveBeenCalledWith({ key: 'settings.fontUploadSummary', params: { succeeded: 0, duplicated: 2 } }))
+    expect(notify.success).not.toHaveBeenCalled()
+  })
+
 })

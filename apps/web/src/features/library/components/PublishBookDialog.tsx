@@ -538,10 +538,10 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
               libraryBookId: target.libraryBookId,
               versionLinkId: target.versionLinkId,
             }, {
-              // One outcome, one word: the server's alreadyUpToDate means the
-              // bytes matched, which is exactly what a push achieves, so it is
-              // not a separate case to report.
-              onSuccess: () => notify.success(_('library.pushSuccess')),
+              onSuccess: (response) => {
+                if (response.data.alreadyUpToDate) notify.info({ key: 'library.pushAlreadyUpToDate' })
+                else notify.success({ key: 'library.pushSuccess' })
+              },
               onError: (err) => notify.error(getUserErrorNotification(err, 'library.pushFailed')),
             })
           }}

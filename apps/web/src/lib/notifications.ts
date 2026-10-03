@@ -8,7 +8,13 @@ import {
 type NotificationInput = string | ToastMessage
 
 function show(message: NotificationInput, type: Toast['type'], options?: AddToastOptions): string {
-  return useToastStore.getState().addToast(message, type, options)
+  const identity = typeof message === 'string'
+    ? message
+    : [message.key, Object.entries(message.params ?? {}).sort(([a], [b]) => a.localeCompare(b))]
+  const dedupeKey = options?.dedupeKey ?? (!options?.action && options?.duration !== 'persistent'
+    ? `notification:${JSON.stringify([type, identity, options?.title ?? null])}`
+    : undefined)
+  return useToastStore.getState().addToast(message, type, { ...options, dedupeKey })
 }
 
 export const notify = {

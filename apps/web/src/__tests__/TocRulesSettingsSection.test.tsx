@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import type { TocRuleRes } from '@bookdock/shared'
 
 import TocRulesSettingsSection from '../features/settings/components/TocRulesSettingsSection'
+import { useToastStore } from '../stores/toast.store'
 
 const mocks = vi.hoisted(() => ({
   query: { data: { data: [] as TocRuleRes[] } },
@@ -51,6 +52,7 @@ async function readExport(blob: Blob) {
 }
 
 beforeEach(() => {
+  useToastStore.getState().clearToasts()
   mocks.query = { data: { data: [...initialRules] } }
   mocks.deleteRules.mockReset()
   mocks.reorder.mockReset()
@@ -58,6 +60,19 @@ beforeEach(() => {
 })
 
 describe('TocRulesSettingsSection', () => {
+  it.each([false, true])('distinguishes restored presets from no change (%s)', (added) => {
+    render(<TocRulesSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: 'settings.editModeEnter' }))
+    fireEvent.click(screen.getByRole('button', { name: 'settings.tocRulesRestore' }))
+    const restored = added ? [...initialRules, { ...initialRules[0]!, id: 'new-preset' }] : initialRules
+    act(() => mocks.restore.mock.calls[0]![1].onSuccess({ data: restored }))
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ type: added ? 'success' : 'info', message: added
+        ? { key: 'toast.tocRulesRestored', params: { count: 1 } }
+        : { key: 'toast.tocRulesAlreadyPresent' } }),
+    ])
+  })
+
   it('keeps normal rows quiet and exposes selection and restoration only in edit mode', () => {
     render(<TocRulesSettingsSection />)
     expect(screen.getByText('· 2')).toBeInTheDocument()

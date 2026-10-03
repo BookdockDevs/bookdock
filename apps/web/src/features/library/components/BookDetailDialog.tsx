@@ -11,6 +11,7 @@ import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import type { ToastMessage } from '@/stores/toast.store'
 
 import { useBook, useBookMembership, useBookMetadataSource, useShelves, useTags, useVersionTocState } from '../hooks'
 
@@ -56,6 +57,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
 
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<ToastMessage | null>(null)
   const [confirmReset, setConfirmReset] = useState(false)
   const [draft, setDraft] = useState<MetaDraft | null>(null)
   const [draftEpoch, setDraftEpoch] = useState(0)
@@ -123,6 +125,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
   }, [pendingCoverFile])
 
   const discardEdit = useCallback(() => {
+    setSaveError(null)
     setEditing(false)
     setConfirmReset(false)
     setDraft(null)
@@ -165,6 +168,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
 
   function enterEdit() {
     if (!book) return
+    setSaveError(null)
     setDraft({
       ...draftFrom(displayBook, bookmeta),
       coverPaletteId: detail?.meta?.coverPaletteId ?? displayBook.coverPaletteId ?? null,
@@ -201,6 +205,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
     if (!book || !draft) return
     const title = draft.title.trim()
     if (!title) return
+    setSaveError(null)
     setSaving(true)
     try {
       const authors = parseAuthorList(draft.authors)
@@ -223,15 +228,23 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
       } else if (pendingCoverFile) {
         requests.push(apiUpload(`/books/${book.id}/cover`, pendingCoverFile, 'PUT'))
       }
-      await Promise.all(requests)
+      const results = await Promise.allSettled(requests)
       queryClient.invalidateQueries({ queryKey: ['books'] })
       queryClient.invalidateQueries({ queryKey: ['book', book.id] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
-      notify.success({ key: 'toast.bookUpdated' })
-      discardEdit()
+      const failed = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      if (failed.length > 0) {
+        const reason = getUserErrorNotification(failed[0]!.reason, 'toast.updateBookFailed')
+        setSaveError(failed.length < results.length
+          ? { key: 'library.bookUpdatePartial', params: { succeeded: results.length - failed.length, failed: failed.length, reason: _(reason.key) } }
+          : reason)
+      } else {
+        notify.success({ key: 'toast.bookUpdated' })
+        discardEdit()
+      }
     } catch (err) {
-      notify.error(getUserErrorNotification(err, 'toast.updateBookFailed'))
+      setSaveError(getUserErrorNotification(err, 'toast.updateBookFailed'))
     } finally {
       setSaving(false)
     }
@@ -434,6 +447,9 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
       >
           {editing && draft ? (
             <div key={draftEpoch}>
+              {saveError && <p role="alert" className={`mb-4 text-sm ${saveError.key === 'library.bookUpdatePartial' ? 'text-amber-700 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
+                {_(saveError.key, saveError.params)}
+              </p>}
               <BookMetaForm
                 draft={draft}
                 onChange={setDraft}

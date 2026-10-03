@@ -8,6 +8,7 @@ import { useAuthStore } from '../stores/auth.store'
 import { useUiStore } from '../stores/ui.store'
 
 import { customThemesFromSync } from '../lib/reading-theme'
+import { useToastStore } from '../stores/toast.store'
 
 const theme = { id: 't1', name: 'Theme', colors: { bg: '#fff', fg: '#000', primary: '#00f' } }
 
@@ -115,6 +116,32 @@ describe('SettingsSync persistence', () => {
     expect(put).toBeDefined()
     const body = JSON.parse(String(put?.[1]?.body)) as { fontOrder: string[] }
     expect(body.fontOrder).toEqual(['noto-sans-sc', 'serif', 'custom-1'])
+  })
+
+  it('retains pending settings and merges repeated sync failures into one notice', async () => {
+    useToastStore.getState().clearToasts()
+    mountSync()
+    await vi.runAllTimersAsync()
+    vi.mocked(fetch).mockRejectedValue(new Error('Offline'))
+    useUiStore.getState().setFontOrder(['serif'])
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(localStorage.getItem('bd-settings-pending')).toContain('serif')
+    const first = useToastStore.getState().toasts.find((toast) => toast.dedupeKey === 'settings-sync')
+    expect(first?.type).toBe('warning')
+    useUiStore.getState().setFontOrder(['serif', 'sans-serif'])
+    await vi.advanceTimersByTimeAsync(1100)
+    const notices = useToastStore.getState().toasts.filter((toast) => toast.dedupeKey === 'settings-sync')
+    expect(notices).toHaveLength(1)
+    expect(notices[0].id).toBe(first?.id)
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ data: {} })))
+    useUiStore.getState().setFontOrder(['sans-serif'])
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(localStorage.getItem('bd-settings-pending')).toBeNull()
+    const recovered = useToastStore.getState().toasts.find((toast) => toast.dedupeKey === 'settings-sync')
+    expect(recovered?.id).toBe(first?.id)
+    expect(recovered?.type).toBe('info')
+    expect(recovered?.message).toEqual({ key: 'settings.syncRestored' })
+    useToastStore.getState().clearToasts()
   })
 
   it('keeps a locally pending change ahead of stale settings on reload', async () => {

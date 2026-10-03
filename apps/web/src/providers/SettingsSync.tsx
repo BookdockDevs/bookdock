@@ -5,6 +5,7 @@ import type { SettingsRes } from '@bookdock/shared'
 
 import { apiPut } from '@/api/client'
 import { customThemesFromSync } from '@/lib/reading-theme'
+import { notify } from '@/lib/notifications'
 import { fetchSettings, seedSettingsQuery } from '@/lib/settings-cache'
 import { useAuthStore } from '@/stores/auth.store'
 import { PENDING_SETTINGS_STORAGE_KEY, useUiStore } from '@/stores/ui.store'
@@ -118,8 +119,22 @@ function applySettings(settings: Partial<SettingsRes>) {
 
 export function SettingsSync() {
   const queryClient = useQueryClient()
+  const syncFailedRef = useRef(false)
   const { mutate: saveSettings } = useMutation({
     mutationFn: (settings: SettingsRes) => apiPut('/settings', settings),
+    onError: () => {
+      syncFailedRef.current = true
+      notify.warning({ key: 'settings.syncFailed' }, { dedupeKey: 'settings-sync' })
+    },
+    onSuccess: (_result, settings) => {
+      if (syncFailedRef.current) {
+        const currentUserId = useAuthStore.getState().user?.id
+        const pending = currentUserId ? getPendingSettings(currentUserId) : null
+        if (pending && JSON.stringify(pending) !== JSON.stringify(settings)) return
+        syncFailedRef.current = false
+        notify.info({ key: 'settings.syncRestored' }, { dedupeKey: 'settings-sync' })
+      }
+    },
   })
   const mutateRef = useRef(saveSettings)
   const settingsUserRef = useRef<string | null>(null)
@@ -137,6 +152,7 @@ export function SettingsSync() {
 
   useEffect(() => {
     if (settingsUserRef.current !== userId) {
+      syncFailedRef.current = false
       settingsUserRef.current = userId
       suppressSyncRef.current = true
       useUiStore.setState({ fontPreferences: {}, fontOrder: [] })

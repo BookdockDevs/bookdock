@@ -61,14 +61,30 @@ export default function FontsSettingsSection() {
   }, [])
 
   async function onFilesSelected(fileList: FileList | null) {
-    if (!fileList?.length) return
+    if (!fileList?.length || fontsQuery.isPending || fontsQuery.isError) return
+    const knownIds = new Set(uploadedFonts.map((font) => font.id))
+    let succeeded = 0
+    let duplicated = 0
+    const failures: unknown[] = []
     for (const file of Array.from(fileList)) {
       try {
-        await uploadFont.mutateAsync(file)
+        const result = await uploadFont.mutateAsync(file)
+        if (knownIds.has(result.data.id)) duplicated++
+        else {
+          knownIds.add(result.data.id)
+          succeeded++
+        }
       } catch (error) {
-        showError(error)
+        failures.push(error)
       }
     }
+    if (failures.length) {
+      const showResult = succeeded + duplicated > 0 ? notify.warning : notify.error
+      showResult({ key: 'settings.fontUploadPartial', params: { succeeded, duplicated, failed: failures.length } })
+    } else if (duplicated > 0) {
+      const showResult = succeeded > 0 ? notify.success : notify.info
+      showResult({ key: 'settings.fontUploadSummary', params: { succeeded, duplicated } })
+    } else notify.success({ key: 'settings.fontUploaded', params: { count: succeeded } })
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -144,7 +160,7 @@ export default function FontsSettingsSection() {
                 />
                 <button
                   type="button"
-                  disabled={sorting || uploadFont.isPending}
+                  disabled={sorting || uploadFont.isPending || fontsQuery.isPending || fontsQuery.isError}
                   onClick={() => fileInputRef.current?.click()}
                   aria-label={_('settings.fontsUpload')}
                   title={_('settings.fontsUpload')}

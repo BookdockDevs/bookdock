@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import type { CatalogBook, CatalogVersion } from '@bookdock/shared'
 
@@ -43,6 +43,8 @@ function labelOf(versions: CatalogVersion[], version: CatalogVersion, fallback: 
 export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, onClose, onDeleted, deletableIds }: DeleteVersionsDialogProps) {
   const _ = useTranslation()
   const deleteVersion = useDeleteCatalogVersion()
+  const [deleting, setDeleting] = useState(false)
+  const deleteLock = useRef(false)
   const deletable = (id: string) => !deletableIds || deletableIds.has(id)
   const versions = work.versions
   const removableVersions = versions.filter((v) => deletable(v.id))
@@ -65,14 +67,27 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
   }
 
   async function runDelete() {
+    if (deleteLock.current || checkedVersions.length === 0) return
+    deleteLock.current = true
+    setDeleting(true)
+    const deletedIds = new Set<string>()
     try {
       for (const version of checkedVersions) {
         await deleteVersion.mutateAsync({ libraryId, libraryBookId: work.id, versionLinkId: version.id })
+        deletedIds.add(version.id)
       }
+      notify.success(removesWork
+        ? { key: trashEnabled ? 'library.catalogWorkTrashed' : 'library.catalogWorkDeleted', params: { title: work.title } }
+        : { key: 'library.catalogVersionsDeleted', params: { count: deletedIds.size } })
       onDeleted(checkedVersions.length === versions.length)
     } catch (err) {
-      notify.error(getUserErrorNotification(err, 'library.catalogDeleteVersionFailed'))
-      onClose()
+      setChecked((current) => current.filter((id) => !deletedIds.has(id)))
+      if (deletedIds.size) {
+        notify.warning({ key: 'library.catalogVersionsDeletePartial', params: { succeeded: deletedIds.size, failed: checkedVersions.length - deletedIds.size } })
+      } else notify.error(getUserErrorNotification(err, 'library.catalogDeleteVersionFailed'))
+    } finally {
+      deleteLock.current = false
+      setDeleting(false)
     }
   }
 
@@ -111,6 +126,7 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
                         <input
                           type="checkbox"
                           checked={isChecked}
+                          disabled={deleting}
                           onChange={() => toggle(version.id)}
                           aria-label={versionTabLabel(version.name, fallback(versionOrdinal(versions, version.id)))}
                           className="h-4 w-4 shrink-0 rounded accent-stone-900 dark:accent-stone-100"
@@ -140,8 +156,8 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
         </div>
       )}
       confirmLabel={_('library.delete')}
-      confirmDisabled={multi && checkedVersions.length === 0}
-      onClose={onClose}
+      confirmDisabled={deleting || checkedVersions.length === 0}
+      onClose={() => { if (!deleting) onClose() }}
       onConfirm={() => void runDelete()}
     />
   )
