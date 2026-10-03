@@ -76,7 +76,7 @@ export default function AccessTokenPermissionSelector({ value, onChange }: Acces
               className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-2.5 transition-all select-none ${
                 isChecked
                   ? 'border-stone-400/80 bg-white shadow-2xs dark:border-stone-600 dark:bg-stone-800'
-                  : 'border-stone-200/70 bg-stone-50/40 hover:bg-stone-100/60 dark:border-stone-800/80 dark:bg-stone-850/30 dark:hover:bg-stone-800/50'
+                  : 'border-stone-200/70 bg-stone-50/40 hover:bg-stone-100/60 dark:border-stone-800/80 dark:bg-stone-800/30 dark:hover:bg-stone-800/50'
               }`}
             >
               <input

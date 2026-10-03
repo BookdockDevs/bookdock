@@ -24,6 +24,7 @@ import {
   useUploadCatalogBookCover,
   useUploadCatalogVersionCover,
 } from '../hooks'
+import { categoryChoices } from '../taxonomy'
 import BookCover from './BookCover'
 import { autoGrow, copyText, middleTruncate, parseAuthorList } from './book-detail/types'
 import MetadataFieldAction from './book-detail/MetadataFieldAction'
@@ -802,7 +803,7 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
                   selected={categoryId === null}
                   onClick={() => setCategoryId(null)}
                 />
-                {(categoriesData?.data ?? []).map((c) => (
+                {categoryChoices(categoriesData?.data ?? []).map((c) => (
                   <Chip
                     key={c.id}
                     label={c.name}

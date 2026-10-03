@@ -173,7 +173,7 @@ export default function LegadoSettingsSection() {
                     disabled={rotateMutation.isPending || isLoadingKey}
                     aria-label={_('settings.legadoRotateKey')}
                     title={_('settings.legadoRotateKey')}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-stone-200/90 bg-white text-stone-600 shadow-xs transition-colors hover:bg-stone-50 hover:text-stone-900 active:scale-95 disabled:pointer-events-none disabled:opacity-40 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-750 dark:hover:text-stone-100"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-stone-200/90 bg-white text-stone-600 shadow-xs transition-colors hover:bg-stone-50 hover:text-stone-900 active:scale-95 disabled:pointer-events-none disabled:opacity-40 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
                   >
                     <svg
                       width="18"
@@ -200,7 +200,7 @@ export default function LegadoSettingsSection() {
                   disabled={!sourceUrl}
                   aria-label={_('settings.legadoCopy')}
                   title={_('settings.legadoCopy')}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-stone-200/90 bg-white text-stone-600 shadow-xs transition-colors hover:bg-stone-50 hover:text-stone-900 active:scale-95 disabled:pointer-events-none disabled:opacity-40 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-750 dark:hover:text-stone-100"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-stone-200/90 bg-white text-stone-600 shadow-xs transition-colors hover:bg-stone-50 hover:text-stone-900 active:scale-95 disabled:pointer-events-none disabled:opacity-40 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
                 >
                   {copied ? (
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600">
@@ -239,7 +239,7 @@ export default function LegadoSettingsSection() {
                     disabled={!sourceUrl}
                     aria-label={_('settings.legadoQrCode')}
                     title={_('settings.legadoQrCode')}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-stone-200/90 bg-white text-stone-600 shadow-xs transition-colors hover:bg-stone-50 hover:text-stone-900 active:scale-95 disabled:pointer-events-none disabled:opacity-40 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-750 dark:hover:text-stone-100"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-stone-200/90 bg-white text-stone-600 shadow-xs transition-colors hover:bg-stone-50 hover:text-stone-900 active:scale-95 disabled:pointer-events-none disabled:opacity-40 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <rect width="5" height="5" x="3" y="3" rx="1" />
@@ -261,7 +261,7 @@ export default function LegadoSettingsSection() {
             </div>
 
             {/* Feature Switches Block - Consolidated into a single divided container */}
-            <div className="rounded-xl border border-stone-200/80 bg-stone-50/50 divide-y divide-stone-200/60 dark:border-stone-800 dark:bg-stone-850/40 dark:divide-stone-800">
+            <div className="rounded-xl border border-stone-200/80 bg-stone-50/50 divide-y divide-stone-200/60 dark:border-stone-800 dark:bg-stone-800/40 dark:divide-stone-800">
               {/* Sign-in-free Access Toggle */}
               <div className="flex items-center justify-between gap-4 p-3.5 sm:px-4">
                 <div className="space-y-0.5">

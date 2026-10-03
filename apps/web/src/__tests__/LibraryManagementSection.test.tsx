@@ -7,6 +7,12 @@ import * as libraryHooks from '../features/library/hooks'
 import * as authHooks from '../features/auth/hooks'
 import { useAuthStore } from '../stores/auth.store'
 
+const navigate = vi.hoisted(() => vi.fn())
+vi.mock('@tanstack/react-router', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@tanstack/react-router')>(),
+  useNavigate: () => navigate,
+}))
+
 vi.mock('../features/library/hooks', () => ({
   useLibraries: vi.fn(),
   useRemoveLibraryMember: vi.fn(),
@@ -73,6 +79,17 @@ beforeEach(async () => {
 })
 
 describe('LibraryManagementSection', () => {
+  it('enters a library from its menu header without triggering another row action', () => {
+    mockSection()
+    render(<LibraryManagementSection />)
+    const row = screen.getByText('Own Library').closest('tr')!
+    fireEvent.click(within(row).getByLabelText('更多操作'))
+    fireEvent.click(screen.getByRole('button', { name: 'Own Library' }))
+    expect(navigate).toHaveBeenCalledOnce()
+    expect(navigate).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib-own' } })
+    expect(screen.queryByRole('button', { name: 'Own Library' })).toBeNull()
+  })
+
   it('lists only the libraries the reader belongs to', () => {
     mockSection()
 

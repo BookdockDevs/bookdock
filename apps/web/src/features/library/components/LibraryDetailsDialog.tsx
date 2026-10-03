@@ -66,7 +66,7 @@ export default function LibraryDetailsDialog({ library, onClose }: LibraryDetail
           </div>
         </div>
 
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 sm:grid-cols-4 dark:border-stone-800 dark:bg-stone-850/40">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 sm:grid-cols-4 dark:border-stone-800 dark:bg-stone-800/40">
           {facts.map((fact) => (
             <div key={fact.label} className="min-w-0">
               <dt className="text-[11px] text-stone-400 dark:text-stone-500">{fact.label}</dt>

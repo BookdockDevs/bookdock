@@ -14,6 +14,7 @@ import {
   reTocSchema,
   tocPreviewSchema,
   categoryCreateSchema,
+  categoryScopeSchema,
   categoryReorderSchema,
   categoryUpdateSchema,
   libraryCreateSchema,
@@ -82,7 +83,6 @@ import {
   deleteLibraryCategory,
   listLibraryCategories,
   reorderLibraryCategories,
-  setLibraryCategoryParent,
   updateLibraryCategory,
 } from '../shelves/shelves.service'
 import {
@@ -252,6 +252,8 @@ librariesRoutes.get('/:id/books', async (c) => {
   const page = Number(c.req.query('page') ?? '1')
   const pageSize = Number(c.req.query('pageSize') ?? '')
   const format = c.req.query('format')
+  const scope = categoryScopeSchema.safeParse(c.req.query('categoryScope') ?? 'direct')
+  if (!scope.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid category scope' } }, 400)
   // Same query vocabulary as GET /books, so one library list and the other can
   // share a single UI without the two drifting apart. Reading-state dimensions
   // (read status, progress, last-read) are deliberately absent: they belong to
@@ -263,6 +265,7 @@ librariesRoutes.get('/:id/books', async (c) => {
     sortBy: c.req.query('sortBy') ?? undefined,
     sortOrder: c.req.query('sortOrder') ?? undefined,
     categoryId: c.req.query('categoryId') ?? c.req.query('shelfId') ?? undefined,
+    categoryScope: scope.data,
     tagId: c.req.query('tagId') ?? undefined,
     format: format === 'epub' || format === 'txt' ? format : undefined,
     author: c.req.query('author') ?? undefined,
@@ -621,12 +624,8 @@ librariesRoutes.patch('/:id/categories/:categoryId', async (c) => {
   if (!parsed.success || (parsed.data.name === undefined && parsed.data.parentId === undefined && parsed.data.pinned === undefined && parsed.data.hidden === undefined)) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name, parentId, pinned or hidden is required' : parsed.error.flatten() } }, 400)
   }
-  const { parentId, ...rest } = parsed.data
-  const renamed = await updateLibraryCategory(user.id, c.req.param('id'), c.req.param('categoryId'), rest)
-  const moved = parentId !== undefined
-    ? await setLibraryCategoryParent(user.id, c.req.param('id'), c.req.param('categoryId'), parentId)
-    : renamed
-  return c.json({ data: moved })
+  const updated = await updateLibraryCategory(user.id, c.req.param('id'), c.req.param('categoryId'), parsed.data)
+  return c.json({ data: updated })
 })
 
 librariesRoutes.put('/:id/categories/order', async (c) => {

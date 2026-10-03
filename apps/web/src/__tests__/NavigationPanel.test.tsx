@@ -1,12 +1,15 @@
 import { describe, it, expect, vi } from 'vitest'
-import { act, render, screen, fireEvent } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { createRef } from 'react'
 import { NavigationPanel } from '../features/reader/components/NavigationPanel'
+import { notify } from '@/lib/notifications'
 import { formatCardExcerpt } from '../features/reader/lib/book-search'
 import { READER_SESSION_ID, useReaderState } from '../features/reader/state/reader-state'
 import { useReaderApi } from '../features/reader/hooks/useReaderApi'
 import { useAnnotations } from '../features/reader/hooks/useAnnotations'
 import type { SearchResult, SearchStatus } from '../features/reader/types'
+
+vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 
 const display = vi.fn()
 const clearSearch = vi.fn()
@@ -938,6 +941,21 @@ describe('NavigationPanel', () => {
       expect(input.closest('div.overflow-hidden')).toHaveClass('max-h-0')
       expect(screen.queryByText('annotation.filterColor')).toBeNull()
       expect(screen.getByText('直线划线甲')).toBeInTheDocument()
+    })
+
+    it('reports partial deletion and retains failed items for a second attempt', async () => {
+      batchDeleteMutateAsync.mockResolvedValueOnce({ succeeded: 2, failedIds: ['h1'] })
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('annotation.batchManage'))
+      fireEvent.click(screen.getByTitle('annotation.batchDelete'))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'annotation.batchDelete' }))
+      await waitFor(() => expect(notify.warning).toHaveBeenCalledWith({ key: 'annotation.batchDeletePartial', params: { succeeded: 2, failed: 1 } }))
+      expect(screen.queryByRole('alertdialog')).toBeNull()
+      batchDeleteMutateAsync.mockResolvedValueOnce({ succeeded: 1, failedIds: [] })
+      fireEvent.click(screen.getByTitle('annotation.batchDelete'))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'annotation.batchDelete' }))
+      await waitFor(() => expect(batchDeleteMutateAsync).toHaveBeenLastCalledWith(['h1']))
+      await waitFor(() => expect(notify.success).toHaveBeenCalledWith({ key: 'annotation.batchDeleted', params: { count: 1 } }))
     })
 
     it('enters batch selection mode, shows selection actions and opens confirm dialog on delete', async () => {

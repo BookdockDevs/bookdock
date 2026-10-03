@@ -78,7 +78,7 @@ export default function AccessTokensSection() {
             {[1, 2].map((i) => (
               <div
                 key={i}
-                className="flex animate-pulse flex-col gap-2 rounded-xl border border-stone-200/50 bg-stone-50/30 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 dark:border-stone-800/60 dark:bg-stone-850/20"
+                className="flex animate-pulse flex-col gap-2 rounded-xl border border-stone-200/50 bg-stone-50/30 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 dark:border-stone-800/60 dark:bg-stone-800/20"
               >
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex items-center gap-2">
@@ -94,7 +94,7 @@ export default function AccessTokensSection() {
             ))}
           </div>
         ) : tokens.length === 0 ? (
-          <div className="my-2 flex flex-col items-center justify-center rounded-xl border border-stone-200/60 bg-stone-50/30 px-4 py-6 text-center dark:border-stone-800/60 dark:bg-stone-850/20">
+          <div className="my-2 flex flex-col items-center justify-center rounded-xl border border-stone-200/60 bg-stone-50/30 px-4 py-6 text-center dark:border-stone-800/60 dark:bg-stone-800/20">
             <p className="text-sm font-medium text-stone-700 dark:text-stone-300">{_('settings.tokensEmpty')}</p>
             <p className="mt-1 max-w-sm text-xs text-stone-400 dark:text-stone-500">{_('settings.tokensEmptyDesc')}</p>
           </div>
@@ -109,7 +109,7 @@ export default function AccessTokensSection() {
               return (
                 <div
                   key={token.id}
-                  className={`group flex flex-col gap-2 rounded-xl border border-stone-200/70 bg-stone-50/40 p-3 transition-all hover:border-stone-300 sm:flex-row sm:items-center sm:justify-between sm:gap-4 dark:border-stone-800 dark:bg-stone-850/40 dark:hover:border-stone-700 ${
+                  className={`group flex flex-col gap-2 rounded-xl border border-stone-200/70 bg-stone-50/40 p-3 transition-all hover:border-stone-300 sm:flex-row sm:items-center sm:justify-between sm:gap-4 dark:border-stone-800 dark:bg-stone-800/40 dark:hover:border-stone-700 ${
                     token.disabled ? 'opacity-70' : ''
                   }`}
                   title={`${_('settings.tokensCreatedAt')} ${formatDate(token.createdAt)}`}

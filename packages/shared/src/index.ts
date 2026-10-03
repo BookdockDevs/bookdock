@@ -336,6 +336,7 @@ export type {
   BlobKind,
   BlobRef,
   Category,
+  CategoryScope,
   LibraryTag,
   BookState,
   RelocationStatus,
@@ -368,6 +369,8 @@ export type {
   BatchSelectionItem,
   BatchOrganizeReq,
 } from './library'
+
+export { categoryScopeSchema } from './library'
 
 export {
   libraryTypeSchema,

@@ -77,6 +77,7 @@ export function vanishedFilterCorrection(params: {
   const patch: Partial<LibrarySearch> = {}
   if (params.shelfId && params.shelfId !== 'none' && !params.shelfIds.includes(params.shelfId)) {
     patch.shelf = undefined
+    patch.categoryScope = undefined
   }
   if (params.tagId && !params.tagIds.includes(params.tagId)) {
     patch.tag = undefined

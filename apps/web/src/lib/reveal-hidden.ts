@@ -1,4 +1,13 @@
 import { useUiStore } from '@/stores/ui.store'
+import { queryClient } from '@/lib/query-client'
+
+export function toggleRevealHidden() {
+  const state = useUiStore.getState()
+  state.setRevealHidden(!state.revealHidden)
+  void queryClient.invalidateQueries({ queryKey: ['books'] })
+  void queryClient.invalidateQueries({ queryKey: ['shelves'] })
+  void queryClient.invalidateQueries({ queryKey: ['tags'] })
+}
 
 /**
  * Private-vault reveal query flag. The owner toggles reveal mode on their own

@@ -30,9 +30,11 @@ interface LibraryHeaderProps {
   onResetMetadataFilter?: () => void
   /** A shared library's list; see ViewMenu's catalogMode. */
   catalogMode?: boolean
+  canSwitchCategoryScope?: boolean
+  categoryScope?: LibrarySearch['categoryScope']
 }
 
-export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter, catalogMode = false }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope }: LibraryHeaderProps) {
   const _ = useTranslation()
   const [searchInput, setSearchInput] = useState(query)
 
@@ -149,6 +151,8 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
             readStatus={readStatus}
             trash={trash}
             catalogMode={catalogMode}
+            canSwitchCategoryScope={canSwitchCategoryScope}
+            categoryScope={categoryScope}
           />
 
           {trash ? (

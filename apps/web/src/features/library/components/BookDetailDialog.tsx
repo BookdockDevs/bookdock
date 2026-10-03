@@ -13,7 +13,7 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import type { ToastMessage } from '@/stores/toast.store'
 
-import { useBook, useBookMembership, useBookMetadataSource, useShelves, useTags, useVersionTocState } from '../hooks'
+import { useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useShelves, useTags, useVersionTocState } from '../hooks'
 
 import AppendContentModal from './AppendContentModal'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
@@ -42,9 +42,12 @@ interface BookDetailDialogProps {
   onPublish?: (book: BookListItem) => void
 }
 
-export default function BookDetailDialog({ book, work = null, readOnly = false, onClose, onDelete, onPublish }: BookDetailDialogProps) {
+export default function BookDetailDialog({ book, work: workContext = null, readOnly = false, onClose, onDelete, onPublish }: BookDetailDialogProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
+  const workQuery = useCatalogBookDetail(workContext?.library.id ?? null, workContext?.work.id ?? null)
+  const work = workContext ? { ...workContext, work: workQuery.data?.data ?? workContext.work } : null
+
 
   const { data: detailData, isLoading: detailLoading } = useBook(book?.id ?? null)
   const detail = detailData?.data
@@ -293,7 +296,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
         closeLabel={_('library.close')}
         size="xl"
       >
-        <WorkDetailBody
+        {workQuery.isError ? <QueryErrorState isRetrying={workQuery.isFetching} onRetry={() => void workQuery.refetch()} /> : <WorkDetailBody
           work={work.work}
           library={work.library}
           canManage={work.canManage}
@@ -306,7 +309,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
           }}
           moreActions={workMenuItems}
           onClose={closeDialog}
-        />
+        />}
         {workAppendOpen && workVersion && workCanEditContent && (
           <AppendContentModal
             target={{ libraryId: work.library.id, libraryBookId: work.work.id, versionLinkId: workVersion.id }}

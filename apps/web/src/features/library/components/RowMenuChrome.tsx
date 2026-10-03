@@ -26,7 +26,7 @@ export function MenuHeader({
         }}
         className="group/header mx-1 mb-1 block w-[calc(100%-0.5rem)] rounded-lg border-b border-stone-100 p-1.5 text-left transition-colors hover:bg-stone-100 dark:border-stone-800 dark:hover:bg-stone-800/80"
       >
-        <p className="truncate text-xs font-medium text-stone-900 transition-colors group-hover/header:text-blue-600 dark:text-stone-100 dark:group-hover/header:text-blue-400">
+        <p className="truncate text-xs font-medium text-stone-900 transition-colors group-hover/header:text-stone-950 dark:text-stone-100 dark:group-hover/header:text-white">
           {title}
         </p>
         {subtitle && (

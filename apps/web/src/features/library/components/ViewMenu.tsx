@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { queryClient } from '@/lib/query-client'
+import { toggleRevealHidden } from '@/lib/reveal-hidden'
 import { GRID_CARD_FIELDS, type GridCardField } from '@bookdock/shared'
 
 import {
@@ -33,6 +33,8 @@ interface ViewMenuProps {
    * sorting. Offering them there would be a filter the server cannot honour.
    */
   catalogMode?: boolean
+  canSwitchCategoryScope?: boolean
+  categoryScope?: LibrarySearch['categoryScope']
   defaultTab?: 'sortFilter' | 'viewLayout'
 }
 
@@ -101,6 +103,8 @@ export default function ViewMenu({
   readStatus,
   trash = false,
   catalogMode = false,
+  canSwitchCategoryScope = false,
+  categoryScope,
   defaultTab = 'sortFilter',
 }: ViewMenuProps) {
   const _ = useTranslation()
@@ -122,7 +126,6 @@ export default function ViewMenu({
   const setSortOrder = useUiStore((s) => s.setSortOrder)
   const setView = useUiStore((s) => s.setView)
   const revealHidden = useUiStore((s) => s.revealHidden)
-  const setRevealHidden = useUiStore((s) => s.setRevealHidden)
   const user = useAuthStore((s) => s.user)
   const isGuest = !user || user.guest === true || user.role === 'guest'
   const updateLibraryPrefs = useUpdateLibraryPrefs()
@@ -149,13 +152,6 @@ export default function ViewMenu({
   // entry): a standing preference like view mode, not a filter — no menu
   // indicator, no reset. The taxonomy/book queries keep stable keys and read
   // the flag at fetch time, so the toggle invalidates them explicitly.
-  function toggleReveal() {
-    setRevealHidden(!revealHidden)
-    void queryClient.invalidateQueries({ queryKey: ['books'] })
-    void queryClient.invalidateQueries({ queryKey: ['shelves'] })
-    void queryClient.invalidateQueries({ queryKey: ['tags'] })
-  }
-
   useEffect(() => {
     const media = window.matchMedia('(max-width: 639px)')
     const update = () => setIsNarrow(media.matches)
@@ -402,25 +398,27 @@ export default function ViewMenu({
                     </div>
                   )}
 
-                  {/* Hidden-content reveal: a standing device-local preference
-                      (like view mode), not a filter — no indicator, no reset. */}
-                  {!catalogMode && !isGuest && (
+                  {/* Both scope and hidden-content preferences stay outside filter indicators and reset. */}
+                  {(catalogMode ? canSwitchCategoryScope : !isGuest) && (
                     <div className="mt-3 border-t border-stone-100 pt-3 dark:border-stone-800">
                       <button
                         type="button"
                         role="switch"
-                        aria-checked={revealHidden}
-                        onClick={toggleReveal}
+                        aria-checked={catalogMode ? categoryScope !== 'direct' : revealHidden}
+                        onClick={() => {
+                          if (catalogMode) navSearch({ categoryScope: categoryScope === 'direct' ? 'subtree' : 'direct' })
+                          else toggleRevealHidden()
+                        }}
                         className="flex w-full items-center justify-between gap-2 px-1 py-1 text-left"
                       >
-                        <span className="truncate text-xs font-medium text-stone-600 dark:text-stone-300">{_('library.showHiddenContent')}</span>
+                        <span className="truncate text-xs font-medium text-stone-600 dark:text-stone-300">{_(catalogMode ? 'library.includeSubcategories' : 'library.showHiddenContent')}</span>
                         <span className={cn(
                           'relative h-5 w-9 shrink-0 rounded-full transition-colors',
-                          revealHidden ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-700',
+                          (catalogMode ? categoryScope !== 'direct' : revealHidden) ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-700',
                         )}>
                           <span className={cn(
                             'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all dark:bg-stone-900',
-                            revealHidden ? 'left-[18px]' : 'left-0.5',
+                            (catalogMode ? categoryScope !== 'direct' : revealHidden) ? 'left-[18px]' : 'left-0.5',
                           )} />
                         </span>
                       </button>

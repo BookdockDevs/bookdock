@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { useLibraryCategories, type UploadTarget } from '../hooks'
+import { categoryPath } from '../taxonomy'
 import UploadSheet from './UploadSheet'
 
 interface CatalogUploadSheetProps {
@@ -44,13 +45,15 @@ export default function CatalogUploadSheet({
   onClose,
 }: CatalogUploadSheetProps) {
   const _ = useTranslation()
-  const { data: categoriesData } = useLibraryCategories(libraryId, { enabled: Boolean(open && categoryId) })
-  const categoryName = categoryId ? categoriesData?.data.find((c) => c.id === categoryId)?.name : undefined
+  const categoriesQuery = useLibraryCategories(libraryId, { enabled: Boolean(open && categoryId && !libraryBookId) })
+  const categories = categoriesQuery.data?.data ?? []
+  const categoryName = !libraryBookId && categoryId
+    ? categoryPath(categories, categoryId).map((node) => node.name).join(' / ')
+    : undefined
 
   // Memoized because the upload queue keys its scheduler and its settlement
   // effect on the target's identity; a fresh object each render would restart
-  // both. The category rides along for the same reason: switching categories
-  // mid-queue re-targets the remaining files, which is the honest behavior.
+  // both. The destination follows the category of the upload entry point.
   const target = useMemo<UploadTarget>(() => ({
     url: `/libraries/${libraryId}/books`,
     fields: (item) => ({
@@ -69,6 +72,9 @@ export default function CatalogUploadSheet({
       ['libraries', libraryId, 'catalog'],
       ['libraries', libraryId, 'categories'],
       ['libraries', libraryId, 'tags'],
+      ['books'],
+      ['book'],
+      ['batch-selection'],
     ],
   }), [libraryId, categoryId, libraryBookId])
 

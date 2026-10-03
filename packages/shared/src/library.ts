@@ -565,7 +565,12 @@ export interface Category {
   updatedAt: number
   /** Works filed under this category, trashed works excluded. */
   bookCount: number
+  /** Visible works filed here or under descendants, independent of book filters. */
+  subtreeBookCount: number
 }
+
+export const categoryScopeSchema = z.enum(['direct', 'subtree'])
+export type CategoryScope = z.infer<typeof categoryScopeSchema>
 
 export interface LibraryTag {
   id: string

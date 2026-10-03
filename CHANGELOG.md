@@ -11,6 +11,7 @@ All notable changes to Bookdock are documented here.
 - Book details become editable in place: fix one field at a time, restore values from the source file, and change the cover without opening the large edit dialog.
 - Dangerous actions ask for the name: deleting or transferring a library, and transferring the instance, now require typing the exact name.
 - Notifications reworked: queued past three, repeats merged, and toasts clear of bottom bars; dialog save errors now show inline.
+- Library navigation rewritten: sidebar rebuilt around the current library, plus a searchable right-side directory with batch actions; shared categories go two levels with subtree counts.
 
 ### Added
 
@@ -21,16 +22,22 @@ All notable changes to Bookdock are documented here.
 - Per-field and whole-form "restore from source", showing whether each value came from inside the file, from the file name, or from the shared version.
 - Inline cover editing in book details: right-click the cover to replace or remove it.
 - GIF avatars, with still images used where animation doesn't fit (e.g. share cards) and clear errors for oversized or broken GIFs.
+- Directory view for shelves, categories and tags: grouped browsing, independent search, the same select mode, and manager batch actions (pin, hide, delete) with counts.
+- Two-level shared categories with flat personal shelves: both levels hold works, parent rows show subtree counts, and the view menu offers an include-subcategories switch (on by default).
+- Category plus one tag can combine as filters; publishing uses the two-level target picker, and rename-plus-move saves atomically.
 
 ### Changed
 
 - Replacement rules are now listed in the order they take effect, with position numbers; grouping is display-only.
 - Library deletion, library transfer, and instance transfer require typing the exact name, stay open and retryable on failure, and no longer confuse libraries when switching.
 - Read-status and shelf labels in book details: click to filter, right-click to change the value.
+- Sidebar rewritten around the current library: fixed brand, library switcher and all-books on top, shelves-or-tags panels in the middle with a directory shortcut, stats/settings/account at the bottom; panel state, expansion and scroll position are kept per library.
+- Home gains a context bar listing only individually removable extra filters (keyword, format, read status, author, series).
 - Toasts show at most three at once with the rest queuing; identical repeats update in place instead of stacking, and hover or keyboard focus pauses each independently.
 - Toasts float above bottom action bars (batch bar, uploads, dialog footers, reader controls) and clear when switching accounts.
 - Book-detail and append dialogs report save failures inline, flagging partial saves, instead of toasting.
-- Toast copy names the outcome: catalog visibility per work and version, trash-empty counts, already-in-sync pushes, and restored rule counts.
+- Toast copy names the outcome across more actions: catalog visibility per work and version, trash-empty counts, already-in-sync pushes, restored rule counts, pinning, version deletion, annotation batch delete, font uploads and settings sync.
+- Scrollbars are thin and theme-aware app-wide, including the reader.
 
 ### Fixed
 
@@ -585,6 +592,7 @@ All notable changes to Bookdock are documented here.
 - 书籍详情可就地改：一次只改一个字段，可从来源恢复，封面不用进大编辑框。
 - 高危操作需输入名称：删库、转让书库、转让实例需输入准确名称。
 - 通知重做：超过三条排队，重复合并，不再遮挡底部操作栏；弹窗保存失败改为行内报错。
+- 书库导航重写：侧栏围绕当前书库重建，右侧目录支持搜索与批量操作；共享分类支持两级并显示子树数量。
 
 #### 新增
 
@@ -595,16 +603,22 @@ All notable changes to Bookdock are documented here.
 - 逐字段与整单“从来源恢复”，恢复前说明值来自文件内、文件名推断还是共享版本。
 - 详情封面内联编辑：右键封面直接换图/删图。
 - GIF 头像：动图不合适的地方（如分享卡）用静态图；超大或损坏的 GIF 明确报错。
+- 书架/分类/标签的右侧目录：分组浏览、独立搜索、同样的选择模式，管理员可批量置顶/隐藏/删除并显示数量。
+- 共享分类支持两级、私人书架保持平级：两级都可放作品，父级显示子树数量，视图菜单可开关“包含子分类”（默认开）。
+- 分类可与一个标签组合筛选；发布改用两级目标选择器，改名加移动一次原子保存。
 
 #### 变更
 
 - 替换规则按生效顺序展示并带序号，分组只做展示标签。
 - 删库、转让书库、转让实例需输入准确名称；失败留在框内可重试；中途切换书库不会串确认框。
 - 详情里的阅读状态与书架标签：左键筛选，右键改值。
+- 侧栏围绕当前书库重写：顶部固定品牌、书库切换与全部书籍，中部书架或分类面板加目录入口，底部统计/设置/账户；面板状态、展开与滚动位置按书库记住。
+- 首页新增条件栏，只列出可单独移除的附加筛选（关键词、格式、阅读状态、作者、系列）。
 - 通知最多同时显示三条，多余排队；重复通知原位更新不再堆叠，悬停或键盘聚焦可暂停。
 - 通知浮于底部操作栏之上（批量操作栏、上传面板、弹窗底部、阅读器控件），切换账号清空通知。
 - 书籍详情与追写弹窗的保存失败改为行内报错，部分保存明确标出，不再弹通知。
-- 通知文案点名结果：目录显隐按作品/版本报告，清空回收站带数量，无变化的推送与实际补回的规则数如实报告。
+- 通知文案点名结果：目录显隐、回收站数量、已一致推送、补回规则数，以及置顶、版本删除、标注批量删除、字体上传、设置同步。
+- 滚动条全应用变细并跟随主题，阅读器也一致。
 
 #### 修复
 

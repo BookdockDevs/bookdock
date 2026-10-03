@@ -69,7 +69,7 @@ describe('vanishedFilterCorrection', () => {
   it('clears a shelf that is no longer in the sidebar', () => {
     // Hiding it again, unhiding it, or deleting it all end up here.
     expect(vanishedFilterCorrection({ shelfId: 'shelf-gone', tagId: null, ...taxonomy }))
-      .toEqual({ shelf: undefined })
+      .toEqual({ shelf: undefined, categoryScope: undefined })
   })
 
   it('clears a tag that is no longer in the sidebar', () => {
@@ -83,7 +83,7 @@ describe('vanishedFilterCorrection', () => {
 
   it('clears both dimensions in one pass', () => {
     expect(vanishedFilterCorrection({ shelfId: 'shelf-gone', tagId: 'tag-gone', ...taxonomy }))
-      .toEqual({ shelf: undefined, tag: undefined })
+      .toEqual({ shelf: undefined, categoryScope: undefined, tag: undefined })
   })
 
   it('is idempotent, so the correction cannot loop', () => {

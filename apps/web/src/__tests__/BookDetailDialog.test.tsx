@@ -66,8 +66,10 @@ let membershipUnavailable = false
 let sharedCategories: Category[] = []
 let categoriesPending = false
 let categoriesError = false
+let queriedWork: CatalogBook | undefined
 
 vi.mock('../features/library/hooks', () => ({
+  useCatalogBookDetail: () => ({ data: queriedWork ? { data: queriedWork } : undefined, isError: false }),
   useBook: () => ({ data: bookDetail }),
   useBookMembership: () => ({
     shelves: membershipUnavailable ? { data: undefined, isError: true } : { data: { data: membershipShelf } },
@@ -160,6 +162,7 @@ beforeEach(async () => {
   sharedCategories = []
   categoriesPending = false
   categoriesError = false
+  queriedWork = undefined
   await i18n.changeLanguage('zh-CN')
 })
 
@@ -1343,6 +1346,24 @@ describe('BookDetailDialog shared work mode', () => {
   })
 
 
+  it('uses refreshed detail when the work has left the current catalog filter', () => {
+    const old = catalogWork({ categoryId: 'old' })
+    queriedWork = {
+      ...old,
+      title: 'Moved work',
+      categoryId: 'child',
+      versions: [catalogVersion({ effective: { ...catalogVersion().effective, title: 'Moved work' } })],
+    }
+    sharedCategories = [
+      { id: 'root', name: 'New root', parentId: null } as Category,
+      { id: 'child', name: 'Moved', parentId: 'root' } as Category,
+    ]
+    renderWorkDialog(old)
+    expect(screen.getByRole('heading', { name: 'Moved work' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New root / Moved' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'City Book' })).toBeNull()
+  })
+
   it('shows category before shared tags and filters within the current library', () => {
     sharedCategories = [{ id: 'c1', libraryId: 'lib_city', userId: 'u2', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 }]
     const { onClose } = renderWorkDialog(catalogWork({ categoryId: 'c1' }))
@@ -1353,7 +1374,7 @@ describe('BookDetailDialog shared work mode', () => {
     expect(screen.queryByText('City', { exact: true })).toBeNull()
     fireEvent.click(category)
     expect(onClose).toHaveBeenCalled()
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: 'c1' } })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: 'c1', categoryScope: 'subtree' } })
     fireEvent.click(tag)
     expect(navigateMock).toHaveBeenLastCalledWith({ to: '/', search: { libraryId: 'lib_city', tag: 't1' } })
     expect(updateCatalogBookMutate).not.toHaveBeenCalled()
@@ -1362,7 +1383,7 @@ describe('BookDetailDialog shared work mode', () => {
   it('shows uncategorized even without tags and filters the shared library', () => {
     renderWorkDialog(catalogWork({ tags: [] }))
     fireEvent.click(screen.getByRole('button', { name: '未分类' }))
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: 'none' } })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: 'none', categoryScope: 'direct' } })
   })
 
   it.each(['loading', 'error', 'missing'])('never labels an unresolved category as uncategorized (%s)', (state) => {

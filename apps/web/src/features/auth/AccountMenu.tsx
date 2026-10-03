@@ -71,9 +71,9 @@ export default function AccountMenu() {
         onClick={() => {
           void navigate({ to: isUninitialized ? '/setup' : '/login' })
         }}
-        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
+        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
       >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-200/70 text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+        <span className="-ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-stone-200/70 text-stone-600 dark:bg-stone-800 dark:text-stone-300">
           {isUninitialized ? <KeyIcon /> : <SignInIcon />}
         </span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-stone-700 dark:text-stone-200">
@@ -97,12 +97,12 @@ export default function AccountMenu() {
           e.preventDefault()
           menu.openFromEvent(e)
         }}
-        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
+        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
       >
         {avatarUrl(user?.avatarKey) ? (
-          <img src={avatarUrl(user?.avatarKey)} alt={username} className="h-7 w-7 shrink-0 rounded-full object-cover" />
+          <img src={avatarUrl(user?.avatarKey)} alt={username} className="-ml-1 h-6 w-6 shrink-0 rounded-full object-cover" />
         ) : (
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-300/80 text-xs font-semibold uppercase text-stone-700 dark:bg-stone-700 dark:text-stone-200">
+          <span className="-ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-stone-300/80 text-[11px] font-semibold uppercase text-stone-700 dark:bg-stone-700 dark:text-stone-200">
             {username.slice(0, 1)}
           </span>
         )}

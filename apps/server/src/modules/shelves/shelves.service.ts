@@ -5,7 +5,7 @@ import { libraries, libraryBooks, libraryBookVersions, libraryCategories } from 
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { ensurePrivateLibrary, isLibraryManager, requireLibraryManager, assertLibraryBrowsable } from '../libraries/library-access'
-import { hiddenTagExclusion, loadLibraryHiddenTaxonomy, workDirectHiddenExclusion } from '../libraries/library-query'
+import { hiddenTagExclusion, loadLibraryHiddenTaxonomy, publishedWorkExists, workDirectHiddenExclusion } from '../libraries/library-query'
 
 function privateLibraryId(userId: string): string | null {
   const db = getDb()
@@ -217,6 +217,12 @@ function toCategoryRes(row: typeof libraryCategories.$inferSelect) {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     bookCount,
+    subtreeBookCount: bookCount + (getDb().select({ count: sql<number>`count(${libraryBooks.id})` })
+      .from(libraryBooks)
+      .where(and(isNull(libraryBooks.deletedAt), inArray(libraryBooks.categoryId,
+        getDb().select({ id: libraryCategories.id }).from(libraryCategories)
+          .where(and(eq(libraryCategories.libraryId, row.libraryId), eq(libraryCategories.parentId, row.id))),
+      ))).get()?.count ?? 0),
   }
 }
 
@@ -244,6 +250,7 @@ export async function listLibraryCategories(actorId: string, libraryId: string) 
   const manager = await isLibraryManager(actorId, libraryId)
   const taxonomy = manager ? null : loadLibraryHiddenTaxonomy(db, libraryId)
   const countExtra: SQL[] = []
+  if (!manager) countExtra.push(publishedWorkExists())
   if (taxonomy) {
     countExtra.push(workDirectHiddenExclusion())
     const tag = hiddenTagExclusion(taxonomy.hiddenTagIds)
@@ -252,9 +259,8 @@ export async function listLibraryCategories(actorId: string, libraryId: string) 
   const rowFilter = taxonomy && taxonomy.hiddenCategoryIds.length > 0
     ? notInArray(libraryCategories.id, taxonomy.hiddenCategoryIds)
     : undefined
-  // Counts ride along in the same grouped query: one query for N rows, not
-  // N+1. Single-row call sites (create, rename, delete) keep toCategoryRes.
-  return db
+  // Aggregate direct counts once before propagating them to visible ancestors.
+  const rows = db
     .select({
       id: libraryCategories.id,
       libraryId: libraryCategories.libraryId,
@@ -274,6 +280,34 @@ export async function listLibraryCategories(actorId: string, libraryId: string) 
     .groupBy(libraryCategories.id)
     .orderBy(asc(libraryCategories.sortOrder), asc(libraryCategories.createdAt))
     .all()
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const subtreeCounts = new Map(rows.map((row) => [row.id, row.bookCount]))
+  for (const row of rows) {
+    const seen = new Set([row.id])
+    let parentId = row.parentId
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId)
+      const parent = byId.get(parentId)
+      if (!parent) break
+      subtreeCounts.set(parentId, (subtreeCounts.get(parentId) ?? 0) + row.bookCount)
+      parentId = parent.parentId
+    }
+  }
+  return rows.map((row) => ({ ...row, subtreeBookCount: subtreeCounts.get(row.id) ?? row.bookCount }))
+}
+
+function validateCategoryParent(libraryId: string, parentId: string | null, categoryId?: string) {
+  if (parentId === null) return
+  const db = getDb()
+  const library = db.select({ type: libraries.type }).from(libraries).where(eq(libraries.id, libraryId)).get()
+  if (library?.type === 'private') throw new AppError('VALIDATION_ERROR', 'Private shelves must remain flat')
+  if (parentId === categoryId) throw new AppError('VALIDATION_ERROR', 'A category cannot parent itself')
+  const parent = getLibraryCategory(libraryId, parentId)
+  if (parent.parentId !== null) throw new AppError('VALIDATION_ERROR', 'Categories support at most two levels')
+  if (categoryId && db.select({ id: libraryCategories.id }).from(libraryCategories)
+    .where(and(eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.parentId, categoryId))).get()) {
+    throw new AppError('VALIDATION_ERROR', 'A category with children must remain a root')
+  }
 }
 
 export async function createLibraryCategory(actorId: string, libraryId: string, data: { name: string; parentId?: string }) {
@@ -283,7 +317,7 @@ export async function createLibraryCategory(actorId: string, libraryId: string, 
     const duplicate = tx.select({ id: libraryCategories.id }).from(libraryCategories)
       .where(and(eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.name, data.name))).get()
     if (duplicate) throw new AppError('CATEGORY_NAME_TAKEN', 'Category name is already in use')
-    if (data.parentId) getLibraryCategory(libraryId, data.parentId)
+    validateCategoryParent(libraryId, data.parentId ?? null)
     const max = tx.select({ max: sql<number>`max(${libraryCategories.sortOrder})` }).from(libraryCategories)
       .where(eq(libraryCategories.libraryId, libraryId)).get()
     const now = Date.now()
@@ -297,11 +331,12 @@ export async function createLibraryCategory(actorId: string, libraryId: string, 
   })
 }
 
-export async function updateLibraryCategory(actorId: string, libraryId: string, categoryId: string, patch: { name?: string; pinned?: boolean; hidden?: boolean }) {
+export async function updateLibraryCategory(actorId: string, libraryId: string, categoryId: string, patch: { name?: string; parentId?: string | null; pinned?: boolean; hidden?: boolean }) {
   const db = getDb()
   await requireLibraryManager(actorId, libraryId)
   return db.transaction((tx) => {
     const existing = getLibraryCategory(libraryId, categoryId)
+    if (patch.parentId !== undefined) validateCategoryParent(libraryId, patch.parentId, categoryId)
     if (patch.name !== undefined && patch.name !== existing.name) {
       const duplicate = tx.select({ id: libraryCategories.id }).from(libraryCategories)
         .where(and(eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.name, patch.name), ne(libraryCategories.id, categoryId))).get()
@@ -313,24 +348,7 @@ export async function updateLibraryCategory(actorId: string, libraryId: string, 
 }
 
 export async function setLibraryCategoryParent(actorId: string, libraryId: string, categoryId: string, parentId: string | null) {
-  const db = getDb()
-  await requireLibraryManager(actorId, libraryId)
-  const existing = getLibraryCategory(libraryId, categoryId)
-  if (parentId === existing.parentId) return toCategoryRes(existing)
-  if (parentId !== null) {
-    if (parentId === categoryId) throw new AppError('VALIDATION_ERROR', 'A category cannot parent itself')
-    getLibraryCategory(libraryId, parentId)
-    // Walk up: the new parent must not descend from the category itself.
-    let cursor: string | null = parentId
-    while (cursor) {
-      if (cursor === categoryId) throw new AppError('VALIDATION_ERROR', 'Category parenting would create a cycle')
-      cursor = db.select({ parentId: libraryCategories.parentId }).from(libraryCategories)
-        .where(and(eq(libraryCategories.id, cursor), eq(libraryCategories.libraryId, libraryId))).get()?.parentId ?? null
-    }
-  }
-  const now = Date.now()
-  db.update(libraryCategories).set({ parentId, updatedAt: now }).where(eq(libraryCategories.id, categoryId)).run()
-  return toCategoryRes({ ...existing, parentId, updatedAt: now })
+  return updateLibraryCategory(actorId, libraryId, categoryId, { parentId })
 }
 
 export async function reorderLibraryCategories(actorId: string, libraryId: string, categoryIds: string[]) {

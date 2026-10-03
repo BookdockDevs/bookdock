@@ -9,6 +9,7 @@ import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
 import { useLibraryCategories, useLibraryTags, useShelves, useTags } from '../hooks'
+import { categoryChoices } from '../taxonomy'
 import { READ_STATUS_OPTIONS } from './read-status'
 
 interface SelectionBarProps {
@@ -481,7 +482,7 @@ function BatchClassifyDialog({ ids, items, libraryId, onClose, onDone }: { ids: 
   const [tagChanges, setTagChanges] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
 
-  const shelves = libraryId ? (libraryCategories?.data ?? []) : (shelvesData?.data ?? [])
+  const shelves = libraryId ? categoryChoices(libraryCategories?.data ?? []) : (shelvesData?.data ?? [])
   const tags = libraryId ? (libraryTags?.data ?? []) : (tagsData?.data ?? [])
   const initialCategory = items.every((item) => item.categoryId === items[0]?.categoryId) ? items[0]?.categoryId : undefined
 
@@ -498,6 +499,7 @@ function BatchClassifyDialog({ ids, items, libraryId, onClose, onDone }: { ids: 
       void queryClient.invalidateQueries({ queryKey: ['shelves'] })
       void queryClient.invalidateQueries({ queryKey: ['tags'] })
       void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
+      void queryClient.invalidateQueries({ queryKey: ['book'] })
       if (libraryId) {
         void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
         void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
@@ -554,6 +556,11 @@ function BatchClassifyDialog({ ids, items, libraryId, onClose, onDone }: { ids: 
         {activeTab === 'shelves' ? (
           <div className="flex max-h-60 flex-col gap-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
             <ShelfRadio
+              label={_('library.keepCategory')}
+              checked={selectedShelf === undefined}
+              onChange={() => setSelectedShelf(undefined)}
+            />
+            <ShelfRadio
               label={_('library.uncategorized')}
               checked={selectedShelf === null || (selectedShelf === undefined && initialCategory === null)}
               onChange={() => setSelectedShelf(null)}
@@ -597,7 +604,7 @@ function BatchClassifyDialog({ ids, items, libraryId, onClose, onDone }: { ids: 
         )}
 
         <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>{_('library.cancel')}</Button>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>{_('library.cancel')}</Button>
           <Button disabled={!showSave || saving} onClick={() => void handleApply()}>{_('library.save')}</Button>
         </div>
       </div>

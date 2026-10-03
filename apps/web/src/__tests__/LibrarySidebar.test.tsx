@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 
 import type { LibraryListItem } from '@bookdock/shared'
 
@@ -138,24 +138,33 @@ function mockLibraryHooks({
   ;(libraryHooks.useCreateLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false })
 }
 
+function openLibrarySwitcher() {
+  fireEvent.click(screen.getByRole('button', { name: '切换书库' }))
+}
+
+function showTagsPanel() {
+  fireEvent.click(screen.getByText('标签'))
+}
+
 describe('LibrarySidebar', () => {
-  it('hides empty shelf and tag groups for read-only guests', () => {
+  it('shows panel tabs with an empty hint to read-only guests', () => {
     mockHooks({ uncategorizedTotal: 0 })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} readOnly />)
 
-    expect(screen.queryByText('书架')).toBeNull()
-    expect(screen.queryByText('标签')).toBeNull()
+    expect(screen.getByText('书架')).toBeInTheDocument()
+    expect(screen.getByText('标签')).toBeInTheDocument()
+    expect(screen.getByText('暂无书架')).toBeInTheDocument()
   })
 
   it('shows populated shelf and tag groups for read-only guests', () => {
     mockHooks({ shelves: [{ id: 'shelf-1', name: '公开分类', bookCount: 1 }], tags: [{ id: 'tag-1', name: '公开标签', bookCount: 1 }] })
 
-    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} readOnly />)
+    render(<LibrarySidebar sessionKey="guest-populated" navSearch={navSearch} shelfId={null} tagId={null} trash={false} readOnly />)
 
     expect(screen.getByText('书架')).toBeInTheDocument()
     expect(screen.getByText('公开分类')).toBeInTheDocument()
-    expect(screen.getByText('标签')).toBeInTheDocument()
+    showTagsPanel()
     expect(screen.getByText('公开标签')).toBeInTheDocument()
   })
 
@@ -174,11 +183,13 @@ describe('LibrarySidebar', () => {
       tags: [{ id: 'tag-1', name: 'Secret', bookCount: 1, hidden: true }],
     })
 
-    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    render(<LibrarySidebar sessionKey="hidden-badges" navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
 
     expect(screen.getByText('Vault')).toBeInTheDocument()
+    expect(screen.getAllByRole('img', { name: '作品已隐藏' })).toHaveLength(1)
+    showTagsPanel()
     expect(screen.getByText('Secret')).toBeInTheDocument()
-    expect(screen.getAllByRole('img', { name: '作品已隐藏' })).toHaveLength(2)
+    expect(screen.getAllByRole('img', { name: '作品已隐藏' })).toHaveLength(1)
   })
 
   it('keeps a zero-count pill so the badge column never shifts', () => {
@@ -225,7 +236,7 @@ describe('LibrarySidebar', () => {
   })
 
   it('renders the uncategorized entry and filters with the none sentinel', () => {
-    mockHooks()
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
     fireEvent.click(screen.getByText('未分类'))
@@ -233,14 +244,14 @@ describe('LibrarySidebar', () => {
     expect(screen.queryByText('暂无书架')).toBeNull()
   })
 
-  it('shows the empty-shelf hint only when the section would otherwise be bare', () => {
+  it('shows the empty-shelf hint alongside the uncategorized entry when bare', () => {
 
     mockHooks({ uncategorizedTotal: 0 })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
 
     expect(screen.getByText('暂无书架')).toBeInTheDocument()
-    expect(screen.queryByText('未分类')).toBeNull()
+    expect(screen.getByText('未分类')).toBeInTheDocument()
   })
 
   it('shows the empty-category hint for a shared library without categories', () => {
@@ -251,7 +262,7 @@ describe('LibrarySidebar', () => {
 
     expect(screen.getByText('分类')).toBeInTheDocument()
     expect(screen.getByText('暂无分类')).toBeInTheDocument()
-    expect(screen.queryByText('未分类')).toBeNull()
+    expect(screen.getByText('未分类')).toBeInTheDocument()
   })
 
   it('keeps the uncategorized row for read-only readers when categories are empty', () => {
@@ -262,7 +273,7 @@ describe('LibrarySidebar', () => {
 
     expect(screen.getByText('分类')).toBeInTheDocument()
     expect(screen.getByText('未分类')).toBeInTheDocument()
-    expect(screen.queryByText('暂无分类')).toBeNull()
+    expect(screen.getByText('暂无分类')).toBeInTheDocument()
   })
 
   it('offers no create entry: creating moved to the settings library list', () => {
@@ -273,6 +284,7 @@ describe('LibrarySidebar', () => {
     }]
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} libraries={memberLibraries} />)
+    openLibrarySwitcher()
 
     expect(screen.getByText('Club')).toBeInTheDocument()
     expect(screen.queryByText('新建书库')).toBeNull()
@@ -292,6 +304,7 @@ describe('LibrarySidebar', () => {
     ]
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} libraries={mixedLibraries} />)
+    openLibrarySwitcher()
 
     expect(screen.getByText('Club')).toBeInTheDocument()
     expect(screen.queryByText('Strangers')).toBeNull()
@@ -313,23 +326,23 @@ describe('LibrarySidebar', () => {
     expect(screen.getByText('未分类').closest('aside')).toHaveClass('w-[min(19rem,75vw)]')
   })
 
-  it('places uncategorized inside the shelves section, before real shelves', () => {
+  it('places uncategorized in the top navigation before the shelves list', () => {
     mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
-    const shelvesHeader = screen.getByText('书架')
+    const allBooks = screen.getByText('全部书籍')
     const uncategorized = screen.getByText('未分类')
     const firstShelf = screen.getByText('Favorites')
-    expect(shelvesHeader.compareDocumentPosition(uncategorized) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(allBooks.compareDocumentPosition(uncategorized) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(uncategorized.compareDocumentPosition(firstShelf) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('hides an empty uncategorized entry when a real shelf exists', () => {
+  it('keeps the uncategorized entry visible even when empty', () => {
     mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }], uncategorizedTotal: 0 })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
 
-    expect(screen.queryByText('未分类')).toBeNull()
+    expect(screen.getByText('未分类')).toBeInTheDocument()
   })
 
   it('keeps an empty uncategorized entry visible when it is selected', () => {
@@ -340,26 +353,18 @@ describe('LibrarySidebar', () => {
     expect(screen.getByText('未分类')).toBeInTheDocument()
   })
 
-  it('renders skeleton loading instead of prematurely showing uncategorized while loading', () => {
+  it('shows a skeleton while taxonomy loads', () => {
+    mockHooks()
     ;(libraryHooks.useShelves as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: { data: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] },
-      isLoading: false,
-    })
-    ;(libraryHooks.useTrashEnabled as ReturnType<typeof vi.fn>).mockReturnValue(true)
-    ;(libraryHooks.useBooks as ReturnType<typeof vi.fn>).mockReturnValue({
       data: undefined,
       isLoading: true,
-    })
-    ;(libraryHooks.useTags as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: { data: [] },
-      isLoading: false,
     })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
 
-    expect(screen.queryByText('未分类')).toBeNull()
-    const shelvesSection = screen.getByText('书架').closest('div')?.parentElement
-    expect(shelvesSection?.querySelector('[aria-busy="true"]')).toBeInTheDocument()
+    expect(screen.getByText('书架')).toBeInTheDocument()
+    expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument()
+    expect(screen.queryByText('Favorites')).toBeNull()
   })
 
   it('enters trash view when trash is clicked', () => {
@@ -377,15 +382,16 @@ describe('LibrarySidebar', () => {
     expect(screen.queryByText('回收站')).toBeNull()
   })
 
-  it('opens the tag context menu with rename and delete actions', () => {
+  it('opens the tag context menu with edit and delete actions', () => {
     mockHooks({ tags: [{ id: 'tag-1', name: '小说', bookCount: 3 }] })
 
-    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    render(<LibrarySidebar sessionKey="tag-menu" navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    showTagsPanel()
     fireEvent.click(screen.getAllByLabelText('更多操作')[0])
 
-    expect(screen.getByText('改名')).toBeInTheDocument()
+    expect(screen.getByText('编辑')).toBeInTheDocument()
     expect(screen.getByText('删除')).toBeInTheDocument()
-    expect(screen.getByText('3', { exact: true })).toHaveClass('opacity-0')
+    expect(screen.getByText('3', { exact: true })).toHaveClass('group-hover:opacity-0')
   })
 
   it('toggles a tag pin from the context menu', () => {
@@ -393,7 +399,8 @@ describe('LibrarySidebar', () => {
     mockHooks({ tags: [{ id: 'tag-1', name: '小说', bookCount: 3 }] })
     ;(libraryHooks.useToggleTagPin as ReturnType<typeof vi.fn>).mockReturnValue({ mutate, isPending: false })
 
-    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    render(<LibrarySidebar sessionKey="tag-pin" navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    showTagsPanel()
     fireEvent.click(screen.getAllByLabelText('更多操作')[0])
     fireEvent.click(screen.getByText('置顶'))
 
@@ -403,7 +410,8 @@ describe('LibrarySidebar', () => {
   it('shows the unpin action for a pinned tag', () => {
     mockHooks({ tags: [{ id: 'tag-1', name: '小说', bookCount: 3, pinned: true }] })
 
-    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    render(<LibrarySidebar sessionKey="tag-unpin" navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    showTagsPanel()
     fireEvent.click(screen.getAllByLabelText('更多操作')[0])
 
     expect(screen.getByText('取消置顶')).toBeInTheDocument()
@@ -414,7 +422,8 @@ describe('LibrarySidebar', () => {
     mockHooks({ tags: [{ id: 'tag-1', name: '小说', bookCount: 3 }] })
     ;(libraryHooks.useDeleteTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
 
-    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    render(<LibrarySidebar sessionKey="tag-delete" navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    showTagsPanel()
     fireEvent.click(screen.getAllByLabelText('更多操作')[0])
     fireEvent.click(screen.getByText('删除'))
 
@@ -423,10 +432,11 @@ describe('LibrarySidebar', () => {
     expect(mutateAsync).toHaveBeenCalledWith('tag-1')
   })
 
-  it('opens the new tag dialog from the tags section header', () => {
+  it('opens the new tag dialog from the tags panel button', () => {
     mockHooks()
 
-    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    render(<LibrarySidebar sessionKey="tag-new" navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    showTagsPanel()
     fireEvent.click(screen.getByTitle('新建标签'))
 
     expect(screen.getByPlaceholderText('标签名称')).toBeInTheDocument()
@@ -463,19 +473,20 @@ describe('LibrarySidebar', () => {
     expect(bottomShadow).toHaveClass('opacity-0')
   })
 
-  it('applies elevated contrast active styles and pill badge classes when a shelf is selected', () => {
+  it('highlights the selected shelf row and keeps a static count pill', () => {
     mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 5 }] })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId="shelf-1" tagId={null} trash={false} />)
 
     const button = screen.getByText('Favorites').closest('button')!
-    expect(button).toHaveClass('dark:bg-stone-800', 'dark:text-stone-50')
+    expect(button).toHaveClass('bg-white', 'shadow-sm')
 
     const badge = screen.getByText('5')
-    expect(badge).toHaveClass('rounded-full', 'dark:bg-stone-700/60', 'dark:text-stone-200')
+    expect(badge).toHaveClass('rounded-full')
+    expect(badge).toHaveTextContent('5')
   })
 
-  it('renders library as primary active when no filter is active, and switches to scope active when a filter is active', () => {
+  it('names the active library in the switcher and highlights its row', () => {
     mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 5 }] })
 
     const { rerender } = render(
@@ -491,9 +502,11 @@ describe('LibrarySidebar', () => {
       />,
     )
 
-    const myLibBtn = screen.getByText('My Library').closest('button')!
-    // Primary active: card style with shadow and ring
-    expect(myLibBtn).toHaveClass('bg-white', 'shadow-sm')
+    // No filter: the switcher names the library in context.
+    expect(screen.getByRole('button', { name: '切换书库' })).toHaveTextContent('My Library')
+    openLibrarySwitcher()
+    const myLibBtn = screen.getAllByText('My Library')[1].closest('button')!
+    expect(myLibBtn).toHaveClass('bg-stone-100/80', 'font-semibold')
 
     // Filter active: shelf selected
     rerender(
@@ -509,11 +522,7 @@ describe('LibrarySidebar', () => {
       />,
     )
 
-    // Scope active: flat highlight without shadow or ring
-    expect(myLibBtn).toHaveClass('bg-stone-200/50')
-    expect(myLibBtn).not.toHaveClass('shadow-sm')
-
-    // And the shelf row becomes the primary active focus
+    // Filter active: the shelf row becomes the highlighted focus
     const shelfBtn = screen.getByText('Favorites').closest('button')!
     expect(shelfBtn).toHaveClass('bg-white', 'shadow-sm')
   })
@@ -541,7 +550,7 @@ describe('LibrarySidebar', () => {
       render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
       fireEvent.click(screen.getByText('Sci-Fi'))
 
-      expect(navSearch).toHaveBeenCalledWith({ shelf: 'cat-1', tag: undefined, status: undefined, trash: undefined })
+      expect(navSearch).toHaveBeenCalledWith({ shelf: 'cat-1', categoryScope: 'subtree', trash: undefined, directory: undefined })
     })
 
     it('offers the uncategorized entry for works filed under no category', () => {
@@ -551,7 +560,7 @@ describe('LibrarySidebar', () => {
       render(<LibrarySidebar navSearch={navSearch} shelfId="none" tagId={null} trash={false} activeLibraryId="lib-1" />)
 
       expect(screen.getByText('未分类')).toBeInTheDocument()
-      expect(screen.getByText('7')).toBeInTheDocument()
+      expect(screen.getAllByText('7')).toHaveLength(2)
     })
 
     it('lets an owner curate the taxonomy but not a plain member', () => {
@@ -577,12 +586,12 @@ describe('LibrarySidebar', () => {
 
       render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
       fireEvent.click(screen.getAllByLabelText('更多操作')[0])
-      fireEvent.click(screen.getByText('改名'))
+      fireEvent.click(screen.getByText('编辑'))
       fireEvent.change(screen.getByPlaceholderText('分类名称'), { target: { value: '科幻' } })
       fireEvent.click(screen.getAllByRole('button', { name: '保存' })[0])
 
       expect(mutate).toHaveBeenCalledWith(
-        expect.objectContaining({ libraryId: 'lib-1', categoryId: 'cat-1', patch: { name: '科幻' } }),
+        expect.objectContaining({ libraryId: 'lib-1', categoryId: 'cat-1', patch: { name: '科幻', parentId: null } }),
         expect.anything(),
       )
     })
@@ -608,7 +617,8 @@ describe('LibrarySidebar', () => {
       const createTag = vi.fn()
       ;(libraryHooks.useCreateLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: createTag, isPending: false })
 
-      render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+      render(<LibrarySidebar sessionKey="shared-new-tag" navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
+      showTagsPanel()
       fireEvent.click(screen.getByTitle('新建标签'))
       fireEvent.change(screen.getByPlaceholderText('标签名称'), { target: { value: '  Prize  ' } })
       fireEvent.click(screen.getAllByRole('button', { name: '创建' })[0])
@@ -616,7 +626,7 @@ describe('LibrarySidebar', () => {
       expect(createTag).toHaveBeenCalledWith({ libraryId: 'lib-1', name: 'Prize' }, expect.anything())
     })
 
-    it('says what happens to the works filed under a deleted category', () => {
+    it('says what happens to the works filed under a deleted category', async () => {
       mockHooks()
       mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }] })
       const mutateAsync = vi.fn().mockResolvedValue({})
@@ -626,11 +636,11 @@ describe('LibrarySidebar', () => {
       fireEvent.click(screen.getAllByLabelText('更多操作')[0])
       fireEvent.click(screen.getByText('删除'))
 
-      expect(screen.getByText(/回到未分类/)).toBeInTheDocument()
+      expect(screen.getByText(/移至未分类/)).toBeInTheDocument()
       fireEvent.click(screen.getAllByRole('button', { name: '删除' }).at(-1)!)
       expect(mutateAsync).toHaveBeenCalledWith({ libraryId: 'lib-1', categoryId: 'cat-1' })
       // Deleting the category being viewed is a dead end, so leave the filter.
-      expect(navSearch).toHaveBeenCalledWith({ shelf: undefined, tag: undefined, status: undefined, trash: undefined })
+      await waitFor(() => expect(navSearch).toHaveBeenCalledWith({ shelf: undefined, categoryScope: undefined, directory: undefined }))
     })
 
     it('shows the trash to a shared-library owner but hides it from members', () => {
@@ -664,11 +674,8 @@ describe('LibrarySidebar', () => {
         />,
       )
 
+      openLibrarySwitcher()
       fireEvent.click(screen.getByText('个人书库'))
-
-      // Two navigations here used to race, and the second - built from the URL
-      // state the first had not replaced yet - put the library id back, so the
-      // reader could never leave the library.
       expect(onSelectLibrary).toHaveBeenCalledTimes(1)
       expect(onSelectLibrary).toHaveBeenCalledWith(null)
     })
@@ -691,6 +698,7 @@ describe('LibrarySidebar', () => {
       )
 
       expect(screen.getByText('My books')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: '切换书库' }))
       fireEvent.click(screen.getAllByLabelText('更多操作')[0])
       fireEvent.click(screen.getByText('改名'))
       const input = screen.getByPlaceholderText('名称')
@@ -719,6 +727,7 @@ describe('LibrarySidebar', () => {
         />,
       )
 
+      fireEvent.click(screen.getByRole('button', { name: '切换书库' }))
       fireEvent.click(screen.getAllByLabelText('更多操作')[0])
       fireEvent.click(screen.getByText('详情'))
 
@@ -761,7 +770,8 @@ describe('LibrarySidebar', () => {
       // The personal library is the way back to your own books, so a stale id
       // in the settings blob cannot take it off the sidebar. It also has no
       // roster or owner to report, so its menu stops at renaming.
-      expect(document.querySelector('nav')?.textContent).toContain('My books')
+      expect(document.querySelector('aside')?.textContent).toContain('My books')
+      openLibrarySwitcher()
       fireEvent.click(screen.getAllByLabelText('更多操作')[0])
       expect(screen.queryByText('隐藏')).toBeNull()
       expect(screen.queryByText('显示')).toBeNull()
@@ -769,7 +779,7 @@ describe('LibrarySidebar', () => {
       expect(screen.getByText('改名')).toBeInTheDocument()
       expect(setHidden).not.toHaveBeenCalled()
       rerender(view())
-      expect(document.querySelector('nav')?.textContent).toContain('My books')
+      expect(document.querySelector('aside')?.textContent).toContain('My books')
     })
 
     it('makes joined shared rows draggable, and leaves the personal one alone', () => {
@@ -793,6 +803,7 @@ describe('LibrarySidebar', () => {
       // element. NavItem renders its own button instead of spreading unknown
       // props, so a row that drops them looks draggable and silently is not —
       // which is exactly how this shipped broken once already.
+      openLibrarySwitcher()
       const byLabel = new Map(
         screen.getAllByRole('button', { name: /Secret|Open|My books/ }).map((row) => [row.textContent, row]),
       )
@@ -823,8 +834,10 @@ describe('LibrarySidebar', () => {
       )
 
       // The server answers in join order (Alpha first); the manual order wins.
-      const labels = Array.from(document.querySelectorAll('nav .truncate')).map((n) => n.textContent)
-      expect(labels.indexOf('Bravo')).toBeLessThan(labels.indexOf('Alpha'))
+      openLibrarySwitcher()
+      const bravo = screen.getByRole('button', { name: 'Bravo' })
+      const alpha = screen.getByRole('button', { name: 'Alpha' })
+      expect(bravo.compareDocumentPosition(alpha) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
 
     it('keeps a library the manual order omits at the bottom', () => {
@@ -850,9 +863,12 @@ describe('LibrarySidebar', () => {
 
       // A library joined after the last drag has no place in the stored order
       // and keeps its base position at the end.
-      const labels = Array.from(document.querySelectorAll('nav .truncate')).map((n) => n.textContent)
-      expect(labels.indexOf('Charlie')).toBeLessThan(labels.indexOf('Alpha'))
-      expect(labels.indexOf('Alpha')).toBeLessThan(labels.indexOf('Bravo'))
+      openLibrarySwitcher()
+      const charlie = screen.getByRole('button', { name: 'Charlie' })
+      const alpha = screen.getByRole('button', { name: 'Alpha' })
+      const bravo = screen.getByRole('button', { name: 'Bravo' })
+      expect(charlie.compareDocumentPosition(alpha) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(alpha.compareDocumentPosition(bravo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
 
     it('hides a joined shared library without touching the others', () => {
@@ -881,14 +897,14 @@ describe('LibrarySidebar', () => {
       )
 
       const { rerender } = render(view())
+      openLibrarySwitcher()
       const rows = screen.getAllByLabelText('更多操作')
       fireEvent.click(rows[0])
       fireEvent.click(screen.getByText('隐藏'))
       rerender(view())
 
-      const navText = document.querySelector('nav')?.textContent
-      expect(navText).not.toContain('City')
-      expect(navText).toContain('Book club')
+      expect(screen.queryByText('City')).toBeNull()
+      expect(screen.getByText('Book club')).toBeInTheDocument()
     })
 
     it('lists only joined libraries; unjoined public rows moved to future discovery', () => {
@@ -912,6 +928,7 @@ describe('LibrarySidebar', () => {
       )
 
       // The unjoined library is not a switching row at all anymore.
+      openLibrarySwitcher()
       expect(screen.queryByText('Open')).toBeNull()
       expect(screen.getByText('Mine')).toBeInTheDocument()
       fireEvent.click(screen.getAllByLabelText('更多操作')[0])
@@ -933,6 +950,7 @@ describe('LibrarySidebar', () => {
           ]}
         />,
       )
+      openLibrarySwitcher()
       fireEvent.click(screen.getAllByLabelText('更多操作')[0])
       expect(screen.getByText('私密')).toBeInTheDocument()
       expect(screen.queryByText('加入书库')).toBeNull()
@@ -952,9 +970,71 @@ describe('LibrarySidebar', () => {
           onExploreLibraries={onExploreLibraries}
         />,
       )
+      fireEvent.click(screen.getByRole('button', { name: '切换书库' }))
       const exploreButton = screen.getByText('探索书库')
       fireEvent.click(exploreButton)
       expect(onExploreLibraries).toHaveBeenCalledTimes(1)
     })
+  })
+})
+
+
+describe('arrowless category navigation', () => {
+  const rows = [
+    { id: 'parent', name: 'Parent', bookCount: 1, subtreeBookCount: 2, parentId: null, pinned: false, hidden: false },
+    { id: 'child', name: 'Child', bookCount: 1, subtreeBookCount: 1, parentId: 'parent', pinned: false, hidden: false },
+    { id: 'other', name: 'Other', bookCount: 0, subtreeBookCount: 0, parentId: null, pinned: false, hidden: false },
+  ]
+
+  it('opens the current root from its menu header without collapsing its children', () => {
+    mockHooks()
+    mockLibraryHooks({ categories: rows })
+    const close = vi.fn()
+    render(<LibrarySidebar sessionKey={`header-${Math.random()}`} navSearch={navSearch} shelfId="parent" tagId={null} trash={false} activeLibraryId="lib-1" onMobileClose={close} />)
+    expect(screen.getByText('Child')).toBeInTheDocument()
+    fireEvent.contextMenu(screen.getByText('Parent'))
+    fireEvent.click(screen.getByRole('button', { name: /Parent 共 2 本/ }))
+    expect(navSearch).toHaveBeenCalledWith({ shelf: 'parent', categoryScope: 'subtree', trash: undefined, directory: undefined })
+    expect(screen.getByText('Child')).toBeInTheDocument()
+    expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('enters and expands a root then toggles the current root without navigating or closing the drawer', () => {
+    mockHooks()
+    mockLibraryHooks({ categories: rows })
+    const close = vi.fn()
+    const props = { sessionKey: `arrowless-${Math.random()}`, navSearch, shelfId: null as string | null, tagId: null, trash: false, activeLibraryId: 'lib-1', onMobileClose: close }
+    const { rerender } = render(<LibrarySidebar {...props} />)
+    expect(screen.queryByText('Child')).toBeNull()
+    expect(screen.queryByText('↳')).toBeNull()
+    fireEvent.click(screen.getByText('Parent'))
+    expect(screen.getByText('Child')).toBeInTheDocument()
+    expect(navSearch).toHaveBeenCalledWith({ shelf: 'parent', categoryScope: 'subtree', trash: undefined, directory: undefined })
+    expect(close).toHaveBeenCalledOnce()
+    rerender(<LibrarySidebar {...props} shelfId="parent" />)
+    fireEvent.click(screen.getByText('Parent'))
+    expect(screen.queryByText('Child')).toBeNull()
+    expect(navSearch).toHaveBeenCalledOnce()
+    expect(close).toHaveBeenCalledOnce()
+    mockLibraryHooks({ categories: rows.map((row) => ({ ...row, bookCount: row.bookCount + 1 })) })
+    rerender(<LibrarySidebar {...props} shelfId="parent" />)
+    expect(screen.queryByText('Child')).toBeNull()
+    fireEvent.click(screen.getByText('Parent'))
+    expect(screen.getByText('Child')).toBeInTheDocument()
+    expect(navSearch).toHaveBeenCalledOnce()
+  })
+
+  it('expands external child navigation without offering collapse or management in a read-only menu', () => {
+    mockHooks()
+    mockLibraryHooks({ categories: rows, relation: 'member' })
+    const close = vi.fn()
+    render(<LibrarySidebar sessionKey={`arrowless-${Math.random()}`} navSearch={navSearch} shelfId="child" tagId={null} trash={false} activeLibraryId="lib-1" onMobileClose={close} />)
+    expect(screen.getByText('Child')).toBeInTheDocument()
+    fireEvent.contextMenu(screen.getByText('Parent'))
+    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '收起' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '展开' })).toBeNull()
+    expect(navSearch).not.toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
   })
 })

@@ -19,7 +19,7 @@ import { publishPrivateBook } from './publish.service'
 import { updateLibrary } from './libraries.service'
 import { createLibrary } from './libraries.service'
 import { ensurePrivateLibrary } from './library-access'
-import { listLibraryCategories } from '../shelves/shelves.service'
+import { createLibraryCategory, deleteLibraryCategory, listLibraryCategories, updateLibraryCategory } from '../shelves/shelves.service'
 import { listLibraryTags } from '../tags/tags.service'
 import { addToPrivateLibrary } from './collect.service'
 import { resolveSharedVersionRead, resolveSourceRead } from './library-access'
@@ -133,6 +133,39 @@ describe('shared library catalog', () => {
       { id: createId('lbm'), libraryId, userId: adminId, role: 'admin', createdAt: 1, updatedAt: 1 },
       { id: createId('lbm'), libraryId, userId: memberId, role: 'member', createdAt: 1, updatedAt: 1 },
     ]).run()
+  })
+
+  it('keeps subtree paging and taxonomy counts aligned with visible works', async () => {
+    const root = await createLibraryCategory(ownerId, libraryId, { name: 'Root' })
+    const child = await createLibraryCategory(ownerId, libraryId, { name: 'Child', parentId: root.id })
+    const tag = seedTag(libraryId, 'Topic')
+    const direct = await uploadCatalogBook(libraryId, ownerId, txtFile('direct.txt', 'Direct text'), { title: 'Direct', categoryId: root.id, tagIds: [tag] })
+    const nested = await uploadCatalogBook(libraryId, ownerId, txtFile('child.txt', 'Child text'), { title: 'Nested', categoryId: child.id, tagIds: [tag] })
+    await uploadCatalogBook(libraryId, ownerId, txtFile('edition.txt', 'Another edition'), { libraryBookId: nested.libraryBookId })
+    const unlisted = await uploadCatalogBook(libraryId, ownerId, txtFile('unlisted.txt', 'Hidden edition'), { title: 'Unlisted', categoryId: child.id, tagIds: [tag] })
+    await updateCatalogVersion(ownerId, libraryId, unlisted.libraryBookId, unlisted.versionLinkId!, { status: 'unlisted' })
+    await uploadCatalogBook(libraryId, ownerId, txtFile('none.txt', 'Unclassified'), { title: 'None' })
+    expect((await listCatalogBooks(memberId, libraryId, { categoryId: root.id })).total).toBe(1)
+    const page = await listCatalogBooks(memberId, libraryId, { categoryId: root.id, categoryScope: 'subtree', pageSize: 1, page: 2 })
+    expect(page.total).toBe(2)
+    expect(page.items).toHaveLength(1)
+    expect((await listCatalogBooks(memberId, libraryId, { categoryId: root.id, categoryScope: 'subtree', tagId: tag })).total).toBe(2)
+    expect((await listCatalogBooks(memberId, libraryId, { categoryId: 'none', categoryScope: 'subtree' })).items.map((w) => w.title)).toEqual(['None'])
+    expect((await listLibraryCategories(memberId, libraryId)).find((c) => c.id === root.id)).toMatchObject({ bookCount: 1, subtreeBookCount: 2 })
+    expect((await listLibraryCategories(ownerId, libraryId)).find((c) => c.id === root.id)).toMatchObject({ bookCount: 1, subtreeBookCount: 3 })
+    expect((await listLibraryTags(memberId, libraryId)).find((t) => t.id === tag)?.bookCount).toBe(2)
+    await updateLibraryCategory(ownerId, libraryId, child.id, { hidden: true })
+    expect((await listLibraryCategories(memberId, libraryId)).find((c) => c.id === root.id)?.subtreeBookCount).toBe(1)
+    expect((await listCatalogBooks(memberId, libraryId, { categoryId: root.id, categoryScope: 'subtree' })).total).toBe(1)
+    await updateLibraryCategory(ownerId, libraryId, root.id, { hidden: true })
+    expect(await listLibraryCategories(memberId, libraryId)).toEqual([])
+    await deleteLibraryCategory(ownerId, libraryId, root.id)
+    expect((await getCatalogBook(ownerId, libraryId, direct.libraryBookId)).categoryId).toBeNull()
+    expect((await listLibraryCategories(ownerId, libraryId)).find((c) => c.id === child.id)?.parentId).toBeNull()
+    await updateLibraryCategory(ownerId, libraryId, child.id, { hidden: false })
+    await deleteCatalogBook(ownerId, libraryId, nested.libraryBookId)
+    expect((await listLibraryCategories(memberId, libraryId)).find((c) => c.id === child.id)?.bookCount).toBe(0)
+    expect((await listLibraryTags(memberId, libraryId)).find((t) => t.id === tag)?.bookCount).toBe(1)
   })
 
   it('carries the work taxonomy: tags on upload, replacement on update, names on read', async () => {

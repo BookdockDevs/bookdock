@@ -145,15 +145,16 @@ describe('library taxonomy (11.5)', () => {
     it('refuses cycles: self-parenting and moving a category under its own descendant', async () => {
       const root = await createLibraryCategory(ownerId, cityId, { name: 'Root' })
       const child = await createLibraryCategory(ownerId, cityId, { name: 'Child', parentId: root.id })
-      const grandchild = await createLibraryCategory(ownerId, cityId, { name: 'Grandchild', parentId: child.id })
+      await expect(createLibraryCategory(ownerId, cityId, { name: 'Grandchild', parentId: child.id }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
 
       await expect(setLibraryCategoryParent(ownerId, cityId, root.id, root.id))
         .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-      // root -> grandchild would close the loop root -> child -> grandchild.
-      await expect(setLibraryCategoryParent(ownerId, cityId, root.id, grandchild.id))
+      // The reverse edge would close the root/child cycle.
+      await expect(setLibraryCategoryParent(ownerId, cityId, root.id, child.id))
         .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
       // The valid direction still works.
-      const promoted = await setLibraryCategoryParent(ownerId, cityId, grandchild.id, null)
+      const promoted = await setLibraryCategoryParent(ownerId, cityId, child.id, null)
       expect(promoted.parentId).toBeNull()
     })
 
@@ -309,6 +310,11 @@ describe('library taxonomy (11.5)', () => {
       const secret = await createLibraryCategory(ownerId, cityId, { name: 'Secret' })
       const kept = seedWork(cityId, { title: 'Kept' })
       const hidden = seedWork(cityId, { title: 'Hidden' })
+      for (const workId of [kept, hidden]) {
+        const versionId = createId('bv')
+        db.insert(schema.bookVersions).values({ id: versionId, format: 'txt', size: 10, createdAt: 1, updatedAt: 1 }).run()
+        db.insert(schema.libraryBookVersions).values({ id: createId('lbv'), libraryId: cityId, libraryBookId: workId, bookVersionId: versionId, kind: 'shared', status: 'published', createdAt: 1, updatedAt: 1 }).run()
+      }
       db.insert(schema.libraryBookTags).values([
         { libraryBookId: kept, tagId: name.id },
         { libraryBookId: hidden, tagId: name.id },

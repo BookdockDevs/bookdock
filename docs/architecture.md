@@ -22,6 +22,64 @@ Selection toolbar geometry is captured in main-viewport coordinates after select
 
 ## Design Principles
 
+### Sidebar, home and taxonomy v1 (implemented functionality, 2026-10-04)
+
+The authoritative product slice is `docs/local/plan/sidebar-home-taxonomy-v1.md`.
+Taxonomy directories and sidebar entries share their context menu, count-to-menu capsule and touch/keyboard entry points. Directory management is available per item without a management mode. Grid drag sorting uses the same preferences and permissions, retains the complete identifier set when searching and only reorders shared categories within one parent. Selection mode follows the book-home control, changes entry clicks into selection and disables dragging; batch actions remain deferred.
+Taxonomy item menus expose one Edit action. Category editing combines name and parent changes in the existing atomic write; private shelves and tags edit their names. Dialog titles describe editing rather than renaming, and parent selection retains the two-level restrictions. There is no separate Move action.
+Sidebar category rows have no dedicated expansion-arrow column or empty placeholder. Entering a root category expands its children; clicking the current root again toggles expansion without navigating or closing the mobile drawer. Expansion is handled only by row clicks, including for read-only readers; context menus contain item management actions only. Child rows use indentation alone; trailing hidden/count/menu positions remain unchanged. External category navigation expands the selected root or its parent, while taxonomy refreshes preserve manual collapse.
+Direct category, shelf and tag navigation selects a browsing view. These view identifiers are not removable filter chips and do not trigger Clear Filters. The home header does not repeat a library/category breadcrumb. Clearing additional search, format, reading-status, author or series conditions retains the current view and its category scope. Further presentation of two-level category context is deferred until UI polishing settles it.
+Category scope is controlled by an Include subcategories switch inside the existing filter panel, only for a selected shared root category with visible children. It defaults to on (subtree); off selects direct scope. It has no standalone home control, filter chip or active-filter indicator and is retained by filter reset.
+Taxonomy directories display shared roots as responsive groups, two across on wide screens and one on narrow screens. Each group has one outer border, a clickable root heading and compact child entries, shown expanded by default. Roots without children have no empty child area. Flat shelves and tags use the same compact entry styling in a responsive grid; context menus, selection and sibling-only sorting retain their existing behavior.
+Directory selection supports explicit pin/unpin, hide/show and confirmed deletion through existing per-item authorized endpoints. Roots and children are selected independently. Select All adds name-matching entries only, excluding ancestors retained solely as search context. The floating toolbar follows book-home selection styling, locks selection while executing, clears successful ids and retains failures for retry. Mixed states expose both target actions. Deletion preserves books and existing category promotion semantics; no taxonomy batch API or merge/reparent operation is introduced in this slice.
+P0–P4 functionality is implemented locally; the plan records automated and
+disposable-instance evidence. Final UI polishing and manual browser acceptance
+remain pending at the user's request. Private shelves and all tags remain
+flat. Shared categories have at most two levels; both levels accept works. The
+server rejects private parenting, non-root parents, self/cross-library parents,
+and moving a category with children below another root. Rename and reparent are
+one transaction. Deleting a category keeps works (SET NULL) and promotes its
+direct children to roots. Existing anomalous data is never silently flattened.
+
+Catalog lists accept `categoryScope=direct|subtree` (default `direct` for existing
+clients). `none` always means uncategorized. Web explicitly requests `subtree`
+for a selected shared root unless the user chooses direct scope. Category and
+one tag combine with AND. `bookCount` remains the direct visible-work count;
+`subtreeBookCount` includes descendants. Counts exclude trash and use catalog
+visibility, including existence of a published version for non-managers; shared
+works count once regardless of their version count. Personal shelves retain the
+private card counting unit. Taxonomy counts do not depend on additional filters.
+
+Web URL state adds `directory=categories|tags` and `categoryScope=direct|subtree`.
+Directory state never enters API list filters or query keys. Entering a directory
+preserves books filters, paging, view and selection; choosing an entry changes
+only that filter and resets paging. Switching libraries or trash clears selection
+and scope-specific filters. Sidebar panel, expanded roots and per-panel scroll
+positions are session UI state scoped by user and library; directory lookup text
+is separate from book search. The sidebar has fixed navigation and account areas,
+one middle segmented list and directory icon, with no search/sort/create rows.
+The library dropdown has no search and a fixed discovery footer reusing the
+existing discovery dialog. Mobile panel changes/expansion keep the drawer open;
+navigation and directory entry close it.
+
+Shared category paths are reused by upload context, publishing, work edit,
+details and batch organization; private shelf selectors stay flat. Upload dialogs
+keep their context-derived destination without an editable destination selector;
+appending a version preserves the bound work classification. Category
+management and shared work organization remain owner/admin operations. Member
+upload capability does not confer taxonomy management, and shared trash remains
+owner-only. Hidden ancestors affect descendants without rewriting their own
+hidden flags; changing or deleting an ancestor must explain visibility effects.
+Sorting/pinning stays within siblings; reorder still submits every category id.
+API state remains in TanStack Query, with existing stable taxonomy query keys.
+Shared work details have an independent query under
+`['libraries', libraryId, 'catalog', 'detail', libraryBookId]`: moving a work out
+of the current catalog filter must not revert an open detail to its click-time
+snapshot. Taxonomy/work writes invalidate catalog, private details, reader
+`['book']` and batch-selection caches. Private reordering includes hidden ids
+from an owner-only complete read before submitting, with optimistic rollback.
+
+
 1. **KISS / first principles**: inline first; only extract into functions when logic repeats ≥3 times or a single block exceeds 50 lines. Avoid over-abstraction.
 2. **Evolution over prediction**: reserve interfaces only where "expensive to refactor and definitely needed" (storage driver, error-class, album-of-mapping parsing, API versioning, multi-user schema); everything else is YAGNI.
 3. **Contract first**: frontend and backend share a single source of truth for types + validation (`@bookdock/shared`) to eliminate drift.

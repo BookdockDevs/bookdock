@@ -98,7 +98,7 @@ export default function UploadSheet({
     : _('library.uploadShelfContext', { name: shelfName ?? '' })
   const tagName = tagId ? tagsData?.data.find((tag) => tag.id === tagId)?.name : undefined
   const assignment: UploadAssignment = {
-    shelfId,
+    shelfId: shelfId,
     tagIds: includeCurrentTag && tagId ? [tagId] : [],
   }
 

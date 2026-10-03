@@ -171,7 +171,7 @@ export default function LibraryDiscoveryDialog({
                       e.preventDefault()
                       setDetailsTarget(lib)
                     }}
-                    className="group flex flex-col gap-3 rounded-xl border border-stone-200/80 bg-white p-3.5 text-left transition-colors hover:border-stone-300 hover:bg-stone-50/50 cursor-pointer sm:flex-row sm:items-center sm:justify-between dark:border-stone-800 dark:bg-stone-900/60 dark:hover:border-stone-700 dark:hover:bg-stone-850/40"
+                    className="group flex flex-col gap-3 rounded-xl border border-stone-200/80 bg-white p-3.5 text-left transition-colors hover:border-stone-300 hover:bg-stone-50/50 cursor-pointer sm:flex-row sm:items-center sm:justify-between dark:border-stone-800 dark:bg-stone-900/60 dark:hover:border-stone-700 dark:hover:bg-stone-800/60"
                   >
                     <div className="min-w-0 flex-1 space-y-1.5">
                       <div className="flex items-center gap-2">

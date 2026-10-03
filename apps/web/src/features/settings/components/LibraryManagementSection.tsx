@@ -11,6 +11,7 @@ import QueryErrorState from '@/components/ui/QueryErrorState'
 import SmartMenu from '@/components/ui/SmartMenu'
 import LibraryCreateDialog from '@/features/library/components/LibraryCreateDialog'
 import LibraryManageDialog from '@/features/library/components/LibraryManageDialog'
+import { MenuHeader } from '@/features/library/components/RowMenuChrome'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
 import { applyLibraryOrder } from '@/features/library/dnd'
 import { useDeleteLibrary, useHiddenLibraries, useLibraries, useLibraryPrefs, useRemoveLibraryMember } from '@/features/library/hooks'
@@ -269,7 +270,7 @@ function LibraryRow({ library, hidden, onEnter, onManage, onLeave, onDelete, onT
       title={_('library.openLibrary')}
     >
       <td className="py-3 pl-4 pr-3 sm:pl-6">
-        <span className="block truncate font-medium text-stone-800 transition-colors group-hover:text-blue-600 dark:text-stone-100 dark:group-hover:text-blue-400">
+        <span className="block truncate font-medium text-stone-800 transition-colors group-hover:text-stone-950 dark:text-stone-100 dark:group-hover:text-white">
           {library.name}
         </span>
       </td>
@@ -310,7 +311,8 @@ function LibraryRow({ library, hidden, onEnter, onManage, onLeave, onDelete, onT
             <circle cx="12" cy="19" r="2" />
           </svg>
         </button>
-        <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(150, itemCount * 36 + 8)} onClose={menu.close}>
+        <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(150, itemCount * 36 + 60)} onClose={menu.close}>
+          <MenuHeader title={library.name} onClick={() => { menu.close(); onEnter() }} />
           {canManageRow && (
             <button
               type="button"

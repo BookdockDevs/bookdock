@@ -16,6 +16,7 @@ import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 import { catalogWorkRow, rowCover, versionOrdinal, versionTabLabel } from '../book-row'
 import { copyCover, downloadCover } from '../download'
 import { useCollectBook, useLibraryCategories, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
+import { categoryPath } from '../taxonomy'
 import { getHiddenCause } from '../hidden-status'
 import BookCover from './BookCover'
 import DetailHeader from './book-detail/DetailHeader'
@@ -63,7 +64,7 @@ export default function WorkDetailBody({
   const _ = useTranslation()
   const navigate = useNavigate()
   const categories = useLibraryCategories(library.id, { enabled: Boolean(work.categoryId) })
-  const categoryName = categories.isError ? undefined : categories.data?.data.find((category) => category.id === work.categoryId)?.name
+  const categoryName = categories.isError ? undefined : (work.categoryId && categories.data?.data.some((category) => category.id === work.categoryId) ? categoryPath(categories.data.data, work.categoryId).map((category) => category.name).join(' / ') : undefined)
   const row = catalogWorkRow(work)
   // The visible version drives everything below: header, actions and manager
   // operations all read the selection, never a hardcoded first row.
@@ -106,7 +107,7 @@ export default function WorkDetailBody({
   const readable = Boolean(selected) && (canManage || !selectedHidden)
   const canDownload = canCollect && readable && Boolean(selected)
 
-  function goToFilter(search: { author?: string; tag?: string; series?: string; shelf?: string }) {
+  function goToFilter(search: { author?: string; tag?: string; series?: string; shelf?: string; categoryScope?: 'direct' | 'subtree' }) {
     onClose()
     void navigate({ to: '/', search: { libraryId: library.id, ...search } })
   }
@@ -288,7 +289,7 @@ export default function WorkDetailBody({
         chips={(
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             {!work.categoryId || categoryName ? (
-              <FilterChip prefix="📁" label={categoryName ?? _('library.uncategorized')} onClick={() => goToFilter({ shelf: work.categoryId ?? 'none' })} />
+              <FilterChip prefix="📁" label={categoryName ?? _('library.uncategorized')} onClick={() => goToFilter({ shelf: work.categoryId ?? 'none', categoryScope: work.categoryId ? 'subtree' : 'direct' })} />
             ) : (
               <span className="inline-flex min-h-7 items-center gap-1.5 rounded-md bg-stone-100/90 px-2 py-0.5 text-xs text-stone-400 dark:bg-stone-800/90 dark:text-stone-500">
                 <span aria-hidden="true">📁</span>

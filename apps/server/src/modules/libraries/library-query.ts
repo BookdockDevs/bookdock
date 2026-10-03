@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql, type SQL, typ
 
 import { bookVersions, contentRevisions, libraryBookTags, libraryBooks, libraryBookVersions, libraryCategories, libraryTags } from '../../db/schema'
 import type { getDb } from '../../db/client'
-import type { HiddenReason, HiddenVia } from '@bookdock/shared'
+import type { CategoryScope, HiddenReason, HiddenVia } from '@bookdock/shared'
 
 /**
  * Query dimensions a library's book list can be filtered and ordered by (0.4.0).
@@ -28,6 +28,7 @@ export interface LibraryListQuery {
   sortOrder?: string
   /** Category, or the 'none' sentinel for uncategorized. */
   categoryId?: string
+  categoryScope?: CategoryScope
   tagId?: string
   format?: 'epub' | 'txt'
   author?: string
@@ -64,10 +65,31 @@ export function likePattern(term: string): string {
 }
 
 /** 'none' filters uncategorized works; otherwise the category must match. */
-export function categoryFilter(categoryId: string | undefined): SQL | undefined {
+export function categoryFilter(categoryId: string | undefined, scope: CategoryScope = 'direct', libraryId?: string): SQL | undefined {
   if (categoryId === 'none') return isNull(libraryBooks.categoryId)
   if (!categoryId) return undefined
+  if (scope === 'subtree' && libraryId) {
+    // UNION terminates even for a historical cycle; every step stays in-library.
+    return sql`${libraryBooks.categoryId} IN (
+      WITH RECURSIVE category_tree(id) AS (
+        SELECT id FROM library_categories WHERE id = ${categoryId} AND library_id = ${libraryId}
+        UNION
+        SELECT child.id FROM library_categories child
+        INNER JOIN category_tree parent ON child.parent_id = parent.id
+        WHERE child.library_id = ${libraryId}
+      ) SELECT id FROM category_tree
+    )`
+  }
   return eq(libraryBooks.categoryId, categoryId)
+}
+
+export function publishedWorkExists(): SQL {
+  return sql`EXISTS (
+    SELECT 1 FROM library_book_versions AS visible_version
+    WHERE visible_version.library_book_id = ${libraryBooks.id}
+      AND visible_version.library_id = ${libraryBooks.libraryId}
+      AND visible_version.status = 'published'
+  )`
 }
 
 /** Works carrying the tag, scoped to the library so ids cannot cross over. */
@@ -377,7 +399,7 @@ export function seriesFilter(series: string, libraryId: string, opts?: { publish
 /** All list filters that mean the same thing in every library, in one place. */
 export function sharedListConditions(query: LibraryListQuery, libraryId: string, opts?: { publishedOnly?: boolean }): SQL[] {
   const conditions: SQL[] = []
-  const category = categoryFilter(query.categoryId)
+  const category = categoryFilter(query.categoryId, query.categoryScope, libraryId)
   if (category) conditions.push(category)
   const tag = query.tagId ? tagFilter(query.tagId, libraryId) : undefined
   if (tag) conditions.push(tag)

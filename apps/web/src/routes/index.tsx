@@ -1,6 +1,7 @@
 import { createRoute } from '@tanstack/react-router'
 import { rootRoute } from './__root'
 import Library from '@/features/library/Library'
+import { categoryScopeSchema, type CategoryScope } from '@bookdock/shared'
 
 export interface LibrarySearch {
   page?: number
@@ -17,6 +18,8 @@ export interface LibrarySearch {
   trash?: boolean
   /** Active shared library; absent = the user's own private library. */
   libraryId?: string
+  directory?: 'categories' | 'tags'
+  categoryScope?: CategoryScope
 }
 
 const VALID_VIEWS = new Set(['grid', 'list'])
@@ -43,6 +46,8 @@ export const indexRoute = createRoute({
       status: VALID_STATUSES.has(input.status as string) ? (input.status as LibrarySearch['status']) : undefined,
       trash: input.trash === true ? true : undefined,
       libraryId: typeof input.libraryId === 'string' && input.libraryId.length > 0 ? input.libraryId : undefined,
+      directory: input.directory === 'categories' || input.directory === 'tags' ? input.directory : undefined,
+      categoryScope: categoryScopeSchema.safeParse(input.categoryScope).success ? input.categoryScope as CategoryScope : undefined,
     }
   },
   component: Library,

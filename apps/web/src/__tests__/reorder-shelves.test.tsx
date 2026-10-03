@@ -9,7 +9,7 @@ import { useReorderShelves } from '../features/library/hooks'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof apiClient>()
-  return { ...actual, apiPut: vi.fn() }
+  return { ...actual, apiGet: vi.fn(), apiPut: vi.fn() }
 })
 
 function wrapper(queryClient: QueryClient) {
@@ -32,6 +32,7 @@ describe('useReorderShelves', () => {
     queryClient.setQueryData(['shelves'], {
       data: [shelf('a', 'A'), shelf('b', 'B'), shelf('c', 'C')],
     })
+    vi.mocked(apiClient.apiGet).mockResolvedValue({ data: [shelf('a', 'A'), shelf('b', 'B'), shelf('c', 'C')] })
     vi.mocked(apiClient.apiPut).mockResolvedValue({ data: null } as never)
   })
 

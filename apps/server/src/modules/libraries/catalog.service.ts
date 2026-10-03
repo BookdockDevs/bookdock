@@ -27,6 +27,7 @@ import {
   likePattern,
   libraryOrderBy,
   loadLibraryHiddenTaxonomy,
+  publishedWorkExists,
   sharedListConditions,
   taxonomyNameMatch,
   versionEffectiveMatch,
@@ -399,11 +400,7 @@ export async function listCatalogBooks(
   // this, it would still occupy total/items with an empty version list and
   // leak the hidden version's name, count and metadata.
   if (!includeUnlisted) {
-    filters.push(sql`EXISTS (
-      SELECT 1 FROM library_book_versions AS visible_version
-      WHERE visible_version.library_book_id = ${libraryBooks.id}
-        AND visible_version.status = 'published'
-    )`)
+    filters.push(publishedWorkExists())
   }
   const where = and(...filters)
   const total = db.select({ count: sql<number>`count(*)` }).from(libraryBooks).where(where).get()?.count ?? 0

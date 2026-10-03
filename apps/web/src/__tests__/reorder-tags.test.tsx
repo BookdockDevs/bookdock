@@ -9,7 +9,7 @@ import { useReorderTags } from '../features/library/hooks'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof apiClient>()
-  return { ...actual, apiPut: vi.fn() }
+  return { ...actual, apiGet: vi.fn(), apiPut: vi.fn() }
 })
 
 function wrapper(queryClient: QueryClient) {
@@ -32,6 +32,7 @@ describe('useReorderTags', () => {
     queryClient.setQueryData(['tags'], {
       data: [tag('a', 'A'), tag('b', 'B'), tag('c', 'C')],
     })
+    vi.mocked(apiClient.apiGet).mockResolvedValue({ data: [tag('a', 'A'), tag('b', 'B'), tag('c', 'C')] })
     vi.mocked(apiClient.apiPut).mockResolvedValue({ data: null } as never)
   })
 

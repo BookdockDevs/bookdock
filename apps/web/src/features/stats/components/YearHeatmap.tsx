@@ -15,7 +15,7 @@ interface YearHeatmapProps {
 }
 
 function levelClass(seconds: number, max: number): string {
-  if (seconds <= 0 || max <= 0) return 'bg-stone-100 hover:bg-stone-200 dark:bg-stone-850 dark:hover:bg-stone-800'
+  if (seconds <= 0 || max <= 0) return 'bg-stone-100 hover:bg-stone-200 dark:bg-stone-800/50 dark:hover:bg-stone-800'
   const ratio = seconds / max
   if (ratio <= 0.25) return 'bg-emerald-200 hover:bg-emerald-300 dark:bg-emerald-950/70 dark:hover:bg-emerald-900'
   if (ratio <= 0.5) return 'bg-emerald-400 hover:bg-emerald-500 dark:bg-emerald-700 dark:hover:bg-emerald-600'
@@ -132,7 +132,7 @@ export default function YearHeatmap({ selectedDate, onSelectDate }: YearHeatmapP
           <div className="mt-3 flex items-center justify-end gap-1.5 text-[11px] text-stone-400 select-none dark:text-stone-500">
             <span>{_('stats.heatmapLess')}</span>
             <div className="flex items-center gap-[3px]">
-              <div className="h-2.5 w-2.5 rounded-[2px] bg-stone-100 dark:bg-stone-850" />
+              <div className="h-2.5 w-2.5 rounded-[2px] bg-stone-100 dark:bg-stone-800/50" />
               <div className="h-2.5 w-2.5 rounded-[2px] bg-emerald-200 dark:bg-emerald-950/70" />
               <div className="h-2.5 w-2.5 rounded-[2px] bg-emerald-400 dark:bg-emerald-700" />
               <div className="h-2.5 w-2.5 rounded-[2px] bg-emerald-500 dark:bg-emerald-500" />

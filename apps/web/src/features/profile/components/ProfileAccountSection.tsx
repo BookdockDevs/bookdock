@@ -108,7 +108,7 @@ export default function ProfileAccountSection({ onOpenSettings }: ProfileAccount
   return (
     <section className="relative overflow-hidden rounded-2xl border border-stone-200/80 bg-white shadow-sm dark:border-stone-800 dark:bg-stone-900">
       {/* Decorative Atmosphere Banner */}
-      <div className="relative h-24 w-full overflow-hidden bg-gradient-to-r from-stone-200 via-amber-100/50 to-stone-300/70 sm:h-32 dark:from-stone-800 dark:via-stone-850 dark:to-stone-700/60">
+      <div className="relative h-24 w-full overflow-hidden bg-gradient-to-r from-stone-200 via-amber-100/50 to-stone-300/70 sm:h-32 dark:from-stone-800 dark:via-stone-900 dark:to-stone-700/60">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.4),transparent_70%)] dark:bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.05),transparent_70%)]" />
         <div className="absolute -right-6 -top-6 h-36 w-36 rounded-full bg-white/20 blur-xl dark:bg-white/5" />
       </div>

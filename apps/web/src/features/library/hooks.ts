@@ -17,6 +17,7 @@ import {
   type CollectBookRes,
   type CoverPaletteId,
   type Category,
+  type CategoryScope,
   type ForkLocalRes,
   type LibraryCreateReq,
   type LibraryListItem,
@@ -396,7 +397,7 @@ export function useRemoveLibraryMember() {
  * catalog card shows, so the catalog query is invalidated with the taxonomy.
  */
 function useTaxonomyMutation<TVars extends { libraryId: string }, TData = unknown>(
-  build: (vars: TVars) => { url: string; method: 'post' | 'patch' | 'delete'; body?: unknown },
+  build: (vars: TVars) => { url: string; method: 'post' | 'patch' | 'delete'; body?: unknown; successKey?: string },
 ) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -407,36 +408,43 @@ function useTaxonomyMutation<TVars extends { libraryId: string }, TData = unknow
       return apiPost<{ data: TData }>(url, body)
     },
     onSuccess: (_res, vars) => {
+      const key = build(vars).successKey
+      if (key) notify.success({ key })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['book'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
     },
+    onError: (error) => notify.error(getUserErrorNotification(error)),
   })
 }
 
 export function useCreateLibraryCategory() {
-  return useTaxonomyMutation<{ libraryId: string; name: string }, Category>(({ libraryId, name }) => ({
-    url: `/libraries/${libraryId}/categories`, method: 'post', body: { name },
+  return useTaxonomyMutation<{ libraryId: string; name: string; parentId?: string }, Category>(({ libraryId, name, parentId }) => ({
+    url: `/libraries/${libraryId}/categories`, method: 'post', body: { name, parentId }, successKey: 'toast.categoryCreated',
   }))
 }
 
 export function useUpdateLibraryCategory() {
-  return useTaxonomyMutation<{ libraryId: string; categoryId: string; patch: { name?: string; pinned?: boolean; hidden?: boolean } }, Category>(
+  return useTaxonomyMutation<{ libraryId: string; categoryId: string; patch: { name?: string; parentId?: string | null; pinned?: boolean; hidden?: boolean } }, Category>(
     ({ libraryId, categoryId, patch }) => ({
       url: `/libraries/${libraryId}/categories/${categoryId}`, method: 'patch', body: patch,
+      successKey: patch.name !== undefined || patch.parentId !== undefined ? 'toast.categoryUpdated' : undefined,
     }),
   )
 }
 
 export function useDeleteLibraryCategory() {
   return useTaxonomyMutation<{ libraryId: string; categoryId: string }>(({ libraryId, categoryId }) => ({
-    url: `/libraries/${libraryId}/categories/${categoryId}`, method: 'delete',
+    url: `/libraries/${libraryId}/categories/${categoryId}`, method: 'delete', successKey: 'toast.categoryDeleted',
   }))
 }
 
 export function useCreateLibraryTag() {
   return useTaxonomyMutation<{ libraryId: string; name: string }, LibraryTag>(({ libraryId, name }) => ({
-    url: `/libraries/${libraryId}/tags`, method: 'post', body: { name },
+    url: `/libraries/${libraryId}/tags`, method: 'post', body: { name }, successKey: 'toast.tagCreated',
   }))
 }
 
@@ -444,13 +452,14 @@ export function useUpdateLibraryTag() {
   return useTaxonomyMutation<{ libraryId: string; tagId: string; patch: { name?: string; pinned?: boolean; hidden?: boolean } }>(
     ({ libraryId, tagId, patch }) => ({
       url: `/libraries/${libraryId}/tags/${tagId}`, method: 'patch', body: patch,
+      successKey: patch.name !== undefined ? 'toast.tagRenamed' : undefined,
     }),
   )
 }
 
 export function useDeleteLibraryTag() {
   return useTaxonomyMutation<{ libraryId: string; tagId: string }>(({ libraryId, tagId }) => ({
-    url: `/libraries/${libraryId}/tags/${tagId}`, method: 'delete',
+    url: `/libraries/${libraryId}/tags/${tagId}`, method: 'delete', successKey: 'toast.tagDeleted',
   }))
 }
 
@@ -523,6 +532,7 @@ export interface CatalogListParams {
   sortBy?: string
   sortOrder?: string
   categoryId?: string
+  categoryScope?: CategoryScope
   tagId?: string
   format?: string
   author?: string
@@ -544,6 +554,7 @@ function catalogQueryParts(libraryId: string, params: CatalogListParams) {
     sortBy: params.sortBy ?? '',
     sortOrder: params.sortOrder ?? '',
     categoryId: params.categoryId ?? '',
+    categoryScope: params.categoryScope ?? 'direct',
     tagId: params.tagId ?? '',
     format: params.format ?? '',
     author: params.author ?? '',
@@ -556,6 +567,7 @@ function catalogQueryParts(libraryId: string, params: CatalogListParams) {
   if (key.sortBy) search.set('sortBy', key.sortBy)
   if (key.sortOrder) search.set('sortOrder', key.sortOrder)
   if (key.categoryId) search.set('categoryId', key.categoryId)
+  if (key.categoryScope !== 'direct') search.set('categoryScope', key.categoryScope)
   if (key.tagId) search.set('tagId', key.tagId)
   if (key.format) search.set('format', key.format)
   if (key.author) search.set('author', key.author)
@@ -637,9 +649,12 @@ export function useSetWorkCategory() {
     mutationFn: ({ libraryId, libraryBookId, categoryId }: { libraryId: string; libraryBookId: string; categoryId: string | null }) =>
       apiPatch(`/libraries/${libraryId}/books/${libraryBookId}`, { categoryId }),
     onSuccess: (_res, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['book'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
-      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
+
     },
   })
 }
@@ -648,6 +663,15 @@ export function useSetWorkCategory() {
  * Edit a work's own metadata (5.3): title, author, description, category and
  * the whole tag set. Version overrides are a separate PATCH on the version.
  */
+export function useCatalogBookDetail(libraryId: string | null, libraryBookId: string | null) {
+  return useQuery({
+    queryKey: ['libraries', libraryId, 'catalog', 'detail', libraryBookId],
+    queryFn: () => apiGet<{ data: CatalogBook }>(`/libraries/${libraryId}/books/${libraryBookId}`),
+    enabled: Boolean(libraryId && libraryBookId),
+    staleTime: 0,
+  })
+}
+
 export function useUpdateCatalogBook() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -658,6 +682,8 @@ export function useUpdateCatalogBook() {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
       void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['book'] })
     },
   })
 }
@@ -1456,6 +1482,9 @@ export function useRenameShelf() {
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => apiPut<{ data: ShelfListItem }>(`/shelves/${id}`, { name }),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['book'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       notify.success({ key: 'toast.shelfRenamed' })
     },
@@ -1486,9 +1515,13 @@ export function useToggleShelfHidden() {
   return useMutation({
     mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) => apiPut(`/shelves/${id}`, { hidden }),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['book'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['books'] })
     },
+    onError: (error) => notify.error(getUserErrorNotification(error, 'library.taxonomyVisibilityFailed')),
   })
 }
 
@@ -1498,6 +1531,9 @@ export function useDeleteShelf() {
   return useMutation({
     mutationFn: (id: string) => apiDelete<{ data: null }>(`/shelves/${id}`),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['book'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       notify.success({ key: 'toast.shelfDeleted' })
     },
@@ -1511,7 +1547,13 @@ export function useReorderShelves() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (shelfIds: string[]) => apiPut<{ data: null }>('/shelves/order', { shelfIds }),
+    mutationFn: async (shelfIds: string[]) => {
+      const all = await apiGet<{ data: ShelfListItem[] }>('/shelves?showHidden=1')
+      const visible = new Set(shelfIds)
+      let position = 0
+      const complete = all.data.map((row) => visible.has(row.id) ? shelfIds[position++]! : row.id)
+      return apiPut<{ data: null }>('/shelves/order', { shelfIds: complete })
+    },
     onMutate: (shelfIds) => {
       const prev = queryClient.getQueryData<{ data: ShelfListItem[] }>(['shelves'])
       if (prev) {
@@ -1534,7 +1576,13 @@ export function useReorderTags() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (tagIds: string[]) => apiPut<{ data: null }>('/tags/order', { tagIds }),
+    mutationFn: async (tagIds: string[]) => {
+      const all = await apiGet<{ data: TagListItem[] }>('/tags?showHidden=1')
+      const visible = new Set(tagIds)
+      let position = 0
+      const complete = all.data.map((row) => visible.has(row.id) ? tagIds[position++]! : row.id)
+      return apiPut<{ data: null }>('/tags/order', { tagIds: complete })
+    },
     onMutate: (tagIds) => {
       const prev = queryClient.getQueryData<{ data: TagListItem[] }>(['tags'])
       if (prev) {
@@ -1734,6 +1782,9 @@ export function useRenameTag() {
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => apiPut<{ data: TagListItem }>(`/tags/${id}`, { name }),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['book'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
       notify.success({ key: 'toast.tagRenamed' })
     },
@@ -1763,9 +1814,13 @@ export function useToggleTagHidden() {
   return useMutation({
     mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) => apiPut(`/tags/${id}`, { hidden }),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['book'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
       queryClient.invalidateQueries({ queryKey: ['books'] })
     },
+    onError: (error) => notify.error(getUserErrorNotification(error, 'library.taxonomyVisibilityFailed')),
   })
 }
 
@@ -1775,6 +1830,9 @@ export function useDeleteTag() {
   return useMutation({
     mutationFn: (id: string) => apiDelete<{ data: null }>(`/tags/${id}`),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['book'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
       queryClient.invalidateQueries({ queryKey: ['books'] })
       notify.success({ key: 'toast.tagDeleted' })

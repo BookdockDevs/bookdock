@@ -64,6 +64,31 @@ describe('libraries routes', () => {
     }).run()
   })
 
+  it('validates category scopes and saves rename and reparent atomically', async () => {
+    const app = createApp({ id: ownerId })
+    const create = async (name: string, parentId?: string) => {
+      const response = await app.request(`/api/v1/libraries/${libraryId}/categories`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, parentId }),
+      })
+      expect(response.status).toBe(201)
+      return (await response.json()).data
+    }
+    const root = await create('Root')
+    const child = await create('Child', root.id)
+    const response = await app.request(`/api/v1/libraries/${libraryId}/categories/${root.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Changed', parentId: child.id }),
+    })
+    expect(response.status).toBe(400)
+    const categories = await (await app.request(`/api/v1/libraries/${libraryId}/categories`)).json()
+    expect(categories.data.find((row: { id: string }) => row.id === root.id)).toMatchObject({ name: 'Root', parentId: null, subtreeBookCount: 0 })
+    expect((await app.request(`/api/v1/libraries/${libraryId}/books?categoryScope=invalid`)).status).toBe(400)
+    expect((await app.request(`/api/v1/libraries/${libraryId}/books?categoryId=${root.id}&categoryScope=subtree`)).status).toBe(200)
+    const denied = await createApp({ id: memberId }).request(`/api/v1/libraries/${libraryId}/categories/${child.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parentId: null }),
+    })
+    expect(denied.status).toBe(403)
+  })
+
   it('transfers ownership for the owner and rejects members', async () => {
     const app = createApp({ id: memberId })
     const denied = await app.request(`/api/v1/libraries/${libraryId}/transfer`, {

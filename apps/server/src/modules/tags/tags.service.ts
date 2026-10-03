@@ -5,7 +5,7 @@ import { libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryT
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { ensurePrivateLibrary, isLibraryManager, requireLibraryManager, assertLibraryBrowsable } from '../libraries/library-access'
-import { hiddenCategoryExclusion, hiddenTagExclusion, loadLibraryHiddenTaxonomy, workDirectHiddenExclusion } from '../libraries/library-query'
+import { hiddenCategoryExclusion, hiddenTagExclusion, loadLibraryHiddenTaxonomy, publishedWorkExists, workDirectHiddenExclusion } from '../libraries/library-query'
 
 function privateLibraryId(userId: string): string | null {
   const db = getDb()
@@ -228,6 +228,7 @@ export async function listLibraryTags(actorId: string, libraryId: string) {
   const manager = await isLibraryManager(actorId, libraryId)
   const taxonomy = manager ? null : loadLibraryHiddenTaxonomy(db, libraryId)
   const countExtra: SQL[] = []
+  if (!manager) countExtra.push(publishedWorkExists())
   if (taxonomy) {
     countExtra.push(workDirectHiddenExclusion())
     const category = hiddenCategoryExclusion(taxonomy.hiddenCategoryIds)

@@ -18,8 +18,8 @@ export default function EmptyFilter({ onClear }: EmptyFilterProps) {
   const _ = useTranslation()
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
-      <div className="mb-1 flex h-20 w-20 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 border-stone-200/70 dark:bg-stone-900 dark:ring-stone-800">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-stone-300 dark:text-stone-600">
+      <div className="mb-1 flex h-16 w-16 items-center justify-center rounded-2xl border border-stone-200/80 bg-white shadow-xs dark:border-stone-800 dark:bg-stone-900">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-stone-400 dark:text-stone-500">
           <circle cx="11" cy="11" r="7" />
           <line x1="16.5" y1="16.5" x2="21" y2="21" />
         </svg>

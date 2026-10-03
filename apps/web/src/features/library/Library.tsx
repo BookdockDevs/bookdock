@@ -50,6 +50,8 @@ import LibraryDiscoveryDialog from './components/LibraryDiscoveryDialog'
 import LibraryHeader from './components/LibraryHeader'
 import LibraryPagination from './components/LibraryPagination'
 import LibrarySidebar from './components/LibrarySidebar'
+import LibraryContextBar from './components/LibraryContextBar'
+import TaxonomyDirectory from './components/TaxonomyDirectory'
 import ListItemWrapper from './components/ListItemWrapper'
 import { SelectionCheck } from './components/RowChrome'
 import ReadingStatsCard from './components/ReadingStatsCard'
@@ -61,6 +63,7 @@ import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, resolveD
 import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-row'
 import { libraryUrlCorrection, vanishedFilterCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
+import { sortCategories } from './taxonomy'
 import { useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
 
 
@@ -141,6 +144,7 @@ export default function Library() {
   // is a separate concern and must not be overwritten by trash-only sorting
   const sortBy = search.sortBy ?? (trash ? 'deletedAt' : defaultSortBy ?? 'createdAt')
   const sortOrder = search.sortOrder ?? (trash ? 'desc' : defaultSortOrder ?? BOOK_SORT_DEFAULT_DIR[sortBy as BookSortPrefField] ?? 'desc')
+  const categoryScope = search.categoryScope ?? (activeLibrary ? 'subtree' : 'direct')
   const shelfId = search.shelf ?? null
   const tagId = search.tag ?? null
   const author = search.author ?? null
@@ -174,20 +178,22 @@ export default function Library() {
       // context prefetches the wrong list when leaving it (shared -> private
       // would warm the shared catalog instead of the private books).
       const target = targetLibraryId !== undefined ? targetLibraryId : (activeLibrary?.id ?? null)
+      const switching = target !== (activeLibrary?.id ?? null)
       // Prefetch the list the reader would actually land on, which is the
       // catalog while a shared library is in context.
       if (target) {
         void prefetchLibraryCatalog(queryClient, target, {
           page: 1,
           pageSize,
-          q: query,
+          q: switching ? '' : query,
           sortBy: nextSortBy,
           sortOrder: nextSortOrder,
           categoryId: nextShelfId ?? undefined,
+          categoryScope: switching ? 'subtree' : patch.categoryScope ?? categoryScope,
           tagId: nextTagId ?? undefined,
-          format: format ?? undefined,
-          author: author ?? undefined,
-          series: series ?? undefined,
+          format: switching ? undefined : format ?? undefined,
+          author: switching ? undefined : author ?? undefined,
+          series: switching ? undefined : series ?? undefined,
           trash: nextTrash || undefined,
         })
         return
@@ -195,20 +201,20 @@ export default function Library() {
       void prefetchBooks(queryClient, {
         page: 1,
         pageSize,
-        search: query,
+        search: switching ? '' : query,
         sortBy: nextSortBy,
         sortOrder: nextSortOrder,
         shelfId: nextShelfId,
         tagId: nextTagId,
-        author: null,
-        series: null,
-        format,
-        readStatus: nextStatus,
+        author: switching ? null : author,
+        series: switching ? null : series,
+        format: switching ? null : format,
+        readStatus: switching ? null : nextStatus,
         trash: nextTrash,
         showHidden: revealHidden,
       })
     },
-    [queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, tagId, format, readStatus, pageSize, activeLibrary, author, series, revealHidden],
+    [queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, tagId, format, readStatus, pageSize, activeLibrary, author, series, revealHidden, categoryScope],
   )
 
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -442,11 +448,17 @@ export default function Library() {
     if (dragType !== 'shelf') return
     // Shelf drag: active/over are shelf row ids (sortable); over may be the
     // uncategorized droppable or empty space, both of which reorder to no-op.
-    const ordered = shelves.map((s) => s.id)
+    const draggedCategory = libraryCategoriesQuery.data?.data.find((category) => category.id === active.id)
+    const targetCategory = libraryCategoriesQuery.data?.data.find((category) => category.id === over.id)
+    if (activeLibrary && (!draggedCategory || !targetCategory || draggedCategory.parentId !== targetCategory.parentId)) return
+    const siblings = activeLibrary ? shelves.filter((shelf) => 'parentId' in shelf && shelf.parentId === draggedCategory?.parentId) : shelves
+    const ordered = siblings.map((s) => s.id)
     const oldIndex = ordered.indexOf(String(active.id))
     const newIndex = ordered.indexOf(String(over.id))
     if (oldIndex < 0 || newIndex < 0) return
-    const next = arrayMove(ordered, oldIndex, newIndex)
+    const moved = arrayMove(ordered, oldIndex, newIndex)
+    let index = 0
+    const next = activeLibrary ? shelves.map((shelf) => ordered.includes(shelf.id) ? moved[index++]! : shelf.id) : moved
     setShelfOrderOverride(next)
     setSettleShelfId(String(active.id))
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
@@ -519,6 +531,7 @@ export default function Library() {
     sortBy,
     sortOrder,
     categoryId: shelfId ?? undefined,
+    categoryScope,
     tagId: tagId ?? undefined,
     format: format ?? undefined,
     author: author ?? undefined,
@@ -541,7 +554,7 @@ export default function Library() {
   )
   const isEmpty = !isLoading && rows.length === 0
 
-  const filterKey = `${activeLibrary?.id ?? ''}:${shelfId ?? ''}:${tagId ?? ''}:${query}:${format ?? ''}:${readStatus ?? ''}:${trash}:${author ?? ''}:${series ?? ''}:${sortBy}:${sortOrder}:${pageSize}`
+  const filterKey = `${activeLibrary?.id ?? ''}:${shelfId ?? ''}:${categoryScope}:${tagId ?? ''}:${query}:${format ?? ''}:${readStatus ?? ''}:${trash}:${author ?? ''}:${series ?? ''}:${sortBy}:${sortOrder}:${pageSize}`
   const lastFilterKeyRef = useRef(filterKey)
   const lastTotalRef = useRef(0)
   const lastTotalSizeRef = useRef(0)
@@ -621,7 +634,9 @@ export default function Library() {
   // Must mirror LibrarySidebar's memo: handleDragEnd materializes this exact
   // visual order when a category/tag row is dropped, in either library.
   const shelves = useMemo(
-    () => sortSidebarItems(applyShelfOrder(activeLibrary ? (libraryCategoriesQuery.data?.data ?? []) : (shelvesData?.data ?? []), shelfOrderOverride), libraryPrefs?.shelfSort),
+    () => activeLibrary
+      ? sortCategories(applyShelfOrder(libraryCategoriesQuery.data?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort)
+      : sortSidebarItems(applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort),
     [activeLibrary, libraryCategoriesQuery.data, shelvesData, shelfOrderOverride, libraryPrefs?.shelfSort],
   )
   const tags = useMemo(
@@ -661,11 +676,8 @@ export default function Library() {
             ? _('library.seriesFilterTitle', { name: metadataFilter.value })
             : (activeShelfName ?? activeTagName ?? activeLibrary?.name ?? privateLibraryName)
 
-  // Any narrowed view. An empty list under a filter is not an empty library, and
-  // the upload invitation is the wrong thing to offer someone who is looking at a
-  // shelf that simply holds nothing they asked for.
   const hasActiveFilter = Boolean(
-    shelfId || tagId || query || author || series || format || readStatus,
+    query || author || series || format || readStatus,
   )
 
   const readStatusName = readStatus === 'wishlist'    ? _('library.readStatusWishlist')
@@ -736,9 +748,9 @@ export default function Library() {
       // within the list/trash domain they were set in, so drop them on crossing
       const nextTrash = 'trash' in patch ? (patch.trash ?? false) : trash
       const sortPatch = nextTrash !== trash ? { sortBy: undefined, sortOrder: undefined } : null
-      const filterChanged = (['shelf', 'tag', 'q', 'format', 'status', 'trash', 'author', 'series'] as const)
+      const filterChanged = (['shelf', 'tag', 'q', 'format', 'status', 'trash', 'author', 'series', 'categoryScope'] as const)
         .some((key) => key in patch && patch[key] !== search[key])
-      return navigate({ to: '/', search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, replace: true })
+      return navigate({ to: '/', search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, replace: !('directory' in patch) })
     },
     [navigate, search, trash],
   )
@@ -749,6 +761,8 @@ export default function Library() {
   const handleSwitchLibrary = useCallback((id: string | null) => {
     void navSearch({
       libraryId: id ?? undefined,
+      directory: undefined,
+      categoryScope: undefined,
       shelf: undefined,
       tag: undefined,
       page: undefined,
@@ -761,13 +775,9 @@ export default function Library() {
     })
   }, [navSearch])
 
-  // One navigation that drops every narrowing dimension, so the reader lands on
-  // the whole library rather than on the next filter they happen to have.
   const clearActiveFilters = useCallback(() => {
     void navSearch({
       q: undefined,
-      shelf: undefined,
-      tag: undefined,
       author: undefined,
       series: undefined,
       format: undefined,
@@ -903,7 +913,7 @@ export default function Library() {
 
   useEffect(() => {
     lastSelectIndexRef.current = null
-  }, [currentPage, activeLibrary?.id, shelfId, tagId, query, format, readStatus, trash, author, series, sortBy, sortOrder])
+  }, [currentPage, activeLibrary?.id, shelfId, categoryScope, tagId, query, format, readStatus, trash, author, series, sortBy, sortOrder])
 
   function goToPage(targetPage: number) {
     if (targetPage < 1 || targetPage > totalPages || targetPage === currentPage) return
@@ -921,6 +931,8 @@ export default function Library() {
             row, so it changes what the rows below it mean rather than replacing
             the page the way the old standalone library view did. */}
         <LibrarySidebar
+          key={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}`}
+          sessionKey={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}`}
           navSearch={navSearch}
           onPrefetchNavigation={prefetchLibrary}
           shelfId={shelfId}
@@ -940,10 +952,13 @@ export default function Library() {
           onManageLibrary={setManageTarget}
           onJoinLibrary={setJoinTarget}
           onExploreLibraries={() => setDiscoveryOpen(true)}
+          directory={search.directory}
         />
 
       <main className="flex min-w-0 flex-1 flex-col px-3 py-5 sm:px-4 sm:py-8 md:px-8">
-        <>
+        {search.directory && !libraryStale && !catalogGone ? <TaxonomyDirectory key={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}:${search.directory}`}
+          libraryId={activeLibrary?.id ?? null} sessionKey={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}`} panel={search.directory}
+          canManage={!isGuest && (!activeLibrary || isLibraryManager)} navSearch={navSearch} onOpenNavigation={() => setMobileNavOpen(true)} /> : <>
         <LibraryHeader
           navSearch={navSearch}
           view={view}
@@ -954,6 +969,10 @@ export default function Library() {
           readStatus={readStatus}
           trash={trash}
           catalogMode={activeLibrary !== null}
+          categoryScope={search.categoryScope}
+          canSwitchCategoryScope={Boolean(activeLibrary && shelfId
+            && libraryCategoriesQuery.data?.data.some((category) => category.id === shelfId && !category.parentId)
+            && libraryCategoriesQuery.data?.data.some((category) => category.parentId === shelfId))}
           onUploadClick={canUpload ? () => setUploadOpen(true) : undefined}
           trashCount={total}
           bookSize={trash && !activeLibrary ? totalSize : undefined}
@@ -966,6 +985,8 @@ export default function Library() {
           bookCount={total}
           onResetMetadataFilter={metadataFilter ? () => navSearch({ author: undefined, series: undefined }) : undefined}
         />
+
+        {!trash && <LibraryContextBar search={search} navSearch={navSearch} onClear={clearActiveFilters} />}
 
         {(shelvesQuery.isError || tagsQuery.isError) && !catalogGone && (
           <QueryErrorState
@@ -1010,7 +1031,7 @@ export default function Library() {
               ? <EmptyTrash />
               : hasActiveFilter
                 ? <EmptyFilter onClear={clearActiveFilters} />
-                : <EmptyLibrary canUpload={canUpload} />
+                : <EmptyLibrary canUpload={canUpload} isView={Boolean(shelfId || tagId)} />
           ) : activeLibrary ? (
             sharedTrash ? (
               view === 'list' ? (
@@ -1206,7 +1227,7 @@ export default function Library() {
             selectionActive={selectionActive}
           />
         )}
-      </>
+      </>}
       </main>
 
       {/* Shared selections contain work ids; private selections contain version ids.
@@ -1700,8 +1721,8 @@ function EmptyTrash() {
   const _ = useTranslation()
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
-      <div className="mb-1 flex h-20 w-20 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-stone-200/70 dark:bg-stone-900 dark:ring-stone-800">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-stone-300 dark:text-stone-600">
+      <div className="mb-1 flex h-16 w-16 items-center justify-center rounded-2xl border border-stone-200/80 bg-white shadow-xs dark:border-stone-800 dark:bg-stone-900">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-stone-400 dark:text-stone-500">
           <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
         </svg>
       </div>

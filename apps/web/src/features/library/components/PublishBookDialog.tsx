@@ -13,6 +13,7 @@ import { useAuthStore } from '@/stores/auth.store'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
 import { useLibraryCategories, useLibraryTags, usePublishPrivateBook, useBook, usePushVersion } from '../hooks'
+import { categoryChoices } from '../taxonomy'
 
 interface CustomSelectOption {
   value: string
@@ -247,7 +248,7 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
   )
 
   const categoryOptions: CustomSelectOption[] = useMemo(() => {
-    const list = categoriesData?.data ?? []
+    const list = categoryChoices(categoriesData?.data ?? [])
     return [
       {
         value: '',

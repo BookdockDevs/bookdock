@@ -268,3 +268,35 @@ describe('ViewMenu hidden-content reveal', () => {
     }
   })
 })
+
+
+describe('ViewMenu category scope', () => {
+  it('defaults to including children and changes only the category scope', () => {
+    const navigate = renderMenu({ catalogMode: true, canSwitchCategoryScope: true })
+    const toggle = screen.getByRole('switch', { name: '包含子分类' })
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(toggle)
+    expect(navigate).toHaveBeenLastCalledWith({ categoryScope: 'direct' })
+  })
+
+  it('enables subtree scope and keeps scope out of filter reset', () => {
+    const navigate = renderMenu({ catalogMode: true, canSwitchCategoryScope: true, categoryScope: 'direct', format: 'epub' })
+    const toggle = screen.getByRole('switch', { name: '包含子分类' })
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(toggle)
+    expect(navigate).toHaveBeenLastCalledWith({ categoryScope: 'subtree' })
+    fireEvent.click(screen.getByText(i18n.t('library.resetFilter')))
+    expect(navigate).toHaveBeenLastCalledWith({ format: undefined, status: undefined })
+  })
+
+  it('shows no scope switch without eligible children or in private and trash views', () => {
+    const props = { navSearch: vi.fn(), view: 'grid', sortBy: 'createdAt', sortOrder: 'desc', format: null, readStatus: null }
+    const { rerender } = render(<ViewMenu {...props} catalogMode />)
+    fireEvent.click(screen.getByRole('button', { name: '视图菜单' }))
+    expect(screen.queryByRole('switch', { name: '包含子分类' })).toBeNull()
+    rerender(<ViewMenu {...props} canSwitchCategoryScope />)
+    expect(screen.queryByRole('switch', { name: '包含子分类' })).toBeNull()
+    rerender(<ViewMenu {...props} catalogMode canSwitchCategoryScope trash />)
+    expect(screen.queryByRole('switch', { name: '包含子分类' })).toBeNull()
+  })
+})

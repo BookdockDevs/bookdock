@@ -53,6 +53,15 @@ describe('UploadSheet', () => {
     mockUseUploadSettings.mockReturnValue({ maxBytes: undefined, normalizeTitle: true })
   })
 
+  it('inherits the current shelf without exposing a destination selector', () => {
+    const addFiles = vi.fn()
+    mockUseUploadBooks.mockReturnValue(uploadOverrides({ addFiles }))
+    render(<UploadSheet open onClose={vi.fn()} shelfId="current-shelf" />)
+    expect(screen.queryByRole('combobox')).toBeNull()
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(['book'], 'book.txt')] } })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { maxBytes: undefined, shelfId: 'current-shelf', tagIds: [] })
+  })
+
   it('clicking drop zone triggers hidden file input', () => {
     render(<UploadSheet open onClose={vi.fn()} />)
     const input = document.querySelector('input[type="file"]') as HTMLInputElement

@@ -13,8 +13,8 @@ const apiPatch = vi.fn()
 const apiPost = vi.fn()
 const apiDelete = vi.fn()
 let selectionItems: BatchSelectionItem[] = []
-let tags: { id: string; name: string; bookCount: number }[] = []
-let categories: { id: string; name: string; bookCount: number }[] = []
+let tags: { id: string; name: string; bookCount: number; parentId?: string | null }[] = []
+let categories: { id: string; name: string; bookCount: number; parentId?: string | null }[] = []
 
 vi.mock('@/api/client', () => ({
   apiPatch: (...args: unknown[]) => apiPatch(...args),
@@ -71,6 +71,23 @@ describe('SelectionBar', () => {
     expect(apiPatch).toHaveBeenCalledWith('/libraries/lib1/books/batch/organize', {
       ids: ['w1', 'w2'], categoryId: 'c1', addTagIds: [], removeTagIds: [],
     })
+  })
+
+  it('keeps mixed classification unchanged after selecting and resetting a target', async () => {
+    selectionItems = [item('a', { categoryId: 'c1' }), item('b', { categoryId: 'c2' })]
+    categories = [{ id: 'c1', name: 'Root', bookCount: 1, parentId: null }, { id: 'c2', name: 'Child', bookCount: 1, parentId: 'c1' }]
+    tags = [{ id: 'tag', name: 'Topic', bookCount: 0 }]
+    render(<SelectionBar selectedIds={['a', 'b']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
+    await clickReady('library.batchOrganize')
+    expect(screen.getByText('Root / Child')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Root / Child'))
+    fireEvent.click(screen.getByText('library.keepCategory'))
+    fireEvent.click(screen.getByText('library.tags'))
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/libraries/lib1/books/batch/organize', {
+      ids: ['a', 'b'], addTagIds: ['tag'], removeTagIds: [],
+    }))
   })
 
   it('adds a partially present tag to all selected entries without changing other tags', async () => {

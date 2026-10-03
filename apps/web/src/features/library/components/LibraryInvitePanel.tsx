@@ -59,7 +59,7 @@ export default function LibraryInvitePanel({ libraryId }: LibraryInvitePanelProp
   }
 
   return (
-    <section className="rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 dark:border-stone-800 dark:bg-stone-850/40">
+    <section className="rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
       <h3 className="text-sm font-medium text-stone-800 dark:text-stone-200">{_('library.inviteLink')}</h3>
       {status.isPending ? (
         <div className="mt-2.5 h-9 w-full animate-pulse rounded-xl bg-stone-200/70 dark:bg-stone-800/60" />
