@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 
-import type { TextReplacementRes, ReplacementCreateReq, ReplacementOverrideReq, ReplacementUpdateReq } from '@bookdock/shared'
+import type { RuleBatchDeleteReq, TextReplacementRes, ReplacementCreateReq, ReplacementImportReq, ReplacementOverrideReq, ReplacementUpdateReq } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../client'
 
@@ -97,6 +97,16 @@ export function useDeleteReplacement() {
   })
 }
 
+export function useImportReplacements() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ReplacementImportReq) => apiPost<{ data: TextReplacementRes[] }>('/replacements/import', body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: REPLACEMENTS_KEY })
+    },
+  })
+}
+
 /** Per-book override for a pattern rule: boolean sets it, null restores global inheritance */
 export function useSetReplacementOverride() {
   const queryClient = useQueryClient()
@@ -120,6 +130,16 @@ export function useSetReplacementOverride() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: REPLACEMENTS_KEY })
+    },
+  })
+}
+
+export function useDeleteGlobalReplacements() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: RuleBatchDeleteReq) => apiPost<{ data: null }>('/replacements/batch-delete', body),
+    onSuccess: () => {
+      return queryClient.invalidateQueries({ queryKey: REPLACEMENTS_KEY })
     },
   })
 }

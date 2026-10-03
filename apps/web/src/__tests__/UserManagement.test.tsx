@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import UserManagementSection from '../features/settings/components/UserManagementSection'
 import { formatDate } from '@/lib/format-date'
@@ -71,19 +71,54 @@ describe('UserManagementSection', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks()
+    transferInstance.mockReset()
+    transferLibrary.mockReset()
     await i18n.changeLanguage('zh-CN')
     useAuthStore.getState().setAuth({ id: 'u1', username: 'alice', role: 'owner' })
     ;(useAdminUsers as ReturnType<typeof vi.fn>).mockReturnValue({ data: { data: USERS }, isLoading: false })
     ;(useUpdateUser as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: mutateUser })
     ;(useCreateUser as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: createUser })
     ;(useDeleteUser as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: deleteUser })
-    ;(useTransferInstanceOwnership as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: transferInstance })
+    ;(useTransferInstanceOwnership as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: transferInstance, reset: vi.fn() })
 
     ;(useLibraries as ReturnType<typeof vi.fn>).mockReturnValue({ data: { data: LIBRARIES }, isLoading: false })
     ;(useLibraryMembers as ReturnType<typeof vi.fn>).mockReturnValue({ data: { data: MEMBERS }, isLoading: false })
     ;(useSetLibraryMemberRole as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: setMemberRole })
     ;(useRemoveLibraryMember as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: removeMember })
-    ;(useTransferLibrary as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: transferLibrary })
+    ;(useTransferLibrary as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: transferLibrary, reset: vi.fn() })
+  })
+
+  it.each(['instance', 'library'] as const)('retains a failed %s transfer and allows retry', async (tab) => {
+    const mutation = tab === 'instance' ? transferInstance : transferLibrary
+    mutation.mockRejectedValueOnce(new TypeError('Offline')).mockResolvedValue(undefined)
+    render(<UserManagementSection initialTab={tab} />)
+    fireEvent.click(within(screen.getByText('carol').closest('tr')!).getByLabelText('更多操作'))
+    fireEvent.click(screen.getByRole('button', { name: '转让所有者' }))
+    const value = tab === 'instance' ? 'carol' : 'City Library'
+    fireEvent.change(screen.getByRole('textbox'), { target: { value } })
+    fireEvent.click(screen.getByRole('button', { name: '转让所有者' }))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toHaveValue(value)
+    fireEvent.click(screen.getByRole('button', { name: '转让所有者' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(mutation).toHaveBeenCalledTimes(2)
+  })
+
+  it('discards a transfer confirmation when switching library context', () => {
+    const { rerender } = render(<UserManagementSection initialTab="library" />)
+    fireEvent.click(within(screen.getByText('carol').closest('tr')!).getByLabelText('更多操作'))
+    fireEvent.click(screen.getByRole('button', { name: '转让所有者' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'City Library' } })
+    ;(useLibraries as ReturnType<typeof vi.fn>).mockReturnValue({ data: { data: [{ ...LIBRARIES[0], id: 'other', name: 'Other Library' }] }, isLoading: false })
+    rerender(<UserManagementSection initialTab="library" />)
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    ;(useLibraries as ReturnType<typeof vi.fn>).mockReturnValue({ data: { data: LIBRARIES }, isLoading: false })
+    rerender(<UserManagementSection initialTab="library" />)
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    fireEvent.click(within(screen.getByText('carol').closest('tr')!).getByLabelText('更多操作'))
+    fireEvent.click(screen.getByRole('button', { name: '转让所有者' }))
+    expect(screen.getByRole('textbox')).toHaveValue('')
+    expect(transferLibrary).not.toHaveBeenCalled()
   })
 
   describe('Instance Users Tab', () => {
@@ -128,15 +163,19 @@ describe('UserManagementSection', () => {
       )
     })
 
-    it('transfers instance ownership instead of patching roles', () => {
+    it('transfers instance ownership after confirming the recipient username', async () => {
       render(<UserManagementSection />)
       fireEvent.click(within(screen.getByText('carol').closest('tr')!).getByLabelText('更多操作'))
       fireEvent.click(screen.getByText('转让所有者'))
 
       expect(transferInstance).not.toHaveBeenCalled()
+      expect(screen.getByRole('button', { name: '转让所有者' })).toBeDisabled()
+      expect(screen.getByRole('alertdialog')).toHaveTextContent('书库成员角色不变')
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'carol' } })
       fireEvent.click(screen.getByRole('button', { name: '转让所有者' }))
-      expect(transferInstance).toHaveBeenCalledWith('u3', expect.objectContaining({ onSuccess: expect.any(Function) }))
+      expect(transferInstance).toHaveBeenCalledWith('u3')
       expect(mutateUser).not.toHaveBeenCalled()
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     })
 
     it('offers no transfer for disabled accounts or the current owner', () => {
@@ -239,20 +278,23 @@ describe('UserManagementSection', () => {
       )
     })
 
-    it('transfers library ownership from the member action menu', () => {
+    it('transfers library ownership after confirming the library name', async () => {
       render(<UserManagementSection initialTab="library" />)
       const carolRow = screen.getByText('carol').closest('tr')!
       fireEvent.click(within(carolRow).getByLabelText('更多操作'))
       fireEvent.click(screen.getByRole('button', { name: '转让所有者' }))
 
       const dialog = screen.getByRole('alertdialog')
-      expect(within(dialog).getByText(/把所有者转让给该成员/)).toBeInTheDocument()
+      expect(dialog).toHaveTextContent('carol')
+      expect(dialog).toHaveTextContent('无法再修改书库设置')
+      expect(within(dialog).getByRole('button', { name: '转让所有者' })).toBeDisabled()
+      fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'City Library' } })
       fireEvent.click(within(dialog).getByRole('button', { name: '转让所有者' }))
 
       expect(transferLibrary).toHaveBeenCalledWith(
         { libraryId: 'lib_shared_1', userId: 'u3' },
-        expect.any(Object),
       )
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     })
 
     it('confirms and removes a member from the library', () => {

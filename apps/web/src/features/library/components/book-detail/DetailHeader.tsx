@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
+
 /**
  * The presentation shell both detail bodies sit in: artwork with its hover
  * actions, title, byline, and whatever the context adds below them. A private
@@ -15,10 +16,13 @@ interface DetailHeaderProps {
   copyingCover: boolean
   onCopyCover: () => void
   onDownloadCover: () => void
+  coverEditing?: boolean
   title: string
   authors: string[]
   author?: string | null
   onAuthorClick: (name: string) => void
+  onEditTitle?: () => void
+  onEditAuthors?: () => void
   chips?: ReactNode
   reading?: ReactNode
   actions?: ReactNode
@@ -31,10 +35,13 @@ export default function DetailHeader({
   copyingCover,
   onCopyCover,
   onDownloadCover,
+  coverEditing = false,
   title,
   authors,
   author,
   onAuthorClick,
+  onEditTitle,
+  onEditAuthors,
   chips,
   reading,
   actions,
@@ -45,7 +52,7 @@ export default function DetailHeader({
     <div className="flex flex-col gap-4 sm:flex-row sm:gap-5">
       <div className="group/cover relative w-32 shrink-0 self-center overflow-hidden rounded-xl shadow-md shadow-stone-900/10 sm:self-start">
         {cover}
-        {hasCoverImage && (
+        {hasCoverImage && !coverEditing && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 p-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 transition-opacity duration-200 group-hover/cover:pointer-events-auto group-hover/cover:opacity-100 group-focus-within/cover:pointer-events-auto group-focus-within/cover:opacity-100">
             <button
               type="button"
@@ -77,9 +84,10 @@ export default function DetailHeader({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <h3 className="font-serif text-xl font-semibold leading-snug text-stone-900 dark:text-stone-100">
-          {title}
-        </h3>
+        <div className="flex items-start gap-1" onContextMenu={onEditTitle ? (event) => { event.preventDefault(); event.stopPropagation(); onEditTitle() } : undefined}>
+          <h3 className="min-w-0 font-serif text-xl font-semibold leading-snug text-stone-900 dark:text-stone-100">{title}</h3>
+        </div>
+        <div className="flex items-center gap-1" onContextMenu={onEditAuthors ? (event) => { event.preventDefault(); event.stopPropagation(); onEditAuthors() } : undefined}>
         {authors.length > 0 ? (
           <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-sm">
             {authors.map((name, index) => (
@@ -108,6 +116,7 @@ export default function DetailHeader({
             {_('library.unknown')}
           </p>
         )}
+        </div>
         {chips}
         {reading}
         {actions}

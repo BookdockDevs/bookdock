@@ -13,6 +13,8 @@ const ERROR_KEYS: Record<string, string> = {
   SESSION_NOT_FOUND: 'errors.notFound',
   FONT_NOT_FOUND: 'errors.notFound',
   AVATAR_NOT_FOUND: 'errors.notFound',
+  AVATAR_INVALID_IMAGE: 'settings.avatarProcessFailed',
+  AVATAR_ANIMATION_TOO_LARGE: 'settings.avatarAnimationTooLarge',
   REPLACEMENT_NOT_FOUND: 'errors.notFound',
   TOC_RULE_NOT_FOUND: 'errors.notFound',
   BOOK_FILE_MISSING: 'errors.bookFileMissing',

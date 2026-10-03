@@ -5,7 +5,7 @@ export const inputClass =
   'h-9 w-full rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 outline-none transition-all placeholder:text-stone-400 focus:border-stone-400 focus:ring-2 focus:ring-stone-400/10 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500 dark:focus:ring-stone-500/20'
 
 export const textareaClass =
-  'w-full resize-none overflow-hidden rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm leading-relaxed text-stone-700 outline-none transition-all placeholder:text-stone-400 focus:border-stone-400 focus:ring-2 focus:ring-stone-400/10 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500 dark:focus:ring-stone-500/20'
+  'w-full min-h-[88px] resize-none overflow-hidden rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm leading-relaxed text-stone-700 outline-none transition-all placeholder:text-stone-400 focus:border-stone-400 focus:ring-2 focus:ring-stone-400/10 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500 dark:focus:ring-stone-500/20'
 
 export function GroupLabel({ children }: { children: ReactNode }) {
   return (
@@ -75,7 +75,7 @@ export function FilterChip({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs transition-colors ${
+      className={`inline-flex min-h-7 items-center gap-1.5 rounded-md px-2 py-0.5 text-xs transition-colors ${
         muted
           ? 'border border-dashed border-stone-300 text-stone-400 hover:border-stone-400 hover:text-stone-600 dark:border-stone-600 dark:hover:border-stone-500 dark:hover:text-stone-300'
           : 'bg-stone-100/90 text-stone-600 hover:bg-stone-200/90 hover:text-stone-900 dark:bg-stone-800/90 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100'

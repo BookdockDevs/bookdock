@@ -15,10 +15,13 @@ import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover, versionOrdinal, versionTabLabel } from '../book-row'
 import { copyCover, downloadCover } from '../download'
-import { useCollectBook, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
+import { useCollectBook, useLibraryCategories, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
 import { getHiddenCause } from '../hidden-status'
 import BookCover from './BookCover'
 import DetailHeader from './book-detail/DetailHeader'
+import DetailCoverEditor from './book-detail/DetailCoverEditor'
+import MetadataFieldDialog from './book-detail/MetadataFieldDialog'
+import type { EditableMetadataField } from './book-detail/metadata-field'
 import DownloadMenu from './book-detail/DownloadMenu'
 import MetaGrid, { type MetaRow } from './book-detail/MetaGrid'
 import MoreActionsMenu, { type MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
@@ -59,6 +62,8 @@ export default function WorkDetailBody({
 }) {
   const _ = useTranslation()
   const navigate = useNavigate()
+  const categories = useLibraryCategories(library.id, { enabled: Boolean(work.categoryId) })
+  const categoryName = categories.isError ? undefined : categories.data?.data.find((category) => category.id === work.categoryId)?.name
   const row = catalogWorkRow(work)
   // The visible version drives everything below: header, actions and manager
   // operations all read the selection, never a hardcoded first row.
@@ -74,9 +79,16 @@ export default function WorkDetailBody({
   const [confirmUnlist, setConfirmUnlist] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [metadataField, setMetadataField] = useState<{ field: EditableMetadataField; label: string; versionId: string } | null>(null)
+  const [coverEditingId, setCoverEditingId] = useState<string | null>(null)
+  const coverEditing = coverEditingId === selected?.id
+  function metadataEdit(field: EditableMetadataField, label: string) {
+    if (!canManage || !selected) return undefined
+    return () => setMetadataField({ field, label, versionId: selected.id })
+  }
   const [uploadOpen, setUploadOpen] = useState(false)
 
-  const hasCoverImage = Boolean(work.coverKey || selected?.format === 'epub')
+  const hasCoverImage = Boolean(selected?.effective.coverKey || selected?.format === 'epub')
   // The two hides resolve independently (see the Hidden boundary in
   // architecture.md), so the dialog must not collapse them into one flag: the
   // list badges a work the dialog called visible when it keyed off `work.hidden`
@@ -94,7 +106,7 @@ export default function WorkDetailBody({
   const readable = Boolean(selected) && (canManage || !selectedHidden)
   const canDownload = canCollect && readable && Boolean(selected)
 
-  function goToFilter(search: { author?: string; tag?: string; series?: string }) {
+  function goToFilter(search: { author?: string; tag?: string; series?: string; shelf?: string }) {
     onClose()
     void navigate({ to: '/', search: { libraryId: library.id, ...search } })
   }
@@ -208,16 +220,17 @@ export default function WorkDetailBody({
       label: _('library.seriesSection'),
       value: bookmeta.seriesIndex != null ? `${series} #${bookmeta.seriesIndex}` : series,
       onClick: () => goToFilter({ series }),
+      onEdit: metadataEdit('series', _('library.seriesSection')),
     })
   }
-  if (bookmeta?.publisher) metaRows.push({ label: _('library.publisher'), value: bookmeta.publisher })
-  if (bookmeta?.published) metaRows.push({ label: _('library.published'), value: bookmeta.published })
+  if (bookmeta?.publisher) metaRows.push({ label: _('library.publisher'), value: bookmeta.publisher, onEdit: metadataEdit('publisher', _('library.publisher')) })
+  if (bookmeta?.published) metaRows.push({ label: _('library.published'), value: bookmeta.published, onEdit: metadataEdit('published', _('library.published')) })
   if (bookmeta?.language) {
-    metaRows.push({ label: _('library.language'), value: formatLanguage(bookmeta.language, i18n.language) })
+    metaRows.push({ label: _('library.language'), value: formatLanguage(bookmeta.language, i18n.language), onEdit: metadataEdit('language', _('library.language')) })
   }
   const rawIdentifier = bookmeta?.isbn || bookmeta?.identifier || ''
   if (rawIdentifier && (bookmeta?.isbn || !isMachineIdentifier(rawIdentifier))) {
-    metaRows.push({ label: bookmeta?.isbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true, hint: _('library.copyValue') })
+    metaRows.push({ label: bookmeta?.isbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true, hint: _('library.copyValue'), onEdit: bookmeta?.isbn ? metadataEdit('isbn', 'ISBN') : undefined })
   }
   if (selected) {
     metaRows.push({ label: _('library.format'), value: selected.format.toUpperCase() })
@@ -235,7 +248,7 @@ export default function WorkDetailBody({
     }
   }
   if (bookmeta?.subjects?.length) {
-    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、'), expandable: true })
+    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、'), expandable: true, onEdit: metadataEdit('subjects', _('library.subjects')) })
   }
   if (selected?.effective.fileName) {
     metaRows.push({ label: _('library.originalFile'), value: selected.effective.fileName, copyable: true, expandable: true, hint: _('library.copyFullFileName') })
@@ -245,12 +258,14 @@ export default function WorkDetailBody({
 
   // Cover and palette follow the visible version, the same rule the work row
   // uses for artwork: a stored cover or an EPUB that can carry an embedded one.
-  const selectedMayHaveArtwork = Boolean(work.coverKey) || selected.format === 'epub'
+  const selectedMayHaveArtwork = Boolean(selected.effective.coverKey) || selected.format === 'epub'
   const selectedRow = {
     ...row,
+    id: selected.bookVersionId,
+    coverKey: selected.effective.coverKey,
     title: selected.effective.title,
     format: selected.format,
-    coverSrc: selectedMayHaveArtwork ? `/api/v1/books/${selected.bookVersionId}/cover?size=thumb` : null,
+    coverSrc: selectedMayHaveArtwork ? `/api/v1/books/${selected.bookVersionId}/cover?size=thumb&v=${encodeURIComponent(selected.effective.coverKey ?? 'auto')}` : null,
     coverPaletteKey: selected.effective.coverPaletteKey ?? selected.bookVersionId,
     size: selected.size,
   }
@@ -258,7 +273,8 @@ export default function WorkDetailBody({
   return (
     <div>
       <DetailHeader
-        cover={<BookCover book={rowCover(selectedRow)} coverSrc={selectedRow.coverSrc} />}
+        cover={canManage ? <DetailCoverEditor key={selected.id} book={rowCover(selectedRow)} coverPaletteId={null} active={coverEditing} onActiveChange={(active) => setCoverEditingId(active ? selected.id : null)} catalog={{ libraryId: library.id, libraryBookId: work.id, versionLinkId: selected.id, hasVersionCover: Boolean(selected.coverKey) }} /> : <BookCover book={rowCover(selectedRow)} coverSrc={selectedRow.coverSrc} />}
+        coverEditing={coverEditing}
         hasCoverImage={hasCoverImage}
         copyingCover={copyingCover}
         onCopyCover={() => void handleCopyCover()}
@@ -267,8 +283,18 @@ export default function WorkDetailBody({
         authors={selected.effective.authors ?? []}
         author={selected.effective.author}
         onAuthorClick={(name) => goToFilter({ author: name })}
-        chips={work.tags.length > 0 && (
+        onEditTitle={metadataEdit('title', _('library.sortBy.title'))}
+        onEditAuthors={metadataEdit('authors', _('library.sortBy.author'))}
+        chips={(
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            {!work.categoryId || categoryName ? (
+              <FilterChip prefix="📁" label={categoryName ?? _('library.uncategorized')} onClick={() => goToFilter({ shelf: work.categoryId ?? 'none' })} />
+            ) : (
+              <span className="inline-flex min-h-7 items-center gap-1.5 rounded-md bg-stone-100/90 px-2 py-0.5 text-xs text-stone-400 dark:bg-stone-800/90 dark:text-stone-500">
+                <span aria-hidden="true">📁</span>
+                {categories.isPending ? _('library.categories') : _('library.categoryUnavailable')}
+              </span>
+            )}
             {work.tags.map((tag) => (
               <FilterChip key={tag.id} prefix="#" label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />
             ))}
@@ -400,7 +426,7 @@ export default function WorkDetailBody({
       />
 
       {selected.effective.description && (
-        <section className="mt-5">
+        <section className="mt-5" onContextMenu={canManage ? (event) => { event.preventDefault(); event.stopPropagation(); metadataEdit('description', _('library.descriptionSection'))?.() } : undefined}>
           <GroupLabel>{_('library.descriptionSection')}</GroupLabel>
           <p className="max-h-40 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1 whitespace-pre-wrap text-sm leading-relaxed text-stone-600 dark:text-stone-300">
             {selected.effective.description}
@@ -436,6 +462,9 @@ export default function WorkDetailBody({
             if (workDeleted) onClose()
           }}
         />
+      )}
+      {canManage && metadataField?.versionId === selected.id && (
+        <MetadataFieldDialog key={`${selected.id}:${metadataField.field}`} book={{ id: selected.bookVersionId, title: selected.effective.title, author: selected.effective.author, authors: selected.effective.authors }} bookmeta={{ ...selected.effective.bookmeta, description: selected.effective.description }} field={metadataField.field} label={metadataField.label} catalog={{ libraryId: library.id, libraryBookId: work.id, version: selected }} onClose={() => setMetadataField(null)} />
       )}
       {editOpen && (
         <WorkEditDialog

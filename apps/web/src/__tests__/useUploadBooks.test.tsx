@@ -133,7 +133,7 @@ describe('useUploadBooks', () => {
     expect(toast?.message).toEqual({ key: 'library.uploadImported', params: { count: 1 } })
   })
 
-  it('reports duplicate-only uploads as a warning', () => {
+  it('reports duplicate-only uploads as an informational no-change result', () => {
     const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
 
     act(() => {
@@ -144,8 +144,33 @@ describe('useUploadBooks', () => {
     })
 
     const toast = useToastStore.getState().toasts[0]
-    expect(toast?.type).toBe('warning')
+    expect(toast?.type).toBe('info')
     expect(toast?.message).toEqual({ key: 'library.uploadDuplicateOnly', params: { count: 1 } })
+  })
+
+  it('updates a partial result after retry without adding another notification', () => {
+    const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
+    act(() => {
+      result.current.addFiles([new File(['a'], 'a.epub'), new File(['b'], 'b.epub')], { autoStart: true })
+    })
+    act(() => {
+      FakeXHR.instances[0]!.respond(201, { data: { id: 'book-1' }, duplicated: false })
+      FakeXHR.instances[1]!.respond(500, { error: { code: 'UPLOAD_FAILED' } })
+    })
+    const first = useToastStore.getState().toasts[0]!
+    expect(first.type).toBe('warning')
+    act(() => { result.current.retryAll() })
+    act(() => {
+      FakeXHR.instances[2]!.respond(201, { data: { id: 'book-2' }, duplicated: false })
+    })
+    expect(useToastStore.getState().toasts).toEqual([expect.objectContaining({ id: first.id, type: 'success' })])
+  })
+
+  it('reports an entirely failed upload batch as an error', () => {
+    const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
+    act(() => { result.current.addFiles([new File(['a'], 'a.epub')], { autoStart: true }) })
+    act(() => { FakeXHR.instances[0]!.respond(500, { error: { code: 'UPLOAD_FAILED' } }) })
+    expect(useToastStore.getState().toasts[0]?.type).toBe('error')
   })
 
   it('re-queues an errored item on retry', () => {

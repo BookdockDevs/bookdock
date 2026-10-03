@@ -3,11 +3,22 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 
 import i18n from '../i18n/i18n'
 import WorkEditDialog from '../features/library/components/WorkEditDialog'
-import type { CatalogBook } from '@bookdock/shared'
+import { ApiError } from '../api/client'
+import type { CatalogBook, FileMetadataSourceRes } from '@bookdock/shared'
+
+function fileSource(overrides: Partial<FileMetadataSourceRes['values']> = {}): FileMetadataSourceRes {
+  return {
+    kind: 'file', format: 'epub', fileName: 'a.epub', normalizeTitleApplied: false,
+    values: { title: 'File Title', authors: null, description: null, publisher: null, published: null, language: null, isbn: null, subjects: null, series: null, seriesIndex: null, ...overrides },
+    provenance: { title: 'file', authors: 'missing', description: 'missing', publisher: 'missing', published: 'missing', language: 'missing', isbn: 'missing', subjects: 'missing', series: 'missing', seriesIndex: 'missing' },
+  }
+}
 
 const HOOKS = vi.hoisted(() => ({
   useLibraryCategories: vi.fn(),
   useLibraryTags: vi.fn(),
+  useCreateLibraryCategory: vi.fn(),
+  useCreateLibraryTag: vi.fn(),
   useUpdateCatalogBook: vi.fn(),
   useUpdateCatalogVersion: vi.fn(),
   useUploadCatalogBookCover: vi.fn(),
@@ -15,6 +26,7 @@ const HOOKS = vi.hoisted(() => ({
   useUploadCatalogVersionCover: vi.fn(),
   useRemoveCatalogVersionCover: vi.fn(),
   useResetCatalogVersionMetadata: vi.fn(),
+  useCatalogVersionMetadataSource: vi.fn(),
 }))
 
 vi.mock('../features/library/hooks', () => HOOKS)
@@ -56,6 +68,8 @@ describe('WorkEditDialog', () => {
     await i18n.changeLanguage('zh-CN')
     HOOKS.useLibraryCategories.mockReturnValue({ data: { data: [{ id: 'cat1', name: '小说' }, { id: 'cat2', name: '散文' }] } })
     HOOKS.useLibraryTags.mockReturnValue({ data: { data: [{ id: 't1', name: 'classic' }, { id: 't2', name: 'new' }] } })
+    HOOKS.useCreateLibraryCategory.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+    HOOKS.useCreateLibraryTag.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
     HOOKS.useUpdateCatalogBook.mockReturnValue({ mutateAsync: updateBook, isPending: false })
     HOOKS.useUpdateCatalogVersion.mockReturnValue({ mutateAsync: updateVersion, isPending: false })
     HOOKS.useUploadCatalogBookCover.mockReturnValue({ mutateAsync: uploadWorkCover, isPending: false })
@@ -63,6 +77,7 @@ describe('WorkEditDialog', () => {
     HOOKS.useUploadCatalogVersionCover.mockReturnValue({ mutateAsync: uploadVersionCover, isPending: false })
     HOOKS.useRemoveCatalogVersionCover.mockReturnValue({ mutateAsync: removeVersionCover, isPending: false })
     HOOKS.useResetCatalogVersionMetadata.mockReturnValue({ mutateAsync: resetVersionMetadata, isPending: false })
+    HOOKS.useCatalogVersionMetadataSource.mockReturnValue({ data: undefined, isFetching: false, isError: false, refetch: vi.fn() })
   })
 
   function renderDialog(target = work(), targetVersionIndex = 0) {
@@ -80,7 +95,8 @@ describe('WorkEditDialog', () => {
 
   it('edits the work and the visible version in one save', async () => {
     renderDialog()
-    fireEvent.change(screen.getByLabelText('书名'), { target: { value: 'City Book 2' } })
+    fireEvent.click(screen.getByRole('button', { name: '作品信息' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '书名' }), { target: { value: 'City Book 2' } })
 
     const versionTab = screen.getByRole('button', { name: /版本 1/ })
     fireEvent.click(versionTab)
@@ -112,6 +128,17 @@ describe('WorkEditDialog', () => {
     expect(updateBook).not.toHaveBeenCalled()
   })
 
+  it.each([null, 'City Book'])('hides equal source and inheritance actions for title override %s', (title) => {
+    HOOKS.useCatalogVersionMetadataSource.mockReturnValue({ data: { data: fileSource({ title: 'City Book' }) }, isFetching: false, isError: false })
+    renderDialog(work({ versions: [version({ title })] }))
+    expect(screen.queryByRole('button', { name: '恢复文件值' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '恢复跟随' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '书名' })).toHaveAttribute('placeholder', 'City Book')
+    fireEvent.change(screen.getByRole('textbox', { name: '书名' }), { target: { value: 'Different' } })
+    expect(screen.getByRole('button', { name: '恢复文件值' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复跟随' })).toBeInTheDocument()
+  })
+
   it('switches between work info and version settings tabs', () => {
     renderDialog()
     const workTab = screen.getByRole('button', { name: '作品信息' })
@@ -124,7 +151,7 @@ describe('WorkEditDialog', () => {
     expect(screen.getByPlaceholderText('版本 1')).toBeVisible()
 
     fireEvent.click(workTab)
-    expect(screen.getByLabelText('书名')).toBeVisible()
+    expect(screen.getByRole('textbox', { name: '书名' })).toBeVisible()
   })
 
   it('edits extended publication metadata under version tab and saves version meta payload', async () => {
@@ -218,6 +245,7 @@ describe('WorkEditDialog', () => {
 
   it('removes the work cover from the work tab', async () => {
     renderDialog(work({ coverKey: 'blobs/work-cover.jpg' }))
+    fireEvent.click(screen.getByRole('button', { name: '作品信息' }))
 
     fireEvent.click(screen.getByRole('button', { name: '移除封面' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -303,26 +331,125 @@ describe('WorkEditDialog', () => {
     })
   })
 
-  it('resets version metadata to file metadata via ConfirmDialog', async () => {
+  it('restores file values into the draft via ConfirmDialog without immediate writes', async () => {
+    HOOKS.useCatalogVersionMetadataSource.mockReturnValue({
+      data: { data: { kind: 'file', format: 'epub', fileName: 'a.epub', normalizeTitleApplied: false, values: { title: 'File Title', authors: ['File Author'], description: null, publisher: 'File Press', published: null, language: null, isbn: null, subjects: null, series: null, seriesIndex: null }, provenance: { title: 'file', authors: 'file', description: 'missing', publisher: 'file', published: 'missing', language: 'missing', isbn: 'missing', subjects: 'missing', series: 'missing', seriesIndex: 'missing' } } },
+      isFetching: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
     renderDialog()
     const versionTab = screen.getByRole('button', { name: /版本 1/ })
     fireEvent.click(versionTab)
 
-    const resetBtn = screen.getByRole('button', { name: '重置为文件元数据' })
+    const resetBtn = screen.getByRole('button', { name: '恢复来源值' })
     expect(resetBtn).toBeInTheDocument()
 
     fireEvent.click(resetBtn)
 
-    // Confirm dialog should be open as an alertdialog
     const confirmDialog = await screen.findByRole('alertdialog')
     expect(confirmDialog).toBeInTheDocument()
-    const confirmBtn = within(confirmDialog).getByRole('button', { name: '重置为文件元数据' })
+    const confirmBtn = within(confirmDialog).getByRole('button', { name: '恢复来源值' })
     fireEvent.click(confirmBtn)
 
-    await waitFor(() => expect(resetVersionMetadata).toHaveBeenCalledWith({
+    expect(resetVersionMetadata).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByDisplayValue('File Title')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({
       libraryId: 'lib_city',
       libraryBookId: 'lb1',
       versionLinkId: 'lbv1',
-    }))
+    })))
+    const patch = updateVersion.mock.calls[0][0].patch
+    expect(patch.title).toBe('File Title')
+    expect(patch.meta).toMatchObject({ publisher: 'File Press' })
   })
+  async function restoreAll() {
+    fireEvent.click(screen.getByRole('button', { name: '恢复来源值' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '恢复来源值' }))
+  }
+
+  it('saves missing file fields as explicit empty overrides, preserving unrelated keys and other versions', async () => {
+    HOOKS.useCatalogVersionMetadataSource.mockReturnValue({ data: { data: fileSource() }, isFetching: false, isError: false })
+    renderDialog(work({ versions: [version({ meta: { publisher: 'Old', identifier: 'keep' } }), version({ id: 'lbv2' })], defaultVersionLinkId: 'lbv1' }))
+    await restoreAll()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateVersion).toHaveBeenCalledTimes(1))
+    expect(updateBook).not.toHaveBeenCalled()
+    expect(updateVersion.mock.calls[0][0]).toMatchObject({ versionLinkId: 'lbv1', patch: {
+      title: 'File Title', authors: [], description: '', meta: { identifier: 'keep', publisher: null, subjects: null, seriesIndex: null },
+    } })
+  })
+
+  it('blocks saving a restored missing title until the draft is filled', async () => {
+    HOOKS.useCatalogVersionMetadataSource.mockReturnValue({ data: { data: fileSource({ title: null }) }, isFetching: false, isError: false })
+    renderDialog()
+    await restoreAll()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    expect(updateVersion).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByRole('textbox', { name: '书名' }), { target: { value: 'New Title' } })
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+  })
+
+  it.each([true, false])('does not restore cached sources during a refresh or after a denial (fetching=%s)', (fetching) => {
+    HOOKS.useCatalogVersionMetadataSource.mockReturnValue({ data: { data: fileSource() }, isFetching: fetching, isError: !fetching, error: new ApiError('FORBIDDEN', 'denied'), refetch: vi.fn() })
+    renderDialog()
+    expect(screen.getByRole('button', { name: '恢复来源值' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '恢复文件值' })).not.toBeInTheDocument()
+    if (!fetching) expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('errors.forbidden'))
+  })
+
+  it('labels inferred file names and restores one field without changing series index', async () => {
+    const source = fileSource({ series: 'File Series', seriesIndex: 0 })
+    source.provenance.title = 'filename'
+    HOOKS.useCatalogVersionMetadataSource.mockReturnValue({ data: { data: source }, isFetching: false, isError: false })
+    renderDialog(work({ versions: [version({ meta: { series: 'Old Series', seriesIndex: 5 } })] }))
+    const titleRestore = within(screen.getByRole('textbox', { name: '书名' }).parentElement!).getByRole('button', { name: '恢复文件值' })
+    fireEvent.focus(titleRestore)
+    expect(screen.getByText(i18n.t('library.sourceProvenanceFilename'))).toBeInTheDocument()
+    expect(screen.getByText('File Title')).toBeInTheDocument()
+    fireEvent.blur(titleRestore)
+    fireEvent.click(within(screen.getByLabelText('系列').parentElement!).getByRole('button', { name: '恢复文件值' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateVersion).toHaveBeenCalled())
+    expect(updateVersion.mock.calls[0][0].patch.meta).toMatchObject({ series: 'File Series', seriesIndex: 5 })
+  })
+
+  it('creates and selects a new category inline', async () => {
+    const createCategory = vi.fn().mockResolvedValue({ data: { id: 'cat_new', name: '科幻' } })
+    HOOKS.useCreateLibraryCategory.mockReturnValue({ mutateAsync: createCategory, isPending: false })
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: '作品信息' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 新建分类' }))
+    const input = screen.getByPlaceholderText('新分类名称')
+    fireEvent.change(input, { target: { value: '科幻' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(createCategory).toHaveBeenCalledWith({ libraryId: 'lib_city', name: '科幻' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({
+      patch: expect.objectContaining({ categoryId: 'cat_new' }),
+    })))
+  })
+
+  it('creates and selects a new tag inline', async () => {
+    const createTag = vi.fn().mockResolvedValue({ data: { id: 't_new', name: '硬核' } })
+    HOOKS.useCreateLibraryTag.mockReturnValue({ mutateAsync: createTag, isPending: false })
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: '作品信息' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 新建标签' }))
+    const input = screen.getByPlaceholderText('新标签名称')
+    fireEvent.change(input, { target: { value: '硬核' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(createTag).toHaveBeenCalledWith({ libraryId: 'lib_city', name: '硬核' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({
+      patch: expect.objectContaining({ tagIds: ['t1', 't_new'] }),
+    })))
+  })
+
 })

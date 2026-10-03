@@ -279,7 +279,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
                 brand={prefs.brand}
                 note={shareTarget.note}
                 authorName={authorName}
-                avatarUrl={avatarUrl(avatarKey)}
+                avatarUrl={avatarUrl(avatarKey, 'static')}
                 writtenAt={shareTarget.createdAt ? _('share.writtenAt', { date: formatShareDate(shareTarget.createdAt) }) : undefined}
                 writtenAtCn={shareTarget.createdAt ? _('share.writtenAtCn', { date: formatChineseDate(shareTarget.createdAt) }) : undefined}
               />

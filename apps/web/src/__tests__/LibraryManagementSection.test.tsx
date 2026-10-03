@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 
 import i18n from '../i18n/i18n'
 import LibraryManagementSection from '../features/settings/components/LibraryManagementSection'
@@ -143,20 +143,69 @@ describe('LibraryManagementSection', () => {
     expect(screen.queryByText('退出书库')).toBeNull()
   })
 
-  it('deletes an owned library through the endpoint after confirmation', () => {
+  it('deletes an owned library through the endpoint after name confirmation', async () => {
     mockSection()
     const mutate = vi.fn()
-    ;(libraryHooks.useDeleteLibrary as ReturnType<typeof vi.fn>).mockReturnValue({ mutate, isPending: false })
+    ;(libraryHooks.useDeleteLibrary as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: mutate, reset: vi.fn(), isPending: false })
 
     render(<LibraryManagementSection />)
     fireEvent.click(screen.getAllByLabelText('更多操作')[0])
     fireEvent.click(screen.getByText('删除'))
-    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    const confirm = screen.getByRole('button', { name: '删除书库' })
+    expect(confirm).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Own Library' } })
+    fireEvent.click(confirm)
 
     expect(mutate).toHaveBeenCalledWith(
       { libraryId: 'lib-own' },
-      expect.anything(),
     )
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  })
+
+  it('keeps a failed deletion open for retry and clears input after closing', async () => {
+    mockSection()
+    const mutateAsync = vi.fn().mockRejectedValueOnce(new TypeError('Offline')).mockResolvedValue(undefined)
+    const reset = vi.fn()
+    ;(libraryHooks.useDeleteLibrary as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, reset })
+    render(<LibraryManagementSection />)
+    function open() {
+      fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+      fireEvent.click(screen.getByText('删除'))
+    }
+    open()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Own Library' } })
+    fireEvent.click(screen.getByRole('button', { name: '删除书库' }))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toHaveValue('Own Library')
+    expect(screen.getByRole('button', { name: '删除书库' })).not.toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(reset).toHaveBeenCalledTimes(1)
+    open()
+    expect(screen.getByRole('textbox')).toHaveValue('')
+    expect(screen.queryByRole('alert')).toBeNull()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Own Library' } })
+    fireEvent.click(screen.getByRole('button', { name: '删除书库' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(mutateAsync).toHaveBeenCalledTimes(2)
+  })
+
+  it('blocks retry if a failed deletion has already removed the library', async () => {
+    mockSection()
+    const state = (libraryHooks.useLibraries as ReturnType<typeof vi.fn>).getMockImplementation()!()
+    state.refetch.mockImplementation(async () => {
+      state.data = { data: state.data.data.filter((library: LibraryListItem) => library.id !== 'lib-own') }
+    })
+    const mutateAsync = vi.fn().mockRejectedValue(new Error('Cleanup failed'))
+    ;(libraryHooks.useDeleteLibrary as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, reset: vi.fn() })
+    const { rerender } = render(<LibraryManagementSection />)
+    fireEvent.click(screen.getAllByLabelText('更多操作')[0])
+    fireEvent.click(screen.getByText('删除'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Own Library' } })
+    fireEvent.click(screen.getByRole('button', { name: '删除书库' }))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    rerender(<LibraryManagementSection />)
+    expect(screen.getByRole('button', { name: '删除书库' })).toBeDisabled()
+    expect(state.refetch).toHaveBeenCalledTimes(1)
   })
 
   it('offers leave but not manage on a member row', () => {

@@ -65,6 +65,24 @@ describe('IdeaOverlay', () => {
     expect(document.querySelector('img')).toHaveAttribute('src', '/api/v1/avatars/ab/abc123.png')
   })
 
+  it('refreshes the selected idea avatar and actions when entries change', () => {
+    const entry: IdeaEntry = { annotation: makeAnnotation(), authorAvatarKey: 'ab/old.gif', own: true }
+    const onShareNote = vi.fn()
+    const props = {
+      entries: [entry], onCopyQuote: vi.fn(), onHighlight: vi.fn(), onWriteNote: vi.fn(), onAiChat: vi.fn(),
+      onShareQuote: vi.fn(), onSearch: vi.fn(), onCopyNote: vi.fn(), onShareNote, onEdit: vi.fn(), onDelete: vi.fn(), onClose: vi.fn(),
+    }
+    const { rerender } = render(<IdeaOverlay {...props} />)
+    fireEvent.click(screen.getByText('a thought'))
+    const updated = { ...entry, authorAvatarKey: 'cd/new.gif' }
+    rerender(<IdeaOverlay {...props} entries={[updated]} />)
+    expect(document.querySelector('img')).toHaveAttribute('src', '/api/v1/avatars/cd/new.gif')
+    fireEvent.click(screen.getByTitle('annotation.share'))
+    expect(onShareNote).toHaveBeenCalledWith(updated)
+    rerender(<IdeaOverlay {...props} entries={[{ ...updated, authorAvatarKey: null }]} />)
+    expect(document.querySelector('img')).toBeNull()
+  })
+
   it('hides the expand chevron when the quote fits within three lines', () => {
     mockQuoteOverflow(false)
     renderOverlay()

@@ -259,8 +259,9 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
               className={settingsInputClass}
             />
           </SettingsFormField>
-          {/* 分组 is a grouping tool for GLOBAL rules only (the settings page
-              groups by it); book-scoped rules and point patches never display it,
+          {/* 分组 is a display label for GLOBAL rules only (the settings page
+              lists them in execution order and never re-sorts by it);
+              book-scoped rules and point patches never display it,
               so the field is hidden and the stored value is cleared. */}
           {scope === 'global' && (
           <SettingsFormField label={_('settings.replacementsGroup')}>

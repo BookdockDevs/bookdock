@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
 import {
   extractVersionNameFromFileName,
@@ -15,6 +15,7 @@ import {
   type CatalogVersion,
   type CatalogVersionUpdateReq,
   type CollectBookRes,
+  type CoverPaletteId,
   type Category,
   type ForkLocalRes,
   type LibraryCreateReq,
@@ -394,16 +395,16 @@ export function useRemoveLibraryMember() {
  * Library taxonomy (11.5). Mutating a category or tag also changes what a
  * catalog card shows, so the catalog query is invalidated with the taxonomy.
  */
-function useTaxonomyMutation<TVars extends { libraryId: string }>(
+function useTaxonomyMutation<TVars extends { libraryId: string }, TData = unknown>(
   build: (vars: TVars) => { url: string; method: 'post' | 'patch' | 'delete'; body?: unknown },
 ) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (vars: TVars) => {
       const { url, method, body } = build(vars)
-      if (method === 'delete') return apiDelete<{ data: unknown }>(url)
-      if (method === 'patch') return apiPatch<{ data: unknown }>(url, body)
-      return apiPost<{ data: unknown }>(url, body)
+      if (method === 'delete') return apiDelete<{ data: TData }>(url)
+      if (method === 'patch') return apiPatch<{ data: TData }>(url, body)
+      return apiPost<{ data: TData }>(url, body)
     },
     onSuccess: (_res, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
@@ -414,13 +415,13 @@ function useTaxonomyMutation<TVars extends { libraryId: string }>(
 }
 
 export function useCreateLibraryCategory() {
-  return useTaxonomyMutation<{ libraryId: string; name: string }>(({ libraryId, name }) => ({
+  return useTaxonomyMutation<{ libraryId: string; name: string }, Category>(({ libraryId, name }) => ({
     url: `/libraries/${libraryId}/categories`, method: 'post', body: { name },
   }))
 }
 
 export function useUpdateLibraryCategory() {
-  return useTaxonomyMutation<{ libraryId: string; categoryId: string; patch: { name?: string; pinned?: boolean; hidden?: boolean } }>(
+  return useTaxonomyMutation<{ libraryId: string; categoryId: string; patch: { name?: string; pinned?: boolean; hidden?: boolean } }, Category>(
     ({ libraryId, categoryId, patch }) => ({
       url: `/libraries/${libraryId}/categories/${categoryId}`, method: 'patch', body: patch,
     }),
@@ -434,7 +435,7 @@ export function useDeleteLibraryCategory() {
 }
 
 export function useCreateLibraryTag() {
-  return useTaxonomyMutation<{ libraryId: string; name: string }>(({ libraryId, name }) => ({
+  return useTaxonomyMutation<{ libraryId: string; name: string }, LibraryTag>(({ libraryId, name }) => ({
     url: `/libraries/${libraryId}/tags`, method: 'post', body: { name },
   }))
 }
@@ -706,16 +707,20 @@ function useCatalogVersionMutation<TVars extends { libraryId: string; libraryBoo
 
 /** Version overrides and publish state (5.3/5.4). */
 export function useUpdateCatalogVersion() {
-  return useCatalogVersionMutation<{
-    libraryId: string
-    libraryBookId: string
-    versionLinkId: string
-    patch: CatalogVersionUpdateReq
-  }>(({ libraryId, libraryBookId, versionLinkId, patch }) => ({
-    url: `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}`,
-    method: 'patch',
-    body: patch,
-  }))
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ libraryId, libraryBookId, versionLinkId, patch }: { libraryId: string; libraryBookId: string; versionLinkId: string; patch: CatalogVersionUpdateReq }) =>
+      apiPatch<{ data: CatalogVersion }>(`/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}`, patch),
+    onSuccess: async (_res, vars) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] }),
+        queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] }),
+        queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] }),
+        queryClient.invalidateQueries({ queryKey: ['books'] }),
+        queryClient.invalidateQueries({ queryKey: ['book'] }),
+      ])
+    },
+  })
 }
 
 /** Re-group a misfiled version under another work (5.5). */
@@ -806,8 +811,12 @@ export function useUploadCatalogVersionCover() {
   return useMutation({
     mutationFn: ({ libraryId, libraryBookId, versionLinkId, file }: { libraryId: string; libraryBookId: string; versionLinkId: string; file: File }) =>
       apiUpload<{ data: CatalogVersion }>(`/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/cover`, file, 'PUT'),
-    onSuccess: (_res, vars) => {
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+    onSuccess: async (_res, vars) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] }),
+        queryClient.invalidateQueries({ queryKey: ['books'] }),
+        queryClient.invalidateQueries({ queryKey: ['book'] }),
+      ])
     },
   })
 }
@@ -817,8 +826,12 @@ export function useRemoveCatalogVersionCover() {
   return useMutation({
     mutationFn: ({ libraryId, libraryBookId, versionLinkId }: { libraryId: string; libraryBookId: string; versionLinkId: string }) =>
       apiDelete<{ data: CatalogVersion }>(`/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/cover`),
-    onSuccess: (_res, vars) => {
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
+    onSuccess: async (_res, vars) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] }),
+        queryClient.invalidateQueries({ queryKey: ['books'] }),
+        queryClient.invalidateQueries({ queryKey: ['book'] }),
+      ])
     },
   })
 }
@@ -1069,6 +1082,7 @@ const UPLOAD_CONCURRENCY = 3
  */
 export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
   const queryClient = useQueryClient()
+  const notificationKey = useId()
   const [items, setItems] = useState<UploadItem[]>([])
   const runningRef = useRef(0)
   const settledRef = useRef(false)
@@ -1204,19 +1218,21 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
     // happen is a red "N failed" toast for a batch the reader stopped on purpose.
     if (stoppingRef.current) return
     if (failed > 0 || (succeeded > 0 && duplicated > 0)) {
-      const showSummary = failed > 0 ? notify.error : notify.warning
+      const showSummary = failed > 0
+        ? (succeeded + duplicated > 0 ? notify.warning : notify.error)
+        : notify.info
       const summary = [
         succeeded > 0 && i18n.t('library.uploadSummarySucceeded', { count: succeeded }),
         duplicated > 0 && i18n.t('library.uploadSummaryDuplicated', { count: duplicated }),
         failed > 0 && i18n.t('library.uploadSummaryFailed', { count: failed }),
       ].filter(Boolean).join(i18n.t('library.uploadSummarySeparator'))
-      showSummary(summary)
+      showSummary(summary, { dedupeKey: `upload:${notificationKey}` })
     } else if (duplicated > 0) {
-      notify.warning({ key: 'library.uploadDuplicateOnly', params: { count: duplicated } })
+      notify.info({ key: 'library.uploadDuplicateOnly', params: { count: duplicated } }, { dedupeKey: `upload:${notificationKey}` })
     } else {
-      notify.success({ key: 'library.uploadImported', params: { count: succeeded } })
+      notify.success({ key: 'library.uploadImported', params: { count: succeeded } }, { dedupeKey: `upload:${notificationKey}` })
     }
-  }, [items, queryClient, target])
+  }, [items, notificationKey, queryClient, target])
 
   const addFiles = useCallback(
     (files: FileList | File[], opts?: { autoStart?: boolean; maxBytes?: number; versionNameMode?: boolean } & UploadAssignment) => {
@@ -1539,10 +1555,13 @@ export function useUpdateBook() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ bookId, ...data }: { bookId: string } & Partial<{ readStatus: string; progress: number; pinned: boolean; title: string; author: string; authors: string[]; hidden: boolean; bookmeta: BookMetadata }>) =>
+    mutationFn: ({ bookId, ...data }: { bookId: string } & Partial<{ readStatus: ReadStatus; progress: number; pinned: boolean; title: string; author: string; authors: string[]; hidden: boolean; bookmeta: BookMetadata; coverPaletteId: CoverPaletteId | null }>) =>
       apiPatch<{ data: BookListItem }>(`/books/${bookId}`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['books'] })
+    onSuccess: async (_result, { bookId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['books'] }),
+        queryClient.invalidateQueries({ queryKey: ['book', bookId] }),
+      ])
       notify.success({ key: 'toast.bookUpdated' })
     },
     onError: (error) => {
@@ -1617,8 +1636,11 @@ export function useUploadCover() {
   return useMutation({
     mutationFn: ({ bookId, file }: { bookId: string; file: File }) =>
       apiUpload<{ data: BookListItem }>(`/books/${bookId}/cover`, file, 'PUT'),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['books'] })
+    onSuccess: async (_result, { bookId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['books'] }),
+        queryClient.invalidateQueries({ queryKey: ['book', bookId] }),
+      ])
       notify.success({ key: 'toast.bookCoverUpdated' })
     },
     onError: (error) => {
@@ -1632,8 +1654,11 @@ export function useRemoveCover() {
 
   return useMutation({
     mutationFn: (bookId: string) => apiDelete<{ data: BookListItem }>(`/books/${bookId}/cover`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['books'] })
+    onSuccess: async (_result, bookId) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['books'] }),
+        queryClient.invalidateQueries({ queryKey: ['book', bookId] }),
+      ])
       notify.success({ key: 'toast.bookCoverRemoved' })
     },
     onError: (error) => {
@@ -1654,6 +1679,35 @@ export function useResetMetadata() {
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.resetMetadataFailed'))
     },
+  })
+}
+
+export function useBookMetadataSource(bookId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['books', bookId, 'metadata-source'],
+    queryFn: () => apiGet<{ data: import('@bookdock/shared').BookMetadataSourceRes }>(`/books/${bookId}/metadata-source`),
+    enabled: Boolean(bookId) && enabled,
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export function useCatalogVersionMetadataSource(
+  libraryId: string | null,
+  libraryBookId: string | null,
+  versionLinkId: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['libraries', libraryId, 'catalog', libraryBookId, versionLinkId, 'metadata-source'],
+    queryFn: () => apiGet<{ data: import('@bookdock/shared').CatalogVersionMetadataSourceRes }>(
+      `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/metadata-source`,
+    ),
+    enabled: Boolean(libraryId && libraryBookId && versionLinkId) && enabled,
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
   })
 }
 
@@ -1736,14 +1790,17 @@ export function useUpdateBookMembership() {
     mutationFn: async ({ bookId, shelfId, tagIds }: { bookId: string; shelfId?: string | null; tagIds?: string[] }) => {
       await Promise.all([
         shelfId !== undefined ? apiPut<{ data: null }>(`/books/${bookId}/shelves`, { shelfId }) : Promise.resolve(),
-        apiPut<{ data: null }>(`/books/${bookId}/tags`, { tagIds: tagIds ?? [] }),
+        tagIds !== undefined ? apiPut<{ data: null }>(`/books/${bookId}/tags`, { tagIds }) : Promise.resolve(),
       ])
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['books'] })
-      queryClient.invalidateQueries({ queryKey: ['shelves'] })
-      queryClient.invalidateQueries({ queryKey: ['tags'] })
-      queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
+    onSuccess: async (_result, { bookId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['books'] }),
+        queryClient.invalidateQueries({ queryKey: ['book', bookId] }),
+        queryClient.invalidateQueries({ queryKey: ['shelves'] }),
+        queryClient.invalidateQueries({ queryKey: ['tags'] }),
+        queryClient.invalidateQueries({ queryKey: ['batch-selection'] }),
+      ])
       notify.success({ key: 'toast.membershipUpdated' })
     },
     onError: (error) => {
@@ -1781,8 +1838,10 @@ export function useMoveBooksToShelf() {
       queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       const failed = results.filter((r) => r.status === 'rejected').length
       if (failed > 0) {
-        notify.warning({
-          key: 'library.moveBooksPartial',
+        const succeeded = results.length - failed
+        const showResult = succeeded > 0 ? notify.warning : notify.error
+        showResult({
+          key: succeeded > 0 ? 'library.moveBooksPartial' : 'library.moveBooksFailed',
           params: { succeeded: results.length - failed, failed },
         })
         return

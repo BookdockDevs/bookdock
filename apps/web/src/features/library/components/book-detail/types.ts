@@ -21,7 +21,7 @@ export interface MetaDraft {
   coverPaletteId: CoverPaletteId | null
 }
 
-export function draftFrom(book: BookListItem, bookmeta?: BookMetadata): MetaDraft {
+export function draftFrom(book: Pick<BookListItem, 'title' | 'author' | 'authors' | 'coverPaletteId'>, bookmeta?: BookMetadata): MetaDraft {
   const authors = (book.authors ?? []).map((name) => name.trim()).filter(Boolean)
   return {
     title: book.title,
@@ -62,6 +62,15 @@ export function draftToBookmeta(draft: MetaDraft): BookMetadata {
   return bookmeta
 }
 
+const EDITABLE_BOOKMETA_KEYS = ['publisher', 'published', 'isbn', 'language', 'subjects', 'description', 'series', 'seriesIndex'] as const
+
+export function draftToBookmetaPreserving(existing: BookMetadata | undefined, draft: MetaDraft): BookMetadata {
+  const next: BookMetadata = { ...(existing ?? {}) }
+  for (const key of EDITABLE_BOOKMETA_KEYS) delete (next as Record<string, unknown>)[key]
+  Object.assign(next, draftToBookmeta(draft))
+  return next
+}
+
 // CJK/fullwidth glyphs render at roughly twice the width of ASCII, so truncating
 // by code-point count under-truncates Chinese file names (a 22-char title still
 // wraps to 3 lines). Count display width instead.
@@ -98,7 +107,7 @@ export function middleTruncate(value: string, max = 28): string {
 export function autoGrow(el: HTMLTextAreaElement | null) {
   if (!el) return
   el.style.height = 'auto'
-  el.style.height = `${el.scrollHeight}px`
+  el.style.height = `${Math.max(el.scrollHeight, 88)}px`
 }
 
 export async function copyText(value: string) {

@@ -12,15 +12,17 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
-import { useBook, useBookMembership, useResetMetadata, useShelves, useTags, useVersionTocState } from '../hooks'
+import { useBook, useBookMembership, useBookMetadataSource, useShelves, useTags, useVersionTocState } from '../hooks'
 
 import AppendContentModal from './AppendContentModal'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
 import BookCoverEditor from './book-detail/BookCoverEditor'
 import BookDetailView from './book-detail/BookDetailView'
 import BookMetaForm from './book-detail/BookMetaForm'
+import type { DraftTextField } from './book-detail/metadata-source'
+import { applySourceAllToDraft, applySourceFieldToDraft, PRIVATE_ALL_TEXT_FIELDS, PRIVATE_B_TEXT_FIELDS } from './book-detail/metadata-source'
 import type { MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
-import { draftFrom, draftToBookmeta, parseAuthorList, type MetaDraft } from './book-detail/types'
+import { draftFrom, draftToBookmetaPreserving, parseAuthorList, type MetaDraft } from './book-detail/types'
 import TocRulePicker from './TocRulePicker'
 import WorkDetailBody from './WorkDetailBody'
 
@@ -52,12 +54,11 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()
 
-  const resetMetadata = useResetMetadata()
-
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
   const [draft, setDraft] = useState<MetaDraft | null>(null)
+  const [draftEpoch, setDraftEpoch] = useState(0)
 
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null)
   const [coverRemovalPending, setCoverRemovalPending] = useState(false)
@@ -138,6 +139,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
   useEffect(() => {
     if (!book) return
     const onKey = (e: KeyboardEvent) => {
+      if (document.querySelector('[data-smart-menu="true"]')) return
       const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]')
       if (e.key === 'Escape' && !e.defaultPrevented && dialogs.length <= 1) closeDialog()
     }
@@ -155,6 +157,11 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
     setTocRuleOpen(false)
     setAppendContentOpen(false)
   }, [book?.id])
+
+  const isEditLibraryOwned = Boolean(displayBook?.source)
+  const editAllowedFields: DraftTextField[] = isEditLibraryOwned ? PRIVATE_B_TEXT_FIELDS : PRIVATE_ALL_TEXT_FIELDS
+  const metadataSource = useBookMetadataSource(book?.id ?? null, editing && Boolean(book))
+  const sourceData = !metadataSource.isFetching && !metadataSource.isError ? (metadataSource.data?.data ?? null) : null
 
   function enterEdit() {
     if (!book) return
@@ -174,7 +181,20 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
       ),
     )
     setConfirmReset(false)
+    setDraftEpoch((n) => n + 1)
+    void queryClient.removeQueries({ queryKey: ['books', book.id, 'metadata-source'] })
     setEditing(true)
+  }
+
+  function handleRestoreField(field: DraftTextField) {
+    if (!draft || !sourceData) return
+    setDraft(applySourceFieldToDraft(draft, field, sourceData))
+  }
+
+  function handleRestoreAll() {
+    if (!draft || !sourceData) return
+    setDraft(applySourceAllToDraft(draft, sourceData, editAllowedFields))
+    setConfirmReset(false)
   }
 
   async function handleSave() {
@@ -184,14 +204,17 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
     setSaving(true)
     try {
       const authors = parseAuthorList(draft.authors)
+      const patch: Record<string, unknown> = {
+        title,
+        author: authors[0] ?? '',
+        authors,
+      }
+      if (!isEditLibraryOwned) {
+        patch.bookmeta = draftToBookmetaPreserving(bookmeta, draft)
+        patch.coverPaletteId = draft.coverPaletteId
+      }
       const requests: Promise<unknown>[] = [
-        apiPatch(`/books/${book.id}`, {
-          title,
-          author: authors[0] ?? '',
-          authors,
-          bookmeta: draftToBookmeta(draft),
-          coverPaletteId: draft.coverPaletteId,
-        }),
+        apiPatch(`/books/${book.id}`, patch),
         apiPut(`/books/${book.id}/shelves`, { shelfId: shelfSel }),
         apiPut(`/books/${book.id}/tags`, { tagIds: [...tagSel] }),
       ]
@@ -202,6 +225,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
       }
       await Promise.all(requests)
       queryClient.invalidateQueries({ queryKey: ['books'] })
+      queryClient.invalidateQueries({ queryKey: ['book', book.id] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
       notify.success({ key: 'toast.bookUpdated' })
@@ -210,16 +234,6 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
       notify.error(getUserErrorNotification(err, 'toast.updateBookFailed'))
     } finally {
       setSaving(false)
-    }
-  }
-
-  async function handleReset() {
-    if (!book) return
-    try {
-      await resetMetadata.mutateAsync(book.id)
-      discardEdit()
-    } catch {
-      // toast handled by the hook
     }
   }
 
@@ -308,7 +322,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
   if (!book) return null
 
   const currentShelfId =
-    memShelves.data?.data !== undefined ? memShelves.data.data : (book.shelfId ?? null)
+    memShelves.data?.data !== undefined ? memShelves.data.data : (displayBook.shelfId ?? null)
   const tagIds = memTags.data?.data ? new Set(memTags.data.data) : null
   // 7.x: a collected B keeps its own metadata editable, but its content belongs
   // to the library — appending, re-chaptering and resetting derived metadata
@@ -375,14 +389,14 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
             <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
               {confirmReset ? (
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-xs text-stone-500 dark:text-stone-400">{_('library.resetMetadataConfirm')}</span>
+                  <span className="truncate text-xs text-stone-500 dark:text-stone-400">{_('library.restoreSourceConfirm')}</span>
                   <button
                     type="button"
-                    onClick={() => void handleReset()}
-                    disabled={resetMetadata.isPending}
-                    className="shrink-0 text-xs font-medium text-red-600 hover:underline dark:text-red-400"
+                    onClick={handleRestoreAll}
+                    disabled={!sourceData || metadataSource.isFetching}
+                    className="shrink-0 text-xs font-medium text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
                   >
-                    {_('library.resetMetadata')}
+                    {_('library.restoreSourceValues')}
                   </button>
                   <button
                     type="button"
@@ -393,21 +407,20 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
                   </button>
                 </div>
               ) : (
-                !isLibraryOwned && (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmReset(true)}
-                    className="inline-flex items-center gap-1.5 text-xs text-stone-400 transition-colors hover:text-stone-700 dark:hover:text-stone-200"
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-70">
-                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                      <path d="M3 3v5h5" />
-                    </svg>
-                    <span>{_('library.resetMetadata')}</span>
-                  </button>
-                )
+                <button
+                  type="button"
+                  onClick={() => setConfirmReset(true)}
+                  disabled={!sourceData || metadataSource.isFetching}
+                  className="inline-flex items-center gap-1.5 text-xs text-stone-400 transition-colors hover:text-stone-700 disabled:opacity-50 dark:hover:text-stone-200"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-70">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                  </svg>
+                  <span>{_('library.restoreSourceValues')}</span>
+                </button>
               )}
-              <div className={`flex shrink-0 items-center gap-2 ${confirmReset || !isLibraryOwned ? '' : 'ml-auto'}`}>
+              <div className={`flex shrink-0 items-center gap-2 ${confirmReset ? '' : ''}`}>
                 <Button variant="secondary" onClick={discardEdit} disabled={saving}>
                   {_('library.cancel')}
                 </Button>
@@ -420,11 +433,17 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
         }
       >
           {editing && draft ? (
-            <div>
+            <div key={draftEpoch}>
               <BookMetaForm
                 draft={draft}
                 onChange={setDraft}
                 identifier={identifier}
+                limited={isEditLibraryOwned}
+                source={sourceData}
+                sourceLoading={metadataSource.isFetching}
+                sourceError={metadataSource.isError ? metadataSource.error : null}
+                onRetrySource={() => void metadataSource.refetch()}
+                onRestoreField={handleRestoreField}
                 coverSlot={
                   <BookCoverEditor
                     book={displayBook}
@@ -433,6 +452,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
                     coverPreviewUrl={coverPreviewUrl}
                     saving={saving}
                     coverPaletteId={draft.coverPaletteId}
+                    allowPalette={!isEditLibraryOwned}
                     onCoverFile={handleCoverFile}
                     onPaletteChange={(id) => setDraft((d) => (d ? { ...d, coverPaletteId: id } : d))}
                     onRemoveCover={() => {
@@ -460,6 +480,7 @@ export default function BookDetailDialog({ book, work = null, readOnly = false, 
               detail={detail}
               shelfName={shelfName}
               currentShelfId={currentShelfId}
+              shelfMembershipReady={memShelves.data !== undefined && !memShelves.isError}
               memberTags={memberTags}
               isLoading={detailLoading || !detail}
               moreActions={privateMenuItems}

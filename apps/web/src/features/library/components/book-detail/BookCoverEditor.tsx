@@ -1,17 +1,19 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import type { BookListItem, CoverPaletteId } from '@bookdock/shared'
+import type { CoverPaletteId } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { computeFromAnchor, PADDING, type SmartPosition } from '@/lib/position'
 
-import BookCover from '../BookCover'
+import BookCover, { type CoverSource } from '../BookCover'
 import { MORANDI_PALETTES } from '../cover-palettes'
 
 interface BookCoverEditorProps {
-  book: BookListItem
+  book: CoverSource
+  canRemove?: boolean
+  removeLabel?: string
   coverRemovalPending: boolean
   pendingCoverFile: File | null
   coverPreviewUrl: string | null
@@ -21,6 +23,10 @@ interface BookCoverEditorProps {
   onCoverFile: (file: File | undefined) => void
   onRemoveCover: () => void
   onPaletteChange: (id: CoverPaletteId) => void
+  toolbarVisible?: boolean
+  toolbarPinned?: boolean
+  fullWidth?: boolean
+  allowPalette?: boolean
 }
 
 const PALETTE_MENU_WIDTH = 176
@@ -28,6 +34,8 @@ const PALETTE_MENU_HEIGHT = 76
 
 export default function BookCoverEditor({
   book,
+  canRemove,
+  removeLabel,
   coverRemovalPending,
   pendingCoverFile,
   coverPreviewUrl,
@@ -36,12 +44,20 @@ export default function BookCoverEditor({
   onCoverFile,
   onRemoveCover,
   onPaletteChange,
+  toolbarVisible = true,
+  toolbarPinned = false,
+  fullWidth = false,
+  allowPalette = true,
 }: BookCoverEditorProps) {
   const _ = useTranslation()
   const coverInputRef = useRef<HTMLInputElement>(null)
   const paletteAnchorRef = useRef<HTMLButtonElement>(null)
   const paletteMenuRef = useRef<HTMLDivElement>(null)
   const [paletteMenu, setPaletteMenu] = useState<SmartPosition | null>(null)
+
+  useEffect(() => {
+    if (!toolbarVisible) setPaletteMenu(null)
+  }, [toolbarVisible])
 
   // What the thumbnail actually shows right now: a real image or the placeholder.
   const hasVisualCover = coverRemovalPending ? false : Boolean(pendingCoverFile || book.coverKey)
@@ -69,17 +85,17 @@ export default function BookCoverEditor({
     'flex h-7 w-7 items-center justify-center rounded-md bg-black/40 text-white/90 transition-colors hover:bg-black/60 disabled:opacity-50'
 
   return (
-    <div className="w-28 shrink-0 self-center sm:self-auto">
+    <div className={`${fullWidth ? 'w-full' : 'w-28'} shrink-0 self-center sm:self-auto`}>
       <div className="group relative">
         <BookCover
           book={book}
           coverSrc={coverRemovalPending ? null : pendingCoverFile ? coverPreviewUrl : undefined}
           coverPaletteId={coverPaletteId}
         />
-        <div
+        {toolbarVisible && <div
           className={cn(
             'absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl bg-black/45 transition-opacity',
-            paletteMenu ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100',
+            toolbarPinned || paletteMenu ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100',
           )}
         >
           <button
@@ -96,15 +112,15 @@ export default function BookCoverEditor({
               <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
             </svg>
           </button>
-          {hasVisualCover && (
+          {(canRemove ?? hasVisualCover) && (
             <button
               type="button"
               onClick={() => {
                 if (!saving) onRemoveCover()
               }}
               disabled={saving}
-              title={_('library.removeCover')}
-              aria-label={_('library.removeCover')}
+              title={removeLabel ?? _('library.removeCover')}
+              aria-label={removeLabel ?? _('library.removeCover')}
               className={iconButtonClass}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -116,7 +132,7 @@ export default function BookCoverEditor({
               </svg>
             </button>
           )}
-          {!hasVisualCover && (
+          {!hasVisualCover && allowPalette && (
             <button
               ref={paletteAnchorRef}
               type="button"
@@ -135,7 +151,7 @@ export default function BookCoverEditor({
               </svg>
             </button>
           )}
-        </div>
+        </div>}
         <input
           ref={coverInputRef}
           type="file"
@@ -148,7 +164,7 @@ export default function BookCoverEditor({
           }}
         />
       </div>
-      {paletteMenu && (
+      {toolbarVisible && paletteMenu && (
         <SmartMenu
           innerRef={paletteMenuRef}
           triggerRef={paletteAnchorRef}

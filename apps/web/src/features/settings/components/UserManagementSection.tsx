@@ -331,6 +331,7 @@ export default function UserManagementSection({
         <InstanceUsersView createOpen={createOpen} setCreateOpen={setCreateOpen} />
       ) : (
         <LibraryMembersView
+          key={activeLibraryId}
           activeLibraryId={activeLibraryId}
           hasManageableLibraries={sharedLibraries.length > 0}
         />
@@ -450,17 +451,25 @@ function InstanceUsersView({
 
       {transferTarget && (
         <ConfirmDialog
+          key={transferTarget.id}
           title={_('admin.transferOwner')}
-          message={_('admin.transferOwnerConfirm', { name: transferTarget.username })}
+          message={<p className="whitespace-pre-line">{_('admin.transferOwnerConfirm', { name: transferTarget.username })}</p>}
           confirmLabel={_('admin.transferOwner')}
-          onClose={() => setTransferTarget(null)}
-          onConfirm={() => {
+          confirmationText={transferTarget.username}
+          confirmationLabel={_('admin.confirmTransferUsername')}
+          errorFallback="admin.transferOwnerFailed"
+          onClose={() => { setTransferTarget(null); transferOwnership.reset() }}
+          onConfirm={async () => {
             const target = transferTarget
-            setTransferTarget(null)
-            transferOwnership.mutate(target.id, {
-              onSuccess: () => notify.success(_('admin.transferOwnerSuccess', { name: target.username })),
-              onError: (err) => notify.error(getUserErrorNotification(err, 'admin.transferOwnerFailed')),
-            })
+            try {
+              await transferOwnership.mutateAsync(target.id)
+              setTransferTarget(null)
+              transferOwnership.reset()
+              notify.success(_('admin.transferOwnerSuccess', { name: target.username }))
+            } catch (err) {
+              notify.error(getUserErrorNotification(err, 'admin.transferOwnerFailed'))
+              throw err
+            }
           }}
         />
       )}
@@ -914,7 +923,7 @@ function LibraryMembersView({
   const transferLibrary = useTransferLibrary()
 
   const [removeTarget, setRemoveTarget] = useState<LibraryMemberEntry | null>(null)
-  const [transferTarget, setTransferTarget] = useState<LibraryMemberEntry | null>(null)
+  const [transferTarget, setTransferTarget] = useState<(LibraryMemberEntry & { libraryId: string; libraryName: string }) | null>(null)
 
   const owner = membersData?.data?.owner
   const members = useMemo(() => {
@@ -1026,7 +1035,9 @@ function LibraryMembersView({
                       onError: (err) => notify.error(getUserErrorNotification(err, 'library.memberRoleChangeFailed')),
                     })
                   }}
-                  onTransfer={() => setTransferTarget(member)}
+                  onTransfer={() => {
+                    if (selectedLibrary) setTransferTarget({ ...member, libraryId: selectedLibrary.id, libraryName: selectedLibrary.name })
+                  }}
                   onRemove={() => setRemoveTarget(member)}
                 />
               ))}
@@ -1063,22 +1074,31 @@ function LibraryMembersView({
         />
       )}
 
-      {transferTarget && activeLibraryId && (
+      {transferTarget && transferTarget.libraryId === activeLibraryId && (
         <ConfirmDialog
+          key={`${transferTarget.libraryId}:${transferTarget.userId}`}
           title={_('library.transferOwner')}
-          message={_('library.transferOwnerConfirm', { name: transferTarget.username })}
+          message={<p className="whitespace-pre-line">{_('library.transferOwnerConfirm', {
+            name: transferTarget.username,
+            library: transferTarget.libraryName,
+          })}</p>}
           confirmLabel={_('library.transferOwner')}
-          onClose={() => setTransferTarget(null)}
-          onConfirm={() => {
+          confirmationText={transferTarget.libraryName}
+          confirmationLabel={_('library.confirmLibraryName')}
+          errorFallback="library.transferOwnerFailed"
+          confirmDisabled={!isLibraryOwner}
+          onClose={() => { setTransferTarget(null); transferLibrary.reset() }}
+          onConfirm={async () => {
             const target = transferTarget
-            setTransferTarget(null)
-            transferLibrary.mutate({
-              libraryId: activeLibraryId,
-              userId: target.userId,
-            }, {
-              onSuccess: () => notify.success(_('library.transferOwnerSuccess')),
-              onError: (err) => notify.error(getUserErrorNotification(err, 'library.transferOwnerFailed')),
-            })
+            try {
+              await transferLibrary.mutateAsync({ libraryId: target.libraryId, userId: target.userId })
+              setTransferTarget(null)
+              transferLibrary.reset()
+              notify.success(_('library.transferOwnerSuccess'))
+            } catch (err) {
+              notify.error(getUserErrorNotification(err, 'library.transferOwnerFailed'))
+              throw err
+            }
           }}
         />
       )}

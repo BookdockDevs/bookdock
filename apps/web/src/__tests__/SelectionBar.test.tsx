@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BatchSelectionItem } from '@bookdock/shared'
 
 import SelectionBar from '../features/library/components/SelectionBar'
+import { useToastStore } from '@/stores/toast.store'
 
 const apiPatch = vi.fn()
 const apiPost = vi.fn()
@@ -44,6 +45,7 @@ async function clickReady(name: string) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  useToastStore.getState().clearToasts()
   selectionItems = []
   tags = []
   categories = []
@@ -158,6 +160,17 @@ describe('SelectionBar', () => {
 
     await clickReady('library.pin')
     await waitFor(() => expect(onRetainSelection).toHaveBeenCalledWith(['b']))
+    expect(useToastStore.getState().toasts[0]).toMatchObject({ type: 'warning', message: { key: 'library.batchPartial', params: { succeeded: 1, failed: 1 } } })
+  })
+
+  it('reports complete batch failure as an error and retains all failed items', async () => {
+    selectionItems = [item('a'), item('b')]
+    apiPatch.mockRejectedValue(new Error('failed'))
+    const onRetainSelection = vi.fn()
+    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} onRetainSelection={onRetainSelection} />, { wrapper })
+    await clickReady('library.pin')
+    await waitFor(() => expect(onRetainSelection).toHaveBeenCalledWith(['a', 'b']))
+    expect(useToastStore.getState().toasts[0]).toMatchObject({ type: 'error', message: { key: 'library.batchFailed', params: { failed: 2 } } })
   })
 
   it('keeps trash actions separate from ordinary selection actions', () => {

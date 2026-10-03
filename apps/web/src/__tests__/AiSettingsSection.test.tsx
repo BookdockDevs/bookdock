@@ -390,6 +390,9 @@ describe('AiSettingsSection', () => {
     vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
 
     render(<AiSettingsSection />)
+    expect(screen.queryByRole('button', { name: '恢复默认快捷指令' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    expect(screen.queryByRole('button', { name: '新建快捷指令' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '恢复默认快捷指令' }))
 
     expect(screen.getByText('恢复默认会移除自定义快捷指令，并还原已修改的内置指令。确定继续吗？')).toBeInTheDocument()
@@ -400,6 +403,20 @@ describe('AiSettingsSection', () => {
       { prompts: null },
       expect.objectContaining({ onError: expect.any(Function) }),
     )
+  })
+
+  it('replaces the sorting draft after restoration instead of resaving stale commands', () => {
+    const mutate = vi.fn()
+    vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
+    render(<AiSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认快捷指令' }))
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认', exact: true }))
+    act(() => mutate.mock.calls[0]![1].onSuccess({ data: { prompts: [] } }))
+    expect(screen.getByText('暂未添加快捷指令')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '保存排序并退出编辑模式' }))
+    expect(mutate).toHaveBeenLastCalledWith({ prompts: [] }, expect.any(Object))
+    expect(screen.getByRole('button', { name: '恢复默认快捷指令' })).toBeEnabled()
   })
 
   it('explains quick-command variables and inserts them at the prompt cursor', () => {

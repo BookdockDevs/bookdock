@@ -12,6 +12,7 @@ export interface MetaRow {
   onClick?: () => void
   expandable?: boolean
   hint?: string
+  onEdit?: () => void
 }
 
 /**
@@ -31,7 +32,7 @@ export default function MetaGrid({ rows, isLoading }: { rows: MetaRow[]; isLoadi
       <div className="rounded-xl border border-stone-200/70 bg-stone-50/70 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
           {rows.map((row, index) => (
-            <div key={row.label} className={cn('min-w-0', spanClasses[index])}>
+            <div key={row.label} className={cn('min-w-0', spanClasses[index])} onContextMenu={row.onEdit ? (event) => { event.preventDefault(); event.stopPropagation(); row.onEdit?.() } : undefined}>
               <dt className="text-xs text-stone-400 dark:text-stone-500">{row.label}</dt>
               {row.copyable ? (
                 <dd className="mt-0.5">

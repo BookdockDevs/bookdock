@@ -1,7 +1,8 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorMessage } from '@/lib/error-message'
 
 import { Button } from './Button'
 import { useDialogLayout } from './dialog-layout-context'
@@ -14,7 +15,10 @@ export interface ConfirmDialogProps {
   confirmLabel: string
   confirmVariant?: 'danger' | 'primary'
   confirmDisabled?: boolean
-  onConfirm: () => void
+  confirmationText?: string
+  confirmationLabel?: string
+  errorFallback?: string
+  onConfirm: () => void | Promise<void>
   onClose: () => void
 }
 
@@ -30,6 +34,9 @@ export default function ConfirmDialog({
   confirmLabel,
   confirmVariant = 'danger',
   confirmDisabled,
+  confirmationText,
+  confirmationLabel,
+  errorFallback,
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
@@ -38,6 +45,38 @@ export default function ConfirmDialog({
   const dialogId = useId()
   const titleId = `${dialogId}-title`
   const messageId = `${dialogId}-message`
+  const inputId = `${dialogId}-input`
+  const [input, setInput] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const submittingRef = useRef(false)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  const needsText = confirmationText !== undefined
+  const disabled = confirmDisabled || submitting || (needsText && (input === '' || input !== confirmationText))
+
+  function close() {
+    if (!submittingRef.current) closeRef.current()
+  }
+
+  async function confirm() {
+    if (disabled || submittingRef.current) return
+    if (!needsText) {
+      onConfirm()
+      return
+    }
+    submittingRef.current = true
+    setSubmitting(true)
+    setError(null)
+    try {
+      await onConfirm()
+    } catch (err) {
+      setError(getUserErrorMessage(err, _, errorFallback))
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
+  }
   const dialogRef = useRef<HTMLDivElement>(null)
   const previousActiveElementRef = useRef<HTMLElement | null>(
     typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null,
@@ -49,7 +88,7 @@ export default function ConfirmDialog({
         e.preventDefault()
         e.stopPropagation()
         e.stopImmediatePropagation()
-        onClose()
+        if (!submittingRef.current) closeRef.current()
         return
       }
 
@@ -62,6 +101,12 @@ export default function ConfirmDialog({
 
         const first = focusable[0]
         const last = focusable[focusable.length - 1]
+
+        if (!dialogRef.current.contains(document.activeElement)) {
+          e.preventDefault()
+          ;(e.shiftKey ? last : first)?.focus()
+          return
+        }
 
         if (e.shiftKey) {
           if (document.activeElement === first) {
@@ -84,14 +129,14 @@ export default function ConfirmDialog({
         previousActiveElement.focus()
       }
     }
-  }, [onClose])
+  }, [])
 
   return createPortal(
     <div
       data-settings-toggle=""
       className={`fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop`}
       style={dialogLayout.style}
-      onClick={onClose}
+      onClick={close}
     >
       <div
         ref={dialogRef}
@@ -99,6 +144,7 @@ export default function ConfirmDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={messageId}
+        aria-busy={submitting || undefined}
         className="flex max-h-[calc(100dvh-1rem)] w-full max-w-md flex-col gap-5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-2xl dark:bg-stone-900 animate-modal-panel"
         onClick={(e) => e.stopPropagation()}
       >
@@ -127,12 +173,31 @@ export default function ConfirmDialog({
             )}
           </div>
         </div>
+        {needsText && (
+          <div className="flex flex-col gap-2">
+            <label htmlFor={inputId} className="text-sm text-stone-700 dark:text-stone-200">
+              {confirmationLabel}
+            </label>
+            <p className="whitespace-pre-wrap break-all text-sm font-semibold text-stone-900 dark:text-stone-100">{confirmationText}</p>
+            <input
+              id={inputId}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={submitting}
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 disabled:opacity-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+            />
+          </div>
+        )}
+        {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" size="sm" onClick={onClose} autoFocus>
+          <Button type="button" variant="secondary" size="sm" onClick={close} disabled={submitting} autoFocus={!needsText}>
             {_('library.cancel')}
           </Button>
-          <Button type="button" variant={confirmVariant} size="sm" onClick={onConfirm} disabled={confirmDisabled}>
-            {confirmLabel}
+          <Button type="button" variant={confirmVariant} size="sm" onClick={() => { void confirm() }} disabled={disabled}>
+            {submitting ? _('library.confirmSubmitting') : confirmLabel}
           </Button>
         </div>
       </div>

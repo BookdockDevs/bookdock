@@ -178,17 +178,28 @@ export default function LibraryManagementSection() {
 
       {deleteTarget && (
         <ConfirmDialog
+          key={deleteTarget.id}
           title={_('library.deleteLibrary')}
-          message={_('library.deleteLibraryConfirm', { name: deleteTarget.name })}
-          confirmLabel={_('library.delete')}
-          onClose={() => setDeleteTarget(null)}
-          onConfirm={() => {
+          message={<p className="whitespace-pre-line">{_('library.deleteLibraryConfirm', { name: deleteTarget.name })}</p>}
+          warning={deleteLibrary.isError ? _('library.deleteLibraryFailureHint') : undefined}
+          confirmLabel={_('library.deleteLibrary')}
+          confirmationText={deleteTarget.name}
+          confirmationLabel={_('library.confirmLibraryName')}
+          errorFallback="library.deleteLibraryFailed"
+          confirmDisabled={!memberships.some((library) => library.id === deleteTarget.id && library.relation === 'owner')}
+          onClose={() => { setDeleteTarget(null); deleteLibrary.reset() }}
+          onConfirm={async () => {
             const target = deleteTarget
-            setDeleteTarget(null)
-            deleteLibrary.mutate({ libraryId: target.id }, {
-              onSuccess: () => notify.success(_('library.deleteLibrarySuccess', { name: target.name })),
-              onError: (err) => notify.error(getUserErrorNotification(err, 'library.deleteLibraryFailed')),
-            })
+            try {
+              await deleteLibrary.mutateAsync({ libraryId: target.id })
+              setDeleteTarget(null)
+              deleteLibrary.reset()
+              notify.success(_('library.deleteLibrarySuccess', { name: target.name }))
+            } catch (err) {
+              notify.error(getUserErrorNotification(err, 'library.deleteLibraryFailed'))
+              await refetch()
+              throw err
+            }
           }}
         />
       )}

@@ -584,7 +584,10 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
 
   function confirmReset() {
     update.mutate({ prompts: null }, {
-      onSuccess: () => notify.success({ key: 'settings.aiPromptsReset' }),
+      onSuccess: (response) => {
+        setDrafts(response.data.prompts)
+        notify.success({ key: 'settings.aiPromptsReset' })
+      },
       onError: showError,
     })
     setRestoreOpen(false)
@@ -688,8 +691,8 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <EditModeButton active={sorting} disabled={update.isPending} onClick={toggleSorting} />
-        <button type="button" onClick={() => setRestoreOpen(true)} disabled={update.isPending || sorting} aria-label={_('settings.aiPromptsReset')} title={_('settings.aiPromptsReset')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-stone-200"><RestoreDefaultsIcon /></button>
-        <button type="button" onClick={openCreate} disabled={update.isPending || sorting} aria-label={_('settings.aiPromptAdd')} title={_('settings.aiPromptAdd')} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>
+        {sorting && <button type="button" onClick={() => setRestoreOpen(true)} disabled={update.isPending} aria-label={_('settings.aiPromptsReset')} title={_('settings.aiPromptsReset')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-stone-200"><RestoreDefaultsIcon /></button>}
+        {!sorting && <button type="button" onClick={openCreate} disabled={update.isPending} aria-label={_('settings.aiPromptAdd')} title={_('settings.aiPromptAdd')} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button>}
       </div>
     </div>
     {drafts.length === 0 ? <p className="rounded-lg border border-dashed border-stone-200 px-3 py-4 text-center text-xs text-stone-400 dark:border-stone-700">{_('settings.aiPromptsEmpty')}</p> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>

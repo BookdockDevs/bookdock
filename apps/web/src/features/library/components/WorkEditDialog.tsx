@@ -6,17 +6,19 @@ import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
-import { getUserErrorNotification } from '@/lib/error-message'
+import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { cn, formatAuthorList } from '@/lib/utils'
 
 import { versionOrdinal, versionTabLabel } from '../book-row'
 import {
+  useCatalogVersionMetadataSource,
+  useCreateLibraryCategory,
+  useCreateLibraryTag,
   useLibraryCategories,
   useLibraryTags,
   useRemoveCatalogBookCover,
   useRemoveCatalogVersionCover,
-  useResetCatalogVersionMetadata,
   useUpdateCatalogBook,
   useUpdateCatalogVersion,
   useUploadCatalogBookCover,
@@ -24,6 +26,8 @@ import {
 } from '../hooks'
 import BookCover from './BookCover'
 import { autoGrow, copyText, middleTruncate, parseAuthorList } from './book-detail/types'
+import MetadataFieldAction from './book-detail/MetadataFieldAction'
+import { sourceTextForField, sourceProvenanceLabel, CATALOG_VERSION_TEXT_FIELDS, type DraftTextField } from './book-detail/metadata-source'
 import { Chip } from './book-detail/ui'
 
 interface WorkEditDialogProps {
@@ -35,6 +39,7 @@ interface WorkEditDialogProps {
 }
 
 interface VersionDraft {
+  explicitFields: DraftTextField[]
   name: string
   pendingCoverFile: File | null
   coverPreviewUrl: string | null
@@ -124,6 +129,11 @@ function initDraft(v: CatalogVersion): VersionDraft {
     display.identifier,
   )
   return {
+    explicitFields: [
+      ...KNOWN_META_KEYS.filter((key) => v.meta?.[key] === null || v.meta?.[key] === '' || (Array.isArray(v.meta?.[key]) && (v.meta[key] as unknown[]).length === 0)),
+      ...(v.authors?.length === 0 ? ['authors' as const] : []),
+      ...(v.description === '' ? ['description' as const] : []),
+    ],
     name: v.name,
     pendingCoverFile: null,
     coverPreviewUrl: null,
@@ -144,10 +154,59 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
   const removeWorkCover = useRemoveCatalogBookCover()
   const uploadVersionCover = useUploadCatalogVersionCover()
   const removeVersionCover = useRemoveCatalogVersionCover()
-  const resetVersionMetadata = useResetCatalogVersionMetadata()
 
   const { data: categoriesData } = useLibraryCategories(libraryId)
   const { data: tagsData } = useLibraryTags(libraryId)
+  const createCategory = useCreateLibraryCategory()
+  const createTag = useCreateLibraryTag()
+
+  const [newCat, setNewCat] = useState('')
+  const [newCatOpen, setNewCatOpen] = useState(false)
+  const [newTag, setNewTag] = useState('')
+  const [newTagOpen, setNewTagOpen] = useState(false)
+  const newCatEditorRef = useRef<HTMLSpanElement>(null)
+  const newTagEditorRef = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    if (!newCatOpen && !newTagOpen) return
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (newCatEditorRef.current?.contains(target) || newTagEditorRef.current?.contains(target)) return
+      setNewCat('')
+      setNewCatOpen(false)
+      setNewTag('')
+      setNewTagOpen(false)
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    return () => document.removeEventListener('mousedown', onMouseDown)
+  }, [newCatOpen, newTagOpen])
+
+  async function handleCreateCategory() {
+    const name = newCat.trim()
+    if (!name) return
+    try {
+      const res = await createCategory.mutateAsync({ libraryId, name })
+      setCategoryId(res.data.id)
+      setNewCat('')
+      setNewCatOpen(false)
+    } catch {
+      // toast handled by the hook
+    }
+  }
+
+  async function handleCreateTag() {
+    const name = newTag.trim()
+    if (!name) return
+    try {
+      const res = await createTag.mutateAsync({ libraryId, name })
+      setTagIds((prev) => (prev.includes(res.data.id) ? prev : [...prev, res.data.id]))
+      setNewTag('')
+      setNewTagOpen(false)
+    } catch {
+      // toast handled by the hook
+    }
+  }
 
   const [activeTab, setActiveTab] = useState<'work' | string>(
     // Open where the caller pointed: jumping from a version's menu straight
@@ -155,6 +214,94 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
     () => (version && work.versions.some((v) => v.id === version.id) ? version.id : 'work'),
   )
   const [confirmResetVersion, setConfirmResetVersion] = useState<CatalogVersion | null>(null)
+  const versionSource = useCatalogVersionMetadataSource(
+    libraryId,
+    work.id,
+    activeTab !== 'work' ? activeTab : null,
+    activeTab !== 'work',
+  )
+  const activeSource = activeTab !== 'work' && !versionSource.isFetching && !versionSource.isError
+    ? (versionSource.data?.data ?? null) : null
+
+  function provenanceText(field: DraftTextField): string {
+    return _(sourceProvenanceLabel(activeSource, field) === 'filename'
+      ? 'library.sourceProvenanceFilename' : 'library.sourceProvenanceFile') as string
+  }
+
+  function sourceText(field: 'title' | 'authors' | 'description' | 'publisher' | 'published' | 'language' | 'isbn' | 'subjects' | 'series' | 'seriesIndex'): string {
+    if (!activeSource) return ''
+    const v = activeSource.values as unknown as Record<string, unknown>
+    if (field === 'authors') return Array.isArray(v.authors) ? (v.authors as string[]).join('、') : ''
+    if (field === 'subjects') return Array.isArray(v.subjects) ? (v.subjects as string[]).join(', ') : ''
+    if (field === 'seriesIndex') return typeof v.seriesIndex === 'number' && Number.isFinite(v.seriesIndex) ? String(v.seriesIndex) : ''
+    const s = v[field]
+    return typeof s === 'string' ? s : ''
+  }
+
+  function sourceHas(field: 'title' | 'authors' | 'description' | 'publisher' | 'published' | 'language' | 'isbn' | 'subjects' | 'series' | 'seriesIndex'): boolean {
+    if (!activeSource) return false
+    const v = activeSource.values as unknown as Record<string, unknown>
+    if (field === 'authors') return Array.isArray(v.authors) && (v.authors as string[]).some((a) => a.trim().length > 0)
+    if (field === 'subjects') return Array.isArray(v.subjects) && (v.subjects as string[]).some((a) => a.trim().length > 0)
+    if (field === 'seriesIndex') return typeof v.seriesIndex === 'number' && Number.isFinite(v.seriesIndex)
+    const s = v[field]
+    return typeof s === 'string' && s.trim().length > 0
+  }
+
+  function versionFieldDiffers(field: 'title' | 'authors' | 'description' | 'publisher' | 'published' | 'language' | 'isbn' | 'subjects' | 'series' | 'seriesIndex', draftValue: string, target = sourceText(field)): boolean {
+    draftValue = effectiveDraftValue(field, draftValue)
+    const s = target
+    if (field === 'authors') {
+      const a = parseAuthorList(draftValue)
+      const b = parseAuthorList(s)
+      return a.length !== b.length || a.some((x, i) => x !== b[i])
+    }
+    if (field === 'subjects') {
+      const norm = (t: string) => t.split(/[,，、]/).map((x) => x.trim()).filter(Boolean)
+      const a = norm(draftValue)
+      const b = norm(s)
+      return a.length !== b.length || a.some((x, i) => x !== b[i])
+    }
+    if (field === 'seriesIndex') {
+      const a = draftValue.trim()
+      if (a === '' && s === '') return false
+      const an = a === '' ? NaN : Number(a)
+      const bn = s === '' ? NaN : Number(s)
+      if (Number.isNaN(an) || Number.isNaN(bn)) return a !== s
+      return an !== bn
+    }
+    if (field === 'description') return draftValue !== s
+    return draftValue.trim() !== s.trim()
+  }
+
+  function restoreVersionField(id: string, field: 'title' | 'authors' | 'description' | 'publisher' | 'published' | 'language' | 'isbn' | 'subjects' | 'series' | 'seriesIndex') {
+    if (!activeSource) return
+    updateDraft(id, { explicitFields: [...new Set([...drafts[id].explicitFields, field])] })
+    const s = sourceText(field)
+    if (field === 'title') updateDraft(id, { overrideTitle: s })
+    else if (field === 'authors') updateDraft(id, { overrideAuthorsText: s })
+    else if (field === 'description') updateDraft(id, { overrideDescription: s })
+    else updateDraft(id, { [field]: s } as Partial<VersionDraft>)
+  }
+
+  function restoreVersionAll(target: CatalogVersion) {
+    if (!activeSource) return
+    const v = activeSource.values as unknown as Record<string, unknown>
+    updateDraft(target.id, {
+      explicitFields: [...CATALOG_VERSION_TEXT_FIELDS],
+      overrideTitle: typeof v.title === 'string' ? v.title : '',
+      overrideAuthorsText: Array.isArray(v.authors) ? (v.authors as string[]).join('、') : '',
+      overrideDescription: typeof v.description === 'string' ? v.description : '',
+      publisher: typeof v.publisher === 'string' ? v.publisher : '',
+      published: typeof v.published === 'string' ? v.published : '',
+      language: typeof v.language === 'string' ? v.language : '',
+      isbn: typeof v.isbn === 'string' ? v.isbn : '',
+      subjects: Array.isArray(v.subjects) ? (v.subjects as string[]).join(', ') : '',
+      series: typeof v.series === 'string' ? v.series : '',
+      seriesIndex: typeof v.seriesIndex === 'number' && Number.isFinite(v.seriesIndex) ? String(v.seriesIndex) : '',
+    })
+    setConfirmResetVersion(null)
+  }
 
   // ------------------------------------------------------------- Tab 1: Work info
   const [title, setTitle] = useState(work.title)
@@ -245,7 +392,36 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
     removeWorkCover.isPending ||
     uploadVersionCover.isPending ||
     removeVersionCover.isPending ||
-    resetVersionMetadata.isPending
+    createCategory.isPending ||
+    createTag.isPending
+
+  function inheritedText(field: DraftTextField): string {
+    if (field === 'title') return title
+    if (field === 'authors') return authorsText
+    if (field === 'description') return description
+    return sourceTextForField(field, activeVersion.inherited?.bookmeta ?? work.meta ?? {})
+  }
+
+  function effectiveDraftValue(field: DraftTextField, raw: string): string {
+    return raw.trim() || activeDraft.explicitFields.includes(field) ? raw : inheritedText(field)
+  }
+
+  function fieldActions(field: DraftTextField, raw: string) {
+    const restore = activeSource && sourceHas(field) && versionFieldDiffers(field, raw)
+    const follow = versionFieldDiffers(field, raw, inheritedText(field))
+    if (!restore && !follow) return null
+    return <span className={`absolute right-2 flex gap-1 ${field === 'description' ? 'top-2' : 'top-1/2 -translate-y-1/2'}`}>
+      {restore && <MetadataFieldAction label={_('library.restoreFieldFile')} provenance={provenanceText(field)} preview={sourceText(field)} disabled={saving} onApply={() => restoreVersionField(activeVersion.id, field)} />}
+      {follow && <MetadataFieldAction label={_('library.restoreFollow')} provenance={_('library.followWork')} preview={inheritedText(field)} kind="inherit" disabled={saving} onApply={() => {
+        const key = field === 'title' ? 'overrideTitle' : field === 'authors' ? 'overrideAuthorsText' : field === 'description' ? 'overrideDescription' : field
+        updateDraft(activeVersion.id, { [key]: '', explicitFields: activeDraft.explicitFields.filter((item) => item !== field) })
+      }} />}
+    </span>
+  }
+
+  const invalidRestoredTitle = Object.values(drafts).some((d) =>
+    d.explicitFields.includes('title') && !d.overrideTitle.trim(),
+  )
 
   const activeMayHaveArtwork = Boolean(activeVersion.coverKey || work.coverKey) || activeVersion.format === 'epub'
   const hasActiveVisualCover = activeDraft.coverRemovalPending
@@ -280,22 +456,14 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
     })
   }
 
-  async function handleResetVersion() {
+  function handleResetVersion() {
     if (!confirmResetVersion) return
-    const target = confirmResetVersion
-    setConfirmResetVersion(null)
-    try {
-      await resetVersionMetadata.mutateAsync({ libraryId, libraryBookId: work.id, versionLinkId: target.id })
-      notify.success(_('library.catalogVersionResetSuccess'))
-      onClose()
-    } catch (err) {
-      notify.error(getUserErrorNotification(err, 'library.resetMetadataFailed'))
-    }
+    restoreVersionAll(confirmResetVersion)
   }
 
   async function handleSave() {
     const name = title.trim()
-    if (!name) return
+    if (!name || invalidRestoredTitle) return
 
     // 1. Work patch
     const bookPatch: CatalogBookUpdateReq = {}
@@ -344,18 +512,20 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
         const versionPatch: CatalogVersionUpdateReq = {}
         if (d.name.trim() !== v.name) versionPatch.name = d.name.trim()
 
-        // Placeholder inheritance logic: empty string = null (inherit), non-empty = custom
+        // Restored emptiness is explicit; choosing inheritance clears that intent.
         const wantTitle = d.overrideTitle.trim() ? d.overrideTitle.trim() : null
         if (wantTitle !== (v.title ?? null)) versionPatch.title = wantTitle
 
-        const wantAuthors = d.overrideAuthorsText.trim() ? parseAuthorList(d.overrideAuthorsText) : null
+        const wantAuthors = d.overrideAuthorsText.trim() || d.explicitFields.includes('authors')
+          ? parseAuthorList(d.overrideAuthorsText) : null
         const initialVAuthors = v.authors ?? null
         const changedAuthors = wantAuthors === null
           ? initialVAuthors !== null
           : initialVAuthors === null || wantAuthors.join('\n') !== initialVAuthors.join('\n')
         if (changedAuthors) versionPatch.authors = wantAuthors
 
-        const wantDesc = d.overrideDescription.trim() ? d.overrideDescription : null
+        const wantDesc = d.overrideDescription.trim() || d.explicitFields.includes('description')
+          ? d.overrideDescription : null
         if (wantDesc !== (v.description ?? null)) versionPatch.description = wantDesc
 
         const newMeta = buildMetaRecord({
@@ -367,15 +537,17 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
           series: d.series,
           seriesIndex: d.seriesIndex,
         })
+        for (const key of KNOWN_META_KEYS) {
+          if (d.explicitFields.includes(key) && !(key in newMeta)) newMeta[key] = null
+        }
         // Unknown keys ride along: the patch replaces the whole override
         // object, so rebuilding from the seven owned fields alone would drop
-        // anything the editor cannot show. Seed-compare against the same
-        // construction so untouched versions stay patch-free.
+        // anything the editor cannot show, including stored empty-value masks.
         const rawMeta = v.meta ?? {}
         const untouched = Object.fromEntries(
           Object.entries(rawMeta).filter(([key]) => !(KNOWN_META_KEYS as readonly string[]).includes(key)),
         )
-        const prevMeta = { ...untouched, ...buildMetaRecord(metaTextFields(rawMeta)) }
+        const prevMeta = { ...rawMeta }
         if (JSON.stringify({ ...untouched, ...newMeta }) !== JSON.stringify(prevMeta)) {
           versionPatch.meta = { ...untouched, ...newMeta }
         }
@@ -413,7 +585,7 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
                 <button
                   type="button"
                   onClick={() => setConfirmResetVersion(activeVersion)}
-                  disabled={saving}
+                  disabled={saving || !activeSource || versionSource.isFetching}
                   className="inline-flex items-center gap-1.5 text-xs text-stone-500 transition-colors hover:text-stone-800 disabled:opacity-50 dark:text-stone-400 dark:hover:text-stone-200"
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -422,7 +594,7 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
                     <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
                     <path d="M16 21h5v-5" />
                   </svg>
-                  <span>{_('library.resetMetadata')}</span>
+                  <span>{_('library.restoreSourceValues')}</span>
                 </button>
               )}
             </div>
@@ -430,7 +602,7 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
               <Button variant="secondary" onClick={onClose} disabled={saving}>
                 {_('library.cancel')}
               </Button>
-              <Button disabled={title.trim().length === 0 || saving} onClick={() => void handleSave()}>
+              <Button disabled={title.trim().length === 0 || invalidRestoredTitle || saving} onClick={() => void handleSave()}>
                 {_('library.save')}
               </Button>
             </div>
@@ -482,16 +654,15 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
           </div>
 
           {/* Tab 1: Work info (Abstract intellectual creation) */}
-          <section className={cn('flex flex-col gap-4', activeTab !== 'work' && 'hidden')}>
-            {/* Work cover: the row-level artwork every version inherits unless
-                it carries its own. Same overlay pattern as the version slot. */}
-            <div className="flex items-center gap-4">
-              <div className="w-24 shrink-0">
+          <section hidden={activeTab !== 'work'} className={cn('flex flex-col gap-4', activeTab !== 'work' && 'hidden')}>
+            {/* Top row: Cover on left, Title + Author on right (matching BookMetaForm) */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:gap-5">
+              <div className="w-28 shrink-0 self-center sm:self-auto">
                 <div className="group relative">
                   <BookCover
                     book={{
                       id: work.versions[0]?.bookVersionId ?? work.id,
-                      title: work.title,
+                      title: title || work.title,
                       format: work.versions[0]?.format ?? 'epub',
                       coverKey: workCoverRemovalPending
                         ? null
@@ -561,40 +732,45 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
                   />
                 </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-stone-500 dark:text-stone-400">{_('library.cover')}</p>
-                <p className="mt-0.5 truncate text-sm text-stone-700 dark:text-stone-200">{work.title}</p>
+
+              {/* Right column: Title & Author */}
+              <div className="min-w-0 flex-1 space-y-3">
+                <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
+                  <span className={labelClass}>
+                    {_('library.sortBy.title')}
+                    <span className="text-red-500"> *</span>
+                  </span>
+                  <input
+                    aria-label={_('library.sortBy.title')}
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    maxLength={300}
+                    className={inputClass}
+                  />
+                  {!title.trim() && (
+                    <p role="alert" className="text-xs text-red-600 dark:text-red-400">{_('library.titleRequiredHint')}</p>
+                  )}
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
+                  <span className={labelClass}>{_('library.authorLabel')}</span>
+                  <input
+                    aria-label={_('library.authorLabel')}
+                    value={authorsText}
+                    onChange={(e) => setAuthorsText(e.target.value)}
+                    maxLength={500}
+                    placeholder={_('library.authorListHint')}
+                    className={inputClass}
+                  />
+                </label>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
-                <span className={labelClass}>
-                  {_('library.sortBy.title')}
-                  <span className="text-red-500"> *</span>
-                </span>
-                <input
-                  aria-label={_('library.sortBy.title')}
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  maxLength={300}
-                  className={inputClass}
-                />
-              </label>
-              <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
-                <span className={labelClass}>{_('library.authorLabel')}</span>
-                <input
-                  value={authorsText}
-                  onChange={(e) => setAuthorsText(e.target.value)}
-                  maxLength={500}
-                  placeholder={_('library.authorListHint')}
-                  className={inputClass}
-                />
-              </label>
-            </div>
-
+            {/* Description */}
             <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
-              <span className={labelClass}>{_('library.descriptionSection')}</span>
+              <div className="flex items-center justify-between">
+                <span className={labelClass}>{_('library.descriptionSection')}</span>
+                <span className="text-[11px] text-stone-400 dark:text-stone-500">{description.length} / 4000</span>
+              </div>
               <textarea
                 ref={autoGrow}
                 value={description}
@@ -604,7 +780,8 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
                 }}
                 maxLength={4000}
                 rows={3}
-                className={cn(inputClass, 'resize-y leading-relaxed')}
+                placeholder={_('library.descriptionSection')}
+                className={cn(inputClass, 'min-h-[96px] resize-y leading-relaxed')}
               />
             </label>
 
@@ -625,30 +802,120 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
                     onClick={() => setCategoryId(c.id)}
                   />
                 ))}
+                {newCatOpen ? (
+                  <span ref={newCatEditorRef} className="inline-flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={newCat}
+                      autoFocus
+                      onChange={(e) => setNewCat(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void handleCreateCategory()
+                        } else if (e.key === 'Escape') {
+                          e.stopPropagation()
+                          setNewCat('')
+                          setNewCatOpen(false)
+                        }
+                      }}
+                      placeholder={_('library.newCategoryPlaceholder') || _('library.newCategory')}
+                      className="h-[26px] w-24 rounded-full border border-stone-200 bg-white px-2.5 text-xs text-stone-700 outline-none transition-colors placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleCreateCategory()}
+                      disabled={!newCat.trim() || createCategory.isPending}
+                      className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200 hover:text-stone-900 disabled:opacity-40 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
+                      aria-label={_('library.newCategory')}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m5 13 4 4 10-10" />
+                      </svg>
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label={`+ ${_('library.newCategory')}`}
+                    onClick={() => setNewCatOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  >
+                    + {_('library.new')}
+                  </button>
+                )}
               </div>
             </div>
 
             {/* Tags */}
-            {(tagsData?.data ?? []).length > 0 && (
-              <div className="flex flex-col gap-2">
-                <span className={labelClass}>{_('library.tagLabel')}</span>
-                <div className="flex max-h-32 flex-wrap items-center gap-1.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
-                  {(tagsData?.data ?? []).map((tag) => (
-                    <Chip
-                      key={tag.id}
-                      label={tag.name}
-                      selected={tagIds.includes(tag.id)}
-                      showCheck
-                      onClick={() => toggleTag(tag.id)}
+            <div className="flex flex-col gap-2">
+              <span className={labelClass}>{_('library.tagLabel')}</span>
+              <div className="flex max-h-32 flex-wrap items-center gap-1.5 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
+                {(tagsData?.data ?? []).map((tag) => (
+                  <Chip
+                    key={tag.id}
+                    label={tag.name}
+                    selected={tagIds.includes(tag.id)}
+                    showCheck
+                    onClick={() => toggleTag(tag.id)}
+                  />
+                ))}
+                {newTagOpen ? (
+                  <span ref={newTagEditorRef} className="inline-flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={newTag}
+                      autoFocus
+                      onChange={(e) => setNewTag(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void handleCreateTag()
+                        } else if (e.key === 'Escape') {
+                          e.stopPropagation()
+                          setNewTag('')
+                          setNewTagOpen(false)
+                        }
+                      }}
+                      placeholder={_('library.newTagPlaceholder')}
+                      className="h-[26px] w-24 rounded-full border border-stone-200 bg-white px-2.5 text-xs text-stone-700 outline-none transition-colors placeholder:text-stone-400 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500"
                     />
-                  ))}
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleCreateTag()}
+                      disabled={!newTag.trim() || createTag.isPending}
+                      className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-600 transition-colors hover:bg-stone-200 hover:text-stone-900 disabled:opacity-40 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
+                      aria-label={_('library.newTag')}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m5 13 4 4 10-10" />
+                      </svg>
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label={`+ ${_('library.newTag')}`}
+                    onClick={() => setNewTagOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  >
+                    + {_('library.new')}
+                  </button>
+                )}
               </div>
-            )}
+            </div>
           </section>
 
           {/* Tab 2: Version settings & Publication metadata */}
-          <section className={cn('flex flex-col gap-4', activeTab === 'work' && 'hidden')}>
+          <section hidden={activeTab === 'work'} className={cn('flex flex-col gap-4', activeTab === 'work' && 'hidden')}>
+            {versionSource.isError && (
+              <p role="alert" className="flex items-center gap-2 text-xs text-red-600 dark:text-red-400">
+                <span>{_('library.sourceLoadFailed')} {getUserErrorMessage(versionSource.error, _)}</span>
+                <button type="button" onClick={() => void versionSource.refetch()} className="font-medium hover:underline">
+                  {_('library.sourceRetry')}
+                </button>
+              </p>
+            )}
             {/* Basic Info: Cover on left, Version Name + Title + Author on right */}
             <div className="flex flex-col gap-4 sm:flex-row sm:gap-5">
               {/* Version Cover slot */}
@@ -758,82 +1025,32 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
                   )}
                 </div>
 
-                {/* Row 2: Title */}
                 <div className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <span className={labelClass}>{_('library.sortBy.title')}</span>
-                    {activeDraft.overrideTitle.trim().length > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => updateDraft(activeVersion.id, { overrideTitle: '' })}
-                        className="text-[11px] text-stone-400 transition-colors hover:text-stone-700 dark:hover:text-stone-200"
-                      >
-                        {_('library.restoreFollow')}
-                      </button>
-                    ) : (
-                      <span className="text-[11px] text-stone-400/80">{_('library.followWork')}</span>
-                    )}
+                  <span className={labelClass}>{_('library.sortBy.title')}</span>
+                  <div className="relative">
+                    <input aria-label={_('library.sortBy.title')} value={activeDraft.overrideTitle} onChange={(e) => updateDraft(activeVersion.id, { overrideTitle: e.target.value })} maxLength={300} placeholder={activeDraft.explicitFields.includes('title') ? '' : inheritedText('title')} className={cn(inputClass, 'w-full pr-20')} />
+                    {fieldActions('title', activeDraft.overrideTitle)}
                   </div>
-                  <input
-                    value={activeDraft.overrideTitle}
-                    onChange={(e) => updateDraft(activeVersion.id, { overrideTitle: e.target.value })}
-                    maxLength={300}
-                    placeholder={`${work.title} (${_('library.followWork')})`}
-                    className={inputClass}
-                  />
+                  {activeDraft.explicitFields.includes('title') && !activeDraft.overrideTitle.trim() && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{_('library.titleRequiredHint')}</p>}
                 </div>
-
-                {/* Row 3: Author */}
                 <div className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between">
-                    <span className={labelClass}>{_('library.authorLabel')}</span>
-                    {activeDraft.overrideAuthorsText.trim().length > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => updateDraft(activeVersion.id, { overrideAuthorsText: '' })}
-                        className="text-[11px] text-stone-400 transition-colors hover:text-stone-700 dark:hover:text-stone-200"
-                      >
-                        {_('library.restoreFollow')}
-                      </button>
-                    ) : (
-                      <span className="text-[11px] text-stone-400/80">{_('library.followWork')}</span>
-                    )}
+                  <span className={labelClass}>{_('library.authorLabel')}</span>
+                  <div className="relative">
+                    <input aria-label={_('library.authorLabel')} value={activeDraft.overrideAuthorsText} onChange={(e) => updateDraft(activeVersion.id, { overrideAuthorsText: e.target.value })} maxLength={500} placeholder={activeDraft.explicitFields.includes('authors') ? '' : inheritedText('authors')} className={cn(inputClass, 'w-full pr-20')} />
+                    {fieldActions('authors', activeDraft.overrideAuthorsText)}
                   </div>
-                  <input
-                    value={activeDraft.overrideAuthorsText}
-                    onChange={(e) => updateDraft(activeVersion.id, { overrideAuthorsText: e.target.value })}
-                    maxLength={500}
-                    placeholder={`${formatAuthorList(work.authors, work.author) || _('library.unknown')} (${_('library.followWork')})`}
-                    className={inputClass}
-                  />
                 </div>
               </div>
             </div>
-
-            {/* Description */}
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
                 <span className={labelClass}>{_('library.descriptionSection')}</span>
-                {activeDraft.overrideDescription.trim().length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => updateDraft(activeVersion.id, { overrideDescription: '' })}
-                    className="text-[11px] text-stone-400 transition-colors hover:text-stone-700 dark:hover:text-stone-200"
-                  >
-                    {_('library.restoreFollow')}
-                  </button>
-                ) : (
-                  <span className="text-[11px] text-stone-400/80">{_('library.followWork')}</span>
-                )}
+                <span className="text-[11px] text-stone-400 dark:text-stone-500">{activeDraft.overrideDescription.length} / 4000</span>
               </div>
-              <textarea
-                value={activeDraft.overrideDescription}
-                onChange={(e) => updateDraft(activeVersion.id, { overrideDescription: e.target.value })}
-                maxLength={4000}
-                rows={3}
-                placeholder={`${work.description || _('library.noDescription')} (${_('library.followWork')})`}
-                className={cn(inputClass, 'resize-y leading-relaxed')}
-              />
+              <div className="relative">
+                <textarea aria-label={_('library.descriptionSection')} value={activeDraft.overrideDescription} onChange={(e) => updateDraft(activeVersion.id, { overrideDescription: e.target.value })} maxLength={4000} rows={3} placeholder={activeDraft.explicitFields.includes('description') ? '' : inheritedText('description')} className={cn(inputClass, 'min-h-[96px] w-full resize-y pr-20 leading-relaxed')} />
+                {fieldActions('description', activeDraft.overrideDescription)}
+              </div>
             </div>
 
             {/* Single Collapsible Section: 更多信息 (Publication & metadata, matching BookMetaForm) */}
@@ -869,54 +1086,59 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
                   </span>
                   <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                     <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-400">
-                      <span className={labelClass}>{_('library.publisher')}</span>
-                      <input
-                        type="text"
+                      <span className="flex items-center justify-between gap-2">
+                        <span className={labelClass}>{_('library.publisher')}</span>
+                      </span>
+                      <div className="relative"><input
+                        type="text" placeholder={activeDraft.explicitFields.includes('publisher') ? '' : inheritedText('publisher')}
                         value={activeDraft.publisher}
                         onChange={(e) => updateDraft(activeVersion.id, { publisher: e.target.value })}
-                        placeholder={_('library.unknown')}
-                        className={inputClass}
-                      />
+                        className={cn(inputClass, 'w-full pr-20')}
+                      />{fieldActions('publisher', activeDraft.publisher)}</div>
                     </label>
                     <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-400">
-                      <span className={labelClass}>{_('library.published')}</span>
-                      <input
-                        type="text"
+                      <span className="flex items-center justify-between gap-2">
+                        <span className={labelClass}>{_('library.published')}</span>
+                      </span>
+                      <div className="relative"><input
+                        type="text" placeholder={activeDraft.explicitFields.includes('published') ? '' : inheritedText('published')}
                         value={activeDraft.published}
                         onChange={(e) => updateDraft(activeVersion.id, { published: e.target.value })}
-                        placeholder="YYYY-MM"
-                        className={inputClass}
-                      />
+                        className={cn(inputClass, 'w-full pr-20')}
+                      />{fieldActions('published', activeDraft.published)}</div>
                     </label>
                     <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-400">
-                      <span className={labelClass}>{_('library.language')}</span>
-                      <input
-                        type="text"
+                      <span className="flex items-center justify-between gap-2">
+                        <span className={labelClass}>{_('library.language')}</span>
+                      </span>
+                      <div className="relative"><input
+                        type="text" placeholder={activeDraft.explicitFields.includes('language') ? '' : inheritedText('language')}
                         value={activeDraft.language}
                         onChange={(e) => updateDraft(activeVersion.id, { language: e.target.value })}
-                        placeholder={_('library.unknown')}
-                        className={inputClass}
-                      />
+                        className={cn(inputClass, 'w-full pr-20')}
+                      />{fieldActions('language', activeDraft.language)}</div>
                     </label>
                     <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-400">
-                      <span className={labelClass}>ISBN</span>
-                      <input
-                        type="text"
+                      <span className="flex items-center justify-between gap-2">
+                        <span className={labelClass}>ISBN</span>
+                      </span>
+                      <div className="relative"><input
+                        type="text" placeholder={activeDraft.explicitFields.includes('isbn') ? '' : inheritedText('isbn')}
                         value={activeDraft.isbn}
                         onChange={(e) => updateDraft(activeVersion.id, { isbn: e.target.value })}
-                        placeholder={_('library.unknown')}
-                        className={inputClass}
-                      />
+                        className={cn(inputClass, 'w-full pr-20')}
+                      />{fieldActions('isbn', activeDraft.isbn)}</div>
                     </label>
                     <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-400 sm:col-span-2">
-                      <span className={labelClass}>{_('library.subjects')}</span>
-                      <input
-                        type="text"
+                      <span className="flex items-center justify-between gap-2">
+                        <span className={labelClass}>{_('library.subjects')}</span>
+                      </span>
+                      <div className="relative"><input
+                        type="text" placeholder={activeDraft.explicitFields.includes('subjects') ? '' : inheritedText('subjects')}
                         value={activeDraft.subjects}
                         onChange={(e) => updateDraft(activeVersion.id, { subjects: e.target.value })}
-                        placeholder={_('library.unknown')}
-                        className={inputClass}
-                      />
+                        className={cn(inputClass, 'w-full pr-20')}
+                      />{fieldActions('subjects', activeDraft.subjects)}</div>
                     </label>
                   </div>
                   {activeVersion.effective.bookmeta?.identifier && (
@@ -941,25 +1163,27 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
                   </span>
                   <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                     <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-400">
-                      <span className={labelClass}>{_('library.seriesSection')}</span>
-                      <input
-                        type="text"
+                      <span className="flex items-center justify-between gap-2">
+                        <span className={labelClass}>{_('library.seriesSection')}</span>
+                      </span>
+                      <div className="relative"><input
+                        type="text" placeholder={activeDraft.explicitFields.includes('series') ? '' : inheritedText('series')}
                         value={activeDraft.series}
                         onChange={(e) => updateDraft(activeVersion.id, { series: e.target.value })}
-                        placeholder={_('library.unknown')}
-                        className={inputClass}
-                      />
+                        className={cn(inputClass, 'w-full pr-20')}
+                      />{fieldActions('series', activeDraft.series)}</div>
                     </label>
                     <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-400">
-                      <span className={labelClass}>{_('library.seriesIndex')}</span>
-                      <input
-                        type="text"
+                      <span className="flex items-center justify-between gap-2">
+                        <span className={labelClass}>{_('library.seriesIndex')}</span>
+                      </span>
+                      <div className="relative"><input
+                        type="text" placeholder={activeDraft.explicitFields.includes('seriesIndex') ? '' : inheritedText('seriesIndex')}
                         inputMode="decimal"
                         value={activeDraft.seriesIndex}
                         onChange={(e) => updateDraft(activeVersion.id, { seriesIndex: e.target.value })}
-                        placeholder="1"
-                        className={inputClass}
-                      />
+                        className={cn(inputClass, 'w-full pr-20')}
+                      />{fieldActions('seriesIndex', activeDraft.seriesIndex)}</div>
                     </label>
                   </div>
                 </section>
@@ -971,11 +1195,9 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
 
       {confirmResetVersion && (
         <ConfirmDialog
-          title={_('library.resetMetadata')}
-          message={_('library.catalogVersionResetConfirm', {
-            name: versionTabLabel(confirmResetVersion.name, _('library.versionFallback', { n: versionOrdinal(work.versions, confirmResetVersion.id) })),
-          })}
-          confirmLabel={_('library.resetMetadata')}
+          title={_('library.restoreSourceValues')}
+          message={_('library.restoreSourceConfirm')}
+          confirmLabel={_('library.restoreSourceValues')}
           onClose={() => setConfirmResetVersion(null)}
           onConfirm={handleResetVersion}
         />

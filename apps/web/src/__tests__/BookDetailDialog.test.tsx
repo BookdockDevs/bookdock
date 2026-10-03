@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
-import type { BookListItem, CatalogBook, Library } from '@bookdock/shared'
+import type { BookListItem, CatalogBook, Category, Library } from '@bookdock/shared'
 
 import i18n from '../i18n/i18n'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
@@ -21,13 +21,20 @@ const apiUpload = vi.fn()
 const createShelfMutate = vi.fn()
 const createTagMutate = vi.fn()
 const updateBookMutate = vi.fn()
+const updateBookMutateAsync = vi.fn()
+const uploadCoverMutate = vi.fn()
+const removeCoverMutate = vi.fn()
+const updateMembershipMutate = vi.fn()
 const collectBookMutate = vi.fn()
 const updateCatalogVersionMutate = vi.fn()
+const uploadVersionCoverMutate = vi.fn()
+const removeVersionCoverMutate = vi.fn()
 const updateCatalogBookMutate = vi.fn()
 const deleteCatalogVersionMutate = vi.fn()
 const navigateMock = vi.fn()
 
-vi.mock('@/api/client', () => ({
+vi.mock('@/api/client', async (original) => ({
+  ...await original<typeof import('@/api/client')>(),
   apiGet: vi.fn().mockResolvedValue({ data: [] }),
   apiPatch: (...args: unknown[]) => apiPatch(...args),
   apiPut: (...args: unknown[]) => apiPut(...args),
@@ -53,30 +60,40 @@ vi.mock('@tanstack/react-router', () => ({
 let membershipShelf: string | null = null
 let membershipTags: string[] = []
 let bookDetail: { data: unknown } | undefined
+let quickEditPending = false
+let membershipUnavailable = false
+let sharedCategories: Category[] = []
+let categoriesPending = false
+let categoriesError = false
 
 vi.mock('../features/library/hooks', () => ({
   useBook: () => ({ data: bookDetail }),
   useBookMembership: () => ({
-    shelves: { data: { data: membershipShelf } },
+    shelves: membershipUnavailable ? { data: undefined, isError: true } : { data: { data: membershipShelf } },
     tags: { data: { data: membershipTags } },
   }),
   useShelves: () => ({ data: { data: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] } }),
   useTags: () => ({ data: { data: [{ id: 'tag-1', name: '小说', bookCount: 1 }] } }),
   useCreateShelf: () => ({ mutateAsync: createShelfMutate, isPending: false }),
   useCreateTag: () => ({ mutateAsync: createTagMutate, isPending: false }),
-  useUpdateBook: () => ({ mutate: updateBookMutate, isPending: false }),
-  useUploadCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useRemoveCover: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateBook: () => ({ mutate: updateBookMutate, mutateAsync: updateBookMutateAsync, isPending: quickEditPending }),
+  useUpdateBookMembership: () => ({ mutate: updateMembershipMutate, isPending: quickEditPending }),
+  useUploadCover: () => ({ mutate: uploadCoverMutate, mutateAsync: vi.fn(), isPending: quickEditPending }),
+  useRemoveCover: () => ({ mutate: removeCoverMutate, isPending: quickEditPending }),
   useResetMetadata: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useBookMetadataSource: () => ({ data: undefined, isFetching: false, isError: false, refetch: vi.fn() }),
+  useCatalogVersionMetadataSource: () => ({ data: undefined, isFetching: false, isError: false, refetch: vi.fn() }),
   useCollectBook: () => ({ mutate: collectBookMutate, isPending: false }),
   useForkBook: () => ({ mutate: vi.fn(), isPending: false }),
   usePushVersion: () => ({ mutate: vi.fn(), isPending: false }),
   useVersionTocState: () => ({ data: undefined }),
-  useUpdateCatalogVersion: () => ({ mutate: updateCatalogVersionMutate, isPending: false }),
+  useUpdateCatalogVersion: () => ({ mutate: updateCatalogVersionMutate, mutateAsync: updateCatalogVersionMutate, isPending: quickEditPending }),
   useUpdateCatalogBook: () => ({ mutate: updateCatalogBookMutate, mutateAsync: updateCatalogBookMutate, isPending: false }),
   useLibraries: () => ({ data: undefined }),
-  useLibraryCategories: () => ({ data: { data: [] } }),
+  useLibraryCategories: () => ({ data: categoriesPending ? undefined : { data: sharedCategories }, isPending: categoriesPending, isError: categoriesError }),
   useLibraryTags: () => ({ data: { data: [] } }),
+  useCreateLibraryCategory: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateLibraryTag: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUploadBooks: () => ({
     items: [], addFiles: vi.fn(), startUpload: vi.fn(), retry: vi.fn(), retryAll: vi.fn(),
     abortAll: vi.fn(), pruneSettled: vi.fn(), isUploading: false, clearQueue: vi.fn(), patchItem: vi.fn(),
@@ -84,8 +101,8 @@ vi.mock('../features/library/hooks', () => ({
   useUploadSettings: () => ({}),
   useUploadCatalogBookCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRemoveCatalogBookCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useUploadCatalogVersionCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useRemoveCatalogVersionCover: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUploadCatalogVersionCover: () => ({ mutate: uploadVersionCoverMutate, mutateAsync: vi.fn(), isPending: quickEditPending }),
+  useRemoveCatalogVersionCover: () => ({ mutate: removeVersionCoverMutate, mutateAsync: vi.fn(), isPending: quickEditPending }),
   useResetCatalogVersionMetadata: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteCatalogVersion: () => ({ mutate: deleteCatalogVersionMutate, mutateAsync: deleteCatalogVersionMutate, isPending: false }),
 }))
@@ -127,6 +144,7 @@ beforeEach(async () => {
   apiPut.mockResolvedValue({})
   apiDelete.mockResolvedValue({})
   apiUpload.mockResolvedValue({})
+  updateBookMutateAsync.mockResolvedValue({ data: book })
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:cover-preview') })
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
   createShelfMutate.mockResolvedValue({ data: { id: 'shelf-new', name: '科幻' } })
@@ -135,10 +153,28 @@ beforeEach(async () => {
   membershipShelf = null
   membershipTags = []
   bookDetail = undefined
+  quickEditPending = false
+  membershipUnavailable = false
+  sharedCategories = []
+  categoriesPending = false
+  categoriesError = false
   await i18n.changeLanguage('zh-CN')
 })
 
 describe('BookDetailDialog shelf chips', () => {
+  it('keeps personal status, source, shelf and tags together without update or collection notices', () => {
+    membershipShelf = 'shelf-1'
+    membershipTags = ['tag-1']
+    bookDetail = { data: { ...book, kind: 'shared', ownsSource: true, hasUnreadUpdate: true, source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' } } }
+    renderDialog()
+    const row = screen.getByRole('button', { name: '在读' }).parentElement!.parentElement!
+    expect(row.textContent).toBe('在读City📁Favorites#小说')
+    expect(row).not.toContainElement(screen.getByText('有更新'))
+    expect(row).not.toContainElement(screen.getByRole('button', { name: '已在书库中' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Favorites' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'shelf-1' } })
+  })
+
   it('saves a single shelf via chip selection', async () => {
     renderDialog()
 
@@ -242,6 +278,19 @@ describe('BookDetailDialog tag chips', () => {
 })
 
 describe('BookDetailDialog shelf chips', () => {
+  it('keeps personal status, source, shelf and tags together without update or collection notices', () => {
+    membershipShelf = 'shelf-1'
+    membershipTags = ['tag-1']
+    bookDetail = { data: { ...book, kind: 'shared', ownsSource: true, hasUnreadUpdate: true, source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' } } }
+    renderDialog()
+    const row = screen.getByRole('button', { name: '在读' }).parentElement!.parentElement!
+    expect(row.textContent).toBe('在读City📁Favorites#小说')
+    expect(row).not.toContainElement(screen.getByText('有更新'))
+    expect(row).not.toContainElement(screen.getByRole('button', { name: '已在书库中' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Favorites' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'shelf-1' } })
+  })
+
   it('creates a shelf from the inline chip and auto-selects it', async () => {
     renderDialog()
 
@@ -442,10 +491,10 @@ describe('BookDetailDialog identity chips', () => {
     expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'shelf-1' } })
   })
 
-  it('does not render an uncategorized chip for books without a shelf', () => {
+  it('filters unassigned books from the unassigned shelf chip', () => {
     renderDialog()
-
-    expect(screen.queryByRole('button', { name: '未分类' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '未分类' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'none' } })
   })
 
   it('navigates to the tag filter on tag chip click', () => {
@@ -463,6 +512,89 @@ describe('BookDetailDialog identity chips', () => {
 })
 
 describe('BookDetailDialog read-status chip', () => {
+  it('filters the private library on status left click without saving', () => {
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: '在读' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { status: 'reading' } })
+    expect(updateBookMutate).not.toHaveBeenCalled()
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('right-clicks status, marks the current value and skips unchanged writes', () => {
+    renderDialog()
+    fireEvent.contextMenu(screen.getByRole('button', { name: '在读' }))
+    const current = screen.getByRole('menuitemradio', { name: '在读' })
+    expect(current).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(current)
+    expect(updateBookMutate).not.toHaveBeenCalled()
+    expect(navigateMock).not.toHaveBeenCalled()
+  })
+
+  it('closes only the menu on Escape and restores the field focus', () => {
+    const onClose = vi.fn()
+    render(<BookDetailDialog book={book} onClose={onClose} onDelete={vi.fn()} />, { wrapper })
+    const trigger = screen.getByRole('button', { name: '在读' })
+    fireEvent.contextMenu(trigger)
+    fireEvent.keyDown(screen.getByRole('menuitemradio', { name: '在读' }), { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('supports keyboard navigation and touch dismissal', () => {
+    renderDialog()
+    fireEvent.contextMenu(screen.getByRole('button', { name: '在读' }))
+    const current = screen.getByRole('menuitemradio', { name: '在读' })
+    fireEvent.keyDown(current, { key: 'ArrowDown' })
+    expect(screen.getByRole('menuitemradio', { name: '读完' })).toHaveFocus()
+    fireEvent.pointerDown(document.body, { pointerType: 'touch' })
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('blocks repeated edits while pending and retains the confirmed value', () => {
+    quickEditPending = true
+    renderDialog()
+    expect(screen.queryByRole('button', { name: '修改阅读状态' })).toBeNull()
+    fireEvent.contextMenu(screen.getByRole('button', { name: membershipUnavailable ? '书架信息暂不可用' : '未分类' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+    fireEvent.contextMenu(screen.getByRole('button', { name: '在读' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(updateBookMutate).not.toHaveBeenCalled()
+  })
+
+  it('does not offer edits in read-only or uncollected detail views', () => {
+    const { rerender } = render(<BookDetailDialog book={book} readOnly onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    expect(screen.queryByRole('button', { name: '修改阅读状态' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '修改书架' })).toBeNull()
+    fireEvent.contextMenu(screen.getByRole('button', { name: '在读' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+    bookDetail = { data: { ...book, collected: false } }
+    rerender(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: '修改阅读状态' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '修改书架' })).toBeNull()
+  })
+
+  it('edits only the private shelf and supports clearing its assignment', () => {
+    membershipShelf = 'shelf-1'
+    membershipTags = ['tag-1']
+    renderDialog()
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Favorites' }))
+    expect(screen.getByRole('menuitemradio', { name: 'Favorites' })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '未分类' }))
+    expect(updateMembershipMutate).toHaveBeenCalledWith({ bookId: 'book-1', shelfId: null })
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '小说' })).toBeInTheDocument()
+  })
+
+  it('disables shelf editing when membership is unavailable rather than claiming unassigned', () => {
+    membershipUnavailable = true
+    renderDialog()
+    fireEvent.contextMenu(screen.getByRole('button', { name: membershipUnavailable ? '书架信息暂不可用' : '未分类' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.queryByRole('button', { name: '未分类' })).toBeNull()
+    expect(screen.getByRole('button', { name: '书架信息暂不可用' })).toBeInTheDocument()
+  })
+
   it('renders the current status as the first identity chip', () => {
     renderDialog()
 
@@ -474,12 +606,12 @@ describe('BookDetailDialog read-status chip', () => {
   it('opens the five-option menu and patches the selected status', () => {
     renderDialog()
 
-    fireEvent.click(screen.getByRole('button', { name: '在读' }))
+    fireEvent.contextMenu(screen.getByRole('button', { name: '在读' }))
     for (const label of ['想读', '在读', '读完', '闲置', '弃读']) {
-      expect(screen.getAllByRole('button', { name: label }).length).toBeGreaterThan(0)
+      expect(screen.getByRole('menuitemradio', { name: label })).toBeInTheDocument()
     }
     // current status carries a check mark; pick a different one
-    fireEvent.click(screen.getByRole('button', { name: '读完' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '读完' }))
 
     expect(updateBookMutate).toHaveBeenCalledWith({ bookId: 'book-1', readStatus: 'finished' })
   })
@@ -487,10 +619,10 @@ describe('BookDetailDialog read-status chip', () => {
   it('closes the menu on outside mousedown without changing the status', () => {
     renderDialog()
 
-    fireEvent.click(screen.getByRole('button', { name: '在读' }))
+    fireEvent.contextMenu(screen.getByRole('button', { name: '在读' }), { clientX: 100, clientY: 100 })
     fireEvent.mouseDown(document.body)
 
-    expect(screen.queryByRole('button', { name: '读完' })).toBeNull()
+    expect(screen.queryByRole('menuitemradio', { name: '读完' })).toBeNull()
     expect(updateBookMutate).not.toHaveBeenCalled()
   })
 })
@@ -761,7 +893,7 @@ describe('BookDetailDialog identifier', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(LONG_IDENTIFIER))
   })
 
-  it('is read-only in edit mode and never written back on save', async () => {
+  it('is read-only in edit mode but preserved on save', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })
     withMeta({ identifier: LONG_IDENTIFIER, publisher: 'Pub' })
@@ -776,7 +908,217 @@ describe('BookDetailDialog identifier', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(apiPatch).toHaveBeenCalled())
     const body = apiPatch.mock.calls[0][1] as { bookmeta: Record<string, unknown> }
-    expect(body.bookmeta).not.toHaveProperty('identifier')
+    expect(body.bookmeta).toHaveProperty('identifier', LONG_IDENTIFIER)
+  })
+})
+
+describe('BookDetailDialog direct metadata editing', () => {
+  it('shows no shortcut edit icons and labels the description only in its dialog title', () => {
+    withMeta({ description: 'Description' })
+    renderDialog()
+    expect(screen.queryByRole('button', { name: /^修改/ })).toBeNull()
+    fireEvent.contextMenu(screen.getByText('Description'))
+    const dialog = within(screen.getByRole('dialog', { name: '修改简介' }))
+    expect(dialog.queryByText('简介')).toBeNull()
+    expect(dialog.getByRole('textbox', { name: '简介' })).toHaveValue('Description')
+  })
+
+  it('edits the title directly without writing unrelated fields', async () => {
+    renderDialog()
+    fireEvent.contextMenu(screen.getByRole('heading', { name: 'Test Book' }))
+    const dialog = within(screen.getByRole('dialog', { name: '修改书名' }))
+    fireEvent.change(dialog.getByRole('textbox', { name: '书名' }), { target: { value: ' New Title ' } })
+    fireEvent.click(dialog.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateBookMutateAsync).toHaveBeenCalledWith({ bookId: 'book-1', title: 'New Title' }))
+    expect(apiPut).not.toHaveBeenCalled()
+  })
+
+  it('edits all authors together while preserving left-click author filtering', async () => {
+    renderDialog()
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Author' }))
+    const dialog = within(screen.getByRole('dialog', { name: '修改作者' }))
+    fireEvent.change(dialog.getByRole('textbox', { name: '作者' }), { target: { value: 'Alice、Bob、Alice' } })
+    fireEvent.click(dialog.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateBookMutateAsync).toHaveBeenCalledWith({ bookId: 'book-1', authors: ['Alice', 'Bob'], author: 'Alice' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Author' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { author: 'Author' } })
+  })
+
+  it.each([
+    ['publisher', '出版商', 'Old Publisher', 'New Publisher'],
+    ['published', '出版日期', '2020', '2026-10'],
+    ['language', '语言', 'en', 'zh-CN'],
+    ['isbn', 'ISBN', '9781234567890', '9781234567891'],
+  ])('edits %s and preserves unrelated metadata', async (field, label, oldValue, newValue) => {
+    withMeta({ [field]: oldValue, identifier: 'source-id', rights: 'Copyright', subjects: ['Other'] })
+    renderDialog()
+    fireEvent.contextMenu(screen.getByText(label))
+    const dialog = within(screen.getByRole('dialog', { name: `修改${label}` }))
+    expect(dialog.getByRole('textbox', { name: label })).toHaveValue(oldValue)
+    fireEvent.change(dialog.getByRole('textbox', { name: label }), { target: { value: newValue } })
+    fireEvent.click(dialog.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateBookMutateAsync).toHaveBeenCalledWith({ bookId: 'book-1', bookmeta: { [field]: newValue, identifier: 'source-id', rights: 'Copyright', subjects: ['Other'] } }))
+  })
+
+  it('clears an optional field without clearing other metadata', async () => {
+    withMeta({ publisher: 'Pub', isbn: '9781234567890' })
+    renderDialog()
+    fireEvent.contextMenu(screen.getByText('Pub'))
+    fireEvent.change(screen.getByRole('textbox', { name: '出版商' }), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateBookMutateAsync).toHaveBeenCalledWith({ bookId: 'book-1', bookmeta: { isbn: '9781234567890' } }))
+  })
+
+  it('edits description and subjects with existing text parsing', async () => {
+    withMeta({ description: 'Old description', subjects: ['Old'], language: 'en' })
+    renderDialog()
+    fireEvent.contextMenu(screen.getByText('Old description'))
+    fireEvent.change(screen.getByRole('textbox', { name: '简介' }), { target: { value: '  First line\nSecond line' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateBookMutateAsync).toHaveBeenCalledWith({ bookId: 'book-1', bookmeta: { description: '  First line\nSecond line', subjects: ['Old'], language: 'en' } }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '修改简介' })).toBeNull())
+    fireEvent.contextMenu(screen.getByText('主题'))
+    fireEvent.change(screen.getByRole('textbox', { name: '主题' }), { target: { value: '科幻，冒险、小说' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateBookMutateAsync).toHaveBeenLastCalledWith({ bookId: 'book-1', bookmeta: { description: 'Old description', subjects: ['科幻', '冒险', '小说'], language: 'en' } }))
+  })
+
+  it('edits series with its numeric index and rejects malformed numbers', async () => {
+    withMeta({ series: 'Trilogy', seriesIndex: 2, publisher: 'Pub' })
+    renderDialog()
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Trilogy #2' }))
+    expect(screen.getByRole('textbox', { name: '系列' })).toHaveValue('Trilogy')
+    fireEvent.change(screen.getByRole('textbox', { name: '系列编号' }), { target: { value: '3abc' } })
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '系列编号' }), { target: { value: '3.5' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateBookMutateAsync).toHaveBeenCalledWith({ bookId: 'book-1', bookmeta: { series: 'Trilogy', seriesIndex: 3.5, publisher: 'Pub' } }))
+  })
+
+  it('keeps failed edits available for retry and retains the displayed value', async () => {
+    updateBookMutateAsync.mockRejectedValueOnce(new Error('Offline'))
+    renderDialog()
+    fireEvent.contextMenu(screen.getByRole('heading', { name: 'Test Book' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '书名' }), { target: { value: 'Retry Title' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateBookMutateAsync).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('textbox', { name: '书名' })).toHaveValue('Retry Title')
+    expect(screen.getByRole('heading', { name: 'Test Book' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '修改书名' })).toBeNull())
+  })
+
+  it('rejects an empty title and closes only the field dialog on Escape', () => {
+    const onClose = vi.fn()
+    render(<BookDetailDialog book={book} onClose={onClose} onDelete={vi.fn()} />, { wrapper })
+    fireEvent.contextMenu(screen.getByRole('heading', { name: 'Test Book' }))
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '书名' }), { target: { value: '   ' } })
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: '修改书名' })).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('offers only card-local metadata edits on a collected shared version', () => {
+    bookDetail = { data: { ...book, source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' }, meta: { bookmeta: { publisher: 'Pub', description: 'Description' } } } }
+    renderDialog()
+    fireEvent.contextMenu(screen.getByRole('heading', { name: 'Test Book' }))
+    expect(screen.getByRole('dialog', { name: '修改书名' })).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: '取消' }).at(-1)!)
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Author' }))
+    expect(screen.getByRole('dialog', { name: '修改作者' })).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: '取消' }).at(-1)!)
+    expect(screen.queryByRole('button', { name: '修改出版商' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '修改简介' })).toBeNull()
+    fireEvent.contextMenu(screen.getByText('Pub'))
+    expect(screen.queryByRole('dialog', { name: '修改出版商' })).toBeNull()
+  })
+
+  it('keeps identifiers and computed fields read-only and hides edits in read-only views', () => {
+    withMeta({ identifier: 'public-source-id', publisher: 'Pub' })
+    const { rerender } = renderDialog()
+    expect(screen.queryByRole('button', { name: '修改标识符' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '修改格式' })).toBeNull()
+    rerender(<BookDetailDialog book={book} readOnly onClose={vi.fn()} onDelete={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: '修改书名' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '修改出版商' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '修改封面' })).toBeNull()
+  })
+})
+
+describe('BookDetailDialog pinned cover editing', () => {
+  it('preserves the loaded TXT artwork element when entering and leaving cover editing', () => {
+    render(<BookDetailDialog book={{ ...book, format: 'txt', coverKey: 'original-cover' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    const image = screen.getByRole('img', { name: 'Test Book' })
+    fireEvent.load(image)
+    expect(image.className).toContain('opacity-100')
+    fireEvent.contextMenu(image)
+    expect(screen.getByRole('img', { name: 'Test Book' })).toBe(image)
+    fireEvent.pointerDown(screen.getByRole('heading', { name: 'Test Book' }))
+    expect(screen.getByRole('img', { name: 'Test Book' })).toBe(image)
+    expect(image.className).toContain('opacity-100')
+    expect(screen.queryByRole('button', { name: '更换封面' })).toBeNull()
+  })
+
+  it('allows a collected version cover override without offering revision palette writes', () => {
+    bookDetail = { data: { ...book, format: 'txt', source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' } } }
+    renderDialog()
+    fireEvent.contextMenu(document.querySelector('input[type="file"]')!.parentElement!)
+    expect(screen.getByRole('button', { name: '更换封面' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '封面配色' })).toBeNull()
+  })
+
+  it('disables cover tools while a save is pending', () => {
+    quickEditPending = true
+    render(<BookDetailDialog book={{ ...book, coverKey: 'original-cover' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    fireEvent.contextMenu(document.querySelector('input[type="file"]')!.parentElement!)
+    expect(screen.getByRole('button', { name: '更换封面' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '移除封面' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '移除封面' }))
+    expect(removeCoverMutate).not.toHaveBeenCalled()
+  })
+
+  it('pins the overlay until outside click or Escape without closing details', () => {
+    const onClose = vi.fn()
+    render(<BookDetailDialog book={{ ...book, format: 'txt' }} onClose={onClose} onDelete={vi.fn()} />, { wrapper })
+    fireEvent.contextMenu(document.querySelector('input[type="file"]')!.parentElement!)
+    const change = screen.getByRole('button', { name: '更换封面' })
+    fireEvent.mouseLeave(change)
+    expect(change).toBeInTheDocument()
+    fireEvent.pointerDown(screen.getByRole('heading', { name: 'Test Book' }))
+    expect(screen.queryByRole('button', { name: '更换封面' })).toBeNull()
+    fireEvent.contextMenu(document.querySelector('input[type="file"]')!.parentElement!)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('button', { name: '更换封面' })).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('uploads or removes directly without changing metadata or shelf', () => {
+    render(<BookDetailDialog book={{ ...book, coverKey: 'original-cover' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    fireEvent.contextMenu(document.querySelector('input[type="file"]')!.parentElement!)
+    const file = new File(['cover'], 'cover.png', { type: 'image/png' })
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } })
+    expect(uploadCoverMutate).toHaveBeenCalledWith({ bookId: 'book-1', file })
+    fireEvent.click(screen.getByRole('button', { name: '移除封面' }))
+    expect(removeCoverMutate).toHaveBeenCalledWith('book-1')
+    expect(apiPut).not.toHaveBeenCalled()
+    expect(updateBookMutate).not.toHaveBeenCalled()
+  })
+
+  it('keeps the palette interactive and consumes Escape before dismissing the overlay', () => {
+    render(<BookDetailDialog book={{ ...book, format: 'txt' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    fireEvent.contextMenu(document.querySelector('input[type="file"]')!.parentElement!)
+    fireEvent.click(screen.getByRole('button', { name: '封面配色' }))
+    const palette = screen.getByRole('button', { name: 'Sage Green' })
+    fireEvent.pointerDown(palette)
+    fireEvent.click(palette)
+    expect(updateBookMutate).toHaveBeenCalledWith({ bookId: 'book-1', coverPaletteId: 'sage' })
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('button', { name: 'Sage Green' })).toBeNull()
+    expect(screen.getByRole('button', { name: '更换封面' })).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('button', { name: '更换封面' })).toBeNull()
   })
 })
 
@@ -911,6 +1253,7 @@ describe('BookDetailDialog shared work mode', () => {
     return {
       id: 'lbv1', libraryBookId: 'lb1', bookVersionId: 'v1', kind: 'personal', status: 'published',
       name: '', title: null, author: null, description: null, coverKey: null,
+      inherited: { title: 'Work Title', authors: ['Work Author'], description: 'Work description', bookmeta: { publisher: 'Work Press', series: 'Work Series', seriesIndex: 1 } },
       effective: {
         title: 'City Book', author: 'Someone', description: 'A tale', coverKey: null,
         bookmeta: { publisher: 'Pub House', series: 'Trilogy', seriesIndex: 2 },
@@ -964,6 +1307,142 @@ describe('BookDetailDialog shared work mode', () => {
     expect(screen.queryByRole('button', { name: '在读' })).toBeNull()
     expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
     expect(screen.queryByText('0%')).toBeNull()
+  })
+
+
+  it('shows category before shared tags and filters within the current library', () => {
+    sharedCategories = [{ id: 'c1', libraryId: 'lib_city', userId: 'u2', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 }]
+    const { onClose } = renderWorkDialog(catalogWork({ categoryId: 'c1' }))
+    const category = screen.getByRole('button', { name: 'Fiction' })
+    const tag = screen.getByRole('button', { name: 'classic' })
+    expect(category.parentElement!.children[0]).toBe(category)
+    expect(category.parentElement!.children[1]).toBe(tag)
+    expect(screen.queryByText('City', { exact: true })).toBeNull()
+    fireEvent.click(category)
+    expect(onClose).toHaveBeenCalled()
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: 'c1' } })
+    fireEvent.click(tag)
+    expect(navigateMock).toHaveBeenLastCalledWith({ to: '/', search: { libraryId: 'lib_city', tag: 't1' } })
+    expect(updateCatalogBookMutate).not.toHaveBeenCalled()
+  })
+
+  it('shows uncategorized even without tags and filters the shared library', () => {
+    renderWorkDialog(catalogWork({ tags: [] }))
+    fireEvent.click(screen.getByRole('button', { name: '未分类' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: 'none' } })
+  })
+
+  it.each(['loading', 'error', 'missing'])('never labels an unresolved category as uncategorized (%s)', (state) => {
+    categoriesPending = state === 'loading'
+    categoriesError = state === 'error'
+    sharedCategories = state === 'error' ? [{ id: 'c1', name: 'Stale' } as Category] : []
+    renderWorkDialog(catalogWork({ categoryId: 'c1' }))
+    expect(screen.queryByRole('button', { name: '未分类' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stale' })).toBeNull()
+    expect(screen.getByText(state === 'loading' ? '分类' : '分类信息暂不可用')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'classic' })).toBeInTheDocument()
+  })
+
+
+  it('edits only the selected shared version metadata and preserves raw overrides', async () => {
+    const version = catalogVersion({ id: 'lbv2', name: 'Second Edition', bookVersionId: 'v2', meta: { rights: 'Keep', language: null } })
+    renderWorkDialog(catalogWork({ defaultVersionLinkId: 'lbv2', versions: [catalogVersion(), version] }), { canManage: true })
+    fireEvent.click(screen.getByRole('tab', { name: 'Second Edition' }))
+    fireEvent.contextMenu(screen.getByText('Pub House'))
+    fireEvent.change(screen.getByRole('textbox', { name: '出版商' }), { target: { value: 'New Pub' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv2', patch: { meta: { rights: 'Keep', language: null, publisher: 'New Pub' } } }))
+    expect(updateCatalogBookMutate).not.toHaveBeenCalled()
+    expect(updateBookMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('distinguishes explicit empty metadata from inheritance (%s)', async (inherit) => {
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ meta: { publisher: 'Override', rights: 'Keep' } })] }), { canManage: true })
+    fireEvent.contextMenu(screen.getByText('Pub House'))
+    if (inherit) fireEvent.click(screen.getByRole('button', { name: '恢复跟随' }))
+    else fireEvent.change(screen.getByRole('textbox', { name: '出版商' }), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { meta: inherit ? { rights: 'Keep' } : { publisher: null, rights: 'Keep' } } }))
+  })
+
+  it.each(['title', 'authors', 'description'])('restores the %s override without changing other fields', async (field) => {
+    const version = catalogVersion({ title: 'Override', authors: ['Override'], description: 'Override' })
+    renderWorkDialog(catalogWork({ versions: [version] }), { canManage: true })
+    const target = field === 'title' ? screen.getByRole('heading', { name: 'City Book' }) : field === 'authors' ? screen.getByRole('button', { name: 'Someone' }) : screen.getByText('A tale')
+    fireEvent.contextMenu(target)
+    fireEvent.click(screen.getByRole('button', { name: '恢复跟随' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { [field]: null } }))
+  })
+
+
+  it('restores series and index inheritance together while preserving other masks', async () => {
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ meta: { series: 'Override', seriesIndex: 0, publisher: null, rights: 'Keep' } })] }), { canManage: true })
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Trilogy #2' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '系列编号' }), { target: { value: '2abc' } })
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    fireEvent.click(screen.getAllByRole('button', { name: '恢复跟随' })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateCatalogVersionMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { meta: { publisher: null, rights: 'Keep' } } }))
+  })
+
+  it('blocks shared cover tools during writes', () => {
+    quickEditPending = true
+    const version = catalogVersion({ coverKey: 'version-cover', effective: { ...catalogVersion().effective, coverKey: 'version-cover' } })
+    renderWorkDialog(catalogWork({ versions: [version] }), { canManage: true })
+    fireEvent.contextMenu(screen.getByRole('img', { name: 'City Book' }))
+    expect(screen.getByRole('button', { name: '更换封面' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '移除版本封面' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '移除版本封面' }))
+    expect(removeVersionCoverMutate).not.toHaveBeenCalled()
+  })
+
+  it('retains a failed shared edit draft for retry', async () => {
+    updateCatalogVersionMutate.mockRejectedValueOnce(new Error('Offline'))
+    renderWorkDialog(catalogWork(), { canManage: true })
+    fireEvent.contextMenu(screen.getByRole('heading', { name: 'City Book' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '书名' }), { target: { value: 'Retry Title' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateCatalogVersionMutate).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('textbox', { name: '书名' })).toHaveValue('Retry Title')
+    expect(screen.getByRole('heading', { name: 'City Book' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '修改书名' })).toBeNull())
+  })
+
+  it('shows a TXT version cover, preserves its image and uploads/removes only the version override', () => {
+    const version = catalogVersion({ coverKey: 'version-cover', effective: { ...catalogVersion().effective, coverKey: 'version-cover' } })
+    renderWorkDialog(catalogWork({ versions: [version] }), { canManage: true })
+    const image = screen.getByRole('img', { name: 'City Book' })
+    fireEvent.load(image)
+    fireEvent.contextMenu(image)
+    expect(screen.queryByRole('button', { name: '封面配色' })).toBeNull()
+    const file = new File(['cover'], 'cover.png', { type: 'image/png' })
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } })
+    expect(uploadVersionCoverMutate).toHaveBeenCalledWith(expect.objectContaining({ libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', file }), expect.any(Object))
+    fireEvent.click(screen.getByRole('button', { name: '移除版本封面' }))
+    expect(removeVersionCoverMutate).toHaveBeenCalledWith(expect.objectContaining({ versionLinkId: 'lbv1' }), expect.any(Object))
+    fireEvent.pointerDown(screen.getByRole('heading', { name: 'City Book' }))
+    expect(screen.getByRole('img', { name: 'City Book' })).toBe(image)
+    expect(image.className).toContain('opacity-100')
+    expect(removeCoverMutate).not.toHaveBeenCalled()
+  })
+
+  it('does not offer removal of inherited artwork', () => {
+    const version = catalogVersion({ effective: { ...catalogVersion().effective, coverKey: 'work-cover' } })
+    renderWorkDialog(catalogWork({ coverKey: 'work-cover', versions: [version] }), { canManage: true })
+    fireEvent.contextMenu(screen.getByRole('img', { name: 'City Book' }))
+    expect(screen.getByRole('button', { name: '更换封面' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '移除版本封面' })).toBeNull()
+  })
+
+  it.each([false, true])('rejects shortcuts for ordinary readers and contributors (%s)', (canContribute) => {
+    renderWorkDialog(catalogWork({ versions: [catalogVersion({ maintainable: true })] }), { canContribute })
+    fireEvent.contextMenu(screen.getByRole('heading', { name: 'City Book' }))
+    fireEvent.contextMenu(screen.getByText('Pub House'))
+    expect(screen.queryByRole('dialog', { name: /修改/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: '更换封面' })).toBeNull()
+    expect(updateCatalogVersionMutate).not.toHaveBeenCalled()
   })
 
   it('reads the first version from the primary action', () => {

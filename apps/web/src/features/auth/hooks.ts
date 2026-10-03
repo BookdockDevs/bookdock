@@ -91,6 +91,8 @@ export function useUploadAvatar() {
     onSuccess: (res) => {
       updateUser({ avatarKey: res.data.avatarKey })
       void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: ADMIN_USERS_QUERY_KEY })
+      void queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey[0] === 'libraries' && queryKey[2] === 'members' })
     },
   })
 }
@@ -103,6 +105,8 @@ export function useDeleteAvatar() {
     onSuccess: () => {
       updateUser({ avatarKey: null })
       void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: ADMIN_USERS_QUERY_KEY })
+      void queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey[0] === 'libraries' && queryKey[2] === 'members' })
     },
   })
 }

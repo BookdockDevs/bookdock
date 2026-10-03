@@ -73,7 +73,8 @@ export function IdeaOverlay({
 }: IdeaOverlayProps) {
   const dialogLayout = useDialogLayout()
   const _ = useTranslation()
-  const [detail, setDetail] = useState<IdeaEntry | null>(null)
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const detail = entries.find((entry) => entry.annotation.id === detailId) ?? null
   const quoteRef = useRef<HTMLParagraphElement>(null)
   const [quoteExpanded, setQuoteExpanded] = useState(false)
   const [quoteClamped, setQuoteClamped] = useState(false)
@@ -92,8 +93,8 @@ export function IdeaOverlay({
   // A deleted entry vanishes from `entries` once the annotations query refetches;
   // drop back to the list level instead of showing a stale detail card
   useEffect(() => {
-    if (detail && !entries.some((e) => e.annotation.id === detail.annotation.id)) setDetail(null)
-  }, [detail, entries])
+    if (detailId && !entries.some((e) => e.annotation.id === detailId)) setDetailId(null)
+  }, [detailId, entries])
 
   // While line-clamped, scrollHeight exceeding clientHeight means the quote
   // overflows four lines — only then is the expand chevron shown
@@ -131,7 +132,7 @@ export function IdeaOverlay({
           {detail ? (
             <div className={`${card} w-full max-w-md`}>
               <div className="flex items-center px-2 pt-2">
-                <button onClick={() => setDetail(null)} title={_('annotation.cancel')} className={iconBtn}>
+                <button onClick={() => setDetailId(null)} title={_('annotation.cancel')} className={iconBtn}>
                   <ChevronLeftIcon />
                 </button>
               </div>
@@ -223,7 +224,7 @@ export function IdeaOverlay({
                 return (
                   <button
                     key={entry.annotation.id}
-                    onClick={() => setDetail(entry)}
+                    onClick={() => setDetailId(entry.annotation.id)}
                     className={cn(
                       card,
                       'mt-3 block w-full p-4 text-left transition-all hover:bg-[color-mix(in_srgb,var(--bd-read-bg)_94%,var(--bd-read-text))] active:scale-[0.99]',

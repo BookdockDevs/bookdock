@@ -2,6 +2,42 @@
 
 All notable changes to Bookdock are documented here.
 
+## [0.4.3] - 2026-10-03
+
+### Highlights
+
+- Old library storage cleaned up behind the scenes: books, progress, and notes stay as-is, with a one-time automatic carry-over first.
+- Rules become importable: text replacements and TOC presets support JSON import/export plus batch delete.
+- Book details become editable in place: fix one field at a time, restore values from the source file, and change the cover without opening the large edit dialog.
+- Dangerous actions ask for the name: deleting or transferring a library, and transferring the instance, now require typing the exact name.
+
+### Added
+
+- JSON import/export for replacement rules and TOC presets, with a preview step, duplicate-name suggestions, and disabled-by-default imports for review.
+- Batch delete for both rule lists, with a selected-count and select-all.
+- Drag-to-reorder for TOC presets; the order you see is the order applied.
+- Single-field edit in book details: right-click a row (title, author, series, publisher, date, language, ISBN, subjects, synopsis) to fix just that field.
+- Per-field and whole-form "restore from source", showing whether each value came from inside the file, from the file name, or from the shared version.
+- Inline cover editing in book details: right-click the cover to replace or remove it.
+- GIF avatars, with still images used where animation doesn't fit (e.g. share cards) and clear errors for oversized or broken GIFs.
+
+### Changed
+
+- Replacement rules are now listed in the order they take effect, with position numbers; grouping is display-only.
+- Library deletion, library transfer, and instance transfer require typing the exact name, stay open and retryable on failure, and no longer confuse libraries when switching.
+- Read-status and shelf labels in book details: click to filter, right-click to change the value.
+
+### Fixed
+
+- Restoring default AI prompts no longer brings your old edits back afterward.
+- Reading stats no longer double-count the same version across libraries and handle deleted books gracefully.
+- Class-based dark mode (`.dark`) works again.
+
+### Upgrade notes
+
+- Back up the complete `DATA_DIR` before upgrading. Migrations 0038-0039 apply automatically.
+- The old-storage cleanup cannot be undone in place: to go back, restore the database plus `files/` snapshot together.
+
 ## [0.4.2] - 2026-10-03
 
 ### Highlights
@@ -534,6 +570,42 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [0.4.3] - 2026-10-03
+
+#### 主要更新
+
+- 旧书库存储在后台清理：书籍、进度、笔记原样保留，先自动搬运一次，无需操作。
+- 规则可导入导出：替换规则与目录预设支持 JSON 导入导出与批量删除。
+- 书籍详情可就地改：一次只改一个字段，可从来源恢复，封面不用进大编辑框。
+- 高危操作需输入名称：删库、转让书库、转让实例需输入准确名称。
+
+#### 新增
+
+- 两类规则的 JSON 导入导出：导入前预览，重名自动建议新名，导入项默认禁用，确认后再启用。
+- 两类规则的批量删除：支持全选与已选计数。
+- 目录预设支持拖拽排序，所见顺序即生效顺序。
+- 详情单字段快编：右键标题、作者、丛书、出版社、日期、语言、ISBN、主题、简介等行，只改该字段。
+- 逐字段与整单“从来源恢复”，恢复前说明值来自文件内、文件名推断还是共享版本。
+- 详情封面内联编辑：右键封面直接换图/删图。
+- GIF 头像：动图不合适的地方（如分享卡）用静态图；超大或损坏的 GIF 明确报错。
+
+#### 变更
+
+- 替换规则按生效顺序展示并带序号，分组只做展示标签。
+- 删库、转让书库、转让实例需输入准确名称；失败留在框内可重试；中途切换书库不会串确认框。
+- 详情里的阅读状态与书架标签：左键筛选，右键改值。
+
+#### 修复
+
+- 恢复默认 AI 快捷指令后，不再把旧草稿写回去。
+- 阅读统计不再跨馆重复计数，遇到已删书也能正常显示。
+- `.dark` 深色切换恢复生效。
+
+#### 升级说明
+
+- 升级前请完整备份 `DATA_DIR`。迁移 0038–0039 自动执行。
+- 旧存储清理不可原地撤销：回退需把数据库与 `files/` 快照一起恢复。
 
 ### [0.4.2] - 2026-10-03
 

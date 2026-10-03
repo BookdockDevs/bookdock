@@ -160,8 +160,9 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
     } else {
       const failedIds = ids.filter((_, index) => results[index]?.status === 'rejected')
       onRetainSelection?.(failedIds)
-      notify.warning(
-        { key: 'library.batchPartial', params: { action: _(actionKey), succeeded, failed } },
+      const showResult = succeeded > 0 ? notify.warning : notify.error
+      showResult(
+        { key: succeeded > 0 ? 'library.batchPartial' : 'library.batchFailed', params: { action: _(actionKey), succeeded, failed } },
         {
           duration: 'persistent',
           action: {
@@ -656,8 +657,9 @@ function BatchDeleteDialog({ ids, items, libraryId, trashEnabled, onRetainSelect
     if (failed === 0) {
       notify.success({ key: 'library.batchDeleteSucceeded', params: { count: succeeded } })
     } else {
-      notify.warning({
-        key: 'library.batchPartial',
+      const showResult = succeeded > 0 ? notify.warning : notify.error
+      showResult({
+        key: succeeded > 0 ? 'library.batchPartial' : 'library.batchFailed',
         params: { action: _('library.batchActionDelete'), succeeded, failed },
       })
       onRetainSelection?.(ids.filter((_, index) => results[index]?.status === 'rejected'))
@@ -722,8 +724,9 @@ function BatchPermanentDeleteDialog({ ids, libraryId, onRetainSelection, onClose
     if (failed === 0) {
       notify.success({ key: 'library.batchPermanentDeleteSucceeded', params: { count: succeeded } })
     } else {
-      notify.warning({
-        key: 'library.batchPartial',
+      const showResult = succeeded > 0 ? notify.warning : notify.error
+      showResult({
+        key: succeeded > 0 ? 'library.batchPartial' : 'library.batchFailed',
         params: { action: _('library.batchActionPermanentDelete'), succeeded, failed },
       })
     }

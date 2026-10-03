@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 
-import type { BookDetailRes, CatalogBook, ReTocReq, TocPreviewReq, TocPreviewRes, TocRuleCreateReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
+import type { RuleBatchDeleteReq, BookDetailRes, CatalogBook, ReTocReq, TocPreviewReq, TocPreviewRes, TocRuleCreateReq, TocRuleImportReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../client'
 
@@ -77,6 +77,16 @@ export function useSeedTocRules() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => apiPost<{ data: TocRuleRes[] }>('/toc-rules/seed'),
+    onSuccess: () => {
+      return queryClient.invalidateQueries({ queryKey: TOC_RULES_KEY })
+    },
+  })
+}
+
+export function useImportTocRules() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: TocRuleImportReq) => apiPost<{ data: TocRuleRes[] }>('/toc-rules/import', body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: TOC_RULES_KEY })
     },
@@ -157,5 +167,15 @@ export function useTocPreview(
     },
     enabled: options?.enabled !== false && Boolean(target),
     staleTime: 60 * 1000,
+  })
+}
+
+export function useDeleteTocRules() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: RuleBatchDeleteReq) => apiPost<{ data: null }>('/toc-rules/batch-delete', body),
+    onSuccess: () => {
+      return queryClient.invalidateQueries({ queryKey: TOC_RULES_KEY })
+    },
   })
 }

@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 
 import type { TextReplacementRes } from '@bookdock/shared'
 
-import { useCreateReplacement, useDeleteReplacement, useReplacements, useUpdateReplacement } from '@/api/hooks/useReplacements'
+import { useCreateReplacement, useDeleteGlobalReplacements, useReplacements, useUpdateReplacement } from '@/api/hooks/useReplacements'
 import i18n from '../i18n/i18n'
 import ReplacementsSettingsSection from '../features/settings/components/ReplacementsSettingsSection'
 
@@ -11,7 +11,8 @@ vi.mock('@/api/hooks/useReplacements', () => ({
   useReplacements: vi.fn(() => ({ data: { data: [] } })),
   useCreateReplacement: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useUpdateReplacement: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
-  useDeleteReplacement: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useDeleteGlobalReplacements: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useImportReplacements: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }))
 
 const rule = (overrides: Partial<TextReplacementRes> = {}): TextReplacementRes => ({
@@ -29,6 +30,7 @@ const rule = (overrides: Partial<TextReplacementRes> = {}): TextReplacementRes =
   spineHref: null,
   textOffset: null,
   originalText: null,
+  sortOrder: 0,
   createdAt: 0,
   updatedAt: 0,
   ...overrides,
@@ -51,17 +53,18 @@ describe('ReplacementsSettingsSection', () => {
     expect(screen.queryByText('· 0')).not.toBeInTheDocument()
   })
 
-  it('shows only global pattern rules with ungrouped rules at the top level', () => {
+  it('shows only global pattern rules in execution order with group badges', () => {
     mockRules([
-      rule({ id: 't1', name: '广告组规则', group: 'a组', createdAt: 100 }),
-      rule({ id: 't2', name: '无组规则', createdAt: 200 }),
-      rule({ id: 't3', name: 'B组', group: 'b组', createdAt: 300 }),
+      rule({ id: 't1', name: '广告组规则', group: 'a组', sortOrder: 0, createdAt: 100 }),
+      rule({ id: 't2', name: '无组规则', sortOrder: 1, createdAt: 200 }),
+      rule({ id: 't3', name: 'B组', group: 'b组', sortOrder: 2, createdAt: 300 }),
       // book-scoped rules and point patches are managed in the reader dialog
-      rule({ id: 't4', pattern: 'book rule', bookId: 'bX', scope: 'book', createdAt: 400 }),
-      rule({ id: 't5', pattern: null, matchType: 'point', originalText: '错字', bookId: 'bX', scope: 'book', createdAt: 500 }),
+      rule({ id: 't4', pattern: 'book rule', bookId: 'bX', scope: 'book', sortOrder: 3, createdAt: 400 }),
+      rule({ id: 't5', pattern: null, matchType: 'point', originalText: '错字', bookId: 'bX', scope: 'book', sortOrder: 4, createdAt: 500 }),
     ])
     render(<ReplacementsSettingsSection />)
 
+    // group renders as a badge, never as a re-sorting section header
     expect(screen.getByText('a组')).toBeInTheDocument()
     expect(screen.getByText('b组')).toBeInTheDocument()
     expect(screen.getByText('无组规则')).toBeInTheDocument()
@@ -69,27 +72,20 @@ describe('ReplacementsSettingsSection', () => {
     expect(screen.queryByText('book rule')).not.toBeInTheDocument()
     expect(screen.queryByText('错字')).not.toBeInTheDocument()
     expect(screen.getByText('· 3')).toBeInTheDocument()
-    // named groups sort alphabetically; ungrouped rules have no group header
-    const headers = screen.getAllByRole('button', { expanded: true })
-    const names = headers.map((h) => h.textContent)
-    expect(names[0]).toContain('a组')
-    expect(names[1]).toContain('b组')
-    expect(names).toHaveLength(2)
+    // execution order, not newest-first: position 1 is the oldest rule
+    const items = screen.getAllByRole('listitem')
+    expect(items[0]).toHaveTextContent('广告组规则')
+    expect(items[1]).toHaveTextContent('无组规则')
+    expect(items[2]).toHaveTextContent('B组')
   })
 
-  it('collapses and expands a group', () => {
-    mockRules([
-      rule({ id: 't1', name: 'A规则', group: '广告' }),
-      rule({ id: 't2', name: 'B规则' }),
-    ])
+  it('offers import and full export without row exports', () => {
+    mockRules([rule({ name: '去广告' })])
     render(<ReplacementsSettingsSection />)
 
-    expect(screen.getByText('A规则')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /广告/ }))
-    expect(screen.queryByText('A规则')).not.toBeInTheDocument()
-    expect(screen.getByText('B规则')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /广告/ }))
-    expect(screen.getByText('A规则')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导入' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导出全部规则' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '导出这条规则' })).not.toBeInTheDocument()
   })
 
   it('shows edit and delete actions only while editing', () => {
@@ -101,11 +97,51 @@ describe('ReplacementsSettingsSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
     expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '删除' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除所选' })).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: '退出编辑模式' }))
     expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
+  })
+
+  it('supports select-all and keeps selected rules available after a failed batch deletion', () => {
+    const mutation = { mutate: vi.fn(), isPending: false }
+    vi.mocked(useDeleteGlobalReplacements).mockReturnValue(mutation as unknown as ReturnType<typeof useDeleteGlobalReplacements>)
+    mockRules([rule({ id: 'a', name: 'A' }), rule({ id: 'b', name: 'B' })])
+    render(<ReplacementsSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 A' }))
+    expect(screen.getByRole('checkbox', { name: '全选' })).toBePartiallyChecked()
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除所选' }))
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('确定删除所选的 2 条规则')
+    fireEvent.click(screen.getByRole('button', { name: '删除', exact: true }))
+    expect(mutation.mutate).toHaveBeenCalledWith({ ruleIds: ['a', 'b'] }, expect.any(Object))
+    act(() => mutation.mutate.mock.calls[0]![1].onError(new Error('failed')))
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: '全选' })).toBeChecked()
+    act(() => mutation.mutate.mock.calls[0]![1].onSuccess())
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '退出编辑模式' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除所选' })).toBeDisabled()
+  })
+
+  it('exports only the selected global rule with its complete configuration', async () => {
+    const createUrl = vi.fn((_blob: Blob) => 'blob:export')
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: createUrl, revokeObjectURL: vi.fn() }))
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    mockRules([rule({ id: 'a', name: 'A', sortOrder: 0 }), rule({ id: 'b', name: 'B', sortOrder: 1, isRegex: true, pattern: 'b+', applyTo: 'both', group: 'group', replacement: 'new' })])
+    render(<ReplacementsSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 B' }))
+    fireEvent.click(screen.getByRole('button', { name: '导出所选' }))
+    const text = await new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.readAsText(createUrl.mock.calls[0]![0])
+    })
+    const exported = JSON.parse(text)
+    expect(exported).toEqual({ kind: 'bookdock.text-replacements', formatVersion: 1, rules: [{ name: 'B', group: 'group', pattern: 'b+', replacement: 'new', isRegex: true, applyTo: 'both', enabled: true }] })
   })
 
   it('fades disabled rules without a strikethrough', () => {
@@ -132,16 +168,17 @@ describe('ReplacementsSettingsSection', () => {
 
   it('deletes a rule through the styled confirm dialog', () => {
     const deleteReplacement = { mutate: vi.fn(), isPending: false }
-    vi.mocked(useDeleteReplacement).mockReturnValue(deleteReplacement as unknown as ReturnType<typeof useDeleteReplacement>)
+    vi.mocked(useDeleteGlobalReplacements).mockReturnValue(deleteReplacement as unknown as ReturnType<typeof useDeleteGlobalReplacements>)
     mockRules([rule()])
     render(<ReplacementsSettingsSection />)
 
     fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
-    fireEvent.click(screen.getByRole('button', { name: '删除' }))
-    expect(screen.getByText(/确定要删除文本替换规则/)).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('checkbox')[1]!)
+    fireEvent.click(screen.getByRole('button', { name: '删除所选' }))
+    expect(screen.getByText(/确定删除所选的 1 条规则/)).toBeInTheDocument()
     const confirmBtn = screen.getAllByRole('button', { name: '删除' }).find((b) => b.textContent === '删除')
     fireEvent.click(confirmBtn!)
-    expect(deleteReplacement.mutate).toHaveBeenCalledWith('t1', expect.objectContaining({ onError: expect.any(Function) }))
+    expect(deleteReplacement.mutate).toHaveBeenCalledWith({ ruleIds: ['t1'] }, expect.objectContaining({ onError: expect.any(Function) }))
   })
 
   it('creates a rule in the shared modal and cancels back to the list', () => {
@@ -203,79 +240,13 @@ describe('ReplacementsSettingsSection', () => {
     expect(screen.queryByRole('button', { name: '所有匹配处' })).not.toBeInTheDocument()
   })
 
-  it('renames a group across all its member rules', async () => {
-    const updateReplacement = { mutate: vi.fn((_, opts) => opts?.onSuccess?.()), isPending: false }
-    vi.mocked(useUpdateReplacement).mockReturnValue(updateReplacement as unknown as ReturnType<typeof useUpdateReplacement>)
-    mockRules([
-      rule({ id: 'r1', name: '规则1', group: '旧分组' }),
-      rule({ id: 'r2', name: '规则2', group: '旧分组' }),
-    ])
+  it('keeps the group field editable per rule without group sections', () => {
+    mockRules([rule({ id: 'r1', name: '规则1', group: '旧分组' })])
     render(<ReplacementsSettingsSection />)
 
-    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
-    fireEvent.click(screen.getByRole('button', { name: '重命名分组' }))
-    expect(screen.getByText('重命名分组')).toBeInTheDocument()
-
-    const input = screen.getByDisplayValue('旧分组')
-    fireEvent.change(input, { target: { value: '新分组' } })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    })
-
-    expect(updateReplacement.mutate).toHaveBeenCalledWith(
-      { id: 'r1', body: { group: '新分组' } },
-      expect.any(Object),
-    )
-    expect(updateReplacement.mutate).toHaveBeenCalledWith(
-      { id: 'r2', body: { group: '新分组' } },
-      expect.any(Object),
-    )
-  })
-
-  it('disbands a group by moving rules to ungrouped when delete checkbox is unchecked', async () => {
-    const updateReplacement = { mutate: vi.fn((_, opts) => opts?.onSuccess?.()), isPending: false }
-    vi.mocked(useUpdateReplacement).mockReturnValue(updateReplacement as unknown as ReturnType<typeof useUpdateReplacement>)
-    mockRules([rule({ id: 'r1', name: '规则1', group: '广告组' })])
-    render(<ReplacementsSettingsSection />)
-
-    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
-    fireEvent.click(screen.getByRole('button', { name: '删除分组' }))
-    expect(screen.getByText('删除分组')).toBeInTheDocument()
-    expect(screen.getByText(/未勾选时，分组下的规则将移至未分组/)).toBeInTheDocument()
-
-    // Confirm delete without checking checkbox -> ungroups rules
-    const confirmBtn1 = screen.getAllByRole('button', { name: '删除' }).find((b) => b.textContent === '删除')
-    await act(async () => {
-      fireEvent.click(confirmBtn1!)
-    })
-    expect(updateReplacement.mutate).toHaveBeenCalledWith(
-      { id: 'r1', body: { group: null } },
-      expect.any(Object),
-    )
-  })
-
-  it('permanently deletes all rules in a group when checkbox is checked', async () => {
-    const deleteReplacement = { mutate: vi.fn((_, opts) => opts?.onSuccess?.()), isPending: false }
-    vi.mocked(useDeleteReplacement).mockReturnValue(deleteReplacement as unknown as ReturnType<typeof useDeleteReplacement>)
-    mockRules([
-      rule({ id: 'r1', name: '规则1', group: '广告组' }),
-      rule({ id: 'r2', name: '规则2', group: '广告组' }),
-    ])
-    render(<ReplacementsSettingsSection />)
-
-    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
-    fireEvent.click(screen.getByRole('button', { name: '删除分组' }))
-    expect(screen.getByText('删除分组')).toBeInTheDocument()
-
-    // Check checkbox -> cascade delete
-    fireEvent.click(screen.getByRole('checkbox'))
-    expect(screen.getByText(/勾选后，分组下的所有规则将被永久删除/)).toBeInTheDocument()
-
-    const confirmBtn2 = screen.getAllByRole('button', { name: '删除' }).find((b) => b.textContent === '删除')
-    await act(async () => {
-      fireEvent.click(confirmBtn2!)
-    })
-    expect(deleteReplacement.mutate).toHaveBeenCalledWith('r1', expect.any(Object))
-    expect(deleteReplacement.mutate).toHaveBeenCalledWith('r2', expect.any(Object))
+    // no group headers, no bulk group actions — the badge is display-only
+    expect(screen.getByText('旧分组')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重命名分组' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除分组' })).not.toBeInTheDocument()
   })
 })
