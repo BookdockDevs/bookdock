@@ -142,14 +142,14 @@ export default function BookCardShell({
       {hasCardInfo && (
         <div className="min-w-0 px-0.5">
           {showTitle && (
-            <h3 className="truncate font-serif text-[13px] font-medium leading-snug text-stone-900 dark:text-stone-100">
+            <h3 className="truncate font-serif text-[13px] font-medium leading-snug text-stone-900 dark:text-stone-100/90">
               {row.title}
             </h3>
           )}
           {hasSubtitle && (
             <p className="mt-0.5 flex items-center truncate text-xs text-stone-500 dark:text-stone-400">
               {showAuthor && <span className="truncate">{authorText}</span>}
-              {showAuthor && progressText && <span className="mx-1 shrink-0 text-stone-300 dark:text-stone-600">·</span>}
+              {showAuthor && progressText && <span className="mx-1 shrink-0 text-stone-300 dark:text-stone-500">·</span>}
               {progressText && (
                 <span className="shrink-0 font-medium font-mono text-[11px] text-stone-500 dark:text-stone-400">
                   {progressText}

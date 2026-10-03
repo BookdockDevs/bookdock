@@ -80,4 +80,13 @@ describe('BookCover', () => {
     expect(wrapper.className).toContain('w-12')
     expect(wrapper.className).toContain('shrink-0')
   })
+
+  it('renders book title and card dimensions for size="card"', () => {
+    const { container } = render(<BookCover book={baseBook} size="card" />)
+    const wrapper = container.firstChild as HTMLElement
+    expect(wrapper.className).toContain('h-20')
+    expect(wrapper.className).toContain('w-14')
+    expect(screen.getByText('Test Book')).toBeInTheDocument()
+    expect(screen.getByText('txt')).toBeInTheDocument()
+  })
 })

@@ -22,6 +22,7 @@ All notable changes to Bookdock are documented here.
 - Per-field and whole-form "restore from source", showing whether each value came from inside the file, from the file name, or from the shared version.
 - Inline cover editing in book details: right-click the cover to replace or remove it.
 - GIF avatars, with still images used where animation doesn't fit (e.g. share cards) and clear errors for oversized or broken GIFs.
+- Currently-reading rows show an inline progress bar with percentage.
 - Directory view for shelves, categories and tags: grouped browsing, independent search, the same select mode, and manager batch actions (pin, hide, delete) with counts.
 - Two-level shared categories with flat personal shelves: both levels hold works, parent rows show subtree counts, and the view menu offers an include-subcategories switch (on by default).
 - Category plus one tag can combine as filters; publishing uses the two-level target picker, and rename-plus-move saves atomically.
@@ -38,6 +39,7 @@ All notable changes to Bookdock are documented here.
 - Book-detail and append dialogs report save failures inline, flagging partial saves, instead of toasting.
 - Toast copy names the outcome across more actions: catalog visibility per work and version, trash-empty counts, already-in-sync pushes, restored rule counts, pinning, version deletion, annotation batch delete, font uploads and settings sync.
 - Scrollbars are thin and theme-aware app-wide, including the reader.
+- Placeholder covers redrawn with spine lighting and a matte sheen, retuned dark-mode palettes, and a compact card size for list rows.
 
 ### Fixed
 
@@ -603,6 +605,7 @@ All notable changes to Bookdock are documented here.
 - 逐字段与整单“从来源恢复”，恢复前说明值来自文件内、文件名推断还是共享版本。
 - 详情封面内联编辑：右键封面直接换图/删图。
 - GIF 头像：动图不合适的地方（如分享卡）用静态图；超大或损坏的 GIF 明确报错。
+- 在读行显示带百分比的行内进度条。
 - 书架/分类/标签的右侧目录：分组浏览、独立搜索、同样的选择模式，管理员可批量置顶/隐藏/删除并显示数量。
 - 共享分类支持两级、私人书架保持平级：两级都可放作品，父级显示子树数量，视图菜单可开关“包含子分类”（默认开）。
 - 分类可与一个标签组合筛选；发布改用两级目标选择器，改名加移动一次原子保存。
@@ -619,6 +622,7 @@ All notable changes to Bookdock are documented here.
 - 书籍详情与追写弹窗的保存失败改为行内报错，部分保存明确标出，不再弹通知。
 - 通知文案点名结果：目录显隐、回收站数量、已一致推送、补回规则数，以及置顶、版本删除、标注批量删除、字体上传、设置同步。
 - 滚动条全应用变细并跟随主题，阅读器也一致。
+- 占位封面重绘（书脊高光、哑光质感），深色配色重调，列表行用紧凑卡片尺寸。
 
 #### 修复
 
