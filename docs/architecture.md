@@ -1,5 +1,58 @@
 # Bookdock Architecture
 
+### Library search expressions v1
+
+Library search applies valid drafts after 300 ms of idle input. Enter or the
+search button applies immediately. IME composition does not submit. Incomplete
+or invalid expressions retain current results; explicit submission reveals a
+positioned error. Slow requests show a delayed indicator and stale requests are
+cancelled. The input clear button exits the search session and restores its
+initial filters, page and scroll position. The first applied draft creates one
+history entry and subsequent drafts replace it. Paging, sorting and changing
+the result view retain that session; sidebar filters and library changes end it.
+Its return snapshot lives in router history state, survives refresh,
+and is absent from copied links (which clear only the linked search).
+Name suggestions keep focus in the input: Up/Down cycles the active option,
+Enter accepts an active option (otherwise submits), Tab accepts the active or
+first option, and Escape dismisses the list. Accepting resumes live search;
+navigating options pauses it. IME keys retain their composition behavior.
+Fixed lowercase fields are `tag`, `shelf`
+(private only), `category` (shared only), `author`, `format`, and `status`
+(private reading state only). Operators are `!`, `&`, `|`, and parentheses;
+whitespace between conditions is AND. Precedence is NOT, AND, OR. Consecutive
+ordinary words form one legacy search term, not a word-by-word conjunction.
+Only tag accepts comma lists, with AND semantics. Double quotes protect spaces
+and punctuation and accept escaped quotes/backslashes. Repeated fields are
+independent predicates. Names match exactly; shared categories accept full
+paths separated by `/`. Unknown, empty, ambiguous, missing or malformed values
+produce positioned errors without applying the draft or replacing prior results.
+Submission reuses fresh list cache data or loads the requested first page once. A successful page
+is seeded into the list's exact query cache before URL navigation, so applying
+the search reuses that result. Failed or aborted submissions do not seed results
+or apply the URL. Text-only expressions do not load taxonomy for name binding.
+
+The shared package owns parsing, bounded structured-expression validation,
+name binding and serialization. Web stores the expression in URL `expression`,
+including taxonomy IDs and display names, rather than flattening OR/NOT into
+legacy parameters. Legacy `q` and filter links retain their literal semantics.
+Simple AND predicates project to sidebar/condition controls where one value
+can represent the field. Editing such a control replaces that field's predicates.
+OR/NOT expressions have no single-condition projection: sidebar and filter
+controls add separate AND restrictions outside the whole expression. The expression
+remains a removable condition chip; no persistent explanatory banner is shown.
+Removing those restrictions preserves the expression.
+Clearing search clears the expression; switching libraries clears scoped filters.
+Filter changes reset paging and selection; paging alone retains selection.
+
+Server list endpoints accept the same structured expression for items, counts
+and every page used in cross-page selection. Compilation uses parameterized SQL
+and revalidates taxonomy IDs in the current library. Author predicates match any
+effective author. Existing format and reading-status contract enums are reused.
+Each shared predicate examines only versions visible to the viewer. Library
+authorization, ownership, deleted-state and hidden-state conditions surround
+the entire expression and cannot be negated or widened by OR. No schema changes,
+saved searches, cross-library search, comparisons or chapter-body search are added.
+
 Private-book detail chips use left click to filter the personal library by reading status or shelf (including the uncategorized shelf). Right click opens the single-selection editor; shortcut edit icons are not displayed. Touch users retain the full edit dialog. Personal books and collected versions support these edits; guests, read-only views and uncollected library reads do not. Existing book PATCH and shelf PUT endpoints save only the selected field. Saving retains the confirmed value until success and query refresh; failures retain it and use the existing notifications. Shelf-only writes must leave tags untouched. Refresh private lists, detail, membership and the separate reader-detail cache; shelf changes also refresh taxonomy counts and batch selection. Shared classification is outside this shortcut's scope. Detail shortcut menus use the same 184px width as home book context menus. Private detail identity chips keep status, optional source library, private shelf and private tags in that order; collection actions and update notices live outside that row. Shared work details show category then shared tags, without repeating the current library or introducing personal state. Category names reuse the library taxonomy query; a null category shows uncategorized, while unresolved or failed lookups never claim uncategorized. Category/tag clicks filter the current shared library through the existing shelf/tag search parameters. Shared classification shortcuts remain deferred.
 
 Displayed metadata in private details supports right-click editing through a small field dialog: title, authors, description, publisher, publication date, language, ISBN, subjects, and series with its index. Existing filter/copy/expand actions remain on left click. Only title and authors are card-local and editable on collected shared versions; revision metadata remains immutable there. File identifiers, format, size, timestamps and word count remain read-only. Optional fields may be cleared; title remains required. A metadata write preserves all unrelated bookmeta keys: the PATCH replaces the whole bookmeta object, so the client merges the editable fields over the stored bookmeta and leaves identifier/rights/contributors and other unowned keys untouched. The dialog validates with the shared bookUpdateSchema and uses the existing mutation/cache/notification path, retaining its draft on failure.

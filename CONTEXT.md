@@ -22,6 +22,10 @@ _Avoid_: representing ongoing progress with repeated toasts.
 
 ## Books and Table of Contents
 
+**Library search expression**:
+A query combining ordinary library search terms and exact metadata or classification conditions within one library. It never changes which library content the reader is permitted to see.
+_Avoid_: full-text search when referring to library metadata search.
+
 **TOC rule**:
 A user-configurable preset that determines how TXT content is recognized and organized into volumes, chapters, and sections in the table of contents.
 _Avoid_: chapter rule when referring to the complete table-of-contents structure.

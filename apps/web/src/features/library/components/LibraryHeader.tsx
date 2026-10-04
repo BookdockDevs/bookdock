@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import type { LibrarySearchNames } from '@bookdock/shared'
+
+import LibrarySearchInput from './LibrarySearchInput'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatBytes } from '@/lib/utils'
@@ -12,6 +14,11 @@ interface LibraryHeaderProps {
   navSearch: (patch: Partial<LibrarySearch>) => void
   view: string
   query: string
+  searchNames?: LibrarySearchNames
+  searchContext?: string
+  searchError?: unknown
+  onSearchSubmit?: (source: string, signal: AbortSignal) => Promise<unknown>
+  onSearchClear?: () => void
   sortBy: string
   sortOrder: string
   format: string | null
@@ -34,21 +41,8 @@ interface LibraryHeaderProps {
   categoryScope?: LibrarySearch['categoryScope']
 }
 
-export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, searchNames, searchContext, searchError, onSearchSubmit, onSearchClear, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope }: LibraryHeaderProps) {
   const _ = useTranslation()
-  const [searchInput, setSearchInput] = useState(query)
-
-  // Sync the input when the URL query changes externally (e.g. cleared filters)
-  useEffect(() => {
-    setSearchInput(query)
-  }, [query])
-
-  // Debounce navigation so each keystroke does not re-render the whole tree
-  useEffect(() => {
-    if (searchInput === query) return
-    const id = setTimeout(() => navSearch({ q: searchInput || undefined }), 250)
-    return () => clearTimeout(id)
-  }, [searchInput, query, navSearch])
 
   return (
     <header className="mb-6 md:mb-8">
@@ -99,27 +93,7 @@ export default function LibraryHeader({ navSearch, view, query, sortBy, sortOrde
 
         <div className="flex w-full min-w-0 flex-1 flex-wrap items-center justify-end gap-2 md:w-auto">
           {!trash && (
-            <div className="relative min-w-0 flex-1 sm:min-w-48 sm:max-w-72 md:max-w-80">
-              <svg
-                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <path d="M21 21l-4.35-4.35" />
-              </svg>
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder={_('library.searchPlaceholder')}
-                className="h-10 w-full appearance-none rounded-xl border border-stone-200 bg-white pl-10 pr-3 text-sm text-stone-700 outline-none transition-all placeholder:text-stone-400 focus:border-stone-400 focus:ring-4 focus:ring-stone-900/5 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-600 dark:focus:ring-white/5"
-              />
-            </div>
+            <LibrarySearchInput query={query} names={searchNames} context={searchContext} appliedError={searchError} onClear={onSearchClear} placeholder={_('library.searchPlaceholder')} onSubmit={onSearchSubmit ?? (async (source) => { navSearch({ q: source || undefined }) })} />
           )}
 
           {onToggleSelectMode && (

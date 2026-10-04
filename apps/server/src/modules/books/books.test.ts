@@ -1,3 +1,5 @@
+import { parseLibrarySearch } from '@bookdock/shared'
+import { listSearchAuthors } from '../libraries/search-expression'
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 import { and, desc, eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
@@ -1598,7 +1600,7 @@ describe('GET /api/v1/books/:id/file range requests', () => {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('/api/v1/books/*', async (c, next) => {
-      c.set('user', { id: userId, username: role, role, avatarKey: null })
+      c.set('user', guest ? null : { id: userId, username: role, role, avatarKey: null })
       if (guest) c.set('guest', true)
       return next()
     })
@@ -2577,5 +2579,53 @@ describe('revision writers move collected pins', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]!.blobKey).toBe(rows[1]!.blobKey)
     expect(sharedPinOf(book.id)).toBe(rows[0]!.id)
+  })
+})
+
+describe('private library search expressions', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'expression-owner')
+  })
+  function list(source: string, page = 1, pageSize = 20, trash = false, showHidden = false) {
+    return listBooks(ownerId, page, pageSize, undefined, 'title', 'asc', undefined, undefined, undefined, undefined, trash, undefined, undefined, showHidden, JSON.stringify(parseLibrarySearch(source)))
+  }
+  it('keeps OR and NOT inside ownership, hidden and trash boundaries with consistent pagination', async () => {
+    seedBook(db, ownerId, { title: 'Visible Alpha' })
+    seedBook(db, ownerId, { title: 'Visible Beta' })
+    const hidden = seedBook(db, ownerId, { title: 'Hidden' })
+    db.update(schema.libraryBooks).set({ hidden: true }).where(eq(schema.libraryBooks.id, libraryBookOf(db, hidden.id)!.id)).run()
+    const deleted = seedBook(db, ownerId, { title: 'Deleted' })
+    db.update(schema.libraryBooks).set({ deletedAt: Date.now() }).where(eq(schema.libraryBooks.id, libraryBookOf(db, deleted.id)!.id)).run()
+    const other = seedUser(db, 'other-expression-owner')
+    seedBook(db, other, { title: 'Other Visible' })
+    const source = 'Visible | !"absent"'
+    const first = await list(source, 1, 1)
+    const second = await list(source, 2, 1)
+    expect(first.total).toBe(2)
+    expect(second.total).toBe(2)
+    expect([...first.data, ...second.data].map((book) => book.title)).toEqual(['Visible Alpha', 'Visible Beta'])
+    expect((await list(source, 1, 20, true)).data.map((book) => book.title)).toEqual(['Deleted'])
+    expect((await list(source, 1, 20, false, true)).total).toBe(3)
+  })
+  it('matches quoted LIKE wildcards literally and treats nullable metadata as false under NOT', async () => {
+    seedBook(db, ownerId, { title: '100% literal' })
+    seedBook(db, ownerId, { title: '100x ordinary' })
+    expect((await list('"100%"')).total).toBe(1)
+    expect((await list('!"missing description"')).total).toBe(2)
+    expect((await list('"100%" & !"ordinary"')).total).toBe(1)
+  })
+  it('matches repeated exact authors and rejects absent authors and out-of-library tag IDs', async () => {
+    seedBook(db, ownerId, { title: 'Alpha', author: 'A' })
+    seedBook(db, ownerId, { title: 'Beta', author: 'B' })
+    expect((await list('author:A | author:B')).total).toBe(2)
+    await expect(list('author:missing')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', details: { start: 0 } })
+    await expect(list('category:missing')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    const expression = { kind: 'field', field: 'tag', value: 'fake', id: 'foreign', start: 0, end: 8 }
+    await expect(listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, undefined, false, JSON.stringify(expression))).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(await listSearchAuthors(ownerId)).toEqual(['A', 'B'])
   })
 })

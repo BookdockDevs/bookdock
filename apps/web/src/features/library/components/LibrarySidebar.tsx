@@ -312,7 +312,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
               <path d="M22 3h-6a4 4 0 0 0-4 4v14a4 4 0 0 1 3-3h7z" />
             </svg>
           }
-          onClick={() => selectNavigation({ shelf: undefined, tag: undefined, q: undefined, format: undefined, status: undefined, author: undefined, series: undefined, categoryScope: undefined, trash: undefined })}
+          onClick={() => selectNavigation({ expression: undefined, shelf: undefined, tag: undefined, q: undefined, format: undefined, status: undefined, author: undefined, series: undefined, categoryScope: undefined, trash: undefined })}
         />
         <UncategorizedDropTarget count={uncategorizedCount} active={isUncategorizedActive}
           onClick={() => selectNavigation({ shelf: 'none', categoryScope: undefined, trash: undefined })}

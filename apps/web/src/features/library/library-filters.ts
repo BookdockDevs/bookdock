@@ -1,5 +1,10 @@
 import type { LibrarySearch } from '@/routes/index'
 
+export function pageRangeCorrection(total: number, page: number, totalPages: number, loading: boolean, placeholder: boolean): Partial<LibrarySearch> {
+  if (loading || placeholder || total <= 0 || page <= totalPages) return {}
+  return { page: totalPages === 1 ? undefined : totalPages }
+}
+
 /**
  * What a shared library's list can and cannot honour, in one place.
  *

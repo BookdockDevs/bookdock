@@ -1,3 +1,5 @@
+import { bindLibrarySearch, parseLibrarySearch } from '@bookdock/shared'
+import { listSearchAuthors } from './search-expression'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { and, desc, eq } from 'drizzle-orm'
@@ -133,6 +135,44 @@ describe('shared library catalog', () => {
       { id: createId('lbm'), libraryId, userId: adminId, role: 'admin', createdAt: 1, updatedAt: 1 },
       { id: createId('lbm'), libraryId, userId: memberId, role: 'member', createdAt: 1, updatedAt: 1 },
     ]).run()
+  })
+
+  it('evaluates expressions with visible-version permissions, taxonomy binding and consistent counts', async () => {
+    const root = await createLibraryCategory(ownerId, libraryId, { name: 'Root' })
+    const child = await createLibraryCategory(ownerId, libraryId, { name: 'Child', parentId: root.id })
+    const sf = seedTag(libraryId, 'Sci Fi')
+    const keep = seedTag(libraryId, 'Keep')
+    const one = await uploadCatalogBook(libraryId, ownerId, txtFile('one.txt', 'One content'), { title: 'One', author: 'A', categoryId: root.id, tagIds: [sf, keep] })
+    await uploadCatalogBook(libraryId, ownerId, txtFile('two.txt', 'Two content'), { title: 'Two', author: 'B', categoryId: child.id, tagIds: [sf] })
+    const unlisted = await uploadCatalogBook(libraryId, ownerId, txtFile('unlisted.txt', 'Unlisted content'), { title: 'Secret', author: 'Secret Author' })
+    await updateCatalogVersion(ownerId, libraryId, unlisted.libraryBookId, unlisted.versionLinkId!, { status: 'unlisted' })
+    const hidden = await uploadCatalogBook(libraryId, ownerId, txtFile('hidden.txt', 'Hidden content'), { title: 'Hidden', author: 'Hidden Author' })
+    await updateCatalogBook(ownerId, libraryId, hidden.libraryBookId, { hidden: true })
+    const deleted = await uploadCatalogBook(libraryId, ownerId, txtFile('deleted.txt', 'Deleted content'), { title: 'Deleted' })
+    db.update(schema.libraryBooks).set({ deletedAt: Date.now() }).where(eq(schema.libraryBooks.id, deleted.libraryBookId)).run()
+    const encode = (source: string) => JSON.stringify(parseLibrarySearch(source))
+    const source = 'category:Root (tag:"Sci Fi" | author:A) !tag:Keep'
+    const first = await listCatalogBooks(memberId, libraryId, { expression: encode(source), categoryScope: 'subtree', pageSize: 1 })
+    expect(first.total).toBe(1)
+    expect(first.items.map((work) => work.title)).toEqual(['Two'])
+    expect((await listCatalogBooks(memberId, libraryId, { expression: encode(source), categoryScope: 'direct' })).total).toBe(0)
+    expect((await listCatalogBooks(memberId, libraryId, { expression: encode('tag:"Sci Fi",Keep') })).items.map((work) => work.id)).toEqual([one.libraryBookId])
+    const broad = encode('One | !"nonexistent"')
+    expect((await listCatalogBooks(memberId, libraryId, { expression: broad })).total).toBe(2)
+    const pages = await Promise.all([1, 2].map((page) => listCatalogBooks(memberId, libraryId, { expression: broad, page, pageSize: 1 })))
+    expect(new Set(pages.flatMap((page) => page.items.map((work) => work.id))).size).toBe(2)
+    expect((await listCatalogBooks(ownerId, libraryId, { expression: broad })).total).toBe(4)
+    await expect(listCatalogBooks(memberId, libraryId, { expression: encode('author:"Secret Author"') })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(listCatalogBooks(memberId, libraryId, { expression: broad, trash: true })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect((await listCatalogBooks(ownerId, libraryId, { expression: broad, trash: true })).items.map((work) => work.title)).toEqual(['Deleted'])
+    await expect(listCatalogBooks(memberId, libraryId, { expression: encode('status:reading') })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    const locked = await createLibrary({ userId: ownerId, isGuest: false }, { name: 'Locked Search', visibility: 'private' })
+    await expect(listCatalogBooks(outsiderId, locked.id, { expression: broad })).rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
+    const bound = bindLibrarySearch(parseLibrarySearch('tag:"Sci Fi"')!, { shared: true, tags: [{ id: sf, name: 'Sci Fi' }], categories: [] })
+    if (bound.kind === 'field') bound.id = keep + '-foreign'
+    await expect(listCatalogBooks(memberId, libraryId, { expression: JSON.stringify(bound) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    expect(await listSearchAuthors(memberId, libraryId)).toEqual(['A', 'B'])
+    expect(await listSearchAuthors(ownerId, libraryId)).toContain('Secret Author')
   })
 
   it('keeps subtree paging and taxonomy counts aligned with visible works', async () => {

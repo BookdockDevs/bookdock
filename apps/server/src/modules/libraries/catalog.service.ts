@@ -1,5 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm'
 
+import { compileSearchExpression } from './search-expression'
+
 import { getDb } from '../../db/client'
 import {
   blobs,
@@ -36,6 +38,7 @@ import {
   type LibraryListQuery,
 } from './library-query'
 import {
+  LibrarySearchError,
   normalizeAuthors,
   type BatchOrganizeReq,
   type BatchSelectionItem,
@@ -334,16 +337,28 @@ export async function listCatalogBooks(
     const page = Math.max(1, params.page ?? 1)
     const pageSize = Math.min(100, Math.max(1, params.pageSize ?? CATALOG_PAGE_SIZE))
     const filters: SQL[] = [eq(libraryBooks.libraryId, libraryId), isNotNull(libraryBooks.deletedAt)]
-    if (params.search) {
-      const pattern = likePattern(params.search)
-      filters.push(sql`(
+    const textMatch = (term: string): SQL => {
+      const pattern = likePattern(term)
+      return sql`(
         ${libraryBooks.title} LIKE ${pattern} ESCAPE '!'
         OR ${libraryBooks.author} LIKE ${pattern} ESCAPE '!'
         OR ${libraryBooks.description} LIKE ${pattern} ESCAPE '!'
         OR ${taxonomyNameMatch(pattern, libraryId)}
         OR ${versionEffectiveMatch(pattern, libraryId, {})}
-      )`)
+      )`
     }
+    if (params.search) filters.push(textMatch(params.search))
+    if (params.expression) filters.push(compileSearchExpression(params.expression, libraryId, true, (node) => {
+      if (node.kind === 'text') return textMatch(node.value)
+      if (node.field === 'author') {
+        const predicate = and(...sharedListConditions({ page, pageSize, author: node.value }, libraryId, {})) as SQL
+        if (!db.select({ id: libraryBooks.id }).from(libraryBooks).where(and(eq(libraryBooks.libraryId, libraryId), isNotNull(libraryBooks.deletedAt), predicate)).limit(1).get()) {
+          throw new LibrarySearchError(`author:${node.value} 名称不存在或不可访问`, node.start, node.end)
+        }
+      }
+      const key = node.field === 'category' ? 'categoryId' : node.field === 'tag' ? 'tagId' : node.field
+      return and(...sharedListConditions({ page, pageSize, categoryScope: params.categoryScope, [key]: node.id ?? node.value }, libraryId, {})) as SQL
+    }))
     filters.push(...sharedListConditions({ page, pageSize, ...params }, libraryId, {}))
     const where = and(...filters)
     const total = db.select({ count: sql<number>`count(*)` }).from(libraryBooks).where(where).get()?.count ?? 0
@@ -376,19 +391,33 @@ export async function listCatalogBooks(
   const page = Math.max(1, params.page ?? 1)
   const pageSize = Math.min(100, Math.max(1, params.pageSize ?? CATALOG_PAGE_SIZE))
   const filters: SQL[] = [eq(libraryBooks.libraryId, libraryId), isNull(libraryBooks.deletedAt)]
-  if (params.search) {
+  const textMatch = (term: string): SQL => {
     // The same searchable surface as a private list: the work's own fields plus
     // the names of the category and tags it is filed under, plus what a reader
     // actually sees on each version (override, else the work default).
-    const pattern = likePattern(params.search)
-    filters.push(sql`(
+    const pattern = likePattern(term)
+    return sql`(
       ${libraryBooks.title} LIKE ${pattern} ESCAPE '!'
       OR ${libraryBooks.author} LIKE ${pattern} ESCAPE '!'
       OR ${libraryBooks.description} LIKE ${pattern} ESCAPE '!'
       OR ${taxonomyNameMatch(pattern, libraryId)}
       OR ${versionEffectiveMatch(pattern, libraryId, { publishedOnly: !includeUnlisted })}
-    )`)
+    )`
   }
+  if (params.search) filters.push(textMatch(params.search))
+  if (params.expression) filters.push(compileSearchExpression(params.expression, libraryId, true, (node) => {
+    if (node.kind === 'text') return textMatch(node.value)
+    if (node.field === 'author') {
+      const predicate = and(...sharedListConditions({ page, pageSize, author: node.value }, libraryId, { publishedOnly: !includeUnlisted })) as SQL
+      const boundary = [eq(libraryBooks.libraryId, libraryId), isNull(libraryBooks.deletedAt)]
+      if (!includeUnlisted) boundary.push(workHiddenExclusion(loadLibraryHiddenTaxonomy(db, libraryId)))
+      if (!db.select({ id: libraryBooks.id }).from(libraryBooks).where(and(...boundary, predicate)).limit(1).get()) {
+        throw new LibrarySearchError(`author:${node.value} 名称不存在或不可访问`, node.start, node.end)
+      }
+    }
+    const key = node.field === 'category' ? 'categoryId' : node.field === 'tag' ? 'tagId' : node.field
+    return and(...sharedListConditions({ page, pageSize, categoryScope: params.categoryScope, [key]: node.id ?? node.value }, libraryId, { publishedOnly: !includeUnlisted })) as SQL
+  }, !includeUnlisted))
   filters.push(...sharedListConditions({ page, pageSize, ...params }, libraryId, { publishedOnly: !includeUnlisted }))
   // Hidden works are invisible to non-managers, with the same no-leak rule
   // as unlisted-only works below (name, count and metadata stay hidden).

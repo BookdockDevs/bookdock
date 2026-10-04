@@ -42,6 +42,7 @@ import { getPrivateBookMetadataSource } from '../libraries/metadata-source.servi
 import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { getStorage } from '../../storage'
+import { listSearchAuthors } from '../libraries/search-expression'
 import { AppError } from '../../middleware/error'
 import { safeFileBase, streamBookFile } from './book-file-response'
 import { requestUserId } from '../../middleware/auth.guard'
@@ -103,6 +104,12 @@ async function parseAppendRequest(c: Context): Promise<{ text: string; startOffs
   return parsed.data
 }
 
+booksRoutes.get('/search-authors', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  return c.json({ data: await listSearchAuthors(user.id, undefined, c.req.query('trash') === '1', requestShowHidden(c)) })
+})
+
 booksRoutes.get('/', async (c) => {
   const query = c.req.query()
   const parsed = paginationSchema.safeParse(query)
@@ -129,7 +136,7 @@ booksRoutes.get('/', async (c) => {
     await purgeExpiredTrash(user.id, trashSettings.autoCleanDays)
     await purgeTrashToCapacity(user.id, trashSettings.maxTrashBytes ?? 0)
   }
-  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series, requestShowHidden(c))
+  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series, requestShowHidden(c), query['expression'])
   return c.json(result)
 })
 

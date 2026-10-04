@@ -473,3 +473,4 @@ export {
   type ReplacementTransferFile,
   type TransferIssue,
 } from './rule-transfer'
+export * from './library-search'

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate, useSearch } from '@tanstack/react-router'
+import { Link, useLocation, useNavigate, useRouter, useSearch } from '@tanstack/react-router'
 
 import {
   DndContext,
@@ -23,6 +23,10 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { formatAuthorList, formatBytes } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
+
+import { normalizeLibrarySearch, readLibrarySearchExpression } from '@bookdock/shared'
+
+import { editSearchControls, expressionDisplay, keepsSearchSession, searchExitTarget, searchProjection, searchSessionNavigation, submittedSearchPatch } from './library-search-state'
 
 import { ApiError } from '@/api/client'
 import { notify } from '@/lib/notifications'
@@ -61,10 +65,10 @@ import TrashInfo from './components/TrashInfo'
 import UploadSheet from './components/UploadSheet'
 import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, resolveDropShelfId, type BookDragPayload } from './dnd'
 import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-row'
-import { libraryUrlCorrection, vanishedFilterCorrection } from './library-filters'
+import { libraryUrlCorrection, pageRangeCorrection, vanishedFilterCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
 import { sortCategories } from './taxonomy'
-import { useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
+import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, catalogQueryParts, useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
 
 
 function estimateDynColumns(): number {  if (typeof window === 'undefined') return 4
@@ -84,6 +88,8 @@ export default function Library() {
   const _ = useTranslation()
   const search = useSearch({ from: indexRoute.id })
   const navigate = useNavigate()
+  const location = useLocation()
+  const router = useRouter()
   const queryClient = useQueryClient()
 
   const viewPref = useUiStore((s) => s.view)
@@ -145,12 +151,13 @@ export default function Library() {
   const sortBy = search.sortBy ?? (trash ? 'deletedAt' : defaultSortBy ?? 'createdAt')
   const sortOrder = search.sortOrder ?? (trash ? 'desc' : defaultSortOrder ?? BOOK_SORT_DEFAULT_DIR[sortBy as BookSortPrefField] ?? 'desc')
   const categoryScope = search.categoryScope ?? (activeLibrary ? 'subtree' : 'direct')
-  const shelfId = search.shelf ?? null
-  const tagId = search.tag ?? null
-  const author = search.author ?? null
+  const projection = searchProjection(search.expression)
+  const shelfId = search.shelf ?? projection.shelf ?? null
+  const tagId = search.tag ?? projection.tag ?? null
+  const author = search.author ?? projection.author ?? null
   const series = search.series ?? null
-  const format = search.format ?? null
-  const readStatus = search.status ?? null
+  const format = search.format ?? projection.format ?? null
+  const readStatus = search.status ?? projection.status ?? null
 
   // Shared-library context (4.7): the selection lives in the URL so refresh
   // and bookmarks reproduce it; the server stays authoritative on access.
@@ -162,6 +169,7 @@ export default function Library() {
 
   const prefetchLibrary = useCallback(
     (patch: Partial<LibrarySearch>, targetLibraryId?: string | null) => {
+      if (search.expression) return
       const nextShelfId = 'shelf' in patch ? (patch.shelf ?? null) : shelfId
       const nextTagId = 'tag' in patch ? (patch.tag ?? null) : tagId
       const nextTrash = 'trash' in patch ? (patch.trash ?? false) : false
@@ -214,7 +222,7 @@ export default function Library() {
         showHidden: revealHidden,
       })
     },
-    [queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, tagId, format, readStatus, pageSize, activeLibrary, author, series, revealHidden, categoryScope],
+    [search.expression, queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, tagId, format, readStatus, pageSize, activeLibrary, author, series, revealHidden, categoryScope],
   )
 
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -501,18 +509,19 @@ export default function Library() {
     return () => window.removeEventListener('pointermove', onPointerMove)
   }, [dragKind])
 
-  const { data, isLoading, isError, isFetching, refetch } = useBooks({
+  const { data, error: booksError, isLoading, isError, isFetching, refetch, isPlaceholderData: booksPlaceholder } = useBooks({
     page: currentPage,
     pageSize,
+    expression: search.expression,
     search: query,
     sortBy,
     sortOrder,
-    shelfId,
-    tagId,
-    author,
+    shelfId: search.shelf ?? null,
+    tagId: search.tag ?? null,
+    author: search.author ?? null,
     series,
-    format,
-    readStatus,
+    format: search.format ?? null,
+    readStatus: search.status ?? null,
     trash,
     showHidden: revealHidden,
     // Server rejects trash queries while the feature is off; the redirect
@@ -527,14 +536,15 @@ export default function Library() {
   const catalogQuery = useLibraryCatalog(activeLibrary?.id ?? null, {
     page: currentPage,
     pageSize,
+    expression: search.expression,
     q: query,
     sortBy,
     sortOrder,
-    categoryId: shelfId ?? undefined,
+    categoryId: search.shelf,
     categoryScope,
-    tagId: tagId ?? undefined,
-    format: format ?? undefined,
-    author: author ?? undefined,
+    tagId: search.tag,
+    format: search.format,
+    author: search.author,
     series: series ?? undefined,
     trash: activeLibrary ? trash : undefined,
   })
@@ -618,6 +628,7 @@ export default function Library() {
     if (canUpload) setUploadOpen(open)
   }, [canUpload])
 
+  const searchAuthors = useLibrarySearchAuthors(activeLibrary?.id ?? null, trash, revealHidden)
   const shelvesQuery = useShelves()
   const tagsQuery = useTags()
   const libraryCategoriesQuery = useLibraryCategories(activeLibrary?.id ?? null)
@@ -677,7 +688,7 @@ export default function Library() {
             : (activeShelfName ?? activeTagName ?? activeLibrary?.name ?? privateLibraryName)
 
   const hasActiveFilter = Boolean(
-    query || author || series || format || readStatus,
+    query || search.expression || author || series || format || readStatus,
   )
 
   const readStatusName = readStatus === 'wishlist'    ? _('library.readStatusWishlist')
@@ -744,22 +755,63 @@ export default function Library() {
 
   const navSearch = useCallback(
     (patch: Partial<LibrarySearch>) => {
+      patch = editSearchControls(search, patch)
       // The trash has its own default sort; URL sort params are meaningful only
       // within the list/trash domain they were set in, so drop them on crossing
       const nextTrash = 'trash' in patch ? (patch.trash ?? false) : trash
       const sortPatch = nextTrash !== trash ? { sortBy: undefined, sortOrder: undefined } : null
-      const filterChanged = (['shelf', 'tag', 'q', 'format', 'status', 'trash', 'author', 'series', 'categoryScope'] as const)
+      const filterChanged = (['expression', 'shelf', 'tag', 'q', 'format', 'status', 'trash', 'author', 'series', 'categoryScope'] as const)
         .some((key) => key in patch && patch[key] !== search[key])
-      return navigate({ to: '/', search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, replace: !('directory' in patch) })
+      return navigate({ to: '/', search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, state: (previous) => ({ ...previous, librarySearchReturn: keepsSearchSession(patch) ? previous.librarySearchReturn : undefined }), replace: !filterChanged && !('directory' in patch) })
     },
     [navigate, search, trash],
   )
+
+  async function submitSearch(source: string, signal: AbortSignal) {
+    const patch = submittedSearchPatch(source, { shared: !!activeLibrary, tags, categories: shelves })
+    const expression = patch.expression
+    // Validate against the real list before publishing URL state. Failures leave
+    // the previous cache, paging, selection and draft intact.
+    const next = { ...search, ...patch }
+    const normalizedExpression = expression ? JSON.stringify(normalizeLibrarySearch(readLibrarySearchExpression(expression))) : undefined
+    let loaded: boolean
+    if (activeLibrary) {
+      const params = { page: 1, pageSize, expression, q: next.q, sortBy, sortOrder, categoryId: next.shelf, categoryScope, tagId: next.tag, author: next.author, series: next.series, format: next.format, trash }
+      const request = catalogQueryParts(activeLibrary.id, params)
+      loaded = await loadSearchPage(queryClient, { path: request.path, queryKey: catalogQueryParts(activeLibrary.id, { ...params, expression: normalizedExpression }).queryKey }, signal)
+    } else {
+      const params = { page: 1, pageSize, expression, search: next.q ?? '', sortBy, sortOrder, shelfId: next.shelf ?? null, tagId: next.tag ?? null, author: next.author, series: next.series, format: next.format ?? null, readStatus: next.status ?? null, trash, showHidden: revealHidden }
+      const request = booksQueryParts(params)
+      loaded = await loadSearchPage(queryClient, { path: request.path, queryKey: booksQueryParts({ ...params, expression: normalizedExpression }).queryKey }, signal)
+    }
+    patch.expression = normalizedExpression
+    if (loaded && !signal.aborted) {
+      const saved = location.state.librarySearchReturn
+      await navigate({ to: '/', ...searchSessionNavigation(search, patch, saved, window.scrollY) })
+    }
+  }
+
+  const searchScrollRestore = useRef<{ search: LibrarySearch; top: number } | undefined>(undefined)
+  useLayoutEffect(() => {
+    const restore = searchScrollRestore.current
+    if (!restore || listLoading || (activeLibrary ? catalogQuery.isPlaceholderData : booksPlaceholder) || JSON.stringify(search) !== JSON.stringify(restore.search)) return
+    searchScrollRestore.current = undefined
+    window.scrollTo({ top: restore.top, behavior: 'instant' })
+  }, [search, listLoading, activeLibrary, catalogQuery.isPlaceholderData, booksPlaceholder])
+  function exitSearch() {
+    const saved = location.state.librarySearchReturn
+    const target = searchExitTarget(search, saved)
+    searchScrollRestore.current = { search: target, top: saved?.scrollTop ?? 0 }
+    if (saved?.back && router.history.canGoBack()) { router.history.back(); return }
+    void navigate({ to: '/', search: target, state: (previous) => ({ ...previous, librarySearchReturn: undefined }), replace: true, resetScroll: false })
+  }
 
   // Switching libraries leaves every filter that belonged to the previous one,
   // in a single navigation: those params are scoped to a library and must never
   // leak across, and two navigations would race on stale URL state.
   const handleSwitchLibrary = useCallback((id: string | null) => {
     void navSearch({
+      expression: undefined,
       libraryId: id ?? undefined,
       directory: undefined,
       categoryScope: undefined,
@@ -777,6 +829,7 @@ export default function Library() {
 
   const clearActiveFilters = useCallback(() => {
     void navSearch({
+      expression: undefined,
       q: undefined,
       author: undefined,
       series: undefined,
@@ -816,15 +869,14 @@ export default function Library() {
   // the rule and why the sort is replaced instead of cleared).
   useEffect(() => {
     if (!activeLibrary) return
-    const patch = libraryUrlCorrection({ readStatus, sortBy, sortOrder })
+    const patch = libraryUrlCorrection({ readStatus: search.status ?? null, sortBy, sortOrder })
     if (Object.keys(patch).length > 0) navSearch(patch)
-  }, [activeLibrary, readStatus, sortBy, sortOrder, navSearch])
+  }, [activeLibrary, search.status, sortBy, sortOrder, navSearch])
 
   useEffect(() => {
-    if (total > 0 && currentPage > totalPages) {
-      navSearch({ page: totalPages === 1 ? undefined : totalPages })
-    }
-  }, [total, currentPage, totalPages, navSearch])
+    const patch = pageRangeCorrection(total, currentPage, totalPages, listLoading, activeLibrary ? catalogQuery.isPlaceholderData : booksPlaceholder)
+    if (Object.keys(patch).length) navSearch(patch)
+  }, [total, currentPage, totalPages, navSearch, listLoading, activeLibrary, catalogQuery.isPlaceholderData, booksPlaceholder])
 
   // A shelf or tag can leave the sidebar while the URL still names it - hidden
   // again, unhidden, or deleted - and the server would keep filtering by an id
@@ -840,13 +892,13 @@ export default function Library() {
   useEffect(() => {
     if (taxonomyLoading || taxonomyFailed) return
     const patch = vanishedFilterCorrection({
-      shelfId,
-      tagId,
+      shelfId: search.shelf ?? null,
+      tagId: search.tag ?? null,
       shelfIds: shelves.map((shelf) => shelf.id),
       tagIds: tags.map((tag) => tag.id),
     })
     if (Object.keys(patch).length > 0) navSearch(patch)
-  }, [taxonomyLoading, taxonomyFailed, shelfId, tagId, shelves, tags, navSearch])
+  }, [taxonomyLoading, taxonomyFailed, search.shelf, search.tag, shelves, tags, navSearch])
 
   // Uncategorized is a virtual view: staying on it after the last book is
   // moved/deleted away is a dead end, so leave back to all books. A view
@@ -900,20 +952,13 @@ export default function Library() {
 
   const columns = gridColumns === 'auto' ? dynColumns : Number(gridColumns)
 
-  // Selection spans filters within one library: switching shelf/category/tag/
-  // search/sort keeps every selected id so books scattered across shelves can
-  // be organized in one batch. Only a library or trash switch clears, because
-  // private version ids and shared work ids are not interchangeable and trash
-  // offers a different action set. Filter/sort/page changes only reset the
-  // Shift-click anchor, which is an index into the visible rows.
+  // Pages retain selection; every query or filter change starts a new selection.
   useEffect(() => {
     clearSelection()
     setSelectionMode(false)
-  }, [activeLibrary?.id, trash])
+  }, [revealHidden, activeLibrary?.id, trash, search.expression, search.q, search.shelf, search.tag, search.author, search.series, search.format, search.status, categoryScope])
 
-  useEffect(() => {
-    lastSelectIndexRef.current = null
-  }, [currentPage, activeLibrary?.id, shelfId, categoryScope, tagId, query, format, readStatus, trash, author, series, sortBy, sortOrder])
+  useEffect(() => { lastSelectIndexRef.current = null }, [currentPage, sortBy, sortOrder])
 
   function goToPage(targetPage: number) {
     if (targetPage < 1 || targetPage > totalPages || targetPage === currentPage) return
@@ -959,10 +1004,15 @@ export default function Library() {
         {search.directory && !libraryStale && !catalogGone ? <TaxonomyDirectory key={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}:${search.directory}`}
           libraryId={activeLibrary?.id ?? null} sessionKey={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}`} panel={search.directory}
           canManage={!isGuest && (!activeLibrary || isLibraryManager)} navSearch={navSearch} onOpenNavigation={() => setMobileNavOpen(true)} /> : <>
-        <LibraryHeader
+        <LibraryHeader key={activeLibrary?.id ?? 'private'}
           navSearch={navSearch}
           view={view}
-          query={query}
+          query={expressionDisplay(search.expression, query)}
+          searchNames={{ shared: !!activeLibrary, tags, categories: shelves, authors: searchAuthors.data?.data }}
+          searchContext={JSON.stringify(search)}
+          searchError={activeLibrary ? catalogQuery.error : booksError}
+          onSearchSubmit={submitSearch}
+          onSearchClear={exitSearch}
           sortBy={sortBy}
           sortOrder={sortOrder}
           format={format}

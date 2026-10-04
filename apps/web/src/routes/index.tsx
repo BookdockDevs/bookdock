@@ -6,6 +6,7 @@ import { categoryScopeSchema, type CategoryScope } from '@bookdock/shared'
 export interface LibrarySearch {
   page?: number
   view?: 'grid' | 'list'
+  expression?: string
   q?: string
   sortBy?: string
   sortOrder?: 'asc' | 'desc'
@@ -35,6 +36,7 @@ export const indexRoute = createRoute({
     return {
       page: typeof page === 'number' && Number.isSafeInteger(page) && page > 0 ? page : undefined,
       view: typeof input.view === 'string' && VALID_VIEWS.has(input.view) ? (input.view as 'grid' | 'list') : undefined,
+      expression: typeof input.expression === 'string' && input.expression.length > 0 ? input.expression : undefined,
       q: typeof input.q === 'string' && input.q.length > 0 ? input.q : undefined,
       sortBy: typeof input.sortBy === 'string' && input.sortBy.length > 0 ? input.sortBy : undefined,
       sortOrder: VALID_ORDERS.has(input.sortOrder as string) ? (input.sortOrder as 'asc' | 'desc') : undefined,

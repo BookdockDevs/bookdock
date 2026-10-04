@@ -73,6 +73,7 @@ import {
 import { addToPrivateLibrary } from './collect.service'
 import { publishPrivateBook } from './publish.service'
 import { appendCityVersionContent, getVersionTocState, previewCityAppend, previewCityToc, pushPrivateToVersion, reTocCityVersion, uploadCatalogBook } from '../books/books.service'
+import { listSearchAuthors } from './search-expression'
 import { AppError } from '../../middleware/error'
 import { decodeTextBuffer } from '../../formats/txt'
 
@@ -246,6 +247,12 @@ librariesRoutes.patch('/:id/versions/:versionId', async (c) => {
 
 // ------------------------------------------------------------- Catalog (5.x)
 
+librariesRoutes.get('/:id/search-authors', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  return c.json({ data: await listSearchAuthors(user.id, c.req.param('id'), c.req.query('trash') === '1') })
+})
+
 librariesRoutes.get('/:id/books', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
@@ -261,6 +268,7 @@ librariesRoutes.get('/:id/books', async (c) => {
   const result = await listCatalogBooks(user.id, c.req.param('id'), {
     page: Number.isFinite(page) ? page : 1,
     pageSize: Number.isFinite(pageSize) ? pageSize : undefined,
+    expression: c.req.query('expression'),
     search: c.req.query('q') ?? undefined,
     sortBy: c.req.query('sortBy') ?? undefined,
     sortOrder: c.req.query('sortOrder') ?? undefined,

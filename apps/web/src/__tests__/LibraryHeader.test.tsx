@@ -45,10 +45,11 @@ function renderHeader(overrides = {}) {
 }
 
 describe('LibraryHeader', () => {
-  it('debounces search input before calling navSearch', async () => {
+  it('submits search input only on Enter', async () => {
     renderHeader()
     fireEvent.change(screen.getByPlaceholderText('library.searchPlaceholder'), { target: { value: 'dune' } })
     expect(navSearch).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByPlaceholderText('library.searchPlaceholder'), { key: 'Enter' })
     await waitFor(() => expect(navSearch).toHaveBeenCalledWith({ q: 'dune' }))
   })
 

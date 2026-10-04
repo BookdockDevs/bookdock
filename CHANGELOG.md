@@ -7,6 +7,9 @@ All notable changes to Bookdock are documented here.
 ### Added
 
 - Uploading a file that matches an existing book now names it and waits for an explicit continue before adding a separate copy.
+- Library search takes one expression that mixes ordinary words with exact `author:`, `series:`, `tag:`, `shelf:`, `category:`, `format:` and `status:` conditions, combined with `&`, `|`, `!` and parentheses. Names match exactly, and an unknown or malformed value reports the position to fix instead of replacing the results.
+- The search box validates a draft against the real list before applying it, suggests names already in the library and shows one removable chip per condition. It applies on Enter, the search button, or 300 ms after typing stops rather than on every keystroke, and exiting restores the previous filters, page and scroll position.
+
 
 ### Changed
 
@@ -618,6 +621,9 @@ All notable changes to Bookdock are documented here.
 #### 新增
 
 - 上传文件与已有藏书内容一致时，先报出那本书的名字，等你点“继续上传”才会另存一份。
+- 搜索支持把普通词和精确条件写进同一个表达式：`author:`、`series:`、`tag:`、`shelf:`、`category:`、`format:`、`status:`，可用 `&`、`|`、`!` 和括号组合。名称精确匹配；未知或格式错误的取值会标出要改的位置，而不是替换掉当前结果。
+- 搜索框先对真实列表校验再生效，提示书库里已有的名称，每个条件显示为可单独移除的标签；改为按回车、点搜索按钮或输入停顿 300 毫秒才生效，不再逐字触发，退出搜索时恢复原来的筛选、页码和滚动位置。
+
 
 #### 变更
 

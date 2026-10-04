@@ -47,6 +47,7 @@ import { fetchSettings, writeStoredSettings } from '@/lib/settings-cache'
 export interface UseBooksParams {
   page: number
   pageSize: number
+  expression?: string
   search: string
   sortBy: string
   sortOrder: string
@@ -61,13 +62,14 @@ export interface UseBooksParams {
   showHidden?: boolean
 }
 
-function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash, showHidden }: UseBooksParams): string {
+export function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash, showHidden, expression }: UseBooksParams): string {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
     sortBy,
     sortOrder,
   })
+  if (expression) params.set('expression', expression)
   if (search) params.set('search', search)
   if (shelfId) params.set('shelfId', shelfId)
   if (tagId) params.set('tagId', tagId)
@@ -80,25 +82,43 @@ function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, ta
   return `/books?${params.toString()}`
 }
 
+export function booksQueryParts(params: UseBooksParams) {
+  const key = { ...params, author: params.author ?? null, series: params.series ?? null, showHidden: params.showHidden ?? false }
+  return { queryKey: ['books', key] as const, path: buildBooksPath(key) }
+}
+
+export async function loadSearchPage(queryClient: QueryClient, request: { queryKey: readonly unknown[]; path: string }, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return false
+  const cached = queryClient.getQueryState(request.queryKey)
+  if (cached?.status === 'success' && !cached.isInvalidated) return true
+  const result = await apiGet(request.path, signal)
+  if (signal.aborted) return false
+  queryClient.setQueryData(request.queryKey, result)
+  return true
+}
+
 export function useBooks(params: UseBooksParams, options?: { enabled?: boolean }): QueryObserverResult<BookListRes> {
+  const user = useAuthStore((state) => state.user)
+  const { queryKey, path } = booksQueryParts(params)
   return useQuery({
-    queryKey: ['books', params],
-    queryFn: () => apiGet<BookListRes>(buildBooksPath(params)),
-    enabled: options?.enabled ?? true,
+    queryKey,
+    queryFn: () => apiGet<BookListRes>(path),
+    enabled: Boolean(user) && (options?.enabled ?? true),
     // Never show another domain's rows: trash and active lists are different
     // queries even when the key has not caught up yet. Same for the vault
     // reveal flag: a still-cached hidden-filtered page must not stand in.
     placeholderData: (prev, prevQuery) => {
-      const prevParams = (prevQuery?.queryKey as unknown[])?.[1] as UseBooksParams | undefined
+      const prevParams = prevQuery?.queryKey[1] as UseBooksParams | undefined
       return prevParams && prevParams.trash === params.trash && prevParams.showHidden === params.showHidden ? prev : undefined
     },
   })
 }
 
 export function prefetchBooks(queryClient: QueryClient, params: UseBooksParams) {
+  const { queryKey, path } = booksQueryParts(params)
   return queryClient.prefetchQuery({
-    queryKey: ['books', params],
-    queryFn: () => apiGet<BookListRes>(buildBooksPath(params)),
+    queryKey,
+    queryFn: () => apiGet<BookListRes>(path),
   })
 }
 
@@ -537,6 +557,7 @@ export function useReorderLibraryTags() {
 export interface CatalogListParams {
   page?: number
   pageSize?: number
+  expression?: string
   q?: string
   sortBy?: string
   sortOrder?: string
@@ -555,10 +576,11 @@ export interface CatalogListParams {
  * the sidebar's hover-prefetch and the list's own fetch can never disagree about
  * what "the same page" means (see prefetchBooks for the same shape).
  */
-function catalogQueryParts(libraryId: string, params: CatalogListParams) {
+export function catalogQueryParts(libraryId: string, params: CatalogListParams) {
   const key = {
     page: params.page ?? 1,
     pageSize: params.pageSize,
+    expression: params.expression ?? '',
     q: params.q ?? '',
     sortBy: params.sortBy ?? '',
     sortOrder: params.sortOrder ?? '',
@@ -572,6 +594,7 @@ function catalogQueryParts(libraryId: string, params: CatalogListParams) {
   }
   const search = new URLSearchParams({ page: String(key.page) })
   if (key.pageSize) search.set('pageSize', String(key.pageSize))
+  if (key.expression) search.set('expression', key.expression)
   if (key.q) search.set('q', key.q)
   if (key.sortBy) search.set('sortBy', key.sortBy)
   if (key.sortOrder) search.set('sortOrder', key.sortOrder)
@@ -582,13 +605,13 @@ function catalogQueryParts(libraryId: string, params: CatalogListParams) {
   if (key.author) search.set('author', key.author)
   if (key.series) search.set('series', key.series)
   if (key.trash) search.set('trash', '1')
-  return { key, path: `/libraries/${libraryId}/books?${search.toString()}` }
+  return { key, queryKey: ['libraries', libraryId, 'catalog', key] as const, path: `/libraries/${libraryId}/books?${search.toString()}` }
 }
 
 export function useLibraryCatalog(libraryId: string | null, params: CatalogListParams = {}) {
-  const { key, path } = catalogQueryParts(libraryId ?? '', params)
+  const { queryKey, path } = catalogQueryParts(libraryId ?? '', params)
   return useQuery({
-    queryKey: ['libraries', libraryId, 'catalog', key],
+    queryKey,
     queryFn: () => apiGet<{ data: CatalogListRes }>(path),
     enabled: !!libraryId,
     // Keep the previous page while the same library reloads, but never show
@@ -599,9 +622,9 @@ export function useLibraryCatalog(libraryId: string | null, params: CatalogListP
 }
 
 export function prefetchLibraryCatalog(queryClient: QueryClient, libraryId: string, params: CatalogListParams) {
-  const { key, path } = catalogQueryParts(libraryId, params)
+  const { queryKey, path } = catalogQueryParts(libraryId, params)
   return queryClient.prefetchQuery({
-    queryKey: ['libraries', libraryId, 'catalog', key],
+    queryKey,
     queryFn: () => apiGet<{ data: CatalogListRes }>(path),
   })
 }
@@ -1940,5 +1963,15 @@ export function useMoveBooksToShelf() {
         ? { key: 'toast.movedToShelf', params: { name, count: variables.bookIds.length } }
         : { key: 'toast.movedOutOfShelf', params: { count: variables.bookIds.length } })
     },
+  })
+}
+
+export function useLibrarySearchAuthors(libraryId: string | null, trash: boolean, showHidden: boolean) {
+  const user = useAuthStore((state) => state.user)
+  return useQuery({
+    enabled: Boolean(user),
+    queryKey: ['library-search-authors', libraryId, trash, showHidden],
+    queryFn: () => apiGet<{ data: string[] }>(`${libraryId ? `/libraries/${libraryId}/search-authors` : '/books/search-authors'}?trash=${trash ? '1' : '0'}&showHidden=${showHidden ? '1' : '0'}`),
+    staleTime: 0,
   })
 }

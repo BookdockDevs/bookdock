@@ -23,6 +23,7 @@ import type { CategoryScope, HiddenReason, HiddenVia } from '@bookdock/shared'
 export interface LibraryListQuery {
   page: number
   pageSize: number
+  expression?: string
   search?: string
   sortBy?: string
   sortOrder?: string

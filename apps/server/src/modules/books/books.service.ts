@@ -36,7 +36,9 @@ import { countWords } from '../../lib/word-count'
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { coverThumbnailKey, detectImageExtension, blobKey, generateCoverThumbnail } from '../../lib/cover'
 import { log } from '../../lib/logger'
-import { normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type CoverPaletteId, type Chapter, type HiddenReason, type LibraryVersionKind, type PublishedLinkInfo, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
+import { LibrarySearchError, normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type CoverPaletteId, type Chapter, type HiddenReason, type LibraryVersionKind, type PublishedLinkInfo, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
+
+import { compileSearchExpression } from '../libraries/search-expression'
 
 import { getReaderBookSettings } from './reader-settings.service'
 import { readTxtEpubCandidate, sameEpubArchive } from './txt-epub-correspondence'
@@ -128,7 +130,7 @@ export function scoreTocRules(userId: string, sample: string): typeof tocRules.$
   return pickedId ? rules.find((r) => r.id === pickedId) ?? null : null
 }
 
-export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean, author?: string, series?: string, showHidden?: boolean) {
+export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean, author?: string, series?: string, showHidden?: boolean, expression?: string) {
   const db = getDb()
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
@@ -150,7 +152,8 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   if (!showHidden && !trash) {
     conditions.push(workHiddenExclusion(loadLibraryHiddenTaxonomy(db, library.id)))
   }
-  if (search) {
+  const searchBoundary = [...conditions]
+  const textMatch = (search: string): SQL => {
     // Escape LIKE wildcards so user input is matched literally. The escape
     // char is '!' (backslash would be mangled by drizzle's sql template) and
     // must itself be escaped first.
@@ -170,7 +173,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
         AND search_tag.library_id = ${library.id}
         AND search_tag.name LIKE ${pattern} ESCAPE '!'
     )`
-    conditions.push(sql`(
+    return sql`(
       ${effTitle} LIKE ${pattern} ESCAPE '!'
       OR ${effAuthor} LIKE ${pattern} ESCAPE '!'
       OR EXISTS (
@@ -187,8 +190,10 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
       OR ${revMeta('$.bookmeta.source')} LIKE ${pattern} ESCAPE '!'
       OR ${categoryMatch}
       OR ${tagMatch}
-    )`)
+    )`
   }
+  if (search) conditions.push(textMatch(search))
+
   if (format) {
     conditions.push(eq(bookVersions.format, format))
   }
@@ -218,6 +223,22 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   }
   if (series) {
     conditions.push(sql`${revMeta('$.bookmeta.series')} = ${series}`)
+  }
+  if (expression) {
+    conditions.push(compileSearchExpression(expression, library.id, false, (node) => {
+      if (node.kind === 'text') return textMatch(node.value)
+      if (node.field === 'tag') return sql`EXISTS (SELECT 1 FROM ${libraryBookTags} WHERE ${libraryBookTags.libraryBookId} = ${libraryBooks.id} AND ${libraryBookTags.tagId} = ${node.id})`
+      if (node.field === 'shelf') return eq(libraryBooks.categoryId, node.id!)
+      if (node.field === 'format') return eq(bookVersions.format, node.value as BookFormat)
+      if (node.field === 'status') return eq(effReadStatus, node.value)
+      const predicate = sql`(${effAuthor} = ${node.value} OR EXISTS (SELECT 1 FROM json_each(coalesce(${libraryBookVersions.authors}, ${libraryBooks.authors}, '[]')) WHERE value = ${node.value}))`
+      const exists = db.select({ id: libraryBooks.id }).from(libraryBookVersions)
+        .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+        .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
+        .where(and(...searchBoundary, predicate)).limit(1).get()
+      if (!exists) throw new LibrarySearchError(`author:${node.value} 名称不存在或不可访问`, node.start, node.end)
+      return predicate
+    }))
   }
   // Pin-first is universal (user decision 2026-08-12): pinned books lead in
   // every sort - including lastReadAt - and the pinned group itself follows
