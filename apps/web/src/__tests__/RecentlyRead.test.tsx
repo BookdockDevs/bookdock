@@ -88,14 +88,15 @@ describe('RecentlyRead covers style', () => {
 })
 
 describe('RecentlyRead cards style', () => {
-  it('renders relative read time instead of a progress bar', () => {
+  it('renders relative read time alongside a progress bar', () => {
     const { container } = render(<RecentlyRead style="cards" />)
 
-    expect(screen.getByText('Book One')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Book One' })).toBeInTheDocument()
     expect(screen.getByText('2 小时前')).toBeInTheDocument()
     expect(screen.getByText('3 天前')).toBeInTheDocument()
-    expect(container.querySelector('.h-1')).toBeNull()
-    expect(screen.queryByText('22%')).toBeNull()
+    expect(screen.getByText('22%')).toBeInTheDocument()
+    expect(container.querySelector('.h-1\\.5')).not.toBeNull()
+    expect(screen.queryByText('0%')).toBeNull()
   })
 
   it('hides the arrow buttons when the row does not overflow', () => {

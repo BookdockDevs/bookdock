@@ -2,7 +2,7 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.4.3] - 2026-10-03
+## [0.4.3] - 2026-10-04
 
 ### Highlights
 
@@ -585,7 +585,7 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.4.3] - 2026-10-03
+### [0.4.3] - 2026-10-04
 
 #### 主要更新
 
