@@ -209,7 +209,7 @@ describe('ViewMenu columns segmented control', () => {
 
 describe('ViewMenu hidden-content reveal', () => {
   function signIn() {
-    useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+    useAuthStore.getState().setAuth({ id: 'u1', username: 'tester', role: 'member' })
   }
 
   it('toggles the reveal flag for signed-in private libraries', () => {

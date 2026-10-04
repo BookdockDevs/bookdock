@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { AiChatReq } from '@bookdock/shared'
 
-import { apiStreamAiChat } from '@/api/client'
+import { apiGet, apiStreamAiChat } from '@/api/client'
+import { useAuthStore } from '@/stores/auth.store'
+import { useUiStore } from '@/stores/ui.store'
 
 const requestBody: AiChatReq = {
   bookId: 'book-1',
@@ -14,6 +16,24 @@ const requestBody: AiChatReq = {
     selection: '一段正文',
   },
 }
+
+describe('expired hidden display session', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    useAuthStore.getState().clearAuth()
+    localStorage.clear()
+  })
+
+  it.each(['/auth/me', '/books/hidden'])('collapses immediately on a 401 from %s without deleting the preference', async (path) => {
+    useAuthStore.getState().setAuth({ id: 'expired-user', username: 'expired', role: 'member' })
+    useUiStore.getState().setRevealHidden(true)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'expired' } }), { status: 401 })))
+    await expect(apiGet(path)).rejects.toThrow('expired')
+    expect(useAuthStore.getState().user).toBeNull()
+    expect(useUiStore.getState().revealHidden).toBe(false)
+    expect(localStorage.getItem('bd-reveal-hidden:expired-user')).toBe('true')
+  })
+})
 
 describe('AI stream client', () => {
   afterEach(() => {

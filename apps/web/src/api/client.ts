@@ -29,6 +29,10 @@ export class ApiError extends Error {
 }
 
 function handleUnauthorized(path: string) {
+  if (path.startsWith('/auth/me')) {
+    useAuthStore.getState().clearAuth()
+    return
+  }
   if (PUBLIC_AUTH_PATHS.some((p) => path.startsWith(p))) return
   useAuthStore.getState().clearAuth()
   window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))

@@ -2,6 +2,24 @@
 
 All notable changes to Bookdock are documented here.
 
+## [0.4.4] - Unreleased
+
+### Changed
+
+- "Show hidden items" is remembered separately for each account in the current browser, defaults to off, and returns to the previous choice after refresh or signing in again. It is not synced across devices.
+- Signing out or losing the session immediately hides private hidden content while keeping the account's local preference. Switching accounts never inherits another account's choice, and guests cannot reveal hidden items.
+- Turning off hidden display while reading a hidden private book saves pending progress before leaving the reader; failed saves keep the reader open for retry.
+
+### Fixed
+
+- Hidden-display changes now clear related list, search, detail, recent-reading, taxonomy, annotation and statistics caches, preventing stale hidden content from remaining visible.
+- Hidden private-book links no longer reuse hidden-inclusive cached details when display is off; direct links never enable hidden display automatically.
+
+### Upgrade notes
+
+- The old shared browser preference is not migrated to any account. Each account starts with hidden display off until explicitly enabled.
+- This switch controls display only. Book, shelf and tag hide flags and shared-library permissions are unchanged; it is not an unlock credential, and no PIN is introduced.
+
 ## [0.4.3] - 2026-10-04
 
 ### Highlights
@@ -584,6 +602,24 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [0.4.4] - 待发布
+
+#### 变更
+
+- “显示隐藏内容”按账号在当前浏览器中分别保存，首次默认关闭；刷新或再次登录时恢复上次选择，不跨设备同步。
+- 退出登录或会话失效后立即收起私库隐藏内容，同时保留该账号的本机偏好；切换账号不继承前一个账号的选择，游客始终不能显示隐藏内容。
+- 关闭显示时，若正在阅读隐藏的私库书籍，先保存待写入的阅读进度，再退出阅读；保存失败时保留阅读页面，方便重试。
+
+#### 修复
+
+- 切换显示状态时同步清理列表、搜索、详情、最近阅读、书架、标签、标注和阅读统计等相关缓存，避免隐藏内容继续显示。
+- 关闭显示后，隐藏私库书籍的链接不会复用此前包含隐藏内容的详情缓存；直接链接不会自动开启显示。
+
+#### 升级说明
+
+- 旧公共浏览器偏好不会迁移给任何账号；各账号首次默认关闭隐藏内容，需自行开启。
+- 此开关只控制展示，不修改书籍、书架和标签的隐藏标记，也不改变共享库权限；显示偏好不作为解锁授权，本次不引入 PIN。
 
 ### [0.4.3] - 2026-10-04
 

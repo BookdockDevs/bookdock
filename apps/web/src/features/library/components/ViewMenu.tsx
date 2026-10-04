@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { toggleRevealHidden } from '@/lib/reveal-hidden'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 import { GRID_CARD_FIELDS, type GridCardField } from '@bookdock/shared'
 
 import {
@@ -407,7 +409,7 @@ export default function ViewMenu({
                         aria-checked={catalogMode ? categoryScope !== 'direct' : revealHidden}
                         onClick={() => {
                           if (catalogMode) navSearch({ categoryScope: categoryScope === 'direct' ? 'subtree' : 'direct' })
-                          else toggleRevealHidden()
+                          else void toggleRevealHidden().catch((error) => notify.error(getUserErrorNotification(error)))
                         }}
                         className="flex w-full items-center justify-between gap-2 px-1 py-1 text-left"
                       >

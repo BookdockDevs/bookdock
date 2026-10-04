@@ -26,6 +26,7 @@ export function RootComponent() {
   const queryClient = useQueryClient()
   const setAuth = useAuthStore((s) => s.setAuth)
   const clearAuth = useAuthStore((s) => s.clearAuth)
+  const authUser = useAuthStore((s) => s.user)
   const recoveringUnauthorizedSession = useRef(false)
   const pathname = location.pathname
   const isUpdatePreview = import.meta.env.DEV && pathname === '/dev/update-preview'
@@ -157,7 +158,7 @@ export function RootComponent() {
   if (!ready) return null
 
   return (
-    <AppShell>
+    <AppShell key={authUser?.guest === true || authUser?.role === 'guest' ? 'guest' : authUser?.id ?? 'anonymous'}>
       <Outlet />
     </AppShell>
   )

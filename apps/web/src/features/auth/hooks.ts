@@ -57,6 +57,7 @@ export function useLogout() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
   return useMutation({
     mutationFn: () => apiPost<{ data: null }>('/auth/logout'),
+    onMutate: () => clearAuth(),
     onSettled: () => {
       queryClient.clear()
       clearAuth()

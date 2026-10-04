@@ -1297,7 +1297,7 @@ export default function Library() {
       ))}
 
       <BookDetailDialog
-        book={detailTarget}
+        book={detailTarget && (revealHidden || !detailTarget.effectiveHidden) ? detailTarget : null}
         work={activeLibrary && workDetail ? {
           // Live row from the catalog query, not the click-time snapshot: menu
           // toggles and version uploads invalidate the catalog, and the open

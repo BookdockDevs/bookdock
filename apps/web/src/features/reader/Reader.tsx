@@ -9,7 +9,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { withReveal } from '@/lib/reveal-hidden'
+import { registerBeforeHideHiddenReader, withReveal } from '@/lib/reveal-hidden'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 
@@ -440,12 +440,23 @@ export default function Reader() {
     enabled: !!id,
   })
 
+  const progressSaveRef = useRef<Promise<{ data: ReadingProgressRes | null }> | null>(null)
   const progressMutation = useMutation({
     mutationFn: async (body: ReadingProgressUpdateReq) => {
       if (isGuest) return { data: saveGuestProgress(id, body) }
-      return apiPut<{ data: ReadingProgressRes | null }>(withReveal(`/progress/${id}`), body)
+      const save = apiPut<{ data: ReadingProgressRes | null }>(withReveal(`/progress/${id}`), body)
+      progressSaveRef.current = save
+      try {
+        return await save
+      } catch (error) {
+        pendingProgress.current ??= body
+        throw error
+      } finally {
+        if (progressSaveRef.current === save) progressSaveRef.current = null
+      }
     },
     onSuccess: (result) => {
+      if (useAuthStore.getState().user?.id !== authUser?.id) return
       // The next reader entry latches initialCfi from this cache. If it holds
       // a stale position while the server holds a newer one, the mount saves
       // the stale position back and the background refetch flips the cache —
@@ -462,6 +473,7 @@ export default function Reader() {
   })
 
   const pendingProgress = useRef<ReadingProgressUpdateReq | null>(null)
+  const closingHiddenReader = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mutateProgressRef = useRef(progressMutation.mutate)
   mutateProgressRef.current = progressMutation.mutate
@@ -515,6 +527,7 @@ export default function Reader() {
   const scheduleProgressSave = useCallback(
     (body: ReadingProgressUpdateReq) => {
       pendingProgress.current = body
+      if (closingHiddenReader.current) return
       // While a saved position awaits restore, buffer only — openRestoreGate
       // (rendered / explicit jump) re-arms the timer with the settled body
       if (restoreGateRef.current?.isPending()) return
@@ -616,6 +629,30 @@ export default function Reader() {
   const { flush: flushReadingTimer, ping: pingReadingTimer } = useReadingTimer(
     !isGuest && readingTimerMode === 'auto' ? (readerReady ? id : undefined) : undefined,
   )
+  const saveProgressAsync = progressMutation.mutateAsync
+  useEffect(() => registerBeforeHideHiddenReader(async () => {
+    const book = bookQuery.data?.data
+    if (!book?.effectiveHidden || book.collected === false) return
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    closingHiddenReader.current = true
+    try {
+      await progressSaveRef.current
+      if (useAuthStore.getState().user?.id !== authUser?.id) return
+      while (!restoreGateRef.current?.isPending() && pendingProgress.current) {
+        const body = pendingProgress.current
+        await saveProgressAsync(body)
+        if (useAuthStore.getState().user?.id !== authUser?.id) return
+        if (pendingProgress.current === body) pendingProgress.current = null
+      }
+      flushReadingTimer()
+      await navigate({ to: '/' })
+    } finally {
+      closingHiddenReader.current = false
+    }
+  }), [authUser?.id, bookQuery.data, saveProgressAsync, flushReadingTimer, navigate])
   // Warm the sidebar stats tab's queries so first open is instant
   usePrefetchBookReadingStats(isGuest || readingTimerMode === 'off' ? undefined : id)
 

@@ -43,6 +43,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem('bd-user', JSON.stringify(user))
     }
     set({ user })
+    useUiStore.getState().bindRevealHiddenUser(user.guest === true || user.role === 'guest' ? null : user.id)
   },
   updateUser: (patch) => {
     set((state) => {
@@ -59,6 +60,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     // skips syncing while logged out, so the reset below stays local and can
     // never be mistaken for a user edit and PUT back to the server.
     set({ user: null })
+    useUiStore.getState().bindRevealHiddenUser(null)
     if (typeof window !== 'undefined') {
       localStorage.removeItem('bd-user')
       clearStoredSettings()

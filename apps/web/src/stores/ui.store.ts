@@ -116,8 +116,10 @@ interface UiState {
   textAlignJustify: boolean
   overrideBookFont: boolean
   overrideBookLayout: boolean
-  /** Private-vault reveal (device-local, never synced): hidden rows included. */
+  /** Account-local display preference; never synced or used as authorization. */
   revealHidden: boolean
+  revealHiddenUserId: string | null
+  bindRevealHiddenUser: (userId: string | null) => void
   readingMode: ReadingMode
   showHeader: boolean
   showFooter: boolean
@@ -446,7 +448,18 @@ export const useUiStore = create<UiState>((set, get) => ({
   textAlignJustify: getInitialBoolean('bd-text-align-justify', false),
   overrideBookFont: getInitialBoolean('bd-override-book-font', false),
   overrideBookLayout: getInitialBoolean('bd-override-book-layout', false),
-  revealHidden: getInitialBoolean('bd-reveal-hidden', false),
+  revealHidden: false,
+  revealHiddenUserId: null,
+  bindRevealHiddenUser: (userId) => {
+    if (get().revealHiddenUserId === userId) return
+    let revealHidden = false
+    try {
+      revealHidden = userId !== null && window.localStorage.getItem(`bd-reveal-hidden:${userId}`) === 'true'
+    } catch {
+      // Storage may be unavailable; the session still starts collapsed.
+    }
+    set({ revealHiddenUserId: userId, revealHidden })
+  },
   readingMode: initialReadingMode,
   showHeader: getInitialBoolean('bd-show-header', true),
   showFooter: getInitialBoolean('bd-show-footer', true),
@@ -786,7 +799,9 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ overrideBookLayout })
   },
   setRevealHidden: (revealHidden) => {
-    setStorage('bd-reveal-hidden', String(revealHidden))
+    const userId = get().revealHiddenUserId
+    if (!userId) return
+    setStorage(`bd-reveal-hidden:${userId}`, String(revealHidden))
     set({ revealHidden })
   },
   setReadingMode: (readingMode) => {

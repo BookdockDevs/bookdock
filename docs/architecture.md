@@ -368,7 +368,19 @@ version.status = 'published'`:
   for a member. The badge still marks it; the exemption is behavioural, not
   visual. Private libraries are symmetric (vault): the
   owner also excludes hidden rows by default and reveals them with an explicit
-  `showHidden` list toggle; the dedicated vault entry UX is deferred. The Legado
+  `showHidden` display toggle. The Web remembers this preference per account in
+  local browser storage only, defaults to off, and restores it only after a
+  confirmed authenticated session. Logout/session expiry immediately collapses
+  hidden content without deleting the account's preference; another account or
+  a guest never inherits it. The legacy global `bd-reveal-hidden` key is ignored.
+  This is a display preference, not an unlock credential or authorization grant;
+  it changes no book/shelf/tag hide flags or shared-library permission rules.
+  List/search, taxonomy, detail, recent reads and statistics caches must switch
+  together, discarding stale hidden-inclusive results. Closing reveal while
+  reading a hidden private book saves pending progress before leaving the reader;
+  failure keeps reveal open for retry. Direct links never enable reveal. Session
+  expiry collapses immediately even when saving is no longer possible. No PIN is
+  implemented. The dedicated vault entry UX is deferred. The Legado
   book source reads with `showHidden` set, because it is the owner's own
   external reader and deliberately lists what they hid.
 

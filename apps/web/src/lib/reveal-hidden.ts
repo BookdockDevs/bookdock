@@ -1,12 +1,29 @@
 import { useUiStore } from '@/stores/ui.store'
-import { queryClient } from '@/lib/query-client'
+import { useAuthStore } from '@/stores/auth.store'
 
-export function toggleRevealHidden() {
+let beforeHide: (() => Promise<void>) | null = null
+let closing = false
+
+export function registerBeforeHideHiddenReader(handler: () => Promise<void>) {
+  beforeHide = handler
+  return () => { if (beforeHide === handler) beforeHide = null }
+}
+
+export async function toggleRevealHidden() {
+  const user = useAuthStore.getState().user
+  if (!user || user.guest === true || user.role === 'guest' || closing) return
   const state = useUiStore.getState()
-  state.setRevealHidden(!state.revealHidden)
-  void queryClient.invalidateQueries({ queryKey: ['books'] })
-  void queryClient.invalidateQueries({ queryKey: ['shelves'] })
-  void queryClient.invalidateQueries({ queryKey: ['tags'] })
+  if (state.revealHiddenUserId !== user.id) return
+  if (state.revealHidden) {
+    closing = true
+    try {
+      await beforeHide?.()
+      // A save can outlive logout or an account change.
+      if (useUiStore.getState().revealHiddenUserId === user.id) state.setRevealHidden(false)
+    } finally {
+      closing = false
+    }
+  } else state.setRevealHidden(true)
 }
 
 /**
@@ -16,6 +33,8 @@ export function toggleRevealHidden() {
  * ignores the flag for guest sessions.
  */
 export function withReveal(path: string): string {
-  if (!useUiStore.getState().revealHidden) return path
+  const user = useAuthStore.getState().user
+  const state = useUiStore.getState()
+  if (!user || user.guest === true || user.role === 'guest' || state.revealHiddenUserId !== user.id || !state.revealHidden) return path
   return path.includes('?') ? `${path}&showHidden=1` : `${path}?showHidden=1`
 }
