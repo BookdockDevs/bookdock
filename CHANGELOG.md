@@ -14,6 +14,7 @@ All notable changes to Bookdock are documented here.
 
 - Hidden-display changes now clear related list, search, detail, recent-reading, taxonomy, annotation and statistics caches, preventing stale hidden content from remaining visible.
 - Hidden private-book links no longer reuse hidden-inclusive cached details when display is off; direct links never enable hidden display automatically.
+- Dismissing a finished update now clears its record so the entry returns on refresh, and interrupted updates no longer show later steps as done; failed dismissals stay open for retry while closing an active update keeps it running in the background.
 
 ### Upgrade notes
 
@@ -615,6 +616,7 @@ All notable changes to Bookdock are documented here.
 
 - 切换显示状态时同步清理列表、搜索、详情、最近阅读、书架、标签、标注和阅读统计等相关缓存，避免隐藏内容继续显示。
 - 关闭显示后，隐藏私库书籍的链接不会复用此前包含隐藏内容的详情缓存；直接链接不会自动开启显示。
+- 已结束的更新关闭即清理，入口刷新后恢复；中途取消不再把没走到的步骤标成完成；清理失败留窗重试，执行中关闭只隐藏、后台继续。
 
 #### 升级说明
 

@@ -223,12 +223,19 @@ export function clearUpdateJob() {
 }
 
 async function dismissSavedState(progressId: string) {
-  const saved = await readFile(stateFile(), 'utf8')
-    .then((text) => readJsonFile<{ progressId?: unknown }>(text))
-    .catch(() => null)
-  if (saved?.progressId !== progressId) return false
-  await rm(stateFile(), { force: true })
-  return true
+  let dismissed = false
+  const write = persistChain.then(async () => {
+    const saved = await readFile(stateFile(), 'utf8')
+      .then((text) => readJsonFile<UpdateStatusRes>(text))
+      .catch(() => null)
+    if (saved?.progressId !== progressId) return
+    if (saved.outcome === 'active' || !['failed', 'cancelled', 'rolled-back'].includes(saved.outcome ?? saved.phase)) return
+    await rm(stateFile(), { force: true })
+    dismissed = true
+  })
+  persistChain = write.catch(() => undefined)
+  await write
+  return dismissed
 }
 
 async function downloadPackage(tag: string, version: string, file: string, active: UpdateJob) {
@@ -484,6 +491,12 @@ function sanitizeUpdateError(error: unknown) {
 }
 
 export async function cancelUpdate(progressId: string) {
+  const settledJob = job?.progressId === progressId && job.outcome !== 'active' ? job : null
+  if (settledJob) {
+    await dismissSavedState(progressId)
+    if (job === settledJob) job = null
+    return getUpdateStatus()
+  }
   if (!job || job.progressId !== progressId) {
     // No live job matches: a settled failure can still sit on disk from an
     // earlier run (containers keep DATA_DIR across updates). Let the owner

@@ -61,7 +61,7 @@ function localizeServerAction(t: (key: string) => string, action?: string): stri
 
 type StepStatus = 'pending' | 'active' | 'completed'
 
-function getStepStatuses(phase: UpdatePhase | undefined, isStarting: boolean, isApplied: boolean) {
+function getStepStatuses(phase: UpdatePhase | undefined, isStarting: boolean, isApplied: boolean, isSettled: boolean) {
   if (isApplied) {
     return {
       snapshot: 'completed',
@@ -85,6 +85,15 @@ function getStepStatuses(phase: UpdatePhase | undefined, isStarting: boolean, is
       snapshot: 'pending',
       download: 'pending',
       extract: 'pending',
+      restart: 'pending',
+    } satisfies Record<string, StepStatus>
+  }
+
+  if (isSettled) {
+    return {
+      snapshot: ['download', 'verify', 'extract', 'promote', 'restarting'].includes(phase) ? 'completed' : 'pending',
+      download: ['extract', 'promote', 'restarting'].includes(phase) ? 'completed' : 'pending',
+      extract: phase === 'restarting' ? 'completed' : 'pending',
       restart: 'pending',
     } satisfies Record<string, StepStatus>
   }
@@ -138,7 +147,7 @@ export default function SystemUpdateDialog({
     status?.phase === 'restarting' &&
     Date.now() - (status?.startedAt ?? updateStartedAt) > UPDATE_STALL_HINT_MS
 
-  const stepStatuses = getStepStatuses(status?.phase, isStarting, isApplied)
+  const stepStatuses = getStepStatuses(isSettled ? status?.previousPhase ?? status?.diagnostic?.phase : status?.phase, isStarting, isApplied, isSettled)
 
   let activeMessage = ''
   if (startErrorKey) {
@@ -463,7 +472,7 @@ export default function SystemUpdateDialog({
             )}
             {cancelError && (
               <span role="alert" className="text-xs text-red-600 dark:text-red-400">
-                {_('settings.aboutUpdateCancelFailed')}
+                {_(isSettled ? 'settings.aboutUpdateDismissFailed' : 'settings.aboutUpdateCancelFailed')}
               </span>
             )}
           </div>
@@ -545,18 +554,19 @@ export default function SystemUpdateDialog({
               <>
                 <button
                   type="button"
-                  onClick={onCancel}
-                  disabled={isCancelling || !status?.progressId}
+                  onClick={onClose}
+                  disabled={isCancelling}
                   className="rounded-lg border border-stone-200/90 bg-white px-3.5 py-2 text-xs font-medium text-stone-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:pointer-events-none disabled:opacity-40 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-red-950/20 dark:hover:text-red-400"
                 >
-                  {isCancelling ? _('settings.aboutUpdateCancelling') : _('settings.aboutUpdateCancel')}
+                  {_('settings.aboutUpdateClose')}
                 </button>
                 <button
                   type="button"
                   onClick={onRetry}
+                  disabled={isCancelling}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white shadow-xs transition-all hover:bg-stone-800 active:scale-95 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
                 >
-                  <span>{_('settings.aboutRetry')}</span>
+                  <span>{_(isCancelled ? 'settings.aboutUpdateNow' : 'settings.aboutRetry')}</span>
                 </button>
               </>
             )}

@@ -265,6 +265,10 @@ describe('update state machine', () => {
     expect(await settled()).toMatchObject({ phase: 'cancelled', outcome: 'cancelled', error: { message: 'Update cancelled; the current version is still running' } })
     expect(await exists(path.join(RELEASES_DIR, `${TARGET}.work`))).toBe(false)
     expect(await exists(path.join(RELEASES_DIR, 'pending'))).toBe(false)
+    await expect(cancelUpdate('p-cancel')).resolves.toMatchObject({ phase: 'idle' })
+    expect(await exists(path.join(RELEASES_DIR, 'update-state.json'))).toBe(false)
+    clearUpdateJob()
+    expect(await getUpdateStatus()).toEqual({ phase: 'idle', currentVersion: CURRENT_VERSION })
   })
 
   it('fails a response that stops sending data until the idle timeout', async () => {
@@ -374,6 +378,24 @@ describe('update state machine', () => {
     await expect(cancelUpdate('someone-else')).rejects.toMatchObject({ code: 'UPDATE_NOT_AVAILABLE' })
     await expect(cancelUpdate('p-stale')).resolves.toMatchObject({ phase: 'idle' })
     expect(await exists(path.join(RELEASES_DIR, 'update-state.json'))).toBe(false)
+  })
+
+  it('dismisses a settled failure without restarting the server', async () => {
+    stubAssets(expectedManifest())
+    vi.mocked(createSnapshot).mockRejectedValue(new AppError('SNAPSHOT_CREATE_FAILED', 'disk full'))
+    await startUpdate({ targetVersion: TARGET, progressId: 'p-live-failure' }, { restart: vi.fn() })
+    expect(await settled()).toMatchObject({ phase: 'failed' })
+    await expect(cancelUpdate('someone-else')).rejects.toMatchObject({ code: 'UPDATE_NOT_AVAILABLE' })
+    expect(await getUpdateStatus()).toMatchObject({ progressId: 'p-live-failure' })
+    await expect(cancelUpdate('p-live-failure')).resolves.toMatchObject({ phase: 'idle' })
+    expect(await exists(path.join(RELEASES_DIR, 'update-state.json'))).toBe(false)
+  })
+
+  it('does not dismiss an active persisted task', async () => {
+    await mkdir(RELEASES_DIR, { recursive: true })
+    await writeFile(path.join(RELEASES_DIR, 'update-state.json'), JSON.stringify({ progressId: 'p-active', phase: 'restarting', outcome: 'active', targetVersion: TARGET }))
+    await expect(cancelUpdate('p-active')).rejects.toMatchObject({ code: 'UPDATE_NOT_AVAILABLE' })
+    expect(await exists(path.join(RELEASES_DIR, 'update-state.json'))).toBe(true)
   })
 })
 

@@ -94,6 +94,21 @@ export default function AboutSettingsSection() {
     setIsModalOpen(true)
   }
 
+  const handleCloseUpdateDialog = () => {
+    if (cancelUpdate.isPending) return
+    if (status?.progressId && ['failed', 'cancelled', 'rolled-back'].includes(status.outcome ?? status.phase)) {
+      cancelUpdate.mutate(status.progressId, {
+        onSuccess: () => {
+          setUpdateTarget(null)
+          startUpdate.reset()
+          setIsModalOpen(false)
+        },
+      })
+      return
+    }
+    setIsModalOpen(false)
+  }
+
   const handleStartUpdate = (overrideTarget?: string) => {
     const target = overrideTarget ?? taskTarget
     if (!target) return
@@ -380,7 +395,7 @@ export default function AboutSettingsSection() {
 
           <SystemUpdateDialog
             isOpen={isModalOpen}
-            onClose={() => setIsModalOpen(false)}
+            onClose={handleCloseUpdateDialog}
             currentVersion={info.version}
             targetVersion={taskTarget ?? ''}
             publishedAt={update?.publishedAt}

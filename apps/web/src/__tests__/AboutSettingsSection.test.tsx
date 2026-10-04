@@ -75,13 +75,13 @@ describe('AboutSettingsSection in-app update', () => {
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2))
   })
 
-  it('dismisses a settled failure through the cancel action', async () => {
+  it('dismisses a settled failure through the close action', async () => {
     renderSection([{ phase: 'failed', currentVersion: CURRENT, targetVersion: TARGET, progressId: 'update-stale', error: { code: 'UPDATE_FAILED', message: 'Checksum mismatch' } }])
     vi.mocked(apiDelete).mockResolvedValueOnce({ data: { phase: 'idle', currentVersion: CURRENT } })
 
     fireEvent.click(screen.getByRole('button', { name: '立即更新' }))
     expect(await screen.findByText('更新失败，请重试')).toBeInTheDocument()
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消更新' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: '关闭' }).at(-1)!)
 
     await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/system/update/update-stale'))
     await waitFor(() => expect(screen.queryByText('更新失败，请重试')).not.toBeInTheDocument())
@@ -107,6 +107,56 @@ describe('AboutSettingsSection in-app update', () => {
 
     await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/system/update/update-progress'))
     expect(await screen.findByText('更新已取消，当前仍运行旧版本。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '取消更新' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: '立即更新' })).toBeInTheDocument()
+  })
+
+  it('acknowledges cancellation and restores the update entry after remounting', async () => {
+    const cancelled: UpdateStatusRes = { phase: 'cancelled', previousPhase: 'download', outcome: 'cancelled', currentVersion: CURRENT, targetVersion: TARGET, progressId: 'update-cancelled' }
+    const idle: UpdateStatusRes = { phase: 'idle', currentVersion: CURRENT }
+    const view = renderSection([cancelled])
+    vi.mocked(apiDelete).mockResolvedValueOnce({ data: idle })
+    fireEvent.click(await screen.findByRole('button', { name: '查看更新状态' }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('2')).toBeInTheDocument()
+    expect(within(dialog).queryByText('1')).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getAllByRole('button', { name: '关闭' }).at(-1)!)
+    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/system/update/update-cancelled'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '立即更新' })).toBeInTheDocument()
+    view.unmount()
+    renderSection([idle])
+    fireEvent.click(await screen.findByRole('button', { name: '立即更新' }))
+    expect(await screen.findByRole('button', { name: '确认更新' })).toBeInTheDocument()
+    expect(screen.queryByText('更新已取消，当前仍运行旧版本。')).not.toBeInTheDocument()
+  })
+
+  it('keeps the cancelled result open when acknowledgment fails', async () => {
+    renderSection([{ phase: 'cancelled', outcome: 'cancelled', currentVersion: CURRENT, targetVersion: TARGET, progressId: 'update-cancelled' }])
+    vi.mocked(apiDelete).mockRejectedValueOnce(new ApiError('UPDATE_FAILED', 'disk error'))
+    fireEvent.click(await screen.findByRole('button', { name: '查看更新状态' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: '关闭' }).at(-1)!)
+    expect(await screen.findByText('清除更新记录失败，请重试。')).toBeInTheDocument()
+    expect(screen.getByText('更新已取消，当前仍运行旧版本。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看更新状态' })).toBeInTheDocument()
+  })
+
+  it('closes an active dialog without cancelling its task', async () => {
+    renderSection([{ phase: 'download', outcome: 'active', currentVersion: CURRENT, targetVersion: TARGET, progressId: 'update-active' }])
+    fireEvent.click(await screen.findByRole('button', { name: '查看更新状态' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(apiDelete).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '查看更新状态' })).toBeInTheDocument()
+  })
+
+  it('does not mark a cancelled snapshot as completed', async () => {
+    renderSection([{ phase: 'cancelled', previousPhase: 'snapshot', outcome: 'cancelled', currentVersion: CURRENT, targetVersion: TARGET, progressId: 'update-snapshot' }])
+    fireEvent.click(await screen.findByRole('button', { name: '查看更新状态' }))
+    expect(within(screen.getByRole('dialog')).getByText('1')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('2')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('3')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('4')).toBeInTheDocument()
   })
 
   it('surfaces a refused start without tracking a target', async () => {

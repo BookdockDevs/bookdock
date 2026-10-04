@@ -1369,6 +1369,7 @@
     "aboutUpdateCancel": "取消更新",
     "aboutUpdateCancelling": "正在停止并清理…",
     "aboutUpdateCancelFailed": "此阶段无法取消，请查看当前更新状态。",
+    "aboutUpdateDismissFailed": "清除更新记录失败，请重试。",
     "aboutUpdateCopyDiagnostic": "复制诊断日志",
     "aboutUpdateRunInBackground": "后台运行",
     "aboutUpdateElapsed": "已耗时 {{time}}",

@@ -1381,6 +1381,7 @@
     "aboutUpdateCancel": "Cancel update",
     "aboutUpdateCancelling": "Stopping and cleaning up…",
     "aboutUpdateCancelFailed": "This stage cannot be cancelled. Check the current update status.",
+    "aboutUpdateDismissFailed": "Could not clear the update result. Please try again.",
     "aboutUpdateCopyDiagnostic": "Copy diagnostic logs",
     "aboutUpdateRunInBackground": "Run in background",
     "aboutUpdateElapsed": "Elapsed {{time}}",
