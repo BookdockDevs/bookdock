@@ -133,6 +133,8 @@
     "uploadIgnored": "Ignored {{count}} unsupported file(s)",
     "uploadOversized": "Ignored {{count}} file(s) over the size limit",
     "uploadRetry": "Retry",
+    "uploadCorresponding": "Matching TXT already exists: {{title}}",
+    "uploadContinue": "Upload anyway",
     "uploadSummarySucceeded": "{{count}} uploaded",
     "uploadSummaryDuplicated": "{{count}} already existed",
     "uploadSummaryFailed": "{{count}} failed",

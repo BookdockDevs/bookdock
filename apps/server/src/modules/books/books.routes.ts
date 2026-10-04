@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono'
-import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, paginationSchema, bookMembershipSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
+import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
@@ -161,8 +161,12 @@ booksRoutes.post('/', async (c) => {
   if (!membership.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid membership', membership.error.flatten())
   }
-  const { book, duplicated } = await uploadBook(user.id, file, membership.data, { normalizeTitle: isTitleNormalizeEnabled(user.id) })
-  return c.json({ data: book, duplicated }, 201)
+  const options = bookUploadOptionsSchema.safeParse({ allowCorresponding: body['allowCorresponding'] })
+  if (!options.success) throw new AppError('VALIDATION_ERROR', 'Invalid upload options')
+  const { book, duplicated, corresponding } = await uploadBook(user.id, file, membership.data, {
+    normalizeTitle: isTitleNormalizeEnabled(user.id), allowCorresponding: options.data.allowCorresponding,
+  })
+  return c.json({ data: book, duplicated, ...(corresponding ? { corresponding } : {}) }, corresponding ? 200 : 201)
 })
 
 booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {

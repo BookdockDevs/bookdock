@@ -4,6 +4,10 @@ All notable changes to Bookdock are documented here.
 
 ## [0.4.4] - Unreleased
 
+### Added
+
+- Uploading a file that matches an existing book now names it and waits for an explicit continue before adding a separate copy.
+
 ### Changed
 
 - "Show hidden items" is remembered separately for each account in the current browser, defaults to off, and returns to the previous choice after refresh or signing in again. It is not synced across devices.
@@ -605,6 +609,10 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### [0.4.4] - 待发布
+
+#### 新增
+
+- 上传文件与已有藏书内容一致时，先报出那本书的名字，等你点“继续上传”才会另存一份。
 
 #### 变更
 

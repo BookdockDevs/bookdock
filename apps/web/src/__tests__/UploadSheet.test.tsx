@@ -37,7 +37,7 @@ function uploadOverrides(overrides: Partial<ReturnType<typeof defaultUpload>> = 
 function defaultUpload() {
   return {
     items: [], addFiles: vi.fn(), startUpload: vi.fn(), retry: vi.fn(), retryAll: vi.fn(),
-    abortAll: vi.fn(), pruneSettled: vi.fn(), isUploading: false, clearQueue: vi.fn(),
+    abortAll: vi.fn(), pruneSettled: vi.fn(), continueUpload: vi.fn(), isUploading: false, clearQueue: vi.fn(),
   }
 }
 
@@ -46,6 +46,18 @@ function fileDropData(files: File[]) {
 }
 
 describe('UploadSheet', () => {
+  it('offers explicit continuation for a matching TXT without opening the candidate as a finished upload', () => {
+    const continueUpload = vi.fn()
+    mockUseUploadBooks.mockReturnValue(uploadOverrides({
+      continueUpload,
+      items: makeItems([{ status: 'corresponding', corresponding: { id: 'A', title: 'Existing A' } }]),
+    }))
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.getByText('library.uploadCorresponding')).toBeTruthy()
+    expect(screen.queryByText('library.uploadReadNow')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'library.uploadContinue' }))
+    expect(continueUpload).toHaveBeenCalledWith('up-0')
+  })
   beforeEach(() => {
     mockUseShelves.mockReturnValue({ data: { data: [] } })
     mockUseTags.mockReturnValue({ data: { data: [] } })

@@ -39,6 +39,7 @@ import { log } from '../../lib/logger'
 import { normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type CoverPaletteId, type Chapter, type HiddenReason, type LibraryVersionKind, type PublishedLinkInfo, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
 
 import { getReaderBookSettings } from './reader-settings.service'
+import { readTxtEpubCandidate, sameEpubArchive } from './txt-epub-correspondence'
 
 /**
  * The effective TOC preset for a book: the pinned rule id in books.meta
@@ -580,7 +581,7 @@ export async function uploadBook(
   userId: string,
   file: File,
   membership?: { shelfId?: string | null; tagIds?: string[] },
-  opts?: { normalizeTitle?: boolean },
+  opts?: { normalizeTitle?: boolean; allowCorresponding?: boolean },
 ) {
   assertUserUploadAllowed(userId)
   const db = getDb()
@@ -612,6 +613,35 @@ export async function uploadBook(
         .run()
     }
     return { book: stripMetaChapters(await resolvePrivateBook(userId, duplicate.versionId, { allowDeleted: true, showHidden: true })), duplicated: true }
+  }
+
+  if (!opts?.allowCorresponding && getParser(file.name, file.type) && !file.name.toLowerCase().endsWith('.txt')) {
+    const hint = await readTxtEpubCandidate(buffer)
+    if (hint) {
+      const { archive, sourceId } = hint
+      const candidate = db.select({ versionId: bookVersions.id }).from(libraryBookVersions)
+        .innerJoin(bookVersions, eq(bookVersions.id, libraryBookVersions.bookVersionId))
+        .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.kind, 'personal'),
+          eq(bookVersions.id, sourceId), eq(bookVersions.format, 'txt'))).get()
+      if (candidate) {
+        const latest = db.select({ blobKey: contentRevisions.blobKey }).from(contentRevisions)
+          .where(eq(contentRevisions.bookVersionId, candidate.versionId))
+          .orderBy(desc(contentRevisions.revisionNo)).get()
+        if (latest && await getStorage().exists(latest.blobKey)) {
+          const original = await bufferFromStream(await getStorage().get(latest.blobKey))
+          const existing = await resolvePrivateBook(userId, candidate.versionId, { allowDeleted: true, showHidden: true })
+          let matched = await sameEpubArchive(archive, original)
+          if (!matched && !existing.deletedAt) {
+            const { exportEpubBook } = await import('./txt-export')
+            const plain = await exportEpubBook(userId, candidate.versionId, true, { showHidden: true })
+            matched = await sameEpubArchive(archive, plain.buffer)
+          }
+          if (matched) {
+            return { book: stripMetaChapters(existing), duplicated: false, corresponding: { id: existing.id, title: existing.title } }
+          }
+        }
+      }
+    }
   }
 
   const upload = await materializeUpload(userId, file, buffer, versionId, opts)

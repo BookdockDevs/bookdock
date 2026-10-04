@@ -8,6 +8,7 @@ import {
   type BookFormat,
   type BookListItem,
   type BookListRes,
+  type BookUploadRes,
   type BookMetadata,
   type CatalogBook,
   type CatalogBookUpdateReq,
@@ -155,7 +156,7 @@ export function prefetchInfiniteBooks(queryClient: QueryClient, params: UseInfin
   })
 }
 
-export type UploadItemStatus = 'pending' | 'queued' | 'uploading' | 'processing' | 'success' | 'duplicate' | 'error'
+export type UploadItemStatus = 'pending' | 'queued' | 'uploading' | 'processing' | 'success' | 'duplicate' | 'corresponding' | 'error'
 
 export interface UploadItem {
   id: string
@@ -172,6 +173,8 @@ export interface UploadItem {
   messageKey?: string
   /** Set once the server answers; the id the reader opens. */
   bookVersionId?: string
+  corresponding?: BookUploadRes['corresponding']
+  allowCorresponding?: boolean
 }
 
 export interface UploadAssignment {
@@ -218,6 +221,7 @@ const BOOK_MEMBERSHIP_KEYS = [['books'], ['shelves'], ['tags']] as const
 const PRIVATE_UPLOAD_TARGET: UploadTarget = {
   url: '/books',
   fields: (item) => ({
+    ...(item.allowCorresponding ? { allowCorresponding: 'true' } : {}),
     ...(item.shelfId ? { shelfId: item.shelfId } : {}),
     ...(item.tagIds?.length ? { tagIds: JSON.stringify(item.tagIds) } : {}),
   }),
@@ -1150,15 +1154,19 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
           let duplicated = false
           let shelfId: string | null | undefined
           let bookVersionId: string | undefined
+          let corresponding: BookUploadRes['corresponding']
           try {
-            const body = JSON.parse(xhr.responseText) as { duplicated?: boolean; data?: { shelfId?: string | null } }
+            const body = JSON.parse(xhr.responseText) as Partial<BookUploadRes>
             duplicated = body.duplicated === true
+            corresponding = body.corresponding
             shelfId = body.data?.shelfId
             bookVersionId = target.pickBookId?.(body)
           } catch {
             // keep false
           }
-          if (duplicated) {
+          if (corresponding) {
+            patchItem(item.id, { status: 'corresponding', progress: 100, corresponding, bookVersionId: undefined })
+          } else if (duplicated) {
             // A duplicate keeps its own shelf: tell the user when the requested
             // shelf was not applied instead of a bare "already exists".
             const notMoved = target.reportsAppliedShelf === true
@@ -1256,7 +1264,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
       showSummary(summary, { dedupeKey: `upload:${notificationKey}` })
     } else if (duplicated > 0) {
       notify.info({ key: 'library.uploadDuplicateOnly', params: { count: duplicated } }, { dedupeKey: `upload:${notificationKey}` })
-    } else {
+    } else if (succeeded > 0) {
       notify.success({ key: 'library.uploadImported', params: { count: succeeded } }, { dedupeKey: `upload:${notificationKey}` })
     }
   }, [items, notificationKey, queryClient, target])
@@ -1337,6 +1345,13 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
     ))
   }, [])
 
+  const continueUpload = useCallback((id: string) => {
+    stoppingRef.current = false
+    setItems((prev) => prev.map((item) => item.id === id && item.status === 'corresponding'
+      ? { ...item, status: 'queued' as const, progress: 0, corresponding: undefined, allowCorresponding: true }
+      : item))
+  }, [])
+
   /**
    * Stop the batch. Parking the not-yet-sent rows first matters: the scheduler
    * restarts anything still `queued`, so aborting the open requests alone would
@@ -1362,10 +1377,10 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
   // Reopening the sheet must not resurrect finished rows from a background
   // upload that settled after the sheet was closed.
   const pruneSettled = useCallback(() => {
-    setItems((prev) => prev.filter((it) => it.status !== 'success' && it.status !== 'duplicate' && it.status !== 'error'))
+    setItems((prev) => prev.filter((it) => it.status !== 'success' && it.status !== 'duplicate' && it.status !== 'corresponding' && it.status !== 'error'))
   }, [])
 
-  return { items, addFiles, startUpload, retry, retryAll, abortAll, pruneSettled, isUploading, clearQueue, patchItem }
+  return { items, addFiles, startUpload, retry, retryAll, continueUpload, abortAll, pruneSettled, isUploading, clearQueue, patchItem }
 }
 
 export function useDeleteBook() {

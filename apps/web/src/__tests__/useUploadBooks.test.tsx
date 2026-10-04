@@ -75,6 +75,24 @@ describe('useUploadBooks', () => {
     vi.unstubAllGlobals()
   })
 
+  it('holds a correspondence for explicit continuation without reporting a successful upload', () => {
+    const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
+    act(() => result.current.addFiles([new File(['x'], 'B.epub')], { autoStart: true, shelfId: 'shelf-1' }))
+    act(() => FakeXHR.instances[0]!.respond(200, {
+      data: { id: 'A', title: 'Existing A' }, duplicated: false, corresponding: { id: 'A', title: 'Existing A' },
+    }))
+    expect(result.current.items[0]?.status).toBe('corresponding')
+    expect(result.current.items[0]?.bookVersionId).toBeUndefined()
+    expect(result.current.items[0]?.corresponding?.title).toBe('Existing A')
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+    act(() => { result.current.continueUpload(result.current.items[0]!.id); result.current.continueUpload(result.current.items[0]!.id) })
+    expect(FakeXHR.instances).toHaveLength(2)
+    expect(FakeXHR.instances[1]!.fields).toMatchObject({ allowCorresponding: 'true', shelfId: 'shelf-1' })
+    act(() => FakeXHR.instances[1]!.respond(201, { data: { id: 'B' }, duplicated: false }))
+    expect(result.current.items[0]?.status).toBe('success')
+    expect(result.current.items[0]?.bookVersionId).toBe('B')
+  })
+
   it('does not settle or notify while picker-selected files are pending', () => {
     const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
 

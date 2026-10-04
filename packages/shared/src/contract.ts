@@ -1401,6 +1401,8 @@ export interface UploadBookRes {
 export interface BookUploadRes {
   data: BookListItem
   duplicated: boolean
+  /** Verified TXT/export correspondence; no upload was persisted. */
+  corresponding?: { id: string; title: string }
 }
 
 /** A reading-speed sample: book-wide position at a wall-clock time (unix ms) */

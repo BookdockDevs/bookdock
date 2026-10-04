@@ -59,6 +59,7 @@ function statusLabel(item: UploadItem): string | null {
     case 'duplicate':
       return 'uploadDuplicate'
     case 'error':
+    case 'corresponding':
       return null
   }
 }
@@ -86,7 +87,7 @@ export default function UploadSheet({
   const [includeCurrentTag, setIncludeCurrentTag] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
-  const { items, addFiles, startUpload, retry, retryAll, abortAll, pruneSettled, isUploading, clearQueue } = useUploadBooks(target)
+  const { items, addFiles, startUpload, retry, retryAll, continueUpload, abortAll, pruneSettled, isUploading, clearQueue } = useUploadBooks(target)
   const reportedRef = useRef('')
   const { maxBytes, normalizeTitle } = useUploadSettings()
   const { data: shelvesData } = useShelves()
@@ -313,7 +314,17 @@ export default function UploadSheet({
                   ) : null}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-stone-700 dark:text-stone-300">{item.name}</span>
-                {item.status === 'error' ? (
+                {item.status === 'corresponding' ? (
+                  <>
+                    <span className="min-w-0 text-amber-600 dark:text-amber-400">
+                      {_('library.uploadCorresponding', { title: item.corresponding?.title ?? '' })}
+                    </span>
+                    <button type="button" onClick={() => continueUpload(item.id)}
+                      className="shrink-0 font-medium underline underline-offset-2">
+                      {_('library.uploadContinue')}
+                    </button>
+                  </>
+                ) : item.status === 'error' ? (
                   <>
                     {note && <span className="shrink-0 text-xs text-red-600 dark:text-red-400">{note}</span>}
                     <button

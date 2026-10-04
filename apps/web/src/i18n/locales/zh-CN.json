@@ -133,6 +133,8 @@
     "uploadIgnored": "已忽略 {{count}} 个不支持的文件",
     "uploadOversized": "已忽略 {{count}} 个超过大小限制的文件",
     "uploadRetry": "重试",
+    "uploadCorresponding": "已有对应 TXT：《{{title}}》",
+    "uploadContinue": "继续上传",
     "uploadSummarySucceeded": "{{count}} 本成功",
     "uploadSummaryDuplicated": "{{count}} 本已存在",
     "uploadSummaryFailed": "{{count}} 本失败",

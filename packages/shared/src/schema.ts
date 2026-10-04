@@ -732,6 +732,10 @@ export const bookMembershipSchema = z.object({
   tagIds: z.array(z.string().min(1)).optional(),
 })
 
+export const bookUploadOptionsSchema = z.object({
+  allowCorresponding: z.enum(['true', 'false']).optional().transform((value) => value === 'true'),
+})
+
 export const bookMetadataSchema = z.object({
   publisher: z.string().max(200).optional(),
   published: z.string().max(50).optional(),
