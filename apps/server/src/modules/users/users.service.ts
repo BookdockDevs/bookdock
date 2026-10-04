@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, asc, count, eq, inArray, isNull } from 'drizzle-orm'
 
 import { normalizeUsername } from '@bookdock/shared'
 import type { AdminUserRes, UpdateUserReq } from '@bookdock/shared'
@@ -37,7 +37,6 @@ export function listUsers(): AdminUserRes[] {
     .select({
       id: users.id,
       username: users.username,
-      role: users.role,
       disabled: users.disabled,
       createdAt: users.createdAt,
       avatarKey: users.avatarKey,
@@ -47,20 +46,8 @@ export function listUsers(): AdminUserRes[] {
     .leftJoin(libraries, and(eq(libraries.userId, users.id), eq(libraries.type, 'private')))
     .leftJoin(libraryBooks, and(eq(libraryBooks.libraryId, libraries.id), isNull(libraryBooks.deletedAt)))
     .leftJoin(libraryBookVersions, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
-    // The shared guest account is managed via the allowGuestAccess instance
-    // switch, has no server-side data, and carries no owner actions —
-    // listing it only confuses user management.
-    .where(ne(users.role, 'guest'))
     .groupBy(users.id)
-    .orderBy(
-      sql`CASE ${users.role}
-        WHEN 'owner' THEN 0
-        WHEN 'admin' THEN 1
-        WHEN 'member' THEN 2
-        ELSE 3
-      END ASC`,
-      asc(users.createdAt),
-    )
+    .orderBy(asc(users.createdAt))
     .all()
   // One extra query for the delete guard: an account owning shared libraries
   // cannot be deleted until they are transferred or deleted.
@@ -75,7 +62,7 @@ export function listUsers(): AdminUserRes[] {
     list.push({ id: lib.id, name: lib.name })
     ownedByUser.set(lib.userId, list)
   }
-  return rows.map((r) => ({ ...r, disabled: r.disabled === 1, ownedLibraries: ownedByUser.get(r.id) ?? [] }))
+  return rows.map((r) => ({ ...r, role: isInstanceOwner(r.id) ? 'owner' : 'member', disabled: r.disabled === 1, ownedLibraries: ownedByUser.get(r.id) ?? [] }))
 }
 
 export async function updateUser(actorId: string, targetId: string, patch: UpdateUserReq): Promise<AdminUserRes> {
@@ -92,17 +79,8 @@ export async function updateUser(actorId: string, targetId: string, patch: Updat
     throw new AppError('CANNOT_MODIFY_SELF', 'Cannot disable own account')
   }
 
-  // The guest account is anonymous and managed by the allowGuestAccess
-  // instance switch; per-account patches (disable, password) would
-  // create state that contradicts the switch.
-  if (target.role === 'guest') {
-    throw new AppError('CANNOT_MODIFY_GUEST', 'Guest account is managed via instance settings')
-  }
-
   const newDisabled = patch.disabled ?? target.disabled === 1
-  // Single-owner model: the instance owner cannot be disabled, only
-  // transferred away first. The legacy multi-owner role rows are ignored as
-  // source of truth (see isInstanceOwner).
+  // The instance owner must transfer ownership before disabling the account.
   if (target.disabled === 0 && newDisabled && isInstanceOwner(targetId)) {
     throw new AppError('LAST_OWNER', 'Cannot disable the instance owner; transfer ownership first')
   }
@@ -136,7 +114,7 @@ export async function createUser(username: string, password: string): Promise<Ad
     try {
       tx.insert(users).values({
         id, username, usernameNormalized: norm, passwordHash: hash,
-        role: 'member', createdAt: now, updatedAt: now,
+        createdAt: now, updatedAt: now,
       }).run()
     } catch (err) {
       if (err instanceof Error && 'code' in err && (err as { code?: unknown }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -158,7 +136,6 @@ function getManagedUser(targetId: string) {
   const db = getDb()
   const target = db.select().from(users).where(eq(users.id, targetId)).get()
   if (!target) throw new AppError('USER_NOT_FOUND', 'User not found')
-  if (target.role === 'guest') throw new AppError('CANNOT_MODIFY_GUEST', 'Guest account is managed via instance settings')
   return target
 }
 
@@ -177,8 +154,6 @@ export async function transferInstanceOwnership(actorId: string, targetId: strin
   const now = Date.now()
   db.transaction((tx) => {
     tx.update(instance).set({ ownerUserId: targetId, updatedAt: now }).run()
-    tx.update(users).set({ role: 'member', updatedAt: now }).where(eq(users.id, actorId)).run()
-    tx.update(users).set({ role: 'owner', updatedAt: now }).where(eq(users.id, targetId)).run()
   })
   invalidateUserCache(actorId)
   invalidateUserCache(targetId)

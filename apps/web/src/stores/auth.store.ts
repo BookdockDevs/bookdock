@@ -9,13 +9,11 @@ export interface AuthUser {
   role: string
   /** Content-hash addressed avatar key; see avatarUrl() in lib/avatar */
   avatarKey?: string | null
-  /** True for guest-injected sessions (no real login); mirrors MeRes.guest. */
-  guest?: boolean
   createdAt?: number
 }
 
 export function getUserDisplayName(user: AuthUser | null | undefined, guestLabel: string): string {
-  return user?.guest === true || user?.role === 'guest' ? guestLabel : user?.username || guestLabel
+  return user?.username || guestLabel
 }
 
 interface AuthState {
@@ -28,13 +26,14 @@ interface AuthState {
 function readStoredUser(): AuthState['user'] {
   if (typeof window === 'undefined') return null
   try {
-    return JSON.parse(localStorage.getItem('bd-user') ?? 'null')
+    const stored = JSON.parse(localStorage.getItem('bd-user') ?? 'null')
+    return stored?.guest === true || stored?.role === 'guest' ? null : stored
   } catch {
     return null
   }
 }
 
-// JWT lives in an HttpOnly cookie; the store only mirrors the user profile for
+// The session lives in an HttpOnly cookie; the store only mirrors the user profile for
 // UI display so a reload does not flash logged-out chrome before /auth/me resolves.
 export const useAuthStore = create<AuthState>((set) => ({
   user: readStoredUser(),
@@ -43,7 +42,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem('bd-user', JSON.stringify(user))
     }
     set({ user })
-    useUiStore.getState().bindRevealHiddenUser(user.guest === true || user.role === 'guest' ? null : user.id)
+    useUiStore.getState().bindRevealHiddenUser(user.id)
   },
   updateUser: (patch) => {
     set((state) => {
@@ -56,6 +55,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     })
   },
   clearAuth: () => {
+    if (!useAuthStore.getState().user) return
     // Drop the session before resetting preferences: the settings subscription
     // skips syncing while logged out, so the reset below stays local and can
     // never be mistaken for a user edit and PUT back to the server.

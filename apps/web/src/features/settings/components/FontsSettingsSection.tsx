@@ -25,8 +25,8 @@ function PlusIcon() {
 export default function FontsSettingsSection() {
   const _ = useTranslation()
   const user = useAuthStore((state) => state.user)
-  const isGuest = user?.guest === true || user?.role === 'guest'
-  const isOwner = user?.role === 'owner' && user.guest !== true
+  const isGuest = !user
+  const isOwner = user?.role === 'owner'
   const fontsQuery = useFonts()
   const uploadedFonts = useMemo(() => fontsQuery.data?.data ?? [], [fontsQuery.data])
   const fontPreferences = useUiStore((state) => state.fontPreferences)

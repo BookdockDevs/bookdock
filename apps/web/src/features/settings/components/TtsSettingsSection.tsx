@@ -92,7 +92,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
-  const isGuest = !user || user.role === 'guest' || user.guest === true
+  const isGuest = !user
   const servicesQuery = useTtsServices({ enabled: !isGuest })
   const { data: servicesData } = servicesQuery
   const { data: providersData } = useTtsProviders({ enabled: !isGuest })

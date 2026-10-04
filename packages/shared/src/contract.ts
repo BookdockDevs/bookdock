@@ -138,8 +138,19 @@ export interface SnapshotRes {
   appVersion: string
   createdAt: number
   sizeBytes: number
-  /** `instance_settings` rows captured with the database; absent when the manifest could not be read */
-  instanceSettings?: Record<string, string>
+  /** Absent on legacy manifests, which only support whole-database rollback with their original release. */
+  formatVersion?: 2
+  instance?: {
+    id: string
+    ownerUserId: string
+    allowRegistration: boolean
+    allowGuestAccess: boolean
+    allowUserCreateLibrary: boolean
+    allowUserUpload: boolean
+    uploadMaxBytes: number | null
+    createdAt: number
+    updatedAt: number
+  }
 }
 
 export interface SnapshotListRes {
@@ -222,14 +233,16 @@ export interface SetupRequiredRes {
   required: boolean
 }
 
-export interface MeRes {
+export type MeRes = AuthenticatedMeRes | { user: null; guest: true }
+
+export interface AuthenticatedMeRes {
   id: string
   username: string
   role: string
   /** Content-hash addressed avatar blob key; the client builds the file URL as `/api/v1/avatars/<avatarKey>` */
   avatarKey: string | null
-  /** True when the server injected the default user for guest access (no real session). */
-  guest?: boolean
+  /** False for an authenticated account. */
+  guest?: false
 }
 
 export interface UpdateUsernameReq {
@@ -287,7 +300,7 @@ export interface ChangePasswordReq {
 export interface AdminUserRes {
   id: string
   username: string
-  role: 'owner' | 'member' | 'guest'
+  role: 'owner' | 'member'
   disabled: boolean
   createdAt: number
   bookCount: number

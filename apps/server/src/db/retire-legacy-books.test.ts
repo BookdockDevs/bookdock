@@ -37,12 +37,15 @@ afterEach(async () => {
 
 function seedLegacy(filePath = 'blobs/old.epub') {
   migrateBeforeBookRetirement(db, { migrationsFolder })
-  sqlite.exec(`INSERT INTO users (id, username, username_normalized, role, created_at) VALUES ('u', 'owner', 'owner', 'owner', 1)`)
+  sqlite.exec(`INSERT INTO users (id, username, username_normalized, password_hash, role, created_at) VALUES ('u', 'owner', 'owner', 'fixture-credential', 'owner', 1)`)
   sqlite.prepare(`INSERT INTO books (id, user_id, title, format, file_path, size, meta, created_at, updated_at)
     VALUES ('b', 'u', 'Old', 'epub', ?, 4, '{"wordCount":4,"chapters":[]}', 1, 1)`).run(filePath)
 }
 
 describe('book retirement production orchestration', () => {
+  // Each of these boots the whole migration chain twice, so its runtime grows
+  // with every migration the project adds. The default 5s cap is not a statement
+  // about this work, so the chain-running cases carry an explicit budget.
   it('boots fresh databases and repeats without reviving legacy tables or backfills', async () => {
     await client.runDatabaseMigrations(db)
     const ledger = sqlite.prepare('SELECT * FROM __drizzle_migrations').all()
@@ -51,9 +54,9 @@ describe('book retirement production orchestration', () => {
     expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE name IN ('books','shelves','tags','book_tags','annotations')").all()).toEqual([])
     expect(sqlite.pragma('foreign_key_check')).toEqual([])
     expect(sqlite.prepare("SELECT COUNT(*) n FROM library_migration_log WHERE batch = 'book-retirement-preflight'").get()).toEqual({ n: 1 })
-    expect(sqlite.pragma('table_info(users)')).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'role' })]))
-    expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE name='instance_settings'").get()).toBeDefined()
-  })
+    expect(sqlite.pragma('table_info(users)')).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'role' })]))
+    expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE name='instance_settings'").get()).toBeUndefined()
+  }, 30_000)
 
   it('bridges populated old data and preserves the entire progress JSON before deleting tables', async () => {
     seedLegacy()
@@ -77,7 +80,7 @@ describe('book retirement production orchestration', () => {
     expect(sqlite.pragma('foreign_key_check')).toEqual([])
     await client.runDatabaseMigrations(db)
     expect(await fs.readFile(path.join(state.dir, 'files/progress/u/b.json'))).toEqual(progress)
-  })
+  }, 30_000)
 
   it('discards unmigratable old rows with explicit loss counts and still boots twice', async () => {
     seedLegacy('missing.epub')
@@ -90,7 +93,7 @@ describe('book retirement production orchestration', () => {
     expect(sqlite.pragma('foreign_key_check')).toEqual([])
     await client.runDatabaseMigrations(db)
     expect(sqlite.prepare('SELECT * FROM book_versions').all()).toEqual([])
-  })
+  }, 30_000)
 
   it('keeps current progress and archives unassignable or malformed legacy files', async () => {
     seedLegacy()

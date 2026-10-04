@@ -292,6 +292,15 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
   }
   retargetBookIdReferences(db)
 
+  // The optional retired TTS table exists only on some older deployments.
+  // Refuse meaningful Guest data rather than letting its FK cascade erase it.
+  const identityColumns = db.all(sql.raw('PRAGMA table_info(users)')) as Array<{ name: string }>
+  if (identityColumns.some((column) => column.name === 'role')
+    && db.get(sql.raw("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tts_configs'"))
+    && db.get(sql.raw("SELECT 1 FROM tts_configs WHERE user_id IN (SELECT id FROM users WHERE role = 'guest') LIMIT 1"))) {
+    throw new Error('Identity retirement blocked: Guest has legacy TTS configuration')
+  }
+
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
   migrate(db, { migrationsFolder })
 }

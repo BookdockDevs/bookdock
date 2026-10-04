@@ -21,6 +21,7 @@ const settingsRoutes = new Hono()
 
 settingsRoutes.get('/', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const data = getSettings(user.id)
   // uploadMaxBytes is the effective instance-level limit (owner-editable, env
   // fallback); settingsUpdateSchema strips it from PUT bodies, so it is never
@@ -39,9 +40,7 @@ settingsRoutes.get('/', async (c) => {
 
 settingsRoutes.put('/', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') {
-    return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot persist settings' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const body = await c.req.json()
   const parsed = settingsUpdateSchema.safeParse(body)
   if (!parsed.success) {

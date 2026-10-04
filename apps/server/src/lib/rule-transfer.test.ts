@@ -38,7 +38,7 @@ describe('rule transfer failure boundaries', () => {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('*', async (c, next) => {
-      c.set('user', { id: 'u', username: 'review', role: guest ? 'guest' : 'owner', avatarKey: null })
+      c.set('user', guest ? null : { id: 'u', username: 'review', role: guest ? 'guest' : 'owner', avatarKey: null })
       c.set('guest', guest)
       await next()
     })

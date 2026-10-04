@@ -15,22 +15,19 @@ aiRoutes.get('/providers', (c) => {
 
 aiRoutes.get('/status', (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   return c.json({ data: getAiStatus(user.id, user.role) } satisfies { data: AiStatusRes })
 })
 
 aiRoutes.get('/config', (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot configure AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   return c.json({ data: getAiConfig(user.id) } satisfies { data: AiConfigRes })
 })
 
 aiRoutes.patch('/config', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot configure AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const raw = await c.req.json().catch(() => null)
   const parsed = aiConfigUpdateSchema.safeParse(raw)
   if (!parsed.success) {
@@ -41,9 +38,7 @@ aiRoutes.patch('/config', async (c) => {
 
 aiRoutes.post('/profiles', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot configure AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiProfileCreateSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI profile', details: parsed.error.flatten() } }, 400)
@@ -53,9 +48,7 @@ aiRoutes.post('/profiles', async (c) => {
 
 aiRoutes.patch('/profiles/:id', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot configure AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiProfileUpdateSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI profile', details: parsed.error.flatten() } }, 400)
@@ -65,18 +58,14 @@ aiRoutes.patch('/profiles/:id', async (c) => {
 
 aiRoutes.delete('/profiles/:id', (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot configure AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   deleteAiProfile(user.id, user.role, c.req.param('id'))
   return c.json({ data: null })
 })
 
 aiRoutes.post('/models', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const raw = await c.req.json().catch(() => null)
   const parsed = aiModelDiscoverySchema.safeParse(raw)
   if (!parsed.success) {
@@ -87,9 +76,7 @@ aiRoutes.post('/models', async (c) => {
 
 aiRoutes.post('/test', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const raw = await c.req.json().catch(() => null)
   const parsed = aiConfigTestSchema.safeParse(raw)
   if (!parsed.success) {
@@ -100,17 +87,13 @@ aiRoutes.post('/test', async (c) => {
 
 aiRoutes.post('/config/test', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   return c.json({ data: await testAiConfig(user.id, user.role, c.req.raw.signal) } satisfies { data: AiConnectionTestRes })
 })
 
 aiRoutes.get('/threads', (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiThreadListSchema.safeParse({ bookId: c.req.query('bookId'), limit: c.req.query('limit') })
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI thread list request', details: parsed.error.flatten() } }, 400)
@@ -120,9 +103,7 @@ aiRoutes.get('/threads', (c) => {
 
 aiRoutes.post('/threads', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiThreadCreateSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI thread', details: parsed.error.flatten() } }, 400)
@@ -132,17 +113,13 @@ aiRoutes.post('/threads', async (c) => {
 
 aiRoutes.get('/threads/:id', (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   return c.json({ data: getAiThread(user.id, c.req.param('id')) } satisfies { data: AiThreadDetailRes })
 })
 
 aiRoutes.get('/threads/:id/messages/:messageId/revisions', (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiMessageIdSchema.safeParse(c.req.param('messageId'))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI message id' } }, 400)
@@ -152,9 +129,7 @@ aiRoutes.get('/threads/:id/messages/:messageId/revisions', (c) => {
 
 aiRoutes.post('/threads/:id/messages/:messageId/revisions/select', (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiMessageIdSchema.safeParse(c.req.param('messageId'))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI message id' } }, 400)
@@ -164,9 +139,7 @@ aiRoutes.post('/threads/:id/messages/:messageId/revisions/select', (c) => {
 
 aiRoutes.patch('/threads/:id', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiThreadUpdateSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI thread', details: parsed.error.flatten() } }, 400)
@@ -176,18 +149,14 @@ aiRoutes.patch('/threads/:id', async (c) => {
 
 aiRoutes.delete('/threads/:id', (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   deleteAiThread(user.id, c.req.param('id'))
   return c.json({ data: null })
 })
 
 aiRoutes.get('/runs/:id', (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiGenerationRunIdSchema.safeParse(c.req.param('id'))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI generation run id' } }, 400)
@@ -197,9 +166,7 @@ aiRoutes.get('/runs/:id', (c) => {
 
 aiRoutes.post('/runs/:id/cancel', (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiGenerationRunIdSchema.safeParse(c.req.param('id'))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI generation run id' } }, 400)
@@ -209,9 +176,7 @@ aiRoutes.post('/runs/:id/cancel', (c) => {
 
 aiRoutes.get('/retrieval/status', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiIndexStatusSchema.safeParse({ bookId: c.req.query('bookId') })
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI index status request', details: parsed.error.flatten() } }, 400)
@@ -221,9 +186,7 @@ aiRoutes.get('/retrieval/status', async (c) => {
 
 aiRoutes.post('/retrieval/index', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiIndexSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI index request', details: parsed.error.flatten() } }, 400)
@@ -236,9 +199,7 @@ aiRoutes.post('/retrieval/index', async (c) => {
 
 aiRoutes.post('/retrieval/index/cancel', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiIndexSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI index request', details: parsed.error.flatten() } }, 400)
@@ -249,9 +210,7 @@ aiRoutes.post('/retrieval/index/cancel', async (c) => {
 
 aiRoutes.delete('/retrieval/index', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiIndexStatusSchema.safeParse({ bookId: c.req.query('bookId') })
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI index status request', details: parsed.error.flatten() } }, 400)
@@ -262,9 +221,7 @@ aiRoutes.delete('/retrieval/index', async (c) => {
 
 aiRoutes.post('/retrieval/search', async (c) => {
   const user = c.get('user')
-  if (user.role === 'guest' || c.get('guest')) {
-    return c.json({ error: { code: 'AI_NOT_ALLOWED', message: 'This account cannot use AI' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = aiSearchSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI search request', details: parsed.error.flatten() } }, 400)
@@ -281,6 +238,7 @@ aiRoutes.post('/retrieval/search', async (c) => {
 
 aiRoutes.post('/chat', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const raw = await c.req.json().catch(() => null)
   const normalizedRaw = raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as Record<string, unknown>).threadId === 'string'
     ? { ...(raw as Record<string, unknown>), history: undefined }

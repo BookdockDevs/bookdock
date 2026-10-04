@@ -68,19 +68,12 @@ export function resetInstanceCache() {
   instanceCache = null
 }
 
-/**
- * Source of truth for instance ownership: the Instance row, not the legacy
- * users.role column (which can hold multiple/stale 'owner' rows). Falls back
- * to the role only when no Instance row exists yet (pre-setup), where every
- * owner-flavored check degrades to "refuse" rather than "allow".
- */
+/** Instance ownership has exactly one source of truth. */
 export function isInstanceOwner(userId: string): boolean {
   const db = getDb()
   const row = db.select({ ownerUserId: instance.ownerUserId }).from(instance).get()
-  if (!row) {
-    return db.select({ role: users.role }).from(users).where(eq(users.id, userId)).get()?.role === 'owner'
-  }
-  return row.ownerUserId === userId
+
+  return row?.ownerUserId === userId
 }
 
 /**
@@ -193,8 +186,8 @@ export function revokeUserSessions(userId: string): void {
   invalidateUserCache(userId)
 }
 
-function toAuthPayload(user: { id: string; username: string; role: string }) {
-  return { id: user.id, username: user.username, role: user.role }
+function toAuthPayload(user: { id: string; username: string }) {
+  return { id: user.id, username: user.username, role: isInstanceOwner(user.id) ? 'owner' : 'member' }
 }
 
 function createPrivateLibrary(tx: Pick<ReturnType<typeof getDb>, 'insert'>, userId: string) {
@@ -243,7 +236,6 @@ export async function register(username: string, password: string) {
         username,
         usernameNormalized: normalizeUsername(username),
         passwordHash: hash,
-        role: 'member',
         createdAt: now,
         updatedAt: now,
       }).run()
@@ -293,7 +285,7 @@ export function changeUsername(userId: string, username: string): AccountRes {
   invalidateUserCache(userId)
   const row = db.select().from(users).where(eq(users.id, userId)).get()
   if (!row) throw new AppError('USER_NOT_FOUND')
-  return { id: row.id, username: row.username, role: row.role, avatarKey: row.avatarKey }
+  return { id: row.id, username: row.username, role: isInstanceOwner(row.id) ? 'owner' : 'member', avatarKey: row.avatarKey }
 }
 
 /**
@@ -328,14 +320,12 @@ export async function setupUser(username: string, password: string) {
     if (tx.select({ id: instance.id }).from(instance).where(eq(instance.id, INSTANCE_ID)).get()) {
       throw new AppError('FORBIDDEN', 'Setup already completed')
     }
-    // Never take over the guest row: the guard caches its id, and promoting
-    // it would silently expose the owner's library to anonymous visitors.
     const id = createId('user')
     const now = Date.now()
     try {
       tx.insert(users).values({
         id, username, usernameNormalized: normalizeUsername(username),
-        passwordHash: hash, role: 'owner', createdAt: now, updatedAt: now,
+        passwordHash: hash, createdAt: now, updatedAt: now,
       }).run()
     } catch (err) {
       if (isUsernameUniqueConstraint(err)) throw new AppError('USERNAME_TAKEN', 'Username is already taken')
@@ -353,33 +343,4 @@ export async function setupUser(username: string, password: string) {
   })
   const { token } = createSession(user.id)
   return { token, user: toAuthPayload(user) }
-}
-
-export async function getDefaultUser() {
-  const db = getDb()
-  // Identified by role, not username: legacy rows (e.g. the old 'admin'
-  // default) keep working without an orphaned duplicate. The username is
-  // the account's own id — the row never logs in and is hidden from user
-  // management, so the name only has to be collision-proof.
-  const user = db.select().from(users).where(eq(users.role, 'guest')).get()
-  if (user) return user
-  const id = createId('user')
-  const newUser = {
-    id,
-    username: id,
-    passwordHash: null,
-    // The shared guest library account — never owner; owner-only routes
-    // reject it via requireOwner, account endpoints via the guest flag.
-    role: 'guest' as const,
-    createdAt: Date.now(),
-  }
-  try {
-    db.insert(users).values(newUser).run()
-    return newUser
-  } catch (err) {
-    if (!isUsernameUniqueConstraint(err)) throw err
-    const racedUser = db.select().from(users).where(eq(users.role, 'guest')).get()
-    if (racedUser) return racedUser
-    throw err
-  }
 }

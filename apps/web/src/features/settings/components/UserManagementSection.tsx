@@ -93,19 +93,17 @@ function MemberAvatar({
   )
 }
 
-function RoleBadge({ role }: { role: 'owner' | 'admin' | 'member' | 'guest' }) {
+function RoleBadge({ role }: { role: 'owner' | 'admin' | 'member' }) {
   const _ = useTranslation()
-  const styles: Record<'owner' | 'admin' | 'member' | 'guest', string> = {
+  const styles: Record<'owner' | 'admin' | 'member', string> = {
     owner: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400',
     admin: 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400',
     member: 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300',
-    guest: 'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400',
   }
-  const labels: Record<'owner' | 'admin' | 'member' | 'guest', string> = {
+  const labels: Record<'owner' | 'admin' | 'member', string> = {
     owner: _('auth.roleOwner'),
     admin: _('library.relationAdmin'),
     member: _('auth.roleMember'),
-    guest: _('auth.guest'),
   }
 
   return (

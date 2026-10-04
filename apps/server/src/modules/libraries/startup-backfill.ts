@@ -1,7 +1,8 @@
 import { desc, eq, ne, sql } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
-import { libraryMigrationLog, users } from '../../db/schema'
+import { libraryMigrationLog } from '../../db/schema'
+import { users } from '../../db/legacy-identity-schema'
 import { createId } from '../../lib/id'
 import { log } from '../../lib/logger'
 import {

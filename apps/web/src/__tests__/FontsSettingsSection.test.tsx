@@ -32,7 +32,7 @@ describe('FontsSettingsSection', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     await i18n.changeLanguage('zh-CN')
-    useAuthStore.setState({ user: null })
+    useAuthStore.setState({ user: { id: 'reader', username: 'reader', role: 'member' } })
     useUiStore.setState({ fontPreferences: {}, fontOrder: [], fontFamily: 'serif' })
     vi.mocked(useDeleteFont).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useDeleteFont>)
     vi.mocked(useUpdateFontScope).mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue(undefined), isPending: false } as unknown as ReturnType<typeof useUpdateFontScope>)

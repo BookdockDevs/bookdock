@@ -23,6 +23,7 @@ const shelvesRoutes = new Hono()
 
 shelvesRoutes.get('/', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   // Guests never reveal the vault, even with the query flag.
   const showHidden = c.get('guest') !== true && c.req.query('showHidden') === '1'
   const items = await listShelves(user.id, showHidden)
@@ -31,6 +32,7 @@ shelvesRoutes.get('/', async (c) => {
 
 shelvesRoutes.post('/', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const body = await c.req.json()
   const parsed = shelfCreateSchema.safeParse(body)
   if (!parsed.success) {
@@ -43,6 +45,7 @@ shelvesRoutes.post('/', async (c) => {
 // Registered before '/:id' so 'order' never matches as a shelf id.
 shelvesRoutes.put('/order', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const body = await c.req.json()
   const parsed = shelfReorderSchema.safeParse(body)
   if (!parsed.success) {
@@ -54,6 +57,7 @@ shelvesRoutes.put('/order', async (c) => {
 
 shelvesRoutes.put('/:id', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const shelfId = c.req.param('id')
   const body = await c.req.json()
   const parsed = shelfUpdateSchema.safeParse(body)
@@ -66,6 +70,7 @@ shelvesRoutes.put('/:id', async (c) => {
 
 shelvesRoutes.delete('/:id', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const shelfId = c.req.param('id')
   await deleteShelf(user.id, shelfId)
   return c.json({ data: null })
@@ -73,6 +78,7 @@ shelvesRoutes.delete('/:id', async (c) => {
 
 shelvesRoutes.post('/:id/books', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const shelfId = c.req.param('id')
   const body = await c.req.json()
   const parsed = bookIdsSchema.safeParse(body)
@@ -85,6 +91,7 @@ shelvesRoutes.post('/:id/books', async (c) => {
 
 shelvesRoutes.delete('/:id/books', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const shelfId = c.req.param('id')
   const body = await c.req.json()
   const parsed = bookIdsSchema.safeParse(body)

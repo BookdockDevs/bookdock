@@ -146,14 +146,7 @@ describe('Profile Page', () => {
 
   it('redirects guest users away from profile', () => {
     useAuthStore.setState({
-      user: {
-        id: 'g1',
-        username: 'Guest',
-        role: 'guest',
-        guest: true,
-        avatarKey: null,
-        createdAt: Date.now(),
-      },
+      user: null,
     })
 
     renderWithQuery(<Profile />)

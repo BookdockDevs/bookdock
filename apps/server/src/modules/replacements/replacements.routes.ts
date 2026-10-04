@@ -11,7 +11,7 @@ const replacementRoutes = new Hono()
 
 replacementRoutes.get('/', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') return c.json({ data: [] })
+  if (!user) return c.json({ data: [] })
   const bookId = c.req.query('bookId')
   const items = await listReplacements(user.id, bookId)
   return c.json({ data: items })
@@ -19,7 +19,7 @@ replacementRoutes.get('/', async (c) => {
 
 replacementRoutes.post('/', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
+  if (!user) return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
   const body = await c.req.json()
   const parsed = replacementCreateSchema.safeParse(body)
   if (!parsed.success) {
@@ -31,7 +31,7 @@ replacementRoutes.post('/', async (c) => {
 
 replacementRoutes.post('/batch-delete', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') throw new AppError('FORBIDDEN', 'Guest sessions cannot manage text replacements')
+  if (!user) throw new AppError('FORBIDDEN', 'Guest sessions cannot manage text replacements')
   const body = await c.req.json().catch(() => { throw new AppError('VALIDATION_ERROR', 'Invalid JSON') })
   const parsed = ruleBatchDeleteSchema.safeParse(body)
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
@@ -41,7 +41,7 @@ replacementRoutes.post('/batch-delete', async (c) => {
 
 replacementRoutes.post('/import', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
+  if (!user) return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
   const body = await readRuleTransferFile(c)
   const imported = await importReplacements(user.id, body)
   return c.json({ data: imported }, 201)
@@ -49,7 +49,7 @@ replacementRoutes.post('/import', async (c) => {
 
 replacementRoutes.put('/:replacementId', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
+  if (!user) return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
   const replacementId = c.req.param('replacementId')
   const body = await c.req.json()
   const parsed = replacementUpdateSchema.safeParse(body)
@@ -62,7 +62,7 @@ replacementRoutes.put('/:replacementId', async (c) => {
 
 replacementRoutes.put('/:replacementId/override', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
+  if (!user) return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
   const replacementId = c.req.param('replacementId')
   const body = await c.req.json()
   const parsed = replacementOverrideSchema.safeParse(body)
@@ -75,7 +75,7 @@ replacementRoutes.put('/:replacementId/override', async (c) => {
 
 replacementRoutes.delete('/:replacementId', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
+  if (!user) return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
   const replacementId = c.req.param('replacementId')
   await deleteReplacement(user.id, replacementId)
   return c.json({ data: null })

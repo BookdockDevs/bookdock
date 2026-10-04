@@ -24,7 +24,7 @@ export const useDownloadStore = create<DownloadState>((set) => ({
   userId: null,
   open: (target) => {
     const user = useAuthStore.getState().user
-    if (user && !user.guest && user.role !== 'guest') set({ target, userId: user.id })
+    if (user) set({ target, userId: user.id })
   },
   close: () => set({ target: null, userId: null }),
 }))

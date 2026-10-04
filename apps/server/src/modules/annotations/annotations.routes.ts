@@ -11,9 +11,7 @@ const annotationRoutes = new Hono()
 
 annotationRoutes.get('/book/:bookId', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') === true || user.role === 'guest') {
-    return c.json({ data: [] })
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const bookId = c.req.param('bookId')
   const items = await listAnnotations(user.id, bookId)
   return c.json({ data: items })
@@ -21,6 +19,7 @@ annotationRoutes.get('/book/:bookId', async (c) => {
 
 annotationRoutes.post('/book/:bookId', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const bookId = c.req.param('bookId')
   const body = await c.req.json()
   const parsed = annotationCreateSchema.safeParse(body)
@@ -33,6 +32,7 @@ annotationRoutes.post('/book/:bookId', async (c) => {
 
 annotationRoutes.put('/:annotationId', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const annotationId = c.req.param('annotationId')
   const body = await c.req.json()
   const parsed = annotationUpdateSchema.safeParse(body)
@@ -45,6 +45,7 @@ annotationRoutes.put('/:annotationId', async (c) => {
 
 annotationRoutes.delete('/:annotationId', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const annotationId = c.req.param('annotationId')
   await deleteAnnotation(user.id, annotationId)
   return c.json({ data: null })

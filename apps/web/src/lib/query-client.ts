@@ -23,7 +23,7 @@ queryClient.setQueryDefaults(['settings'], {
 seedSettingsQuery(queryClient)
 
 useAuthStore.subscribe((state, previous) => {
-  if (state.user?.id === previous.user?.id && state.user?.guest === previous.user?.guest && state.user?.role === previous.user?.role) return
+  if (state.user?.id === previous.user?.id && state.user?.role === previous.user?.role) return
   const filters = { predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[0] !== 'auth' }
   void queryClient.cancelQueries(filters)
   queryClient.removeQueries(filters)

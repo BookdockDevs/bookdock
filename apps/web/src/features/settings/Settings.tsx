@@ -36,9 +36,9 @@ export default function Settings() {
   usePageTitle(_('settings.title'))
   const onBack = useBackNavigation('/')
   const user = useAuthStore((s) => s.user)
-  const isOwner = user?.role === 'owner' && user.guest !== true
+  const isOwner = user?.role === 'owner'
   // Guest sessions share one anonymous identity and cannot manage tokens at all.
-  const isGuest = user?.guest === true || user?.role === 'guest'
+  const isGuest = !user
   const { data: userLibrariesData } = useLibraries()
   const hasManageableLibraries = (userLibrariesData?.data ?? []).some(
     (lib) => lib.type === 'shared' && (lib.relation === 'owner' || lib.relation === 'admin'),

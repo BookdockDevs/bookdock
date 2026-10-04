@@ -53,7 +53,7 @@ const appendOptionsSchema = appendContentSchema.pick({ startOffset: true })
 
 booksRoutes.post('/batch/selection', async (c) => {
   const user = c.get('user')
-  if (!user || c.get('guest') || user.role === 'guest') throw new AppError('FORBIDDEN')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const parsed = batchSelectionSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid selection', parsed.error.flatten())
   return c.json({ data: getPrivateBatchSelection(user.id, parsed.data.ids) })
@@ -61,7 +61,7 @@ booksRoutes.post('/batch/selection', async (c) => {
 
 booksRoutes.patch('/batch/organize', async (c) => {
   const user = c.get('user')
-  if (!user || c.get('guest') || user.role === 'guest') throw new AppError('FORBIDDEN')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const parsed = batchOrganizeSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid batch organization', parsed.error.flatten())
   return c.json({ data: organizePrivateBatch(user.id, parsed.data) })
@@ -110,6 +110,7 @@ booksRoutes.get('/', async (c) => {
     throw new AppError('VALIDATION_ERROR', 'Invalid pagination', parsed.error.flatten())
   }
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const search = query['search']
   const sortBy = query['sortBy']
   const sortOrder = query['sortOrder']
@@ -121,9 +122,6 @@ booksRoutes.get('/', async (c) => {
   const format = formatParsed.success ? formatParsed.data : undefined
   const readStatus = query['readStatus']
   const trash = query['trash'] === '1'
-  if (trash && (c.get('guest') === true || user.role === 'guest')) {
-    throw new AppError('FORBIDDEN', 'Guest sessions cannot access trash')
-  }
   // Opening the trash lazily runs both cleanup rules for the current user
   if (trash) {
     if (!isTrashEnabled(user.id)) throw new AppError('TRASH_DISABLED', 'Trash is disabled')
@@ -137,6 +135,7 @@ booksRoutes.get('/', async (c) => {
 
 booksRoutes.post('/', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const body = await c.req.parseBody()
   const file = body['file']
   if (!file || !(file instanceof File)) {
@@ -172,7 +171,7 @@ booksRoutes.post('/', async (c) => {
 booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
   const user = c.get('user')
   const id = c.req.param('id')
-  if ((c.get('guest') || user.role === 'guest') && c.req.query('reader') !== '1') {
+  if (!user && c.req.query('reader') !== '1') {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
   }
   const book = await getActiveBook(requestUserId(c), id, { showHidden: requestShowHidden(c) })
@@ -184,7 +183,7 @@ booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {
 
 booksRoutes.get('/:id/content', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') {
+  if (!user) {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
   }
   const id = c.req.param('id')
@@ -195,7 +194,7 @@ booksRoutes.get('/:id/content', async (c) => {
 
 booksRoutes.get('/:id/epub', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') {
+  if (!user) {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
   }
   const id = c.req.param('id')
@@ -219,7 +218,7 @@ booksRoutes.get('/:id/epub', async (c) => {
 // (the content is identical, the 校订版 label would be dishonest).
 booksRoutes.get('/:id/export.txt', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') {
+  if (!user) {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot export books')
   }
   const id = c.req.param('id')
@@ -240,7 +239,7 @@ booksRoutes.get('/:id/export.txt', async (c) => {
 // rules the filename is the 原文 form (same rule as export.txt above).
 booksRoutes.get('/:id/export.epub', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') {
+  if (!user) {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot export books')
   }
   const id = c.req.param('id')
@@ -281,7 +280,7 @@ booksRoutes.get('/:id/chapters', async (c) => {
 
 booksRoutes.patch('/:id/reader-settings', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') {
+  if (!user) {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot save reader settings')
   }
   const id = c.req.param('id')
@@ -295,6 +294,7 @@ booksRoutes.patch('/:id/reader-settings', async (c) => {
 
 booksRoutes.patch('/:id', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const id = c.req.param('id')
   const body = await c.req.json()
   const parsed = bookUpdateSchema.safeParse(body)
@@ -307,6 +307,7 @@ booksRoutes.patch('/:id', async (c) => {
 
 booksRoutes.post('/:id/toc-preview', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const id = c.req.param('id')
   const body = await c.req.json().catch(() => ({}))
   const parsed = tocPreviewSchema.safeParse(body)
@@ -319,6 +320,7 @@ booksRoutes.post('/:id/toc-preview', async (c) => {
 
 booksRoutes.post('/:id/append-preview', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const { text, startOffset } = await parseAppendRequest(c)
   const preview = await previewAppendTxtBookContent(user.id, c.req.param('id'), text, startOffset)
   return c.json({ data: preview })
@@ -326,6 +328,7 @@ booksRoutes.post('/:id/append-preview', async (c) => {
 
 booksRoutes.post('/:id/append', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const { text, startOffset } = await parseAppendRequest(c)
   const book = await appendTxtBookContent(user.id, c.req.param('id'), text, startOffset)
   return c.json({ data: book })
@@ -333,6 +336,7 @@ booksRoutes.post('/:id/append', async (c) => {
 
 booksRoutes.post('/:id/re-toc', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const id = c.req.param('id')
   const body = await c.req.json().catch(() => ({}))
   const parsed = reTocSchema.safeParse(body)
@@ -346,6 +350,7 @@ booksRoutes.post('/:id/re-toc', async (c) => {
 
 booksRoutes.delete('/trash', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   if (!isTrashEnabled(user.id)) throw new AppError('TRASH_DISABLED', 'Trash is disabled')
   const count = await emptyTrash(user.id)
   return c.json({ data: { count } })
@@ -353,6 +358,7 @@ booksRoutes.delete('/trash', async (c) => {
 
 booksRoutes.delete('/:id', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const id = c.req.param('id')
   // With trash disabled, deletion is immediate and unrecoverable.
   const deleteUserData = c.req.query('deleteUserData') === 'true'
@@ -371,6 +377,7 @@ booksRoutes.delete('/:id', async (c) => {
 
 booksRoutes.post('/:id/restore', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const id = c.req.param('id')
   if (!isTrashEnabled(user.id)) throw new AppError('TRASH_DISABLED', 'Trash is disabled')
   await restoreBook(user.id, id)
@@ -379,6 +386,7 @@ booksRoutes.post('/:id/restore', async (c) => {
 
 booksRoutes.delete('/:id/permanent', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const id = c.req.param('id')
   const deleteUserData = c.req.query('deleteUserData') === 'true'
   await deleteBook(user.id, id, { deleteUserData })
@@ -409,6 +417,7 @@ booksRoutes.get('/:id/cover', async (c) => {
 
 booksRoutes.put('/:id/cover', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const id = c.req.param('id')
   const body = await c.req.parseBody()
   const file = body['file']
@@ -421,6 +430,7 @@ booksRoutes.put('/:id/cover', async (c) => {
 
 booksRoutes.delete('/:id/cover', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const id = c.req.param('id')
   const book = await removeBookCover(user.id, id)
   return c.json({ data: book })
@@ -428,6 +438,7 @@ booksRoutes.delete('/:id/cover', async (c) => {
 
 booksRoutes.post('/:id/reset-metadata', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const id = c.req.param('id')
   const book = await resetBookMetadata(user.id, id, { normalizeTitle: isTitleNormalizeEnabled(user.id) })
   return c.json({ data: book })
@@ -435,6 +446,7 @@ booksRoutes.post('/:id/reset-metadata', async (c) => {
 
 booksRoutes.get('/:id/metadata-source', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const source = await getPrivateBookMetadataSource(user.id, c.req.param('id'))
   return c.json({ data: source })
 })
@@ -452,6 +464,7 @@ booksRoutes.post('/:id/fork', async (c) => {
 
 booksRoutes.put('/:id/shelves', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const bookId = c.req.param('id')
   const body = await c.req.json()
   const parsed = bookMembershipSchema.safeParse(body)
@@ -464,6 +477,7 @@ booksRoutes.put('/:id/shelves', async (c) => {
 
 booksRoutes.put('/:id/tags', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const bookId = c.req.param('id')
   const body = await c.req.json()
   const parsed = bookMembershipSchema.safeParse(body)
@@ -476,6 +490,7 @@ booksRoutes.put('/:id/tags', async (c) => {
 
 booksRoutes.get('/:id/shelves', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const bookId = c.req.param('id')
   const shelfId = await getBookShelf(user.id, bookId)
   return c.json({ data: shelfId })
@@ -483,6 +498,7 @@ booksRoutes.get('/:id/shelves', async (c) => {
 
 booksRoutes.get('/:id/tags', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const bookId = c.req.param('id')
   const tagIds = await getBookTags(user.id, bookId)
   return c.json({ data: tagIds })

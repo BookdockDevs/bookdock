@@ -37,6 +37,7 @@ import {
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import { tocBasePath, invalidateCityVersionQueries, type TocTarget } from '@/api/hooks/useTocRules'
+import { useAuthStore } from '@/stores/auth.store'
 import { withReveal } from '@/lib/reveal-hidden'
 import i18n from '@/i18n/i18n'
 import { getErrorKeyByCode, getUserErrorNotification } from '@/lib/error-message'
@@ -232,7 +233,9 @@ const PRIVATE_UPLOAD_TARGET: UploadTarget = {
 
 /** Instance-level upload limit (read-only, injected by GET /settings). */
 export function useUploadSettings() {
+  const user = useAuthStore((state) => state.user)
   const { data } = useQuery({
+    enabled: Boolean(user),
     queryKey: ['settings'],
     queryFn: fetchSettings,
   })
@@ -245,10 +248,11 @@ export function useUploadSettings() {
 /** Trash feature switch; respects user settings, cached settings, and stays disabled while loading without cache. */
 export function useTrashEnabled(options: { enabled?: boolean } = {}): boolean {
   const isEnabled = options.enabled !== false
+  const user = useAuthStore((state) => state.user)
   const { data } = useQuery({
     queryKey: ['settings'],
     queryFn: fetchSettings,
-    enabled: isEnabled,
+    enabled: Boolean(user) && isEnabled,
   })
   if (!isEnabled || !data?.data) return false
   return data.data.trash?.enabled !== false
@@ -257,10 +261,11 @@ export function useTrashEnabled(options: { enabled?: boolean } = {}): boolean {
 /** Trash size cap in bytes; undefined when unlimited (0 or unset) or when disabled. */
 export function useTrashCapBytes(options: { enabled?: boolean } = {}): number | undefined {
   const isEnabled = options.enabled !== false
+  const user = useAuthStore((state) => state.user)
   const { data } = useQuery({
     queryKey: ['settings'],
     queryFn: fetchSettings,
-    enabled: isEnabled,
+    enabled: Boolean(user) && isEnabled,
   })
   if (!isEnabled) return undefined
   const cap = data?.data.trash?.maxTrashBytes
@@ -988,7 +993,9 @@ export function usePublishPrivateBook() {
 
 /** Per-user library preferences (N-06 default sort modes, view, title normalization). */
 export function useLibraryPrefs(): SettingsRes['library'] {
+  const user = useAuthStore((state) => state.user)
   const { data } = useQuery({
+    enabled: Boolean(user),
     queryKey: ['settings'],
     queryFn: fetchSettings,
   })
@@ -1001,7 +1008,9 @@ export function useLibraryPrefs(): SettingsRes['library'] {
  * not who can see them.
  */
 export function useProfileSettings(): NonNullable<SettingsRes['profile']> {
+  const user = useAuthStore((state) => state.user)
   const { data } = useQuery({
+    enabled: Boolean(user),
     queryKey: ['settings'],
     queryFn: fetchSettings,
   })
@@ -1463,14 +1472,18 @@ export function useEmptyTrash() {
 }
 
 export function useShelves(): QueryObserverResult<{ data: ShelfListItem[] }> {
+  const user = useAuthStore((state) => state.user)
   return useQuery({
+    enabled: Boolean(user),
     queryKey: ['shelves'],
     queryFn: () => apiGet<{ data: ShelfListItem[] }>(withReveal('/shelves')),
   })
 }
 
 export function useTags(): QueryObserverResult<{ data: TagListItem[] }> {
+  const user = useAuthStore((state) => state.user)
   return useQuery({
+    enabled: Boolean(user),
     queryKey: ['tags'],
     queryFn: () => apiGet<{ data: TagListItem[] }>(withReveal('/tags')),
   })

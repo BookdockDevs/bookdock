@@ -59,7 +59,7 @@ export default function AccountMenu() {
   const instance = instanceData?.data
   // Guest = server injected the default passwordless user: the me payload is
   // flagged, or there is no local session while guest access is on.
-  const isGuest = user?.role === 'guest' || user?.guest === true || (!user && Boolean(instance?.allowGuestAccess))
+  const isGuest = !user
 
   if (!user && !isGuest) return null
 

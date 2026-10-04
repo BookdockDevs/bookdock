@@ -18,9 +18,7 @@ import { isWorkEffectivelyHidden } from './library-query'
  * private) and write rules land in Phase 4; this file only computes the
  * relation and the two read verdicts every caller needs.
  *
- * `userId: null` is an anonymous guest. Today's guard still injects the
- * shared default user, so callers map that to null until 3.11 switches
- * the context over.
+ * `userId: null` is an anonymous reader with no persisted account identity.
  */
 export interface RequestIdentity {
   userId: string | null

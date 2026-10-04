@@ -7,8 +7,7 @@ import { createAccessToken, deleteAccessToken, listAccessTokens, setAccessTokenD
 
 const tokensRoutes = new Hono()
 
-// A guest session is a shared anonymous identity, and a token it issued would
-// outlive that session, so guests cannot reach the token surface at all.
+// Anonymous requests cannot issue persistent access credentials.
 tokensRoutes.use('*', async (c, next) => {
   if (c.get('guest')) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage access tokens' } }, 403)
@@ -18,12 +17,14 @@ tokensRoutes.use('*', async (c, next) => {
 
 tokensRoutes.get('/', (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const data: AccessTokenListRes = { tokens: listAccessTokens(user.id) }
   return c.json({ data })
 })
 
 tokensRoutes.post('/', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = accessTokenCreateSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
@@ -34,6 +35,7 @@ tokensRoutes.post('/', async (c) => {
 
 tokensRoutes.patch('/:id', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = accessTokenUpdateSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
@@ -43,16 +45,19 @@ tokensRoutes.patch('/:id', async (c) => {
 
 tokensRoutes.post('/:id/disable', (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   return c.json({ data: setAccessTokenDisabled(user.id, c.req.param('id'), true) })
 })
 
 tokensRoutes.post('/:id/enable', (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   return c.json({ data: setAccessTokenDisabled(user.id, c.req.param('id'), false) })
 })
 
 tokensRoutes.delete('/:id', (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   deleteAccessToken(user.id, c.req.param('id'))
   return c.json({ data: null })
 })

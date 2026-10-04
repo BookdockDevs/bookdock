@@ -186,7 +186,6 @@ function getTargetUser(userId: string) {
   const db = getDb()
   const target = db.select().from(users).where(eq(users.id, userId)).get()
   if (!target) throw new AppError('USER_NOT_FOUND', 'User not found')
-  if (target.role === 'guest') throw new AppError('FORBIDDEN', 'Guest identities cannot join libraries')
   if (target.disabled) throw new AppError('FORBIDDEN', 'Disabled accounts cannot join libraries')
   return target
 }
@@ -700,7 +699,7 @@ export async function transferLibraryOwnership(actorId: string, libraryId: strin
   if (library.type === 'private') throw new AppError('FORBIDDEN', 'Private libraries cannot be transferred')
   if (library.userId !== actorId) throw new AppError('FORBIDDEN', 'Only the library owner can transfer it')
   const target = db.select().from(users).where(eq(users.id, targetId)).get()
-  if (!target || target.role === 'guest') throw new AppError('USER_NOT_FOUND', 'User not found')
+  if (!target) throw new AppError('USER_NOT_FOUND', 'User not found')
   if (target.disabled === 1) throw new AppError('FORBIDDEN', 'Transfer target must be enabled')
   const membership = membershipOf(libraryId, targetId)
   if (!membership) throw new AppError('FORBIDDEN', 'Transfer target must be an admin or member of the library')

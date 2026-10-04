@@ -1,15 +1,14 @@
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { runDatabaseMigrations } from '../../db/client'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { BOOKDOCK_BUILD_INFO } from '@bookdock/shared'
 
-import * as schema from '../../db/legacy-test-schema'
+import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { config } from '../../config'
 import { AppError } from '../../middleware/error'
@@ -19,29 +18,28 @@ import { createSnapshot, deleteSnapshot, listSnapshots, releaseSnapshotRetention
 vi.mock('../../config', async () => {
   const os = await import('node:os')
   const nodePath = await import('node:path')
-  return { config: { dataDir: nodePath.join(os.tmpdir(), `bookdock-snapshots-test-${process.pid}`) } }
+  return { config: { dataDir: nodePath.join(os.tmpdir(), `bookdock-snapshots-test-${process.pid}`), storageDriver: 'localfs' } }
 })
 
-const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'db', 'migrations')
 const snapshotsRoot = path.join(config.dataDir, 'snapshots')
 const CURRENT_VERSION = BOOKDOCK_BUILD_INFO.version
 
-function createTestDb() {
+async function createTestDb() {
   const sqlite = new Database(':memory:')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder })
+  await runDatabaseMigrations(db)
   return db
 }
 
-let db: ReturnType<typeof createTestDb>
+let db: Awaited<ReturnType<typeof createTestDb>>
 let userId: string
 
 beforeEach(async () => {
-  db = createTestDb()
+  db = await createTestDb()
   userId = createId('user')
   db.insert(schema.users).values({ id: userId, username: `user-${userId}`, createdAt: Date.now() }).run()
-  db.insert(schema.instanceSettings).values({ key: 'allowGuestAccess', value: 'false' }).run()
+  db.insert(schema.instance).values({ id: 'instance', ownerUserId: userId, createdAt: Date.now(), updatedAt: Date.now() }).run()
   vi.spyOn(client, 'getDb').mockReturnValue(db)
   await rm(snapshotsRoot, { recursive: true, force: true })
 })
@@ -73,7 +71,7 @@ describe('snapshots service', () => {
       id: `${CURRENT_VERSION}-1760000000000`,
       appVersion: CURRENT_VERSION,
       createdAt: 1_760_000_000_000,
-      instanceSettings: { allowGuestAccess: 'false' },
+      formatVersion: 2, instance: expect.objectContaining({ ownerUserId: userId, allowGuestAccess: false }),
     })
     expect(snapshot.sizeBytes).toBeGreaterThan(0)
 
@@ -86,7 +84,7 @@ describe('snapshots service', () => {
     expect(manifest).toEqual({
       appVersion: CURRENT_VERSION,
       createdAt: 1_760_000_000_000,
-      instanceSettings: { allowGuestAccess: 'false' },
+      formatVersion: 2, instance: expect.objectContaining({ ownerUserId: userId, allowGuestAccess: false }),
     })
   })
 
@@ -127,7 +125,7 @@ describe('snapshots service', () => {
     // the id pattern is also the traversal guard, so both must agree.
     await seedSnapshot('0.4.0-beta.1-1760000000000', 1_760_000_000_000)
 
-    expect(await listSnapshots()).toEqual([{ id: '0.4.0-beta.1-1760000000000', appVersion: '0.4.0-beta.1', createdAt: 1_760_000_000_000, sizeBytes: expect.any(Number), instanceSettings: {} }])
+    expect(await listSnapshots()).toEqual([{ id: '0.4.0-beta.1-1760000000000', appVersion: '0.4.0-beta.1', createdAt: 1_760_000_000_000, sizeBytes: expect.any(Number) }])
     await deleteSnapshot('0.4.0-beta.1-1760000000000')
     expect(await listSnapshots()).toEqual([])
   })

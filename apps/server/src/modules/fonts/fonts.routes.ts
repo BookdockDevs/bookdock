@@ -30,7 +30,7 @@ const fontsRoutes = new Hono()
 
 fontsRoutes.post('/', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') {
+  if (!user) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot upload fonts' } }, 403)
   }
   const body = await c.req.parseBody()
@@ -54,14 +54,14 @@ fontsRoutes.post('/', async (c) => {
 
 fontsRoutes.get('/', async (c) => {
   const user = c.get('user')
-  const items = await listFonts(user.id)
-  const visibleItems = c.get('guest') || user.role === 'guest' ? items.filter((item) => item.scope === 'instance') : items
+  const items = await listFonts(user?.id ?? null)
+  const visibleItems = !user ? items.filter((item) => item.scope === 'instance') : items
   return c.json({ data: visibleItems } satisfies { data: FontListItem[] })
 })
 
 fontsRoutes.patch('/:id/scope', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') {
+  if (!user) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage fonts' } }, 403)
   }
   const body = await c.req.json()
@@ -75,7 +75,7 @@ fontsRoutes.patch('/:id/scope', async (c) => {
 
 fontsRoutes.delete('/:id', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') || user.role === 'guest') {
+  if (!user) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot delete fonts' } }, 403)
   }
   await deleteFont(user.id, user.role, c.req.param('id'))
@@ -84,8 +84,8 @@ fontsRoutes.delete('/:id', async (c) => {
 
 fontsRoutes.get('/:id/file', async (c) => {
   const user = c.get('user')
-  const row = await getFontFile(user.id, c.req.param('id'))
-  if ((c.get('guest') || user.role === 'guest') && row.scope !== 'instance') {
+  const row = await getFontFile(user?.id ?? null, c.req.param('id'))
+  if (!user && row.scope !== 'instance') {
     throw new AppError('FONT_NOT_FOUND')
   }
   const storage = getStorage()

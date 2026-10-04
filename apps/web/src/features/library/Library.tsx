@@ -90,12 +90,12 @@ export default function Library() {
   const libraryPageSize = useUiStore((s) => s.libraryPageSize)
   const pageSize = libraryPageSize || 24
   const user = useAuthStore((s) => s.user)
-  const isGuest = !user || user.guest === true || user.role === 'guest'
+  const isGuest = !user
   // Private-surface upload gate: the instance switch closes it for ordinary
   // members (fail-open while the instance query loads; the server enforces).
   const { data: instanceData } = useInstanceInfo()
   const userUploadAllowed = instanceData?.data.allowUserUpload !== false
-    || (user?.role === 'owner' && user.guest !== true)
+    || (user?.role === 'owner')
   const sortByPref = useUiStore((s) => s.sortBy)
   const sortOrderPref = useUiStore((s) => s.sortOrder)
   const revealHidden = useUiStore((s) => s.revealHidden)

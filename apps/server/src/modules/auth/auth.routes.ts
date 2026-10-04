@@ -102,7 +102,7 @@ authRoutes.post('/logout', (c) => {
 
 authRoutes.post('/password', async (c) => {
   const user = c.get('user')
-  if (!user || c.get('guest')) {
+  if (!user) {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
   }
   const body = await c.req.json().catch(() => null)
@@ -119,7 +119,7 @@ authRoutes.post('/password', async (c) => {
 
 authRoutes.post('/username', async (c) => {
   const user = c.get('user')
-  if (!user || c.get('guest')) {
+  if (!user) {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
   }
   const body = await c.req.json().catch(() => null)
@@ -133,7 +133,7 @@ authRoutes.post('/username', async (c) => {
 
 authRoutes.put('/timezone', async (c) => {
   const user = c.get('user')
-  if (!user || c.get('guest')) {
+  if (!user) {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
   }
   const body = await c.req.json().catch(() => null)
@@ -147,15 +147,12 @@ authRoutes.put('/timezone', async (c) => {
 
 authRoutes.get('/me', (c) => {
   const user = c.get('user')
-  if (!user) {
-    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
-  }
-  return c.json({ data: { ...user, guest: c.get('guest') === true } })
+  return c.json({ data: user ? { ...user, guest: false } : { user: null, guest: true } })
 })
 
 authRoutes.delete('/account', async (c) => {
   const user = c.get('user')
-  if (!user || c.get('guest')) {
+  if (!user) {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
   }
   const body = await c.req.json().catch(() => null)

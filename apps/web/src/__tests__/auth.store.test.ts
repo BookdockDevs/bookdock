@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { getUserDisplayName } from '../stores/auth.store'
+import { getUserDisplayName, useAuthStore } from '../stores/auth.store'
+import { useUiStore } from '../stores/ui.store'
 
 describe('getUserDisplayName', () => {
   it('uses the username for a signed-in user', () => {
@@ -8,6 +9,14 @@ describe('getUserDisplayName', () => {
   })
 
   it('uses the guest label for a guest session', () => {
-    expect(getUserDisplayName({ id: 'guest-1', username: 'admin', role: 'guest', guest: true }, '游客')).toBe('游客')
+    expect(getUserDisplayName(null, '游客')).toBe('游客')
+  })
+
+  it('keeps anonymous local preferences when identity is checked again', () => {
+    useAuthStore.setState({ user: null })
+    useUiStore.setState({ view: 'list' })
+    useAuthStore.getState().clearAuth()
+    expect(useAuthStore.getState().user).toBeNull()
+    expect(useUiStore.getState().view).toBe('list')
   })
 })

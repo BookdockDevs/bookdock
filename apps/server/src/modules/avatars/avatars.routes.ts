@@ -33,10 +33,7 @@ const avatarsRoutes = new Hono()
 
 avatarsRoutes.post('/', async (c) => {
   const user = c.get('user')
-  // The shared guest account is anonymous: no personal avatar
-  if (!user || c.get('guest')) {
-    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const body = await c.req.parseBody()
   const file = body['file']
   if (!file || !(file instanceof File)) {
@@ -51,9 +48,7 @@ avatarsRoutes.post('/', async (c) => {
 
 avatarsRoutes.delete('/', async (c) => {
   const user = c.get('user')
-  if (!user || c.get('guest')) {
-    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   await deleteAvatar(user.id)
   return c.json({ data: null })
 })

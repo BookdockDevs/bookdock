@@ -444,7 +444,7 @@ describe('toc-rules routes', () => {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('/api/v1/toc-rules/*', async (c, next) => {
-      c.set('user', { id: ownerId, username: 'owner', role: guest ? 'guest' : 'owner', avatarKey: null })
+      c.set('user', guest ? null : { id: ownerId, username: 'owner', role: guest ? 'guest' : 'owner', avatarKey: null })
       return next()
     })
     app.route('/api/v1/toc-rules', tocRuleRoutes)

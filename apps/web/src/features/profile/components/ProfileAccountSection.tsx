@@ -182,7 +182,7 @@ export default function ProfileAccountSection({ onOpenSettings }: ProfileAccount
                     {user?.username}
                   </span>
                   <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">
-                    {user?.role === 'owner' ? _('auth.roleOwner') : user?.role === 'guest' ? _('auth.guest') : _('auth.roleMember')}
+                    {user?.role === 'owner' ? _('auth.roleOwner') : !user ? _('auth.guest') : _('auth.roleMember')}
                   </span>
                 </div>
 

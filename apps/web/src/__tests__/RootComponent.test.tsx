@@ -21,7 +21,7 @@ vi.mock('@/api/client', () => ({
   UNAUTHORIZED_EVENT: 'bd:unauthorized',
 }))
 
-function mockApi({ instance, me }: { instance: InstanceInfoRes; me?: { id: string; username: string; role: string; guest?: boolean } }) {
+function mockApi({ instance, me }: { instance: InstanceInfoRes; me?: { id: string; username: string; role: string; guest?: false } | { user: null; guest: true } }) {
   ;(apiGet as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
     if (path === '/auth/instance') return Promise.resolve({ data: instance })
     if (path === '/auth/me') {
@@ -64,14 +64,14 @@ describe('RootComponent guard', () => {
     })
   })
 
-  it('stores guest-flagged sessions and passes through', async () => {
-    const me = { id: 'u1', username: 'admin', role: 'owner', guest: true }
+  it('keeps anonymous identity null and passes through', async () => {
+    const me = { user: null, guest: true as const }
     mockApi({ instance: { ...INITIALIZED, allowGuestAccess: true }, me })
     renderRoot()
     await waitFor(() => {
       expect(screen.getByTestId('outlet')).toBeInTheDocument()
     })
-    expect(useAuthStore.getState().user).toEqual(me)
+    expect(useAuthStore.getState().user).toBeNull()
     expect(navigateMock).not.toHaveBeenCalledWith({ to: '/login' })
   })
 
@@ -179,7 +179,7 @@ describe('RootComponent guard', () => {
 
   it('keeps the login page reachable from a guest session', async () => {
     currentPath = '/login'
-    const me = { id: 'u1', username: 'admin', role: 'guest', guest: true }
+    const me = { user: null, guest: true as const }
     mockApi({ instance: { ...INITIALIZED, allowGuestAccess: true }, me })
     renderRoot()
 

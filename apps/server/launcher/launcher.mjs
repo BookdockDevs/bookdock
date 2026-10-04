@@ -160,7 +160,24 @@ export function createLauncher({
   }
 
   function restoreSnapshot(snapshotId) {
-    const source = path.join(dataDir, 'snapshots', snapshotId, 'bookdock.db')
+    if (typeof snapshotId !== 'string' || !/^(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)-(\d{10,})$/.test(snapshotId)) {
+      throw new Error('Unsupported snapshot id')
+    }
+    const dir = path.join(dataDir, 'snapshots', snapshotId)
+    const manifest = readJson(path.join(dir, 'manifest.json'))
+    const previousName = readPointer('current')?.name
+    const previousRoot = typeof previousName === 'string' && parseVersion(previousName)
+      ? path.join(releasesDir, previousName) : factoryRoot
+    const expectedVersion = readJson(path.join(previousRoot, MANIFEST_FILE))?.version
+    if (typeof expectedVersion !== 'string' || !parseVersion(expectedVersion) || !manifest || manifest.appVersion !== expectedVersion) throw new Error('Snapshot does not match the rollback release')
+    if (manifest.formatVersion !== undefined && manifest.formatVersion !== 2) throw new Error('Unsupported snapshot format')
+    if (manifest.formatVersion === 2 && (!manifest.instance || typeof manifest.instance.ownerUserId !== 'string')) {
+      throw new Error('Snapshot has no instance identity')
+    }
+    if (manifest.formatVersion === undefined && (!manifest.instanceSettings || typeof manifest.instanceSettings !== 'object' || Array.isArray(manifest.instanceSettings))) {
+      throw new Error('Unsupported legacy snapshot manifest')
+    }
+    const source = path.join(dir, 'bookdock.db')
     if (!existsSync(source)) throw new Error(`snapshot ${snapshotId} has no ${source}`)
     copyFileSync(source, dbPath)
     for (const sidecar of ['-wal', '-shm']) rmSync(`${dbPath}${sidecar}`, { force: true })

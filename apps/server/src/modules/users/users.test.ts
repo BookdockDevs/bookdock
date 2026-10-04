@@ -52,6 +52,9 @@ async function insertUser(
     role: opts.role ?? 'member',
     createdAt: Date.now(),
   }).run()
+  if (opts.role === 'owner' && !db.select().from(schema.instance).get()) {
+    db.insert(schema.instance).values({ id: 'instance', ownerUserId: id, createdAt: 1, updatedAt: 1 }).run()
+  }
   return id
 }
 
@@ -121,10 +124,9 @@ describe('users module', () => {
     db.run(sql.raw('DROP TABLE tags'))
   })
 
-  it('lists users with book counts (excluding trashed books and the guest account)', async () => {
+  it('lists users with book counts (excluding trashed books)', async () => {
     await insertUser(db, { username: 'own', role: 'owner' })
     const memberId = await insertUser(db, { username: 'mem' })
-    await insertUser(db, { username: 'guest', role: 'guest' })
     insertBook(db, memberId)
     insertBook(db, memberId)
     insertBook(db, memberId, Date.now())
@@ -179,13 +181,11 @@ describe('users module', () => {
     expect(await verifyPassword('newpass6', row!.passwordHash!)).toBe(true)
   })
 
-  it('rejects all updates to the guest account', async () => {
-    const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
-    const guestId = await insertUser(db, { username: 'guest', role: 'guest' })
-    await expect(updateUser(ownerId, guestId, { newPassword: 'hack123' }))
-      .rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
-    await expect(updateUser(ownerId, guestId, { disabled: true }))
-      .rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
+  it('refuses management without an instance owner even if a legacy role says owner', async () => {
+    const actorId = await insertUser(db, { username: 'own', role: 'owner' })
+    const memberId = await insertUser(db, { username: 'mem' })
+    db.delete(schema.instance).run()
+    await expect(updateUser(actorId, memberId, { disabled: true })).rejects.toMatchObject({ code: 'FORBIDDEN' })
   })
 
   it('rejects disabling oneself', async () => {
@@ -194,12 +194,12 @@ describe('users module', () => {
     await expect(updateUser(ownerId, ownerId, { disabled: true })).rejects.toMatchObject({ code: 'CANNOT_MODIFY_SELF' })
   })
 
-  it('rejects disabling the last active owner', async () => {
+  it('rejects a stale legacy owner after instance ownership moves', async () => {
     const actorId = await insertUser(db, { username: 'actor', role: 'owner' })
     const targetId = await insertUser(db, { username: 'target', role: 'owner' })
-    // stale session: actor is itself disabled, so target is the only active owner
+    db.update(schema.instance).set({ ownerUserId: targetId }).run()
     db.update(schema.users).set({ disabled: 1 }).where(eq(schema.users.id, actorId)).run()
-    await expect(updateUser(actorId, targetId, { disabled: true })).rejects.toMatchObject({ code: 'LAST_OWNER' })
+    await expect(updateUser(actorId, targetId, { disabled: true })).rejects.toMatchObject({ code: 'FORBIDDEN' })
   })
 
   it('rejects updates for a missing user', async () => {
@@ -219,7 +219,7 @@ describe('users module', () => {
       db.insert(schema.instance).values({
         id: 'instance', ownerUserId: ownerId, allowRegistration: false,
         allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
-      }).run()
+      }).onConflictDoUpdate({ target: schema.instance.id, set: { ownerUserId: ownerId } }).run()
       const app = createUsersApp({ id: ownerId, username: 'own', role: 'owner' })
       const res = await app.request('/api/v1/users')
       expect(res.status).toBe(200)
@@ -233,7 +233,7 @@ describe('users module', () => {
       db.insert(schema.instance).values({
         id: 'instance', ownerUserId: ownerId, allowRegistration: false,
         allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
-      }).run()
+      }).onConflictDoUpdate({ target: schema.instance.id, set: { ownerUserId: ownerId } }).run()
       const app = createUsersApp({ id: ownerId, username: 'own', role: 'owner' })
       const res = await app.request('/api/v1/users', {
         method: 'POST',
@@ -253,7 +253,7 @@ describe('users module', () => {
       db.insert(schema.instance).values({
         id: 'instance', ownerUserId: ownerId, allowRegistration: false,
         allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
-      }).run()
+      }).onConflictDoUpdate({ target: schema.instance.id, set: { ownerUserId: ownerId } }).run()
       // The legacy role column still says owner, but ownership lives on the
       // Instance row: a drifted role must grant nothing.
       const app = createUsersApp({ id: staleId, username: 'stale', role: 'owner' })
@@ -267,7 +267,7 @@ describe('users module', () => {
       db.insert(schema.instance).values({
         id: 'instance', ownerUserId: ownerId, allowRegistration: false,
         allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
-      }).run()
+      }).onConflictDoUpdate({ target: schema.instance.id, set: { ownerUserId: ownerId } }).run()
       const app = createUsersApp({ id: ownerId, username: 'own', role: 'owner' })
       const transfer = await app.request('/api/v1/users/instance-owner', {
         method: 'POST',
@@ -316,7 +316,7 @@ describe('users module', () => {
       db.insert(schema.instance).values({
         id: 'instance', ownerUserId: ownerId, allowRegistration: false,
         allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
-      }).run()
+      }).onConflictDoUpdate({ target: schema.instance.id, set: { ownerUserId: ownerId } }).run()
     }
 
     it('moves ownership and demotes the former owner atomically', async () => {
@@ -324,18 +324,16 @@ describe('users module', () => {
       const memberId = await insertUser(db, { username: 'mem' })
       seedInstanceDb(ownerId)
       expect(await transferInstanceOwnership(ownerId, memberId)).toMatchObject({ ownerUserId: memberId })
-      expect(db.select().from(schema.users).where(eq(schema.users.id, ownerId)).get()!.role).toBe('member')
-      expect(db.select().from(schema.users).where(eq(schema.users.id, memberId)).get()!.role).toBe('owner')
+      expect(listUsers().find((user) => user.id === ownerId)?.role).toBe('member')
+      expect(listUsers().find((user) => user.id === memberId)?.role).toBe('owner')
     })
 
-    it('refuses non-owners, guests and disabled targets', async () => {
+    it('refuses non-owners and disabled targets', async () => {
       const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
       const memberId = await insertUser(db, { username: 'mem' })
       const otherId = await insertUser(db, { username: 'other' })
       seedInstanceDb(ownerId)
       await expect(transferInstanceOwnership(memberId, otherId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
-      const guestId = await insertUser(db, { username: 'ghost', role: 'guest' })
-      await expect(transferInstanceOwnership(ownerId, guestId)).rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
       const offId = await insertUser(db, { username: 'off' })
       db.update(schema.users).set({ disabled: 1 }).where(eq(schema.users.id, offId)).run()
       await expect(transferInstanceOwnership(ownerId, offId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
@@ -355,7 +353,7 @@ describe('users module', () => {
       db.insert(schema.instance).values({
         id: 'instance', ownerUserId: ownerId, allowRegistration: false,
         allowGuestAccess: false, uploadMaxBytes: null, createdAt: 1, updatedAt: 1,
-      }).run()
+      }).onConflictDoUpdate({ target: schema.instance.id, set: { ownerUserId: ownerId } }).run()
     }
 
     function seedPrivateLibrary(userId: string, bookId?: string) {
@@ -467,11 +465,9 @@ describe('users module', () => {
       expect(keys.every((storageKey) => !mem.files.has(storageKey))).toBe(true)
     })
 
-    it('refuses the guest account and missing users', async () => {
+    it('refuses missing users', async () => {
       const ownerId = await insertUser(db, { username: 'own', role: 'owner' })
       seedInstanceDb(ownerId)
-      const guestId = await insertUser(db, { username: 'ghost', role: 'guest' })
-      await expect(deleteUser(ownerId, guestId)).rejects.toMatchObject({ code: 'CANNOT_MODIFY_GUEST' })
       await expect(deleteUser(ownerId, 'missing')).rejects.toMatchObject({ code: 'USER_NOT_FOUND' })
     })
 

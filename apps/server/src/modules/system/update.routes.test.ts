@@ -24,7 +24,7 @@ function createApp(role: 'owner' | 'member', guest = false, id = 'user-1') {
   const app = new Hono()
   app.onError(errorHandler)
   app.use('*', async (c, next) => {
-    c.set('user', { id, username: 'tester', role, avatarKey: null })
+    c.set('user', guest ? null : { id, username: 'tester', role, avatarKey: null })
     if (guest) c.set('guest', true)
     return next()
   })

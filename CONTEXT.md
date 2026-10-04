@@ -96,3 +96,17 @@ _Avoid_: infinite scroll when the behavior is limited to book content.
 **Viewport scrolling**:
 The behavior of vertical arrow keys in a scrolling reading mode: each press moves approximately one viewport with a small overlap, while left and right arrows remain chapter navigation controls.
 _Avoid_: treating left and right arrows as ordinary iframe scrolling.
+
+## Instance Identity
+
+**User**:
+A real account that owns personal reading data and preferences.
+_Avoid_: Guest account for an anonymous visitor.
+
+**Guest**:
+An anonymous reader admitted by the instance guest-access policy; guest preferences and progress belong to the local device.
+_Avoid_: shared anonymous User.
+
+**Instance Owner**:
+The one real account responsible for the deployment and its configuration. Shared-library ownership and membership are separate responsibilities.
+_Avoid_: global user role as an independent source of ownership.

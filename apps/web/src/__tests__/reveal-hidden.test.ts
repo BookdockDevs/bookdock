@@ -46,9 +46,9 @@ describe('account-local hidden display', () => {
     expect(useUiStore.getState().revealHidden).toBe(true)
   })
 
-  it('never reveals for guests, including the injected default account', async () => {
+  it('never reveals for anonymous readers', async () => {
     localStorage.setItem('bd-reveal-hidden:alice', 'true')
-    useAuthStore.getState().setAuth({ ...alice, guest: true })
+    useAuthStore.getState().clearAuth()
     await toggleRevealHidden()
     expect(useUiStore.getState().revealHidden).toBe(false)
     expect(withReveal('/books/abc')).toBe('/books/abc')

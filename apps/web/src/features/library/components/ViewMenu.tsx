@@ -129,7 +129,7 @@ export default function ViewMenu({
   const setView = useUiStore((s) => s.setView)
   const revealHidden = useUiStore((s) => s.revealHidden)
   const user = useAuthStore((s) => s.user)
-  const isGuest = !user || user.guest === true || user.role === 'guest'
+  const isGuest = !user
   const updateLibraryPrefs = useUpdateLibraryPrefs()
   const libraryPrefs = useLibraryPrefs()
   const gridCardFields = libraryPrefs?.gridCardFields ?? DEFAULT_GRID_CARD_FIELDS

@@ -52,12 +52,14 @@ const writeQuerySchema = z.object({ libraryId: z.string().min(1).max(128).option
 
 extRoutes.get('/libraries', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const libraries = await listExternalLibraries(user.id)
   return c.json({ data: { libraries } satisfies ExternalLibrariesRes })
 })
 
 extRoutes.get('/books', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = listQuerySchema.safeParse(c.req.query())
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid query', parsed.error.flatten())
@@ -67,6 +69,7 @@ extRoutes.get('/books', async (c) => {
 
 extRoutes.get('/books/:versionId', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   return c.json({ data: await getExternalBook(user.id, c.req.param('versionId')) })
 })
 
@@ -78,6 +81,7 @@ extRoutes.get('/books/:versionId', async (c) => {
  */
 const download = async (c: Context, versionId: string) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   // getActiveBook is the readability gate, and it resolves a library version as
   // well as a private card, so a member can fetch a shared library's file.
   // showHidden because the listing already shows a manager the vault's hidden
@@ -90,6 +94,7 @@ extRoutes.on('HEAD', '/books/:versionId/file', (c) => download(c, c.req.param('v
 
 extRoutes.post('/books', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const body = await c.req.parseBody()
   const file = body['file']
   if (!(file instanceof File)) {
@@ -136,6 +141,7 @@ extRoutes.post('/books', async (c) => {
 
 extRoutes.delete('/books/:versionId', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = writeQuerySchema.safeParse(c.req.query())
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid query', parsed.error.flatten())

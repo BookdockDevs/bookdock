@@ -20,7 +20,7 @@ export default function Stats() {
   const _ = useTranslation()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
-  const isGuest = user?.guest === true || user?.role === 'guest'
+  const isGuest = !user
   usePageTitle(_('stats.title'))
   const onBack = useBackNavigation('/')
   const [period, setPeriod] = useState<StatsPeriod>('week')

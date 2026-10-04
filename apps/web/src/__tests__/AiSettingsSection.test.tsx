@@ -313,7 +313,7 @@ describe('AiSettingsSection', () => {
   })
 
   it('shows guests a hint instead of configuration controls', () => {
-    useAuthStore.setState({ user: { id: 'guest', username: 'guest', role: 'guest', guest: true } })
+    useAuthStore.setState({ user: null })
 
     render(<AiSettingsSection />)
 

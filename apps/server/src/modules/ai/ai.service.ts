@@ -412,14 +412,7 @@ export function listAiProviders() {
   return PROVIDERS
 }
 
-function canUse(role: string) {
-  return role !== 'guest'
-}
-
 function assertAvailable(role: string, ai: EffectiveAiConfig) {
-  if (!canUse(role)) {
-    throw new AppError('AI_NOT_ALLOWED', 'This account cannot use AI')
-  }
   assertBaseUrlAllowed(role, ai)
   if (!configured(ai)) {
     throw new AppError('AI_NOT_CONFIGURED', 'AI is not configured on this server')
@@ -442,9 +435,8 @@ export function getAiStatus(userId: string, role: string): AiStatusRes {
   const activeProfile = activeStoredProfile(stored.value, profiles)
   const models = activeProfile ? profileModels(activeProfile) : []
   if (ai.model && !models.some((model) => model.id === ai.model)) models.unshift({ id: ai.model, name: ai.model })
-  const allowed = canUse(role)
   return {
-    enabled: configured(ai) && allowed && (role !== 'member' || !ai.configuredByUser || memberBaseUrlAllowed(ai.provider, ai.baseUrl)),
+    enabled: configured(ai) && (role !== 'member' || !ai.configuredByUser || memberBaseUrlAllowed(ai.provider, ai.baseUrl)),
     provider: ai.provider,
     model: ai.model,
     models,
@@ -586,7 +578,6 @@ function profileFromCreate(input: AiProfileCreateReq): StoredAiProfile {
 }
 
 export function createAiProfile(userId: string, role: string, input: AiProfileCreateReq): AiProfileRes {
-  if (!canUse(role)) throw new AppError('AI_NOT_ALLOWED', 'This account cannot configure AI')
   assertDraftBaseUrlAllowed(role, normalizeProvider(input.provider), input.baseUrl)
   const existing = storedConfig(userId)
   const profiles = storedProfiles(existing.value)
@@ -598,7 +589,6 @@ export function createAiProfile(userId: string, role: string, input: AiProfileCr
 }
 
 export function updateAiProfile(userId: string, role: string, profileId: string, input: AiProfileUpdateReq): AiProfileRes {
-  if (!canUse(role)) throw new AppError('AI_NOT_ALLOWED', 'This account cannot configure AI')
   const existing = storedConfig(userId)
   const profiles = storedProfiles(existing.value)
   const profile = profiles.find((item) => item.id === profileId)
@@ -615,7 +605,6 @@ export function updateAiProfile(userId: string, role: string, profileId: string,
 }
 
 export function deleteAiProfile(userId: string, role: string, profileId: string) {
-  if (!canUse(role)) throw new AppError('AI_NOT_ALLOWED', 'This account cannot configure AI')
   const existing = storedConfig(userId)
   const profiles = storedProfiles(existing.value)
   if (!profiles.some((profile) => profile.id === profileId)) throw new AppError('AI_PROFILE_NOT_FOUND', 'AI profile not found')
@@ -1268,7 +1257,6 @@ export async function embedAiTexts(userId: string, texts: string[], signal: Abor
 }
 
 export async function listAiModels(userId: string, role: string, input: AiModelDiscoveryReq, signal: AbortSignal): Promise<AiModelRes[]> {
-  if (!canUse(role)) throw new AppError('AI_NOT_ALLOWED', 'This account cannot use AI')
   const ai = draftConfig(userId, input)
   assertDraftBaseUrlAllowed(role, ai.provider, ai.baseUrl)
   assertProviderRequestable(ai, false)
@@ -1325,7 +1313,6 @@ async function testEmbeddingProvider(ai: EffectiveAiConfig, signal: AbortSignal)
 }
 
 export async function testAiConfigDraft(userId: string, role: string, input: AiConfigTestReq, signal: AbortSignal) {
-  if (!canUse(role)) throw new AppError('AI_NOT_ALLOWED', 'This account cannot use AI')
   const ai = draftConfig(userId, input)
   assertDraftBaseUrlAllowed(role, ai.provider, ai.baseUrl)
   return input.kind === 'embedding' ? testEmbeddingProvider(ai, signal) : testProvider(ai, signal)

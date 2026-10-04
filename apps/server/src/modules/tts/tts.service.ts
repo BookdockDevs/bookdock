@@ -190,13 +190,11 @@ export function listTtsProviders(): readonly TtsProviderRes[] {
   return PROVIDERS
 }
 
-export function listTtsServices(userId: string, role: string): TtsServiceRes[] {
-  if (role === 'guest') return []
+export function listTtsServices(userId: string): TtsServiceRes[] {
   return getDb().select().from(ttsServices).where(eq(ttsServices.userId, userId)).orderBy(desc(ttsServices.updatedAt)).all().map(toServiceRes)
 }
 
-export function createTtsService(userId: string, role: string, input: TtsServiceCreateReq): TtsServiceRes {
-  if (role === 'guest') throw new AppError('TTS_NOT_ALLOWED', 'Guest users cannot configure AI TTS')
+export function createTtsService(userId: string, input: TtsServiceCreateReq): TtsServiceRes {
   const provider = validateProvider(input.provider)
   const secrets = Object.fromEntries(Object.entries(input.secrets ?? {}).map(([key, value]) => [key, value.trim()]))
   const baseUrl = input.baseUrl ?? providerCatalog(provider)?.defaultBaseUrl ?? null
@@ -226,8 +224,7 @@ export function createTtsService(userId: string, role: string, input: TtsService
   return toServiceRes(getServiceRow(userId, row.id))
 }
 
-export function updateTtsService(userId: string, role: string, serviceId: string, input: TtsServiceUpdateReq): TtsServiceRes {
-  if (role === 'guest') throw new AppError('TTS_NOT_ALLOWED', 'Guest users cannot configure AI TTS')
+export function updateTtsService(userId: string, serviceId: string, input: TtsServiceUpdateReq): TtsServiceRes {
   const existing = getServiceRow(userId, serviceId)
   const provider = validateProvider(input.provider ?? existing.provider)
   const secrets = mergeSecrets(decryptSecrets(existing.encryptedSecrets), input.secrets)
@@ -256,8 +253,7 @@ export function updateTtsService(userId: string, role: string, serviceId: string
   return toServiceRes(getServiceRow(userId, serviceId))
 }
 
-export function deleteTtsService(userId: string, role: string, serviceId: string) {
-  if (role === 'guest') throw new AppError('TTS_NOT_ALLOWED', 'Guest users cannot configure AI TTS')
+export function deleteTtsService(userId: string, serviceId: string) {
   getServiceRow(userId, serviceId)
   getDb().delete(ttsServices).where(and(eq(ttsServices.id, serviceId), eq(ttsServices.userId, userId))).run()
 }
@@ -487,8 +483,7 @@ async function synthesizeProvider(input: ProviderConfig, speech: TtsSpeechReq, s
   }
 }
 
-export async function synthesizeSpeech(userId: string, role: string, input: TtsSpeechReq, signal: AbortSignal) {
-  if (role === 'guest') throw new AppError('TTS_NOT_ALLOWED', 'Guest users cannot use AI TTS')
+export async function synthesizeSpeech(userId: string, input: TtsSpeechReq, signal: AbortSignal) {
   const row = getServiceRow(userId, input.serviceId)
   const service = serviceConfig(row)
   assertConfigured(service.provider, service)
@@ -518,8 +513,7 @@ async function listMinimaxVoices(service: ProviderConfig, signal: AbortSignal): 
   return (body.system_voice ?? []).filter((voice) => voice.voice_id).map((voice) => ({ id: voice.voice_id!, name: voice.voice_name ?? voice.voice_id!, lang: '' }))
 }
 
-export async function listTtsVoices(userId: string, role: string, serviceId: string, signal: AbortSignal): Promise<TtsVoiceRes[]> {
-  if (role === 'guest') throw new AppError('TTS_NOT_ALLOWED', 'Guest users cannot use AI TTS')
+export async function listTtsVoices(userId: string, serviceId: string, signal: AbortSignal): Promise<TtsVoiceRes[]> {
   const service = serviceConfig(getServiceRow(userId, serviceId))
   try {
     if (service.provider === 'azure') return await listAzureVoices(service, signal)
@@ -534,13 +528,12 @@ export async function listTtsVoices(userId: string, role: string, serviceId: str
   return OPENAI_VOICES
 }
 
-export async function testTtsService(userId: string, role: string, serviceId: string, signal: AbortSignal) {
-  await synthesizeSpeech(userId, role, { serviceId, text: '这是一段测试语音。', rate: 1 }, signal)
+export async function testTtsService(userId: string, serviceId: string, signal: AbortSignal) {
+  await synthesizeSpeech(userId, { serviceId, text: '这是一段测试语音。', rate: 1 }, signal)
   return { ok: true as const }
 }
 
-export async function testTtsServiceDraft(role: string, input: TtsServiceCreateReq, signal: AbortSignal) {
-  if (role === 'guest') throw new AppError('TTS_NOT_ALLOWED', 'Guest users cannot use AI TTS')
+export async function testTtsServiceDraft(input: TtsServiceCreateReq, signal: AbortSignal) {
   const provider = validateProvider(input.provider)
   const service: ProviderConfig = {
     provider,

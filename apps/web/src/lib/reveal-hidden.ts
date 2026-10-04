@@ -11,7 +11,7 @@ export function registerBeforeHideHiddenReader(handler: () => Promise<void>) {
 
 export async function toggleRevealHidden() {
   const user = useAuthStore.getState().user
-  if (!user || user.guest === true || user.role === 'guest' || closing) return
+  if (!user || closing) return
   const state = useUiStore.getState()
   if (state.revealHiddenUserId !== user.id) return
   if (state.revealHidden) {
@@ -35,6 +35,6 @@ export async function toggleRevealHidden() {
 export function withReveal(path: string): string {
   const user = useAuthStore.getState().user
   const state = useUiStore.getState()
-  if (!user || user.guest === true || user.role === 'guest' || state.revealHiddenUserId !== user.id || !state.revealHidden) return path
+  if (!user || state.revealHiddenUserId !== user.id || !state.revealHidden) return path
   return path.includes('?') ? `${path}&showHidden=1` : `${path}?showHidden=1`
 }

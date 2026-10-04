@@ -101,7 +101,7 @@ describe('avatars routes', () => {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('/api/v1/avatars/*', async (c, next) => {
-      c.set('user', { id: currentUser.id, username: currentUser.username, role: currentUser.role, avatarKey: null })
+      c.set('user', guest ? null : { id: currentUser.id, username: currentUser.username, role: currentUser.role, avatarKey: null })
       if (guest) c.set('guest', true)
       return next()
     })
@@ -301,7 +301,7 @@ describe('avatars routes', () => {
     expect(body.error.code).toBe('UPLOAD_TOO_LARGE')
   })
 
-  it('rejects avatar upload for guest-injected sessions', async () => {
+  it('rejects avatar upload for anonymous requests', async () => {
     const guest = seedUser(db, 'admin', 'guest')
     const app = createApp(guest, true)
     const res = await app.request(uploadRequest(new File([Buffer.alloc(8)], 'a.png', { type: 'image/png' })))

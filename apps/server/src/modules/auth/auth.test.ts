@@ -26,7 +26,6 @@ import {
   changePassword,
   createSession,
   effectiveUploadMaxBytes,
-  getDefaultUser,
   getInstanceInfo,
   getUserTimezone,
   refreshSessionIfNeeded,
@@ -155,7 +154,7 @@ describe('auth module', () => {
       expect(result.user.role).toBe('member')
       expect(result.token).toBeTruthy()
       const row = db.select().from(schema.users).where(eq(schema.users.username, 'alice')).get()
-      expect(row?.role).toBe('member')
+      expect(result.user.role).toBe('member')
       expect(row?.passwordHash).toBeTruthy()
       expect(row?.usernameNormalized).toBe('alice')
       expect(db.select().from(schema.sessions).where(eq(schema.sessions.userId, row!.id)).all()).toHaveLength(1)
@@ -280,7 +279,7 @@ describe('auth module', () => {
       const app = new Hono()
       app.onError(errorHandler)
       app.use('/api/v1/auth/*', async (c, next) => {
-        c.set('user', { id: 'u1', username: 'admin', role: 'guest', avatarKey: null })
+        c.set('user', null)
         c.set('guest', true)
         return next()
       })
@@ -559,11 +558,11 @@ describe('auth module', () => {
       expect(res.status).toBe(200)
     })
 
-    it('rejects guest-injected sessions', async () => {
+    it('rejects anonymous requests', async () => {
       const app = new Hono()
       app.onError(errorHandler)
       app.use('/api/v1/auth/*', async (c, next) => {
-        c.set('user', { id: 'u1', username: 'admin', role: 'guest', avatarKey: null })
+        c.set('user', null)
         c.set('guest', true)
         return next()
       })
@@ -625,7 +624,7 @@ describe('auth module', () => {
       const app = new Hono()
       app.onError(errorHandler)
       app.use('/api/v1/auth/*', async (c, next) => {
-        c.set('user', { id: 'u1', username: 'admin', role: 'guest', avatarKey: null })
+        c.set('user', null)
         c.set('guest', true)
         return next()
       })
@@ -645,7 +644,7 @@ describe('auth module', () => {
       const app = new Hono()
       app.onError(errorHandler)
       app.use('/api/v1/auth/*', async (c, next) => {
-        c.set('user', { id: 'u1', username: 'admin', role: 'owner', avatarKey: null })
+        c.set('user', null)
         c.set('guest', true)
         return next()
       })
@@ -748,14 +747,14 @@ describe('auth module', () => {
       expect(res.status).toBe(401)
     })
 
-    it('injects the default user when guest access is on', async () => {
+    it('uses null identity when guest access is on', async () => {
       await seedInstance(db, { allowGuestAccess: true })
       const app = createGuardApp()
       const res = await app.request('/api/v1/protected')
       expect(res.status).toBe(200)
       const body = await res.json()
-      expect(body.data.username).toMatch(/^user_/)
-      expect(body.data.role).toBe('guest')
+      expect(body.data).toBeNull()
+      expect(db.select().from(schema.users).all()).toHaveLength(1)
     })
 
     it('rejects mutations from a guest session before route handling', async () => {
@@ -776,31 +775,6 @@ describe('auth module', () => {
         headers: { Authorization: `Bearer ${startSession(db, id)}` },
       })
       expect(res.status).toBe(200)
-    })
-
-    it('creates the default user with the guest role, never owner', async () => {
-      await seedInstance(db, { allowGuestAccess: true })
-      const user = await getDefaultUser()
-      expect(user.role).toBe('guest')
-      expect(user.username).toBe(user.id)
-      const row = db.select().from(schema.users).where(eq(schema.users.id, user.id)).get()
-      expect(row?.role).toBe('guest')
-    })
-
-    it('never gives the guest row a private library', async () => {
-      await seedInstance(db, { allowGuestAccess: true })
-      const user = await getDefaultUser()
-      expect(db.select().from(schema.libraries).where(eq(schema.libraries.userId, user.id)).all()).toHaveLength(0)
-    })
-
-    it('reuses a legacy guest row as-is, without renaming or duplicating', async () => {
-      await seedInstance(db, { allowGuestAccess: true })
-      const legacyId = await insertUser(db, { username: 'admin', role: 'guest' })
-      const user = await getDefaultUser()
-      expect(user.id).toBe(legacyId)
-      expect(user.username).toBe('admin')
-      const rows = db.select().from(schema.users).all()
-      expect(rows).toHaveLength(2)
     })
 
     it('deletes the own account with password verification', async () => {

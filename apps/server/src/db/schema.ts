@@ -11,7 +11,6 @@ export const users = sqliteTable('users', {
   usernameNormalized: text('username_normalized').unique(),
   bio: text('bio').notNull().default(''),
   passwordHash: text('password_hash'),
-  role: text('role', { enum: ['owner', 'member', 'guest'] }).notNull().default('owner'),
   disabled: integer('disabled').notNull().default(0),
   avatarKey: text('avatar_key'),
   // IANA zone reported by the client, used only to render timestamps the server
@@ -216,10 +215,6 @@ export const aiChunkEmbeddings = sqliteTable('ai_chunk_embeddings', {
   versionIdx: index('ai_chunk_embeddings_book_version_idx').on(table.bookVersionId),
 }))
 
-export const instanceSettings = sqliteTable('instance_settings', {
-  key: text('key').primaryKey(),
-  value: text('value').notNull(),
-})
 
 // Text replacements (P1): regex/filter rules and point patches share one table,
 // discriminated by matchType. Pattern rules are user-global (bookId always null);

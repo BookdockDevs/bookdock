@@ -23,6 +23,7 @@ const tagsRoutes = new Hono()
 
 tagsRoutes.get('/', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   // Guests never reveal the vault, even with the query flag.
   const showHidden = c.get('guest') !== true && c.req.query('showHidden') === '1'
   const items = await listTags(user.id, showHidden)
@@ -31,6 +32,7 @@ tagsRoutes.get('/', async (c) => {
 
 tagsRoutes.post('/', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const body = await c.req.json()
   const parsed = tagCreateSchema.safeParse(body)
   if (!parsed.success) {
@@ -43,6 +45,7 @@ tagsRoutes.post('/', async (c) => {
 // Registered before '/:id' so 'order' never matches as a tag id.
 tagsRoutes.put('/order', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const body = await c.req.json()
   const parsed = tagReorderSchema.safeParse(body)
   if (!parsed.success) {
@@ -54,6 +57,7 @@ tagsRoutes.put('/order', async (c) => {
 
 tagsRoutes.put('/:id', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const tagId = c.req.param('id')
   const body = await c.req.json()
   const parsed = tagUpdateSchema.safeParse(body)
@@ -66,6 +70,7 @@ tagsRoutes.put('/:id', async (c) => {
 
 tagsRoutes.delete('/:id', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const tagId = c.req.param('id')
   await deleteTag(user.id, tagId)
   return c.json({ data: null })
@@ -73,6 +78,7 @@ tagsRoutes.delete('/:id', async (c) => {
 
 tagsRoutes.post('/:id/books', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const tagId = c.req.param('id')
   const body = await c.req.json()
   const parsed = bookIdsSchema.safeParse(body)
@@ -85,6 +91,7 @@ tagsRoutes.post('/:id/books', async (c) => {
 
 tagsRoutes.delete('/:id/books', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const tagId = c.req.param('id')
   const body = await c.req.json()
   const parsed = bookIdsSchema.safeParse(body)

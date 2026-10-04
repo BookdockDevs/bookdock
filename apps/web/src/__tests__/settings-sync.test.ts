@@ -252,8 +252,8 @@ describe('SettingsSync persistence', () => {
     expect(useUiStore.getState().customThemes).toEqual([other])
   })
 
-  it('keeps guest preferences local instead of syncing the shared guest account', async () => {
-    useAuthStore.getState().setAuth({ id: 'guest-1', username: 'admin', role: 'guest', guest: true })
+  it('keeps anonymous preferences local without a database account', async () => {
+    useAuthStore.getState().clearAuth()
     mountSync()
     await vi.runAllTimersAsync()
 

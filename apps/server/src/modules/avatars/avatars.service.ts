@@ -5,6 +5,7 @@ import type { AccountRes } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { users } from '../../db/schema'
+import { isInstanceOwner } from '../auth/auth.service'
 import { getStorage } from '../../storage'
 import { AppError } from '../../middleware/error'
 import { invalidateUserCache } from '../../middleware/auth.guard'
@@ -77,7 +78,7 @@ export async function generateAvatarThumbnail(buffer: Buffer): Promise<Buffer | 
 }
 
 function toAccountRes(row: typeof users.$inferSelect): AccountRes {
-  return { id: row.id, username: row.username, role: row.role, avatarKey: row.avatarKey }
+  return { id: row.id, username: row.username, role: isInstanceOwner(row.id) ? 'owner' : 'member', avatarKey: row.avatarKey }
 }
 
 // Blobs are content-hash addressed and can be shared across users; delete the

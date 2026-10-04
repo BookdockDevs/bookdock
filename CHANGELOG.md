@@ -13,17 +13,22 @@ All notable changes to Bookdock are documented here.
 - "Show hidden items" is remembered separately for each account in the current browser, defaults to off, and returns to the previous choice after refresh or signing in again. It is not synced across devices.
 - Signing out or losing the session immediately hides private hidden content while keeping the account's local preference. Switching accounts never inherits another account's choice, and guests cannot reveal hidden items.
 - Turning off hidden display while reading a hidden private book saves pending progress before leaving the reader; failed saves keep the reader open for retry.
+- The instance owner is the one account named by `instance.ownerUserId`; the `owner`/`member` role is derived per request instead of stored on the account, and no account holds a `guest` role.
+- Anonymous readers no longer have a database account. `GET /api/v1/auth/me` answers `{ user: null, guest: true }`, guest preferences and progress stay in the local browser, and personal data, downloads, exports and every change require a real account.
 
 ### Fixed
 
 - Hidden-display changes now clear related list, search, detail, recent-reading, taxonomy, annotation and statistics caches, preventing stale hidden content from remaining visible.
 - Hidden private-book links no longer reuse hidden-inclusive cached details when display is off; direct links never enable hidden display automatically.
 - Dismissing a finished update now clears its record so the entry returns on refresh, and interrupted updates no longer show later steps as done; failed dismissals stay open for retry while closing an active update keeps it running in the background.
+- A failed system update no longer rolls back to a snapshot from another release, an unknown manifest format or one without an instance owner; the current database and the pending update are left untouched.
 
 ### Upgrade notes
 
 - The old shared browser preference is not migrated to any account. Each account starts with hidden display off until explicitly enabled.
 - This switch controls display only. Book, shelf and tag hide flags and shared-library permissions are unchanged; it is not an unlock credential, and no PIN is introduced.
+- Migration 0040 retires the legacy guest identity, `users.role` and `instance_settings`. It runs once, cannot be undone in place, and stops rather than deleting data it does not recognise: back up `DATA_DIR` completely first, and never boot an older release against a migrated database. It also turns registration and guest access off once, which the owner can re-enable.
+- Snapshots now record `formatVersion: 2` with the `instance` row. Earlier snapshots stay listable and deletable but only roll back to the release they came from.
 
 ## [0.4.3] - 2026-10-04
 
@@ -619,17 +624,22 @@ All notable changes to Bookdock are documented here.
 - “显示隐藏内容”按账号在当前浏览器中分别保存，首次默认关闭；刷新或再次登录时恢复上次选择，不跨设备同步。
 - 退出登录或会话失效后立即收起私库隐藏内容，同时保留该账号的本机偏好；切换账号不继承前一个账号的选择，游客始终不能显示隐藏内容。
 - 关闭显示时，若正在阅读隐藏的私库书籍，先保存待写入的阅读进度，再退出阅读；保存失败时保留阅读页面，方便重试。
+- 实例所有者改为 `instance.ownerUserId` 指定的那一个账号；`owner`/`member` 每次请求实时派生，不再存进账号，账号也不再拥有 `guest` 角色。
+- 匿名读者不再有数据库账号。`GET /api/v1/auth/me` 返回 `{ user: null, guest: true }`，游客的偏好与进度仍留在本机浏览器，个人数据、下载导出和一切修改都需要真实账号。
 
 #### 修复
 
 - 切换显示状态时同步清理列表、搜索、详情、最近阅读、书架、标签、标注和阅读统计等相关缓存，避免隐藏内容继续显示。
 - 关闭显示后，隐藏私库书籍的链接不会复用此前包含隐藏内容的详情缓存；直接链接不会自动开启显示。
 - 已结束的更新关闭即清理，入口刷新后恢复；中途取消不再把没走到的步骤标成完成；清理失败留窗重试，执行中关闭只隐藏、后台继续。
+- 系统更新失败时，若快照来自其他版本、清单格式未知或缺少实例所有者，则拒绝回滚，保持当前数据库和待更新状态不动。
 
 #### 升级说明
 
 - 旧公共浏览器偏好不会迁移给任何账号；各账号首次默认关闭隐藏内容，需自行开启。
 - 此开关只控制展示，不修改书籍、书架和标签的隐藏标记，也不改变共享库权限；显示偏好不作为解锁授权，本次不引入 PIN。
+- 迁移 0040 清理旧游客身份、`users.role` 列和 `instance_settings` 表。它只执行一次，不能原地撤销，遇到无法识别的数据会停下而不是删除——请先完整冷备份 `DATA_DIR`，且不要用旧版本启动已迁移的数据库；同时会一次性关闭注册和游客访问，可由所有者重新开启。
+- 快照清单改为记录 `formatVersion: 2` 与 `instance` 行。旧快照仍可列出和删除，但只能回滚到它对应的那个版本。
 
 ### [0.4.3] - 2026-10-04
 

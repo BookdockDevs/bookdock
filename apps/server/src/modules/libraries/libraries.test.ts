@@ -499,10 +499,7 @@ describe('libraries service', () => {
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
     await expect(addMember(carolId, sharedId, { userId: seedUser('erin'), role: 'member' }))
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
-    // Guest-role and disabled accounts can never hold membership.
-    const guestId = seedUser('ghost', { role: 'guest' })
-    await expect(addMember(aliceId, sharedId, { userId: guestId, role: 'member' }))
-      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    // Disabled accounts cannot hold membership.
     const offId = seedUser('off', { disabled: 1 })
     await expect(addMember(aliceId, sharedId, { userId: offId, role: 'member' }))
       .rejects.toMatchObject({ code: 'FORBIDDEN' })

@@ -148,7 +148,7 @@ export function SettingsSync() {
   // skip the request entirely so /login never sees a 401.
   const user = useAuthStore((s) => s.user)
   const userId = user?.id ?? null
-  const isGuest = user?.guest === true || user?.role === 'guest'
+  const isGuest = !user
 
   useEffect(() => {
     if (settingsUserRef.current !== userId) {
@@ -189,7 +189,7 @@ export function SettingsSync() {
       channel.onmessage = (event) => {
         if (event.data?.sessionId === SESSION_ID) return
         const currentUser = useAuthStore.getState().user
-        if (!currentUser || currentUser.guest === true || currentUser.role === 'guest') return
+        if (!currentUser) return
         const data = event.data?.settings as Partial<Record<string, unknown>> | undefined
         if (!data) return
         applySettings(data as Partial<SettingsRes>)
@@ -221,7 +221,7 @@ export function SettingsSync() {
       const activeTouched = state.activePresetId !== prevState.activePresetId
       if (!settingsTouched && !activeTouched) return
       const user = useAuthStore.getState().user
-      if (!user || user.guest === true || user.role === 'guest') return
+      if (!user) return
       if (settingsTouched) {
         const userId = useAuthStore.getState().user?.id
         if (userId) persistPendingSettings(userId, pickSettings(state))

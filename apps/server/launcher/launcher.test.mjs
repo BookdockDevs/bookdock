@@ -38,17 +38,18 @@ function createWorkspace() {
     pointerPath: (name) => path.join(releasesDir, name),
     writePointer: (name, value) => writeFileSync(path.join(releasesDir, name), JSON.stringify(value)),
     readPointer: (name) => JSON.parse(readFileSync(path.join(releasesDir, name), 'utf8')),
-    seedSnapshot(snapshotId) {
+    seedSnapshot(snapshotId, appVersion = '0.3.2') {
       const dir = path.join(dataDir, 'snapshots', snapshotId)
       mkdirSync(dir, { recursive: true })
       writeFileSync(path.join(dir, 'bookdock.db'), `snapshot:${snapshotId}`)
+      writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ appVersion, createdAt: 1760000000000, instanceSettings: {} }))
     },
     /** Stage a promoted-but-unhealthy update: pending marker + target + rollback seats. */
     stageUpdate({ target = '0.4.0', previous, snapshot = SNAPSHOT_ID } = {}) {
       const dir = this.writeRelease(target)
       if (previous) this.writePointer('current', { name: previous })
       if (snapshot) {
-        this.seedSnapshot(snapshot)
+        this.seedSnapshot(snapshot, previous)
         writeFileSync(this.dbPath, 'live-database')
       }
       this.writePointer('pending', { target, snapshot, progressId: 'progress-1' })
@@ -282,6 +283,28 @@ describe('launcher update gate', () => {
     expect(existsSync(workspace.pointerPath('pending'))).toBe(true)
     expect(workspace.readPointer('current')).toEqual({ name: '0.3.5' })
     expect(readFileSync(workspace.dbPath, 'utf8')).toBe('live-database')
+  })
+
+  it.each([
+    { label: 'wrong release', manifest: { appVersion: '0.1.0', instanceSettings: {} } },
+    { label: 'unknown format', manifest: { appVersion: '0.3.2', formatVersion: 99 } },
+    { label: 'missing instance', manifest: { appVersion: '0.3.2', formatVersion: 2 } },
+    { label: 'invalid legacy settings', manifest: { appVersion: '0.3.2', instanceSettings: [] } },
+    { label: 'missing rollback release version', manifest: { instanceSettings: {} }, invalidRollback: true },
+  ])('refuses $label snapshots before replacing the database', async ({ manifest, invalidRollback }) => {
+    workspace.stageUpdate()
+    if (invalidRollback) writeFileSync(path.join(workspace.factoryRoot, 'release.json'), '{}')
+    writeFileSync(path.join(workspace.dataDir, 'snapshots', SNAPSHOT_ID, 'manifest.json'), JSON.stringify(manifest))
+    const refusals = []
+    const { launcher } = launcherFor(() => createChild(['0.3.2']), {
+      error: (message) => refusals.push(message),
+    })
+    const running = launcher.run()
+    await vi.waitFor(() => expect(refusals).toContain('launcher.rollback_refused'))
+    launcher.stop()
+    await running
+    expect(readFileSync(workspace.dbPath, 'utf8')).toBe('live-database')
+    expect(existsSync(workspace.pointerPath('pending'))).toBe(true)
   })
 
   it('drops a pending marker it can neither boot nor undo, so a server still comes up', async () => {

@@ -7,7 +7,7 @@ import type { AccessTokenPermission } from '@bookdock/shared'
 
 import { getDb } from '../db/client'
 import { users } from '../db/schema'
-import { getDefaultUser, getInstanceSettings, isInstanceOwner, refreshSessionIfNeeded, resetInstanceCache, resolveSession, revokeSession } from '../modules/auth/auth.service'
+import { getInstanceSettings, isInstanceOwner, refreshSessionIfNeeded, resetInstanceCache, resolveSession, revokeSession } from '../modules/auth/auth.service'
 import { resolveLegadoAccessKey } from '../modules/books/legado-access.service'
 import { resolveAccessToken } from '../modules/tokens/tokens.service'
 import { isLegadoAccessKeyEnabled } from '../modules/settings/settings.service'
@@ -16,13 +16,13 @@ import { SESSION_COOKIE, setSessionCookie } from '../modules/auth/session-cookie
 export interface AuthUser {
   id: string
   username: string
-  role: string
+  role: 'owner' | 'member'
   avatarKey: string | null
 }
 
 declare module 'hono' {
   interface ContextVariableMap {
-    user: AuthUser
+    user: AuthUser | null
     /** true when the request was allowed via allowGuestAccess without a token */
     guest: boolean
     /** true when the request uses a scoped, read-only Legado access key */
@@ -31,7 +31,7 @@ declare module 'hono' {
     legadoToken?: string
     /**
      * Permissions carried by the access token authenticating this request.
-     * Absent for cookie/JWT sessions and guest-injected requests, which are
+     * Absent for cookie/JWT sessions and anonymous requests, which are
      * never permission-checked.
      */
     tokenPermissions?: AccessTokenPermission[]
@@ -58,7 +58,6 @@ interface CachedUser extends AuthUser {
 }
 
 const userCache = new Map<string, { user: CachedUser; at: number }>()
-let cachedDefaultUserId: string | null = null
 
 export function invalidateUserCache(userId?: string) {
   if (userId) {
@@ -68,21 +67,20 @@ export function invalidateUserCache(userId?: string) {
   }
 }
 
-/** Test helper: drop all auth-related caches (user, default user, instance settings). */
+/** Test helper: drop all auth-related caches (user and instance configuration). */
 export function resetAuthCaches() {
   userCache.clear()
-  cachedDefaultUserId = null
   resetInstanceCache()
 }
 
 function getFreshUser(userId: string): CachedUser | null {
   const hit = userCache.get(userId)
   if (hit && Date.now() - hit.at < USER_CACHE_TTL) {
-    return hit.user
+    return { ...hit.user, role: isInstanceOwner(userId) ? 'owner' : 'member' }
   }
   const db = getDb()
   const row = db
-    .select({ id: users.id, username: users.username, role: users.role, disabled: users.disabled, avatarKey: users.avatarKey })
+    .select({ id: users.id, username: users.username, disabled: users.disabled, avatarKey: users.avatarKey })
     .from(users)
     .where(eq(users.id, userId))
     .get()
@@ -90,7 +88,7 @@ function getFreshUser(userId: string): CachedUser | null {
     userCache.delete(userId)
     return null
   }
-  const user: CachedUser = { id: row.id, username: row.username, role: row.role, disabled: row.disabled === 1, avatarKey: row.avatarKey }
+  const user: CachedUser = { role: isInstanceOwner(row.id) ? 'owner' : 'member', id: row.id, username: row.username, disabled: row.disabled === 1, avatarKey: row.avatarKey }
   userCache.set(userId, { user, at: Date.now() })
   return user
 }
@@ -103,33 +101,26 @@ function extractToken(authHeader: string | undefined, cookieToken: string | unde
 
 function rejectGuestMutation(c: Context): Response | null {
   const user = c.get('user')
-  const isGuest = c.get('guest') === true || user?.role === 'guest'
+  const isGuest = !user
   if (isGuest && !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions are read-only' } }, 403)
   }
   return null
 }
 
-/**
- * Request identity for read paths: an anonymous guest is `null`, an
- * authenticated caller is their user id. Shared-library verdicts must branch
- * on this — never on the injected default guest row's id, which otherwise
- * reads as an authenticated non-member and skips the guest triple gate
- * (instance switch + public visibility + listing guestReadable).
- */
+/** Anonymous readers never have a persisted account identity. */
 export function requestUserId(c: Context): string | null {
-  if (c.get('guest') === true || c.get('user')?.role === 'guest') return null
-  return c.get('user').id
+  return c.get('user')?.id ?? null
 }
 
 /**
  * Owner-only gate. Single checkpoint so a future permission/group system
- * replaces the role comparison here instead of across routes.
+ * replaces the instance ownership comparison here instead of across routes.
  */
 export function requireOwner(): MiddlewareHandler {
   return async (c, next) => {
     const user = c.get('user')
-    if (!user || c.get('guest') || !isInstanceOwner(user.id)) {
+    if (!user || !isInstanceOwner(user.id)) {
       return c.json({ error: { code: 'FORBIDDEN', message: 'Owner only' } }, 403)
     }
     return next()
@@ -138,6 +129,9 @@ export function requireOwner(): MiddlewareHandler {
 
 export function authGuard(): MiddlewareHandler {
   return async (c, next) => {
+    c.set('user', null)
+    c.set('guest', false)
+    c.set('legadoAccessKey', false)
     if (PUBLIC_ROUTES.has(`${c.req.method} ${c.req.path}`)) {
       return next()
     }
@@ -161,7 +155,7 @@ export function authGuard(): MiddlewareHandler {
           c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
           c.set('legadoAccessKey', true)
           c.set('legadoToken', token)
-          c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
+          c.set('actorRole', user.role)
           const blocked = rejectGuestMutation(c)
           if (blocked) return blocked
           return next()
@@ -198,7 +192,7 @@ export function authGuard(): MiddlewareHandler {
         }
         c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
         c.set('legadoAccessKey', false)
-        c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
+        c.set('actorRole', user.role)
         c.set('tokenPermissions', access.permissions)
         const blocked = rejectGuestMutation(c)
         if (blocked) return blocked
@@ -222,7 +216,7 @@ export function authGuard(): MiddlewareHandler {
       }
       c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
       c.set('legadoAccessKey', false)
-      c.set('actorRole', user.role === 'owner' ? 'owner' : user.role === 'member' ? 'member' : 'guest')
+      c.set('actorRole', user.role)
       if (refreshSessionIfNeeded(session.sessionId, session.expiresAt)) {
         setSessionCookie(c, token)
       }
@@ -232,20 +226,11 @@ export function authGuard(): MiddlewareHandler {
     }
 
     if (getInstanceSettings().allowGuestAccess) {
-      if (!cachedDefaultUserId) {
-        const defaultUser = await getDefaultUser()
-        cachedDefaultUserId = defaultUser.id
-      }
-      const user = getFreshUser(cachedDefaultUserId)
-      if (user && !user.disabled) {
-        c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
-        c.set('guest', true)
-        c.set('legadoAccessKey', false)
-        c.set('actorRole', 'guest')
-        const blocked = rejectGuestMutation(c)
-        if (blocked) return blocked
-        return next()
-      }
+      c.set('guest', true)
+      c.set('actorRole', 'guest')
+      const blocked = rejectGuestMutation(c)
+      if (blocked) return blocked
+      return next()
     }
 
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)

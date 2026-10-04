@@ -39,7 +39,7 @@ function createApp(user: { id: string; username: string; role: string } = { id: 
   const app = new Hono()
   app.onError(errorHandler)
   app.use('/api/v1/settings/*', async (c, next) => {
-    c.set('user', { ...user, avatarKey: null })
+    c.set('user', guest ? null : { ...user, avatarKey: null })
     if (guest) c.set('guest', true)
     return next()
   })
@@ -110,7 +110,7 @@ describe('Settings routes - Integrations', () => {
       body: JSON.stringify({ coverFit: 'full' }),
     })
 
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(401)
     expect(settingsService.updateSettings).not.toHaveBeenCalled()
   })
 })

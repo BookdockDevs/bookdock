@@ -1,12 +1,15 @@
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import Database from 'better-sqlite3'
+import { drizzle } from 'drizzle-orm/better-sqlite3'
+
 import type { SnapshotRes } from '@bookdock/shared'
 import { BOOKDOCK_BUILD_INFO } from '@bookdock/shared'
 
 import { config } from '../../config'
 import { getDb } from '../../db/client'
-import { instanceSettings } from '../../db/schema'
+import { instance } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 
 const DB_FILE_NAME = 'bookdock.db'
@@ -18,7 +21,8 @@ const retainedForUpdate = new Set<string>()
 interface SnapshotManifest {
   appVersion: string
   createdAt: number
-  instanceSettings: Record<string, string>
+  formatVersion?: 2
+  instance?: SnapshotRes['instance']
 }
 
 /**
@@ -45,7 +49,7 @@ async function readManifest(dir: string): Promise<SnapshotManifest | null> {
     return {
       appVersion: parsed.appVersion,
       createdAt: parsed.createdAt,
-      instanceSettings: typeof parsed.instanceSettings === 'object' && parsed.instanceSettings !== null ? parsed.instanceSettings : {},
+      ...(parsed.formatVersion === 2 && parsed.instance && typeof parsed.instance.ownerUserId === 'string' ? { formatVersion: 2 as const, instance: parsed.instance } : {}),
     }
   } catch {
     return null
@@ -69,7 +73,7 @@ export async function listSnapshots(): Promise<SnapshotRes[]> {
       appVersion: manifest?.appVersion ?? id.slice(0, id.lastIndexOf('-')),
       createdAt: manifest?.createdAt ?? createdAt,
       sizeBytes,
-      ...(manifest ? { instanceSettings: manifest.instanceSettings } : {}),
+      ...(manifest?.formatVersion === 2 ? { formatVersion: 2 as const, instance: manifest.instance } : {}),
     })
   }
   return snapshots
@@ -91,7 +95,6 @@ export async function createSnapshot({ retainForUpdate = false, onProgress }: { 
   const id = `${BOOKDOCK_BUILD_INFO.version}-${createdAt}`
   const { dir } = snapshotDir(id)
   const db = getDb()
-  const capturedSettings = Object.fromEntries(db.select().from(instanceSettings).all().map((row) => [row.key, row.value]))
 
   await mkdir(dir, { recursive: true })
   if (retainForUpdate) retainedForUpdate.add(id)
@@ -100,7 +103,15 @@ export async function createSnapshot({ retainForUpdate = false, onProgress }: { 
       onProgress?.(progress)
       return 100
     } })
-    const manifest: SnapshotManifest = { appVersion: BOOKDOCK_BUILD_INFO.version, createdAt, instanceSettings: capturedSettings }
+    const copy = new Database(path.join(dir, DB_FILE_NAME), { readonly: true, fileMustExist: true })
+    let capturedInstance: SnapshotRes['instance']
+    try {
+      capturedInstance = drizzle(copy).select().from(instance).get()
+      if (!capturedInstance) throw new Error('Snapshot has no initialized instance')
+    } finally {
+      copy.close()
+    }
+    const manifest: SnapshotManifest = { formatVersion: 2, appVersion: BOOKDOCK_BUILD_INFO.version, createdAt, instance: capturedInstance }
     await writeFile(path.join(dir, MANIFEST_FILE_NAME), `${JSON.stringify(manifest, null, 2)}\n`)
   } catch (err) {
     // A partial snapshot directory would look like a valid rollback target.

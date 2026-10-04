@@ -6,9 +6,7 @@ const progressRoutes = new Hono()
 
 progressRoutes.get('/:bookId', async (c) => {
   const user = c.get('user')
-  if (c.get('guest') === true || user.role === 'guest') {
-    return c.json({ data: null })
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const bookId = c.req.param('bookId')
   const progress = await getProgress(user.id, bookId, c.req.query('showHidden') === '1')
   return c.json({ data: progress })
@@ -16,6 +14,7 @@ progressRoutes.get('/:bookId', async (c) => {
 
 progressRoutes.put('/:bookId', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const bookId = c.req.param('bookId')
   const body = await c.req.json()
   const parsed = readingProgressUpdateSchema.safeParse(body)

@@ -65,7 +65,7 @@ export default function Reader() {
   const _ = useTranslation()
   const { id } = useParams({ from: '/books/$id' })
   const authUser = useAuthStore((s) => s.user)
-  const isGuest = !authUser || authUser.guest === true || authUser.role === 'guest'
+  const isGuest = !authUser
   const deepLinkParams = new URLSearchParams(window.location.search)
   const deepLinkAnnotation = deepLinkParams.get('annotation')
   const deepLinkCfi = deepLinkParams.get('cfi')

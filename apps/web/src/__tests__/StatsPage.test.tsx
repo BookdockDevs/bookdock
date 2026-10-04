@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 
 import Stats from '../features/stats/Stats'
+import { useAuthStore } from '../stores/auth.store'
 import { localDateString, useReadingByBook, useReadingByTag, useReadingDaily, useReadingHourly, useReadingSummary } from '@/api/hooks/reading-records'
 import { eachDay, periodRange } from '../features/stats/date-utils'
 import type { ReadingRecordBookItem } from '@bookdock/shared'
@@ -99,6 +100,7 @@ describe('Stats page', () => {
   ]
 
   beforeEach(async () => {
+    useAuthStore.setState({ user: { id: 'reader', username: 'reader', role: 'member' } })
     vi.clearAllMocks()
     i18n.addResourceBundle(
       'zh-CN',

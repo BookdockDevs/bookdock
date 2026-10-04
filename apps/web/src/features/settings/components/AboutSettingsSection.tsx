@@ -150,7 +150,7 @@ export default function AboutSettingsSection() {
       `- User Agent: ${navigator.userAgent}`,
       `- Language: ${navigator.language}`,
       `- Viewport: ${window.innerWidth}x${window.innerHeight}`,
-      `- User Role: ${user?.role ?? 'anonymous'}${user?.guest ? ' (guest)' : ''}`,
+      `- User Role: ${user?.role ?? 'anonymous'}`,
       `- Timestamp: ${new Date().toISOString()}`,
     ].join('\n')
 

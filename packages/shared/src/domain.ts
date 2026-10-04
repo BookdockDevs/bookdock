@@ -4,7 +4,6 @@ export interface User {
   id: string
   username: string
   passwordHash: string | null
-  role: 'owner' | 'member' | 'guest'
   /** Content-hash addressed avatar blob key (`<hh>/<sha256>.<ext>`), null when unset */
   avatarKey: string | null
   createdAt: number

@@ -44,7 +44,7 @@ describe('tts routes', () => {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('/api/v1/tts/*', async (c, next) => {
-      c.set('user', { ...user, avatarKey: null })
+      c.set('user', user.role === 'guest' ? null : { ...user, avatarKey: null })
       return next()
     })
     app.route('/api/v1/tts', ttsRoutes)
@@ -107,14 +107,14 @@ describe('tts routes', () => {
   it('does not expose or mutate AI services for guests', async () => {
     const app = createApp(guest)
     const list = await app.request('http://test/api/v1/tts/services')
-    expect((await list.json() as { data: unknown[] }).data).toEqual([])
+    expect(list.status).toBe(401)
     const response = await app.request('http://test/api/v1/tts/services', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'Guest service', provider: 'openai', secrets: { apiKey: 'secret' } }),
     })
-    expect(response.status).toBe(403)
-    expect(await response.json()).toMatchObject({ error: { code: 'TTS_NOT_ALLOWED' } })
+    expect(response.status).toBe(401)
+    expect(await response.json()).toMatchObject({ error: { code: 'UNAUTHORIZED' } })
   })
 
   it('requires provider-specific credentials before creating a service', async () => {

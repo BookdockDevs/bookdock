@@ -131,7 +131,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
-  const isGuest = !user || user.role === 'guest' || user.guest === true
+  const isGuest = !user
   const { data, isError, isFetching, isLoading, refetch } = useAiConfig({ enabled: !isGuest })
   const { data: providersData } = useAiProviders({ enabled: !isGuest })
   const create = useCreateAiProfile()

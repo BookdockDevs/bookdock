@@ -17,7 +17,7 @@ export function fontKey(hash: string, ext: string): string {
   return `fonts/${hash.slice(0, 2)}/${hash}.${ext}`
 }
 
-function toListItem(row: typeof fonts.$inferSelect, userId: string): FontListItem {
+function toListItem(row: typeof fonts.$inferSelect, userId: string | null): FontListItem {
   return {
     id: row.id,
     family: row.family,
@@ -30,12 +30,12 @@ function toListItem(row: typeof fonts.$inferSelect, userId: string): FontListIte
   }
 }
 
-export async function listFonts(userId: string): Promise<FontListItem[]> {
+export async function listFonts(userId: string | null): Promise<FontListItem[]> {
   const db = getDb()
   const rows = db
     .select()
     .from(fonts)
-    .where(or(eq(fonts.userId, userId), eq(fonts.scope, 'instance')))
+    .where(userId ? or(eq(fonts.userId, userId), eq(fonts.scope, 'instance')) : eq(fonts.scope, 'instance'))
     .orderBy(asc(fonts.createdAt))
     .all()
   return rows.map((row) => toListItem(row, userId))
@@ -123,7 +123,7 @@ export async function deleteFont(userId: string, userRole: string, fontId: strin
   }
 }
 
-export async function getFontFile(userId: string, fontId: string) {
+export async function getFontFile(userId: string | null, fontId: string) {
   const db = getDb()
   const row = db.select().from(fonts).where(eq(fonts.id, fontId)).get()
   // Invisible fonts answer 404 like missing ones — no existence leak

@@ -7,10 +7,11 @@ import { getDb } from '../../db/client'
 import { annotations, books, bookTags, shelves, tags } from '../../db/legacy-book-schema'
 import {
   aiBookIndexes, aiChunkEmbeddings, aiChunks, aiThreads, blobs, bookmarks, bookStates,
-  bookVersions, contentRevisions, highlights, ideas, instance, instanceSettings, libraries,
+  bookVersions, contentRevisions, highlights, ideas, instance, libraries,
   libraryBookTags, libraryBookVersions, libraryBooks, libraryCategories, libraryMigrationLog, libraryTags,
-  readingRecords, readingSessions, textReplacementOverrides, textReplacements, users,
+  readingRecords, readingSessions, textReplacementOverrides, textReplacements,
 } from '../../db/schema'
+import { users, instanceSettings } from '../../db/legacy-identity-schema'
 import { createId } from '../../lib/id'
 import { readProgressFile } from '../../lib/progress-file'
 import { getStorage } from '../../storage'

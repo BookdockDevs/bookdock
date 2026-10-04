@@ -90,7 +90,7 @@ describe('DownloadDialog', () => {
     act(() => useAuthStore.setState({ user: { id: 'other', username: 'other', role: 'member' } }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     useDownloadStore.getState().close()
-    useAuthStore.setState({ user: { id: 'guest', username: 'guest', role: 'guest' } })
+    useAuthStore.setState({ user: null })
     useDownloadStore.getState().open({ id: 'book', title: 'Book', format: 'epub' })
     expect(useDownloadStore.getState().target).toBeNull()
   })

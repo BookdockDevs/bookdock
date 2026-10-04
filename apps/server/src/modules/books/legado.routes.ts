@@ -457,6 +457,7 @@ legadoRoutes.use('*', async (c, next) => {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot use Legado integration')
   }
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   if (c.get('legadoAccessKey') && c.req.path.endsWith('/access-key')) {
     throw new AppError('FORBIDDEN', 'Legado access keys require the Bookdock session')
   }
@@ -468,6 +469,7 @@ legadoRoutes.use('*', async (c, next) => {
 
 legadoRoutes.get('/access-key', (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const issued = getOrCreateLegadoAccessKey(user.id)
   const sourceUrl = new URL('/api/v1/legado/source.json', publicOrigin(c))
   sourceUrl.searchParams.set('key', issued.token)
@@ -486,6 +488,7 @@ legadoRoutes.post('/access-key', async (c) => {
   const parsed = legadoAccessKeySchema.safeParse(await c.req.json().catch(() => ({})))
   const duration = parsed.success ? parsed.data.duration : 'permanent'
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const issued = rotateLegadoAccessKey(user.id, duration)
   const sourceUrl = new URL('/api/v1/legado/source.json', publicOrigin(c))
   sourceUrl.searchParams.set('key', issued.token)
@@ -592,6 +595,7 @@ async function exploreBooks(c: Context, scope: LegadoExploreScope, id?: string, 
   }
 
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const sortBy = parsed.data.sort === 'updated' ? 'updatedAt' : parsed.data.sort === 'title' ? 'title' : 'createdAt'
   const sortOrder = parsed.data.order ?? (parsed.data.sort === 'title' ? 'asc' : 'desc')
   const requested = libraryId ?? legadoPrivateLibraryId(user.id)
@@ -610,6 +614,7 @@ async function exploreBooks(c: Context, scope: LegadoExploreScope, id?: string, 
 
 legadoRoutes.get('/explore/config', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const data = await getLegadoExploreConfig(user.id)
   return c.json({ data } satisfies { data: LegadoExploreConfigRes })
 })
@@ -628,6 +633,7 @@ legadoRoutes.get('/search', async (c) => {
   }
 
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const libraryIds = parsed.data.scope === 'private'
     ? [legadoPrivateLibraryId(user.id)]
     : legadoJoinedLibraryIds(user.id)
@@ -641,6 +647,7 @@ legadoRoutes.get('/search', async (c) => {
 
 legadoRoutes.get('/books/:id', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const book = await getActiveBook(user.id, c.req.param('id'), LEGADO_READ)
   const wordCount = typeof book.meta.wordCount === 'number' && Number.isFinite(book.meta.wordCount) ? book.meta.wordCount : null
   // A version collected from a shared library keeps the publisher, series and
@@ -670,6 +677,7 @@ legadoRoutes.get('/books/:id', async (c) => {
 
 legadoRoutes.get('/books/:id/cover', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const cover = await getBookCoverContent(user.id, c.req.param('id'), { size: 'thumb' })
   if (!cover) throw new AppError('BOOK_NOT_FOUND', 'No cover')
   return c.newResponse(new Uint8Array(cover.data), 200, { 'Content-Type': cover.contentType, 'Cache-Control': 'private, immutable, max-age=31536000' })
@@ -679,6 +687,7 @@ legadoRoutes.get('/books/:id/resource', async (c) => {
   const resourcePath = c.req.query('path')
   if (!resourcePath) throw new AppError('VALIDATION_ERROR', 'EPUB resource path is required')
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const resource = await getLegadoBookResource(user.id, c.req.param('id'), resourcePath)
   return c.newResponse(new Uint8Array(resource.data), 200, {
     'Content-Type': resource.mediaType,
@@ -690,6 +699,7 @@ legadoRoutes.get('/books/:id/resource', async (c) => {
 
 legadoRoutes.get('/books/:id/chapters', async (c) => {
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const bookId = c.req.param('id')
   const chapters = await getLegadoToc(user.id, bookId)
   const data: LegadoTocRes = {
@@ -712,6 +722,7 @@ legadoRoutes.get('/books/:id/chapters/:index', async (c) => {
   const index = Number(c.req.param('index'))
 
   const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const bookId = c.req.param('id')
   const token = c.get('legadoToken')
   const includeMedia = isLegadoEpubMediaEnabled(user.id)

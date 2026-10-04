@@ -31,12 +31,14 @@ usersRoutes.patch('/:id', async (c) => {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
   const actor = c.get('user')
+  if (!actor) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const updated = await updateUser(actor.id, c.req.param('id'), parsed.data)
   return c.json({ data: updated })
 })
 
 usersRoutes.delete('/:id', async (c) => {
   const actor = c.get('user')
+  if (!actor) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const result = await deleteUser(actor.id, c.req.param('id'))
   return c.json({ data: result })
 })
@@ -48,6 +50,7 @@ usersRoutes.post('/instance-owner', async (c) => {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
   const actor = c.get('user')
+  if (!actor) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const result = await transferInstanceOwnership(actor.id, parsed.data.userId)
   return c.json({ data: result })
 })

@@ -27,9 +27,7 @@ const readingRecordsRoutes = new Hono()
 
 readingRecordsRoutes.use('*', async (c, next) => {
   const user = c.get('user')
-  if (c.get('guest') === true || user.role === 'guest') {
-    return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot access reading records' } }, 403)
-  }
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   return next()
 })
 
@@ -40,6 +38,7 @@ function serverToday(): string {
 
 readingRecordsRoutes.post('/', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const body = await c.req.json()
   const parsed = readingRecordCreateSchema.safeParse(body)
   if (!parsed.success) {
@@ -51,6 +50,7 @@ readingRecordsRoutes.post('/', async (c) => {
 
 readingRecordsRoutes.get('/summary', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const todayParam = c.req.query('today')
   const today = todayParam && /^\d{4}-\d{2}-\d{2}$/.test(todayParam) ? todayParam : serverToday()
   const summary = await getSummary(user.id, today, c.req.query('showHidden') === '1')
@@ -59,6 +59,7 @@ readingRecordsRoutes.get('/summary', async (c) => {
 
 readingRecordsRoutes.get('/daily', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = readingRecordRangeSchema.safeParse({ from: c.req.query('from'), to: c.req.query('to') })
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid range', details: parsed.error.flatten() } }, 400)
@@ -69,6 +70,7 @@ readingRecordsRoutes.get('/daily', async (c) => {
 
 readingRecordsRoutes.get('/by-book', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = readingRecordRangeSchema.safeParse({ from: c.req.query('from'), to: c.req.query('to') })
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid range', details: parsed.error.flatten() } }, 400)
@@ -79,6 +81,7 @@ readingRecordsRoutes.get('/by-book', async (c) => {
 
 readingRecordsRoutes.get('/by-tag', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = readingRecordRangeSchema.safeParse({ from: c.req.query('from'), to: c.req.query('to') })
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid range', details: parsed.error.flatten() } }, 400)
@@ -89,6 +92,7 @@ readingRecordsRoutes.get('/by-tag', async (c) => {
 
 readingRecordsRoutes.get('/hourly', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = readingRecordHourlySchema.safeParse({
     from: c.req.query('from'),
     to: c.req.query('to'),
@@ -104,6 +108,7 @@ readingRecordsRoutes.get('/hourly', async (c) => {
 
 readingRecordsRoutes.get('/book/:bookId', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const detail = await getBookRecords(user.id, c.req.param('bookId'), c.req.query('showHidden') === '1')
   return c.json({ data: detail })
 })
@@ -111,6 +116,7 @@ readingRecordsRoutes.get('/book/:bookId', async (c) => {
 // Mixed detail feed: manual sessions + auto-mode day rows, newest first
 readingRecordsRoutes.get('/book/:bookId/detail', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = readingDetailListSchema.safeParse({
     limit: c.req.query('limit'),
     offset: c.req.query('offset'),
@@ -128,6 +134,7 @@ readingRecordsRoutes.get('/book/:bookId/detail', async (c) => {
 // aggregate adjustment.
 readingRecordsRoutes.get('/sessions', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = readingSessionListSchema.safeParse({
     bookId: c.req.query('bookId'),
     limit: c.req.query('limit'),
@@ -142,6 +149,7 @@ readingRecordsRoutes.get('/sessions', async (c) => {
 
 readingRecordsRoutes.put('/sessions/:id', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const body = await c.req.json()
   const parsed = readingSessionUpdateSchema.safeParse(body)
   if (!parsed.success) {
@@ -153,6 +161,7 @@ readingRecordsRoutes.put('/sessions/:id', async (c) => {
 
 readingRecordsRoutes.delete('/sessions/:id', async (c) => {
   const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   await deleteSession(user.id, c.req.param('id'))
   return c.json({ data: { ok: true } })
 })

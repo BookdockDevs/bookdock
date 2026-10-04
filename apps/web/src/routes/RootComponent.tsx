@@ -107,17 +107,15 @@ export function RootComponent() {
     if (isLibraryInvite) {
       if (meQuery.isPending || meQuery.isFetching) return
       const me = meQuery.isError ? undefined : meQuery.data?.data
-      if (me) setAuth(me)
+      if (me && me.guest !== true) setAuth(me)
       else clearAuth()
       return
     }
     if (isPublic) return
     if (meQuery.isPending || meQuery.isFetching) return
     const me = meQuery.isError ? undefined : meQuery.data?.data
-    if (me) {
+    if (me && me.guest !== true) {
       recoveringUnauthorizedSession.current = false
-      // Guest-injected sessions carry me.guest; the store keeps the user so
-      // settings sync keeps working, and UI branches on the flag.
       setAuth(me)
       return
     }
@@ -158,7 +156,7 @@ export function RootComponent() {
   if (!ready) return null
 
   return (
-    <AppShell key={authUser?.guest === true || authUser?.role === 'guest' ? 'guest' : authUser?.id ?? 'anonymous'}>
+    <AppShell key={authUser?.id ?? 'anonymous'}>
       <Outlet />
     </AppShell>
   )

@@ -141,7 +141,7 @@ function createApp(user: TestUser) {
   app.onError(errorHandler)
 
   app.use('/api/v1/ai/*', async (c, next) => {
-    c.set('user', { ...user, username: user.role, avatarKey: null })
+    c.set('user', user.role === 'guest' ? null : { ...user, username: user.role, avatarKey: null })
     return next()
   })
   app.route('/api/v1/ai', aiRoutes)
@@ -1366,7 +1366,7 @@ describe('ai routes', () => {
 
   it('blocks guests from configuring or calling AI', async () => {
     const configResponse = await createApp({ id: 'guest-1', role: 'guest' }).request('http://test/api/v1/ai/config')
-    expect(configResponse.status).toBe(403)
+    expect(configResponse.status).toBe(401)
 
     const chatResponse = await createApp({ id: 'guest-1', role: 'guest' }).request('http://test/api/v1/ai/chat', {
       method: 'POST',
@@ -1374,8 +1374,8 @@ describe('ai routes', () => {
       body: JSON.stringify(requestBody),
     })
 
-    expect(chatResponse.status).toBe(403)
-    expect(await chatResponse.json()).toMatchObject({ error: { code: 'AI_NOT_ALLOWED' } })
+    expect(chatResponse.status).toBe(401)
+    expect(await chatResponse.json()).toMatchObject({ error: { code: 'UNAUTHORIZED' } })
     expect(fetch).not.toHaveBeenCalled()
   })
 

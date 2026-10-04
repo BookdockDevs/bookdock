@@ -72,6 +72,7 @@ describe('authGuard access token branch', () => {
       { id: memberId, username: `member-${memberId}`, role: 'member', createdAt: Date.now() },
       { id: ownerId, username: `owner-${ownerId}`, role: 'owner', createdAt: Date.now() },
     ]).run()
+    db.insert(schema.instance).values({ id: 'instance', ownerUserId: ownerId, createdAt: 1, updatedAt: 1 }).run()
   })
 
   function issue(permissions: AccessTokenPermission[], owner = memberId) {

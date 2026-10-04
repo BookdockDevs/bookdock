@@ -45,7 +45,7 @@ export function Toast() {
   const visible = toasts.length > 0
 
   useEffect(() => useAuthStore.subscribe((state, previous) => {
-    if (state.user?.id !== previous.user?.id || state.user?.guest !== previous.user?.guest) {
+    if (state.user?.id !== previous.user?.id) {
       useToastStore.getState().clearToasts()
     }
   }), [])

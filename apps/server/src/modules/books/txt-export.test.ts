@@ -542,7 +542,7 @@ describe('GET /books/:id/export.txt', () => {
     const epub = seedBook(db, ownerId, { format: 'epub' })
     const app = new Hono()
     app.onError(errorHandler)
-    app.use('*', async (c, next) => { c.set('user', { id: ownerId, username: 'guest', role: 'guest', avatarKey: null }); return next() })
+    app.use('*', async (c, next) => { c.set('user', null); return next() })
     app.route('/api/v1/books', booksRoutes)
     expect((await app.request(`/api/v1/books/${epub.id}/export.txt`)).status).toBe(403)
   })
