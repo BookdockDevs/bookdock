@@ -57,7 +57,7 @@ interface IdeaOverlayProps {
   onClose: () => void
 }
 
-const card = 'rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] text-[var(--bd-read-text)] shadow-2xl'
+const card = 'rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] text-[var(--bd-read-text)] shadow-xl'
 const iconBtn =
   'flex h-10 w-10 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current'
 const detailActionBtn =
@@ -156,7 +156,7 @@ export function IdeaOverlay({
           }}
         >
           {detail ? (
-            <div className={`${card} w-full max-w-lg overflow-hidden`}>
+            <div className={`${card} w-full max-w-[420px] overflow-hidden`}>
               <div className="flex items-center justify-between px-3 pt-3 pb-2 border-b border-stone-200/40 dark:border-stone-800/40">
                 <div className="flex items-center gap-2 min-w-0">
                   <button
@@ -175,7 +175,7 @@ export function IdeaOverlay({
                   )}
                   <span className="truncate text-sm font-medium">{detail.authorName ?? _('annotation.myNote')}</span>
                 </div>
-                <div className="flex items-center gap-1 shrink-0 text-xs text-[var(--bd-read-sub)]">
+                <div className="flex items-center gap-0.5 shrink-0 text-xs text-[var(--bd-read-sub)]">
                   {onToggleLike && (
                     <button
                       onClick={() => onToggleLike({ ...detail, liked: isDetailLiked })}
@@ -224,7 +224,12 @@ export function IdeaOverlay({
                       <span className="flex items-center gap-1.5 text-[var(--bd-read-sub)]">
                         <QuoteLeftIcon height={13} />
                       </span>
-                      <span className="mt-1.5 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-[var(--bd-read-sub)]">{quoteText}</span>
+                      <span
+                        className="mt-1.5 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-[var(--bd-read-sub)]"
+                        style={fontStack ? { fontFamily: fontStack } : undefined}
+                      >
+                        {quoteText}
+                      </span>
                     </button>
                   ) : (
                     <div
@@ -237,7 +242,12 @@ export function IdeaOverlay({
                       <div className="flex items-center gap-1.5 text-[var(--bd-read-sub)]">
                         <QuoteLeftIcon height={13} />
                       </div>
-                      <p className="mt-1.5 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-[var(--bd-read-sub)]">{quoteText}</p>
+                      <p
+                        className="mt-1.5 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-[var(--bd-read-sub)]"
+                        style={fontStack ? { fontFamily: fontStack } : undefined}
+                      >
+                        {quoteText}
+                      </p>
                     </div>
                   )
                 )}
@@ -257,7 +267,7 @@ export function IdeaOverlay({
               </div>
             </div>
           ) : (
-            <div className="w-full max-w-lg">
+            <div className="w-full max-w-[420px]">
               <div className={card}>
                 <div className="relative px-5 pt-4">
                   <span className="text-[var(--bd-read-sub)]">
@@ -304,6 +314,7 @@ export function IdeaOverlay({
                     onEdit={() => onEdit(entry)}
                     onDelete={() => onDelete(entry)}
                     onJump={onJump && entry.locationAvailable !== false ? () => onJump(entry) : undefined}
+                    fontStack={fontStack}
                   />
                 )
               })}

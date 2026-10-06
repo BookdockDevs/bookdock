@@ -37,6 +37,16 @@ export default function LibraryContextBar({ search, navSearch, onClear }: Librar
       return <button type="button" key={`expression-${index}`} onClick={() => navSearch({ expression: removeSearchCondition(search.expression!, index) })} className="max-w-64 truncate rounded-full bg-stone-200/60 px-2.5 py-1 dark:bg-stone-800" title={label}>{label} ×</button>
     })}
     {conditions.map((condition) => <button type="button" key={condition.key} onClick={() => navSearch({ [condition.key]: undefined })} className="max-w-64 truncate rounded-full bg-stone-200/60 px-2.5 py-1 dark:bg-stone-800" title={condition.label}>{condition.label} ×</button>)}
-    <button type="button" onClick={onClear} className="ml-auto hover:underline">{_('library.clearFilters')}</button>
+    <button
+      type="button"
+      onClick={onClear}
+      className="ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-70">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+        <path d="M3 3v5h5" />
+      </svg>
+      <span>{_('library.clearFilters')}</span>
+    </button>
   </div>
 }

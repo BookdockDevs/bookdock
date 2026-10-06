@@ -21,6 +21,7 @@ interface IdeaCardProps {
   onEdit?: () => void
   onDelete?: () => void
   onJump?: () => void
+  fontStack?: string
 }
 
 export default function IdeaCard({
@@ -33,6 +34,7 @@ export default function IdeaCard({
   onEdit,
   onDelete,
   onJump,
+  fontStack,
 }: IdeaCardProps) {
   const [quoteExpanded, setQuoteExpanded] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ pos: { x: number; y: number } } | null>(null)
@@ -88,7 +90,7 @@ export default function IdeaCard({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        className="mt-3 block w-full rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-4 text-left text-[var(--bd-read-text)] shadow-2xl transition-all hover:bg-[color-mix(in_srgb,var(--bd-read-bg)_94%,var(--bd-read-text))] hover:border-stone-300 dark:hover:border-stone-700"
+        className="mt-3 block w-full rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-4 text-left text-[var(--bd-read-text)] shadow-md transition-all hover:bg-[color-mix(in_srgb,var(--bd-read-bg)_94%,var(--bd-read-text))] hover:border-stone-300 dark:hover:border-stone-700"
       >
         <div className="relative">
           <div className="flex items-center gap-2.5">
@@ -115,7 +117,7 @@ export default function IdeaCard({
                   <LockIcon size={12} />
                 </span>
               )}
-              <span className="rounded-full bg-stone-500/10 px-2.5 py-0.5 text-[11px] text-[var(--bd-read-sub)] font-medium">
+              <span className="rounded-md bg-stone-500/10 px-1.5 py-0.5 text-[10px] text-[var(--bd-read-sub)] font-medium tracking-tight">
                 {_('annotation.myNote')}
               </span>
             </div>
@@ -139,7 +141,10 @@ export default function IdeaCard({
               onJump && entry.locationAvailable !== false && 'hover:bg-stone-500/10 transition-colors',
             )}
           >
-            <p className={cn('whitespace-pre-wrap text-xs text-[var(--bd-read-sub)]', !quoteExpanded && 'line-clamp-2')}>
+            <p
+              className={cn('whitespace-pre-wrap text-xs text-[var(--bd-read-sub)]', !quoteExpanded && 'line-clamp-2')}
+              style={fontStack ? { fontFamily: fontStack } : undefined}
+            >
               {entry.annotation.text}
             </p>
             {entry.annotation.text.length > 40 && (

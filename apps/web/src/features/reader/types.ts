@@ -342,12 +342,12 @@ export type FontFamily = string
 export const READER_GLYPH_FALLBACK = '"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI Symbol", "Noto Sans Symbols 2", "Noto Sans Symbols", "Arial Unicode MS"'
 
 export const FONT_OPTIONS: { id: FontFamily; name: string; value: string; latin?: boolean }[] = [
-  { id: 'sans-serif', name: '黑体', value: `"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Microsoft YaHei UI", "Noto Sans SC", "Source Han Sans SC", ${READER_GLYPH_FALLBACK}, sans-serif` },
-  { id: 'serif', name: '宋体', value: `"Songti SC", "SimSun", "Noto Serif SC", "Source Han Serif SC", "Source Han Serif", ${READER_GLYPH_FALLBACK}, serif` },
-  { id: 'kaiti', name: '楷体', value: `"KaiTi", "KaiTi_GB2312", "STKaiti", "BiauKai", ${READER_GLYPH_FALLBACK}, serif` },
-  { id: 'fangsong', name: '仿宋', value: `"FangSong", "FangSong_GB2312", "STFangsong", ${READER_GLYPH_FALLBACK}, serif` },
-  { id: 'serif-en', name: '西文衬线', latin: true, value: `"Georgia", "Times New Roman", "Songti SC", "SimSun", ${READER_GLYPH_FALLBACK}, serif` },
-  { id: 'sans-en', name: '西文无衬线', latin: true, value: `"Inter", "Helvetica Neue", "Helvetica", "Arial", "PingFang SC", "Microsoft YaHei", ${READER_GLYPH_FALLBACK}, sans-serif` },
+  { id: 'sans-serif', name: '黑体', value: `"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", "Microsoft YaHei UI", "Noto Sans SC", "Source Han Sans SC", ${READER_GLYPH_FALLBACK}, sans-serif` },
+  { id: 'serif', name: '宋体', value: `"Songti SC", "SimSun", "宋体", "STSong", "Noto Serif SC", "Source Han Serif SC", "Source Han Serif", ${READER_GLYPH_FALLBACK}, serif` },
+  { id: 'kaiti', name: '楷体', value: `"KaiTi", "楷体", "STKaiti", "KaiTi_GB2312", "BiauKai", ${READER_GLYPH_FALLBACK}, serif` },
+  { id: 'fangsong', name: '仿宋', value: `"FangSong", "仿宋", "STFangsong", "FangSong_GB2312", ${READER_GLYPH_FALLBACK}, serif` },
+  { id: 'serif-en', name: '西文衬线', latin: true, value: `"Georgia", "Times New Roman", "Songti SC", "SimSun", "宋体", ${READER_GLYPH_FALLBACK}, serif` },
+  { id: 'sans-en', name: '西文无衬线', latin: true, value: `"Inter", "Helvetica Neue", "Helvetica", "Arial", "PingFang SC", "Microsoft YaHei", "微软雅黑", ${READER_GLYPH_FALLBACK}, sans-serif` },
 ]
 
 export interface FontConfig {

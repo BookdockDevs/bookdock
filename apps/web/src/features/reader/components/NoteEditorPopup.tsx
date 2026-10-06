@@ -157,7 +157,7 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
       className={cn(
         'rounded-full px-5 py-1.5 text-sm font-medium transition-all shadow-xs',
         hasDraft && !saving
-          ? 'bg-blue-500 hover:bg-blue-600 text-white cursor-pointer active:scale-95'
+          ? 'bg-[var(--bd-read-primary)] text-white hover:opacity-90 cursor-pointer active:scale-95'
           : 'bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-500 cursor-not-allowed opacity-60',
       )}
     >
@@ -207,9 +207,6 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
             <div />
           )}
           <div className="flex items-center gap-2.5">
-            <span className="hidden text-[11px] text-[var(--bd-read-sub)] opacity-60 sm:inline">
-              Ctrl+Enter
-            </span>
             {publishButton}
           </div>
         </div>

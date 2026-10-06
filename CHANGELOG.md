@@ -28,6 +28,8 @@ All notable changes to Bookdock are documented here.
 - Hidden private-book links no longer reuse hidden-inclusive cached details when display is off; direct links never enable hidden display automatically.
 - Dismissing a finished update now clears its record so the entry returns on refresh, and interrupted updates no longer show later steps as done; failed dismissals stay open for retry while closing an active update keeps it running in the background.
 - A failed system update no longer rolls back to a snapshot from another release, an unknown manifest format or one without an instance owner; the current database and the pending update are left untouched.
+- Chinese font stacks now include common Windows face names, which may change the physical font actually rendered; Latin-first fonts still lead with the CJK companion chain.
+- Filter reset affordances in the library context bar and the view menu are now icon buttons.
 
 ### Upgrade notes
 
@@ -646,6 +648,8 @@ All notable changes to Bookdock are documented here.
 - 关闭显示后，隐藏私库书籍的链接不会复用此前包含隐藏内容的详情缓存；直接链接不会自动开启显示。
 - 已结束的更新关闭即清理，入口刷新后恢复；中途取消不再把没走到的步骤标成完成；清理失败留窗重试，执行中关闭只隐藏、后台继续。
 - 系统更新失败时，若快照来自其他版本、清单格式未知或缺少实例所有者，则拒绝回滚，保持当前数据库和待更新状态不动。
+- 中文字体栈补齐 Windows 常用字名，同等设置下实际命中的物理字体可能变化；西文优先字体仍由西文字体打头、CJK 伴随补齐。
+- 书库上下文栏与视图菜单的重置筛选改为图标按钮。
 
 #### 升级说明
 

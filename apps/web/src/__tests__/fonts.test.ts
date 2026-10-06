@@ -95,6 +95,14 @@ describe('resolveDualFont', () => {
     expect(dual.name).toBe('宋体')
   })
 
+  it('keeps a CJK primary stack intact even when companion is different', () => {
+    const dual = resolveDualFont('serif', 'sans-serif', [])
+    expect(dual.stack).toBe(FONT_OPTIONS.find((f) => f.id === 'serif')!.value)
+    expect(dual.stack).toContain('"SimSun"')
+    expect(dual.css).toBe('')
+    expect(dual.name).toBe('宋体')
+  })
+
   it('leads with the latin face and follows with the CJK companion chain', () => {
     const dual = resolveDualFont('literata', 'lxgw-wenkai', [])
     expect(dual.stack.startsWith('"Literata Variable", ')).toBe(true)

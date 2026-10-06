@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import type { IdeaComment } from '@bookdock/shared'
 
@@ -51,6 +51,18 @@ export default function IdeaDiscussionPanel({
   const data = query.data?.data
   const userAvatar = user?.avatarKey ? avatarUrl(user.avatarKey) : undefined
   const isExpanded = isFocused || Boolean(draft) || Boolean(replyTo) || Boolean(editing)
+
+  useLayoutEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    if (!isExpanded) {
+      el.style.height = ''
+      return
+    }
+    el.style.height = 'auto'
+    const newHeight = Math.min(Math.max(el.scrollHeight, 52), 160)
+    el.style.height = `${newHeight}px`
+  }, [draft, isExpanded])
 
   useEffect(() => {
     if (replyTo || editing) {
@@ -237,52 +249,23 @@ export default function IdeaDiscussionPanel({
             </p>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 pt-0.5">
-              {user && (
-                <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100 text-xs text-[var(--bd-read-sub)]">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setReplyTo(comment)
-                      setEditing(null)
-                    }}
-                    className="hover:text-[var(--bd-read-text)] transition-colors cursor-pointer"
-                  >
-                    {_('comment.reply')}
-                  </button>
-                  {comment.canDelete && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setDeleteTarget(comment)
-                      }}
-                      className="hover:text-red-500 transition-colors cursor-pointer"
-                    >
-                      {_('comment.delete')}
-                    </button>
-                  )}
-                </div>
-              )}
-              <button
-                type="button"
-                disabled={!user || action.isPending}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void perform({ type: 'like', commentId: comment.id, liked: !comment.liked })
-                }}
-                className={cn(
-                  'flex items-center gap-1 text-xs transition-colors',
-                  comment.liked ? 'text-red-500 font-medium' : 'text-[var(--bd-read-sub)] hover:text-red-500',
-                  !user && 'cursor-default opacity-80',
-                )}
-                title={comment.liked ? _('comment.unlike') : _('comment.like')}
-              >
-                {comment.likeCount > 0 && <span className="tabular-nums">{comment.likeCount}</span>}
-                <HeartIcon filled={comment.liked} size={15} />
-              </button>
-          </div>
+          <button
+            type="button"
+            disabled={!user || action.isPending}
+            onClick={(e) => {
+              e.stopPropagation()
+              void perform({ type: 'like', commentId: comment.id, liked: !comment.liked })
+            }}
+            className={cn(
+              'flex items-center gap-1 text-xs shrink-0 pt-0.5 transition-colors',
+              comment.liked ? 'text-red-500 font-medium' : 'text-[var(--bd-read-sub)] hover:text-red-500',
+              !user && 'cursor-default opacity-80',
+            )}
+            title={comment.liked ? _('comment.unlike') : _('comment.like')}
+          >
+            {comment.likeCount > 0 && <span className="tabular-nums">{comment.likeCount}</span>}
+            <HeartIcon filled={comment.liked} size={15} />
+          </button>
         </div>
       </div>
     )
@@ -307,7 +290,7 @@ export default function IdeaDiscussionPanel({
         >
           {_('comment.tabComments', { count: data.idea.commentCount })}
           {tab === 'comments' && (
-            <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-blue-500" />
+            <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-[var(--bd-read-primary)]" />
           )}
         </button>
 
@@ -324,7 +307,7 @@ export default function IdeaDiscussionPanel({
         >
           {_('comment.tabLikes', { count: data.idea.likeCount })}
           {tab === 'likes' && (
-            <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-blue-500" />
+            <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-[var(--bd-read-primary)]" />
           )}
         </button>
       </div>
@@ -377,133 +360,131 @@ export default function IdeaDiscussionPanel({
             )}
           </div>
 
-          {/* 底部评论输入栏轻量化（对标微信读书）：默认为一条圆角胶囊状轻输入行，点击后聚焦展开 */}
+          {/* 底部评论输入栏：收起态为极简圆角胶囊（对标微信读书），点击展开为卡片 */}
           {user && (
-            isExpanded ? (
-              <div className="mt-4 rounded-xl border border-stone-200/70 bg-stone-500/[0.04] p-2.5 transition-all dark:border-stone-800/70 dark:bg-stone-500/[0.06]">
-                {(replyTo || editing) && (
-                  <div className="mb-2 flex items-center justify-between">
-                    <div className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-xs text-blue-600 dark:text-blue-400">
-                      <span className="font-medium">
-                        {editing ? _('comment.editTitle') : _('comment.replyTo', { name: replyTo?.author.name ?? '' })}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={action.isPending}
-                        onClick={() => {
-                          setReplyTo(null)
-                          setEditing(null)
-                          setDraft('')
-                          setIsFocused(false)
-                        }}
-                        title={_('comment.cancel')}
-                        className="rounded-full p-0.5 text-current transition-colors hover:bg-blue-500/20 cursor-pointer"
-                      >
-                        <CloseIcon size={11} />
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <div className="flex items-start gap-2">
-                  {userAvatar ? (
-                    <img src={userAvatar} alt="" className="mt-0.5 h-6 w-6 shrink-0 rounded-full object-cover" />
-                  ) : (
-                    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-stone-400/20 text-[10px] font-medium text-[var(--bd-read-sub)]">
-                      {user.username.slice(0, 1)}
+            <div
+              className={cn(
+                'mt-4 border border-stone-200/70 bg-stone-500/[0.04] transition-[border-color,background-color] dark:border-stone-800/70 dark:bg-stone-500/[0.06]',
+                isExpanded ? 'rounded-xl p-3' : 'rounded-full px-3.5 py-2 hover:border-stone-300 dark:hover:border-stone-700 cursor-text',
+              )}
+              onClick={() => {
+                if (!isExpanded) {
+                  setIsFocused(true)
+                  inputRef.current?.focus()
+                }
+              }}
+            >
+              {(replyTo || editing) && (
+                <div className="mb-2.5 flex items-center justify-between">
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-[var(--bd-read-primary)]/10 px-2.5 py-0.5 text-xs text-[var(--bd-read-primary)]">
+                    <span className="font-medium">
+                      {editing ? _('comment.editTitle') : _('comment.replyTo', { name: replyTo?.author.name ?? '' })}
                     </span>
-                  )}
-                  <textarea
-                    ref={inputRef}
-                    aria-label={_('comment.inputPlaceholder')}
-                    placeholder={
-                      replyTo
-                        ? _('comment.replyInputPlaceholder')
-                        : _('comment.inputPlaceholder')
-                    }
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                        e.preventDefault()
-                        void submit()
-                      } else if (e.key === 'Escape') {
-                        e.preventDefault()
-                        setIsFocused(false)
-                        setReplyTo(null)
-                        setEditing(null)
-                        if (!editing) setDraft('')
-                      }
-                    }}
-                    disabled={action.isPending}
-                    maxLength={10000}
-                    rows={2}
-                    className="w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--bd-read-text)] placeholder-[var(--bd-read-sub)]/50 focus:outline-hidden"
-                  />
-                </div>
-                <div className="mt-2 flex items-center justify-between border-t border-stone-200/30 pt-2 text-xs dark:border-stone-800/30">
-                  <span className="text-[11px] text-[var(--bd-read-sub)] opacity-70">
-                    Ctrl+Enter {_('comment.submit')}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    {!draft.trim() && !replyTo && !editing && (
-                      <button
-                        type="button"
-                        onClick={() => setIsFocused(false)}
-                        className="px-2 py-1 text-xs text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] transition-colors"
-                      >
-                        {_('comment.cancel')}
-                      </button>
-                    )}
                     <button
                       type="button"
-                      disabled={action.isPending || !draft.trim()}
-                      onClick={() => void submit()}
-                      className="rounded-lg bg-blue-500 px-3.5 py-1 text-xs font-medium text-white shadow-xs transition-opacity hover:bg-blue-600 disabled:opacity-40"
+                      disabled={action.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setReplyTo(null)
+                        setEditing(null)
+                        setDraft('')
+                        setIsFocused(false)
+                      }}
+                      title={_('comment.cancel')}
+                      className="rounded-full p-0.5 text-current transition-colors hover:bg-stone-500/20 cursor-pointer"
                     >
-                      {editing ? _('comment.save') : _('comment.submit')}
+                      <CloseIcon size={11} />
                     </button>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div
-                onClick={() => {
-                  setIsFocused(true)
-                  inputRef.current?.focus()
-                }}
-                className="mt-4 flex items-center gap-2.5 rounded-full border border-stone-200/70 bg-stone-500/[0.04] px-3 py-1.5 transition-all hover:border-stone-300 dark:border-stone-800/70 dark:bg-stone-500/[0.06] dark:hover:border-stone-700 cursor-text"
-              >
+              )}
+
+              <div className={cn('flex gap-2.5', isExpanded ? 'items-start' : 'items-center')}>
                 {userAvatar ? (
-                  <img src={userAvatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
+                  <img
+                    src={userAvatar}
+                    alt=""
+                    className={cn('shrink-0 rounded-full object-cover', isExpanded ? 'mt-0.5 h-6 w-6' : 'h-5 w-5')}
+                  />
                 ) : (
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-stone-400/20 text-[10px] font-medium text-[var(--bd-read-sub)]">
+                  <span
+                    className={cn(
+                      'flex shrink-0 items-center justify-center rounded-full bg-stone-400/20 text-[10px] font-medium text-[var(--bd-read-sub)]',
+                      isExpanded ? 'mt-0.5 h-6 w-6' : 'h-5 w-5',
+                    )}
+                  >
                     {user.username.slice(0, 1)}
                   </span>
                 )}
+
                 <textarea
                   ref={inputRef}
-                  rows={1}
                   aria-label={_('comment.inputPlaceholder')}
-                  placeholder={_('comment.inputPlaceholder')}
+                  placeholder={
+                    replyTo
+                      ? _('comment.replyInputPlaceholder')
+                      : _('comment.inputPlaceholder')
+                  }
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onFocus={() => setIsFocused(true)}
-                  disabled={action.isPending}
-                  className="min-w-0 flex-1 resize-none bg-transparent py-0.5 text-xs text-[var(--bd-read-text)] placeholder-[var(--bd-read-sub)]/60 focus:outline-hidden"
-                />
-                <button
-                  type="button"
-                  disabled={!draft.trim() || action.isPending}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void submit()
+                  onBlur={() => {
+                    if (!draft.trim() && !replyTo && !editing) {
+                      setIsFocused(false)
+                    }
                   }}
-                  className="rounded-full bg-blue-500 px-3 py-1 text-xs font-medium text-white shadow-xs transition-opacity hover:bg-blue-600 disabled:opacity-40"
-                >
-                  {_('comment.submit')}
-                </button>
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault()
+                      void submit()
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault()
+                      setIsFocused(false)
+                      setReplyTo(null)
+                      setEditing(null)
+                      if (!editing) setDraft('')
+                    }
+                  }}
+                  disabled={action.isPending}
+                  maxLength={10000}
+                  className={cn(
+                    'min-w-0 flex-1 resize-none bg-transparent leading-relaxed text-[var(--bd-read-text)] placeholder-[var(--bd-read-sub)]/50 focus:outline-hidden',
+                    isExpanded
+                      ? 'min-h-[52px] max-h-40 text-sm'
+                      : '!h-5 max-h-5 py-0 text-xs placeholder-[var(--bd-read-sub)]/70 overflow-hidden cursor-text leading-5',
+                  )}
+                />
               </div>
-            )
+
+              {isExpanded && (
+                <div className="mt-2.5 flex items-center justify-end gap-2 border-t border-stone-200/30 pt-2 text-xs dark:border-stone-800/30">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setIsFocused(false)
+                      setReplyTo(null)
+                      setEditing(null)
+                      if (!editing) setDraft('')
+                    }}
+                    className="px-2.5 py-1 text-xs text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] transition-colors cursor-pointer"
+                  >
+                    {_('comment.cancel')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={action.isPending || !draft.trim()}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void submit()
+                    }}
+                    className="rounded-full bg-[var(--bd-read-primary)] px-4 py-1.5 text-xs font-medium text-white shadow-xs transition-opacity hover:opacity-90 disabled:opacity-40 cursor-pointer"
+                  >
+                    {editing ? _('comment.save') : _('comment.submit')}
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

@@ -300,9 +300,15 @@ export default function ViewMenu({
               <button
                 type="button"
                 onClick={() => navSearch({ format: undefined, status: undefined })}
-                className="shrink-0 px-2 py-1 text-xs font-medium text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                aria-label={_('library.resetFilter')}
+                title={_('library.resetFilter')}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-stone-100/80 text-stone-500 transition-colors hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
               >
-                {_('library.resetFilter')}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+                <span className="sr-only">{_('library.resetFilter')}</span>
               </button>
             )}
           </div>

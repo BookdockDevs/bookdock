@@ -56,6 +56,7 @@ export interface ResolvedFont {
   name: string
   /** Ready-to-use CSS font-family stack */
   stack: string
+  latin: boolean
   builtin?: BuiltinFont
   uploaded?: FontListItem
 }
@@ -85,6 +86,7 @@ export function resolveFont(
   return {
     name: option.name,
     stack: option.stack,
+    latin: option.latin,
     builtin: option.builtin,
     uploaded: option.uploaded,
   }
@@ -123,14 +125,15 @@ export function resolveCjkFont(
   return {
     name: selected.name,
     stack: selected.stack,
+    latin: selected.latin,
     builtin: selected.builtin,
     uploaded: selected.uploaded,
   }
 }
 
 /** Primary + CJK companion composition. A CJK primary keeps its own stack
- *  untouched when it already is the companion; otherwise the primary face
- *  leads and the companion chain covers CJK glyphs */
+ *  untouched; when the primary face is Latin-first, it leads and the
+ *  companion chain covers CJK glyphs */
 export function resolveDualFont(
   primaryId: string,
   cjkId: string,
@@ -140,7 +143,7 @@ export function resolveDualFont(
 ): DualFont {
   const primary = resolveFont(primaryId, uploaded, preferences, fontOrder)
   const companion = resolveCjkFont(cjkId, uploaded, preferences, fontOrder)
-  if (primary.stack === companion.stack) {
+  if (!primary.latin || primary.stack === companion.stack) {
     return { name: primary.name, stack: primary.stack, css: fontCssFor(primary), primary, companion }
   }
   return {
