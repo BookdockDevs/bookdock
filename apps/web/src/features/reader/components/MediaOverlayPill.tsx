@@ -494,7 +494,7 @@ export const MediaOverlayPill = memo(function MediaOverlayPill({ coordinator, in
           onClick={() => void handleTogglePlay()}
           title={_('reader.mediaTitle')}
           aria-label={_('reader.mediaTitle')}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] text-[var(--bd-read-sub)] shadow-xl transition-all hover:bg-stone-500/10 hover:text-[var(--bd-read-text)] active:scale-95"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] text-[var(--bd-read-sub)] shadow-xl transition-all hover:bg-[color-mix(in_srgb,var(--bd-read-bg)_90%,var(--bd-read-text))] hover:text-[var(--bd-read-text)] active:scale-95"
         >
           <HeadphoneIcon />
         </button>

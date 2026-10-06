@@ -687,6 +687,9 @@ export const ideas = sqliteTable('ideas', {
   note: text('note'),
   visibility: text('visibility', { enum: ['private', 'shared'] }).notNull().default('private'),
   sharedLibraryId: text('shared_library_id'),
+  sourceLibraryBookVersionId: text('source_library_book_version_id'),
+  revisionId: text('revision_id'),
+  editedAt: integer('edited_at'),
   chapter: text('chapter'),
   chapterHref: text('chapter_href'),
   createdAt: integer('created_at').notNull(),
@@ -696,3 +699,27 @@ export const ideas = sqliteTable('ideas', {
   userVersionIdx: index('ideas_user_version_idx').on(table.userId, table.bookVersionId, table.deletedAt),
   sharedIdx: index('ideas_shared_idx').on(table.sharedLibraryId, table.visibility),
 }))
+
+export const ideaComments = sqliteTable('idea_comments', {
+  id: text('id').primaryKey(),
+  ideaId: text('idea_id').notNull().references(() => ideas.id, { onDelete: 'cascade' }),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
+  parentId: text('parent_id').references((): AnySQLiteColumn => ideaComments.id, { onDelete: 'cascade' }),
+  replyToId: text('reply_to_id').references((): AnySQLiteColumn => ideaComments.id, { onDelete: 'set null' }),
+  body: text('body').notNull(),
+  createdAt: integer('created_at').notNull(),
+  editedAt: integer('edited_at'),
+  deletedAt: integer('deleted_at'),
+}, (table) => ({ ideaIdx: index('idea_comments_idea_idx').on(table.ideaId, table.createdAt) }))
+
+export const ideaLikes = sqliteTable('idea_likes', {
+  ideaId: text('idea_id').notNull().references(() => ideas.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.ideaId, table.userId] }) }))
+
+export const ideaCommentLikes = sqliteTable('idea_comment_likes', {
+  commentId: text('comment_id').notNull().references(() => ideaComments.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.commentId, table.userId] }) }))

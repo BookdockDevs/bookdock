@@ -27,6 +27,7 @@ import { RendererContext } from './hooks/useReaderApi'
 import { TtsSessionProvider } from './hooks/TtsSessionProvider'
 import { AutoReadingSessionProvider } from './hooks/AutoReadingSessionProvider'
 import { useBookChapters } from './hooks/useBookChapters'
+import { useReaderIdeas } from './hooks/useIdeas'
 import { createSegmentTracker, trackPosition, closeSegment } from './stats/reading-segments'
 import { createJumpHistory } from './jump-history'
 import { createHistoryAutoHide, type HistoryAutoHide } from './history-auto-hide'
@@ -186,6 +187,9 @@ export default function Reader() {
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
   const { data: annotations } = useAnnotations(id, { enabled: !isGuest })
+  const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
+  const publicIdeas = useReaderIdeas(id, showFriendIdeas)
+  const publicMarkers = useMemo(() => publicIdeas.isError || !showFriendIdeas ? [] : (publicIdeas.data?.data ?? []).filter((idea) => !idea.own && idea.locationAvailable), [publicIdeas.isError, publicIdeas.data, showFriendIdeas])
   const deepLinkHandled = useRef(false)
 
   const bookmarks = useMemo(
@@ -830,6 +834,7 @@ export default function Reader() {
       // notes side panel
       const annotation = annotations?.data?.find((a) => a.cfiRange === e.cfiRange && a.type === 'highlight')
         ?? annotations?.data?.find((a) => a.cfiRange === e.cfiRange)
+        ?? publicMarkers.find((idea) => idea.annotation.cfiRange === e.cfiRange)?.annotation
       if (!annotation || current?.cfiRange === e.cfiRange) { setSelection(null); return }
       setSelection({ cfiRange: e.cfiRange, text: annotation.text, rect: e.rect })
     },
@@ -922,11 +927,12 @@ export default function Reader() {
     const annotation = deepLinkAnnotation
       ? annotations?.data?.find((item) => item.id === deepLinkAnnotation)
       : undefined
+    if (annotation?.type === 'note' && (annotation.locationAvailable === false || (annotation.revisionId != null && bookQuery.data?.data.revisionId != null && annotation.revisionId !== bookQuery.data?.data.revisionId))) return
     const target = deepLinkCfi || annotation?.cfiRange || annotation?.cfiAnchor
     if (!target) return
     deepLinkHandled.current = true
     void renderer.display(target)
-  }, [annotations?.data, readerReady, deepLinkAnnotation, deepLinkCfi, renderer])
+  }, [annotations?.data, bookQuery.data?.data.revisionId, readerReady, deepLinkAnnotation, deepLinkCfi, renderer])
 
   // A TOC jump clicked before the renderer became available is queued in the
   // store — apply it as soon as the live renderer can accept navigation.
@@ -969,15 +975,16 @@ export default function Reader() {
   useEffect(() => {
     if (!renderer?.setAnnotations) return
     const list: ReaderAnnotation[] = (annotations?.data ?? [])
-      .filter((a) => a.type === 'highlight' || a.type === 'note')
+      .filter((a) => a.type === 'highlight' || (a.type === 'note' && a.locationAvailable !== false && (a.revisionId == null || bookQuery.data?.data.revisionId == null || a.revisionId === bookQuery.data?.data.revisionId)))
       .map((a) => ({ cfiRange: a.cfiRange, type: a.type as 'highlight' | 'note', color: a.color, style: a.style, note: a.note }))
+    list.push(...publicMarkers.map((idea) => ({ cfiRange: idea.annotation.cfiRange, type: 'note' as const, color: DEFAULT_IDEA_COLOR, style: 'underline' as const, note: idea.annotation.note })))
     // An idea being composed has no row yet; a pseudo note keeps the dashed
     // underline on its range while the editor is open
     if (noteEditorRange) {
       list.push({ cfiRange: noteEditorRange, type: 'note', color: DEFAULT_IDEA_COLOR, style: 'underline' })
     }
     renderer.setAnnotations(list)
-  }, [renderer, annotations?.data, noteEditorRange])
+  }, [renderer, annotations?.data, publicMarkers, bookQuery.data?.data.revisionId, noteEditorRange])
 
   useEffect(() => {
     // A locked desktop toolbar is persistent by intent — reopen the sidebar
@@ -1100,8 +1107,10 @@ export default function Reader() {
   }, [syncHistoryCaps])
 
   // The stored selection rect goes stale when the reading area resizes
-  // (sidebar toggle/drag, window resize), so dismiss the bubble instead of
-  // leaving it floating at the old position
+  // (sidebar toggle/drag, window resize), so dismiss a bare selection bubble
+  // instead of leaving it floating at the old position. Modal dialogs like
+  // IdeaOverlay and NoteEditorPopup are centered/anchored views and should not
+  // be dismissed just because the sidebar opened or closed.
   useEffect(() => {
     if (!containerEl || typeof ResizeObserver === 'undefined') return
     let width = containerEl.clientWidth
@@ -1110,12 +1119,22 @@ export default function Reader() {
       if (containerEl.clientWidth === width && containerEl.clientHeight === height) return
       width = containerEl.clientWidth
       height = containerEl.clientHeight
+      const currentSelection = useReaderState.getState().selection
+      const activeNoteEditor = useReaderState.getState().noteEditorRange
+      if (activeNoteEditor) return
+      if (currentSelection) {
+        // Idea overlays (note type or initialDetailId) are fixed modal overlays, don't dismiss on container resize
+        const isIdea = currentSelection.initialDetailId != null
+          || (annotations?.data?.some((a) => a.cfiRange === currentSelection.cfiRange && a.type === 'note'))
+          || (publicMarkers.some((p) => p.annotation.cfiRange === currentSelection.cfiRange))
+        if (isIdea) return
+      }
       rendererRef.current?.clearSelection()
       setSelection(null)
     })
     ro.observe(containerEl)
     return () => ro.disconnect()
-  }, [containerEl, setSelection])
+  }, [containerEl, setSelection, annotations?.data, publicMarkers])
 
   // Stable context value: a fresh `{ renderer }` object per render would
   // re-render every consumer on each relocate tick, defeating memo below

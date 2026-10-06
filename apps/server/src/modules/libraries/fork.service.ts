@@ -1,4 +1,4 @@
-import { and, desc, eq, or } from 'drizzle-orm'
+import { and, desc, eq, isNull, or } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import {
@@ -148,7 +148,7 @@ export async function forkLocalBook(userId: string, bookVersionId: string): Prom
     tx.update(bookmarks).set({ bookVersionId: newBookVersionId })
       .where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, bookVersionId))).run()
     tx.update(ideas).set({ bookVersionId: newBookVersionId })
-      .where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, bookVersionId))).run()
+      .where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, bookVersionId), isNull(ideas.sharedLibraryId), isNull(ideas.sourceLibraryBookVersionId))).run()
     tx.update(readingRecords).set({ bookId: newBookVersionId, bookVersionId: newBookVersionId })
       .where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookVersionId, bookVersionId))).run()
     tx.update(readingSessions).set({ bookId: newBookVersionId, bookVersionId: newBookVersionId })

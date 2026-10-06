@@ -88,6 +88,8 @@ export function useCreateAnnotation(bookId: string) {
     // the refetch resyncs the cache (including overlap deletes) in the background
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: key })
+      void queryClient.invalidateQueries({ queryKey: ['idea-composer', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
     },
   })
 }
@@ -116,6 +118,8 @@ export function useUpdateAnnotation(bookId: string) {
     // Not awaited on purpose: the refetch resyncs the cache in the background
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: key })
+      void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
+      void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
     },
   })
 }
@@ -137,6 +141,8 @@ export function useDeleteAnnotation(bookId: string) {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: key })
+      void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
     },
   })
 }
@@ -173,6 +179,8 @@ export function useBatchDeleteAnnotations(bookId: string) {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: key })
+      void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
     },
   })
 }

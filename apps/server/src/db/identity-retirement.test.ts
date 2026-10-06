@@ -4,8 +4,12 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import * as client from './client'
 import * as schema from './schema'
+import { LEGACY_IDENTITY_RETIREMENT_TAG, migrationTagWhen } from './migration-stage'
 import { authGuard, requireOwner, resetAuthCaches } from '../middleware/auth.guard'
 import { errorHandler } from '../middleware/error'
 import authRoutes from '../modules/auth/auth.routes'
@@ -37,12 +41,29 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+function legacyIdentityCutoff() {
+  return migrationTagWhen(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations'),
+    LEGACY_IDENTITY_RETIREMENT_TAG,
+  )
+}
+
 function makeLegacyIdentity() {
+  // Strip the legacy-identity retirement and everything after it (idea
+  // discussion tables included); the cutoff is derived from the journal so
+  // later migrations stay covered without touching this file.
+  const cutoff = legacyIdentityCutoff()
+  db.$client.exec(`DROP TRIGGER idea_comments_deleted_author;
+    DROP TABLE idea_comment_likes; DROP TABLE idea_likes; DROP TABLE idea_comments;
+    ALTER TABLE ideas DROP COLUMN source_library_book_version_id;
+    ALTER TABLE ideas DROP COLUMN revision_id;
+    ALTER TABLE ideas DROP COLUMN edited_at;
+    DELETE FROM __drizzle_migrations WHERE created_at >= ${cutoff};`)
   db.$client.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'")
   db.$client.prepare("UPDATE users SET role = 'owner' WHERE id = ?").run(ownerId)
   db.$client.exec("CREATE TABLE instance_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
   db.$client.exec("INSERT INTO instance_settings VALUES ('allowGuestAccess', 'true'), ('obsolete', 'discard')")
-  db.$client.exec('DELETE FROM __drizzle_migrations WHERE created_at = 1791800000000')
+  db.$client.exec(`DELETE FROM __drizzle_migrations WHERE created_at = ${cutoff}`)
 }
 
 function seedMember() {
@@ -108,7 +129,7 @@ describe('identity/configuration retirement', () => {
     await expect(client.runDatabaseMigrations(db)).rejects.toMatchObject({ cause: { code: 'SQLITE_CONSTRAINT_CHECK' } })
     expect(db.$client.prepare('SELECT * FROM users ORDER BY id').all()).toEqual(before)
     expect(db.$client.prepare('SELECT * FROM instance_settings').all()).toHaveLength(2)
-    expect(db.$client.prepare('SELECT * FROM __drizzle_migrations WHERE created_at = 1791800000000').all()).toEqual([])
+    expect(db.$client.prepare(`SELECT * FROM __drizzle_migrations WHERE created_at = ${legacyIdentityCutoff()}`).all()).toEqual([])
   })
 
   it('derives ownership from instance and updates cached identities immediately after transfer', async () => {

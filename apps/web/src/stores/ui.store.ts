@@ -123,6 +123,8 @@ interface UiState {
   readingMode: ReadingMode
   showHeader: boolean
   showFooter: boolean
+  showFriendIdeas: boolean
+  setShowFriendIdeas: (value: boolean) => void
   chineseConversion: ChineseConversion
   continuousScroll: ContinuousScroll
   pageAnimation: boolean
@@ -463,6 +465,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   readingMode: initialReadingMode,
   showHeader: getInitialBoolean('bd-show-header', true),
   showFooter: getInitialBoolean('bd-show-footer', true),
+  showFriendIdeas: getInitialBoolean('bd-show-friend-ideas', true),
   chineseConversion: getInitial<ChineseConversion>('bd-chinese-conversion', 'off'),
   continuousScroll: getInitial<ContinuousScroll>('bd-continuous-scroll', 'off'),
   pageAnimation: getInitialBoolean('bd-page-animation', true),
@@ -845,6 +848,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setShowFooter: (showFooter) => {
     setStorage('bd-show-footer', String(showFooter))
     set({ showFooter })
+  },
+  setShowFriendIdeas: (showFriendIdeas) => {
+    setStorage('bd-show-friend-ideas', String(showFriendIdeas))
+    set({ showFriendIdeas })
   },
   setChineseConversion: (chineseConversion) => {
     setStorage('bd-chinese-conversion', chineseConversion)

@@ -1476,6 +1476,7 @@ describe('AiPanel', () => {
 
     const saveButton = await screen.findByRole('button', { name: 'reader.aiSaveAsIdea' })
     fireEvent.click(saveButton)
+    fireEvent.click(await screen.findByRole('button', { name: 'annotation.publish' }))
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/annotations/book/book-1', expect.objectContaining({
       cfiRange: 'epubcfi(/6/4!/2)',
       type: 'note',

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import type { BookDetailRes } from '@bookdock/shared'
 
 import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT_PROMPT_CHARS, AI_TOOL_NAMES, getAiPromptVariables, isAiEmbeddingModel, sanitizeAiCitationMarkers } from '@bookdock/shared'
 import type { AiAssistantMode, AiChapterReference, AiChatReq, AiCitation, AiContextReceipt, AiConversationSettings, AiHistoryMessage, AiMessageEventRes, AiMessageRes, AiReadingScope, AiRetryRecipe, AiStatusRes, AiThreadRes, AiToolName } from '@bookdock/shared'
@@ -21,6 +22,8 @@ import { useUiStore } from '@/stores/ui.store'
 
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useBookChapters } from '../hooks/useBookChapters'
+import { useIdeaComposer } from '../hooks/useIdeas'
+import { NoteEditorPopup } from './NoteEditorPopup'
 import { useAiQuickCommands, type AiQuickCommand } from '../hooks/useAiQuickCommands'
 import { useIsTouch } from '../hooks/useIsTouch'
 import { useAnnotations, useCreateAnnotation } from '../hooks/useAnnotations'
@@ -41,7 +44,7 @@ interface AiMessage {
   citations: AiCitation[]
   events?: AiMessageEventRes[]
   retry?: AiRetryRecipe | null
-  ideaTarget?: { cfiRange: string; text: string; chapter?: string; chapterHref?: string }
+  ideaTarget?: { cfiRange: string; text: string; chapter?: string; chapterHref?: string; revisionId?: string }
   savedAsIdea: boolean
 }
 
@@ -547,6 +550,8 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const [clearIndexOpen, setClearIndexOpen] = useState(false)
   const [preparingIndex, setPreparingIndex] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [ideaSaveTarget, setIdeaSaveTarget] = useState<AiMessage | null>(null)
+  const ideaComposer = useIdeaComposer(bookId)
   const [openQuoteId, setOpenQuoteId] = useState<string | null>(null)
   const [openBasisId, setOpenBasisId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -1361,6 +1366,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     const selectedText = request.context.selection.trim()
     const ideaTarget = selectedText && request.context.cfiRange !== 'selection'
       ? {
+          revisionId: queryClient.getQueryData<{ data: BookDetailRes }>(['book', bookId])?.data.revisionId,
           cfiRange: request.context.cfiRange,
           text: selectedText.slice(0, 500),
           ...(request.context.chapterTitle ? { chapter: request.context.chapterTitle } : {}),
@@ -1577,21 +1583,24 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     }
   }
 
-  async function saveAssistantAsIdea(message: AiMessage) {
+  async function saveAssistantAsIdea(message: AiMessage, note: string, visibility?: 'private' | 'shared') {
     if (createAnnotation.isPending || message.savedAsIdea || message.aborted || !message.content.trim() || !message.ideaTarget) return
     try {
       await createAnnotation.mutateAsync({
         cfiRange: message.ideaTarget.cfiRange,
         type: 'note',
+        visibility,
+        revisionId: message.ideaTarget.revisionId ?? null,
         style: 'underline',
         color: 'yellow',
         text: message.ideaTarget.text,
         ...(message.ideaTarget.chapter ? { chapter: message.ideaTarget.chapter } : {}),
         ...(message.ideaTarget.chapterHref ? { chapterHref: message.ideaTarget.chapterHref } : {}),
-        note: message.content.trim(),
+        note,
       })
       updateAssistant(message.id, (current) => ({ ...current, savedAsIdea: true }))
       notify.success({ key: 'reader.aiSavedAsIdea' })
+      setIdeaSaveTarget(null)
     } catch {
       notify.error({ key: 'reader.aiSaveIdeaFailed' })
     }
@@ -1869,7 +1878,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                   {message.role === 'assistant' && (hasVisibleContent || message.aborted) && !streaming && (
                     <div className="mt-1 flex max-h-7 items-center gap-1 overflow-hidden pl-2 text-[var(--bd-read-sub)] opacity-100 transition-[max-height,margin,opacity] [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:mt-0 [@media(hover:hover)]:max-h-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:mt-1 [@media(hover:hover)]:group-hover:max-h-7 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:pointer-events-auto [@media(hover:hover)]:group-focus-within:mt-1 [@media(hover:hover)]:group-focus-within:max-h-7 [@media(hover:hover)]:group-focus-within:opacity-100">
                       <button type="button" disabled={!hasVisibleContent} onClick={() => void copyAssistantMessage(message.id, message.content)} aria-label={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} title={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} className={`flex h-7 w-7 items-center justify-center rounded transition-colors active:scale-95 ${copiedMessageId === message.id ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-50'}`}>{copiedMessageId === message.id ? <CheckIcon /> : <CopyIcon />}</button>
-                      {message.ideaTarget && !message.aborted && <button type="button" onClick={() => void saveAssistantAsIdea(message)} disabled={message.savedAsIdea || createAnnotation.isPending} aria-label={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} title={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-60"><BulbIcon size={14} /></button>}
+                      {message.ideaTarget && !message.aborted && <button type="button" onClick={() => setIdeaSaveTarget(message)} disabled={message.savedAsIdea || createAnnotation.isPending} aria-label={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} title={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-60"><BulbIcon size={14} /></button>}
                       {retryRequest && index === messages.length - 1 && <button type="button" onClick={() => void runRequest(retryRequest, 2)} aria-label={_('reader.aiRetry')} title={_('reader.aiRetry')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current"><RetryIcon /></button>}
                       {revisionOptions.length > 1 && <div className="ml-1 flex items-center gap-0.5 rounded-md bg-stone-500/5 px-0.5" aria-label={_('reader.aiAnswerVersions')}>
                         <button type="button" disabled={selectedRevisionIndex <= 0 || selectRevisionMutation.isPending} onClick={() => selectRevision(revisionOptions[selectedRevisionIndex - 1]!.id)} aria-label={_('reader.aiPreviousAnswer')} title={_('reader.aiPreviousAnswer')} className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14.5 6-6 6 6 6" /></svg></button>
@@ -1892,7 +1901,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
               <p className="text-base font-normal text-current">{_('reader.aiStartChat')}</p>
             </div>
           )}
-          {messages.length > 0 && (!isAtLatest || hasPendingLatest) && <button type="button" onClick={scrollToLatest} aria-label={_('reader.aiBackToLatest')} title={hasPendingLatest ? _('reader.aiViewNewAnswer') : _('reader.aiBackToLatest')} className="absolute bottom-3 left-1/2 flex h-8 -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-2.5 text-xs text-[var(--bd-read-sub)] shadow-md transition-colors hover:bg-stone-500/15 hover:text-current">
+          {messages.length > 0 && (!isAtLatest || hasPendingLatest) && <button type="button" onClick={scrollToLatest} aria-label={_('reader.aiBackToLatest')} title={hasPendingLatest ? _('reader.aiViewNewAnswer') : _('reader.aiBackToLatest')} className="absolute bottom-3 left-1/2 flex h-8 -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-2.5 text-xs text-[var(--bd-read-sub)] shadow-md transition-colors hover:bg-[color-mix(in_srgb,var(--bd-read-bg)_85%,var(--bd-read-text))] hover:text-current">
             <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v15M6.5 13.5 12 19l5.5-5.5" /></svg>
             {hasPendingLatest && <span>{_('reader.aiNewAnswer')}</span>}
           </button>}
@@ -1929,36 +1938,25 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                   {AI_PERMISSION_OPTIONS.map((option) => {
                     const enabled = option.toolNames.every((name) => enabledTools.includes(name))
                     return <li key={option.id}>
-                      <div
-                        role="button"
-                        tabIndex={0}
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={enabled}
+                        aria-label={_(option.labelKey)}
                         onClick={() => togglePermission(option.toolNames)}
-                        onKeyDown={(e) => {
-                          if (e.key === ' ' || e.key === 'Enter') {
-                            e.preventDefault()
-                            togglePermission(option.toolNames)
-                          }
-                        }}
-                        className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-stone-500/15"
+                        className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-stone-500/15 outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)]"
                       >
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-current">{_(option.labelKey)}</p>
-                          <p className="mt-0.5 truncate text-[11px] text-[var(--bd-read-sub)]">{_(option.descriptionKey)}</p>
-                        </div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={enabled}
-                          aria-label={_(option.labelKey)}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            togglePermission(option.toolNames)
-                          }}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-current">{_(option.labelKey)}</span>
+                          <span className="mt-0.5 block truncate text-[11px] text-[var(--bd-read-sub)]">{_(option.descriptionKey)}</span>
+                        </span>
+                        <span
+                          aria-hidden="true"
                           className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${enabled ? 'bg-[var(--bd-read-primary)]' : 'bg-[var(--bd-read-accent)]'}`}
                         >
                           <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-[var(--bd-read-bg)] shadow-sm transition-transform ${enabled ? 'left-4' : 'left-0.5'}`} />
-                        </button>
-                      </div>
+                        </span>
+                      </button>
                     </li>
                   })}
                 </ul>
@@ -2174,6 +2172,8 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
           </div>
         </form>
       </Modal>}
+      {ideaSaveTarget && !ideaComposer.data && createPortal(<button onClick={() => void ideaComposer.refetch()} className="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-lg bg-stone-100 p-3 text-sm text-stone-700">{ideaComposer.isError ? '想法设置加载失败，点击重试' : '加载想法设置…'}</button>, document.body)}
+      {ideaSaveTarget && ideaComposer.data && createPortal(<NoteEditorPopup initialNote={ideaSaveTarget.content.trim()} saving={createAnnotation.isPending} initialVisibility={ideaComposer.data.data.defaultVisibility} visibilityEligible={ideaComposer.data.data.eligible} sourceReadable={ideaComposer.data.data.sourceReadable} onSave={(note) => void saveAssistantAsIdea(ideaSaveTarget, note)} onSaveVisibility={(note, visibility) => void saveAssistantAsIdea(ideaSaveTarget, note, visibility)} onClose={() => { if (!createAnnotation.isPending) setIdeaSaveTarget(null) }} />, document.body)}
       {deleteTarget && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('reader.aiDeleteConfirm', { name: deleteTarget.title })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setDeleteTarget(null)} />}
       {assistantModeDeleteTarget && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('reader.aiModeDeleteConfirm', { name: assistantModeDeleteTarget.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDeleteAssistantMode} onClose={() => setAssistantModeDeleteTarget(null)} />}
       {assistantModeRestoreOpen && <ConfirmDialog title={_('settings.confirmRestoreTitle')} message={_('reader.aiRestoreDefaultConfirm')} confirmLabel={_('settings.confirmRestoreAction')} confirmVariant="primary" onConfirm={confirmRestoreAssistantMode} onClose={() => setAssistantModeRestoreOpen(false)} />}

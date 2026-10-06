@@ -367,6 +367,8 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
     setShowHeader,
     showFooter,
     setShowFooter,
+    showFriendIdeas,
+    setShowFriendIdeas,
     chineseConversion,
     setChineseConversion,
     continuousScroll,
@@ -815,6 +817,7 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
               <FieldSelect value={footerCenter} onChange={setFooterCenter} disabled={!showFooter} />
               <FieldSelect value={footerRight} onChange={setFooterRight} disabled={!showFooter} />
             </div>
+            <ToggleRow label={_('reader.showFriendIdeas')} checked={showFriendIdeas} onChange={setShowFriendIdeas} />
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, ne } from 'drizzle-orm'
+import { and, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 
 import type { BookMetadata } from '@bookdock/shared'
 import { normalizeUsername } from '@bookdock/shared'
@@ -399,13 +399,14 @@ export async function migrateAnnotations(): Promise<AnnotationsMigrationReport> 
           report.skipped += 1
           continue
         }
-        db.insert(ideas).values({
-          id: row.id, userId: row.userId, bookVersionId: row.bookId, cfiRange: row.cfiRange,
-          cfiAnchor: row.cfiAnchor, color: row.color, style: row.style,
-          text: row.text, note: row.note, visibility: 'private', sharedLibraryId: null,
-          chapter: row.chapter, chapterHref: row.chapterHref,
-          createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt,
-        }).run()
+        // The bridge runs before post-retirement migrations add idea columns.
+        db.run(sql`INSERT INTO ideas (id, user_id, book_version_id, cfi_range,
+          cfi_anchor, color, style, text, note, visibility, shared_library_id,
+          chapter, chapter_href, created_at, updated_at, deleted_at)
+          VALUES (${row.id}, ${row.userId}, ${row.bookId}, ${row.cfiRange},
+          ${row.cfiAnchor}, ${row.color}, ${row.style}, ${row.text}, ${row.note},
+          'private', NULL, ${row.chapter}, ${row.chapterHref}, ${row.createdAt},
+          ${row.updatedAt}, ${row.deletedAt})`)
         report.ideas += 1
       }
     }
@@ -691,7 +692,7 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
   const annotationRows = db.select().from(annotations).all()
   const highlightRows = db.select().from(highlights).all()
   const bookmarkRows = db.select().from(bookmarks).all()
-  const ideaRows = db.select().from(ideas).all()
+  const ideaRows = db.select({ id: ideas.id }).from(ideas).all()
   check('annotations', annotationRows.every((a) =>
     !versionIds.has(a.bookId)
     || (a.type === 'highlight' && highlightRows.some((h) => h.id === a.id))

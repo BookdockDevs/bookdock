@@ -474,3 +474,4 @@ export {
   type TransferIssue,
 } from './rule-transfer'
 export * from './library-search'
+export * from './idea-discussion'

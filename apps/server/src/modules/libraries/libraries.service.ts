@@ -420,7 +420,7 @@ export async function deleteLibrary(userId: string, libraryId: string) {
       .map((row) => row.coverKey).filter((key): key is string => key !== null))
   // Shared ideas fall back to private instead of dying with the library;
   // private cards (B) and user-owned data in other libraries are untouched.
-  db.update(ideas).set({ visibility: 'private', sharedLibraryId: null })
+  db.update(ideas).set({ visibility: 'private' })
     .where(and(eq(ideas.sharedLibraryId, libraryId), eq(ideas.visibility, 'shared'))).run()
   db.delete(libraries).where(eq(libraries.id, libraryId)).run()
   await deleteOrphanedBookVersions([...new Set(versionIds)], { coverKeys })

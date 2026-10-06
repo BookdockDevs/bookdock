@@ -1258,7 +1258,8 @@
     "statsEmptyDesc": "Your reading time, progress, and daily trends will be recorded here as you read",
     "ai": "AI Assistant",
     "aiPromptsEmpty": "No quick prompts configured",
-    "searchPlaceholderChapter": "Search in chapter..."
+    "searchPlaceholderChapter": "Search in chapter...",
+    "showFriendIdeas": "Show friend ideas"
   },
   "theme": {
     "system": "System",
@@ -2035,7 +2036,16 @@
     "exportCopied": "Copied {{n}} {{format}} annotations",
     "exportDownloaded": "Downloaded {{n}} {{format}} annotations",
     "expandQuote": "Show all",
-    "collapseQuote": "Collapse"
+    "collapseQuote": "Collapse",
+    "visibilityPrivate": "Private",
+    "visibilityPublic": "Public",
+    "visibility": "Visibility",
+    "visibilitySourceUnavailable": "Source unavailable, private only",
+    "openIdeaDetail": "Open idea detail",
+    "toggleSelected": "Toggle selection",
+    "edited": "Edited",
+    "jumpToSource": "Jump to source",
+    "locationUnavailable": "Location unavailable"
   },
   "share": {
     "saveImage": "Save Image",
@@ -2154,5 +2164,28 @@
     "actionDownload": "Receiving the update package",
     "timeoutMessage": "Timed out waiting for the update package response. Check the server network and retry.",
     "rollbackMessage": "The new version failed its startup health check. Version 0.3.3 was restored automatically."
+  },
+  "comment": {
+    "tabComments": "Comments {{count}}",
+    "tabLikes": "Likes {{count}}",
+    "noComments": "No comments yet",
+    "noLikes": "No likes yet",
+    "hostBadge": "Host",
+    "reply": "Reply",
+    "replyTo": "Reply to @{{name}}",
+    "replyPlaceholder": "Reply to @{{name}}…",
+    "replyInputPlaceholder": "Write your reply…",
+    "edit": "Edit",
+    "editTitle": "Edit comment",
+    "delete": "Delete",
+    "deleteConfirmTitle": "Delete comment",
+    "deleteConfirmMessage": "This action cannot be undone. Existing replies will be preserved.",
+    "inputPlaceholder": "Write a comment…",
+    "submit": "Post",
+    "save": "Save",
+    "cancel": "Cancel",
+    "like": "Like",
+    "unlike": "Unlike",
+    "deletedNotice": "Comment deleted"
   }
 }

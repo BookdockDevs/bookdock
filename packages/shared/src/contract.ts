@@ -1760,6 +1760,8 @@ export interface AppendContentPreviewRes {
 }
 
 export type AnnotationCreateReq = {
+  visibility?: 'private' | 'shared'
+  revisionId?: string | null
   cfiRange: string
   cfiAnchor?: string
   type: AnnotationType
@@ -1773,6 +1775,7 @@ export type AnnotationCreateReq = {
 }
 
 export type AnnotationUpdateReq = {
+  visibility?: 'private' | 'shared'
   color?: string
   style?: AnnotationStyle
   note?: string
@@ -1780,6 +1783,10 @@ export type AnnotationUpdateReq = {
 }
 
 export interface AnnotationRes {
+  locationAvailable?: boolean
+  visibility?: 'private' | 'shared'
+  revisionId?: string | null
+  editedAt?: number | null
   id: string
   bookId: string
   cfiRange: string
@@ -1795,4 +1802,7 @@ export interface AnnotationRes {
   createdAt: number
   updatedAt: number
   deletedAt?: number | null
+  likeCount?: number
+  commentCount?: number
+  liked?: boolean
 }

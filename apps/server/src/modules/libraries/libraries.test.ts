@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { and, eq } from 'drizzle-orm'
@@ -43,6 +44,7 @@ function createTestDb() {
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
   migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  sqlite.exec(fs.readFileSync(path.join(__dirname, '..', '..', 'db', 'migrations', '0041_idea_discussion.sql'), 'utf8'))
   return db
 }
 
@@ -374,7 +376,7 @@ describe('libraries service', () => {
     expect((await deleteLibrary(aliceId, sharedId)).id).toBe(sharedId)
     expect(db.select().from(schema.libraries).where(eq(schema.libraries.id, sharedId)).get()).toBeUndefined()
     expect(db.select().from(schema.ideas).where(eq(schema.ideas.id, ideaId)).get())
-      .toMatchObject({ visibility: 'private', sharedLibraryId: null })
+      .toMatchObject({ visibility: 'private', sharedLibraryId: sharedId })
     expect(db.select().from(schema.bookStates).all()).toHaveLength(1)
     const alicePrivate = db.select().from(schema.libraries)
       .where(and(eq(schema.libraries.userId, aliceId), eq(schema.libraries.type, 'private'))).get()!

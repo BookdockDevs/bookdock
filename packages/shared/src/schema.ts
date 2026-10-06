@@ -460,6 +460,8 @@ export const aiConfigTestSchema = z.object({
 }).strict()
 
 export const annotationCreateSchema = z.object({
+  visibility: z.enum(['private', 'shared']).optional(),
+  revisionId: z.string().min(1).nullable().optional(),
   cfiRange: z.string().min(1),
   cfiAnchor: z.string().optional(),
   type: z.enum(['highlight', 'note', 'bookmark']),
@@ -473,6 +475,7 @@ export const annotationCreateSchema = z.object({
 })
 
 export const annotationUpdateSchema = z.object({
+  visibility: z.enum(['private', 'shared']).optional(),
   color: z.string().optional(),
   style: z.enum(['underline', 'squiggly', 'highlight']).optional(),
   note: z.string().optional(),

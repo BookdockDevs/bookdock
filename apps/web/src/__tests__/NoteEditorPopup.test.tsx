@@ -120,4 +120,31 @@ describe('NoteEditorPopup', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
     expect(onSave).not.toHaveBeenCalled()
   })
+  it('shows scope only for B and submits the selected scope without clearing a failed draft', () => {
+    const onSaveVisibility = vi.fn()
+    renderPopup({ initialNote: 'retained draft', initialVisibility: 'shared', visibilityEligible: true, sourceReadable: true, onSaveVisibility })
+    const scope = screen.getByRole('combobox')
+    expect(scope).toHaveValue('shared')
+    fireEvent.change(scope, { target: { value: 'private' } })
+    fireEvent.click(screen.getByRole('button', { name: 'annotation.publish' }))
+    expect(onSaveVisibility).toHaveBeenCalledWith('retained draft', 'private')
+    expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toHaveValue('retained draft')
+  })
+
+  it('does not silently downgrade public scope when its source becomes unavailable', () => {
+    const onSaveVisibility = vi.fn()
+    renderPopup({ initialNote: 'draft', initialVisibility: 'shared', visibilityEligible: true, sourceReadable: false, onSaveVisibility })
+    expect(screen.getByRole('combobox')).toHaveValue('shared')
+    fireEvent.click(screen.getByRole('button', { name: 'annotation.publish' }))
+    expect(onSaveVisibility).toHaveBeenCalledWith('draft', 'shared')
+  })
+
+  it('hides scope outside B and prevents dismissal while publication is pending', () => {
+    const { onClose } = renderPopup({ initialNote: 'pending draft', saving: true })
+    expect(screen.queryByRole('combobox')).toBeNull()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    fireEvent.mouseDown(document.body)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
 })

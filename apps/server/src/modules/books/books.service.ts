@@ -3656,7 +3656,7 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
     if (opts?.deleteUserData) {
       for (const versionId of versionIds) {
         tx.delete(highlights).where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, versionId))).run()
-        tx.delete(ideas).where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, versionId))).run()
+        tx.delete(ideas).where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, versionId), isNull(ideas.sharedLibraryId), isNull(ideas.sourceLibraryBookVersionId))).run()
         tx.delete(bookmarks).where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, versionId))).run()
         tx.delete(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, versionId))).run()
         tx.delete(aiThreads).where(and(eq(aiThreads.userId, userId), or(eq(aiThreads.bookVersionId, versionId), eq(aiThreads.bookId, versionId)))).run()

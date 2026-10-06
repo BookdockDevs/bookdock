@@ -27,8 +27,8 @@ function configWith(preset: ReadingPreset): ReadingConfig {
 }
 
 describe('reading profiles', () => {
-  it('covers every reading-menu setting (46 keys)', () => {
-    expect(READING_PROFILE_KEYS).toHaveLength(46)
+  it('covers every reading-menu setting (47 keys)', () => {
+    expect(READING_PROFILE_KEYS).toHaveLength(47)
     expect(READING_PROFILE_KEYS).toContain('readingThemeMode')
     expect(READING_PROFILE_KEYS).toContain('fontFamily')
     expect(READING_PROFILE_KEYS).toContain('cjkFontFamily')
@@ -55,6 +55,7 @@ describe('reading profiles', () => {
     expect(parsed.global.fontSize).toBe(20)
     expect(parsed.global.clickAreaMode).toBe('standard')
     expect(parsed.global.showHeader).toBe(false)
+    expect(parsed.global.showFriendIdeas).toBe(true)
   })
 
   it('backfills the mode-mirror fields from the matching backing field', () => {

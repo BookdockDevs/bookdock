@@ -11,6 +11,9 @@ import { useReaderApi } from '../hooks/useReaderApi'
 import { useAiQuickCommands, type AiQuickCommand } from '../hooks/useAiQuickCommands'
 import { useTtsSession } from '../hooks/useTtsSession'
 import { useAnnotations, useCreateAnnotation, useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
+import { useIdeaComposer, useReaderIdeas, useToggleIdeaLike } from '../hooks/useIdeas'
+import { useUiStore } from '@/stores/ui.store'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { IdeaOverlay } from './IdeaOverlay'
 import type { IdeaEntry } from './IdeaOverlay'
 import { NoteEditorPopup } from './NoteEditorPopup'
@@ -57,10 +60,15 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const { renderer } = useReaderApi()
   const { controller: ttsController } = useTtsSession()
+  const user = useAuthStore((s) => s.user)
   const create = useCreateAnnotation(bookId)
   const update = useUpdateAnnotation(bookId)
   const del = useDeleteAnnotation(bookId)
-  const { data: annotations } = useAnnotations(bookId)
+  const { data: annotations } = useAnnotations(bookId, { enabled: !!user })
+  const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
+  const publicIdeas = useReaderIdeas(bookId, showFriendIdeas)
+  const composer = useIdeaComposer(bookId, !!user)
+  const orphanedKeys = useReaderState((state) => state.orphanedAnnotationKeys)
   const { commands: aiCommands } = useAiQuickCommands()
 
   const [createdLocal, setCreatedLocal] = useState<AnnotationRes | null>(null)
@@ -75,9 +83,10 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   // A brand-new idea stays local until published — nothing hits the server
   // before the user commits, so cancels leave no placeholder row behind
   const [noteDraft, setNoteDraft] = useState(false)
-  const user = useAuthStore((s) => s.user)
+  const [deleteTarget, setDeleteTarget] = useState<IdeaEntry | null>(null)
   const authorName = getUserDisplayName(user, _('auth.guest'))
   const avatarKey = useAuthStore((s) => s.user?.avatarKey)
+  const toggleIdeaLike = useToggleIdeaLike(bookId)
 
   const iconBtn = (active?: boolean, danger?: boolean) => cn(
     'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors active:scale-95',
@@ -116,9 +125,12 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   const created = annotations?.data?.find((a) => a.id === createdLocal?.id) ?? createdLocal
   // A range can hold a highlight and an idea at once; the highlight wins when
   // both are clicked — the idea stays reachable from the notes side panel
+  const allReaderIdeas = publicIdeas.data?.data ?? []
+  const publicAtRange = !showFriendIdeas || publicIdeas.isError ? [] : allReaderIdeas.filter((idea) => !idea.own && idea.locationAvailable)
   const existing = !createdLocal && selection
     ? (annotations?.data?.find((a) => a.cfiRange === selection.cfiRange && a.type === 'highlight')
       ?? annotations?.data?.find((a) => a.cfiRange === selection.cfiRange && a.type === 'note')
+      ?? publicAtRange.find((idea) => idea.annotation.cfiRange === selection.cfiRange)?.annotation
       ?? null)
     : null
   const target = created ?? existing
@@ -204,13 +216,15 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       // Deleting one of several ideas at the same range drops back to the
       // overlay's list level; only the last remaining idea closes it
       const remaining = id
-        ? (annotations?.data ?? []).filter(
+        ? [...(annotations?.data ?? []), ...publicAtRange.map((idea) => idea.annotation)].filter(
             (a) => a.id !== annotationId && a.type === 'note' && a.cfiRange === selection?.cfiRange,
           )
         : []
       if (remaining.length === 0) close()
+      return true
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'annotation.deleteFailed'))
+      return false
     }
   }
 
@@ -223,7 +237,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     setNoteEditing(true)
   }
 
-  async function handleSaveNote(note: string) {
+  async function handleSaveNote(note: string, visibility?: 'private' | 'shared') {
     if (!selection) return
     try {
       if (noteDraft) {
@@ -231,6 +245,8 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           cfiRange: selection.cfiRange,
           cfiAnchor: selection.cfiRange,
           type: 'note',
+          visibility,
+          revisionId: composer.data?.data.revisionId ?? undefined,
           color: DEFAULT_IDEA_COLOR,
           style: 'underline',
           text: selection.rawText ?? selection.text,
@@ -239,7 +255,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           note: note || undefined,
         })
       } else if (target) {
-        await update.mutateAsync({ id: target.id, body: { note: note || undefined } })
+        await update.mutateAsync({ id: target.id, body: { note: note || undefined, visibility } })
       }
       close()
     } catch (err) {
@@ -374,11 +390,16 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     hasStyleBar ? styleSize.height + 8 : 0, selection.geometry, styleSize.width)
 
   if (noteEditing) {
+    if (!composer.data) return <button onClick={() => void composer.refetch()} className="fixed bottom-6 left-1/2 z-[70] rounded-lg bg-stone-100 p-3 text-sm text-stone-700">{composer.isError ? '想法设置加载失败，点击重试' : '加载想法设置…'}</button>
     return (
       <NoteEditorPopup
         rect={selection.rect}
         geometry={selection.geometry}
         initialNote={noteDraft ? '' : (target?.note ?? '')}
+        initialVisibility={noteDraft ? composer.data?.data.defaultVisibility : target?.visibility ?? 'private'}
+        visibilityEligible={composer.data?.data.eligible}
+        sourceReadable={composer.data?.data.sourceReadable}
+        onSaveVisibility={handleSaveNote}
         saving={create.isPending || update.isPending}
         onSave={handleSaveNote}
         onClose={handleCloseNoteEditor}
@@ -391,16 +412,37 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   // highlights get the dark action bubble.
   if (target?.type === 'note') {
     const atRange = annotations?.data?.filter((a) => a.cfiRange === target.cfiRange && a.type === 'note') ?? []
-    const entries: IdeaEntry[] = (atRange.length > 0 ? atRange : [target]).map((a) => ({
-      annotation: a,
-      authorName,
-      authorAvatarKey: avatarKey,
-      own: true,
-    }))
+    const entries: IdeaEntry[] = atRange.map((a) => {
+      const pub = allReaderIdeas.find((p) => p.annotation.id === a.id)
+      return {
+        annotation: a,
+        authorName,
+        authorAvatarKey: avatarKey,
+        own: true,
+        canDelete: true,
+        liked: pub?.liked ?? a.liked ?? false,
+        likeCount: pub?.likeCount ?? a.likeCount ?? 0,
+        commentCount: pub?.commentCount ?? a.commentCount ?? 0,
+        locationAvailable: a.locationAvailable !== false && !orphanedKeys.includes(`${a.cfiRange}|${a.type}`),
+      }
+    })
+    entries.push(...publicAtRange.filter((idea) => idea.annotation.cfiRange === target.cfiRange && !atRange.some((a) => a.id === idea.annotation.id)).map((idea) => ({
+      annotation: idea.annotation,
+      authorName: idea.author.name,
+      authorAvatarKey: idea.author.avatarKey,
+      own: false,
+      canDelete: idea.canDelete,
+      liked: idea.liked,
+      likeCount: idea.likeCount,
+      commentCount: idea.commentCount,
+      locationAvailable: idea.locationAvailable && !orphanedKeys.includes(`${idea.annotation.cfiRange}|note`),
+    })))
     return (
-      <IdeaOverlay
+      <><IdeaOverlay
+        bookId={bookId}
         entries={entries}
         quoteText={selection.text}
+        initialDetailId={selection.initialDetailId}
         fontStack={fontStack}
         fontCss={fontCss}
         onCopyQuote={() => void copyQuoteText()}
@@ -416,9 +458,16 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           setNoteEditorRange(entry.annotation.cfiRange)
           setNoteEditing(true)
         }}
-        onDelete={(entry) => void removeAnnotation(entry.annotation.id)}
+        onDelete={(entry) => setDeleteTarget(entry)}
+        onToggleLike={(entry) => {
+          toggleIdeaLike.mutate({ ideaId: entry.annotation.id, liked: !entry.liked })
+        }}
+        onJump={(entry) => { if (entry.locationAvailable !== false) { void renderer?.display(entry.annotation.cfiRange); close() } }}
         onClose={close}
       />
+      {deleteTarget && <ConfirmDialog title="删除想法" message="删除后，评论、回复和点赞也会删除。" confirmLabel="删除" confirmDisabled={del.isPending} onClose={() => { if (!del.isPending) setDeleteTarget(null) }} onConfirm={async () => {
+        if (await removeAnnotation(deleteTarget.annotation.id)) setDeleteTarget(null)
+      }} />}</>
     )
   }
 

@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { Hono } from 'hono'
@@ -38,6 +39,7 @@ function createTestDb() {
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
   migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  sqlite.exec(fs.readFileSync(path.join(__dirname, '..', '..', 'db', 'migrations', '0041_idea_discussion.sql'), 'utf8'))
   return db
 }
 

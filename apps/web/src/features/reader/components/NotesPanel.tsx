@@ -3,12 +3,14 @@ import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, 
 import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 
 import { useReaderApi } from '../hooks/useReaderApi'
+import { useAuthStore } from '@/stores/auth.store'
 import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { kindOf, type NoteSort } from '../hooks/useNotesFilter'
 import { isCustomBookmarkTitle } from '../lib/annotation-text'
@@ -17,6 +19,8 @@ import { buildChapterOrderLookup, type ChapterOrderItem } from '../lib/chapter-o
 import { markEscConsumed } from '../lib/esc-consumed'
 import { useReaderState } from '../state/reader-state'
 import AnnotationExportDialog from './AnnotationExportDialog'
+import IdeaVisibilityControl from './IdeaVisibilityControl'
+import { useIdeaComposer } from '../hooks/useIdeas'
 import { HIGHLIGHT_COLORS } from './annotation-colors'
 import { BookmarkIcon, BulbIcon, CheckIcon, CloseIcon, CopyIcon, DocumentExportIcon, PencilIcon, SelectionIcon, ShareIcon, TrashIcon } from './annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from './format-relative-time'
@@ -46,6 +50,7 @@ function ClampedText({
   expandLabel,
   collapseLabel,
   minLengthForToggle,
+  toggleClassName,
 }: {
   text: string
   clampClassName: string
@@ -60,6 +65,8 @@ function ClampedText({
   expandLabel: string
   collapseLabel: string
   minLengthForToggle: number
+  /** Extra classes for the floating expand toggle (e.g. z-index above a stretched overlay button). */
+  toggleClassName?: string
 }) {
   const ref = useRef<HTMLParagraphElement | null>(null)
   const [clipped, setClipped] = useState(false)
@@ -112,7 +119,10 @@ function ClampedText({
         <button
           type="button"
           onClick={onToggle}
-          className="absolute bottom-1 right-1.5 inline-flex items-center gap-0.5 rounded border border-stone-200/80 bg-[var(--bd-read-bg)]/95 px-1.5 py-0.5 text-[10px] text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80"
+          className={cn(
+            'absolute bottom-1 right-1.5 inline-flex items-center gap-0.5 rounded border border-stone-200/80 bg-[var(--bd-read-bg)]/95 px-1.5 py-0.5 text-[10px] text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80',
+            toggleClassName,
+          )}
         >
           <span>{expanded ? collapseLabel : expandLabel}</span>
           <svg
@@ -181,17 +191,24 @@ function InlineEditor({
   error,
   onSave,
   onCancel,
+  visibilityEligible,
+  sourceReadable,
+  initialVisibility = 'private',
 }: {
   initial: string
   placeholder: string
   allowEmpty?: boolean
   saving: boolean
   error: string | null
-  onSave: (value: string) => void
+  onSave: (value: string, visibility?: 'private' | 'shared') => void
   onCancel: () => void
+  visibilityEligible?: boolean
+  sourceReadable?: boolean
+  initialVisibility?: 'private' | 'shared'
 }) {
   const _ = useTranslation()
   const [draft, setDraft] = useState(initial)
+  const [visibility, setVisibility] = useState(initialVisibility)
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -217,12 +234,12 @@ function InlineEditor({
   function submit() {
     if (saving) return
     const value = draft.trim()
-    if (value) onSave(value)
+    if (value) onSave(value, visibilityEligible ? visibility : undefined)
     else if (allowEmpty && initial.trim()) onSave('')
     else onCancel()
   }
 
-  const isChanged = draft.trim() !== initial.trim()
+  const isChanged = draft.trim() !== initial.trim() || visibility !== initialVisibility
   const canSave = allowEmpty ? isChanged : Boolean(draft.trim())
 
   return (
@@ -249,6 +266,7 @@ function InlineEditor({
         className="w-full resize-none bg-transparent text-sm leading-relaxed text-current outline-none placeholder:text-[var(--bd-read-sub)]"
       />
       {error && <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {visibilityEligible && <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable ?? false} disabled={saving} />}
       <div className="mt-2 flex items-center justify-end gap-2">
         <button
           disabled={saving}
@@ -311,9 +329,12 @@ export const NotesPanel = memo(function NotesPanel({
   const deleteAnnotation = useDeleteAnnotation(bookId)
   const updateAnnotation = useUpdateAnnotation(bookId)
   const setShareTarget = useReaderState((s) => s.setShareTarget)
+  const setSelection = useReaderState((s) => s.setSelection)
   // Annotations whose CFI no longer resolves (P2): badge them and refuse to
   // navigate instead of silently landing nowhere
   const orphanedKeys = useReaderState((s) => s.orphanedAnnotationKeys)
+  const user = useAuthStore((s) => s.user)
+  const composer = useIdeaComposer(bookId, !!user)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: AnnotationRes } | null>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -322,6 +343,7 @@ export const NotesPanel = memo(function NotesPanel({
   const [internalSelectedIds, setInternalSelectedIds] = useState<Set<string>>(new Set())
   const selectedIds = externalSelectedIds ?? internalSelectedIds
   const [exportOpen, setExportOpen] = useState(false)
+  const [noteDeleteTarget, setNoteDeleteTarget] = useState<AnnotationRes | null>(null)
   const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set())
   const [expandedQuoteIds, setExpandedQuoteIds] = useState<Set<string>>(new Set())
   const wasSelectionMode = useRef(false)
@@ -467,12 +489,20 @@ export const NotesPanel = memo(function NotesPanel({
   }, [contextMenu, renderer])
 
   function goTo(item: AnnotationRes) {
-    if (orphanedKeys.includes(`${item.cfiRange}|${item.type}`)) {
+    if (item.locationAvailable === false || orphanedKeys.includes(`${item.cfiRange}|${item.type}`)) {
       notify.info({ key: 'annotation.orphanedNotice' })
       return
     }
     renderer?.display(item.cfiRange)
     if (!locked) onClose?.()
+  }
+
+  function openIdeaDetail(item: AnnotationRes) {
+    setSelection({
+      cfiRange: item.cfiRange,
+      text: item.text,
+      initialDetailId: item.id,
+    })
   }
 
   function handleContextMenu(e: MouseEvent, item: AnnotationRes) {
@@ -501,13 +531,13 @@ export const NotesPanel = memo(function NotesPanel({
     }
   }
 
-  function saveEdit(item: AnnotationRes, value: string) {
+  function saveEdit(item: AnnotationRes, value: string, visibility?: 'private' | 'shared') {
     if (saveLock.current || updateAnnotation.isPending) return
     saveLock.current = true
     setEditError(null)
     updateAnnotation.mutate({
       id: item.id,
-      body: item.type === 'bookmark' ? { text: value } : { note: value },
+      body: item.type === 'bookmark' ? { text: value } : { note: value, visibility },
     }, {
       onSuccess: () => { saveLock.current = false; setEditingId(null) },
       onError: (error) => { saveLock.current = false; setEditError(getUserErrorMessage(error, _, 'annotation.editSaveFailed')) },
@@ -520,9 +550,13 @@ export const NotesPanel = memo(function NotesPanel({
     setEditingId(id)
   }
 
-  function deleteItem(item: AnnotationRes) {
+  function deleteItem(item: AnnotationRes, confirmed = false) {
+    if (item.type === 'note' && !confirmed) { setNoteDeleteTarget(item); return }
     deleteAnnotation.mutate(item.id, {
-      onSuccess: () => notify.success({ key: item.type === 'bookmark' ? 'reader.bookmarkRemoved' : 'annotation.deleted' }),
+      onSuccess: () => {
+        setNoteDeleteTarget(null)
+        notify.success({ key: item.type === 'bookmark' ? 'reader.bookmarkRemoved' : 'annotation.deleted' })
+      },
       onError: (error) => notify.error(getUserErrorNotification(error, 'annotation.deleteFailed')),
     })
   }
@@ -539,7 +573,7 @@ export const NotesPanel = memo(function NotesPanel({
   function renderCard(a: AnnotationRes) {
     const hex = hexOf(a)
     const kind = kindOf(a)
-    const orphaned = orphanedKeys.includes(`${a.cfiRange}|${a.type}`)
+    const orphaned = a.locationAvailable === false || orphanedKeys.includes(`${a.cfiRange}|${a.type}`)
     const isNoteExpanded = expandedCardIds.has(a.id)
     const isQuoteExpanded = expandedQuoteIds.has(a.id)
     const isBookmark = kind === 'bookmark'
@@ -568,33 +602,44 @@ export const NotesPanel = memo(function NotesPanel({
             initial={a.type === 'bookmark' ? (hasCustomTitle ? a.text : '') : (a.note ?? '')}
             placeholder={a.type === 'bookmark' ? _('annotation.renamePlaceholder') : _('annotation.notePlaceholder')}
             allowEmpty={a.type === 'bookmark'}
-            onSave={(value) => saveEdit(a, value)}
+            onSave={(value, visibility) => saveEdit(a, value, visibility)}
+            initialVisibility={a.visibility ?? 'private'}
+            visibilityEligible={a.type === 'note' && composer.data?.data.eligible}
+            sourceReadable={composer.data?.data.sourceReadable}
             onCancel={() => { setEditingId(null); setEditError(null) }}
           />
         ) : (
           <>
-            <button
-              onClick={() => (selectionMode ? toggleSelected(a.id) : goTo(a))}
-              className={cn('w-full text-left', selectionMode && 'pr-8')}
+            <div
+              className={cn('relative w-full text-left rounded-lg', selectionMode && 'pr-8')}
             >
               {selectionMode && (
-                <span
-                  className={cn(
-                    'absolute right-2.5 top-3 flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
-                    selectedIds.has(a.id)
-                      ? 'border-[var(--bd-read-primary)] bg-[var(--bd-read-primary)] text-[var(--bd-read-bg)]'
-                      : 'border-stone-300 bg-transparent dark:border-stone-600',
-                  )}
-                >
-                  {selectedIds.has(a.id) && <CheckIcon size={13} strokeWidth={2.4} />}
-                </span>
+                <>
+                  <span
+                    className={cn(
+                      'absolute right-2.5 top-3 flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
+                      selectedIds.has(a.id)
+                        ? 'border-[var(--bd-read-primary)] bg-[var(--bd-read-primary)] text-[var(--bd-read-bg)]'
+                        : 'border-stone-300 bg-transparent dark:border-stone-600',
+                    )}
+                  >
+                    {selectedIds.has(a.id) && <CheckIcon size={13} strokeWidth={2.4} />}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleSelected(a.id)}
+                    aria-label={_('annotation.toggleSelected')}
+                    className="absolute inset-0 z-0 cursor-pointer rounded-lg outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)]"
+                  />
+                </>
               )}
               {kind === 'bookmark' && (
-                <div className="flex items-start gap-2.5">
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-blue-500/5 text-blue-500 dark:bg-blue-400/5 dark:text-blue-400">
-                    <BookmarkIcon />
-                  </span>
-                  <div className="min-w-0 flex-1 space-y-2">
+                <div className="relative">
+                  <div className="flex items-start gap-2.5">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-blue-500/5 text-blue-500 dark:bg-blue-400/5 dark:text-blue-400">
+                      <BookmarkIcon />
+                    </span>
+                    <div className="min-w-0 flex-1 space-y-2">
                     {hasCustomTitle ? (
                       <>
                         <ClampedText
@@ -606,6 +651,7 @@ export const NotesPanel = memo(function NotesPanel({
                           expandLabel={_('annotation.expand')}
                           collapseLabel={_('annotation.collapse')}
                           minLengthForToggle={40}
+                          toggleClassName="z-10"
                         />
                         {a.contextText && (
                           <ClampedText
@@ -618,6 +664,7 @@ export const NotesPanel = memo(function NotesPanel({
                             expandLabel={_('annotation.expand')}
                             collapseLabel={_('annotation.collapse')}
                             minLengthForToggle={50}
+                            toggleClassName="z-10"
                           />
                         )}
                       </>
@@ -632,64 +679,111 @@ export const NotesPanel = memo(function NotesPanel({
                         expandLabel={_('annotation.expand')}
                         collapseLabel={_('annotation.collapse')}
                         minLengthForToggle={65}
+                        toggleClassName="z-10"
                       />
                     )}
+                  </div>
+                  {!selectionMode && (
+                    <button
+                      type="button"
+                      onClick={() => goTo(a)}
+                      aria-label={_('annotation.jumpToSource')}
+                      className="absolute inset-0 z-0 cursor-pointer rounded-lg outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)]"
+                    />
+                  )}
                   </div>
                 </div>
               )}
               {kind === 'idea' && (
                 <div className="space-y-2">
-                  <div className="group/note flex items-start gap-2.5">
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-500/5 text-amber-500 dark:bg-amber-400/5 dark:text-amber-400">
-                      <BulbIcon />
-                    </span>
+                  <div className="relative">
+                    <div className="group/note flex items-start gap-2.5">
+                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-500/5 text-amber-500 dark:bg-amber-400/5 dark:text-amber-400">
+                        <BulbIcon />
+                      </span>
+                      <ClampedText
+                        text={a.note ?? ''}
+                        clampClassName="line-clamp-3"
+                        className="text-sm font-medium leading-relaxed text-current whitespace-pre-wrap break-words"
+                        expanded={isNoteExpanded}
+                        onToggle={(e) => toggleNoteExpand(a.id, e)}
+                        expandLabel={_('annotation.expand')}
+                        collapseLabel={_('annotation.collapse')}
+                        minLengthForToggle={60}
+                        toggleClassName="z-10"
+                      />
+                    </div>
+                    {!selectionMode && (
+                      <button
+                        type="button"
+                        onClick={() => openIdeaDetail(a)}
+                        aria-label={_('annotation.openIdeaDetail')}
+                        className="absolute inset-0 z-0 cursor-pointer rounded-lg outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)]"
+                      />
+                    )}
+                  </div>
+                  {a.text && (
+                    <div
+                      title={selectionMode ? undefined : _('annotation.jumpToSource')}
+                      className="relative ml-7 rounded-md border-l-2 border-amber-300/40 bg-stone-500/3 px-2 py-1 transition-colors hover:bg-stone-500/8 hover:border-amber-400 dark:border-amber-400/25 dark:hover:bg-stone-500/12"
+                    >
+                      <ClampedText
+                        text={a.text}
+                        clampClassName="line-clamp-2"
+                        className="text-xs leading-relaxed text-[var(--bd-read-text)]/80 whitespace-pre-wrap break-words"
+                        expanded={isQuoteExpanded}
+                        onToggle={(e) => toggleQuoteExpand(a.id, e)}
+                        expandLabel={_('annotation.expand')}
+                        collapseLabel={_('annotation.collapse')}
+                        minLengthForToggle={40}
+                        toggleClassName="z-10"
+                      />
+                      {!selectionMode && (
+                        <button
+                          type="button"
+                          onClick={() => goTo(a)}
+                          title={_('annotation.jumpToSource')}
+                          aria-label={_('annotation.jumpToSource')}
+                          className="absolute inset-0 z-0 cursor-pointer rounded-md outline-none focus-visible:ring-1 focus-visible:ring-amber-400"
+                        />
+                      )}
+                    </div>
+                  )}
+
+                </div>
+              )}
+              {kind === 'highlight' && (
+                <div className="relative">
+                  <div className="flex items-start gap-2.5">
+                    <span
+                      className="mt-1 flex h-3.5 w-1 shrink-0 rounded-full"
+                      style={{ backgroundColor: hex }}
+                      aria-hidden="true"
+                    />
                     <ClampedText
-                      text={a.note ?? ''}
-                      clampClassName="line-clamp-3"
-                      className="text-sm font-medium leading-relaxed text-current whitespace-pre-wrap break-words"
+                      text={a.text}
+                      clampClassName="line-clamp-4"
+                      className={cn('text-sm leading-relaxed text-current whitespace-pre-wrap break-words', a.style !== 'highlight' && 'pb-1')}
+                      renderText={(value) => <span style={highlightDecoration(a.style, hex)}>{value}</span>}
                       expanded={isNoteExpanded}
                       onToggle={(e) => toggleNoteExpand(a.id, e)}
                       expandLabel={_('annotation.expand')}
                       collapseLabel={_('annotation.collapse')}
-                      minLengthForToggle={60}
+                      minLengthForToggle={65}
+                      toggleClassName="z-10"
                     />
                   </div>
-                  {a.text && (
-                    <ClampedText
-                      text={a.text}
-                      clampClassName="line-clamp-2"
-                      className="text-xs leading-relaxed text-[var(--bd-read-text)]/80 whitespace-pre-wrap break-words"
-                      wrapperClassName="ml-7 rounded-md border-l-2 border-amber-300/40 bg-stone-500/3 px-2 py-1 dark:border-amber-400/25"
-                      expanded={isQuoteExpanded}
-                      onToggle={(e) => toggleQuoteExpand(a.id, e)}
-                      expandLabel={_('annotation.expand')}
-                      collapseLabel={_('annotation.collapse')}
-                      minLengthForToggle={40}
+                  {!selectionMode && (
+                    <button
+                      type="button"
+                      onClick={() => goTo(a)}
+                      aria-label={_('annotation.jumpToSource')}
+                      className="absolute inset-0 z-0 cursor-pointer rounded-lg outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)]"
                     />
                   )}
                 </div>
               )}
-              {kind === 'highlight' && (
-                <div className="flex items-start gap-2.5">
-                  <span
-                    className="mt-1 flex h-3.5 w-1 shrink-0 rounded-full"
-                    style={{ backgroundColor: hex }}
-                    aria-hidden="true"
-                  />
-                  <ClampedText
-                    text={a.text}
-                    clampClassName="line-clamp-4"
-                    className={cn('text-sm leading-relaxed text-current whitespace-pre-wrap break-words', a.style !== 'highlight' && 'pb-1')}
-                    renderText={(value) => <span style={highlightDecoration(a.style, hex)}>{value}</span>}
-                    expanded={isNoteExpanded}
-                    onToggle={(e) => toggleNoteExpand(a.id, e)}
-                    expandLabel={_('annotation.expand')}
-                    collapseLabel={_('annotation.collapse')}
-                    minLengthForToggle={65}
-                  />
-                </div>
-              )}
-            </button>
+            </div>
             {!selectionMode && (
               <div className="mt-2 flex h-6 items-center px-0.5 text-xs text-[var(--bd-read-sub)]">
                 <span
@@ -933,6 +1027,7 @@ export const NotesPanel = memo(function NotesPanel({
           onClose={() => setExportOpen(false)}
         />
       )}
+      {noteDeleteTarget && <ConfirmDialog title="删除想法" message="删除后，评论、回复和点赞也会删除。" confirmLabel="删除" confirmDisabled={deleteAnnotation.isPending} onClose={() => { if (!deleteAnnotation.isPending) setNoteDeleteTarget(null) }} onConfirm={() => deleteItem(noteDeleteTarget, true)} />}
     </div>
   )
 })

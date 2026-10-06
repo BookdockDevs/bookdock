@@ -4,6 +4,7 @@ import { act, render, screen, fireEvent } from '@testing-library/react'
 import type { AnnotationRes } from '@bookdock/shared'
 
 import { useReaderApi } from '../features/reader/hooks/useReaderApi'
+import { useReaderState } from '../features/reader/state/reader-state'
 import { NotesPanel } from '../features/reader/components/NotesPanel'
 
 const display = vi.fn()
@@ -310,12 +311,34 @@ describe('NotesPanel', () => {
   it('navigates on click and closes the panel when not locked', () => {
     const onClose = vi.fn()
     renderPanel(onClose)
-    fireEvent.click(screen.getByText('直线划线甲'))
+    fireEvent.click(screen.getByText('直线划线甲').closest('.group')!.querySelector('button[aria-label="annotation.jumpToSource"]')!)
     expect(display).toHaveBeenCalledWith('cfi:1')
     expect(onClose).toHaveBeenCalled()
     // bookmarks navigate by their persisted restore position
-    fireEvent.click(screen.getByText('书签丁'))
+    fireEvent.click(screen.getByText('书签丁').closest('.group')!.querySelector('button[aria-label="annotation.jumpToSource"]')!)
     expect(display).toHaveBeenCalledWith('cfi:4')
+  })
+
+  it('clicking idea quote navigates to cfi while clicking idea body opens detail overlay', () => {
+    const onClose = vi.fn()
+    renderPanel(onClose)
+    useReaderState.getState().setSelection(null)
+    display.mockClear()
+
+    // Clicking idea body opens detail overlay without navigating
+    fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
+    expect(display).not.toHaveBeenCalled()
+    expect(useReaderState.getState().selection).toEqual({
+      cfiRange: 'cfi:3',
+      text: '想法原文丙',
+      initialDetailId: 'n1',
+    })
+
+    // Clicking idea quote navigates to cfi
+    display.mockClear()
+    fireEvent.click(screen.getByText('想法原文丙').closest('div.ml-7')!.querySelector('button[aria-label="annotation.jumpToSource"]')!)
+    expect(display).toHaveBeenCalledWith('cfi:3')
+    expect(onClose).toHaveBeenCalled()
   })
 
   it('groups consecutive notes by chapter under time sort', () => {
@@ -544,3 +567,10 @@ describe('NotesPanel', () => {
     expect(timeContainer.querySelector('.group-hover\\/time\\:inline')).toBeInTheDocument()
   })
 })
+
+vi.mock('../features/reader/hooks/useIdeas', () => ({
+  useIdeaComposer: () => ({ data: { data: { eligible: false, sourceReadable: false, defaultVisibility: 'private', revisionId: null } } }),
+  useReaderIdeas: () => ({ data: { data: [] }, isError: false }),
+  useIdeaDiscussion: () => ({ isPending: true }),
+  useIdeaAction: () => ({ isPending: false }),
+}))

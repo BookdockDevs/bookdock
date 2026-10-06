@@ -100,6 +100,8 @@ export interface SelectionInfo {
   /** When set on instantAnnotation, the selection toolbar stays open so the
    * user can restyle right after auto-marking ("选中即划" mode). */
   keepSelection?: boolean
+  /** When set, opening the idea overlay navigates directly into this idea's detail view */
+  initialDetailId?: string
 }
 
 export interface SelectionGeometry {

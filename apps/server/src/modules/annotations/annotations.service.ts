@@ -1,13 +1,14 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
-import { bookmarks, highlights, ideas } from '../../db/schema'
+import { bookmarks, highlights, ideas, ideaComments, ideaLikes, settings } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { assertReadableBook } from '../books/books.service'
 import type { AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq } from '@bookdock/shared'
+import { assertIdeaSource, IDEA_VISIBILITY_KEY, ideaComposerContext, ideaRevision, privateIdeaLink, readableIdea } from './idea-access'
 
-function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
+export function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   id: string
   userId: string
   bookVersionId: string | null
@@ -25,6 +26,9 @@ function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   createdAt: number
   updatedAt: number
   deletedAt?: number | null
+  visibility?: 'private' | 'shared'
+  revisionId?: string | null
+  editedAt?: number | null
 }): AnnotationRes {
   if (kind === 'highlight') {
     return {
@@ -45,6 +49,7 @@ function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   return {
     id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? '', cfiAnchor: row.cfiAnchor ?? null,
     type: 'note', color: row.color ?? 'yellow', style: (row.style ?? 'underline') as AnnotationRes['style'],
+    visibility: row.visibility ?? 'private', revisionId: row.revisionId ?? null, editedAt: row.editedAt ?? null,
     text: row.text ?? '', note: row.note ?? null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
     createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
   }
@@ -63,10 +68,50 @@ export async function listAnnotations(userId: string, bookId: string) {
       .where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, bookId), isNull(ideas.deletedAt)))
       .orderBy(desc(ideas.createdAt), desc(ideas.id)).all(),
   ])
+  const currentRevisionId = ideaRevision(userId, bookId)?.id ?? null
+  const ideaIds = ideaRows.map((row) => row.id)
+  const likes = ideaIds.length
+    ? db.select({ ideaId: ideaLikes.ideaId, userId: ideaLikes.userId })
+        .from(ideaLikes)
+        .where(inArray(ideaLikes.ideaId, ideaIds))
+        .all()
+    : []
+  const comments = ideaIds.length
+    ? db.select({ ideaId: ideaComments.ideaId })
+        .from(ideaComments)
+        .where(and(inArray(ideaComments.ideaId, ideaIds), isNull(ideaComments.deletedAt)))
+        .all()
+    : []
+
+  const likesByIdea = new Map<string, { count: number; liked: boolean }>()
+  for (const like of likes) {
+    const entry = likesByIdea.get(like.ideaId) ?? { count: 0, liked: false }
+    entry.count += 1
+    if (like.userId === userId) entry.liked = true
+    likesByIdea.set(like.ideaId, entry)
+  }
+
+  const commentsByIdea = new Map<string, number>()
+  for (const c of comments) {
+    commentsByIdea.set(c.ideaId, (commentsByIdea.get(c.ideaId) ?? 0) + 1)
+  }
+
   return [
     ...hl.map((row) => toRes('highlight', row)),
     ...bm.map((row) => toRes('bookmark', row)),
-    ...ideaRows.map((row) => toRes('idea', row)),
+    // Legacy ideas predate revision provenance (revisionId null): they remain
+    // locatable via CFI, so only an explicit revision mismatch disables them.
+    ...ideaRows.map((row) => {
+      const ideaLike = likesByIdea.get(row.id)
+      const commentCount = commentsByIdea.get(row.id) ?? 0
+      return {
+        ...toRes('idea', row),
+        likeCount: ideaLike?.count ?? 0,
+        liked: ideaLike?.liked ?? false,
+        commentCount,
+        locationAvailable: !row.revisionId || !currentRevisionId || row.revisionId === currentRevisionId,
+      }
+    }),
   ]
 }
 
@@ -208,6 +253,12 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
     return toRes('bookmark', row)
   }
   // Notes are exempt from dedup: rereads produce new ideas on the same range.
+  const context = await ideaComposerContext(userId, bookId)
+  const visibility = data.visibility ?? context.defaultVisibility
+  const link = privateIdeaLink(userId, bookId)
+  if (visibility === 'shared' && (!context.eligible || !context.sourceReadable)) throw new AppError('ANNOTATION_NOT_FOUND')
+  const revision = ideaRevision(userId, bookId)
+  if (data.revisionId && data.revisionId !== revision?.id) throw new AppError('VALIDATION_ERROR', 'The reading revision has changed')
   const row = {
     id: createId('idea'),
     userId,
@@ -218,15 +269,23 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
     style: data.style ?? 'underline',
     text: data.text ?? '',
     note: data.note ?? null,
-    visibility: 'private' as const,
-    sharedLibraryId: null,
+    visibility,
+    sharedLibraryId: context.eligible ? link!.sourceLibraryId : null,
+    sourceLibraryBookVersionId: context.eligible ? link!.sourceLibraryBookVersionId : null,
+    revisionId: data.revisionId === null ? null : revision?.id ?? null,
     chapter: data.chapter ?? null,
     chapterHref: data.chapterHref ?? null,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
   }
-  db.insert(ideas).values(row).run()
+  db.transaction((tx) => {
+    tx.insert(ideas).values(row).run()
+    if (context.eligible) {
+      tx.insert(settings).values({ id: createId('setting'), userId, key: IDEA_VISIBILITY_KEY, value: visibility })
+        .onConflictDoUpdate({ target: [settings.userId, settings.key], set: { value: visibility } }).run()
+    }
+  })
   return toRes('idea', row)
 }
 
@@ -268,19 +327,42 @@ export async function updateAnnotation(userId: string, annotationId: string, dat
     }).where(eq(bookmarks.id, owned.row.id)).run()
     return toRes('bookmark', { ...owned.row, title: data.text ?? owned.row.title, updatedAt: now })
   }
-  db.update(ideas).set({
+  const visibility = data.visibility ?? owned.row.visibility
+  let source = { sharedLibraryId: owned.row.sharedLibraryId, sourceLibraryBookVersionId: owned.row.sourceLibraryBookVersionId }
+  if (visibility === 'shared' && owned.row.visibility !== 'shared') {
+    const link = privateIdeaLink(userId, owned.row.bookVersionId ?? '')
+    if (!link || link.kind !== 'shared') throw new AppError('ANNOTATION_NOT_FOUND')
+    if (!source.sharedLibraryId && !source.sourceLibraryBookVersionId) {
+      source = { sharedLibraryId: link.sourceLibraryId, sourceLibraryBookVersionId: link.sourceLibraryBookVersionId }
+    }
+    if (source.sharedLibraryId !== link.sourceLibraryId || source.sourceLibraryBookVersionId !== link.sourceLibraryBookVersionId) throw new AppError('ANNOTATION_NOT_FOUND')
+  }
+  if (visibility === 'shared') await assertIdeaSource(userId, { ...source, bookVersionId: owned.row.bookVersionId })
+  if (data.text !== undefined && data.text !== owned.row.text) throw new AppError('VALIDATION_ERROR', 'The original quotation is immutable')
+  const patch = {
+    ...source, visibility,
     color: data.color ?? owned.row.color,
     style: data.style ?? owned.row.style,
     text: data.text ?? owned.row.text,
     note: data.note ?? owned.row.note,
     updatedAt: now,
-  }).where(eq(ideas.id, owned.row.id)).run()
-  return toRes('idea', { ...owned.row, color: data.color ?? owned.row.color, style: data.style ?? owned.row.style, text: data.text ?? owned.row.text, note: data.note ?? owned.row.note, updatedAt: now })
+    editedAt: data.note !== undefined && data.note !== owned.row.note ? now : owned.row.editedAt,
+  }
+  db.update(ideas).set(patch).where(eq(ideas.id, owned.row.id)).run()
+  return toRes('idea', { ...owned.row, ...patch })
 }
 
 export async function deleteAnnotation(userId: string, annotationId: string) {
   const db = getDb()
-  const owned = await ownedAnnotation(userId, annotationId)
+  let owned: OwnedAnnotation
+  try {
+    owned = await ownedAnnotation(userId, annotationId)
+  } catch (error) {
+    if (!(error instanceof AppError)) throw error
+    const access = await readableIdea(userId, annotationId)
+    if (!access.manager) throw new AppError('ANNOTATION_NOT_FOUND')
+    owned = { kind: 'idea', row: access.row }
+  }
   const now = Date.now()
   if (owned.kind === 'highlight') {
     db.update(highlights).set({ deletedAt: now, updatedAt: now }).where(eq(highlights.id, owned.row.id)).run()
@@ -290,6 +372,11 @@ export async function deleteAnnotation(userId: string, annotationId: string) {
     db.update(bookmarks).set({ deletedAt: now, updatedAt: now }).where(eq(bookmarks.id, owned.row.id)).run()
     return toRes('bookmark', { ...owned.row, deletedAt: now, updatedAt: now })
   }
-  db.update(ideas).set({ deletedAt: now, updatedAt: now }).where(eq(ideas.id, owned.row.id)).run()
+  if (owned.row.visibility === 'shared') await assertIdeaSource(userId, owned.row)
+  db.transaction((tx) => {
+    tx.delete(ideaComments).where(eq(ideaComments.ideaId, owned.row.id)).run()
+    tx.delete(ideaLikes).where(eq(ideaLikes.ideaId, owned.row.id)).run()
+    tx.update(ideas).set({ deletedAt: now, updatedAt: now }).where(eq(ideas.id, owned.row.id)).run()
+  })
   return toRes('idea', { ...owned.row, deletedAt: now, updatedAt: now })
 }

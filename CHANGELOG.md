@@ -6,6 +6,8 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
+- Reader ideas become discussions for collected shared books: eligible readers can publish public ideas bound to the exact source listing and version, with comments, one-level replies, likes and liker lists. Deleting a comment removes it and promotes surviving replies to top level without placeholders. Visibility defaults to the account's last successful choice and stays private until published.
+- New `showFriendIdeas` reader setting (synced across devices, defaults to on): shows other readers' idea markers without ever hiding your own. Revision mismatches disable markers and jumps instead of misplacing them.
 - Uploading a file that matches an existing book now names it and waits for an explicit continue before adding a separate copy.
 - Library search takes one expression that mixes ordinary words with exact `author:`, `series:`, `tag:`, `shelf:`, `category:`, `format:` and `status:` conditions, combined with `&`, `|`, `!` and parentheses. Names match exactly, and an unknown or malformed value reports the position to fix instead of replacing the results.
 - The search box validates a draft against the real list before applying it, suggests names already in the library and shows one removable chip per condition. It applies on Enter, the search button, or 300 ms after typing stops rather than on every keystroke, and exiting restores the previous filters, page and scroll position.
@@ -21,6 +23,7 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- AI "save as idea" now shows loading feedback and offers a retry when its settings fail to load, instead of silently doing nothing.
 - Hidden-display changes now clear related list, search, detail, recent-reading, taxonomy, annotation and statistics caches, preventing stale hidden content from remaining visible.
 - Hidden private-book links no longer reuse hidden-inclusive cached details when display is off; direct links never enable hidden display automatically.
 - Dismissing a finished update now clears its record so the entry returns on refresh, and interrupted updates no longer show later steps as done; failed dismissals stay open for retry while closing an active update keeps it running in the background.
@@ -31,6 +34,7 @@ All notable changes to Bookdock are documented here.
 - The old shared browser preference is not migrated to any account. Each account starts with hidden display off until explicitly enabled.
 - This switch controls display only. Book, shelf and tag hide flags and shared-library permissions are unchanged; it is not an unlock credential, and no PIN is introduced.
 - Migration 0040 retires the legacy guest identity, `users.role` and `instance_settings`. It runs once, cannot be undone in place, and stops rather than deleting data it does not recognise: back up `DATA_DIR` completely first, and never boot an older release against a migrated database. It also turns registration and guest access off once, which the owner can re-enable.
+- Migration 0041 adds idea discussion tables (`idea_comments`, `idea_likes`, `idea_comment_likes`), idea provenance columns (`source_library_book_version_id`, `revision_id`, `edited_at`) and an author-cleanup trigger. It applies automatically on boot and, like 0040, cannot be undone in place.
 - Snapshots now record `formatVersion: 2` with the `instance` row. Earlier snapshots stay listable and deletable but only roll back to the release they came from.
 
 ## [0.4.3] - 2026-10-04
@@ -620,6 +624,8 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
+- 阅读想法长出讨论区：收藏过的共享书可发布公开想法，精确绑定来源书库与版本；支持评论、单层回复、点赞与点赞名单，删评论即整行删除、存活回复上提为顶级，不留占位。可见范围默认沿用上次发布成功的选择，发布前一律私密。
+- 阅读器新增“显示书友想法”开关（多端同步，默认开）：只显示他人的想法标记，自己的想法永远可见。版本对不上时标记与跳转直接禁用，不会错位。
 - 上传文件与已有藏书内容一致时，先报出那本书的名字，等你点“继续上传”才会另存一份。
 - 搜索支持把普通词和精确条件写进同一个表达式：`author:`、`series:`、`tag:`、`shelf:`、`category:`、`format:`、`status:`，可用 `&`、`|`、`!` 和括号组合。名称精确匹配；未知或格式错误的取值会标出要改的位置，而不是替换掉当前结果。
 - 搜索框先对真实列表校验再生效，提示书库里已有的名称，每个条件显示为可单独移除的标签；改为按回车、点搜索按钮或输入停顿 300 毫秒才生效，不再逐字触发，退出搜索时恢复原来的筛选、页码和滚动位置。
@@ -635,6 +641,7 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- AI“存为想法”在配置加载失败时显示加载或重试，不再点了没反应。
 - 切换显示状态时同步清理列表、搜索、详情、最近阅读、书架、标签、标注和阅读统计等相关缓存，避免隐藏内容继续显示。
 - 关闭显示后，隐藏私库书籍的链接不会复用此前包含隐藏内容的详情缓存；直接链接不会自动开启显示。
 - 已结束的更新关闭即清理，入口刷新后恢复；中途取消不再把没走到的步骤标成完成；清理失败留窗重试，执行中关闭只隐藏、后台继续。
@@ -645,6 +652,7 @@ All notable changes to Bookdock are documented here.
 - 旧公共浏览器偏好不会迁移给任何账号；各账号首次默认关闭隐藏内容，需自行开启。
 - 此开关只控制展示，不修改书籍、书架和标签的隐藏标记，也不改变共享库权限；显示偏好不作为解锁授权，本次不引入 PIN。
 - 迁移 0040 清理旧游客身份、`users.role` 列和 `instance_settings` 表。它只执行一次，不能原地撤销，遇到无法识别的数据会停下而不是删除——请先完整冷备份 `DATA_DIR`，且不要用旧版本启动已迁移的数据库；同时会一次性关闭注册和游客访问，可由所有者重新开启。
+- 迁移 0041 新增想法讨论表（`idea_comments`、`idea_likes`、`idea_comment_likes`）、想法来源列（`source_library_book_version_id`、`revision_id`、`edited_at`）与账号清理触发器。随启动自动执行，与 0040 一样不能原地撤销。
 - 快照清单改为记录 `formatVersion: 2` 与 `instance` 行。旧快照仍可列出和删除，但只能回滚到它对应的那个版本。
 
 ### [0.4.3] - 2026-10-04

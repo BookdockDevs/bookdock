@@ -1246,7 +1246,8 @@
     "replacementDeleteFailed": "删除替换规则失败",
     "sessionDeleteFailed": "删除记录失败",
     "sessionUpdateFailed": "更新记录失败",
-    "searchPlaceholderChapter": "搜索本章..."
+    "searchPlaceholderChapter": "搜索本章...",
+    "showFriendIdeas": "显示书友想法"
   },
   "theme": {
     "system": "跟随系统",
@@ -2023,7 +2024,16 @@
     "collapseQuote": "收起",
     "styleUpdateFailed": "更新标注样式失败",
     "deleted": "标注已删除",
-    "deleteFailed": "删除标注失败"
+    "deleteFailed": "删除标注失败",
+    "visibilityPrivate": "私密",
+    "visibilityPublic": "公开",
+    "visibility": "可见范围",
+    "visibilitySourceUnavailable": "来源不可用，仅私密",
+    "openIdeaDetail": "打开想法详情",
+    "toggleSelected": "切换选中",
+    "edited": "已编辑",
+    "jumpToSource": "跳转原文",
+    "locationUnavailable": "定位不可用"
   },
   "share": {
     "saveImage": "保存图片",
@@ -2142,5 +2152,28 @@
     "actionDownload": "正在接收更新包",
     "timeoutMessage": "等待更新包响应超时。请检查服务器网络连接后重试。",
     "rollbackMessage": "新版本未通过启动健康检查，已自动恢复到 0.3.3。"
+  },
+  "comment": {
+    "tabComments": "评论 {{count}}",
+    "tabLikes": "赞 {{count}}",
+    "noComments": "暂无评论",
+    "noLikes": "暂无点赞",
+    "hostBadge": "楼主",
+    "reply": "回复",
+    "replyTo": "回复 @{{name}}",
+    "replyPlaceholder": "回复 @{{name}}…",
+    "replyInputPlaceholder": "写下你的回复…",
+    "edit": "编辑",
+    "editTitle": "编辑评论",
+    "delete": "删除",
+    "deleteConfirmTitle": "删除评论",
+    "deleteConfirmMessage": "删除后不可恢复；已有回复会保留。",
+    "inputPlaceholder": "发表评论…",
+    "submit": "发表",
+    "save": "保存",
+    "cancel": "取消",
+    "like": "赞",
+    "unlike": "取消赞",
+    "deletedNotice": "评论已删除"
   }
 }

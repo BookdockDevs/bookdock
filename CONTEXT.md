@@ -73,6 +73,19 @@ The stable key used to derive an automatic placeholder-cover color. It begins as
 
 ## Reader Concepts
 
+**Collected B entry**:
+A private-library reference bound to exactly one shared-library listing and content version. Collecting the same version elsewhere does not replace its source.
+
+**Public idea**:
+An author's thought visible to readers currently permitted to read its bound source listing and version. Public does not mean visible outside that source library.
+_Avoid_: member-only idea or globally public idea.
+
+**Private idea**:
+An author's thought whose content and discussion are accessible only to that author.
+
+**Idea discussion**:
+Comments, replies and likes attached to an idea, inheriting that idea's visibility and source permissions. Replies appear beneath a top-level comment even when addressed to another reply.
+
 **EPUB format**:
 The e-book format that packages a book’s metadata, table of contents, and content resources. It is not a renderer and does not define how pages are laid out.
 _Avoid_: using EPUB to mean the reading engine.

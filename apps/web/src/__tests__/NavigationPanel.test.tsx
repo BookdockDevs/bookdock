@@ -1000,3 +1000,10 @@ describe('NavigationPanel', () => {
     })
   })
 })
+
+vi.mock('../features/reader/hooks/useIdeas', () => ({
+  useIdeaComposer: () => ({ data: { data: { eligible: false, sourceReadable: false, defaultVisibility: 'private', revisionId: null } } }),
+  useReaderIdeas: () => ({ data: { data: [] }, isError: false }),
+  useIdeaDiscussion: () => ({ isPending: true }),
+  useIdeaAction: () => ({ isPending: false }),
+}))

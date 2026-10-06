@@ -1,5 +1,57 @@
 # Bookdock Architecture
 
+### B-entry ideas and reader discussion
+
+Only a collected B entry may publish an idea as public (`shared` in storage).
+Its immutable provenance is the source library, exact library-book-version
+listing and BookVersion. Every public read and mutation rechecks that exact
+listing through `library-access.ts`; identical content in another library is
+never a grant to this discussion. Authenticated non-members may publish after
+collecting a readable B. Uncollected direct reads and A/C entries remain private.
+Historical ideas remain private. New B ideas default to public, overridden by
+the account's last successful new B publication; cancelling, failed writes and
+editing never change that preference. Source failure rejects public submission
+without changing visibility or discarding the draft.
+
+Private and public ideas use the same cards and discussion UI. Private content,
+counts and liker identities are author-only; library managers cannot access it.
+Authors edit their own content. Authors and current source managers delete
+public ideas/comments/replies through the same UI. Idea deletion removes all
+discussion and likes. Comment deletion removes the row and promotes surviving
+replies to top level, leaving no tombstone. Replies have one top-level parent and may address another
+reply under that parent. Likes are unique per account and target. Making an
+idea private retains interactions, hides them from other readers, and permits
+them to reappear on republication. Guests never write interaction data.
+
+Ideas record the publication revision, original CFI, chapter identity and quote.
+No cross-revision relocation is performed: revision mismatch, missing historical
+revision or unresolved CFI disables markers and jumps. Personal notes retain
+unlocatable ideas with a visible unavailable-position state. Public discussion
+queries are separate from personal annotation queries, exports and AI tools.
+Other readers contribute idea markers only, never personal highlight styling.
+The reader's `showFriendIdeas` setting uses existing account-synced global and
+preset settings (including the preset bound to a book), defaults to true, and never hides own ideas.
+No book/library idea directory, feed, notification centre or social graph is added.
+
+`ideas` remains author-owned with user/version cascade references. Discussion
+comments and likes inherit the idea's source ACL and cascade
+with the idea; likes are account-owned, while deleted comment authors become
+null and their comments are removed with surviving replies promoted to top
+level; source and revision provenance are retained as plain identifiers.
+Account deletion deletes authored ideas and their dependent discussion. Library
+deletion hides its public ideas using the existing private fallback; source
+listing deletion invalidates public access. Localization must never clone or
+rebind public discussion to a local C or another library.
+
+Authenticated non-members with current source read access may comment, reply
+and like. Every request rechecks the idea's ACL; guests remain read-only.
+
+Leaving the source library or removing the collected B retains published ideas
+and their discussion at the original source. Current source permissions still
+govern every public read and interaction. Even removal with personal-data
+cleanup preserves source-bound ideas. Localization leaves source-bound ideas
+and discussion on the original version; only unbound private ideas follow C.
+
 ### Library search expressions v1
 
 Library search applies valid drafts after 300 ms of idle input. Enter or the
@@ -511,7 +563,8 @@ apps/server/src/
     progress.routes.ts      # reading position
     settings.routes.ts      # user-level KV
     tokens.routes.ts        # operation-scoped access tokens: create/edit/enable/disable/delete (ADR-24)
-    annotations.routes.ts   # highlight/note/comment CRUD
+    annotations.routes.ts   # personal highlight/bookmark/idea CRUD
+    idea-discussion.routes.ts # source-scoped reader ideas, comments and likes
     avatars/                # user avatar upload/delete + immutable content-hash file serving (256px WebP thumbnail by default, ?size=original for the source)
     fonts/                  # custom font upload/list/delete/scope + immutable file serving; web merges these rows with the stable system/builtin catalog and user font preferences
     reading-records.routes.ts # duration upsert + aggregation
@@ -721,7 +774,10 @@ visibility and membership remain unavailable.
 | `book_states` | userId FK (cascade), bookVersionId FK (cascade), readStatus, percent, cfi?, chapter?, lastReadAt?, readRevisionId?, updatedAt | composite PK (userId, bookVersionId); intervals/speed samples stay in storage files under the same dimension |
 | `highlights` | id, userId FK (cascade), bookVersionId FK (cascade), revisionId?, cfiRange, cfiAnchor?, color, style, text, chapter?, chapterHref?, relocation, createdAt, updatedAt, deletedAt? | revisionId has no FK so the anchor survives revision-row lifecycle; unresolved relocations are kept and flagged, never deleted |
 | `bookmarks` | id, userId FK (cascade), bookVersionId FK (cascade), revisionId?, cfi?, chapter?, title?, createdAt, updatedAt, deletedAt? | same revision-anchor rationale as highlights |
-| `ideas` | id, userId FK (cascade), bookVersionId? FK (cascade), cfiRange?, text, note?, visibility, sharedLibraryId?, chapter?, chapterHref?, createdAt, updatedAt, deletedAt? | sharedLibraryId has no FK: deleting a library clears the scope, never the idea |
+| `ideas` | id, userId FK (cascade), bookVersionId? FK (cascade), revisionId?, cfiRange?, cfiAnchor?, text, note?, visibility, sharedLibraryId?, sourceLibraryBookVersionId?, chapter?, chapterHref?, editedAt?, createdAt, updatedAt, deletedAt? | source and revision IDs have no FK; library deletion makes ideas private while retaining provenance; exact source ACL gates public content |
+| `idea_comments` | id, ideaId FK (cascade), userId? FK (set null), parentId? FK, replyToId? FK, body, createdAt, editedAt?, deletedAt? | idea ACL; author-owned writes and current public-source manager deletes; deleted rows promote surviving replies to top level, never tombstones |
+| `idea_likes` | ideaId FK (cascade), userId FK (cascade), createdAt | unique (ideaId, userId); idea ACL |
+| `idea_comment_likes` | commentId FK (cascade), userId FK (cascade), createdAt | unique (commentId, userId); parent idea ACL |
 
 `meta` is a JSON column for "may grow" metadata; frequently-queried stable fields are promoted to dedicated columns.
 
@@ -796,7 +852,7 @@ Private trash is stored on `library_books.deleted_at` and controlled by per-user
 | `/api/v1/legado` | books / Legado adapter | `GET /source.json` and `GET /login` (public source definition/login bridge); `POST /access-key` (authenticated generation/rotation); `GET /search` `GET /explore/config` `GET /explore/all` `GET /explore/libraries/:id` `GET /explore/libraries/:id/categories/:categoryId` `GET /explore/libraries/:id/tags/:tagId` `GET /books/:id` `GET /books/:id/cover` `GET /books/:id/resource` `GET /books/:id/chapters` `GET /books/:id/chapters/:index` (authenticated or scoped-key, read-only projections for Reading/Legado; search and discovery take `scope=joined\|private`) |
 | `/api/v1/ext` | ext / external automation API | `GET /libraries` (each row carries its role, write access, `memberCount`, `workCount` and full shelf/tag taxonomy) `GET /books` `GET /books/:versionId` `GET`+`HEAD /books/:versionId/file` `POST /books` (optional `libraryId` and `categoryId`) `DELETE /books/:versionId` (token-permissioned: one permission per endpoint; list spans the private and joined shared libraries) |
 | `/api/v1/users` | users | `GET /`(owner) `POST /`(owner; creates the account plus its private library, no session) `PATCH /:id`(owner; disabled/password only) `DELETE /:id`(owner; refuses instance/shared-library owners) `POST /instance-owner`(owner; atomic transfer, former owner becomes a member) |
-| `/api/v1/libraries` | libraries | `GET /`(own private library + discoverable shared; each row also carries `memberCount`, `workCount` and `ownerUsername` so a list or details panel needs no second request — the work count is reader-scoped, excluding trashed works and, for a plain member, hidden and all-unlisted works) `POST /`(shared) `GET /:id` `GET /:id/relation` `POST /:id/join`(public/password) `GET/POST/DELETE /:id/invite`(owner/admin; status, replace, revoke) `POST /invites/preview`(valid token; limited metadata) `POST /invites/join`(authenticated confirmation; member seat) `PATCH /:id`(owner) `DELETE /:id`(owner; clears Idea sharing scope, never user data) `POST /:id/transfer`(owner) `GET/POST /:id/members` `PATCH/DELETE /:id/members/:userId` `PATCH /:id/versions/:versionId`(owner/admin; per-listing guest-readable flag) `GET/POST /:id/categories` `PATCH/DELETE /:id/categories/:categoryId` `PUT /:id/categories/order` `GET/POST /:id/tags` `PATCH/DELETE /:id/tags/:tagId` `PUT /:id/tags/order` `POST /:id/books/:bookId/versions/:versionLinkId/push`(contributor; updates the version with the linked private book's current bytes — refused with `VALIDATION_ERROR` when the library's own content moved on since publishing, which is no longer written over) `POST /:id/books/:bookId/versions/:versionLinkId/append` `POST /:id/books/:bookId/versions/:versionLinkId/append-preview` `POST /:id/books/:bookId/versions/:versionLinkId/re-toc` `POST /:id/books/:bookId/versions/:versionLinkId/toc-preview`(the four content writers; txt only, contributor-gated, and all four refuse a work sitting in the library trash) `GET /:id/books/:bookId/versions/:versionLinkId/toc-state`(read-gated exactly like chapter reads, so the TOC picker and the outline agree on who may see a version) |
+| `/api/v1/libraries` | libraries | `GET /`(own private library + discoverable shared; each row also carries `memberCount`, `workCount` and `ownerUsername` so a list or details panel needs no second request — the work count is reader-scoped, excluding trashed works and, for a plain member, hidden and all-unlisted works) `POST /`(shared) `GET /:id` `GET /:id/relation` `POST /:id/join`(public/password) `GET/POST/DELETE /:id/invite`(owner/admin; status, replace, revoke) `POST /invites/preview`(valid token; limited metadata) `POST /invites/join`(authenticated confirmation; member seat) `PATCH /:id`(owner) `DELETE /:id`(owner; makes source ideas private while retaining provenance) `POST /:id/transfer`(owner) `GET/POST /:id/members` `PATCH/DELETE /:id/members/:userId` `PATCH /:id/versions/:versionId`(owner/admin; per-listing guest-readable flag) `GET/POST /:id/categories` `PATCH/DELETE /:id/categories/:categoryId` `PUT /:id/categories/order` `GET/POST /:id/tags` `PATCH/DELETE /:id/tags/:tagId` `PUT /:id/tags/order` `POST /:id/books/:bookId/versions/:versionLinkId/push`(contributor; updates the version with the linked private book's current bytes — refused with `VALIDATION_ERROR` when the library's own content moved on since publishing, which is no longer written over) `POST /:id/books/:bookId/versions/:versionLinkId/append` `POST /:id/books/:bookId/versions/:versionLinkId/append-preview` `POST /:id/books/:bookId/versions/:versionLinkId/re-toc` `POST /:id/books/:bookId/versions/:versionLinkId/toc-preview`(the four content writers; txt only, contributor-gated, and all four refuse a work sitting in the library trash) `GET /:id/books/:bookId/versions/:versionLinkId/toc-state`(read-gated exactly like chapter reads, so the TOC picker and the outline agree on who may see a version) |
 | `/api/v1/avatars` | avatars | `POST /` (multipart, jpeg/png/webp/gif; default upload limit 5 MiB; GIF decoding and animation limits above) `DELETE /` `GET /<hh>/<sha256>.<ext>` (private immutable cache; default/`?size=thumb` → WebP thumbnail, animated for GIF; `?size=static` → first frame; `?size=original` → source bytes) |
 | `/api/v1/books` | books | `GET /` (supports title/author search plus exact metadata filters `author` and `series`) `POST /` `GET /:id` `DELETE /:id` `GET /:id/file` `GET /:id/cover` `PUT /:id/shelves` (set single shelf, `{shelfId: string|null}`) `GET /:id/shelves` `PUT /:id/tags` `GET /:id/tags` `GET /:id/chapters` `POST /:id/toc-preview` `POST /:id/re-toc` `POST /:id/append-preview` `POST /:id/append` |
 | `/api/v1/shelves` | shelves | `GET /` `POST /` `PUT /:id` `DELETE /:id` `POST /:id/books` (batch move in) `DELETE /:id/books` (batch move out) |
@@ -804,6 +860,7 @@ Private trash is stored on `library_books.deleted_at` and controlled by per-user
 | `/api/v1/fonts` | fonts | `GET /` `POST /` `PATCH /:id/scope`(owner) `DELETE /:id` `GET /:id/file` |
 | `/api/v1/replacements` | replacements | pattern and point-replacement CRUD plus per-book enablement; `POST /import` batch-creates global pattern rules only |
 | `/api/v1/toc-rules` | toc-rules | `GET /` `POST /` `PUT /:id` `DELETE /:id` `PUT /reorder` `POST /seed` `POST /import` (batch create, transactional append) |
+| `/api/v1/ideas` | annotations | Composer context, exact-source reader idea projection, idea detail, comments/replies, likes and liker identities; current source ACL on every request; guests read-only |
 | `/api/v1/annotations` | annotations | `GET /`(?bookId=) `POST /` `PUT /:id` `DELETE /:id` |
 | `/api/v1/progress` | reading | `GET /:bookId` `PUT /:bookId` |
 

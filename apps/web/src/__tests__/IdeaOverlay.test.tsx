@@ -26,7 +26,7 @@ function makeAnnotation(overrides?: Partial<AnnotationRes>): AnnotationRes {
 function renderOverlay(props?: Partial<Parameters<typeof IdeaOverlay>[0]>) {
   const entry: IdeaEntry = { annotation: makeAnnotation(), own: true }
   return render(
-    <IdeaOverlay
+    <IdeaOverlay bookId="book1"
       entries={[entry]}
       quoteText="quote text"
       onCopyQuote={vi.fn()}
@@ -72,14 +72,14 @@ describe('IdeaOverlay', () => {
       entries: [entry], onCopyQuote: vi.fn(), onHighlight: vi.fn(), onWriteNote: vi.fn(), onAiChat: vi.fn(),
       onShareQuote: vi.fn(), onSearch: vi.fn(), onCopyNote: vi.fn(), onShareNote, onEdit: vi.fn(), onDelete: vi.fn(), onClose: vi.fn(),
     }
-    const { rerender } = render(<IdeaOverlay {...props} />)
-    fireEvent.click(screen.getByText('a thought'))
+    const { rerender } = render(<IdeaOverlay bookId="book1" {...props} />)
+    fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
     const updated = { ...entry, authorAvatarKey: 'cd/new.gif' }
-    rerender(<IdeaOverlay {...props} entries={[updated]} />)
+    rerender(<IdeaOverlay bookId="book1" {...props} entries={[updated]} />)
     expect(document.querySelector('img')).toHaveAttribute('src', '/api/v1/avatars/cd/new.gif')
     fireEvent.click(screen.getByTitle('annotation.share'))
     expect(onShareNote).toHaveBeenCalledWith(updated)
-    rerender(<IdeaOverlay {...props} entries={[{ ...updated, authorAvatarKey: null }]} />)
+    rerender(<IdeaOverlay bookId="book1" {...props} entries={[{ ...updated, authorAvatarKey: null }]} />)
     expect(document.querySelector('img')).toBeNull()
   })
 
@@ -110,7 +110,7 @@ describe('IdeaOverlay', () => {
 
   it('switches to the detail level when an entry card is clicked', () => {
     renderOverlay()
-    fireEvent.click(screen.getByText('a thought'))
+    fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
     expect(screen.getByText(/annotation\.publishedAt/)).toBeInTheDocument()
   })
 
@@ -134,7 +134,10 @@ describe('IdeaOverlay', () => {
   it('keeps quote actions in the same order as the selection menu', () => {
     renderOverlay()
 
-    const titles = screen.getAllByRole('button').map((button) => button.getAttribute('title'))
+    const titles = screen
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('title'))
+      .filter((title) => title !== 'annotation.cancel')
     expect(titles.slice(0, 6)).toEqual([
       'annotation.copy',
       'annotation.drawHighlight',
@@ -144,4 +147,27 @@ describe('IdeaOverlay', () => {
       'annotation.shareExcerpt',
     ])
   })
+
+  it('jumps to source text when the detail quote block is clicked', () => {
+    const onJump = vi.fn()
+    renderOverlay({ onJump, initialDetailId: 'ann1' })
+    const quoteBlock = screen.getByRole('button', { name: 'annotation.jumpToSource' })
+    fireEvent.click(quoteBlock)
+    expect(onJump).toHaveBeenCalledTimes(1)
+  })
+
+  it('triggers like toggle directly from the idea card action button', () => {
+    const onToggleLike = vi.fn()
+    renderOverlay({ onToggleLike })
+    const likeBtn = screen.getByTitle('comment.like')
+    fireEvent.click(likeBtn)
+    expect(onToggleLike).toHaveBeenCalledTimes(1)
+  })
 })
+
+vi.mock('../features/reader/hooks/useIdeas', () => ({
+  useIdeaComposer: () => ({ data: { data: { eligible: false, sourceReadable: false, defaultVisibility: 'private', revisionId: null } } }),
+  useReaderIdeas: () => ({ data: { data: [] }, isError: false }),
+  useIdeaDiscussion: () => ({ isPending: true }),
+  useIdeaAction: () => ({ isPending: false }),
+}))

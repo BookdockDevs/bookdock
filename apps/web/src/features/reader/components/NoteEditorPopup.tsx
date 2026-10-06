@@ -1,12 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 
 import type { PopupRect, SelectionGeometry } from '../types'
 import { markEscConsumed } from '../lib/esc-consumed'
 import { BulbIcon, CloseIcon } from './annotation-icons'
 import { noteEditorPosition, type NotePlacement } from './note-editor-position'
+import IdeaVisibilityControl from './IdeaVisibilityControl'
 
 const VIEWPORT_MARGIN = 12
 const EDITOR_WIDTH = 400
@@ -26,12 +28,17 @@ interface NoteEditorPopupProps {
   saving: boolean
   onSave: (note: string) => void
   onClose: () => void
+  initialVisibility?: 'private' | 'shared'
+  visibilityEligible?: boolean
+  sourceReadable?: boolean
+  onSaveVisibility?: (note: string, visibility: 'private' | 'shared') => void
 }
 
-export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, onClose }: NoteEditorPopupProps) {
+export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, onClose, initialVisibility = 'private', visibilityEligible, sourceReadable = false, onSaveVisibility }: NoteEditorPopupProps) {
   const _ = useTranslation()
   const readingMode = useUiStore((s) => s.readingMode)
   const [draft, setDraft] = useState(initialNote)
+  const [visibility, setVisibility] = useState(initialVisibility)
   const [viewport, setViewport] = useState(() => ({
     width: window.visualViewport?.width ?? window.innerWidth,
     height: window.visualViewport?.height ?? window.innerHeight,
@@ -45,13 +52,13 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !saving) {
         markEscConsumed()
         onClose()
       }
     }
     function onPointerDown(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onClose()
+      if (!saving && rootRef.current && !rootRef.current.contains(e.target as Node)) onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('mousedown', onPointerDown)
@@ -59,7 +66,7 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('mousedown', onPointerDown)
     }
-  }, [onClose])
+  }, [onClose, saving])
 
   useEffect(() => {
     const visualViewport = window.visualViewport
@@ -119,7 +126,10 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
   const anim = ANIMATION_OFFSET[pos.placement]
 
   function submit() {
-    if (!saving && draft.trim()) onSave(draft.trim())
+    if (!saving && draft.trim()) {
+      if (onSaveVisibility) onSaveVisibility(draft.trim(), visibility)
+      else onSave(draft.trim())
+    }
   }
 
   const textarea = (
@@ -139,11 +149,17 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
     />
   )
 
+  const hasDraft = draft.trim().length > 0
   const publishButton = (
     <button
       onClick={submit}
-      disabled={saving || draft.trim() === ''}
-      className="rounded-full bg-[var(--bd-read-primary)] px-5 py-1.5 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-60"
+      disabled={saving || !hasDraft}
+      className={cn(
+        'rounded-full px-5 py-1.5 text-sm font-medium transition-all shadow-xs',
+        hasDraft && !saving
+          ? 'bg-blue-500 hover:bg-blue-600 text-white cursor-pointer active:scale-95'
+          : 'bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-500 cursor-not-allowed opacity-60',
+      )}
     >
       {_('annotation.publish')}
     </button>
@@ -176,6 +192,7 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
           <span className="text-sm font-medium">{_('annotation.noteTitle')}</span>
           <button
             onClick={onClose}
+            disabled={saving}
             title={_('annotation.cancel')}
             className="absolute right-3 flex h-7 w-7 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
           >
@@ -183,7 +200,19 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
           </button>
         </div>
         <div className="flex min-h-0 flex-1 px-4 py-3">{textarea}</div>
-        <div className="flex shrink-0 items-center justify-end px-4 pb-3.5">{publishButton}</div>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-4 pb-3.5">
+          {visibilityEligible ? (
+            <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable} disabled={saving} />
+          ) : (
+            <div />
+          )}
+          <div className="flex items-center gap-2.5">
+            <span className="hidden text-[11px] text-[var(--bd-read-sub)] opacity-60 sm:inline">
+              Ctrl+Enter
+            </span>
+            {publishButton}
+          </div>
+        </div>
       </div>
     </div>
   )

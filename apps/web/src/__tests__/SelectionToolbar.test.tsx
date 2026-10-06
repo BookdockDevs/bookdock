@@ -250,7 +250,7 @@ describe('SelectionToolbar', () => {
     expect(screen.queryByTitle('annotation.styleSquiggly')).toBeNull()
     expect(screen.queryByTitle('annotation.deleteHighlight')).toBeNull()
     // clicking the entry switches to the detail level
-    fireEvent.click(screen.getByText('我的想法内容'))
+    fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
     expect(screen.getByTitle('annotation.editNote')).toBeInTheDocument()
     fireEvent.click(screen.getByTitle('annotation.editNote'))
     expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument()
@@ -278,7 +278,7 @@ describe('SelectionToolbar', () => {
     annotationsData = [{ ...ANNOTATION, type: 'note', note: '我的想法内容' }]
     setSelection(ANNOTATION.cfiRange)
     render(<SelectionToolbar bookId="b1" />)
-    fireEvent.click(screen.getByText('我的想法内容'))
+    fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
     fireEvent.click(screen.getByTitle('annotation.copy'))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('我的想法内容'))
   })
@@ -375,7 +375,7 @@ describe('SelectionToolbar', () => {
     annotationsData = [{ ...ANNOTATION, type: 'note', note: '已有想法' }]
     setSelection(ANNOTATION.cfiRange)
     render(<SelectionToolbar bookId="b1" />)
-    fireEvent.click(screen.getByText('已有想法'))
+    fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
     fireEvent.click(screen.getByTitle('annotation.editNote'))
     await waitFor(() => expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument())
     expect(useReaderState.getState().noteEditorRange).toBe('epubcfi(/6/4!/2)')
@@ -392,9 +392,10 @@ describe('SelectionToolbar', () => {
     annotationsData = [note1, note2]
     setSelection(ANNOTATION.cfiRange)
     const { rerender } = render(<SelectionToolbar bookId="b1" />)
-    fireEvent.click(screen.getByText('想法一'))
+    fireEvent.click(screen.getAllByLabelText('annotation.openIdeaDetail')[0])
     expect(screen.getByTitle('annotation.editNote')).toBeInTheDocument()
     fireEvent.click(screen.getByTitle('annotation.deleteAnnotation'))
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => expect(deleteMutate).toHaveBeenCalledWith('n1'))
     // Simulate the annotations refetch after deletion: the detail entry is gone
     annotationsData = [note2]
@@ -408,8 +409,9 @@ describe('SelectionToolbar', () => {
     annotationsData = [{ ...ANNOTATION, type: 'note', note: '唯一想法' }]
     setSelection(ANNOTATION.cfiRange)
     render(<SelectionToolbar bookId="b1" />)
-    fireEvent.click(screen.getByText('唯一想法'))
+    fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
     fireEvent.click(screen.getByTitle('annotation.deleteAnnotation'))
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => expect(deleteMutate).toHaveBeenCalledWith('a1'))
     await waitFor(() => expect(useReaderState.getState().selection).toBeNull())
   })
@@ -453,3 +455,11 @@ describe('SelectionToolbar', () => {
     }
   })
 })
+
+vi.mock('../features/reader/hooks/useIdeas', () => ({
+  useIdeaComposer: () => ({ data: { data: { eligible: false, sourceReadable: false, defaultVisibility: 'private', revisionId: null } } }),
+  useReaderIdeas: () => ({ data: { data: [] }, isError: false }),
+  useIdeaDiscussion: () => ({ isPending: true }),
+  useIdeaAction: () => ({ isPending: false }),
+  useToggleIdeaLike: () => ({ mutate: vi.fn() }),
+}))
