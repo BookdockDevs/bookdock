@@ -594,3 +594,27 @@ export function LockIcon({
     </svg>
   )
 }
+
+export function DotsHorizontalIcon({
+  size = 16,
+  className,
+}: {
+  size?: number
+  className?: string
+} = {}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="currentColor"
+    >
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="5" cy="12" r="1.75" />
+      <circle cx="19" cy="12" r="1.75" />
+    </svg>
+  )
+}
+
+

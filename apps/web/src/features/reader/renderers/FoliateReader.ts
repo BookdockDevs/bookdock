@@ -1719,8 +1719,10 @@ export class FoliateReader implements BookReader {
   private footnoteEntryId = 0
   private footnoteGeneration = 0
   private footnoteRequests = new Map<number, number>()
-  private handleDocInteraction = () => {
+  private handleDocInteraction = (e: MouseEvent) => {
     if (this.footnoteEntries.length > 0) this.closeFootnote()
+    const sel = (e.target as Node | null)?.ownerDocument?.defaultView?.getSelection?.()
+    if (sel && !sel.isCollapsed && sel.rangeCount > 0) return
     // Must bubble: listeners on document (e.g. popup dismiss handlers) rely on
     // the event travelling up from the container
     this.container?.dispatchEvent(new CustomEvent('content-click', { bubbles: true }))
@@ -3664,6 +3666,7 @@ export class FoliateReader implements BookReader {
     // selectionchange listener emits ('selected', null) and unmounts the
     // toolbar before it can show the fresh highlight's restyle state.
     // Callers that DO want the bubble gone emit the event themselves.
+    this.lastClickedAnnotation = null
     this.selectionActive = false
     try { this.view?.deselect?.() } catch { /* view may be gone */ }
   }
@@ -3776,6 +3779,8 @@ export class FoliateReader implements BookReader {
     for (const name of ['bd:click→post', 'bd:click→set', 'bd:click→draw']) performance.clearMeasures(name)
   }
 
+  private lastClickedAnnotation: { cfiRange: string; doc: Document; range: Range } | null = null
+
   private handleShowAnnotation(detail: any) {
     const { value, range } = detail ?? {}
     if (!value) return
@@ -3786,10 +3791,19 @@ export class FoliateReader implements BookReader {
     try {
       const doc = range && (range as Range).startContainer?.ownerDocument as Document | undefined
       const rect = doc && range ? this.popupRect(doc, range as Range) : undefined
+      this.lastClickedAnnotation = doc && range ? { cfiRange, doc, range: range as Range } : null
       this.emit('annotationClicked', { cfiRange, rect })
     } catch {
+      this.lastClickedAnnotation = null
       this.emit('annotationClicked', { cfiRange })
     }
+  }
+
+  getActiveAnnotationRect(cfiRange?: string): PopupRect | undefined {
+    if (!this.lastClickedAnnotation) return undefined
+    if (cfiRange && this.lastClickedAnnotation.cfiRange !== cfiRange) return undefined
+    const { doc, range } = this.lastClickedAnnotation
+    return this.popupRect(doc, range)
   }
 
   async search(
@@ -3797,7 +3811,7 @@ export class FoliateReader implements BookReader {
     opts?: SearchOptions,
     onProgress?: (results: SearchResult[], progress: number | null, status?: SearchStatus) => void,
   ): Promise<SearchResult[]> {
-    const q = query.trim()
+    const q = opts?.mode === 'regex' ? query.trim() : query.replace(/\s+/g, ' ').trim()
     if (!q || !this.view || !this.book) return []
     // New search supersedes any in-flight one: the old loop observes the
     // generation bump and stops consuming chapters at the next boundary

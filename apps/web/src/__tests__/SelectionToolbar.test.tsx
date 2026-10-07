@@ -8,6 +8,7 @@ import { useReaderState } from '../features/reader/state/reader-state'
 import { SelectionToolbar } from '../features/reader/components/SelectionToolbar'
 import { popupPosition } from '../features/reader/components/annotation-colors'
 import { RendererContext } from '../features/reader/hooks/useReaderApi'
+import { useUiStore } from '@/stores/ui.store'
 
 const createMutate = vi.fn()
 const updateMutate = vi.fn()
@@ -55,6 +56,7 @@ function setSelection(cfiRange = 'epubcfi(/6/4!/2)') {
 beforeEach(() => {
   vi.clearAllMocks()
   window.localStorage.clear()
+  useUiStore.setState({ ideaDisplayMode: 'modal' })
   annotationsData = []
   createMutate.mockResolvedValue({ data: ANNOTATION })
   updateMutate.mockResolvedValue({})
@@ -216,6 +218,16 @@ describe('SelectionToolbar', () => {
     fireEvent.click(screen.getByTitle('annotation.deleteHighlight'))
     await waitFor(() => expect(deleteMutate).toHaveBeenCalledWith('a1'))
     await waitFor(() => expect(useReaderState.getState().selection).toBeNull())
+  })
+
+  it('normalizes multi-line whitespace when searching an existing annotation', () => {
+    annotationsData = [{ ...ANNOTATION, text: '第一段\n\n第二段' }]
+    useReaderState.setState({
+      selection: { cfiRange: ANNOTATION.cfiRange, text: '第一段\n\n第二段' },
+    })
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('reader.search'))
+    expect(useReaderState.getState().pendingSearchQuery).toBe('第一段 第二段')
   })
 
   it('restores the remembered color when switching styles', async () => {
@@ -453,6 +465,44 @@ describe('SelectionToolbar', () => {
     } finally {
       window.innerHeight = originalInnerHeight
     }
+  })
+
+  it('closes the toolbar when sharing excerpt from a bare selection', () => {
+    setSelection()
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('annotation.shareExcerpt'))
+    expect(useReaderState.getState().shareTarget).toEqual({
+      text: '划线文本',
+      chapter: '当前章节',
+    })
+    expect(useReaderState.getState().selection).toBeNull()
+  })
+
+  it('keeps the idea overlay open when sharing excerpt from IdeaOverlay', () => {
+    annotationsData = [{ ...ANNOTATION, type: 'note', note: '想法内容' }]
+    setSelection(ANNOTATION.cfiRange)
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('annotation.shareExcerpt'))
+    expect(useReaderState.getState().shareTarget).toEqual({
+      text: '划线文本',
+      chapter: '当前章节',
+    })
+    expect(useReaderState.getState().selection).not.toBeNull()
+  })
+
+  it('keeps the idea overlay open when sharing an idea note from IdeaOverlay detail', () => {
+    annotationsData = [{ ...ANNOTATION, type: 'note', note: '想法内容' }]
+    setSelection(ANNOTATION.cfiRange)
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
+    fireEvent.click(screen.getByTitle('annotation.share'))
+    expect(useReaderState.getState().shareTarget).toEqual({
+      text: '划线文本',
+      chapter: '当前章节',
+      note: '想法内容',
+      createdAt: 0,
+    })
+    expect(useReaderState.getState().selection).not.toBeNull()
   })
 })
 

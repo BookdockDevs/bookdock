@@ -21,6 +21,8 @@ interface IdeaDiscussionPanelProps {
   bookId: string
   initialCommentCount?: number
   initialLikeCount?: number
+  hideTabs?: boolean
+  className?: string
 }
 
 export default function IdeaDiscussionPanel({
@@ -28,6 +30,8 @@ export default function IdeaDiscussionPanel({
   bookId,
   initialCommentCount = 0,
   initialLikeCount = 0,
+  hideTabs = false,
+  className,
 }: IdeaDiscussionPanelProps) {
   const _ = useTranslation()
   const query = useIdeaDiscussion(ideaId, bookId)
@@ -133,58 +137,7 @@ export default function IdeaDiscussionPanel({
     }
   }
 
-  if (query.isPending) {
-    return (
-      <div className="mt-4 pt-1 animate-pulse">
-        {/* Skeleton Tab Headers */}
-        <div className="flex items-center gap-6 border-b border-stone-200/60 pb-2.5 dark:border-stone-800/60">
-          <div className="relative pb-1 text-sm font-bold text-[var(--bd-read-text)]">
-            {_('comment.tabComments', { count: initialCommentCount })}
-            <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-blue-500" />
-          </div>
-          <div className="relative pb-1 text-sm text-[var(--bd-read-sub)]">
-            {_('comment.tabLikes', { count: initialLikeCount })}
-          </div>
-        </div>
-
-        {/* Skeleton Comment Rows */}
-        <div className="mt-3 space-y-3.5">
-          {initialCommentCount > 0 ? (
-            Array.from({ length: Math.min(initialCommentCount, 2) }).map((_, i) => (
-              <div key={i} className="flex items-start gap-2.5 pt-2">
-                <div className="h-7 w-7 shrink-0 rounded-full bg-stone-500/15" />
-                <div className="flex-1 space-y-1.5">
-                  <div className="h-3.5 w-24 rounded bg-stone-500/15" />
-                  <div className="h-4 w-3/4 rounded bg-stone-500/10" />
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="flex py-6 items-center justify-center text-xs text-[var(--bd-read-sub)] opacity-50">
-              {_('comment.noComments')}
-            </div>
-          )}
-        </div>
-
-        {/* Skeleton Input Capsule */}
-        {user && (
-          <div className="mt-4 h-9 rounded-full border border-stone-200/50 bg-stone-500/[0.04] dark:border-stone-800/50" />
-        )}
-      </div>
-    )
-  }
-
-  if (query.isError || !data) {
-    return (
-      <div className="mt-4 pt-1">
-        <button onClick={() => void query.refetch()} className="py-3 text-sm text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] transition-colors">
-          讨论加载失败，点击重试
-        </button>
-      </div>
-    )
-  }
-
-  const isIdeaAuthor = (authorId: string) => Boolean(data.idea.author?.id && authorId === data.idea.author.id)
+  const isIdeaAuthor = (authorId: string) => Boolean(data?.idea.author?.id && authorId === data.idea.author.id)
 
   function renderComment(comment: IdeaComment) {
     const isReply = Boolean(comment.parentId)
@@ -274,45 +227,74 @@ export default function IdeaDiscussionPanel({
   const menuPos = contextMenu ? computeAtPoint(contextMenu.pos, 130, 140) : null
 
   return (
-    <div className="mt-4 pt-1">
+    <div className={cn('pt-1', !hideTabs && 'mt-4', className)}>
       {/* Tabs: 评论 n 与 赞 n */}
-      <div className="flex items-center gap-6 border-b border-stone-200/60 pb-2.5 dark:border-stone-800/60">
-        <button
-          type="button"
-          aria-pressed={tab === 'comments'}
-          onClick={() => setTab('comments')}
-          className={cn(
-            'relative pb-1 text-sm transition-colors',
-            tab === 'comments'
-              ? 'font-bold text-[var(--bd-read-text)]'
-              : 'text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)]',
-          )}
-        >
-          {_('comment.tabComments', { count: data.idea.commentCount })}
-          {tab === 'comments' && (
-            <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-[var(--bd-read-primary)]" />
-          )}
-        </button>
+      {!hideTabs && (
+        <div className="flex items-center gap-6 border-b border-stone-200/60 pb-2.5 dark:border-stone-800/60">
+          <button
+            type="button"
+            aria-pressed={tab === 'comments'}
+            onClick={() => setTab('comments')}
+            className={cn(
+              'relative pb-1 text-sm transition-colors',
+              tab === 'comments'
+                ? 'font-bold text-[var(--bd-read-text)]'
+                : 'text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)]',
+            )}
+          >
+            {_('comment.tabComments', { count: data?.idea.commentCount ?? initialCommentCount })}
+            {tab === 'comments' && (
+              <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-[var(--bd-read-primary)]" />
+            )}
+          </button>
 
-        <button
-          type="button"
-          aria-pressed={tab === 'likes'}
-          onClick={() => setTab('likes')}
-          className={cn(
-            'relative pb-1 text-sm transition-colors',
-            tab === 'likes'
-              ? 'font-bold text-[var(--bd-read-text)]'
-              : 'text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)]',
-          )}
-        >
-          {_('comment.tabLikes', { count: data.idea.likeCount })}
-          {tab === 'likes' && (
-            <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-[var(--bd-read-primary)]" />
-          )}
-        </button>
-      </div>
+          <button
+            type="button"
+            aria-pressed={tab === 'likes'}
+            onClick={() => setTab('likes')}
+            className={cn(
+              'relative pb-1 text-sm transition-colors',
+              tab === 'likes'
+                ? 'font-bold text-[var(--bd-read-text)]'
+                : 'text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)]',
+            )}
+          >
+            {_('comment.tabLikes', { count: data?.idea.likeCount ?? initialLikeCount })}
+            {tab === 'likes' && (
+              <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-[var(--bd-read-primary)]" />
+            )}
+          </button>
+        </div>
+      )}
 
-      {tab === 'likes' ? (
+      {query.isPending ? (
+        <div className={cn(!hideTabs ? 'mt-3' : 'mt-1', 'space-y-3.5 animate-pulse')}>
+          {(data?.idea.commentCount ?? initialCommentCount) > 0 ? (
+            Array.from({ length: Math.min(data?.idea.commentCount ?? initialCommentCount, 2) }).map((_, i) => (
+              <div key={i} className="flex items-start gap-2.5 pt-2">
+                <div className="h-7 w-7 shrink-0 rounded-full bg-stone-500/15" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-3.5 w-24 rounded bg-stone-500/15" />
+                  <div className="h-4 w-3/4 rounded bg-stone-500/10" />
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="flex py-4 items-center justify-center text-xs text-[var(--bd-read-sub)] opacity-50">
+              {_('comment.noComments')}
+            </div>
+          )}
+        </div>
+      ) : query.isError || !data ? (
+        <div className={cn(hideTabs ? 'pt-1' : 'mt-3 pt-1')}>
+          <button
+            onClick={() => void query.refetch()}
+            className="py-3 text-sm text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] transition-colors cursor-pointer"
+          >
+            讨论加载失败，点击重试
+          </button>
+        </div>
+      ) : !hideTabs && tab === 'likes' ? (
         <div className="mt-3">
           {data.likers.length === 0 ? (
             <div className="flex py-6 items-center justify-center text-xs text-[var(--bd-read-sub)]">
@@ -328,7 +310,7 @@ export default function IdeaDiscussionPanel({
                     className="flex items-center gap-2 rounded-full border border-stone-200/70 bg-stone-500/5 px-2.5 py-1 text-xs text-[var(--bd-read-text)] dark:border-stone-800/70"
                   >
                     {avatar ? (
-                      <img src={avatar} alt="" className="h-4 w-4 rounded-full object-cover" />
+                      <img src={avatar} alt="" decoding="async" className="h-4 w-4 rounded-full object-cover" />
                     ) : (
                       <span className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-400/20 text-[9px] font-medium">
                         {liker.name.slice(0, 1)}
@@ -359,10 +341,12 @@ export default function IdeaDiscussionPanel({
                 ))
             )}
           </div>
+        </div>
+      )}
 
-          {/* 底部评论输入栏：收起态为极简圆角胶囊（对标微信读书），点击展开为卡片 */}
-          {user && (
-            <div
+      {/* 底部评论输入栏：收起态为极简圆角胶囊（对标微信读书），点击展开为卡片 */}
+      {user && (hideTabs || tab === 'comments') && (
+        <div
               className={cn(
                 'mt-4 border border-stone-200/70 bg-stone-500/[0.04] transition-[border-color,background-color] dark:border-stone-800/70 dark:bg-stone-500/[0.06]',
                 isExpanded ? 'rounded-xl p-3' : 'rounded-full px-3.5 py-2 hover:border-stone-300 dark:hover:border-stone-700 cursor-text',
@@ -404,6 +388,7 @@ export default function IdeaDiscussionPanel({
                   <img
                     src={userAvatar}
                     alt=""
+                    decoding="async"
                     className={cn('shrink-0 rounded-full object-cover', isExpanded ? 'mt-0.5 h-6 w-6' : 'h-5 w-5')}
                   />
                 ) : (
@@ -486,8 +471,6 @@ export default function IdeaDiscussionPanel({
               )}
             </div>
           )}
-        </div>
-      )}
 
       {/* 右键 / 长按操作菜单 */}
       {contextMenu && (

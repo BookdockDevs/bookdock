@@ -498,10 +498,21 @@ export const NotesPanel = memo(function NotesPanel({
   }
 
   function openIdeaDetail(item: AnnotationRes) {
+    const current = useReaderState.getState().selection
+    if (current?.cfiRange === item.cfiRange) {
+      setSelection(null)
+      return
+    }
+    const hasComments = Boolean(
+      item.visibility !== 'private' &&
+      item.commentCount &&
+      item.commentCount > 0,
+    )
     setSelection({
       cfiRange: item.cfiRange,
       text: item.text,
-      initialDetailId: item.id,
+      initialDetailId: hasComments ? item.id : undefined,
+      isIdea: true,
     })
   }
 

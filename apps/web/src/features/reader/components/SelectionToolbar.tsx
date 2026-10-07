@@ -309,8 +309,9 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   }
 
   function searchSelection() {
-    if (!selection?.text) return
-    setPendingSearchQuery(selection.text)
+    const text = (selection?.text ?? '').replace(/\s+/g, ' ').trim()
+    if (!text) return
+    setPendingSearchQuery(text)
     setActiveNavTab('toc')
     setSidebarOpen(true)
     close()
@@ -367,13 +368,13 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
 
   // Sharing is ephemeral: the card dialog takes the excerpt text and chapter,
   // no annotation is created for a bare selection
-  function shareExcerpt() {
+  function shareExcerpt(keepOpen = false) {
     if (!selection) return
     setShareTarget({
       text: selection.rawText || selection.text,
       chapter: target?.chapter ?? currentChapter ?? null,
     })
-    close()
+    if (!keepOpen) close()
   }
 
   function shareIdea(entry: IdeaEntry) {
@@ -383,7 +384,6 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       note: entry.annotation.note ?? undefined,
       createdAt: entry.annotation.createdAt,
     })
-    close()
   }
 
   const bar = popupPosition(selection.rect, barSize.width, barSize.height,
@@ -448,8 +448,27 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         onCopyQuote={() => void copyQuoteText()}
         onHighlight={() => void highlight()}
         onWriteNote={() => void createNote()}
+        onSaveIdea={async (note, visibility) => {
+          if (!selection) return
+          await create.mutateAsync({
+            cfiRange: selection.cfiRange,
+            cfiAnchor: selection.cfiRange,
+            type: 'note',
+            visibility,
+            revisionId: composer.data?.data.revisionId ?? undefined,
+            color: DEFAULT_IDEA_COLOR,
+            style: 'underline',
+            text: selection.rawText ?? selection.text,
+            chapter: currentChapter ?? undefined,
+            ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
+            note: note || undefined,
+          })
+        }}
+        defaultVisibility={composer.data?.data.defaultVisibility ?? 'private'}
+        visibilityEligible={composer.data?.data.eligible}
+        sourceReadable={composer.data?.data.sourceReadable}
         onAiChat={openAiChat}
-        onShareQuote={shareExcerpt}
+        onShareQuote={() => shareExcerpt(true)}
         onSearch={searchSelection}
         onCopyNote={(entry) => void copyNote(entry)}
         onShareNote={shareIdea}
@@ -492,7 +511,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     ), danger: false, onClick: toggleAiMenu },
     { key: 'tts', label: _('reader.ttsFromSelection'), icon: <TtsIcon />, danger: false, onClick: readSelection },
     { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
-    { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: shareExcerpt },
+    { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: () => shareExcerpt(false) },
     // Low-frequency text-editing action sits last so the common actions stay put.
     // The replace dialog lives in Reader (via replaceTarget): opening it must
     // collapse this toolbar, but clearing the selection unmounts this

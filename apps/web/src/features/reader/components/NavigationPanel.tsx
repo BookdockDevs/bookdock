@@ -831,7 +831,8 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   // "Search selection" from the toolbar lands here
   useEffect(() => {
     if (pendingSearchQuery == null) return
-    setQuery(pendingSearchQuery)
+    const normalized = pendingSearchQuery.replace(/\s+/g, ' ').trim()
+    setQuery(normalized)
     setSearchExpanded(true)
     setPendingSearchQuery(null)
   }, [pendingSearchQuery, setPendingSearchQuery])
@@ -871,7 +872,8 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   }, [searchResults])
 
   async function doSearch() {
-    if (!query.trim() || !renderer?.search) return
+    const trimmed = searchMode === 'regex' ? query.trim() : query.replace(/\s+/g, ' ').trim()
+    if (!trimmed || !renderer?.search) return
     const gen = ++searchGenRef.current
     setSearching(true)
     setSearchProgress(0)
@@ -880,7 +882,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     setSearchIndex(-1)
     try {
       const results = await renderer.search(
-        query.trim(),
+        trimmed,
         { scope: searchScope, matchCase: searchMatchCase, mode: searchMode },
         (partial, progress, status) => {
           if (gen !== searchGenRef.current) return

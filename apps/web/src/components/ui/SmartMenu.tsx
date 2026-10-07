@@ -58,11 +58,11 @@ export default function SmartMenu({
       }
     }
     window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('mousedown', onPointerDown, true)
     document.addEventListener('content-click', onPointerDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('mousedown', onPointerDown, true)
       document.removeEventListener('content-click', onPointerDown)
     }
   }, [position, onClose, innerRef, triggerRef])

@@ -55,12 +55,26 @@ import { ViewSettingsContext } from './view-settings-context'
 import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './lib/view-settings'
 import { readingRateOf, RATE_SAMPLE_MIN_INTERVAL_MS } from './lib/progress-model'
 import type { PerBookSettingKey, GlobalViewSettings } from './lib/view-settings'
-import type { FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, ReaderAnnotation } from './types'
+import type { FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, ReaderAnnotation, SelectionInfo } from './types'
 import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
 import { FootnotePopup } from './components/FootnotePopup'
 import { ImageViewer } from './components/ImageViewer'
 import { BOOKMARK_CONTEXT_MAX_LENGTH } from '@bookdock/shared'
-import type { BookDetailRes, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+import type { AnnotationRes, BookDetailRes, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+
+function isSelectionIdea(
+  currentSelection: SelectionInfo | null,
+  activeNoteEditor: string | null,
+  annotationsList?: AnnotationRes[],
+  markersList?: { annotation: { cfiRange: string } }[],
+): boolean {
+  if (activeNoteEditor) return true
+  if (!currentSelection) return false
+  if (currentSelection.isIdea || currentSelection.initialDetailId != null) return true
+  if (annotationsList?.some((a) => a.cfiRange === currentSelection.cfiRange && a.type === 'note')) return true
+  if (markersList?.some((p) => p.annotation.cfiRange === currentSelection.cfiRange)) return true
+  return false
+}
 
 export default function Reader() {
   const _ = useTranslation()
@@ -164,6 +178,7 @@ export default function Reader() {
     footerVisibleRef.current = footerVisible
   }, [footerVisible])
   const setSelection = useReaderState((s) => s.setSelection)
+  const selection = useReaderState((s) => s.selection)
   const resetForBook = useReaderState((s) => s.resetForBook)
   const replaceTarget = useReaderState((s) => s.replaceTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
@@ -183,6 +198,8 @@ export default function Reader() {
   const readingMode = useUiStore((s) => s.readingMode)
   const toolbarLocked = useUiStore((s) => s.toolbarLocked)
   const sidebarWidth = useUiStore((s) => s.sidebarWidth)
+  const ideaDisplayMode = useUiStore((s) => s.ideaDisplayMode)
+  const ideaSidebarWidth = useUiStore((s) => s.ideaSidebarWidth)
   const dialogInset = !isTouch && (sidebarOpen || toolbarLocked) ? 56 + (sidebarOpen ? sidebarWidth : 0) : 0
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
@@ -191,6 +208,15 @@ export default function Reader() {
   const publicIdeas = useReaderIdeas(id, showFriendIdeas)
   const publicMarkers = useMemo(() => publicIdeas.isError || !showFriendIdeas ? [] : (publicIdeas.data?.data ?? []).filter((idea) => !idea.own && idea.locationAvailable), [publicIdeas.isError, publicIdeas.data, showFriendIdeas])
   const deepLinkHandled = useRef(false)
+  const annotationClickHandledRef = useRef(false)
+  const annotationClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const isIdeaSidebarOpen = Boolean(
+    selection &&
+    !isTouch &&
+    ideaDisplayMode === 'sidebar' &&
+    isSelectionIdea(selection, null, annotations?.data, publicMarkers),
+  )
 
   const bookmarks = useMemo(
     () => (annotations?.data ?? []).filter((annotation) => annotation.type === 'bookmark'),
@@ -772,7 +798,14 @@ export default function Reader() {
       setPendingNavChapter(null)
       setNavError(null)
       if (e.source !== 'tts' && !keepChromePinnedRef.current) setChromePinned(false)
-      setSelection(null)
+      const activeNoteEditor = useReaderState.getState().noteEditorRange
+      const chapterChanged = Boolean(
+        (e.chapterHref && currentChapterHref && e.chapterHref !== currentChapterHref) ||
+        (e.chapterIndex !== undefined && currentChapterIndex !== null && e.chapterIndex !== currentChapterIndex),
+      )
+      if (chapterChanged) {
+        if (!activeNoteEditor) setSelection(null)
+      }
       if (e.source !== 'tts') pingReadingTimer()
       setPercent(e.percent)
       setCurrentContentCfi(e.contentCfi ?? null)
@@ -828,6 +861,15 @@ export default function Reader() {
       setHeaderSummon(false)
     },
     onAnnotationClicked: (e) => {
+      annotationClickHandledRef.current = true
+      if (annotationClickTimerRef.current) {
+        clearTimeout(annotationClickTimerRef.current)
+      }
+      annotationClickTimerRef.current = setTimeout(() => {
+        annotationClickHandledRef.current = false
+        annotationClickTimerRef.current = null
+      }, 400)
+
       const current = useReaderState.getState().selection
       // A range can hold both a highlight and ideas; the highlight wins the
       // click (same rule as SelectionToolbar), ideas stay reachable from the
@@ -835,8 +877,18 @@ export default function Reader() {
       const annotation = annotations?.data?.find((a) => a.cfiRange === e.cfiRange && a.type === 'highlight')
         ?? annotations?.data?.find((a) => a.cfiRange === e.cfiRange)
         ?? publicMarkers.find((idea) => idea.annotation.cfiRange === e.cfiRange)?.annotation
-      if (!annotation || current?.cfiRange === e.cfiRange) { setSelection(null); return }
-      setSelection({ cfiRange: e.cfiRange, text: annotation.text, rect: e.rect })
+      const isSameSelection = current?.cfiRange === e.cfiRange && Boolean(current?.isIdea) === (annotation?.type === 'note')
+      if (!annotation || isSameSelection) {
+        rendererRef.current?.clearSelection()
+        setSelection(null)
+        return
+      }
+      setSelection({
+        cfiRange: e.cfiRange,
+        text: annotation.text,
+        rect: e.rect,
+        isIdea: annotation.type === 'note',
+      })
     },
     onTocReady: (items) => setTocItems(items, id),
     onJumpConfirmed: (e) => {
@@ -1051,35 +1103,49 @@ export default function Reader() {
   useEffect(() => {
     if (!containerEl) return
     const handler = () => {
+      if (annotationClickHandledRef.current) return
       setSettingsOpen(false)
       setTtsOpen(false)
       setAutoReadingOpen(false)
+      const currentSelection = useReaderState.getState().selection
+      const activeNoteEditor = useReaderState.getState().noteEditorRange
+      if (isSelectionIdea(currentSelection, activeNoteEditor, annotations?.data, publicMarkers)) {
+        return
+      }
       setSelection(null)
     }
     containerEl.addEventListener('content-click', handler)
-    return () => containerEl.removeEventListener('content-click', handler)
-  }, [containerEl, setSelection])
+    return () => {
+      containerEl.removeEventListener('content-click', handler)
+      if (annotationClickTimerRef.current) clearTimeout(annotationClickTimerRef.current)
+    }
+  }, [containerEl, setSelection, annotations?.data, publicMarkers])
 
   // While a floating UI is open (selection bubble / note editor / settings
   // popover), the click that dismisses it must not also turn a page or toggle
   // chrome — the renderer swallows click-to-turn while the guard is held
-  const selection = useReaderState((s) => s.selection)
-  const popupOpen = !!selection || settingsOpen || ttsOpen || autoReadingOpen || !!footnoteEntry
+  const isFloatingSelection = Boolean(selection && (!isIdeaSidebarOpen || !selection.isIdea))
+  const popupOpen = isFloatingSelection || settingsOpen || ttsOpen || autoReadingOpen || !!footnoteEntry
   useEffect(() => {
     if (!popupOpen || !renderer) return
     renderer.pushPopupGuard()
     return () => renderer.popPopupGuard()
   }, [popupOpen, renderer])
 
-  // Dismiss popups on scroll (scrolled mode)
+  // Dismiss popups on scroll (scrolled mode), but keep ideas open for side-by-side reading
   useEffect(() => {
     if (!containerEl) return
     const onScroll = () => {
-      setSelection(null)
+      if (annotationClickHandledRef.current) return
+      const currentSelection = useReaderState.getState().selection
+      const activeNoteEditor = useReaderState.getState().noteEditorRange
+      if (!isSelectionIdea(currentSelection, activeNoteEditor, annotations?.data, publicMarkers)) {
+        setSelection(null)
+      }
     }
     containerEl.addEventListener('scroll', onScroll, { passive: true })
     return () => containerEl.removeEventListener('scroll', onScroll)
-  }, [containerEl, setSelection])
+  }, [containerEl, setSelection, annotations?.data, publicMarkers])
 
   const rendererRef = useRef(renderer)
   useEffect(() => {
@@ -1121,13 +1187,16 @@ export default function Reader() {
       height = containerEl.clientHeight
       const currentSelection = useReaderState.getState().selection
       const activeNoteEditor = useReaderState.getState().noteEditorRange
-      if (activeNoteEditor) return
-      if (currentSelection) {
-        // Idea overlays (note type or initialDetailId) are fixed modal overlays, don't dismiss on container resize
-        const isIdea = currentSelection.initialDetailId != null
-          || (annotations?.data?.some((a) => a.cfiRange === currentSelection.cfiRange && a.type === 'note'))
-          || (publicMarkers.some((p) => p.annotation.cfiRange === currentSelection.cfiRange))
-        if (isIdea) return
+      if (isSelectionIdea(currentSelection, activeNoteEditor, annotations?.data, publicMarkers)) return
+      if (annotationClickHandledRef.current) {
+        const nextRect = rendererRef.current?.getActiveAnnotationRect?.(currentSelection?.cfiRange)
+        if (nextRect && currentSelection) {
+          setSelection({
+            ...currentSelection,
+            rect: nextRect,
+          })
+        }
+        return
       }
       rendererRef.current?.clearSelection()
       setSelection(null)
@@ -1225,20 +1294,23 @@ export default function Reader() {
     if (!toolbarLocked) setSidebarOpen(false)
     setTtsOpen(false)
     setAutoReadingOpen(false)
+    setSelection(null)
     setSettingsOpen((v) => !v)
-  }, [setSidebarOpen, toolbarLocked])
+  }, [setSelection, setSidebarOpen, toolbarLocked])
 
   const onToggleTts = useCallback(() => {
     setSettingsOpen(false)
     setAutoReadingOpen(false)
+    setSelection(null)
     setTtsOpen((v) => !v)
-  }, [])
+  }, [setSelection])
 
   const onToggleAutoReading = useCallback(() => {
     setSettingsOpen(false)
     setTtsOpen(false)
+    setSelection(null)
     setAutoReadingOpen((v) => !v)
-  }, [])
+  }, [setSelection])
 
   // Starting playback means eyes on the text: starting from either panel drops
   // a pinned chrome along with the popover and retracts the header so the view
@@ -1471,7 +1543,12 @@ export default function Reader() {
               onFooterSummon={onFooterEnter}
               guestReadOnly={isGuest}
             />
-          <div className="relative flex flex-1 flex-col">
+          <div
+            className="relative flex flex-1 flex-col transition-[margin] duration-150 will-change-[margin]"
+            style={{
+              marginRight: isIdeaSidebarOpen ? `${ideaSidebarWidth}px` : undefined,
+            }}
+          >
             {/* Top hover zone: hot strip + header hover with 180ms grace period.
                 Touch: no hot strip — pinned (middle tap) is the only reveal. */}
             <div className="absolute inset-x-0 top-0 z-50 pointer-events-none">

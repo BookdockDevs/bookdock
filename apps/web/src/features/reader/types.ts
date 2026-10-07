@@ -102,6 +102,8 @@ export interface SelectionInfo {
   keepSelection?: boolean
   /** When set, opening the idea overlay navigates directly into this idea's detail view */
   initialDetailId?: string
+  /** Whether the selection represents a note / idea (e.g. opened from badge or notes panel) */
+  isIdea?: boolean
 }
 
 export interface SelectionGeometry {
@@ -274,6 +276,8 @@ export interface BookReader {
   clearSearch(): void
   /** Clear the DOM selection without emitting events — keeps React toolbar state */
   deselect(): void
+  /** Resolve the live bounding rect of the currently clicked annotation */
+  getActiveAnnotationRect?(cfiRange?: string): PopupRect | undefined
   getTtsSegment(startCfi?: string): Promise<TtsSegment | null>
   getMediaOverlayCues(sectionIndex?: number): Promise<MediaOverlayCue[]>
   hasMediaOverlay(): boolean
@@ -378,6 +382,8 @@ export interface ParagraphStyle {
 }
 
 export type ReadingMode = 'scroll' | 'page'
+
+export type IdeaDisplayMode = 'sidebar' | 'modal'
 
 export type AutoReadingMode = 'smooth' | 'timed'
 

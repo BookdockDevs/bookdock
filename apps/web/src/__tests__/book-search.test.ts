@@ -78,6 +78,13 @@ describe('findMatches', () => {
     expect(findMatches(text, '上一段 下一段')).toEqual([{ start: 0, end: text.length }])
   })
 
+  it('matches cross-paragraph text when query contains newlines from annotation quotes', () => {
+    const text = extractChapterText(
+      parseXhtml(`${XHTML_HEAD}<p>上一段</p><p>下一段</p>${XHTML_TAIL}`),
+    ).text
+    expect(findMatches(text, '上一段\n\n下一段')).toEqual([{ start: 0, end: text.length }])
+  })
+
   it('matches regex patterns and honors matchCase', () => {
     const text = 'abc123 DEF456 def789'
     expect(findMatches(text, '[a-z]+\\d+', { mode: 'regex', matchCase: true })).toEqual([

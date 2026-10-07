@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { FontPreferences, TtsEngine } from '@bookdock/shared'
-import type { AutoReadingMode, FontFamily, ReadingMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField, NavTab, ParagraphStyle } from '../features/reader/types'
+import type { AutoReadingMode, FontFamily, ReadingMode, IdeaDisplayMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField, NavTab, ParagraphStyle } from '../features/reader/types'
 import {
   isReadingThemeMode,
   resolveEffectiveReadingThemeId,
@@ -125,6 +125,8 @@ interface UiState {
   showFooter: boolean
   showFriendIdeas: boolean
   setShowFriendIdeas: (value: boolean) => void
+  ideaDisplayMode: IdeaDisplayMode
+  setIdeaDisplayMode: (value: IdeaDisplayMode) => void
   chineseConversion: ChineseConversion
   continuousScroll: ContinuousScroll
   pageAnimation: boolean
@@ -224,6 +226,8 @@ interface UiState {
   navTabRemembered: NavTab
   setToolbarLocked: (v: boolean) => void
   setSidebarWidth: (v: number) => void
+  ideaSidebarWidth: number
+  setIdeaSidebarWidth: (v: number) => void
   setSidebarRememberedOpen: (v: boolean) => void
   setNavTabRemembered: (v: NavTab) => void
 
@@ -466,6 +470,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   showHeader: getInitialBoolean('bd-show-header', true),
   showFooter: getInitialBoolean('bd-show-footer', true),
   showFriendIdeas: getInitialBoolean('bd-show-friend-ideas', true),
+  ideaDisplayMode: getInitial<IdeaDisplayMode>('bd-idea-display-mode', 'sidebar'),
   chineseConversion: getInitial<ChineseConversion>('bd-chinese-conversion', 'off'),
   continuousScroll: getInitial<ContinuousScroll>('bd-continuous-scroll', 'off'),
   pageAnimation: getInitialBoolean('bd-page-animation', true),
@@ -504,6 +509,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   view: getInitial<string>('bd-library-view', 'grid') === 'list' ? ('list' as const) : ('grid' as const),
   toolbarLocked: getInitialBoolean('bd-reader-toolbar-locked', true),
   sidebarWidth: getInitialNumber('bd-sidebar-width', 288, 200, 640),
+  ideaSidebarWidth: getInitialNumber('bd-idea-sidebar-width', 380, 260, 720),
   sidebarRememberedOpen: getInitialBoolean('bd-reader-sidebar-open', true),
   navTabRemembered: getInitialNavTab(),
 
@@ -546,6 +552,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setSidebarWidth: (sidebarWidth) => {
     setStorage('bd-sidebar-width', String(sidebarWidth))
     set({ sidebarWidth })
+  },
+  setIdeaSidebarWidth: (ideaSidebarWidth) => {
+    setStorage('bd-idea-sidebar-width', String(ideaSidebarWidth))
+    set({ ideaSidebarWidth })
   },
   setListInfoItems: (listInfoItems) => {
     setStorage('bd-list-info-items', JSON.stringify(listInfoItems))
@@ -852,6 +862,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setShowFriendIdeas: (showFriendIdeas) => {
     setStorage('bd-show-friend-ideas', String(showFriendIdeas))
     set({ showFriendIdeas })
+  },
+  setIdeaDisplayMode: (ideaDisplayMode) => {
+    setStorage('bd-idea-display-mode', ideaDisplayMode)
+    set({ ideaDisplayMode })
   },
   setChineseConversion: (chineseConversion) => {
     setStorage('bd-chinese-conversion', chineseConversion)

@@ -93,14 +93,14 @@ export default function IdeaVisibilityControl({ value, onChange, sourceReadable,
               'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors cursor-pointer',
               !sourceReadable && 'opacity-40 cursor-not-allowed',
               value === 'shared'
-                ? 'bg-blue-500/10 text-blue-500 font-medium'
+                ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)] font-medium'
                 : 'text-[var(--bd-read-text)] hover:bg-stone-500/10',
             )}
             title={!sourceReadable ? _('annotation.visibilitySourceUnavailable') : undefined}
           >
             <GlobeIcon size={13} />
             <span>{_('annotation.visibilityPublic')}</span>
-            {value === 'shared' && <CheckIcon size={13} className="ml-auto text-blue-500" />}
+            {value === 'shared' && <CheckIcon size={13} className="ml-auto text-[var(--bd-read-primary)]" />}
           </button>
 
           <button
@@ -114,13 +114,13 @@ export default function IdeaVisibilityControl({ value, onChange, sourceReadable,
             className={cn(
               'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors cursor-pointer',
               value === 'private'
-                ? 'bg-blue-500/10 text-blue-500 font-medium'
+                ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)] font-medium'
                 : 'text-[var(--bd-read-text)] hover:bg-stone-500/10',
             )}
           >
             <LockIcon size={13} />
             <span>{_('annotation.visibilityPrivate')}</span>
-            {value === 'private' && <CheckIcon size={13} className="ml-auto text-blue-500" />}
+            {value === 'private' && <CheckIcon size={13} className="ml-auto text-[var(--bd-read-primary)]" />}
           </button>
         </div>
       )}

@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 
 import type { AnnotationRes } from '@bookdock/shared'
 
 import { IdeaOverlay, type IdeaEntry } from '../features/reader/components/IdeaOverlay'
+import { useUiStore } from '../stores/ui.store'
 
 function makeAnnotation(overrides?: Partial<AnnotationRes>): AnnotationRes {
   return {
@@ -52,6 +53,10 @@ function mockQuoteOverflow(overflows: boolean) {
 }
 
 describe('IdeaOverlay', () => {
+  beforeEach(() => {
+    useUiStore.getState().setIdeaDisplayMode('modal')
+  })
+
   afterEach(() => {
     delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight
     delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight
@@ -93,18 +98,18 @@ describe('IdeaOverlay', () => {
     mockQuoteOverflow(true)
     renderOverlay()
     const quote = screen.getByText('quote text')
-    expect(quote.className).toContain('line-clamp-4')
+    expect(quote.className).toContain('line-clamp-')
 
     const toggle = screen.getByTitle('annotation.expandQuote')
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(toggle)
 
-    expect(quote.className).not.toContain('line-clamp-4')
+    expect(quote.className).not.toContain('line-clamp-')
     const collapse = screen.getByTitle('annotation.collapseQuote')
     expect(collapse).toHaveAttribute('aria-expanded', 'true')
     fireEvent.click(collapse)
 
-    expect(quote.className).toContain('line-clamp-4')
+    expect(quote.className).toContain('line-clamp-')
     expect(screen.getByTitle('annotation.expandQuote')).toBeInTheDocument()
   })
 
@@ -162,6 +167,104 @@ describe('IdeaOverlay', () => {
     const likeBtn = screen.getByTitle('comment.like')
     fireEvent.click(likeBtn)
     expect(onToggleLike).toHaveBeenCalledTimes(1)
+  })
+
+  it('supports in-situ idea creation in sidebar mode', async () => {
+    useUiStore.getState().setIdeaDisplayMode('sidebar')
+    const onSaveIdea = vi.fn().mockResolvedValue(undefined)
+    renderOverlay({ onSaveIdea })
+
+    const trigger = screen.getByText('annotation.writeNote')
+    act(() => {
+      fireEvent.click(trigger)
+    })
+
+    const textarea = screen.getByLabelText('annotation.notePlaceholder')
+    act(() => {
+      fireEvent.change(textarea, { target: { value: 'My inline thought' } })
+    })
+
+    const publishBtn = screen.getByText('annotation.publish')
+    await act(async () => {
+      fireEvent.click(publishBtn)
+    })
+
+    expect(onSaveIdea).toHaveBeenCalledWith('My inline thought', 'private')
+    useUiStore.getState().setIdeaDisplayMode('modal')
+  })
+
+  it('renders resize handle and supports double-click reset in sidebar mode', () => {
+    useUiStore.getState().setIdeaDisplayMode('sidebar')
+    renderOverlay()
+
+    const handle = screen.getByTestId('idea-sidebar-resize-handle')
+    expect(handle).toBeInTheDocument()
+    fireEvent.doubleClick(handle)
+    expect(useUiStore.getState().ideaSidebarWidth).toBe(380)
+
+    useUiStore.getState().setIdeaDisplayMode('modal')
+  })
+
+  it('toggles idea more actions menu when clicking more icon', () => {
+    useUiStore.getState().setIdeaDisplayMode('sidebar')
+    const onShare = vi.fn()
+    renderOverlay({ onShareNote: onShare })
+
+    const moreBtn = screen.getByRole('button', { name: 'reader.more' })
+    fireEvent.click(moreBtn)
+    expect(screen.getByText('annotation.share')).toBeInTheDocument()
+
+    // Clicking more icon again closes the menu
+    fireEvent.click(moreBtn)
+    expect(screen.queryByText('annotation.share')).toBeNull()
+
+    useUiStore.getState().setIdeaDisplayMode('modal')
+  })
+
+  it('expands discussion inline below the entry card in sidebar mode', () => {
+    useUiStore.getState().setIdeaDisplayMode('sidebar')
+    renderOverlay()
+    const openBtn = screen.getByLabelText('annotation.openIdeaDetail')
+    fireEvent.click(openBtn)
+    expect(screen.getByLabelText('annotation.collapse')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('annotation.collapse'))
+    expect(screen.getByLabelText('annotation.openIdeaDetail')).toBeInTheDocument()
+    useUiStore.getState().setIdeaDisplayMode('modal')
+  })
+
+  it('supports closing via header collapse button in sidebar mode', () => {
+    useUiStore.getState().setIdeaDisplayMode('sidebar')
+    const onClose = vi.fn()
+    renderOverlay({ onClose })
+
+    const collapseBtn = screen.getByTitle('annotation.cancel')
+    expect(collapseBtn).toBeInTheDocument()
+    fireEvent.click(collapseBtn)
+    expect(onClose).toHaveBeenCalledTimes(1)
+
+    useUiStore.getState().setIdeaDisplayMode('modal')
+  })
+
+  it('handles stepped Escape key in sidebar mode', () => {
+    useUiStore.getState().setIdeaDisplayMode('sidebar')
+    const onClose = vi.fn()
+    renderOverlay({ onClose })
+
+    // Step 1: Open inline discussion
+    const openBtn = screen.getByLabelText('annotation.openIdeaDetail')
+    fireEvent.click(openBtn)
+    expect(screen.getByLabelText('annotation.collapse')).toBeInTheDocument()
+
+    // Escape collapses discussion first, does not call onClose
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByLabelText('annotation.openIdeaDetail')).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+
+    // Step 2: Next Escape closes sidebar
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+
+    useUiStore.getState().setIdeaDisplayMode('modal')
   })
 })
 

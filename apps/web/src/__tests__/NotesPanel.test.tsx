@@ -325,13 +325,13 @@ describe('NotesPanel', () => {
     useReaderState.getState().setSelection(null)
     display.mockClear()
 
-    // Clicking idea body opens detail overlay without navigating
+    // Clicking idea body opens idea overlay without navigating; no comments means initialDetailId is omitted
     fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
     expect(display).not.toHaveBeenCalled()
     expect(useReaderState.getState().selection).toEqual({
       cfiRange: 'cfi:3',
       text: '想法原文丙',
-      initialDetailId: 'n1',
+      isIdea: true,
     })
 
     // Clicking idea quote navigates to cfi
@@ -339,6 +339,29 @@ describe('NotesPanel', () => {
     fireEvent.click(screen.getByText('想法原文丙').closest('div.ml-7')!.querySelector('button[aria-label="annotation.jumpToSource"]')!)
     expect(display).toHaveBeenCalledWith('cfi:3')
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('opens idea detail with initialDetailId only when idea has comments and is shared', () => {
+    const withComments = makeAnnotation({
+      id: 'nc',
+      cfiRange: 'cfi:10',
+      type: 'note',
+      text: '有评论的想法',
+      note: '想法内容',
+      visibility: 'shared',
+      commentCount: 3,
+    })
+    render(
+      <NotesPanel items={[withComments]} total={1} sort="chapter" bookId="book-1" chapterOrder={[{ label: '第一章', href: 'chapter:1' }]} />,
+    )
+    useReaderState.getState().setSelection(null)
+    fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
+    expect(useReaderState.getState().selection).toEqual({
+      cfiRange: 'cfi:10',
+      text: '有评论的想法',
+      initialDetailId: 'nc',
+      isIdea: true,
+    })
   })
 
   it('groups consecutive notes by chapter under time sort', () => {

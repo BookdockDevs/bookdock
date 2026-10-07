@@ -6,6 +6,7 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
+- Reader ideas can be viewed in a side-by-side sidebar or floating modal, with draggable width adjustment (280–720 px), bottom composer, and custom card layout styles.
 - Reader ideas become discussions for collected shared books: eligible readers can publish public ideas bound to the exact source listing and version, with comments, one-level replies, likes and liker lists. Deleting a comment removes it and promotes surviving replies to top level without placeholders. Visibility defaults to the account's last successful choice and stays private until published.
 - New `showFriendIdeas` reader setting (synced across devices, defaults to on): shows other readers' idea markers without ever hiding your own. Revision mismatches disable markers and jumps instead of misplacing them.
 - Uploading a file that matches an existing book now names it and waits for an explicit continue before adding a separate copy.
@@ -23,6 +24,7 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Searching cross-paragraph selections with multi-line whitespace from idea menus and annotations now correctly matches occurrences in book search.
 - AI "save as idea" now shows loading feedback and offers a retry when its settings fail to load, instead of silently doing nothing.
 - Hidden-display changes now clear related list, search, detail, recent-reading, taxonomy, annotation and statistics caches, preventing stale hidden content from remaining visible.
 - Hidden private-book links no longer reuse hidden-inclusive cached details when display is off; direct links never enable hidden display automatically.
@@ -626,6 +628,7 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
+- 阅读器想法支持侧边栏与浮层弹窗双模式切换，侧边栏支持 280–720 px 拖拽调宽与版心自适应避让，底部提供即时想法输入框，并支持多种卡片排版样式。
 - 阅读想法长出讨论区：收藏过的共享书可发布公开想法，精确绑定来源书库与版本；支持评论、单层回复、点赞与点赞名单，删评论即整行删除、存活回复上提为顶级，不留占位。可见范围默认沿用上次发布成功的选择，发布前一律私密。
 - 阅读器新增“显示书友想法”开关（多端同步，默认开）：只显示他人的想法标记，自己的想法永远可见。版本对不上时标记与跳转直接禁用，不会错位。
 - 上传文件与已有藏书内容一致时，先报出那本书的名字，等你点“继续上传”才会另存一份。
@@ -643,6 +646,7 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 修复从想法详情或划线菜单搜索跨段落、多行空白的选中文本时无法命中正文的问题。
 - AI“存为想法”在配置加载失败时显示加载或重试，不再点了没反应。
 - 切换显示状态时同步清理列表、搜索、详情、最近阅读、书架、标签、标注和阅读统计等相关缓存，避免隐藏内容继续显示。
 - 关闭显示后，隐藏私库书籍的链接不会复用此前包含隐藏内容的详情缓存；直接链接不会自动开启显示。

@@ -369,6 +369,8 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
     setShowFooter,
     showFriendIdeas,
     setShowFriendIdeas,
+    ideaDisplayMode,
+    setIdeaDisplayMode,
     chineseConversion,
     setChineseConversion,
     continuousScroll,
@@ -818,6 +820,17 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
               <FieldSelect value={footerRight} onChange={setFooterRight} disabled={!showFooter} />
             </div>
             <ToggleRow label={_('reader.showFriendIdeas')} checked={showFriendIdeas} onChange={setShowFriendIdeas} />
+            <div className="flex flex-col gap-1.5 pt-1">
+              <span className="text-xs text-[var(--bd-read-sub)]">{_('reader.ideaDisplayMode')}</span>
+              <ButtonGroup
+                options={[
+                  { value: 'sidebar', label: _('reader.ideaDisplaySidebar') },
+                  { value: 'modal', label: _('reader.ideaDisplayModal') },
+                ]}
+                value={ideaDisplayMode}
+                onChange={setIdeaDisplayMode}
+              />
+            </div>
           </div>
         </div>
       )}

@@ -1247,7 +1247,10 @@
     "sessionDeleteFailed": "删除记录失败",
     "sessionUpdateFailed": "更新记录失败",
     "searchPlaceholderChapter": "搜索本章...",
-    "showFriendIdeas": "显示书友想法"
+    "showFriendIdeas": "显示书友想法",
+    "ideaDisplayMode": "想法展示方式",
+    "ideaDisplaySidebar": "侧边栏",
+    "ideaDisplayModal": "居中卡片"
   },
   "theme": {
     "system": "跟随系统",
@@ -2033,7 +2036,8 @@
     "toggleSelected": "切换选中",
     "edited": "已编辑",
     "jumpToSource": "跳转原文",
-    "locationUnavailable": "定位不可用"
+    "locationUnavailable": "定位不可用",
+    "collapseSidebar": "收起侧页"
   },
   "share": {
     "saveImage": "保存图片",

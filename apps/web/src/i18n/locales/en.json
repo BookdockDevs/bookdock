@@ -1259,7 +1259,10 @@
     "ai": "AI Assistant",
     "aiPromptsEmpty": "No quick prompts configured",
     "searchPlaceholderChapter": "Search in chapter...",
-    "showFriendIdeas": "Show friend ideas"
+    "showFriendIdeas": "Show friend ideas",
+    "ideaDisplayMode": "Idea display style",
+    "ideaDisplaySidebar": "Sidebar",
+    "ideaDisplayModal": "Centered card"
   },
   "theme": {
     "system": "System",
@@ -2045,7 +2048,8 @@
     "toggleSelected": "Toggle selection",
     "edited": "Edited",
     "jumpToSource": "Jump to source",
-    "locationUnavailable": "Location unavailable"
+    "locationUnavailable": "Location unavailable",
+    "collapseSidebar": "Collapse sidebar"
   },
   "share": {
     "saveImage": "Save Image",
