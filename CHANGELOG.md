@@ -2,17 +2,23 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.4.4] - Unreleased
+## [0.4.4] - 2026-10-07
+
+### Highlights
+
+- Ideas become discussions: public ideas support comments, replies, likes and liker lists; the reader gains side-by-side drawer and floating modal modes, 280–720 px draggable width, reading margin shifting, bottom composer, and custom card styles.
+- Structured search expressions: library search supports combining plain words with exact `author:`, `tag:`, etc. filters, boolean operators (`&`, `|`, `!`), and interactive condition chips.
+- Simplified identity & database architecture: legacy guest database identity and obsolete instance settings are fully retired; anonymous reading is client-only, and hidden content display is isolated per local account.
+- Upload duplicate warning: uploading a file that matches an existing book prompts before creating a separate copy.
 
 ### Added
 
-- Reader ideas can be viewed in a side-by-side sidebar or floating modal, with draggable width adjustment (280–720 px), bottom composer, and custom card layout styles.
 - Reader ideas become discussions for collected shared books: eligible readers can publish public ideas bound to the exact source listing and version, with comments, one-level replies, likes and liker lists. Deleting a comment removes it and promotes surviving replies to top level without placeholders. Visibility defaults to the account's last successful choice and stays private until published.
+- Reader ideas can be viewed in a side-by-side drawer sidebar or floating modal, with draggable width adjustment (280–720 px), bottom composer, reading margin shifting, and custom card layout styles.
 - New `showFriendIdeas` reader setting (synced across devices, defaults to on): shows other readers' idea markers without ever hiding your own. Revision mismatches disable markers and jumps instead of misplacing them.
-- Uploading a file that matches an existing book now names it and waits for an explicit continue before adding a separate copy.
 - Library search takes one expression that mixes ordinary words with exact `author:`, `series:`, `tag:`, `shelf:`, `category:`, `format:` and `status:` conditions, combined with `&`, `|`, `!` and parentheses. Names match exactly, and an unknown or malformed value reports the position to fix instead of replacing the results.
 - The search box validates a draft against the real list before applying it, suggests names already in the library and shows one removable chip per condition. It applies on Enter, the search button, or 300 ms after typing stops rather than on every keystroke, and exiting restores the previous filters, page and scroll position.
-
+- Uploading a file that matches an existing book now names it and waits for an explicit continue before adding a separate copy.
 
 ### Changed
 
@@ -25,13 +31,13 @@ All notable changes to Bookdock are documented here.
 ### Fixed
 
 - Searching cross-paragraph selections with multi-line whitespace from idea menus and annotations now correctly matches occurrences in book search.
+- Chinese font stacks now include common Windows face names, which may change the physical font actually rendered; Latin-first fonts still lead with the CJK companion chain.
 - AI "save as idea" now shows loading feedback and offers a retry when its settings fail to load, instead of silently doing nothing.
 - Hidden-display changes now clear related list, search, detail, recent-reading, taxonomy, annotation and statistics caches, preventing stale hidden content from remaining visible.
 - Hidden private-book links no longer reuse hidden-inclusive cached details when display is off; direct links never enable hidden display automatically.
+- Filter reset affordances in the library context bar and the view menu are now icon buttons.
 - Dismissing a finished update now clears its record so the entry returns on refresh, and interrupted updates no longer show later steps as done; failed dismissals stay open for retry while closing an active update keeps it running in the background.
 - A failed system update no longer rolls back to a snapshot from another release, an unknown manifest format or one without an instance owner; the current database and the pending update are left untouched.
-- Chinese font stacks now include common Windows face names, which may change the physical font actually rendered; Latin-first fonts still lead with the CJK companion chain.
-- Filter reset affordances in the library context bar and the view menu are now icon buttons.
 
 ### Upgrade notes
 
@@ -624,17 +630,23 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.4.4] - 待发布
+### [0.4.4] - 2026-10-07
+
+#### 主要更新
+
+- 想法讨论区与全新侧边栏：公开想法支持评论、回复、点赞与点赞名单；阅读器新增侧边抽屉与居中弹窗双模式，支持 280–720 px 自由拖拽调宽、版心自适应避让与多种卡片样式。
+- 结构化搜索表达式：书库搜索支持普通词与 `author:`、`tag:` 等精确条件自由组合，支持 `&`、`|`、`!` 逻辑运算与胶囊标签交互。
+- 游客身份与数据库模型精简：彻底退场旧数据库游客账号与旧配置表，游客转为纯前端轻量会话，个人隐私与隐藏内容展示按本地账号完全隔离。
+- 藏书防重提醒：上传文件与已有藏书内容一致时主动提示，明确确认后才会另存副本。
 
 #### 新增
 
-- 阅读器想法支持侧边栏与浮层弹窗双模式切换，侧边栏支持 280–720 px 拖拽调宽与版心自适应避让，底部提供即时想法输入框，并支持多种卡片排版样式。
 - 阅读想法长出讨论区：收藏过的共享书可发布公开想法，精确绑定来源书库与版本；支持评论、单层回复、点赞与点赞名单，删评论即整行删除、存活回复上提为顶级，不留占位。可见范围默认沿用上次发布成功的选择，发布前一律私密。
+- 阅读器想法支持侧边抽屉与浮层弹窗双模式切换：侧边栏支持 280–720 px 拖拽调宽与阅读版心自适应避让，底部提供即时想法输入框，并支持多种卡片排版样式。
 - 阅读器新增“显示书友想法”开关（多端同步，默认开）：只显示他人的想法标记，自己的想法永远可见。版本对不上时标记与跳转直接禁用，不会错位。
-- 上传文件与已有藏书内容一致时，先报出那本书的名字，等你点“继续上传”才会另存一份。
 - 搜索支持把普通词和精确条件写进同一个表达式：`author:`、`series:`、`tag:`、`shelf:`、`category:`、`format:`、`status:`，可用 `&`、`|`、`!` 和括号组合。名称精确匹配；未知或格式错误的取值会标出要改的位置，而不是替换掉当前结果。
-- 搜索框先对真实列表校验再生效，提示书库里已有的名称，每个条件显示为可单独移除的标签；改为按回车、点搜索按钮或输入停顿 300 毫秒才生效，不再逐字触发，退出搜索时恢复原来的筛选、页码和滚动位置。
-
+- 搜索框先对真实列表校验再生效：提示书库里已有的名称，每个条件显示为可单独移除的标签；改为按回车、点搜索按钮或输入停顿 300 毫秒才生效，不再逐字触发，退出搜索时恢复原来的筛选、页码和滚动位置。
+- 上传文件与已有藏书内容一致时，先报出那本书的名字，等你点“继续上传”才会另存一份。
 
 #### 变更
 
@@ -647,13 +659,13 @@ All notable changes to Bookdock are documented here.
 #### 修复
 
 - 修复从想法详情或划线菜单搜索跨段落、多行空白的选中文本时无法命中正文的问题。
+- 中文字体栈补齐 Windows 常用字名，同等设置下实际命中的物理字体可能变化；西文优先字体仍由西文字体打头、CJK 伴随补齐。
 - AI“存为想法”在配置加载失败时显示加载或重试，不再点了没反应。
 - 切换显示状态时同步清理列表、搜索、详情、最近阅读、书架、标签、标注和阅读统计等相关缓存，避免隐藏内容继续显示。
 - 关闭显示后，隐藏私库书籍的链接不会复用此前包含隐藏内容的详情缓存；直接链接不会自动开启显示。
+- 书库上下文栏与视图菜单的重置筛选改为图标按钮。
 - 已结束的更新关闭即清理，入口刷新后恢复；中途取消不再把没走到的步骤标成完成；清理失败留窗重试，执行中关闭只隐藏、后台继续。
 - 系统更新失败时，若快照来自其他版本、清单格式未知或缺少实例所有者，则拒绝回滚，保持当前数据库和待更新状态不动。
-- 中文字体栈补齐 Windows 常用字名，同等设置下实际命中的物理字体可能变化；西文优先字体仍由西文字体打头、CJK 伴随补齐。
-- 书库上下文栏与视图菜单的重置筛选改为图标按钮。
 
 #### 升级说明
 
