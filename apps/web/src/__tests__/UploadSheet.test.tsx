@@ -23,11 +23,17 @@ const mockUseUploadBooks = vi.fn()
 const mockUseShelves = vi.fn()
 const mockUseTags = vi.fn()
 const mockUseUploadSettings = vi.fn()
+const mockUseStorageConnections = vi.fn().mockReturnValue({ data: { data: [] }, isLoading: false })
 vi.mock('../features/library/hooks', () => ({
   useUploadBooks: (...args: unknown[]) => mockUseUploadBooks(...args),
   useShelves: (...args: unknown[]) => mockUseShelves(...args),
   useTags: (...args: unknown[]) => mockUseTags(...args),
   useUploadSettings: () => mockUseUploadSettings(),
+}))
+vi.mock('@/api/hooks/useStorageConnections', () => ({
+  useStorageConnections: () => mockUseStorageConnections(),
+  useStorageConnectionLs: () => ({ data: { data: [] }, isLoading: false, isError: false, refetch: vi.fn() }),
+  useStorageConnectionImport: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
 function uploadOverrides(overrides: Partial<ReturnType<typeof defaultUpload>> = {}) {
@@ -348,5 +354,63 @@ describe('UploadSheet', () => {
     expect(screen.getByRole('button', { name: 'library.upload' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'library.uploadCancel' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'library.done' })).toBeNull()
+  })
+
+  it('switches upload source between local files and remote storage connection', () => {
+    mockUseStorageConnections.mockReturnValue({
+      data: {
+        data: [
+          { id: 'conn_1', name: 'My NAS', provider: 'webdav', isDefault: true },
+        ],
+      },
+      isLoading: false,
+    })
+    render(<UploadSheet open onClose={vi.fn()} />)
+    const sourceBtn = screen.getByRole('button', { name: /library.uploadSourceLocal/ })
+    expect(sourceBtn).toBeTruthy()
+
+    fireEvent.click(sourceBtn)
+    const nasOption = screen.getByRole('button', { name: /My NAS/ })
+    expect(nasOption).toBeTruthy()
+
+    fireEvent.click(nasOption)
+    expect(localStorage.getItem('bookdock:last_upload_source')).toBe('conn_1')
+  })
+
+  it('restores last upload source from localStorage on open', () => {
+    localStorage.setItem('bookdock:last_upload_source', 'conn_2')
+    mockUseStorageConnections.mockReturnValue({
+      data: {
+        data: [
+          { id: 'conn_1', name: 'My NAS', provider: 'webdav' },
+          { id: 'conn_2', name: 'Cloud Drive', provider: 'webdav' },
+        ],
+      },
+      isLoading: false,
+    })
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /Cloud Drive/ })).toBeTruthy()
+  })
+
+  it('auto-switches source to local when files are dropped onto the modal', () => {
+    localStorage.setItem('bookdock:last_upload_source', 'conn_1')
+    const addFiles = vi.fn()
+    mockUseUploadBooks.mockReturnValue(uploadOverrides({ addFiles }))
+    mockUseStorageConnections.mockReturnValue({
+      data: {
+        data: [
+          { id: 'conn_1', name: 'My NAS', provider: 'webdav' },
+        ],
+      },
+      isLoading: false,
+    })
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /My NAS/ })).toBeTruthy()
+
+    const panel = screen.getByRole('heading', { name: 'library.upload' }).parentElement!
+    fireEvent.drop(panel, fileDropData([new File([], 'dropped.epub')]))
+
+    expect(addFiles).toHaveBeenCalled()
+    expect(localStorage.getItem('bookdock:last_upload_source')).toBe('local')
   })
 })

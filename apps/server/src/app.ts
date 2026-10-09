@@ -32,6 +32,8 @@ import replacementRoutes from './modules/replacements/replacements.routes'
 import tocRuleRoutes from './modules/toc-rules/toc-rules.routes'
 import ttsRoutes from './modules/tts/tts.routes'
 import aiRoutes from './modules/ai/ai.routes'
+import storageConnectionRoutes from './modules/integrations/storage-connection.routes'
+import webdavRoutes from './modules/integrations/webdav.routes'
 import systemRoutes from './modules/system/system.routes'
 import internalRoutes from './modules/system/internal.routes'
 
@@ -79,6 +81,8 @@ app.route('/api/v1/replacements', replacementRoutes)
 app.route('/api/v1/toc-rules', tocRuleRoutes)
 app.route('/api/v1/tts', ttsRoutes)
 app.route('/api/v1/ai', aiRoutes)
+app.route('/api/v1/integrations/storage-connections', storageConnectionRoutes)
+app.route('/api/v1/integrations/webdav', webdavRoutes)
 
 // Serve the built web client (apps/web/dist) in production. Skipped in dev,
 // where the dist directory may not exist and Vite serves the client instead.

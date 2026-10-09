@@ -53,7 +53,8 @@ function makeLegacyIdentity() {
   // discussion tables included); the cutoff is derived from the journal so
   // later migrations stay covered without touching this file.
   const cutoff = legacyIdentityCutoff()
-  db.$client.exec(`DROP TRIGGER idea_comments_deleted_author;
+  db.$client.exec(`DROP TABLE IF EXISTS storage_connections;
+    DROP TRIGGER idea_comments_deleted_author;
     DROP TABLE idea_comment_likes; DROP TABLE idea_likes; DROP TABLE idea_comments;
     ALTER TABLE ideas DROP COLUMN source_library_book_version_id;
     ALTER TABLE ideas DROP COLUMN revision_id;

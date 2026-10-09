@@ -91,6 +91,7 @@ export default function CatalogUploadSheet({
     <UploadSheet
       open
       onClose={onClose}
+      libraryId={libraryId}
       shelfName={categoryName}
       isCategory
       target={target}

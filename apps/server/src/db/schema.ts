@@ -723,3 +723,20 @@ export const ideaCommentLikes = sqliteTable('idea_comment_likes', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: integer('created_at').notNull(),
 }, (table) => ({ pk: primaryKey({ columns: [table.commentId, table.userId] }) }))
+
+export const storageConnections = sqliteTable('storage_connections', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  provider: text('provider').notNull().default('webdav'),
+  endpoint: text('endpoint').notNull(),
+  username: text('username').notNull(),
+  encryptedPassword: text('encrypted_password'),
+  basePath: text('base_path').notNull().default('/'),
+  isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  userIdx: index('storage_connections_user_idx').on(table.userId),
+}))
+

@@ -25,6 +25,8 @@ import TocRulesSettingsSection from './components/TocRulesSettingsSection'
 import TtsSettingsSection from './components/TtsSettingsSection'
 import AiSettingsSection from './components/AiSettingsSection'
 import LegadoSettingsSection from './components/LegadoSettingsSection'
+import StorageConnectionsSection from './components/StorageConnectionsSection'
+import IntegrationsRoadmapSection from './components/IntegrationsRoadmapSection'
 import AccessTokensSection from './components/AccessTokensSection'
 import AboutSettingsSection from './components/AboutSettingsSection'
 import SettingsCard from './components/SettingsCard'
@@ -40,6 +42,9 @@ export default function Settings() {
   // Guest sessions share one anonymous identity and cannot manage tokens at all.
   const isGuest = !user
   const { data: userLibrariesData } = useLibraries()
+  const { data: instanceData } = useInstanceInfo()
+  const userUploadAllowed = instanceData?.data.allowUserUpload !== false
+  const showWebDav = !isGuest && (isOwner || userUploadAllowed)
   const hasManageableLibraries = (userLibrariesData?.data ?? []).some(
     (lib) => lib.type === 'shared' && (lib.relation === 'owner' || lib.relation === 'admin'),
   )
@@ -254,6 +259,8 @@ export default function Settings() {
                 <>
                   <AccessTokensSection />
                   <LegadoSettingsSection />
+                  {showWebDav && <StorageConnectionsSection />}
+                  <IntegrationsRoadmapSection />
                 </>
               )}
             </div>

@@ -288,6 +288,13 @@
       "when": 1791900000000,
       "tag": "0041_idea_discussion",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792000000000,
+      "tag": "0042_storage_connections",
+      "breakpoints": true
     }
   ]
 }
