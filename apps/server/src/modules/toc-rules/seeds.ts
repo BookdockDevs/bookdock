@@ -9,6 +9,7 @@ import { createId } from '../../lib/id'
 /** Settings key that records that a user has been seeded (delete-all sticks). */
 const SEEDED_KEY = 'tocRuleSeeded'
 const SEED_ORDER_MIGRATED_KEY = 'tocRuleSeedOrderV8'
+const BUILTIN_DEFINITION_MIGRATED_KEY = 'tocRuleBuiltinDefV9'
 const LEGACY_BACKFILL_KEY = 'tocRuleLegacyBackfillV1'
 const RETIRED_FLAT_SEED_KEY = 'toc.zh-flat'
 const MIGRATABLE_DEFAULT_ORDERS = [
@@ -34,9 +35,11 @@ const DEFAULT_SEED_ORDER = ['toc.zh-hierarchy', 'toc.numeric', 'toc.en']
 const ZH_FLAT_NAME = '中文网文（章/回 平铺）'
 const LEGACY_ZH_HIERARCHY_NAME = '中文网文（卷·章·节）'
 const ZH_HIERARCHY_NAME = '中文网文（卷·章）'
-const ZH_VOLUME_REGEX = '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}卷.{0,30}$'
+const LEGACY_ZH_VOLUME_REGEX = '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}卷.{0,30}$'
+const ZH_VOLUME_REGEX = '^[ \\t　]{0,4}(?:【|\\[|〖)?(?:第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}(?:卷|部(?![分是门落赛游]))|(?<!（)卷\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+|[上中下][部卷]|终卷|最终卷)(?:】|\\]|〗)?(?:[\\s:：、_—\\-].{0,30}|[^\\n。，；]{0,30})$'
 const ZH_LEGACY_CHAPTER_REGEX = '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}章.{0,30}$'
-const ZH_CHAPTER_REGEX = '^[ \\t　]{0,4}(?:序章|楔子|正文(?!完|结)|终章|后记|尾声|番外|第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}(?:章|回(?![合来事去])|话|集(?![合和]))).{0,30}$'
+const LEGACY_ZH_CHAPTER_V2_REGEX = '^[ \\t　]{0,4}(?:序章|楔子|正文(?!完|结)|终章|后记|尾声|番外|第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}(?:章|回(?![合来事去])|话|集(?![合和]))).{0,30}$'
+const ZH_CHAPTER_REGEX = '^[ \\t　]{0,4}(?:【|\\[|〖)?(?:[引楔]子|[引序前]言|自序|序文|序章|正文(?!完|结)|[末终]章|大结局|后记|尾声|番外|外[篇传]|后篇|扉页|.{0,4}感言|第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}(?:章|回(?![合来事去])|节(?!课)|篇(?!张)|话|集(?![合和])))(?:】|\\]|〗)?(?:[\\s:：、_—\\-].{0,35}|[^\\n。，；]{0,35})$'
 const ZH_SECTION_REGEX = '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}节(?!课).{0,30}$'
 const ZH_FLAT_REGEX = '^[ \\t　]{0,4}(?:序章|楔子|正文(?!完|结)|终章|后记|尾声|番外|第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}(?:章|回(?![合来事去])|话|集(?![合和]))).{0,30}$'
 
@@ -51,6 +54,23 @@ const ZH_HIERARCHY_PATTERNS: TocRulePattern[] = ZH_HIERARCHY_WITH_SECTION_PATTER
 const LEGACY_ZH_HIERARCHY_PATTERNS: TocRulePattern[] = [
   { level: 1, regex: ZH_VOLUME_REGEX, replacement: null, enabled: true },
   { level: 2, regex: ZH_LEGACY_CHAPTER_REGEX, replacement: null, enabled: true },
+  { level: 3, regex: ZH_SECTION_REGEX, replacement: null, enabled: true },
+]
+
+const LEGACY_ZH_HIERARCHY_V1_PATTERNS: TocRulePattern[] = [
+  { level: 1, regex: LEGACY_ZH_VOLUME_REGEX, replacement: null, enabled: true },
+  { level: 2, regex: ZH_LEGACY_CHAPTER_REGEX, replacement: null, enabled: true },
+  { level: 3, regex: ZH_SECTION_REGEX, replacement: null, enabled: true },
+]
+
+const LEGACY_ZH_HIERARCHY_V2_PATTERNS: TocRulePattern[] = [
+  { level: 1, regex: LEGACY_ZH_VOLUME_REGEX, replacement: null, enabled: true },
+  { level: 2, regex: LEGACY_ZH_CHAPTER_V2_REGEX, replacement: null, enabled: true },
+]
+
+const LEGACY_ZH_HIERARCHY_V2_WITH_SECTION_PATTERNS: TocRulePattern[] = [
+  { level: 1, regex: LEGACY_ZH_VOLUME_REGEX, replacement: null, enabled: true },
+  { level: 2, regex: LEGACY_ZH_CHAPTER_V2_REGEX, replacement: null, enabled: true },
   { level: 3, regex: ZH_SECTION_REGEX, replacement: null, enabled: true },
 ]
 
@@ -128,7 +148,13 @@ function migrateBuiltInDefinitions(userId: string) {
   if (
     hierarchy
     && (hierarchy.name === ZH_HIERARCHY_NAME || hierarchy.name === LEGACY_ZH_HIERARCHY_NAME)
-    && (hasSamePatterns(hierarchy.patterns, LEGACY_ZH_HIERARCHY_PATTERNS) || hasSamePatterns(hierarchy.patterns, ZH_HIERARCHY_WITH_SECTION_PATTERNS))
+    && (
+      hasSamePatterns(hierarchy.patterns, LEGACY_ZH_HIERARCHY_PATTERNS)
+      || hasSamePatterns(hierarchy.patterns, LEGACY_ZH_HIERARCHY_V1_PATTERNS)
+      || hasSamePatterns(hierarchy.patterns, LEGACY_ZH_HIERARCHY_V2_PATTERNS)
+      || hasSamePatterns(hierarchy.patterns, LEGACY_ZH_HIERARCHY_V2_WITH_SECTION_PATTERNS)
+      || hasSamePatterns(hierarchy.patterns, ZH_HIERARCHY_WITH_SECTION_PATTERNS)
+    )
   ) {
     db.update(tocRules)
       .set({ name: ZH_HIERARCHY_NAME, patterns: ZH_HIERARCHY_PATTERNS, updatedAt: Date.now() })
@@ -210,11 +236,26 @@ function seedIfEmpty(userId: string) {
   markSeeded(userId)
 }
 
+function hasBuiltInDefinitionMigrated(userId: string): boolean {
+  const db = getDb()
+  const row = db.select().from(settings).where(and(eq(settings.userId, userId), eq(settings.key, BUILTIN_DEFINITION_MIGRATED_KEY))).get()
+  return row !== undefined
+}
+
+function markBuiltInDefinitionMigrated(userId: string) {
+  const db = getDb()
+  db.insert(settings).values({ id: createId('setting'), userId, key: BUILTIN_DEFINITION_MIGRATED_KEY, value: 1 }).run()
+}
+
 /** Seed once per user on first access. Delete-all afterwards stays empty. */
 export function ensureTocRuleSeeds(userId: string) {
   backfillLegacySeedKeys(userId)
   if (!hasSeeded(userId)) seedIfEmpty(userId)
   migrateLegacyDefaultOrder(userId)
+  if (!hasBuiltInDefinitionMigrated(userId)) {
+    migrateBuiltInDefinitions(userId)
+    markBuiltInDefinitionMigrated(userId)
+  }
 }
 
 /** Add missing built-in presets without changing any existing user rules. */

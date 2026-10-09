@@ -10,6 +10,7 @@ export function useFonts() {
   return useQuery({
     queryKey: FONTS_KEY,
     queryFn: () => apiGet<{ data: FontListItem[] }>('/fonts'),
+    staleTime: 5 * 60 * 1000,
   })
 }
 

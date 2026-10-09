@@ -2,6 +2,13 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- TXT chapter/volume detection hardened: bracketed headings, 卷/部/话/集/篇 forms and special headings (finale, prefaces, colophons, spin-offs, …) are recognised while 正文完, 第一回合 and 第一部分 body lines no longer split chapters. Existing hierarchy presets migrate to the hardened definitions without touching user edits.
+- Switching accounts now hydrates the UI store from cached settings immediately instead of clearing font preferences first; the reading config blob is also persisted locally, and the font list stays cached for five minutes.
+
 ## [0.4.4] - 2026-10-07
 
 ### Highlights
@@ -629,6 +636,13 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [Unreleased]
+
+#### 修复
+
+- TXT 章卷识别加固：支持带括号标题、卷/部/话/集/篇各类写法与特殊标题（大结局、引子/前言、感言、外传等），正文完、第一回合、第一部分这类正文行不再误切章节。已有层级预设自动迁移到加固后的定义，不动用户自己的修改。
+- 切换账号时立即用水合后的缓存设置恢复界面状态，不再先清空字体偏好；阅读配置整体也在本机持久化，字体列表缓存五分钟。
 
 ### [0.4.4] - 2026-10-07
 

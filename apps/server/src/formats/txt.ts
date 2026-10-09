@@ -124,11 +124,11 @@ export function decodeTextBuffer(buffer: Buffer): string {
  * section level stays out, otherwise rule-less rescans re-split content the
  * presets deliberately leave alone. */
 export const defaultTocPatterns: TocPatternLike[] = [
-  { level: 1, regex: '^第[一二三四五六七八九十百千万零\\d]+章\\s*[：:]?\\s*(.+)?$' },
-  { level: 1, regex: '^第[一二三四五六七八九十百千万零\\d]+回\\s*[：:]?\\s*(.+)?$' },
-  { level: 1, regex: '^[Cc]hapter\\s+\\d+\\s*[：:]?\\s*(.+)?$' },
   { level: 0, regex: '^[Vv]olume\\s+\\d+\\s*[：:]?\\s*(.+)?$' },
-  { level: 0, regex: '^第[一二三四五六七八九十百千万零\\d]+卷\\s*[：:]?\\s*(.+)?$' },
+  { level: 0, regex: '^[ \\t　]{0,4}(?:【|\\[|〖)?(?:第[一二三四五六七八九十百千万零\\d]+(?:卷|部(?![分是门落赛游]))|(?<!（)卷[一二三四五六七八九十百千万零\\d]+|[上中下][部卷]|终卷|最终卷)(?:】|\\]|〗)?(?:[\\s:：、_—\\-].{0,30}|[^\\n。，；]{0,30})$' },
+  { level: 1, regex: '^[ \\t　]{0,4}(?:【|\\[|〖)?第[一二三四五六七八九十百千万零\\d]+(?:章|回(?![合来事去])|篇(?!张)|话|集)(?:】|\\]|〗)?(?:[\\s:：、_—\\-].{0,35}|[^\\n。，；]{0,35})$' },
+  { level: 1, regex: '^[ \\t　]{0,4}(?:【|\\[|〖)?(?:序章|楔子|[末终]章|大结局|后记|尾声|番外)(?:】|\\]|〗)?(?:[\\s:：、_—\\-].{0,35}|[^\\n。，；]{0,35})$' },
+  { level: 1, regex: '^[Cc]hapter\\s+\\d+\\s*[：:]?\\s*(.+)?$' },
   { level: 1, regex: '^#{1,2}\\s+(.+)$' },
   { level: 1, regex: '^\\d+\\.\\s+(.+)$' },
 ]

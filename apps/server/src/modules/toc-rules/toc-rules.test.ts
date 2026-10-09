@@ -202,6 +202,38 @@ describe('toc-rules service', () => {
     expect((await listTocRules(ownerId)).some((rule) => rule.name === '中文网文（章/回 平铺）')).toBe(false)
   })
 
+  it('recognizes 卷一, 部, brackets, and expanded chapter headings in hierarchy preset', async () => {
+    const hierarchy = (await listTocRules(ownerId)).find((rule) => rule.name === '中文网文（卷·章）')!
+    const volRe = new RegExp(hierarchy.patterns[0]!.regex, 'm')
+    const chRe = new RegExp(hierarchy.patterns[1]!.regex, 'm')
+
+    expect(volRe.test('卷一 甲卷示例')).toBe(true)
+    expect(volRe.test('卷1 示例一')).toBe(true)
+    expect(volRe.test('第一卷 甲卷示例')).toBe(true)
+    expect(volRe.test('【第一卷】 丙卷示例')).toBe(true)
+    expect(volRe.test('【卷一】甲卷示例')).toBe(true)
+    expect(volRe.test('第一部 丁部示例')).toBe(true)
+    expect(volRe.test('上卷')).toBe(true)
+    expect(volRe.test('终卷 示例终局')).toBe(true)
+
+    expect(volRe.test('第一部分 示例绪论')).toBe(false)
+    expect(volRe.test('卷一展开，后面全是正文内容。')).toBe(false)
+
+    expect(chRe.test('第一章 示例开篇')).toBe(true)
+    expect(chRe.test('【第一章】 示例开篇')).toBe(true)
+    expect(chRe.test('第1回 示例回目')).toBe(true)
+    expect(chRe.test('引子')).toBe(true)
+    expect(chRe.test('前言')).toBe(true)
+    expect(chRe.test('上架感言')).toBe(true)
+    expect(chRe.test('完本感言')).toBe(true)
+    expect(chRe.test('大结局')).toBe(true)
+    expect(chRe.test('外传 示例番外')).toBe(true)
+
+    expect(chRe.test('第一节课 课程安排如下')).toBe(false)
+    expect(chRe.test('第一回合 比赛中场休息')).toBe(false)
+    expect(chRe.test('正文完')).toBe(false)
+  })
+
   it('retires an untouched legacy flat preset and upgrades the hierarchy preset', async () => {
     const legacyFlatRegex = '^[ \\t　]{0,4}(?:序章|楔子|正文(?!完|结)|终章|后记|尾声|番外|第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}(?:章|回(?![合来事去])|话|集(?![合和]))).{0,30}$'
     const legacyChapterRegex = '^[ \\t　]{0,4}第\\s{0,4}[\\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\\s{0,4}章.{0,30}$'

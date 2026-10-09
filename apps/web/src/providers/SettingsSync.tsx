@@ -109,6 +109,13 @@ function applySettings(settings: Partial<SettingsRes>) {
     }
     return patch
   })
+  if (typeof settings.readingConfig === 'string') {
+    try {
+      localStorage.setItem('bd-reading-config', settings.readingConfig)
+    } catch {
+      // ignore
+    }
+  }
   const syncedThemes = customThemesFromSync(settings.customThemes)
   if (syncedThemes) useUiStore.getState().setCustomThemes(syncedThemes)
   // The profiles blob is authoritative for the reading keys: re-apply the
@@ -154,10 +161,16 @@ export function SettingsSync() {
     if (settingsUserRef.current !== userId) {
       syncFailedRef.current = false
       settingsUserRef.current = userId
-      suppressSyncRef.current = true
-      useUiStore.setState({ fontPreferences: {}, fontOrder: [] })
-      suppressSyncRef.current = false
-      seedSettingsQuery(queryClient, userId)
+      const cached = seedSettingsQuery(queryClient, userId)
+      if (userId && !isGuest && cached) {
+        suppressSyncRef.current = true
+        applySettings(cached)
+        suppressSyncRef.current = false
+      } else {
+        suppressSyncRef.current = true
+        useUiStore.setState({ fontPreferences: {}, fontOrder: [] })
+        suppressSyncRef.current = false
+      }
     }
     if (!userId || isGuest) return
     const pending = getPendingSettings(userId)
@@ -165,7 +178,9 @@ export function SettingsSync() {
       // A reload can happen before the debounced PUT completes. Keep the
       // locally committed snapshot visible and retry it instead of allowing a
       // stale server response to overwrite it.
+      suppressSyncRef.current = true
       applySettings(pending)
+      suppressSyncRef.current = false
       mutateRef.current(pending, { onSuccess: () => clearPendingSettings(userId, pending) })
       return
     }

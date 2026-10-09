@@ -8,6 +8,7 @@ import { useAuthStore } from '../stores/auth.store'
 import { useUiStore } from '../stores/ui.store'
 
 import { customThemesFromSync } from '../lib/reading-theme'
+import { writeStoredSettings } from '../lib/settings-cache'
 import { useToastStore } from '../stores/toast.store'
 
 const theme = { id: 't1', name: 'Theme', colors: { bg: '#fff', fg: '#000', primary: '#00f' } }
@@ -288,5 +289,18 @@ describe('SettingsSync persistence', () => {
     useAuthStore.getState().setAuth(user)
     await vi.runAllTimersAsync()
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+  })
+
+  it('hydrates useUiStore immediately on mount from cached user settings', () => {
+    const cachedSettings = {
+      fontPreferences: { 'custom-font': { enabled: true, displayName: 'My Font' } },
+      fontOrder: ['custom-font'],
+    }
+    writeStoredSettings(cachedSettings, user.id)
+
+    mountSync()
+
+    expect(useUiStore.getState().fontPreferences).toEqual(cachedSettings.fontPreferences)
+    expect(useUiStore.getState().fontOrder).toEqual(cachedSettings.fontOrder)
   })
 })

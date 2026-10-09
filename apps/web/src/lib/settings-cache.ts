@@ -63,11 +63,12 @@ export function clearStoredSettings(): void {
   }
 }
 
-export function seedSettingsQuery(client: QueryClient, userId?: string | null): void {
+export function seedSettingsQuery(client: QueryClient, userId?: string | null): SettingsRes | null {
   const cached = readStoredSettings(userId)
   if (cached) {
     client.setQueryData(['settings'], { data: cached }, { updatedAt: 0 })
   }
+  return cached
 }
 
 export async function fetchSettings(): Promise<{ data: SettingsRes }> {
