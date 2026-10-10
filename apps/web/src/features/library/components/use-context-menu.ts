@@ -7,11 +7,24 @@ export function useContextMenu() {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
+  const lastCloseTimeRef = useRef(0)
 
-  function close() { setOpen(false); setPos(null) }
+  function close() {
+    lastCloseTimeRef.current = Date.now()
+    setOpen(false)
+    setPos(null)
+  }
   function openFromEvent(e: React.MouseEvent) { setPos({ x: e.clientX, y: e.clientY }); setOpen(true) }
   function openFromPoint(p: { x: number; y: number }) { setPos(p); setOpen(true) }
-  function toggleFromButton() { setPos(null); setOpen((value) => !value) }
+  function toggleFromButton() {
+    // If the menu was just closed by an outside pointerdown in this same click gesture,
+    // prevent the subsequent synthetic click event from reopening it.
+    if (Date.now() - lastCloseTimeRef.current < 150) {
+      return
+    }
+    setPos(null)
+    setOpen((value) => !value)
+  }
 
   function position(menuW: number, menuH: number): SmartPosition | null {
     if (!open) return null

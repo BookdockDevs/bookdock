@@ -242,10 +242,13 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
                     {service.model ? ` · ${service.model}` : ''}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                <div className="flex shrink-0 items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:has-[:focus-visible]:opacity-100">
                   <button
                     type="button"
-                    onClick={() => openEdit(service)}
+                    onClick={(e) => {
+                      if (e.detail > 0) e.currentTarget.blur()
+                      openEdit(service)
+                    }}
                     aria-label={_('library.edit')}
                     title={_('library.edit')}
                     className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
@@ -254,7 +257,10 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPendingDelete(service)}
+                    onClick={(e) => {
+                      if (e.detail > 0) e.currentTarget.blur()
+                      setPendingDelete(service)
+                    }}
                     aria-label={_('settings.fontsDelete')}
                     title={_('settings.fontsDelete')}
                     className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"

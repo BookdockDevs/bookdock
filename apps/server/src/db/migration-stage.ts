@@ -99,5 +99,6 @@ export function migrateTestBaseWithStorage(
   return migrateBeforeBookRetirementIncluding(db, options, [
     '0042_storage_connections',
     '0043_storage_backend',
+    '0044_storage_s3',
   ])
 }

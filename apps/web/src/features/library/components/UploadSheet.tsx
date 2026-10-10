@@ -5,13 +5,12 @@ import { useNavigate } from '@tanstack/react-router'
 import { useStorageConnections } from '@/api/hooks/useStorageConnections'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
-import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
-import type { SmartPosition } from '@/lib/position'
-import { cn, formatBytes } from '@/lib/utils'
+import { formatBytes } from '@/lib/utils'
+import { StorageConnectionDialog } from '@/features/settings/components/StorageConnectionsSection'
+import StorageConnectionPicker from '@/features/settings/components/StorageConnectionPicker'
 
 import { useShelves, useTags, useUploadBooks, useUploadSettings, type UploadAssignment, type UploadItem, type UploadTarget } from '../hooks'
-import { useContextMenu } from './use-context-menu'
 import WebDavImportBrowser from './WebDavImportBrowser'
 
 interface UploadSheetProps {
@@ -105,7 +104,7 @@ export default function UploadSheet({
   const { data: connectionsRes } = useStorageConnections()
   const connections = useMemo(() => connectionsRes?.data ?? [], [connectionsRes?.data])
   const [selectedSource, setSelectedSource] = useState<string>(() => getSavedUploadSource())
-  const sourceMenu = useContextMenu()
+  const [showAddConnection, setShowAddConnection] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [includeCurrentTag, setIncludeCurrentTag] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -124,14 +123,6 @@ export default function UploadSheet({
       // ignore
     }
   }, [])
-
-  const currentSourceName = useMemo(() => {
-    if (selectedSource === 'local') {
-      return _('library.uploadSourceLocal') || '本地文件'
-    }
-    const conn = connections.find((c) => c.id === selectedSource)
-    return conn?.name || (_('library.uploadSourceLocal') || '本地文件')
-  }, [selectedSource, connections, _])
 
   const selectedSourceRef = useRef(selectedSource)
   selectedSourceRef.current = selectedSource
@@ -152,17 +143,6 @@ export default function UploadSheet({
     window.addEventListener('dragover', onWindowDragOver)
     return () => window.removeEventListener('dragover', onWindowDragOver)
   }, [open])
-
-  const sourceAnchor = sourceMenu.btnRef.current?.getBoundingClientRect()
-  const sourceMenuWidth = Math.max(160, Math.min(240, (sourceAnchor?.width ?? 120) + 40))
-  const sourceMenuPosition = useMemo((): SmartPosition | null => {
-    if (!sourceMenu.open || !sourceAnchor) return null
-    return {
-      left: Math.max(8, Math.min(sourceAnchor.right - sourceMenuWidth, window.innerWidth - sourceMenuWidth - 8)),
-      top: sourceAnchor.bottom + 6,
-      dir: 'down',
-    }
-  }, [sourceMenu.open, sourceAnchor, sourceMenuWidth])
 
   const shelfName = propShelfName ?? (shelfId ? shelvesData?.data.find((shelf) => shelf.id === shelfId)?.name : undefined)
   const contextTooltip = isCategory
@@ -326,134 +306,25 @@ export default function UploadSheet({
       )}
       actions={(
         <div className="relative flex items-center mr-1">
-          <button
-            ref={sourceMenu.btnRef}
-            type="button"
-            onClick={sourceMenu.toggleFromButton}
-            aria-haspopup="listbox"
-            aria-expanded={sourceMenu.open}
-            className={cn(
-              'flex items-center gap-1.5 rounded-lg border border-stone-200/90 bg-stone-50/80 px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs transition-colors hover:border-stone-300 hover:bg-stone-100 focus:outline-none dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-stone-100',
-              sourceMenu.open && 'border-stone-400 bg-stone-100 dark:border-stone-500 dark:bg-stone-700 dark:text-stone-100',
-            )}
-          >
-            {selectedSource === 'local' ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400">
-                <rect width="20" height="14" x="2" y="3" rx="2" />
-                <line x1="8" x2="16" y1="21" y2="21" />
-                <line x1="12" x2="12" y1="17" y2="21" />
-              </svg>
-            ) : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400">
-                <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-              </svg>
-            )}
-            <span className="max-w-[140px] truncate">{currentSourceName}</span>
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className={cn('shrink-0 text-stone-400 transition-transform dark:text-stone-500', sourceMenu.open && 'rotate-180')}
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
-          </button>
-
-          {sourceMenu.open && (
-            <SmartMenu
-              triggerRef={sourceMenu.btnRef}
-              innerRef={sourceMenu.menuRef}
-              position={sourceMenuPosition}
-              onClose={sourceMenu.close}
-              width={sourceMenuWidth}
-            >
-              <div className="max-h-60 overflow-y-auto overscroll-contain py-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleSelectSource('local')
-                    sourceMenu.close()
-                  }}
-                  className={cn(
-                    'flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors cursor-pointer',
-                    selectedSource === 'local'
-                      ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                      : 'text-stone-600 hover:bg-stone-100/70 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/70 dark:hover:text-stone-100',
-                  )}
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                      <rect width="20" height="14" x="2" y="3" rx="2" />
-                      <line x1="8" x2="16" y1="21" y2="21" />
-                      <line x1="12" x2="12" y1="17" y2="21" />
-                    </svg>
-                    <span className="truncate">{_('library.uploadSourceLocal') || '本地文件'}</span>
-                  </div>
-                  {selectedSource === 'local' && (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-600 dark:text-stone-300">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  )}
-                </button>
-
-                {connections.length > 0 && <div className="my-1 border-t border-stone-200/80 dark:border-stone-800" />}
-
-                {connections.map((conn) => {
-                  const isSelected = selectedSource === conn.id
-                  return (
-                    <button
-                      key={conn.id}
-                      type="button"
-                      onClick={() => {
-                        handleSelectSource(conn.id)
-                        sourceMenu.close()
-                      }}
-                      className={cn(
-                        'flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors cursor-pointer',
-                        isSelected
-                          ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                          : 'text-stone-600 hover:bg-stone-100/70 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/70 dark:hover:text-stone-100',
-                      )}
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                          <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-                        </svg>
-                        <span className="truncate">{conn.name}</span>
-                      </div>
-                      {isSelected && (
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-600 dark:text-stone-300">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      )}
-                    </button>
-                  )
-                })}
-
-                <div className="my-1 border-t border-stone-200/80 dark:border-stone-800" />
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    sourceMenu.close()
-                    handleClose()
-                    void navigate({ to: '/settings', search: { section: 'integrations' } })
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-stone-500 hover:bg-stone-100/70 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/70 dark:hover:text-stone-100 cursor-pointer"
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                  <span>{_('library.uploadSourceManage') || '管理存储源...'}</span>
-                </button>
-              </div>
-            </SmartMenu>
+          <StorageConnectionPicker
+            connections={connections}
+            value={selectedSource}
+            onChange={handleSelectSource}
+            showLocalOption
+            localLabel={_('library.uploadSourceLocal') || '本地文件'}
+            onAddNew={() => setShowAddConnection(true)}
+            addNewLabel={_('settings.storageBackendConnectionAddNew') || '添加存储'}
+            triggerClassName="border-stone-200/90 bg-stone-50/80 shadow-2xs hover:bg-stone-100 dark:bg-stone-800/80 dark:hover:bg-stone-700"
+          />
+          {showAddConnection && (
+            <StorageConnectionDialog
+              mode="add"
+              onClose={() => setShowAddConnection(false)}
+              onSuccess={(conn) => {
+                handleSelectSource(conn.id)
+                setShowAddConnection(false)
+              }}
+            />
           )}
         </div>
       )}

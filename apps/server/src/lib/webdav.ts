@@ -3,6 +3,7 @@ import { Readable } from 'node:stream'
 import { DOMParser, type Element as XmlElement } from '@xmldom/xmldom'
 import type { WebDavEntry } from '@bookdock/shared'
 import { AppError } from '../middleware/error'
+import type { RemoteBrowseClient } from './remote-client'
 
 export interface WebDavClientConfig {
   url: string
@@ -186,7 +187,7 @@ export function parsePropfindXml(xmlText: string, requestedPath: string, maxSize
   return entries
 }
 
-export class WebDavClient {
+export class WebDavClient implements RemoteBrowseClient {
   constructor(private readonly config: WebDavClientConfig) {}
 
   async testConnection(): Promise<{ success: boolean; latencyMs: number }> {

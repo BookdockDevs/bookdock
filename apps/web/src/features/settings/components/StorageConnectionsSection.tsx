@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import type { ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 import type { StorageConnectionRes } from '@bookdock/shared'
 
 import {
@@ -12,17 +11,22 @@ import {
 } from '@/api/hooks/useStorageConnections'
 import { useStorageBackendConfig } from '@/api/hooks/useStorageBackend'
 import { Button } from '@/components/ui/Button'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
+import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { computeDropdownPosition } from '@/lib/position'
 import { cn } from '@/lib/utils'
+import { useContextMenu } from '@/features/library/components/use-context-menu'
 
 import AiModelIcon from './AiModelIcon'
 import SettingsCard from './SettingsCard'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import SettingsFormField from './SettingsFormField'
 import { settingsFormClass, settingsInputClass } from './settingsForm'
+import { PROVIDER_MARK } from './storageProviderMark'
 
 function EditIcon() {
   return (
@@ -40,26 +44,26 @@ function TrashIcon() {
   )
 }
 
-// Row mark per storage provider, mirroring how file managers badge each
-// service (DAV / 115 / Alist …). Only webdav exists today; adding a type
-// means adding one entry here, row structure stays untouched. Brand marks
-// with their own colors can additionally override the tile background.
-const PROVIDER_MARK: Record<string, { label: string; mark: ReactNode }> = {
-  webdav: {
-    label: 'WebDAV',
-    mark: (
-      // Italic glyphs lean right, so nudge 1px left for optical centering.
-      <span className="-translate-x-px text-[10px] font-black italic leading-none tracking-tighter text-stone-700 dark:text-stone-200">
-        DAV
-      </span>
-    ),
-  },
-}
-
 interface EditModalState {
   open: boolean
   mode: 'add' | 'edit'
   connection?: StorageConnectionRes
+}
+
+function formatEndpointDisplay(endpoint: string): string {
+  try {
+    const url = new URL(endpoint)
+    const hostParts = url.hostname.split('.')
+    // Cloudflare R2 or other endpoints with 32-hex account ID subdomain
+    if (hostParts[0]?.length === 32 && /^[a-f0-9]+$/i.test(hostParts[0])) {
+      const shortHash = `${hostParts[0].slice(0, 6)}…${hostParts[0].slice(-4)}`
+      const shortHost = [shortHash, ...hostParts.slice(1)].join('.')
+      return `${url.protocol}//${shortHost}${url.pathname === '/' ? '' : url.pathname}`
+    }
+  } catch {
+    // fallback
+  }
+  return endpoint
 }
 
 export default function StorageConnectionsSection() {
@@ -71,6 +75,7 @@ export default function StorageConnectionsSection() {
   const testMutation = useTestStorageConnection()
 
   const [modalState, setModalState] = useState<EditModalState>({ open: false, mode: 'add' })
+  const [pendingDelete, setPendingDelete] = useState<StorageConnectionRes | null>(null)
   const [testingId, setTestingId] = useState<string | null>(null)
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; latencyMs?: number; message?: string }>>({})
 
@@ -82,15 +87,20 @@ export default function StorageConnectionsSection() {
     setModalState({ open: true, mode: 'edit', connection: conn })
   }
 
-  async function handleDelete(conn: StorageConnectionRes) {
-    if (!window.confirm(_('settings.storageConnectionsDeleteConfirm') || `确定要删除存储连接「${conn.name}」吗？`)) {
-      return
-    }
+  function handleDeleteClick(e: React.MouseEvent<HTMLButtonElement>, conn: StorageConnectionRes) {
+    if (e.detail > 0) e.currentTarget.blur()
+    setPendingDelete(conn)
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete) return
     try {
-      await deleteMutation.mutateAsync(conn.id)
+      await deleteMutation.mutateAsync(pendingDelete.id)
       notify.success({ key: 'settings.storageConnectionsDeleteSuccess' })
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'settings.storageConnectionsDeleteFailed'))
+    } finally {
+      setPendingDelete(null)
     }
   }
 
@@ -132,7 +142,7 @@ export default function StorageConnectionsSection() {
         }
         iconBgClass="bg-sky-500/10 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400"
         title={_('settings.storageConnectionsTitle') || '外部存储'}
-        description={_('settings.storageConnectionsDesc') || '连接外部存储，直接浏览并批量导入图书。'}
+        description={_('settings.storageConnectionsDesc') || '连接 WebDAV、S3 等存储服务，浏览并批量导入图书。'}
         action={
           <Button type="button" variant="secondary" size="sm" onClick={handleOpenAdd} className="shrink-0 whitespace-nowrap gap-1.5">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -183,7 +193,11 @@ export default function StorageConnectionsSection() {
                 >
                   <span
                     title={PROVIDER_MARK[conn.provider]?.label ?? conn.provider}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400"
+                    className={cn(
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg shadow-2xs',
+                      PROVIDER_MARK[conn.provider]?.tileClassName ??
+                        'border border-stone-200/80 bg-stone-100 text-stone-500 dark:border-stone-800 dark:bg-stone-800 dark:text-stone-400',
+                    )}
                   >
                     {PROVIDER_MARK[conn.provider]?.mark ?? (
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -213,15 +227,18 @@ export default function StorageConnectionsSection() {
                         </span>
                       )}
                     </div>
-                    <p className="truncate text-xs font-mono text-stone-400 dark:text-stone-500" title={conn.endpoint}>
-                      {conn.endpoint}
-                    </p>
+                    <div className="truncate text-xs font-mono text-stone-400 dark:text-stone-500" title={conn.provider === 's3' && conn.bucket ? `${conn.bucket} · ${conn.endpoint}` : conn.endpoint}>
+                      {formatEndpointDisplay(conn.endpoint)}
+                    </div>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                  <div className="flex shrink-0 items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:has-[:focus-visible]:opacity-100">
                     <button
                       type="button"
-                      onClick={() => void handleTest(conn)}
+                      onClick={(e) => {
+                        if (e.detail > 0) e.currentTarget.blur()
+                        void handleTest(conn)
+                      }}
                       disabled={isTesting}
                       aria-label={isTesting ? (_('settings.webdavTesting') || '测试中...') : (_('settings.storageConnectionsTest') || '测试连接')}
                       title={isTesting ? (_('settings.webdavTesting') || '测试中...') : (_('settings.storageConnectionsTest') || '测试连接')}
@@ -232,7 +249,10 @@ export default function StorageConnectionsSection() {
 
                     <button
                       type="button"
-                      onClick={() => handleOpenEdit(conn)}
+                      onClick={(e) => {
+                        if (e.detail > 0) e.currentTarget.blur()
+                        handleOpenEdit(conn)
+                      }}
                       aria-label={_('settings.storageConnectionsEdit') || '编辑'}
                       title={_('settings.storageConnectionsEdit') || '编辑'}
                       className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
@@ -242,7 +262,7 @@ export default function StorageConnectionsSection() {
 
                     <button
                       type="button"
-                      onClick={() => void handleDelete(conn)}
+                      onClick={(e) => handleDeleteClick(e, conn)}
                       disabled={deleteMutation.isPending}
                       aria-label={_('settings.storageConnectionsDelete') || '删除'}
                       title={_('settings.storageConnectionsDelete') || '删除'}
@@ -257,6 +277,16 @@ export default function StorageConnectionsSection() {
           </div>
         )}
       </SettingsCard>
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title={_('settings.confirmDeleteTitle') || '确认删除'}
+          message={_('settings.storageConnectionsDeleteConfirm', { name: pendingDelete.name }) || `确定要删除存储连接「${pendingDelete.name}」吗？`}
+          confirmLabel={_('settings.confirmDeleteAction') || '删除'}
+          onConfirm={confirmDelete}
+          onClose={() => setPendingDelete(null)}
+        />
+      )}
 
       {modalState.open && (
         <StorageConnectionDialog
@@ -284,14 +314,24 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
   const byIdTestMutation = useTestStorageConnection()
 
   const [name, setName] = useState(connection?.name || '')
+  const [provider, setProvider] = useState<'webdav' | 's3'>(connection?.provider || 'webdav')
   const [endpoint, setEndpoint] = useState(connection?.endpoint || '')
   const [username, setUsername] = useState(connection?.username || '')
   const [password, setPassword] = useState('')
   const [basePath, setBasePath] = useState(connection?.basePath || '')
+  const [region, setRegion] = useState(connection?.region || '')
+  const [bucket, setBucket] = useState(connection?.bucket || '')
   const [testLatency, setTestLatency] = useState<number | null>(null)
+  const providerMenu = useContextMenu()
+  const providerAnchor = providerMenu.btnRef.current?.getBoundingClientRect()
+  const providerPosition = useMemo(
+    () => (providerMenu.open && providerAnchor ? computeDropdownPosition(providerAnchor, 200, 110) : null),
+    [providerMenu.open, providerAnchor],
+  )
 
   const isSaving = createMutation.isPending || updateMutation.isPending
   const isTesting = directTestMutation.isPending || byIdTestMutation.isPending
+  const isS3 = provider === 's3'
 
   // Editing the connection the storage backend is actively using takes
   // effect immediately on save — nudge toward testing when credentials changed.
@@ -302,7 +342,9 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
     endpoint.trim() !== (connection?.endpoint || '') ||
     username.trim() !== (connection?.username || '') ||
     password !== '' ||
-    (basePath.trim() || '/') !== (connection?.basePath || '/')
+    (basePath.trim() || '/') !== (connection?.basePath || '/') ||
+    (isS3 && (region.trim() !== (connection?.region || '') || bucket.trim() !== (connection?.bucket || '')))
+  const canSubmit = endpoint.trim() !== '' && username.trim() !== '' && (!isS3 || bucket.trim() !== '') && !isSaving
   const showActiveBackendHint =
     mode === 'edit' &&
     !!connection &&
@@ -316,6 +358,9 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
       // Edit mode tests against the stored connection: blank password falls
       // back to the saved secret server-side, so testing no longer forces
       // re-entering it. Add mode has nothing stored, test the raw fields.
+      const s3Override = isS3
+        ? { region: region.trim(), bucket: bucket.trim() }
+        : {}
       const res = mode === 'edit' && connection
         ? await byIdTestMutation.mutateAsync({
           id: connection.id,
@@ -324,13 +369,16 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
             username: username.trim(),
             ...(password ? { password } : {}),
             basePath: basePath.trim() || '/',
+            ...s3Override,
           },
         })
         : await directTestMutation.mutateAsync({
+          provider,
           endpoint: endpoint.trim(),
           username: username.trim(),
           password: password ? password : undefined,
           basePath: basePath.trim() || '/',
+          ...s3Override,
         })
       const latency = res.data.latencyMs
       setTestLatency(latency)
@@ -356,11 +404,12 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
       if (mode === 'add') {
         const res = await createMutation.mutateAsync({
           name: effectiveName,
-          provider: 'webdav',
+          provider,
           endpoint: endpoint.trim(),
           username: username.trim(),
           password: password ? password : undefined,
           basePath: effectiveBasePath,
+          ...(isS3 ? { region: region.trim(), bucket: bucket.trim() } : {}),
         })
         if (res?.data) onSuccess?.(res.data)
       } else if (connection) {
@@ -372,6 +421,7 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
             username: username.trim(),
             password: password ? password : undefined,
             basePath: effectiveBasePath,
+            ...(isS3 ? { region: region.trim(), bucket: bucket.trim() } : {}),
           },
         })
       }
@@ -393,19 +443,114 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
       size="default"
     >
       <form onSubmit={handleSave} className={settingsFormClass}>
-        <SettingsFormField label={_('settings.storageConnectionsName') || '显示名称'} required>
-          <input
-            type="text"
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={_('settings.storageConnectionsDefaultName') || '我的存储'}
-            className={settingsInputClass}
-            disabled={isSaving}
-          />
-        </SettingsFormField>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
+          <SettingsFormField label={_('settings.storageConnectionsName') || '显示名称'} required className="sm:col-span-3">
+            <input
+              type="text"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={settingsInputClass}
+              disabled={isSaving}
+            />
+          </SettingsFormField>
 
-        <SettingsFormField label={_('settings.webdavUrl') || 'WebDAV 地址'} required>
+          {mode === 'add' ? (
+            <SettingsFormField label={_('settings.storageConnectionsProvider') || '存储类型'} required className="sm:col-span-2" as="div">
+              <button
+                ref={providerMenu.btnRef}
+                type="button"
+                onClick={providerMenu.toggleFromButton}
+                aria-haspopup="listbox"
+                aria-expanded={providerMenu.open}
+                disabled={isSaving}
+                className={cn(settingsInputClass, 'flex items-center justify-between gap-2', providerMenu.open && 'border-stone-400 dark:border-stone-500')}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0" title={PROVIDER_MARK[provider].label}>
+                    {PROVIDER_MARK[provider].badge}
+                  </span>
+                  <span className="truncate">
+                    {provider === 's3'
+                      ? (_('settings.storageConnectionsProviderS3') || 'S3 Compatible')
+                      : (_('settings.storageConnectionsProviderWebdav') || 'WebDAV')}
+                  </span>
+                </span>
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={cn('shrink-0 text-stone-400 transition-transform dark:text-stone-500', providerMenu.open && 'rotate-180')}
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+              {providerMenu.open && (
+                <SmartMenu
+                  triggerRef={providerMenu.btnRef}
+                  innerRef={providerMenu.menuRef}
+                  position={providerPosition}
+                  onClose={providerMenu.close}
+                  width={200}
+                  className="!z-[60]"
+                >
+                  <div className="py-1">
+                    {(['webdav', 's3'] as const).map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          setProvider(id)
+                          setTestLatency(null)
+                          providerMenu.close()
+                        }}
+                        className={cn(
+                          'flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors cursor-pointer',
+                          provider === id
+                            ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                            : 'text-stone-600 hover:bg-stone-100/70 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/70 dark:hover:text-stone-100',
+                        )}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="shrink-0" title={PROVIDER_MARK[id].label}>
+                            {PROVIDER_MARK[id].badge}
+                          </span>
+                          <span className="truncate">
+                            {id === 's3'
+                              ? (_('settings.storageConnectionsProviderS3') || 'S3 Compatible')
+                              : (_('settings.storageConnectionsProviderWebdav') || 'WebDAV')}
+                          </span>
+                        </span>
+                        {provider === id && (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-600 dark:text-stone-300">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </SmartMenu>
+              )}
+            </SettingsFormField>
+          ) : (
+            <SettingsFormField label={_('settings.storageConnectionsProvider') || '存储类型'} className="sm:col-span-2">
+              <input
+                type="text"
+                value={isS3 ? (_('settings.storageConnectionsProviderS3') || 'S3 Compatible') : (_('settings.storageConnectionsProviderWebdav') || 'WebDAV')}
+                className={settingsInputClass}
+                disabled
+                readOnly
+              />
+            </SettingsFormField>
+          )}
+        </div>
+
+        <SettingsFormField label={isS3 ? (_('settings.storageConnectionsEndpoint') || 'Endpoint URL') : (_('settings.webdavUrl') || 'WebDAV 地址')} required>
           <div className="relative">
             <input
               type="url"
@@ -414,7 +559,7 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
                 setEndpoint(e.target.value)
                 setTestLatency(null)
               }}
-              placeholder="http:// 或 https://..."
+              placeholder={isS3 ? 'https://s3.amazonaws.com' : 'http:// 或 https://...'}
               className={cn(settingsInputClass, testLatency !== null ? 'pr-20' : 'pr-9')}
               disabled={isSaving}
             />
@@ -427,7 +572,7 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
               <button
                 type="button"
                 onClick={handleTest}
-                disabled={!endpoint.trim() || !username.trim() || isTesting || isSaving}
+                disabled={!canSubmit || isTesting}
                 aria-label={isTesting ? (_('settings.webdavTesting') || '测试中...') : (_('settings.webdavTest') || '测试连接')}
                 title={isTesting ? (_('settings.webdavTesting') || '测试中...') : (_('settings.webdavTest') || '测试连接')}
                 className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
@@ -438,8 +583,34 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
           </div>
         </SettingsFormField>
 
+        {isS3 && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <SettingsFormField label={_('settings.storageConnectionsRegion') || 'Region'}>
+              <input
+                type="text"
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+                placeholder="us-east-1"
+                className={settingsInputClass}
+                disabled={isSaving}
+              />
+            </SettingsFormField>
+
+            <SettingsFormField label={_('settings.storageConnectionsBucket') || 'Bucket'} required>
+              <input
+                type="text"
+                value={bucket}
+                onChange={(e) => setBucket(e.target.value)}
+                placeholder="my-bucket"
+                className={settingsInputClass}
+                disabled={isSaving}
+              />
+            </SettingsFormField>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <SettingsFormField label={_('settings.webdavUsername') || '用户名'} required>
+          <SettingsFormField label={isS3 ? (_('settings.storageConnectionsAccessKey') || 'Access Key') : (_('settings.webdavUsername') || '用户名')} required>
             <input
               type="text"
               value={username}
@@ -450,7 +621,7 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
             />
           </SettingsFormField>
 
-          <SettingsFormField label={_('settings.webdavPassword') || '密码'}>
+          <SettingsFormField label={isS3 ? (_('settings.storageConnectionsSecretKey') || 'Secret Key') : (_('settings.webdavPassword') || '密码')}>
             <input
               type="password"
               value={password}
@@ -501,7 +672,7 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
           <Button
             type="submit"
             size="sm"
-            disabled={!endpoint.trim() || !username.trim() || isSaving}
+            disabled={!canSubmit}
           >
             {isSaving ? _('settings.storageConnectionsSaving') || '保存中...' : _('library.save') || '保存'}
           </Button>

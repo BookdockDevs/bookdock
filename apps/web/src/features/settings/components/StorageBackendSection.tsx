@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import type { StorageConnectionRes, StorageTargetInspectionRes } from '@bookdock/shared'
 
@@ -22,19 +21,18 @@ import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
-import SmartMenu from '@/components/ui/SmartMenu'
-import { useContextMenu } from '@/features/library/components/use-context-menu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import type { SmartPosition } from '@/lib/position'
 import { cn, formatBytes } from '@/lib/utils'
 
 import AiModelIcon from './AiModelIcon'
 import SettingsCard from './SettingsCard'
 import SettingsFormField from './SettingsFormField'
 import { settingsFormClass, settingsInputClass } from './settingsForm'
+import StorageConnectionPicker from './StorageConnectionPicker'
 import { StorageConnectionDialog } from './StorageConnectionsSection'
+import { PROVIDER_MARK } from './storageProviderMark'
 
 const CACHE_CAPS = [1024, 2048, 4096] as const
 
@@ -99,6 +97,7 @@ export default function StorageBackendSection() {
   const config = configQuery.data?.data
   const connections = connectionsQuery.data?.data ?? []
   const isEnabled = config?.enabled ?? false
+  const liveConnection = connections.find((c) => c.id === config?.connectionId)
 
   const migrationQuery = useStorageMigrationStatus({ enabled: isEnabled })
   const migration = migrationQuery.data?.data
@@ -179,8 +178,12 @@ export default function StorageBackendSection() {
               disabled={isLoading || configQuery.isError}
               onClick={() => setShowConfigModal(true)}
               aria-label={_('settings.storageBackendConfigure') || '更改存储位置'}
-              title={_('settings.storageBackendConfigure') || '更改存储位置'}
-              className="group inline-flex h-8 items-center gap-1.5 rounded-lg border border-stone-200/90 bg-white/90 px-3 text-xs font-medium text-stone-700 shadow-2xs transition-all hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-700/90 dark:hover:text-stone-100"
+              title={
+                config.enabled
+                  ? `${config.connectionName || '我的网盘'}${liveConnection ? ` (${PROVIDER_MARK[liveConnection.provider]?.label ?? liveConnection.provider})` : ''}`
+                  : (_('settings.storageLocationLocalOption') || '本地磁盘')
+              }
+              className="group inline-flex h-8 items-center gap-2 rounded-lg border border-stone-200/90 bg-white/90 px-3 text-xs font-medium text-stone-700 shadow-2xs transition-all hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 active:scale-[0.98] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-700/90 dark:hover:text-stone-100"
             >
               <span
                 className={cn(
@@ -192,24 +195,8 @@ export default function StorageBackendSection() {
                     : 'bg-stone-400',
                 )}
               />
-              {config.enabled ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400 transition-colors group-hover:text-stone-700 dark:group-hover:text-stone-200">
-                  <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-                </svg>
-              ) : (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400 transition-colors group-hover:text-stone-700 dark:group-hover:text-stone-200">
-                  <rect width="20" height="14" x="2" y="3" rx="2" />
-                  <line x1="8" x2="16" y1="21" y2="21" />
-                  <line x1="12" x2="12" y1="17" y2="21" />
-                </svg>
-              )}
               <span
                 className="truncate max-w-[160px]"
-                title={
-                  config.enabled
-                    ? (config.connectionName || '我的网盘')
-                    : (_('settings.storageLocationLocalOption') || '本地磁盘')
-                }
               >
                 {config.enabled
                   ? (config.connectionName || '我的网盘')
@@ -516,24 +503,6 @@ function StorageConfigModal({ config, connections, onClose }: StorageConfigModal
 
   const isLocal = selectedTarget === 'local'
 
-  const targetMenu = useContextMenu()
-  const targetMenuOpen = targetMenu.open
-  const targetMenuAnchor = targetMenu.btnRef.current?.getBoundingClientRect()
-  const targetMenuWidth = 160
-  const targetMenuPosition = useMemo((): SmartPosition | null => {
-    if (!targetMenu.open || !targetMenuAnchor) return null
-    return {
-      left: Math.max(8, Math.min(targetMenuAnchor.left, window.innerWidth - targetMenuWidth - 8)),
-      top: targetMenuAnchor.bottom + 6,
-      dir: 'down',
-    }
-  }, [targetMenu.open, targetMenuAnchor, targetMenuWidth])
-
-  const activeConnection = useMemo(
-    () => connections.find((c) => c.id === selectedTarget),
-    [connections, selectedTarget],
-  )
-
   const inspectMutation = useInspectStorageTarget()
   const [targetInspection, setTargetInspection] = useState<StorageTargetInspectionRes | null>(null)
   const [isLocalInspecting, setIsLocalInspecting] = useState(false)
@@ -698,199 +667,30 @@ function StorageConfigModal({ config, connections, onClose }: StorageConfigModal
       <Modal onClose={onClose} title={_('settings.storageConfigureModalTitle') || '更改存储位置'}>
         <form onSubmit={handleSubmit} className={settingsFormClass}>
           {/* Target selection */}
-          <SettingsFormField label={_('settings.storageLocationLabel')} required>
+          <SettingsFormField label={_('settings.storageLocationLabel') || '存储目标'} required as="div">
             <div className="relative">
-              <button
-                ref={targetMenu.btnRef}
-                type="button"
-                onClick={targetMenu.toggleFromButton}
-                aria-haspopup="listbox"
-                aria-expanded={targetMenuOpen}
-                aria-label={_('settings.storageLocationLabel') || '选择存储目标'}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-lg border border-stone-200/90 bg-stone-50/80 px-2.5 py-1.5 text-xs font-medium text-stone-700 shadow-2xs transition-colors hover:border-stone-300 hover:bg-stone-100 focus:outline-none dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-stone-100 cursor-pointer',
-                  targetMenuOpen && 'border-stone-400 bg-stone-100 dark:border-stone-500 dark:bg-stone-700 dark:text-stone-100',
-                )}
-              >
-                {isLocal ? (
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400">
-                    <rect width="20" height="14" x="2" y="3" rx="2" />
-                    <line x1="8" x2="16" y1="21" y2="21" />
-                    <line x1="12" x2="12" y1="17" y2="21" />
-                  </svg>
-                ) : (
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400">
-                    <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-                  </svg>
-                )}
-                <span
-                  className="max-w-[140px] truncate"
-                  title={
-                    isLocal
-                      ? (_('settings.storageLocationLocalOption') || '本地磁盘')
-                      : (activeConnection?.name || selectedTarget)
-                  }
-                >
-                  {isLocal
-                    ? (_('settings.storageLocationLocalOption') || '本地磁盘')
-                    : (activeConnection?.name || selectedTarget)}
-                </span>
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className={cn(
-                    'shrink-0 text-stone-400 transition-transform dark:text-stone-500',
-                    targetMenuOpen && 'rotate-180',
-                  )}
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </button>
-
-              {targetMenuOpen && (
-                <>
-                  {createPortal(
-                    <div
-                      className="fixed inset-0 z-[55]"
-                      onPointerDown={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        targetMenu.close()
-                      }}
-                    />,
-                    document.body,
-                  )}
-                  <SmartMenu
-                    triggerRef={targetMenu.btnRef}
-                    innerRef={targetMenu.menuRef}
-                    position={targetMenuPosition}
-                    onClose={targetMenu.close}
-                    width={targetMenuWidth}
-                    className="!z-[60]"
-                  >
-                    <div className="max-h-56 overflow-y-auto overscroll-contain py-1">
-                      {/* Local Option */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedTarget('local')
-                          setProbeLatency(null)
-                          setTargetInspection(null)
-                          targetMenu.close()
-                        }}
-                        className={cn(
-                          'flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors cursor-pointer',
-                          isLocal
-                            ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                            : 'text-stone-600 hover:bg-stone-100/70 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/70 dark:hover:text-stone-100',
-                        )}
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                            <rect width="20" height="14" x="2" y="3" rx="2" />
-                            <line x1="8" x2="16" y1="21" y2="21" />
-                            <line x1="12" x2="12" y1="17" y2="21" />
-                          </svg>
-                          <span className="truncate">{_('settings.storageLocationLocalOption') || '本地磁盘'}</span>
-                        </div>
-                        {isLocal && (
-                          <svg
-                            width="13"
-                            height="13"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="shrink-0 text-stone-600 dark:text-stone-300"
-                          >
-                            <polyline points="20 6 9 17 4 12" />
-                          </svg>
-                        )}
-                      </button>
-
-                      {connections.length > 0 && (
-                        <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
-                      )}
-
-                      {/* Remote Connections */}
-                      {connections.map((c) => {
-                        const isSelected = selectedTarget === c.id
-                        return (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedTarget(c.id)
-                              setProbeLatency(null)
-                              setTargetInspection(null)
-                              targetMenu.close()
-                            }}
-                            className={cn(
-                              'flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors cursor-pointer',
-                              isSelected
-                                ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                                : 'text-stone-600 hover:bg-stone-100/70 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/70 dark:hover:text-stone-100',
-                            )}
-                          >
-                            <div className="flex items-center gap-2 truncate">
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-                                <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-                              </svg>
-                              <span className="truncate" title={c.name}>{c.name}</span>
-                            </div>
-                            {isSelected && (
-                              <svg
-                                width="13"
-                                height="13"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                className="shrink-0 text-stone-600 dark:text-stone-300"
-                              >
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
-                            )}
-                          </button>
-                        )
-                      })}
-
-                      <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
-
-                      {/* Add Connection Option */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          targetMenu.close()
-                          setShowAddConnection(true)
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-stone-500 hover:bg-stone-100/70 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/70 dark:hover:text-stone-100 cursor-pointer"
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400 dark:text-stone-500">
-                          <line x1="12" y1="5" x2="12" y2="19" />
-                          <line x1="5" y1="12" x2="19" y2="12" />
-                        </svg>
-                        <span>{_('settings.storageBackendConnectionAddNew')}</span>
-                      </button>
-                    </div>
-                  </SmartMenu>
-                </>
-              )}
+              <StorageConnectionPicker
+                connections={connections}
+                value={selectedTarget}
+                onChange={(id) => {
+                  setSelectedTarget(id)
+                  setProbeLatency(null)
+                  setTargetInspection(null)
+                }}
+                showLocalOption
+                localLabel={_('settings.storageLocationLocalOption') || '本地磁盘'}
+                onAddNew={() => setShowAddConnection(true)}
+                addNewLabel={_('settings.storageBackendConnectionAddNew')}
+                triggerClassName="border-stone-200/90 bg-stone-50/80 py-1.5 shadow-2xs hover:bg-stone-100 dark:bg-stone-800/80 dark:hover:bg-stone-700 cursor-pointer"
+                menuWidth={180}
+                menuClassName="!z-[60]"
+                ariaLabel={_('settings.storageLocationLabel') || '存储目标'}
+              />
             </div>
           </SettingsFormField>
 
           {/* Base path input with embedded test probe */}
-          <SettingsFormField label={_('settings.storageBackendBasePath')} required={!isLocal}>
+          <SettingsFormField label={_('settings.storageBackendBasePath') || '存储路径'} required={!isLocal}>
             <div className="relative">
               <input
                 type="text"

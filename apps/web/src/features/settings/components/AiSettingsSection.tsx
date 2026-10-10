@@ -405,11 +405,14 @@ export default function AiSettingsSection({ id }: { id?: string }) {
                   </div>
                   <p className="mt-0.5 truncate text-xs text-stone-400">{providers.find((item) => item.id === profile.provider)?.name ?? profile.provider}{profile.model ? ` · ${profile.model}` : ''}</p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                <div className="flex shrink-0 items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:has-[:focus-visible]:opacity-100">
                   {config.activeProfileId !== profile.id && (
                     <button
                       type="button"
-                      onClick={() => activate.mutate(profile.id, { onError: (error) => showError(error) })}
+                      onClick={(e) => {
+                        if (e.detail > 0) e.currentTarget.blur()
+                        activate.mutate(profile.id, { onError: (error) => showError(error) })
+                      }}
                       className="rounded-lg px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200"
                     >
                       {_('settings.aiUse')}
@@ -417,7 +420,10 @@ export default function AiSettingsSection({ id }: { id?: string }) {
                   )}
                   <button
                     type="button"
-                    onClick={() => openEdit(profile)}
+                    onClick={(e) => {
+                      if (e.detail > 0) e.currentTarget.blur()
+                      openEdit(profile)
+                    }}
                     aria-label={_('settings.aiEdit')}
                     title={_('settings.aiEdit')}
                     className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
@@ -426,7 +432,10 @@ export default function AiSettingsSection({ id }: { id?: string }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPendingDelete(profile)}
+                    onClick={(e) => {
+                      if (e.detail > 0) e.currentTarget.blur()
+                      setPendingDelete(profile)
+                    }}
                     aria-label={_('settings.aiDelete')}
                     title={_('settings.aiDelete')}
                     className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"

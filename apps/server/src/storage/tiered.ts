@@ -7,6 +7,8 @@ import { eq, sql } from 'drizzle-orm'
 
 import type { StorageDriver } from './driver'
 import { LocalFsDriver } from './localfs'
+import type { RemoteTierClient } from '../lib/remote-client'
+import { S3Client } from '../lib/s3'
 import { WebDavClient } from '../lib/webdav'
 import { config } from '../config'
 import { getDb } from '../db/client'
@@ -16,13 +18,13 @@ import { decryptPassword } from '../lib/secrets'
 
 export class TieredStorageDriver implements StorageDriver {
   private localDriver: LocalFsDriver
-  private webdavClient: WebDavClient | null = null
+  private remoteClient: RemoteTierClient | null = null
   private remoteBasePath: string = '/Bookdock/storage'
   private cacheMaxMb: number = 2048
 
-  constructor(client: WebDavClient, remoteBasePath: string, cacheMaxMb: number) {
+  constructor(client: RemoteTierClient, remoteBasePath: string, cacheMaxMb: number) {
     this.localDriver = new LocalFsDriver(path.join(config.dataDir, 'files'))
-    this.webdavClient = client
+    this.remoteClient = client
     this.remoteBasePath = remoteBasePath
     this.cacheMaxMb = cacheMaxMb
   }
@@ -74,7 +76,7 @@ export class TieredStorageDriver implements StorageDriver {
   }
 
   async get(key: string, range?: { start: number; end: number }): Promise<Readable> {
-    if (this.isCover(key) || !this.webdavClient) {
+    if (this.isCover(key) || !this.remoteClient) {
       return this.localDriver.get(key, range)
     }
 
@@ -85,7 +87,7 @@ export class TieredStorageDriver implements StorageDriver {
       return this.localDriver.get(key, range)
     }
 
-    // Cache Miss: stream from WebDAV into local cache via safe atomic pipeline (borrowed from ANX Reader)
+    // Cache Miss: stream from remote storage into local cache via safe atomic pipeline (borrowed from ANX Reader)
     const remotePath = this.getRemoteFilePath(key)
     const localTarget = path.join(config.dataDir, 'files', key)
     const tmpPath = localTarget + '.tmp.' + randomUUID()
@@ -93,7 +95,7 @@ export class TieredStorageDriver implements StorageDriver {
     await fs.mkdir(path.dirname(localTarget), { recursive: true })
 
     try {
-      const remoteStream = await this.webdavClient.getStream(remotePath)
+      const remoteStream = await this.remoteClient.getStream(remotePath)
       await pipeline(remoteStream, fsSync.createWriteStream(tmpPath))
 
       const stat = await fs.stat(tmpPath)
@@ -127,9 +129,9 @@ export class TieredStorageDriver implements StorageDriver {
     await this.localDriver.delete(key).catch(() => {})
 
     // 2. Delete remote copy if not cover
-    if (!this.isCover(key) && this.webdavClient) {
+    if (!this.isCover(key) && this.remoteClient) {
       const remotePath = this.getRemoteFilePath(key)
-      await this.webdavClient.delete(remotePath).catch(() => {})
+      await this.remoteClient.delete(remotePath).catch(() => {})
     }
   }
 
@@ -145,7 +147,7 @@ export class TieredStorageDriver implements StorageDriver {
 
     // DB tier is the source of truth for gating reads: get() will download
     // from remote on a miss and throw if the copy is truly gone. Do not
-    // gate on a live remote probe here — WebDAV PROPFIND is flaky enough
+    // gate on a live remote probe here — remote listing calls are flaky enough
     // (short timeouts, non-standard statuses) that a false negative would
     // turn an openable book into BOOK_FILE_MISSING.
     try {
@@ -157,8 +159,8 @@ export class TieredStorageDriver implements StorageDriver {
     } catch {}
 
     // Fallback probe for rows the DB does not know about
-    if (this.webdavClient) {
-      return this.webdavClient.exists(this.getRemoteFilePath(key))
+    if (this.remoteClient) {
+      return this.remoteClient.exists(this.getRemoteFilePath(key))
     }
     return false
   }
@@ -181,8 +183,8 @@ export class TieredStorageDriver implements StorageDriver {
       return this.localDriver.size(key)
     }
 
-    if (this.webdavClient) {
-      return this.webdavClient.size(this.getRemoteFilePath(key))
+    if (this.remoteClient) {
+      return this.remoteClient.size(this.getRemoteFilePath(key))
     }
     return 0
   }
@@ -199,6 +201,38 @@ export class TieredStorageDriver implements StorageDriver {
 }
 
 // Helper to construct TieredStorageDriver from instance settings
+export interface StoredRemoteConnection {
+  provider: string
+  endpoint: string
+  username: string
+  encryptedPassword: string | null
+  region: string | null
+  bucket: string | null
+}
+
+export function buildRemoteClientForConnection(
+  conn: StoredRemoteConnection,
+  basePath = '/',
+): RemoteTierClient {
+  const password = conn.encryptedPassword ? (decryptPassword(conn.encryptedPassword) || undefined) : undefined
+  if (conn.provider === 's3') {
+    return new S3Client({
+      endpoint: conn.endpoint,
+      region: conn.region || undefined,
+      bucket: conn.bucket || '',
+      accessKey: conn.username,
+      secretKey: password,
+      basePath,
+    })
+  }
+  return new WebDavClient({
+    url: conn.endpoint,
+    username: conn.username,
+    password,
+    basePath,
+  })
+}
+
 export function createTieredDriverFromDb(): TieredStorageDriver | null {
   try {
     const db = getDb()
@@ -215,13 +249,7 @@ export function createTieredDriverFromDb(): TieredStorageDriver | null {
 
     if (!conn) return null
 
-    const password = conn.encryptedPassword ? (decryptPassword(conn.encryptedPassword) || undefined) : undefined
-    const client = new WebDavClient({
-      url: conn.endpoint,
-      username: conn.username,
-      password,
-      basePath: '/',
-    })
+    const client = buildRemoteClientForConnection(conn, '/')
 
     return new TieredStorageDriver(client, inst.storageBackendBasePath, inst.storageBackendCacheMaxMb)
   } catch {
@@ -273,13 +301,7 @@ export async function triggerTransferWorker(): Promise<void> {
       return
     }
 
-    const password = conn.encryptedPassword ? (decryptPassword(conn.encryptedPassword) || undefined) : undefined
-    const client = new WebDavClient({
-      url: conn.endpoint,
-      username: conn.username,
-      password,
-      basePath: '/',
-    })
+    const client = buildRemoteClientForConnection(conn, '/')
 
     const cleanBase = '/' + inst.storageBackendBasePath.replace(/^\/+|\/+$/g, '')
 
@@ -303,7 +325,7 @@ export async function triggerTransferWorker(): Promise<void> {
 
       try {
         if (task.taskType === 'restore') {
-          // Restore task: download from remote WebDAV into local files
+          // Restore task: download from remote storage into local files
           const localExists = await fs.stat(localPath).then((st) => st.size > 0).catch(() => false)
           if (!localExists) {
             await fs.mkdir(path.dirname(localPath), { recursive: true })
@@ -338,7 +360,7 @@ export async function triggerTransferWorker(): Promise<void> {
           // Skip uploading if remote already exists with valid content
           const remoteExists = await client.exists(remoteFilePath).catch(() => false)
           if (!remoteExists) {
-            // Stream local file to WebDAV without buffering whole file into RAM
+            // Stream local file to remote storage without buffering whole file into RAM
             const fileStream = fsSync.createReadStream(localPath)
             await client.upload(remoteFilePath, fileStream)
           }
@@ -381,7 +403,7 @@ export async function triggerTransferWorker(): Promise<void> {
           .run()
 
         // Leave retryable tasks pending but break this round so a persistent
-        // network/auth failure does not hammer WebDAV with tight retries.
+        // network/auth failure does not hammer remote storage with tight retries.
         // The next triggerTransferWorker() call resumes them.
         if (newStatus === 'pending') break
       }

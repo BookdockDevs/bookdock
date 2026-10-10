@@ -756,6 +756,8 @@ export const storageConnections = sqliteTable('storage_connections', {
   username: text('username').notNull(),
   encryptedPassword: text('encrypted_password'),
   basePath: text('base_path').notNull().default('/'),
+  region: text('region').notNull().default(''),
+  bucket: text('bucket').notNull().default(''),
   // Legacy: the default-connection concept was removed (it only ever drove
   // list ordering). The column stays so no data migration is needed.
   isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),

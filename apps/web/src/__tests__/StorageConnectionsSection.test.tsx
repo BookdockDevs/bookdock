@@ -123,6 +123,13 @@ describe('StorageConnectionsSection', () => {
 
     fireEvent.click(deleteBtn)
 
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toBeInTheDocument()
+    expect(apiDelete).not.toHaveBeenCalled()
+
+    const confirmBtn = within(dialog).getByRole('button', { name: '删除' })
+    fireEvent.click(confirmBtn)
+
     await waitFor(() => {
       expect(apiDelete).toHaveBeenCalledWith('/integrations/storage-connections/conn_1')
     })
@@ -140,10 +147,10 @@ describe('StorageConnectionsSection', () => {
     fireEvent.click(editBtn)
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('我的存储')).toBeInTheDocument()
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
     })
 
-    const nameInput = screen.getByPlaceholderText('我的存储')
+    const nameInput = screen.getByDisplayValue('坚果云')
     fireEvent.change(nameInput, { target: { value: '我的坚果云' } })
 
     const saveBtn = screen.getByRole('button', { name: '保存' })
@@ -168,7 +175,7 @@ describe('StorageConnectionsSection', () => {
     fireEvent.click(editBtn)
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('我的存储')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('坚果云')).toBeInTheDocument()
     })
 
     const dialog = screen.getByRole('dialog')

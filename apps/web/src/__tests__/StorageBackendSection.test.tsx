@@ -137,7 +137,7 @@ describe('StorageBackendSection', () => {
     expect(saveButton).not.toBeDisabled()
 
     // Open target menu and select WebDAV connection
-    const targetTrigger = screen.getByRole('button', { name: /选择存储目标/ })
+    const targetTrigger = screen.getByRole('button', { name: /存储目标/ })
     fireEvent.click(targetTrigger)
 
     const remoteOption = screen.getByText('我的网盘')

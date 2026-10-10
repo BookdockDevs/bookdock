@@ -27,7 +27,6 @@ import TtsSettingsSection from './components/TtsSettingsSection'
 import AiSettingsSection from './components/AiSettingsSection'
 import LegadoSettingsSection from './components/LegadoSettingsSection'
 import StorageConnectionsSection from './components/StorageConnectionsSection'
-import IntegrationsRoadmapSection from './components/IntegrationsRoadmapSection'
 import AccessTokensSection from './components/AccessTokensSection'
 import AboutSettingsSection from './components/AboutSettingsSection'
 import SettingsCard from './components/SettingsCard'
@@ -261,7 +260,6 @@ export default function Settings() {
                   <AccessTokensSection />
                   <LegadoSettingsSection />
                   {showWebDav && <StorageConnectionsSection />}
-                  <IntegrationsRoadmapSection />
                 </>
               )}
             </div>

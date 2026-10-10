@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 
 import type {
   CreateStorageConnectionReq,
@@ -16,6 +16,8 @@ import type {
 import { getDb } from '../../db/client'
 import { settings, storageConnections } from '../../db/schema'
 import { createId } from '../../lib/id'
+import type { RemoteBrowseClient } from '../../lib/remote-client'
+import { S3Client } from '../../lib/s3'
 import { WebDavClient } from '../../lib/webdav'
 import { AppError } from '../../middleware/error'
 import { resetStorage } from '../../storage'
@@ -23,6 +25,22 @@ import { assertUserUploadAllowed, getInstanceSettings } from '../auth/auth.servi
 import { uploadBook, uploadCatalogBook } from '../books/books.service'
 import { isTitleNormalizeEnabled } from '../settings/settings.service'
 import { decryptPassword, encryptPassword } from './webdav.service'
+
+function toStorageConnectionRes(row: typeof storageConnections.$inferSelect): StorageConnectionRes {
+  return {
+    id: row.id,
+    name: row.name,
+    provider: row.provider as StorageProviderType,
+    endpoint: row.endpoint,
+    username: row.username,
+    basePath: row.basePath,
+    region: row.region ?? '',
+    bucket: row.bucket ?? '',
+    hasSecrets: Boolean(row.encryptedPassword),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
 
 function maybeMigrateLegacyWebDav(userId: string): void {
   const db = getDb()
@@ -71,24 +89,16 @@ export function listStorageConnections(userId: string): StorageConnectionRes[] {
   maybeMigrateLegacyWebDav(userId)
   const db = getDb()
 
+  // Stable oldest-first order: positions never shift when a new connection
+  // is added, and the import browser's first-connection fallback stays put.
   const rows = db
     .select()
     .from(storageConnections)
     .where(eq(storageConnections.userId, userId))
-    .orderBy(desc(storageConnections.createdAt))
+    .orderBy(asc(storageConnections.createdAt))
     .all()
 
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    provider: row.provider as StorageProviderType,
-    endpoint: row.endpoint,
-    username: row.username,
-    basePath: row.basePath,
-    hasSecrets: Boolean(row.encryptedPassword),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }))
+  return rows.map(toStorageConnectionRes)
 }
 
 export function getStorageConnection(userId: string, id: string): StorageConnectionRes {
@@ -103,21 +113,16 @@ export function getStorageConnection(userId: string, id: string): StorageConnect
     throw new AppError('STORAGE_CONNECTION_NOT_FOUND', 'Storage connection not found')
   }
 
-  return {
-    id: row.id,
-    name: row.name,
-    provider: row.provider as StorageProviderType,
-    endpoint: row.endpoint,
-    username: row.username,
-    basePath: row.basePath,
-    hasSecrets: Boolean(row.encryptedPassword),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }
+  return toStorageConnectionRes(row)
 }
 
 export function createStorageConnection(userId: string, req: CreateStorageConnectionReq): StorageConnectionRes {
   const db = getDb()
+
+  const provider = req.provider || 'webdav'
+  if (provider === 's3' && (!req.bucket || !req.bucket.trim())) {
+    throw new AppError('VALIDATION_ERROR', 'Bucket is required for S3 connections')
+  }
 
   const encryptedPassword = req.password && req.password.trim().length > 0
     ? encryptPassword(req.password.trim())
@@ -130,11 +135,13 @@ export function createStorageConnection(userId: string, req: CreateStorageConnec
     id,
     userId,
     name: req.name.trim(),
-    provider: req.provider || 'webdav',
+    provider,
     endpoint: req.endpoint.trim(),
     username: req.username.trim(),
     encryptedPassword,
     basePath: req.basePath?.trim() || '/',
+    region: req.region?.trim() || '',
+    bucket: req.bucket?.trim() || '',
     isDefault: false,
     createdAt: now,
     updatedAt: now,
@@ -171,12 +178,14 @@ export function updateStorageConnection(userId: string, id: string, req: UpdateS
       username: req.username !== undefined ? req.username.trim() : existing.username,
       encryptedPassword,
       basePath: req.basePath !== undefined ? req.basePath.trim() || '/' : existing.basePath,
+      region: req.region !== undefined ? req.region.trim() : existing.region,
+      bucket: req.bucket !== undefined ? req.bucket.trim() : existing.bucket,
       updatedAt: Date.now(),
     })
     .where(and(eq(storageConnections.id, id), eq(storageConnections.userId, userId)))
     .run()
 
-  // The tiered driver caches the WebDAV client built from this row;
+  // The tiered driver caches the remote client built from this row;
   // drop the cache so the next read picks up the new endpoint/credentials.
   resetStorage()
 
@@ -203,7 +212,7 @@ export function deleteStorageConnection(userId: string, id: string): void {
   resetStorage()
 }
 
-function getWebDavClientForConnection(userId: string, id: string, override?: TestStorageConnectionReq): WebDavClient {
+function getRemoteClientForConnection(userId: string, id: string, override?: TestStorageConnectionReq): RemoteBrowseClient {
   const db = getDb()
   const row = db
     .select()
@@ -215,15 +224,29 @@ function getWebDavClientForConnection(userId: string, id: string, override?: Tes
     throw new AppError('STORAGE_CONNECTION_NOT_FOUND', 'Storage connection not found')
   }
 
+  const provider = (override?.provider ?? row.provider ?? 'webdav') as StorageProviderType
   const endpoint = (override?.endpoint !== undefined ? override.endpoint.trim() : row.endpoint) || ''
   const username = (override?.username !== undefined ? override.username.trim() : row.username) || ''
   const basePath = (override?.basePath !== undefined ? override.basePath.trim() : row.basePath) || '/'
+  const region = (override?.region !== undefined ? override.region.trim() : (row.region ?? '')) || ''
+  const bucket = (override?.bucket !== undefined ? override.bucket.trim() : (row.bucket ?? '')) || ''
 
   let password = ''
   if (override?.password !== undefined) {
     password = override.password
   } else if (row.encryptedPassword) {
     password = decryptPassword(row.encryptedPassword) || ''
+  }
+
+  if (provider === 's3') {
+    return new S3Client({
+      endpoint,
+      region: region || undefined,
+      bucket,
+      accessKey: username,
+      secretKey: password,
+      basePath: basePath || '/',
+    })
   }
 
   return new WebDavClient({
@@ -235,6 +258,18 @@ function getWebDavClientForConnection(userId: string, id: string, override?: Tes
 }
 
 export async function testDirectStorageConnection(req: TestDirectStorageConnectionReq): Promise<{ success: boolean; latencyMs: number }> {
+  const provider = req.provider || 'webdav'
+  if (provider === 's3') {
+    const client = new S3Client({
+      endpoint: req.endpoint.trim(),
+      region: req.region?.trim() || undefined,
+      bucket: req.bucket?.trim() || '',
+      accessKey: req.username.trim(),
+      secretKey: req.password || '',
+      basePath: req.basePath?.trim() || '/',
+    })
+    return await client.testConnection()
+  }
   const client = new WebDavClient({
     url: req.endpoint.trim(),
     username: req.username.trim(),
@@ -249,12 +284,12 @@ export async function testStorageConnection(
   id: string,
   override?: TestStorageConnectionReq,
 ): Promise<{ success: boolean; latencyMs: number }> {
-  const client = getWebDavClientForConnection(userId, id, override)
+  const client = getRemoteClientForConnection(userId, id, override)
   return await client.testConnection()
 }
 
 export async function listStorageConnectionFiles(userId: string, id: string, path = '/'): Promise<WebDavEntry[]> {
-  const client = getWebDavClientForConnection(userId, id)
+  const client = getRemoteClientForConnection(userId, id)
   const instance = getInstanceSettings()
   return await client.list(path, instance.uploadMaxBytes)
 }
@@ -266,7 +301,7 @@ export async function importStorageConnectionBooks(
 ): Promise<WebDavImportRes> {
   assertUserUploadAllowed(userId)
 
-  const client = getWebDavClientForConnection(userId, id)
+  const client = getRemoteClientForConnection(userId, id)
   const instance = getInstanceSettings()
   const normalizeTitle = isTitleNormalizeEnabled(userId)
   const results: WebDavImportItemResult[] = []

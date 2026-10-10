@@ -15,6 +15,8 @@ import type {
 
 import { getDb } from '../../db/client'
 import { blobs, fonts, instance, storageConnections, storageTransferTasks } from '../../db/schema'
+import type { RemoteBrowseClient } from '../../lib/remote-client'
+import { S3Client } from '../../lib/s3'
 import { WebDavClient } from '../../lib/webdav'
 import { AppError } from '../../middleware/error'
 import { config } from '../../config'
@@ -23,6 +25,26 @@ import { LocalFsDriver } from '../../storage/localfs'
 import { triggerLruEviction, triggerTransferWorker } from '../../storage/tiered'
 import { createId } from '../../lib/id'
 import { decryptPassword } from './webdav.service'
+
+function buildProbeClient(conn: typeof storageConnections.$inferSelect): RemoteBrowseClient {
+  const password = conn.encryptedPassword ? (decryptPassword(conn.encryptedPassword) || undefined) : undefined
+  if (conn.provider === 's3') {
+    return new S3Client({
+      endpoint: conn.endpoint,
+      region: conn.region || undefined,
+      bucket: conn.bucket || '',
+      accessKey: conn.username,
+      secretKey: password,
+      basePath: '/',
+    })
+  }
+  return new WebDavClient({
+    url: conn.endpoint,
+    username: conn.username,
+    password,
+    basePath: '/',
+  })
+}
 
 export async function getStorageBackendConfig(): Promise<StorageBackendConfigRes> {
   const db = getDb()
@@ -198,13 +220,7 @@ export async function testStorageBackend(body: TestStorageBackendReq): Promise<{
     throw new AppError('NOT_FOUND', 'Storage connection not found')
   }
 
-  const password = conn.encryptedPassword ? (decryptPassword(conn.encryptedPassword) || undefined) : undefined
-  const client = new WebDavClient({
-    url: conn.endpoint,
-    username: conn.username,
-    password,
-    basePath: '/',
-  })
+  const client = buildProbeClient(conn)
 
   const res = await client.testStorageProbe(body.basePath)
 
@@ -472,13 +488,7 @@ export async function inspectStorageTarget(
   }
 
   const cleanBase = '/' + (body.basePath || '/Bookdock/storage').replace(/^\/+|\/+$/g, '')
-  const password = conn.encryptedPassword ? (decryptPassword(conn.encryptedPassword) || undefined) : undefined
-  const client = new WebDavClient({
-    url: conn.endpoint,
-    username: conn.username,
-    password,
-    basePath: '/',
-  })
+  const client = buildProbeClient(conn)
 
   // Get all book keys that exist in Bookdock
   const bookBlobs = db

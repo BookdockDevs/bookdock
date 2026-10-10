@@ -48,6 +48,8 @@ describe('Storage connection routes', () => {
         endpoint: 'https://dav.test.com',
         username: 'user1',
         basePath: '/books',
+        region: '',
+        bucket: '',
         hasSecrets: true,
         createdAt: 1000,
         updatedAt: 1000,
@@ -71,6 +73,8 @@ describe('Storage connection routes', () => {
       endpoint: 'https://dav2.test.com',
       username: 'user2',
       basePath: '/',
+      region: '',
+      bucket: '',
       hasSecrets: true,
       createdAt: 2000,
       updatedAt: 2000,
@@ -124,6 +128,8 @@ describe('Storage connection routes', () => {
       endpoint: 'https://dav.test.com',
       username: 'user1',
       basePath: '/',
+      region: '',
+      bucket: '',
       hasSecrets: true,
       createdAt: 1000,
       updatedAt: 1000,
@@ -145,6 +151,8 @@ describe('Storage connection routes', () => {
       endpoint: 'https://dav.test.com',
       username: 'user1',
       basePath: '/',
+      region: '',
+      bucket: '',
       hasSecrets: true,
       createdAt: 1000,
       updatedAt: 2000,
@@ -239,6 +247,68 @@ describe('Storage connection routes', () => {
     const body = await res.json()
     expect(body.data).toHaveLength(1)
     expect(storageService.listStorageConnectionFiles).toHaveBeenCalledWith('u1', 'conn_1', '/books')
+  })
+
+  it('POST / rejects S3 connections without a bucket', async () => {
+    const app = createApp()
+    const res = await app.request('/api/v1/integrations/storage-connections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'My S3',
+        provider: 's3',
+        endpoint: 'http://localhost:9000',
+        username: 'minioadmin',
+        password: 'minioadmin',
+      }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(storageService.createStorageConnection).not.toHaveBeenCalled()
+  })
+
+  it('POST / creates an S3 connection', async () => {
+    vi.mocked(storageService.createStorageConnection).mockReturnValue({
+      id: 'conn_s3',
+      name: 'My S3',
+      provider: 's3',
+      endpoint: 'http://localhost:9000',
+      username: 'minioadmin',
+      basePath: '/import',
+      region: 'us-east-1',
+      bucket: 'bookdock',
+      hasSecrets: true,
+      createdAt: 3000,
+      updatedAt: 3000,
+    })
+
+    const app = createApp()
+    const res = await app.request('/api/v1/integrations/storage-connections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'My S3',
+        provider: 's3',
+        endpoint: 'http://localhost:9000',
+        username: 'minioadmin',
+        password: 'minioadmin',
+        region: 'us-east-1',
+        bucket: 'bookdock',
+        basePath: '/import',
+      }),
+    })
+
+    expect(res.status).toBe(201)
+    expect(storageService.createStorageConnection).toHaveBeenCalledWith('u1', {
+      name: 'My S3',
+      provider: 's3',
+      endpoint: 'http://localhost:9000',
+      username: 'minioadmin',
+      password: 'minioadmin',
+      region: 'us-east-1',
+      bucket: 'bookdock',
+      basePath: '/import',
+    })
   })
 
   it('POST /:id/import imports books from connection', async () => {

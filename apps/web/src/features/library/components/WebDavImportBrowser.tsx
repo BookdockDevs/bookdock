@@ -7,11 +7,10 @@ import {
   useStorageConnections,
 } from '@/api/hooks/useStorageConnections'
 import { Button } from '@/components/ui/Button'
-import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn, formatBytes } from '@/lib/utils'
 import { notify } from '@/lib/notifications'
-import { useContextMenu } from './use-context-menu'
+import StorageConnectionPicker from '@/features/settings/components/StorageConnectionPicker'
 import type { UploadTarget } from '../hooks'
 import type { WebDavEntry } from '@bookdock/shared'
 
@@ -104,7 +103,6 @@ export default function WebDavImportBrowser({
     return '/'
   })
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
-  const driveMenu = useContextMenu()
 
   useEffect(() => {
     if (propConnectionId) {
@@ -463,11 +461,6 @@ export default function WebDavImportBrowser({
   }
 
   const breadcrumbs = currentPath.split('/').filter(Boolean)
-  const selectedConnection = connections.find((c) => c.id === activeConnectionId) || connections[0]
-  const driveAnchor = driveMenu.btnRef.current?.getBoundingClientRect()
-  const driveMenuWidth = Math.max(160, Math.min(260, driveAnchor?.width ?? 180))
-  const driveMenuHeight = Math.min(192, connections.length * 34 + 8)
-  const driveMenuPosition = driveMenu.position(driveMenuWidth, driveMenuHeight)
 
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm dark:border-stone-800 dark:bg-stone-900">
@@ -477,11 +470,6 @@ export default function WebDavImportBrowser({
           /* Drive Selector Bar */
           <div className="flex items-center justify-between border-b border-stone-200/60 px-3.5 py-2 text-xs dark:border-stone-800/80">
             <div className="relative flex min-w-0 items-center gap-2">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-stone-200/60 text-stone-600 dark:bg-stone-800 dark:text-stone-300">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-                </svg>
-              </span>
               <label htmlFor="drive-select" className="sr-only">
                 {_('library.storageConnectionSelectLabel') || '选择存储'}
               </label>
@@ -500,71 +488,12 @@ export default function WebDavImportBrowser({
                 ))}
               </select>
 
-              <button
-                ref={driveMenu.btnRef}
-                type="button"
-                onClick={driveMenu.toggleFromButton}
-                aria-haspopup="listbox"
-                aria-expanded={driveMenu.open}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-800 shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700/60',
-                  driveMenu.open && 'border-stone-400 dark:border-stone-500',
-                )}
-              >
-                <span className="max-w-[180px] truncate">{selectedConnection?.name}</span>
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className={cn('shrink-0 text-stone-400 transition-transform dark:text-stone-500', driveMenu.open && 'rotate-180')}
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </button>
-
-              {driveMenu.open && (
-                <SmartMenu
-                  triggerRef={driveMenu.btnRef}
-                  innerRef={driveMenu.menuRef}
-                  position={driveMenuPosition}
-                  onClose={driveMenu.close}
-                  width={driveMenuWidth}
-                >
-                  <div className="max-h-48 overflow-y-auto overscroll-contain">
-                    {connections.map((conn) => {
-                      const isSelected = conn.id === activeConnectionId
-                      return (
-                        <button
-                          key={conn.id}
-                          type="button"
-                          onClick={() => {
-                            handleConnectionChange(conn.id)
-                            driveMenu.close()
-                          }}
-                          className={cn(
-                            'flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors cursor-pointer',
-                            isSelected
-                              ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                              : 'text-stone-600 hover:bg-stone-100/70 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/70 dark:hover:text-stone-100',
-                          )}
-                        >
-                          <span className="truncate">{conn.name}</span>
-                          {isSelected && (
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-600 dark:text-stone-300">
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </SmartMenu>
-              )}
+              <StorageConnectionPicker
+                connections={connections}
+                value={activeConnectionId}
+                onChange={handleConnectionChange}
+                triggerNameClassName="max-w-[180px]"
+              />
             </div>
 
             <button
