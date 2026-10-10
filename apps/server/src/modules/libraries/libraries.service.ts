@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { normalizeUsername } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { ideas, libraries, libraryBooks, libraryBookVersions, libraryInvites, libraryMemberships, users } from '../../db/schema'
+import { bookReviews, ideas, libraries, libraryBooks, libraryBookVersions, libraryInvites, libraryMemberships, users } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { hashPassword, verifyPassword } from '../../lib/password'
 import { assertUserCreateLibraryAllowed } from '../auth/auth.service'
@@ -422,6 +422,10 @@ export async function deleteLibrary(userId: string, libraryId: string) {
   // private cards (B) and user-owned data in other libraries are untouched.
   db.update(ideas).set({ visibility: 'private' })
     .where(and(eq(ideas.sharedLibraryId, libraryId), eq(ideas.visibility, 'shared'))).run()
+  // Shared reviews fall back the same way: the author keeps rating and body,
+  // shared reads close, and provenance survives for the personal entry.
+  db.update(bookReviews).set({ visibility: 'private' })
+    .where(and(eq(bookReviews.sourceLibraryId, libraryId), eq(bookReviews.visibility, 'shared'))).run()
   db.delete(libraries).where(eq(libraries.id, libraryId)).run()
   await deleteOrphanedBookVersions([...new Set(versionIds)], { coverKeys })
   return { id: libraryId }

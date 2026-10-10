@@ -76,6 +76,8 @@ function makeLegacyIdentity() {
     DROP TRIGGER idea_comments_deleted_author;
     DROP TABLE idea_comment_likes; DROP TABLE idea_likes; DROP TABLE idea_comments;
     ALTER TABLE ideas DROP COLUMN source_library_book_version_id;
+    DROP TRIGGER book_review_comments_deleted_author;
+    DROP TABLE book_review_comment_likes; DROP TABLE book_review_likes; DROP TABLE book_review_comments; DROP TABLE book_reviews;
     ALTER TABLE ideas DROP COLUMN revision_id;
     ALTER TABLE ideas DROP COLUMN edited_at;
     DELETE FROM __drizzle_migrations WHERE created_at >= ${cutoff};`)

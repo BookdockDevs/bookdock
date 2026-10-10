@@ -690,6 +690,64 @@ export const ideaCommentLikes = sqliteTable('idea_comment_likes', {
   createdAt: integer('created_at').notNull(),
 }, (table) => ({ pk: primaryKey({ columns: [table.commentId, table.userId] }) }))
 
+// Book reviews (书评) v1: work-anchored, one live row per user per work.
+// A pure private work anchors to its private library_books row (FK cascade
+// with the work). A collected work anchors to its source work as plain-text
+// provenance (no FK): the row survives uncollect, fork, version deletes and
+// source deletion, and shared reads fall back to private instead of dying.
+export const bookReviews = sqliteTable('book_reviews', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  privateLibraryBookId: text('private_library_book_id').references(() => libraryBooks.id, { onDelete: 'cascade' }),
+  sourceLibraryId: text('source_library_id'),
+  sourceLibraryBookId: text('source_library_book_id'),
+  // Integer halves 1–10 (0.5–5 stars); null = unrated, never zero.
+  ratingHalves: integer('rating_halves'),
+  body: text('body'),
+  bodyFormat: text('body_format', { enum: ['plain', 'markdown'] }).notNull().default('markdown'),
+  visibility: text('visibility', { enum: ['private', 'shared'] }).notNull().default('private'),
+  // Read-time provenance for display only; never decides the review's home.
+  readListingId: text('read_listing_id'),
+  readBookVersionId: text('read_book_version_id'),
+  readRevisionId: text('read_revision_id'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  editedAt: integer('edited_at'),
+}, (table) => ({
+  userIdx: index('book_reviews_user_idx').on(table.userId, table.updatedAt),
+  sourceIdx: index('book_reviews_source_idx').on(table.sourceLibraryId, table.sourceLibraryBookId, table.visibility),
+  sourceUserUnique: uniqueIndex('book_reviews_source_user_unique')
+    .on(table.sourceLibraryId, table.sourceLibraryBookId, table.userId)
+    .where(sql`${table.sourceLibraryId} IS NOT NULL`),
+  privateUnique: uniqueIndex('book_reviews_private_unique')
+    .on(table.privateLibraryBookId)
+    .where(sql`${table.privateLibraryBookId} IS NOT NULL`),
+}))
+
+export const bookReviewComments = sqliteTable('book_review_comments', {
+  id: text('id').primaryKey(),
+  reviewId: text('review_id').notNull().references(() => bookReviews.id, { onDelete: 'cascade' }),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
+  parentId: text('parent_id').references((): AnySQLiteColumn => bookReviewComments.id, { onDelete: 'cascade' }),
+  replyToId: text('reply_to_id').references((): AnySQLiteColumn => bookReviewComments.id, { onDelete: 'set null' }),
+  body: text('body').notNull(),
+  createdAt: integer('created_at').notNull(),
+  editedAt: integer('edited_at'),
+  deletedAt: integer('deleted_at'),
+}, (table) => ({ reviewIdx: index('book_review_comments_review_idx').on(table.reviewId, table.createdAt) }))
+
+export const bookReviewLikes = sqliteTable('book_review_likes', {
+  reviewId: text('review_id').notNull().references(() => bookReviews.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.reviewId, table.userId] }) }))
+
+export const bookReviewCommentLikes = sqliteTable('book_review_comment_likes', {
+  commentId: text('comment_id').notNull().references(() => bookReviewComments.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.commentId, table.userId] }) }))
+
 export const storageConnections = sqliteTable('storage_connections', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

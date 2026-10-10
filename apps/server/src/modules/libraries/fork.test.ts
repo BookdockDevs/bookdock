@@ -35,6 +35,7 @@ function createTestDb() {
   const db = drizzle(sqlite, { schema })
   migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
   sqlite.exec(fs.readFileSync(path.join(__dirname, '..', '..', 'db', 'migrations', '0041_idea_discussion.sql'), 'utf8'))
+  sqlite.exec(fs.readFileSync(path.join(__dirname, '..', '..', 'db', 'migrations', '0046_book_reviews.sql'), 'utf8'))
   return db
 }
 

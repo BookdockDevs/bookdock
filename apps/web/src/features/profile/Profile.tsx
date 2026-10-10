@@ -5,12 +5,14 @@ import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useProfileSettings } from '@/features/library/hooks'
+import { useMyReviews } from '@/features/reviews/hooks/useReviews'
 import { useAuthStore } from '@/stores/auth.store'
 
 import ProfileAccountSection from './components/ProfileAccountSection'
 import ProfileReadingShowcase from './components/ProfileReadingShowcase'
 import ProfileSettingsDialog from './components/ProfileSettingsDialog'
 import ProfileStatsSection from './components/ProfileStatsSection'
+import MyReviewsSection from '@/features/reviews/components/MyReviewsSection'
 
 export default function Profile() {
   const _ = useTranslation()
@@ -22,6 +24,13 @@ export default function Profile() {
   const profile = useProfileSettings()
   const showStats = profile.showStats !== false
   const showShowcase = profile.showShowcase !== false
+  // Shares the ['reviews','mine'] cache with MyReviewsSection below, so this
+  // adds no request: the "all modules hidden" empty state must not render
+  // next to a populated reviews list. The pending window owns the skeleton,
+  // so the empty state also stays off until the query settles; a failed query
+  // still shows the guidance, which is acceptable.
+  const myReviews = useMyReviews(!isGuest)
+  const hasReviews = (myReviews.data?.data.entries.length ?? 0) > 0
   const onBack = useBackNavigation('/')
 
   useEffect(() => {
@@ -54,7 +63,9 @@ export default function Profile() {
 
       {showShowcase && <ProfileReadingShowcase />}
 
-      {!showStats && !showShowcase && (
+      <MyReviewsSection />
+
+      {!showStats && !showShowcase && !hasReviews && !myReviews.isPending && (
         <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 p-8 text-center text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-900/30 dark:text-stone-400">
           {_('profile.allModulesHidden')}
         </div>

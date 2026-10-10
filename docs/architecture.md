@@ -52,6 +52,87 @@ govern every public read and interaction. Even removal with personal-data
 cleanup preserves source-bound ideas. Localization leaves source-bound ideas
 and discussion on the original version; only unbound private ideas follow C.
 
+### Book reviews (书评) v1
+
+Ratings are half-star steps from 0.5 to 5 (ten buckets, stored as integer
+halves 1–10 so no float step is lost); unrated is NULL, never zero. A review
+carries at most one optional rating plus one optional text body — at least one
+of the two is required. Comments, replies and likes never produce a rating.
+
+A review belongs to exactly one work, never to a file version or a content
+revision. A pure private work (A/C) anchors to its private `library_books` row
+(private-only visibility, FK cascade with the work). A collected B anchors to
+its source work as plain-text `(sourceLibraryId, sourceLibraryBookId)`
+provenance — no FK — so two collected versions of the same source work
+project the same review, edits apply once, and statistics count it once.
+Works from different libraries are never merged by title, author or file hash.
+The read-time version (listing, version, revision ids, also plain text) is kept
+as provenance for display only and never decides the review's home.
+
+One user holds at most one live review per work (partial unique indexes on
+`(sourceLibraryId, sourceLibraryBookId, userId)` and on the private work).
+Visibility (`private`/`shared`, worded 书库可见) is shared by the rating and
+the body. Private reviews, their discussion, likes and counts are author-only;
+managers cannot see them. Publishing a review to the library folds its rating
+into the shared statistics; making it private withdraws it while retaining the
+hidden discussion and likes for a later republication. New-review defaults
+mirror the ideas composer preference under an independent settings key:
+first eligible shared publication defaults to shared, afterwards the last
+successful new-review choice wins; cancelled, failed and edited writes never
+move it.
+
+Review authorization is work-level, built on the `library-access.ts`
+primitives but never a copy of the version-bound idea ACL: shared reads and
+interactions require the source library to be visible to the viewer, the work
+to be live (not trashed/deleted), and at least one currently readable version
+of that work (published, effectively visible; managers bypass hidden and
+unlisted; guests additionally need the instance switch plus a guest-readable
+listing of that work). Provenance names and metadata resolve through the same
+per-listing read verdict and degrade to an unavailable state without leaking
+hidden, unlisted or otherwise unreadable versions. Creation requires holding
+the work (ownership for private works; a collected B for source works), and
+the shared choice additionally requires the collector's own source listing to
+still read. Guests read only where the guest conditions above hold and never
+write; authors edit their own content; current source managers delete shared
+reviews, comments and replies through the same UI (never private content, never
+editing another author's content). Statistics, lists and
+interactions share one permission scope.
+
+Lifecycle: uncollecting never deletes or re-privates a review — it stays on
+the source work under current source permissions. Forking (B→C) leaves the
+source review in place; the new local work starts its own private review.
+Deleting one source version never deletes work reviews; provenance pointing at
+a gone version reads as unavailable without rebinding. Trashing a source work
+or losing access closes shared reads and interactions while the author keeps
+their own review and its visibility choice; recovery restores shared access
+under the retained choice, never by retitling, rehashing or rebinding to a new
+library. Library deletion falls back shared reviews to private (same line as
+ideas in `libraries.service.ts`), keeping provenance; the author's retained
+reviews stay reachable through the minimal personal entry (`GET
+/reviews/mine`). Author deletion removes the rating, body and dependent
+discussion and likes; account deletion clears owned reviews through the user
+FK cascade while review comments fall back to the deleted-author handling
+below. Explicit content FKs (`reviewId`, comment `idea`-style parent linkage)
+cascade with the review; source and provenance identifiers stay plain text so
+no database cascade can express the retention rules above.
+
+Bodies are lightweight Markdown (paragraphs, breaks with `breaks: on`,
+bold, italic, quotes, ordered/unordered lists, links) stored raw with a
+`bodyFormat` of `plain`/`markdown` owned by `@bookdock/shared`. New reviews
+write `markdown`; legacy `plain` bodies are never reinterpreted. Raw HTML is
+disabled and link protocols are allowlisted at render time (mature parser plus
+sanitizer, never a hand-rolled regex parser); the rendered HTML is never
+stored. List excerpts are readable plain text derived from the parsed token
+stream, not regex-stripped markup.
+
+Review discussion is plain text in the first phase and follows the
+idea-discussion shape: one top-level parent per reply chain with an optional
+addressee under it, unique likes per account and target, author-only edits,
+author-or-current-source-manager deletes, and comment deletion promoting
+surviving replies to top level with no tombstone. No feed, notification
+centre, social graph, version-quality score or review-history versions are
+added.
+
 ### Library search expressions v1
 
 Library search applies valid drafts after 300 ms of idle input. Enter or the

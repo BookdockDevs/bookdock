@@ -8,6 +8,7 @@ import type { CatalogBook, Library } from '@bookdock/shared'
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import ReviewSection from '@/features/reviews/components/ReviewSection'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -436,6 +437,8 @@ export default function WorkDetailBody({
       )}
 
       <MetaGrid rows={metaRows} />
+
+      <ReviewSection libraryId={library.id} libraryBookId={work.id} canCollect={canCollect} />
 
       {confirmUnlist && (
         <ConfirmDialog

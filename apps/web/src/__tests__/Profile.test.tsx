@@ -86,6 +86,14 @@ vi.mock('@/features/auth/hooks', () => ({
   useChangePassword: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }))
 
+const { mockMyReviews } = vi.hoisted(() => ({
+  mockMyReviews: vi.fn((): unknown => ({ data: undefined, isPending: true, isError: false })),
+}))
+
+vi.mock('@/features/reviews/hooks/useReviews', () => ({
+  useMyReviews: (...args: Array<unknown>) => mockMyReviews(...args),
+}))
+
 function renderWithQuery(ui: React.ReactElement) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -109,6 +117,8 @@ describe('Profile Page', () => {
     })
     profileSettings = { showStats: true, showShowcase: true, isPublic: true }
     mockProfileMutate.mockClear()
+    mockMyReviews.mockReset()
+    mockMyReviews.mockReturnValue({ data: undefined, isPending: true, isError: false })
   })
 
   it('renders profile hero card with username and member days', () => {
@@ -197,5 +207,41 @@ describe('Profile Page', () => {
     const changePasswordBtn = screen.getByRole('button', { name: '修改密码' })
     fireEvent.click(changePasswordBtn)
     expect(screen.getByText('旧密码')).toBeInTheDocument()
+  })
+
+  it('does not flash the all-hidden empty state while reviews are loading', () => {
+    profileSettings = { showStats: false, showShowcase: false }
+    mockMyReviews.mockReturnValue({ data: undefined, isPending: true, isError: false })
+    renderWithQuery(<Profile />)
+    expect(screen.queryByText('已在主页设置中隐藏了所有公开展示模块')).not.toBeInTheDocument()
+  })
+
+  it('hides the all-hidden empty state when the reviews list is populated', () => {
+    profileSettings = { showStats: false, showShowcase: false }
+    mockMyReviews.mockReturnValue({
+      data: {
+        data: {
+          entries: [
+            {
+              review: { id: 'r1', rating: 4, body: '好书', bodyFormat: 'markdown' },
+              sourceStatus: 'ok',
+              workTitle: '三体',
+            },
+          ],
+        },
+      },
+      isPending: false,
+      isError: false,
+    })
+    renderWithQuery(<Profile />)
+    expect(screen.queryByText('已在主页设置中隐藏了所有公开展示模块')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /我的书评/ })).toBeInTheDocument()
+  })
+
+  it('shows the all-hidden guidance when reviews fail to load', () => {
+    profileSettings = { showStats: false, showShowcase: false }
+    mockMyReviews.mockReturnValue({ data: undefined, isPending: false, isError: true })
+    renderWithQuery(<Profile />)
+    expect(screen.getByText('已在主页设置中隐藏了所有公开展示模块')).toBeInTheDocument()
   })
 })

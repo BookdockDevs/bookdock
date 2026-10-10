@@ -29,6 +29,7 @@ import ReadStatusChip from './ReadStatusChip'
 import ShelfChip from './ShelfChip'
 import { isMachineIdentifier, formatLanguage, formatWordCount } from './types'
 import { ActionIcon, FilterChip, GroupLabel } from './ui'
+import ReviewSection from '@/features/reviews/components/ReviewSection'
 
 interface BookDetailViewProps {
   book: BookListItem
@@ -395,6 +396,10 @@ export default function BookDetailView({
       )}
 
       <MetaGrid rows={metaRows} isLoading={isLoading} />
+
+      {!readOnly && displayBook.collected !== false && (
+        <ReviewSection bookVersionId={book.id} />
+      )}
 
       {metadataField && !readOnly && (canEditBookmeta || metadataField.field === 'title' || metadataField.field === 'authors') && (
         <MetadataFieldDialog key={`${book.id}:${metadataField.field}`} book={displayBook} bookmeta={bookmeta} field={metadataField.field} label={metadataField.label} onClose={() => setMetadataField(null)} />

@@ -24,6 +24,7 @@ import settingsRoutes from './modules/settings/settings.routes'
 import tokensRoutes from './modules/tokens/tokens.routes'
 import annotationRoutes from './modules/annotations/annotations.routes'
 import ideaRoutes from './modules/annotations/idea-discussion.routes'
+import reviewRoutes from './modules/reviews/reviews.routes'
 import librariesRoutes from './modules/libraries/libraries.routes'
 import shelvesRoutes from './modules/shelves/shelves.routes'
 import tagsRoutes from './modules/tags/tags.routes'
@@ -74,6 +75,7 @@ app.route('/api/v1/settings', settingsRoutes)
 app.route('/api/v1/tokens', tokensRoutes)
 app.route('/api/v1/annotations', annotationRoutes)
 app.route('/api/v1/ideas', ideaRoutes)
+app.route('/api/v1/reviews', reviewRoutes)
 app.route('/api/v1/libraries', librariesRoutes)
 app.route('/api/v1/shelves', shelvesRoutes)
 app.route('/api/v1/tags', tagsRoutes)
