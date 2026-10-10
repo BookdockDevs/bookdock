@@ -1185,124 +1185,15 @@ describe('AiPanel', () => {
     expect(display).toHaveBeenCalledWith('search-hit-chapter:1:12:24')
   })
 
-  it('can build the book index from the empty state', async () => {
-    vi.mocked(apiGet).mockImplementation(async (path) => {
-      if (path === '/ai/status') return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
-      if (path === '/ai/retrieval/status?bookId=book-1') return { data: { bookId: 'book-1', status: 'not_indexed', chunkCount: 0, updatedAt: null } }
-      return { data: [] }
-    })
-    vi.mocked(apiPost).mockResolvedValue({ data: { bookId: 'book-1', status: 'ready', embeddingStatus: 'ready', chunkCount: 8, updatedAt: 123 } })
-
-    renderPanel(readerWithCorpus())
-    await openMore()
-
-    const button = await screen.findByRole('button', { name: 'reader.aiIndexBuild' })
-    fireEvent.click(button)
-    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/ai/retrieval/index', {
-      bookId: 'book-1',
-      force: false,
-      visibleTextVersion: 'reader-test',
-      chapters: [{ chapterIndex: 0, text: '第一章 经过阅读器变换后的文本' }],
-    }, expect.any(AbortSignal)))
-  })
-
-  it('keeps lexical index controls available without a chat model', async () => {
-    vi.mocked(apiGet).mockImplementation(async (path) => {
-      if (path === '/ai/status') return { data: { enabled: false, provider: 'openai', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
-      if (path === '/ai/retrieval/status?bookId=book-1') return { data: { bookId: 'book-1', status: 'not_indexed', embeddingStatus: 'unavailable', chunkCount: 0, updatedAt: null } }
-      return { data: [] }
-    })
-    vi.mocked(apiPost).mockResolvedValue({ data: { bookId: 'book-1', status: 'ready', embeddingStatus: 'unavailable', chunkCount: 8, updatedAt: 123 } })
-
-    renderPanel(readerWithCorpus())
-    await openMore()
-
-    fireEvent.click(await screen.findByRole('button', { name: 'reader.aiIndexBuild' }))
-    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/ai/retrieval/index', {
-      bookId: 'book-1',
-      force: false,
-      visibleTextVersion: 'reader-test',
-      chapters: [{ chapterIndex: 0, text: '第一章 经过阅读器变换后的文本' }],
-    }, expect.any(AbortSignal)))
-    expect(screen.getByRole('button', { name: 'reader.aiSelectModel' })).toBeDisabled()
-    expect(screen.getByRole('textbox')).not.toBeDisabled()
-  })
-
-  it('requires an explicit rebuild when the configured embedding service changes', async () => {
-    vi.mocked(apiGet).mockImplementation(async (path) => {
-      if (path === '/ai/status') return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', embeddingProvider: 'openai', embeddingModel: 'text-embedding-3-small', embeddingConfigured: true, maxSelectionChars: 6_000, maxContextChars: 8_000 } }
-      if (path === '/ai/retrieval/status?bookId=book-1') return { data: { bookId: 'book-1', status: 'ready', embeddingStatus: 'ready', embeddingProvider: 'ollama', embeddingModel: 'nomic-embed-text', chunkCount: 8, updatedAt: 123 } }
-      return { data: [] }
-    })
-    vi.mocked(apiPost).mockResolvedValue({ data: { bookId: 'book-1', status: 'ready', embeddingStatus: 'ready', embeddingProvider: 'openai', embeddingModel: 'text-embedding-3-small', chunkCount: 8, updatedAt: 123 } })
-
-    renderPanel(readerWithCorpus())
-    await openMore()
-
-    expect(await screen.findByText('reader.aiEmbeddingStale')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'reader.aiEmbeddingRebuild' }))
-    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/ai/retrieval/index', {
-      bookId: 'book-1',
-      force: true,
-      visibleTextVersion: 'reader-test',
-      chapters: [{ chapterIndex: 0, text: '第一章 经过阅读器变换后的文本' }],
-    }, expect.any(AbortSignal)))
-  })
-
-  it('can cancel an in-flight index build', async () => {
-    let indexSignal: AbortSignal | undefined
-    vi.mocked(apiGet).mockImplementation(async (path) => {
-      if (path === '/ai/status') return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
-      if (path === '/ai/retrieval/status?bookId=book-1') return { data: { bookId: 'book-1', status: 'not_indexed', embeddingStatus: 'not_indexed', chunkCount: 0, updatedAt: null } }
-      return { data: [] }
-    })
-    vi.mocked(apiPost).mockImplementation(async (path, _body, signal) => {
-      if (path === '/ai/retrieval/index') {
-        indexSignal = signal
-        return new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true }))
-      }
-      return { data: { bookId: 'book-1', status: 'not_indexed', embeddingStatus: 'not_indexed', chunkCount: 0, updatedAt: null } }
-    })
-
-    renderPanel(readerWithCorpus())
-    await openMore()
-    fireEvent.click(await screen.findByRole('button', { name: 'reader.aiIndexBuild' }))
-    const cancelButton = await screen.findByRole('button', { name: 'reader.aiIndexCancel' })
-    fireEvent.click(cancelButton)
-
-    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/ai/retrieval/index/cancel', { bookId: 'book-1' }))
-    expect(indexSignal?.aborted).toBe(true)
-  })
-
-  it('shows the persisted index progress while indexing', async () => {
-    vi.mocked(apiGet).mockImplementation(async (path) => {
-      if (path === '/ai/status') return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
-      if (path === '/ai/retrieval/status?bookId=book-1') return { data: { bookId: 'book-1', status: 'indexing', embeddingStatus: 'indexing', progress: 42, chunkCount: 8, updatedAt: 123 } }
-      return { data: [] }
-    })
+  it('keeps more menu streamlined without requiring manual index management', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
 
     renderPanel()
     await openMore()
 
-    expect(await screen.findByText('reader.aiEmbeddingBuilding')).toBeInTheDocument()
-    expect(screen.getByText('42%')).toBeInTheDocument()
-  })
-
-  it('can clear an existing derived index after confirmation', async () => {
-    vi.mocked(apiGet).mockImplementation(async (path) => {
-      if (path === '/ai/status') return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
-      if (path === '/ai/retrieval/status?bookId=book-1') return { data: { bookId: 'book-1', status: 'ready', embeddingStatus: 'unavailable', chunkCount: 4, updatedAt: 123 } }
-      return { data: [] }
-    })
-    vi.mocked(apiDelete).mockResolvedValue({ data: null })
-
-    renderPanel()
-    await openMore()
-    fireEvent.click(await screen.findByRole('button', { name: 'reader.aiIndexClear' }))
-    expect(screen.getByText('reader.aiIndexClearConfirm')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'settings.confirmClearAction' }))
-
-    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/ai/retrieval/index?bookId=book-1'))
+    expect(screen.getByRole('button', { name: 'reader.aiExport' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'reader.aiIndexBuild' })).toBeNull()
+    expect(screen.queryByText('reader.aiIndexTitle')).toBeNull()
   })
 
   it('creates a persisted thread on the first message and reuses it afterwards', async () => {

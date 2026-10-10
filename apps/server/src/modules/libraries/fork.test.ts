@@ -316,35 +316,6 @@ describe('fork B into local C', () => {
     expect((await getActiveBook(memberId, result.bookVersionId)).filePath).not.toBe(sourceBlobKey)
   })
 
-  it('rebinds the AI retrieval index instead of orphaning it', async () => {
-    const city = await seedCityBook()
-    await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
-    const indexId = createId('ai-index')
-    const chunkId = createId('ai-chunk')
-    db.insert(schema.aiBookIndexes).values({
-      id: indexId, userId: memberId, bookId: city.bookVersionId,
-      sourceVersion: 'test:1', status: 'ready', createdAt: 1, updatedAt: 1,
-    }).run()
-    db.insert(schema.aiChunks).values({
-      id: chunkId, userId: memberId, indexId, bookId: city.bookVersionId,
-      chapterIndex: 0, chapterId: 'c1', chapterTitle: 't', startOffset: 0, endOffset: 5,
-      text: 'hello', createdAt: 1,
-    }).run()
-    db.insert(schema.aiChunkEmbeddings).values({
-      id: createId('ai-emb'), userId: memberId, indexId, chunkId, bookId: city.bookVersionId,
-      model: 'm', dimension: 3, vector: Buffer.from([1, 2, 3]), createdAt: 1,
-    }).run()
-
-    const result = await forkLocalBook(memberId, city.bookVersionId)
-    for (const table of [schema.aiBookIndexes, schema.aiChunks, schema.aiChunkEmbeddings] as const) {
-      const moved = db.select().from(table)
-        .where(and(eq(table.userId, memberId), eq(table.bookId, result.bookVersionId))).all()
-      expect(moved.length).toBeGreaterThan(0)
-      const left = db.select().from(table)
-        .where(and(eq(table.userId, memberId), eq(table.bookId, city.bookVersionId))).all()
-      expect(left).toHaveLength(0)
-    }
-  })
 
   it('moves bookmarks, ideas and reading history to the new version', async () => {
     const city = await seedCityBook()

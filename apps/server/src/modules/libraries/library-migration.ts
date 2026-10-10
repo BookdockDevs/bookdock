@@ -6,7 +6,7 @@ import { normalizeUsername } from '@bookdock/shared'
 import { getDb } from '../../db/client'
 import { annotations, books, bookTags, shelves, tags } from '../../db/legacy-book-schema'
 import {
-  aiBookIndexes, aiChunkEmbeddings, aiChunks, aiThreads, bookmarks, bookStates,
+  aiThreads, bookmarks, bookStates,
   bookVersions, contentRevisions, highlights, ideas, libraries,
   libraryBookTags, libraryBookVersions, libraryBooks, libraryCategories, libraryMigrationLog, libraryTags,
   readingRecords, readingSessions, textReplacementOverrides, textReplacements,
@@ -447,9 +447,6 @@ export async function backfillVersionReferences(): Promise<ReferencesBackfillRep
     { table: readingRecords, name: 'reading_records' },
     { table: readingSessions, name: 'reading_sessions' },
     { table: aiThreads, name: 'ai_threads' },
-    { table: aiBookIndexes, name: 'ai_book_indexes' },
-    { table: aiChunks, name: 'ai_chunks' },
-    { table: aiChunkEmbeddings, name: 'ai_chunk_embeddings' },
     { table: textReplacements, name: 'text_replacements' },
     { table: textReplacementOverrides, name: 'text_replacement_overrides' },
   ] as const
@@ -706,7 +703,7 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
     || (a.type === 'note' && ideaRows.some((h) => h.id === a.id)),
   ), `${highlightRows.length}/${bookmarkRows.length}/${ideaRows.length} of ${annotationRows.length}`)
 
-  const refTargets = [readingRecords, readingSessions, aiThreads, aiBookIndexes, aiChunks, aiChunkEmbeddings, textReplacements, textReplacementOverrides]
+  const refTargets = [readingRecords, readingSessions, aiThreads, textReplacements, textReplacementOverrides]
   let dangling = 0
   for (const table of refTargets) {
     const rows = db.select({ bookVersionId: table.bookVersionId, bookId: table.bookId }).from(table).all()

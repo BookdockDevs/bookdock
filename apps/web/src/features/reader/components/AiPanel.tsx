@@ -7,7 +7,7 @@ import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT
 import type { AiAssistantMode, AiChapterReference, AiChatReq, AiCitation, AiContextReceipt, AiConversationSettings, AiHistoryMessage, AiMessageEventRes, AiMessageRes, AiReadingScope, AiRetryRecipe, AiStatusRes, AiThreadRes, AiToolName } from '@bookdock/shared'
 
 import { apiGet, apiPost, apiStreamAiChat } from '@/api/client'
-import { AI_THREADS_KEY, useAiIndexStatus, useAiMessageRevisions, useAiThread, useAiThreads, useCancelAiBookIndex, useClearAiBookIndex, useDeleteAiThread, useIndexAiBook, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiProfile, useUpdateAiThread } from '@/api/hooks/useAi'
+import { AI_THREADS_KEY, useAiMessageRevisions, useAiThread, useAiThreads, useDeleteAiThread, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiProfile, useUpdateAiThread } from '@/api/hooks/useAi'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import AiBrandIcon from '@/components/ui/AiBrandIcon'
 import Modal from '@/components/ui/Modal'
@@ -547,8 +547,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const [toolStatus, setToolStatus] = useState<string | null>(null)
-  const [clearIndexOpen, setClearIndexOpen] = useState(false)
-  const [preparingIndex, setPreparingIndex] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [ideaSaveTarget, setIdeaSaveTarget] = useState<AiMessage | null>(null)
   const ideaComposer = useIdeaComposer(bookId)
@@ -557,7 +555,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const abortRef = useRef<AbortController | null>(null)
   const streamingTextStore = useRef(new StreamingTextStore()).current
   const activeRunIdRef = useRef<string | null>(null)
-  const indexAbortRef = useRef<AbortController | null>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const modelButtonRef = useRef<HTMLButtonElement>(null)
   const modelMenuPopupRef = useRef<HTMLDivElement>(null)
@@ -596,10 +593,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const latestMessage = messages.at(-1)
   const latestRevisionMessageId = !streaming && latestMessage?.role === 'assistant' && latestMessage.content.trim() && latestMessage.revisionGroupId ? latestMessage.id : null
   const revisionsQuery = useAiMessageRevisions(threadId, latestRevisionMessageId, { enabled: Boolean(latestRevisionMessageId) })
-  const indexQuery = useAiIndexStatus(bookId)
-  const indexBook = useIndexAiBook()
-  const cancelIndex = useCancelAiBookIndex()
-  const clearIndex = useClearAiBookIndex()
   const updateAiConfig = useUpdateAiConfig()
   const updateAiProfile = useUpdateAiProfile()
   const selectRevisionMutation = useSelectAiMessageRevision()
@@ -616,7 +609,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
 
   useEffect(() => () => {
     abortRef.current?.abort()
-    indexAbortRef.current?.abort()
     streamingTextStore.clear()
   }, [streamingTextStore])
   useEffect(() => {
@@ -628,9 +620,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     abortRef.current = null
     activeRunIdRef.current = null
     streamingTextStore.clear()
-    indexAbortRef.current?.abort()
-    indexAbortRef.current = null
-    setPreparingIndex(false)
     setThreadId(memory.activeThreadId)
     setMessages([])
     setPrompt(memory.prompt)
@@ -651,7 +640,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     setPreparingReferences(false)
     setRenameThreadId(null)
     setDeleteTarget(null)
-    setClearIndexOpen(false)
     setEditingMessageId(null)
     setEditDraft('')
     setOpenQuoteId(null)
@@ -966,18 +954,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const selectedModelLabel = selectedModel
     ? selectedModel.name === selectedModel.id ? selectedModel.id : `${selectedModel.name} · ${selectedModel.id}`
     : modelLabel
-  const embeddingConfigMismatch = useMemo(() => {
-    const index = indexQuery.data?.data
-    const status = statusQuery.data?.data
-    if (!index || index.status !== 'ready' || index.embeddingStatus !== 'ready' || !status?.embeddingConfigured) return false
-    return index.embeddingProvider !== status.embeddingProvider || index.embeddingModel !== status.embeddingModel
-  }, [indexQuery.data, statusQuery.data])
   const visibleTextVersion = renderer?.getAiCorpusVersion?.() ?? null
-  const visibleCorpusMismatch = useMemo(() => {
-    const index = indexQuery.data?.data
-    if (!visibleTextVersion || !index || index.status !== 'ready' || !index.sourceVersion) return false
-    return !index.sourceVersion.endsWith(`:visible:${visibleTextVersion}`)
-  }, [indexQuery.data, visibleTextVersion])
   const availableAssistantModes = assistantModes.length > 0 ? assistantModes : [DEFAULT_ASSISTANT_MODE]
   const selectedAssistantMode = availableAssistantModes.find((mode) => mode.id === selectedAssistantModeId) ?? DEFAULT_ASSISTANT_MODE
   const assistantModeLabel = (mode: AiAssistantMode) => mode.id === DEFAULT_ASSISTANT_MODE.id && mode.name === DEFAULT_ASSISTANT_MODE.name ? _('reader.aiDefaultAssistantModeName') : mode.name
@@ -1020,45 +997,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   }, [modelOptions])
   useDismissiblePopup(quickCommandMenuOpen, quickCommandMenuRef, () => setQuickCommandMenuOpen(false))
   useDismissiblePopup(assistantModeMenuOpen, assistantModeMenuRef, () => setAssistantModeMenuOpen(false))
-  const indexStatus = indexQuery.data?.data.status
-  const indexActionVisible = Boolean(visibleCorpusMismatch || embeddingConfigMismatch || ['not_indexed', 'stale', 'failed', 'indexing'].includes(indexStatus ?? '') || indexQuery.data?.data.embeddingStatus === 'failed')
-  const indexActionLabel = preparingIndex
-    ? _('reader.aiIndexPreparing')
-    : indexStatus === 'indexing' || indexBook.isPending
-      ? _('reader.aiIndexCancel')
-      : visibleCorpusMismatch
-        ? _('reader.aiCorpusRebuild')
-        : embeddingConfigMismatch
-          ? _('reader.aiEmbeddingRebuild')
-          : indexQuery.data?.data.embeddingStatus === 'failed'
-            ? _('reader.aiEmbeddingRetry')
-            : indexStatus === 'failed'
-              ? _('reader.aiIndexRebuild')
-              : _('reader.aiIndexBuild')
-  const indexStatusLabel = preparingIndex
-    ? _('reader.aiIndexReading')
-    : indexStatus === 'indexing'
-      ? _(indexQuery.data?.data.embeddingStatus === 'indexing' ? 'reader.aiEmbeddingBuilding' : 'reader.aiIndexBuilding')
-      : indexStatus === 'ready'
-        ? _('reader.aiIndexReady')
-        : indexStatus === 'stale'
-          ? _('reader.aiIndexNeedsRebuild')
-          : indexStatus === 'failed'
-            ? _('reader.aiIndexFailed')
-            : indexStatus === 'not_indexed'
-              ? _('reader.aiIndexNotBuilt')
-              : ''
-  const indexActionShortLabel = preparingIndex || indexStatus === 'indexing' || indexBook.isPending
-    ? _('reader.aiIndexCancelShort')
-    : visibleCorpusMismatch
-      ? _('reader.aiCorpusRebuildShort')
-      : embeddingConfigMismatch
-        ? _('reader.aiEmbeddingRebuildShort')
-        : indexQuery.data?.data.embeddingStatus === 'failed'
-          ? _('reader.aiEmbeddingRetryShort')
-          : indexStatus === 'failed' || indexStatus === 'stale'
-            ? _('reader.aiIndexRebuildShort')
-            : _('reader.aiIndexBuildShort')
 
   function updateAssistant(id: string, update: (message: AiMessage) => AiMessage) {
     setMessages((current) => current.map((message) => message.id === id ? update(message) : message))
@@ -1641,60 +1579,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     updateAiProfile.mutate({ id: activeProfileId, body: { model } }, { onError: (error) => showError(error) })
   }
 
-  async function buildBookIndex() {
-    if (preparingIndex || indexBook.isPending || indexQuery.data?.data.status === 'indexing') return
-    const controller = new AbortController()
-    indexAbortRef.current = controller
-    setPreparingIndex(true)
-    try {
-      if (!renderer?.getAiCorpus) {
-        notify.error({ key: 'reader.aiIndexReaderNotReady' })
-        return
-      }
-      const corpus = await renderer.getAiCorpus(controller.signal)
-      if (controller.signal.aborted) return
-      indexBook.mutate({
-        bookId,
-        force: visibleCorpusMismatch || embeddingConfigMismatch || ['stale', 'failed'].includes(indexQuery.data?.data.status ?? ''),
-        visibleTextVersion: corpus.visibleTextVersion,
-        chapters: corpus.chapters,
-        signal: controller.signal,
-      }, {
-        onError: (error) => {
-          if (error instanceof Error && error.name === 'AbortError') return
-          showError(error)
-        },
-        onSettled: () => {
-          if (indexAbortRef.current === controller) indexAbortRef.current = null
-        },
-      })
-    } catch (error) {
-      if (!(error instanceof Error && error.name === 'AbortError')) showError(error, 'reader.aiIndexBuildFailed')
-      if (indexAbortRef.current === controller) indexAbortRef.current = null
-    } finally {
-      setPreparingIndex(false)
-    }
-  }
-
-  function cancelBookIndex() {
-    if (preparingIndex) {
-      indexAbortRef.current?.abort()
-      return
-    }
-    if (!indexBook.isPending && indexQuery.data?.data.status !== 'indexing') return
-    indexAbortRef.current?.abort()
-    cancelIndex.mutate({ bookId }, { onError: (error) => showError(error) })
-  }
-
-  function confirmClearIndex() {
-    clearIndex.mutate(bookId, {
-      onSuccess: () => {
-        setClearIndexOpen(false)
-        notify.success({ key: 'reader.aiIndexCleared' })
-      },
-      onError: (error) => showError(error),
-    })
-  }
 
   function jumpToCitation(citation: AiCitation) {
     if (!renderer) return
@@ -2055,24 +1939,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
       </div>
       {moreOpen && (
         <aside ref={moreRef} data-testid="ai-more-menu" aria-label={_('reader.aiMore')} className="absolute right-2 top-12 z-20 flex max-h-[min(360px,calc(100vh-5rem))] w-80 max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-2 shadow-xl">
-          <section className="px-1 py-1">
-            <div className="flex min-h-10 items-center gap-2 rounded-lg px-2">
-              <span className="shrink-0 text-[var(--bd-read-sub)]"><ReadingScopeIcon scope="full_book" /></span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-current">{_('reader.aiIndexTitle')}</p>
-                {indexStatusLabel && <p className="truncate text-[11px] text-[var(--bd-read-sub)]">{indexStatusLabel}</p>}
-              </div>
-              {indexActionVisible && <button type="button" onClick={indexStatus === 'indexing' || indexBook.isPending || preparingIndex ? cancelBookIndex : () => void buildBookIndex()} disabled={cancelIndex.isPending || clearIndex.isPending} aria-label={indexActionLabel} title={indexActionLabel} className="shrink-0 rounded-md border border-[var(--bd-read-accent)] px-2 py-1 text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/5 hover:text-current disabled:cursor-not-allowed disabled:opacity-50">{indexActionShortLabel}</button>}
-              {indexStatus !== 'not_indexed' && indexStatus !== 'indexing' && indexStatus !== undefined && <button type="button" onClick={() => setClearIndexOpen(true)} disabled={clearIndex.isPending} aria-label={_('reader.aiIndexClear')} title={_('reader.aiIndexClear')} className="shrink-0 rounded-md px-2 py-1 text-xs text-[var(--bd-read-sub)] underline underline-offset-2 transition-colors hover:text-current disabled:cursor-not-allowed disabled:opacity-50">{_('reader.aiIndexClearShort')}</button>}
-            </div>
-            {indexStatus === 'indexing' && <div className="px-2 pb-1 pt-0.5 text-[11px] text-[var(--bd-read-sub)]">
-              <div className="flex items-center justify-end"><span>{indexQuery.data?.data.progress ?? 0}%</span></div>
-              <div className="mt-1 h-1 overflow-hidden rounded-full bg-stone-500/10"><div className="h-full rounded-full bg-current transition-[width]" style={{ width: `${Math.max(0, Math.min(100, indexQuery.data?.data.progress ?? 0))}%` }} /></div>
-            </div>}
-            {embeddingConfigMismatch && <p className="px-2 pb-1 pt-1 text-[11px] leading-relaxed text-[var(--bd-read-sub)]">{_('reader.aiEmbeddingStale')}</p>}
-            {visibleCorpusMismatch && <p className="px-2 pb-1 pt-1 text-[11px] leading-relaxed text-[var(--bd-read-sub)]">{_('reader.aiCorpusStale')}</p>}
-          </section>
-          <section className="border-t border-[var(--bd-read-accent)] pt-2">
+          <section className="p-1">
             <button type="button" onClick={() => { exportConversation(); setMoreOpen(false) }} disabled={messages.length === 0} aria-label={_('reader.aiExport')} title={_('reader.aiExport')} className="flex min-h-10 w-full items-center rounded-lg border border-transparent px-3 text-left text-sm text-[var(--bd-read-sub)] transition-colors hover:border-[var(--bd-read-accent)] hover:bg-stone-500/5 hover:text-current disabled:cursor-not-allowed disabled:opacity-50">
               <DownloadIcon />
               <span className="ml-3 min-w-0 flex-1 truncate">{_('reader.aiExport')}</span>
@@ -2177,7 +2044,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
       {deleteTarget && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('reader.aiDeleteConfirm', { name: deleteTarget.title })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setDeleteTarget(null)} />}
       {assistantModeDeleteTarget && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('reader.aiModeDeleteConfirm', { name: assistantModeDeleteTarget.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDeleteAssistantMode} onClose={() => setAssistantModeDeleteTarget(null)} />}
       {assistantModeRestoreOpen && <ConfirmDialog title={_('settings.confirmRestoreTitle')} message={_('reader.aiRestoreDefaultConfirm')} confirmLabel={_('settings.confirmRestoreAction')} confirmVariant="primary" onConfirm={confirmRestoreAssistantMode} onClose={() => setAssistantModeRestoreOpen(false)} />}
-      {clearIndexOpen && <ConfirmDialog title={_('settings.confirmClearTitle')} message={_('reader.aiIndexClearConfirm')} confirmLabel={_('settings.confirmClearAction')} onConfirm={confirmClearIndex} onClose={() => setClearIndexOpen(false)} />}
     </div>
   )
 }

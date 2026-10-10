@@ -7,12 +7,11 @@ const { getActiveBook, getBookChapters, getBookChapterContent } = vi.hoisted(() 
 }))
 
 const { searchAiBook } = vi.hoisted(() => ({ searchAiBook: vi.fn() }))
-const { getVisibleAiChapterContent } = vi.hoisted(() => ({ getVisibleAiChapterContent: vi.fn() }))
 const { listAnnotations, searchAnnotations } = vi.hoisted(() => ({ listAnnotations: vi.fn(), searchAnnotations: vi.fn() }))
 
 vi.mock('../annotations/annotations.service', () => ({ listAnnotations, searchAnnotations }))
 vi.mock('../books/books.service', () => ({ getActiveBook, getBookChapters, getBookChapterContent }))
-vi.mock('./ai.retrieval.service', () => ({ getVisibleAiChapterContent, searchAiBook }))
+vi.mock('./ai.retrieval.service', () => ({ searchAiBook }))
 
 import { AI_TOOL_DEFAULT_TIMEOUT_MS, AI_TOOL_MAX_ANNOTATION_RESULTS, AI_TOOL_MAX_CHAPTER_CHARS, AI_TOOL_MAX_RESULT_CHARS, AI_TOOLS, createAiToolRepeatedExecution, executeAiTool, executeAiToolWithPolicy, getAiToolDefinition } from './ai.tools'
 
@@ -152,14 +151,12 @@ describe('AI read-only tools', () => {
   })
 
   it('keeps Reader tool reads on the exact visible index version', async () => {
-    getVisibleAiChapterContent.mockResolvedValue(null)
     await executeAiTool('user-1', 'book-1', { id: 'call-visible-search', name: 'search_book', arguments: '{"query":"命中段落"}' }, new AbortController().signal, 3, undefined, 'reader-test')
     expect(searchAiBook).toHaveBeenCalledWith('user-1', { bookId: 'book-1', query: '命中段落', limit: 5, maxChapterIndex: 3 }, expect.objectContaining({ visibleTextVersion: 'reader-test' }))
 
     const chapterExecution = await executeAiTool('user-1', 'book-1', { id: 'call-visible-chapter', name: 'get_chapter_content', arguments: '{"chapterIndex":1}' }, new AbortController().signal, 3, undefined, 'reader-test')
-    expect(JSON.parse(chapterExecution.content)).toMatchObject({ chapterIndex: 1, error: 'visible_index_unavailable' })
-    expect(getVisibleAiChapterContent).toHaveBeenCalledWith('user-1', 'book-1', 1, 'reader-test', AI_TOOL_MAX_CHAPTER_CHARS)
-    expect(getBookChapterContent).not.toHaveBeenCalled()
+    expect(JSON.parse(chapterExecution.content)).toMatchObject({ chapterIndex: 1, chapterTitle: '第一章' })
+    expect(getBookChapterContent).toHaveBeenCalledWith('user-1', 'book-1', 1)
   })
 
   it('searches only visible notes and turns them into direct-CFI citations', async () => {

@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm'
-import { sqliteTable, text, integer, real, blob, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 import type { AccessTokenPermission, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
 
@@ -157,63 +157,6 @@ export const aiGenerationRuns = sqliteTable('ai_generation_runs', {
     .where(sql`${table.state} IN ('preparing', 'requesting', 'streaming', 'waiting_tool')`),
 }))
 
-export const aiBookIndexes = sqliteTable('ai_book_indexes', {
-  id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
-  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
-  sourceVersion: text('source_version').notNull(),
-  status: text('status', { enum: ['indexing', 'ready', 'failed'] }).notNull(),
-  embeddingStatus: text('embedding_status', { enum: ['not_indexed', 'indexing', 'ready', 'failed', 'unavailable'] }).notNull().default('unavailable'),
-  embeddingProvider: text('embedding_provider'),
-  embeddingModel: text('embedding_model'),
-  embeddingDim: integer('embedding_dim'),
-  progress: integer('progress').notNull().default(0),
-  chunkCount: integer('chunk_count').notNull().default(0),
-  error: text('error'),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
-}, (table) => ({
-  userBookUnique: uniqueIndex('ai_book_indexes_user_book_unique').on(table.userId, table.bookId),
-  userStatusUpdatedIdx: index('ai_book_indexes_user_status_updated_idx').on(table.userId, table.status, table.updatedAt),
-  versionIdx: index('ai_book_indexes_book_version_idx').on(table.bookVersionId),
-}))
-
-export const aiChunks = sqliteTable('ai_chunks', {
-  id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  indexId: text('index_id').notNull().references(() => aiBookIndexes.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
-  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
-  chapterIndex: integer('chapter_index').notNull(),
-  chapterId: text('chapter_id').notNull(),
-  chapterTitle: text('chapter_title').notNull(),
-  startOffset: integer('start_offset').notNull(),
-  endOffset: integer('end_offset').notNull(),
-  text: text('text').notNull(),
-  createdAt: integer('created_at').notNull(),
-}, (table) => ({
-  userBookChapterIdx: index('ai_chunks_user_book_chapter_idx').on(table.userId, table.bookId, table.chapterIndex, table.startOffset),
-  indexIdIdx: index('ai_chunks_index_id_idx').on(table.indexId),
-  versionIdx: index('ai_chunks_book_version_idx').on(table.bookVersionId),
-}))
-
-export const aiChunkEmbeddings = sqliteTable('ai_chunk_embeddings', {
-  id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  indexId: text('index_id').notNull().references(() => aiBookIndexes.id, { onDelete: 'cascade' }),
-  chunkId: text('chunk_id').notNull().references(() => aiChunks.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
-  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
-  model: text('model').notNull(),
-  dimension: integer('dimension').notNull(),
-  vector: blob('vector', { mode: 'buffer' }).notNull(),
-  createdAt: integer('created_at').notNull(),
-}, (table) => ({
-  indexChunkUnique: uniqueIndex('ai_chunk_embeddings_index_chunk_unique').on(table.indexId, table.chunkId),
-  userBookIdx: index('ai_chunk_embeddings_user_book_idx').on(table.userId, table.bookId, table.indexId),
-  versionIdx: index('ai_chunk_embeddings_book_version_idx').on(table.bookVersionId),
-}))
 
 
 // Text replacements (P1): regex/filter rules and point patches share one table,

@@ -3,7 +3,7 @@ import type { AiCitation, AiRetrievalDiagnostics, AiToolName } from '@bookdock/s
 
 import { listAnnotations, searchAnnotations } from '../annotations/annotations.service'
 import { getActiveBook, getBookChapterContent, getBookChapters } from '../books/books.service'
-import { getVisibleAiChapterContent, searchAiBook, type AiEmbedder } from './ai.retrieval.service'
+import { searchAiBook, type AiEmbedder } from './ai.retrieval.service'
 
 export const AI_TOOL_MAX_STEPS = 4
 export const AI_TOOL_MAX_CALLS = 8
@@ -329,17 +329,7 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
     if ((maxChapterIndex >= 0 && chapterIndex > maxChapterIndex) || chapterIndex < minChapterIndex) {
       return result('The requested chapter is outside the current reading boundary.', call, chapterIndex)
     }
-    const indexedChapter = visibleTextVersion
-      ? await getVisibleAiChapterContent(userId, bookId, chapterIndex, visibleTextVersion, AI_TOOL_MAX_CHAPTER_CHARS)
-      : null
-    if (visibleTextVersion && !indexedChapter) {
-      return result(JSON.stringify({
-        chapterIndex,
-        error: 'visible_index_unavailable',
-        message: 'The Reader-visible index is not ready. Ask the user to build or rebuild the book index before reading chapter content.',
-      }), call, chapterIndex)
-    }
-    const chapter = indexedChapter ?? await getBookChapterContent(userId, bookId, chapterIndex)
+    const chapter = await getBookChapterContent(userId, bookId, chapterIndex)
     const content = chapter.content.slice(0, AI_TOOL_MAX_CHAPTER_CHARS)
     const citation: AiCitation = {
       id: `chapter:${chapter.index}`,

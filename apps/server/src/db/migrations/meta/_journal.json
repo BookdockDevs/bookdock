@@ -309,6 +309,13 @@
       "when": 1792200000000,
       "tag": "0044_storage_s3",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792300000000,
+      "tag": "0045_retire_ai_chunk_tables",
+      "breakpoints": true
     }
   ]
 }
