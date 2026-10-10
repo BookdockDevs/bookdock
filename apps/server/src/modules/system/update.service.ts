@@ -416,7 +416,16 @@ async function runUpdate(active: UpdateJob, tag: string, restart: () => void) {
     // Only ever a strictly newer version than the one running, so this cannot
     // delete the release serving the current request.
     await rm(releaseDir, { recursive: true, force: true })
-    await rename(appDir, releaseDir)
+    // Newly extracted files can briefly be locked by Windows scanners.
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await rename(appDir, releaseDir)
+        break
+      } catch (error) {
+        if (!isTransientFsError(error) || attempt >= 4) throw error
+        await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)))
+      }
+    }
     await rm(workDir, { recursive: true, force: true })
     await writePending({ target: version, snapshot: snapshot.id, progressId: active.progressId })
     releaseSnapshotRetention(snapshot.id)

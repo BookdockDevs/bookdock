@@ -8,7 +8,8 @@ import { useContextMenu } from '@/features/library/components/use-context-menu'
 import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
 import { cn } from '@/lib/utils'
 
-import { PROVIDER_MARK, LocalStorageBadge } from './storageProviderMark'
+import LocalStorageBadge from './LocalStorageBadge'
+import { PROVIDER_MARK } from './storageProviderMark'
 
 export interface StorageConnectionPickerProps {
   connections: StorageConnectionRes[]
@@ -23,16 +24,6 @@ export interface StorageConnectionPickerProps {
   menuWidth?: number | 'auto'
   menuClassName?: string
   ariaLabel?: string
-}
-
-function MonitorIcon({ className }: { className?: string }) {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <rect width="20" height="14" x="2" y="3" rx="2" />
-      <line x1="8" x2="16" y1="21" y2="21" />
-      <line x1="12" x2="12" y1="17" y2="21" />
-    </svg>
-  )
 }
 
 function CheckIcon() {

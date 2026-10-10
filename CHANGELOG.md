@@ -2,28 +2,35 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.5.0] - 2026-10-11
+
+### Highlights
+
+- Connect your NAS or object storage: browse and batch-import EPUB/TXT from WebDAV servers and S3-compatible services.
+- Keep book files remotely with a configurable local cache, background archiving, and controls to migrate existing books or bring them back to local storage.
+- AI searches chapters on demand within your reading scope, without a separate indexing step or persistent copies of chapter text.
 
 ### Added
 
-- External storage connections (WebDAV NAS, self-hosted servers and S3-compatible object storage): save multiple connections, test reachability, and browse plus batch-import EPUB/TXT directly from the upload dialog. S3 connections use access-key credentials with region and bucket (verified against Cloudflare R2). New settings sections for connection management and an integrations roadmap. Server API under `/api/v1/integrations/storage-connections` and `/api/v1/integrations/webdav`.
-- Tiered external storage backend (owner-only): point book storage at a WebDAV or S3-compatible connection with a bounded local cache. New books land locally and archive asynchronously; covers always stay local; evicted books stream back on first open. Settings gains a storage dashboard, one-click cache clearing, historical-book migration with pause/resume, restore-to-local with missing-file guards, and connection probing before switching. Server API under `/api/v1/integrations/storage-backend`.
+- Save and test multiple WebDAV or S3-compatible connections in Settings, then browse remote files and batch-import EPUB/TXT from the upload dialog.
+- The instance owner can use a remote connection for book storage and set a local cache limit. New books are saved locally before background archiving; files no longer cached locally are fetched when needed, while covers stay local.
+- A storage dashboard shows storage usage and transfer progress, with cache clearing, migration of existing books with pause/resume, and restore-to-local controls. Connection and file-availability checks guard storage switches.
 
 ### Changed
 
-- Zero-storage on-demand AI retrieval: retired persistent chunk and FTS/embedding tables (`ai_chunks`, `ai_chunks_fts_*`, `ai_chunk_embeddings`, `ai_book_indexes`) to eliminate library disk bloat. Server performs on-demand streaming chapter search within spoiler prevention bounds with exact citations, and reader AI UI removes manual indexing controls.
+- AI retrieval now searches chapters on demand and returns source citations within the selected reading scope and spoiler prevention bounds. Persistent chunk and search indexes are removed, along with the reader's manual index-building and cleanup controls.
 
 ### Fixed
 
-- TXT chapter/volume detection hardened: bracketed headings, 卷/部/话/集/篇 forms and special headings (finale, prefaces, colophons, spin-offs, …) are recognised while 正文完, 第一回合 and 第一部分 body lines no longer split chapters. Existing hierarchy presets migrate to the hardened definitions without touching user edits.
-- Switching accounts now hydrates the UI store from cached settings immediately instead of clearing font preferences first; the reading config blob is also persisted locally, and the font list stays cached for five minutes.
+- TXT chapter detection recognises more bracketed headings, Chinese volume/chapter forms, and special sections such as prefaces, finales, and afterwords. Body lines such as 正文完, 第一回合, and 第一部分 no longer create false chapters. Built-in hierarchy presets are updated while user edits are preserved.
+- Switching accounts restores cached reading settings immediately instead of briefly clearing font preferences. Reading preferences are also cached locally, and font lists are reused for five minutes.
+- In-app updates retry briefly when Windows temporarily locks newly extracted files during release promotion.
 
 ### Upgrade notes
 
-- Migration 0042 adds the `storage_connections` table. It applies automatically on boot and, like earlier migrations, cannot be undone in place.
-- Migration 0043 adds storage backend settings, blob storage tiers and the `storage_transfer_tasks` queue. It applies automatically on boot and cannot be undone in place. Books evicted to remote storage stream back on first open.
-- Migration 0044 adds `region` and `bucket` columns to `storage_connections` for S3-compatible connections. It applies automatically on boot and cannot be undone in place.
-- Migration 0045 drops `ai_chunks_fts` triggers, `ai_chunks_fts`, `ai_chunk_embeddings`, `ai_chunks`, and `ai_book_indexes` tables. It applies automatically on boot and cannot be undone in place. Running `VACUUM;` on existing SQLite databases after boot will reclaim disk space previously occupied by AI chunk indexes.
+- Back up the complete `DATA_DIR` before upgrading. Migrations 0042–0045 run automatically on startup and cannot be undone in place. To downgrade, restore the pre-upgrade data with the matching previous release.
+- Migrations 0042–0044 add external storage connections, storage tiers, and transfer tasks. When using remote storage, back up remote book files separately: a `DATA_DIR` backup alone does not include files stored only remotely.
+- Migration 0045 removes the old AI chunk and search indexes. SQLite can reuse the freed space, but the database file may not shrink automatically. An optional offline `VACUUM;` after a successful upgrade can reclaim that space.
 
 ## [0.4.4] - 2026-10-07
 
@@ -653,28 +660,35 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [Unreleased]
+### [0.5.0] - 2026-10-11
+
+#### 主要更新
+
+- 接入 NAS 与对象存储：从 WebDAV 服务器和 S3 兼容服务浏览、批量导入 EPUB/TXT。
+- 书籍文件可存放在远端，配合可设容量的本地缓存与后台归档，也能迁移已有书籍或还原到本地。
+- AI 按阅读范围即时检索章节，无需单独建立索引，也不再持久化保存章节原文切片。
 
 #### 新增
 
-- 外部存储连接（WebDAV NAS、自建服务器与 S3 兼容对象存储）：可保存多个连接并测试连通性，直接在上传弹窗里浏览远端目录、批量导入 EPUB/TXT。S3 连接使用 access-key、region 与 bucket 配置（已在 Cloudflare R2 验证）。设置页新增连接管理与集成路线图分区。服务端新增 `/api/v1/integrations/storage-connections` 与 `/api/v1/integrations/webdav` 接口。
-- 分层外部存储后端（仅所有者）：把书籍存储指向 WebDAV 或 S3 兼容连接，配有限本地缓存。新书先落本地再异步归档；封面常驻本地；被淘汰的书首次打开时回流。设置页新增存储仪表盘、一键清缓存、可暂停/恢复的历史迁移、带缺文件守卫的本地还原、切换前探测。服务端新增 `/api/v1/integrations/storage-backend` 接口。
+- 在设置中保存、测试多个 WebDAV 或 S3 兼容连接，再从上传弹窗浏览远端文件、批量导入 EPUB/TXT。
+- 实例所有者可将书籍存储设为远端连接，并设置本地缓存容量。新书先保存在本地，再后台归档；未保留本地缓存的文件会在需要时取回，封面仍保存在本地。
+- 存储仪表盘展示空间占用与传输进度，支持清理缓存、暂停或恢复已有书籍的迁移，以及还原到本地。切换存储前会检查连接和文件是否可用。
 
 #### 变更
 
-- 零存储开销按需 AI 检索：退场持久化切片与全文/向量索引表（`ai_chunks`、`ai_chunks_fts_*`、`ai_chunk_embeddings`、`ai_book_indexes`），彻底消除藏书建立索引时的磁盘膨胀。服务端改为在防剧透边界内即时流式检索章节并产出精确引用，阅读器 AI 面板移除手动构建与清理索引控件。
+- AI 改为按需检索章节，在所选阅读范围与防剧透边界内返回原文引用。移除持久化切片与检索索引，同时取消阅读器中手动建立、清理索引的操作。
 
 #### 修复
 
-- TXT 章卷识别加固：支持带括号标题、卷/部/话/集/篇各类写法与特殊标题（大结局、引子/前言、感言、外传等），正文完、第一回合、第一部分这类正文行不再误切章节。已有层级预设自动迁移到加固后的定义，不动用户自己的修改。
-- 切换账号时立即用水合后的缓存设置恢复界面状态，不再先清空字体偏好；阅读配置整体也在本机持久化，字体列表缓存五分钟。
+- TXT 章节识别支持更多带括号标题、卷/部/话/集/篇写法，以及前言、大结局、感言等特殊章节；正文完、第一回合、第一部分等正文行不再被误切成章节。内置层级预设同步更新，保留用户自己的修改。
+- 切换账号时立即恢复缓存的阅读设置，避免字体偏好短暂重置。阅读偏好也在本机缓存，字体列表缓存五分钟。
+- 应用内更新在 Windows 暂时锁定新解压文件时进行短暂重试，避免版本切换因此失败。
 
 #### 升级说明
 
-- 迁移 0042 新增 `storage_connections` 表。随启动自动执行，与此前迁移一样不能原地撤销。
-- 迁移 0043 新增存储后端设置、文件存储分层和 `storage_transfer_tasks` 队列表。随启动自动执行，不能原地撤销。已淘汰到远端的书首次打开会自动回流（稍慢一次）。
-- 迁移 0044 给 `storage_connections` 新增 S3 连接用的 `region` 与 `bucket` 列。随启动自动执行，不能原地撤销。
-- 迁移 0045 删除废弃的 `ai_chunks_fts` 触发器、`ai_chunks_fts`、`ai_chunk_embeddings`、`ai_chunks` 与 `ai_book_indexes` 表。随启动自动执行，不能原地撤销。启动后在已有 SQLite 数据库执行 `VACUUM;` 即可收回先前 AI 切片索引占用的磁盘空间。
+- 升级前完整备份 `DATA_DIR`。迁移 0042–0045 随启动自动执行，不能原地撤销；降级需要一起恢复升级前的数据与对应旧版本。
+- 迁移 0042–0044 新增外部存储连接、文件存储分层与传输任务。使用远端存储时，请单独备份远端书籍文件：仅备份 `DATA_DIR` 不包含只存放在远端的文件。
+- 迁移 0045 移除旧 AI 切片与检索索引。SQLite 可复用释放的空间，但数据库文件不一定自动缩小；如需收回这部分磁盘空间，可在升级成功后停机执行 `VACUUM;`，这不是升级的必需步骤。
 
 ### [0.4.4] - 2026-10-07
 

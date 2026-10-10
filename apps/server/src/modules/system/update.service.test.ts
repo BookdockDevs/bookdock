@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -33,6 +33,11 @@ vi.mock('./system.service', async (importOriginal) => ({
   checkForUpdates: vi.fn(),
 }))
 vi.mock('./snapshots.service', () => ({ createSnapshot: vi.fn(), releaseSnapshotRetention: vi.fn() }))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, rename: vi.fn(actual.rename) }
+})
 
 const TARGET = '0.4.0'
 const CURRENT_VERSION = BOOKDOCK_BUILD_INFO.version
@@ -107,6 +112,8 @@ function expectedManifest() {
 }
 
 beforeEach(async () => {
+  const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+  vi.mocked(rename).mockImplementation(actualFs.rename)
   settings.dataDir = path.join(tmpdir(), `bookdock-update-test-${process.pid}-${randomUUID()}`)
   RELEASES_DIR = path.join(config.dataDir, 'releases')
   clearUpdateJob()
@@ -131,6 +138,29 @@ afterEach(async () => {
 })
 
 describe('update guards', () => {
+  it('retries a transient filesystem lock while promoting a verified release', async () => {
+    const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    let promotionAttempts = 0
+    vi.mocked(rename).mockImplementation(async (source, destination) => {
+      if (String(source).endsWith(path.join(`${TARGET}.work`, 'app'))) {
+        promotionAttempts++
+        if (promotionAttempts === 1) throw Object.assign(new Error('File temporarily locked'), { code: 'EPERM' })
+      }
+      await actualFs.rename(source, destination)
+    })
+    const archive = await defaultPackage()
+    stubAssets({
+      ...expectedManifest(),
+      [`${DOWNLOAD_BASE}/${PACKAGE_NAME}`]: archive,
+      [`${DOWNLOAD_BASE}/${PACKAGE_NAME}.sha256`]: createHash('sha256').update(archive).digest('hex'),
+    })
+    const restart = vi.fn()
+    await startUpdate({ targetVersion: TARGET, progressId: 'p-lock' }, { restart })
+    expect(await settled()).toMatchObject({ phase: 'restarting' })
+    expect(promotionAttempts).toBeGreaterThanOrEqual(2)
+    expect(restart).toHaveBeenCalledOnce()
+  })
+
   it('refuses to update when no launcher injected a nonce', async () => {
     settings.launcherNonce = undefined
 

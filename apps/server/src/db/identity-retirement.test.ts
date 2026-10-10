@@ -1,11 +1,12 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import Database from 'better-sqlite3'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import * as client from './client'
 import * as schema from './schema'
@@ -53,6 +54,14 @@ function makeLegacyIdentity() {
   // discussion tables included); the cutoff is derived from the journal so
   // later migrations stay covered without touching this file.
   const cutoff = legacyIdentityCutoff()
+  // 0045 removes these tables; the pre-0040 fixture must restore them for
+  // the historical Guest dependency guards to inspect the original schema.
+  const baseline = readFileSync(new URL('./migrations/0000_baseline.sql', import.meta.url), 'utf8')
+  for (const statement of baseline.split('--> statement-breakpoint')) {
+    if (/^CREATE (?:TABLE|VIRTUAL TABLE|(?:UNIQUE )?INDEX|TRIGGER) `ai_(?:book_indexes|chunks|chunk_embeddings)/.test(statement.trim())) {
+      db.$client.exec(statement.replaceAll('REFERENCES `books`', 'REFERENCES `book_versions`'))
+    }
+  }
   db.$client.exec(`DROP TABLE IF EXISTS storage_connections;
     DROP TABLE IF EXISTS storage_transfer_tasks;
     ALTER TABLE blobs DROP COLUMN storage_tier;

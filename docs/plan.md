@@ -8,7 +8,7 @@
 - EPUB and TXT remain the main formats.
 - Near-term mobile work means responsive layout and touch usability, not Android-only features.
 - Online book sources are out of scope.
-- Android, browser extensions, and additional storage backends are later-stage work. AI currently provides a deliberately small, read-only reader workflow.
+- Android and browser extensions are later-stage work. WebDAV and S3-compatible storage connections and tiered book storage are implemented for v0.5.0. AI currently provides a deliberately small, read-only reader workflow.
 
 ## Current release track
 
@@ -41,6 +41,8 @@ The following are intentionally excluded from this Web milestone: brightness con
 - Rule JSON import/export: delivered for replacement rules and TOC presets in v0.4.3
 - Structured search expressions: delivered in v0.4.4
 - Reader idea discussions: source-bound public comments, replies and likes delivered in v0.4.4
+- External storage: WebDAV and S3-compatible browsing/import, tiered book storage with a bounded local cache, historical-book migration, and restore-to-local controls implemented for v0.5.0
+- AI retrieval: on-demand chapter search within spoiler prevention bounds replaces persistent chunk indexes in v0.5.0
 - Browser extension after the Web library and reader are stable: first milestone is a lightweight local EPUB/TXT reader with a flat local library, plus Bookdock Instance connection, drag-to-upload, and automatic opening by `bookId`; Web-only custom fonts/themes/TOC rules, annotations, AI, TTS, and web clipping remain out of scope.
 - Open API, feed, and note-taking integrations based on real consumers
 - Additional deployment examples where operational use justifies them
@@ -52,7 +54,7 @@ FTS5 is conditional: it will be considered only if real library scale shows that
 - Android client and native capabilities such as brightness, E-Ink, hardware keys, wake lock, and system TTS
 - Advanced TTS engines/offline audio, dictionary, translation, advanced annotation, custom CSS, code highlighting, and bionic reading
 - Whole-book or cross-book AI retrieval, autonomous agents, knowledge graphs, and advanced reading knowledge tools
-- S3/MinIO, WebDAV, and other storage drivers
+- Additional storage providers beyond the implemented WebDAV and S3-compatible connections, based on operational demand
 - Feed compatibility and broader synchronization
 
 ## Not planned for the current product phase
