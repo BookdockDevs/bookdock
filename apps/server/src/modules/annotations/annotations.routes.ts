@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
-import { annotationCreateSchema, annotationUpdateSchema } from '@bookdock/shared'
+import { annotationCreateSchema, annotationUpdateSchema, archiveQuerySchema } from '@bookdock/shared'
+import { AppError } from '../../middleware/error'
+import { noteArchive } from './note-archive.service'
 import {
   listAnnotations,
   createAnnotation,
@@ -8,6 +10,14 @@ import {
 } from './annotations.service'
 
 const annotationRoutes = new Hono()
+
+annotationRoutes.get('/mine', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED')
+  const query = archiveQuerySchema.safeParse(c.req.query())
+  if (!query.success) throw new AppError('VALIDATION_ERROR')
+  return c.json({ data: await noteArchive(user.id, query.data) })
+})
 
 annotationRoutes.get('/book/:bookId', async (c) => {
   const user = c.get('user')

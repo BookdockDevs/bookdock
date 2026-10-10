@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 
 import {
+  archiveQuerySchema,
   reviewCommentCreateSchema,
   reviewCommentUpdateSchema,
   reviewCreateSchema,
@@ -15,6 +16,7 @@ import {
   getReviewBookContext,
   getReviewWorkContext,
   myReviews,
+  readerProfile,
   updateReview,
 } from './reviews.service'
 import {
@@ -42,7 +44,15 @@ reviewRoutes.get('/work', async (c) => {
 reviewRoutes.get('/mine', async (c) => {
   const user = c.get('user')
   if (!user) throw new AppError('UNAUTHORIZED')
-  return c.json({ data: await myReviews(user.id) })
+  const query = archiveQuerySchema.safeParse(c.req.query())
+  if (!query.success) throw new AppError('VALIDATION_ERROR')
+  return c.json({ data: await myReviews(user.id, query.data) })
+})
+
+reviewRoutes.get('/author/:userId', async (c) => {
+  const query = archiveQuerySchema.safeParse(c.req.query())
+  if (!query.success) throw new AppError('VALIDATION_ERROR')
+  return c.json({ data: await readerProfile(c.get('user')?.id ?? null, c.req.param('userId'), query.data) })
 })
 
 reviewRoutes.post('/', async (c) => {

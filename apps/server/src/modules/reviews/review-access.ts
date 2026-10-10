@@ -233,9 +233,9 @@ export async function assertSourceWorkReadable(
 async function resolveProvenance(row: ReviewRow, viewerId: string | null): Promise<ReviewProvenance | null> {
   if (!row.sourceLibraryId) return null
   const base: ReviewProvenance = {
-    listingId: row.readListingId,
-    bookVersionId: row.readBookVersionId,
-    revisionId: row.readRevisionId,
+    listingId: viewerId === row.userId ? row.readListingId : null,
+    bookVersionId: viewerId === row.userId ? row.readBookVersionId : null,
+    revisionId: viewerId === row.userId ? row.readRevisionId : null,
     versionName: null,
     available: false,
   }
@@ -251,7 +251,10 @@ async function resolveProvenance(row: ReviewRow, viewerId: string | null): Promi
   } catch {
     return base
   }
-  return { ...base, versionName: listing.name || null, available: true }
+  const revision = row.readRevisionId ? getDb().select().from(contentRevisions)
+    .where(and(eq(contentRevisions.id, row.readRevisionId), eq(contentRevisions.bookVersionId, row.readBookVersionId))).get() : null
+  if (!revision) return base
+  return { ...base, listingId: row.readListingId, bookVersionId: row.readBookVersionId, revisionId: row.readRevisionId, versionName: listing.name || null, available: true }
 }
 
 export async function projectReview(

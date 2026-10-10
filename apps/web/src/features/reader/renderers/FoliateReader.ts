@@ -2614,7 +2614,8 @@ export class FoliateReader implements BookReader {
       const intent = ++this.navigationIntent
       const gen = this.beginPendingNavigation(resolvedTarget)
       try {
-        await this.navigateTo(target, opts)
+        const resolved = await this.navigateTo(target, opts)
+        if (resolved === false) throw new Error('Reading position is unavailable')
       } catch (err) {
         // User-triggered navigation is commonly fire-and-forget from React
         // handlers. Keep a failed chapter load from becoming an unhandled

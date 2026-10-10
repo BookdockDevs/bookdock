@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useProfileSettings } from '@/features/library/hooks'
-import { useMyReviews } from '@/features/reviews/hooks/useReviews'
+import { useMyReviews, useReaderProfile } from '@/features/reviews/hooks/useReviews'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useAuthStore } from '@/stores/auth.store'
 
 import ProfileAccountSection from './components/ProfileAccountSection'
@@ -13,12 +14,16 @@ import ProfileReadingShowcase from './components/ProfileReadingShowcase'
 import ProfileSettingsDialog from './components/ProfileSettingsDialog'
 import ProfileStatsSection from './components/ProfileStatsSection'
 import MyReviewsSection from '@/features/reviews/components/MyReviewsSection'
+import ProfileNotesSection from './components/ProfileNotesSection'
 
 export default function Profile() {
   const _ = useTranslation()
   usePageTitle(_('profile.title'))
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
+  const search = useSearch({ from: '/profile' })
+  const publicView = Boolean(search.userId && search.userId !== user?.id)
+  const reader = useReaderProfile(publicView ? search.userId : undefined, search.reviewsPage)
   const isGuest = !user
   const [settingsOpen, setSettingsOpen] = useState(false)
   const profile = useProfileSettings()
@@ -29,13 +34,25 @@ export default function Profile() {
   // next to a populated reviews list. The pending window owns the skeleton,
   // so the empty state also stays off until the query settles; a failed query
   // still shows the guidance, which is acceptable.
-  const myReviews = useMyReviews(!isGuest)
+  const myReviews = useMyReviews(!isGuest && !publicView, search.reviewsPage)
   const hasReviews = (myReviews.data?.data.entries.length ?? 0) > 0
   const onBack = useBackNavigation('/')
 
   useEffect(() => {
-    if (isGuest) void navigate({ to: '/' })
-  }, [isGuest, navigate])
+    if (isGuest && !publicView) void navigate({ to: '/' })
+  }, [isGuest, publicView, navigate])
+
+  if (publicView) {
+    return <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6">
+      <Link to="/" className="text-sm text-stone-500">{_('profile.back')}</Link>
+      {reader.isPending ? <div role="status" className="h-24 animate-pulse rounded-2xl bg-stone-500/10" />
+        : reader.isError ? <QueryErrorState isRetrying={reader.isFetching} onRetry={() => void reader.refetch()} />
+        : reader.data && <>
+          <h1 className="text-xl font-bold">{reader.data.data.author.name}</h1>
+          <MyReviewsSection publicView archive={reader.data.data.reviews} page={search.reviewsPage} onPageChange={(reviewsPage) => void navigate({ to: '/profile', search: { ...search, reviewsPage } })} />
+        </>}
+    </div>
+  }
 
   if (!user || isGuest) return null
 
@@ -63,7 +80,9 @@ export default function Profile() {
 
       {showShowcase && <ProfileReadingShowcase />}
 
-      <MyReviewsSection />
+      <ProfileNotesSection page={search.notesPage ?? 1} bookId={search.bookId} onChange={(notesPage, bookId) => void navigate({ to: '/profile', search: { ...search, notesPage, bookId } })} />
+
+      <MyReviewsSection page={search.reviewsPage} onPageChange={(reviewsPage) => void navigate({ to: '/profile', search: { ...search, reviewsPage } })} />
 
       {!showStats && !showShowcase && !hasReviews && !myReviews.isPending && (
         <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 p-8 text-center text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-900/30 dark:text-stone-400">

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { MyReviewEntry, ReviewBookContext, ReviewDiscussion } from '@bookdock/shared'
+import type { ArchivePage, MyReviewEntry, ReaderProfile, ReviewBookContext, ReviewDiscussion } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '@/api/client'
 
@@ -34,12 +34,22 @@ export function useReviewDiscussion(reviewId: string | null, enabled = true) {
   })
 }
 
-export function useMyReviews(enabled = true) {
+export function useMyReviews(enabled = true, page = 1) {
   return useQuery({
-    queryKey: ['reviews', 'mine'],
-    queryFn: () => apiGet<{ data: { entries: MyReviewEntry[] } }>('/reviews/mine'),
+    queryKey: ['reviews', 'mine', page],
+    queryFn: () => apiGet<{ data: ArchivePage<MyReviewEntry> }>(`/reviews/mine?page=${page}`),
     enabled,
     staleTime: 0,
+  })
+}
+
+export function useReaderProfile(userId: string | undefined, page = 1) {
+  return useQuery({
+    queryKey: ['reviews', 'author', userId, page],
+    queryFn: () => apiGet<{ data: ReaderProfile }>(`/reviews/author/${encodeURIComponent(userId!)}?page=${page}`),
+    enabled: Boolean(userId),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   })
 }
 

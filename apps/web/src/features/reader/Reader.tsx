@@ -979,12 +979,23 @@ export default function Reader() {
     const annotation = deepLinkAnnotation
       ? annotations?.data?.find((item) => item.id === deepLinkAnnotation)
       : undefined
-    if (annotation?.type === 'note' && (annotation.locationAvailable === false || (annotation.revisionId != null && bookQuery.data?.data.revisionId != null && annotation.revisionId !== bookQuery.data?.data.revisionId))) return
+    if (deepLinkAnnotation && !annotation) {
+      if (annotations?.data) {
+        deepLinkHandled.current = true
+        notify.warning(_('profileArchive.positionUnavailable'))
+      }
+      return
+    }
+    if (annotation && (annotation.locationAvailable === false || (annotation.revisionId != null && annotation.revisionId !== bookQuery.data?.data.revisionId))) {
+      deepLinkHandled.current = true
+      notify.warning(_('profileArchive.positionUnavailable'))
+      return
+    }
     const target = deepLinkCfi || annotation?.cfiRange || annotation?.cfiAnchor
     if (!target) return
     deepLinkHandled.current = true
     void renderer.display(target)
-  }, [annotations?.data, bookQuery.data?.data.revisionId, readerReady, deepLinkAnnotation, deepLinkCfi, renderer])
+  }, [annotations?.data, bookQuery.data?.data.revisionId, readerReady, deepLinkAnnotation, deepLinkCfi, renderer, _])
 
   // A TOC jump clicked before the renderer became available is queued in the
   // store — apply it as soon as the live renderer can accept navigation.

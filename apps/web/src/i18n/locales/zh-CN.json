@@ -2323,5 +2323,18 @@
     "sourceDeleted": "来源已删除",
     "sourceLibraryDeleted": "书库已删除",
     "sourceGoneTitle": "来源已不可用"
+  },
+  "profileArchive": {
+    "notes": "全局笔记档案",
+    "privateNotes": "仅自己可见 · 按最近更新排序",
+    "noNotes": "暂无笔记",
+    "allBooks": "所有书籍",
+    "readLocation": "回到阅读位置",
+    "sourceUnavailable": "来源当前不可读，无法定位",
+    "positionUnavailable": "历史位置不可用",
+    "sharedReviews": "书库可见书评",
+    "pagination": "档案分页",
+    "previous": "上一页",
+    "next": "下一页"
   }
 }

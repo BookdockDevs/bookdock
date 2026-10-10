@@ -97,8 +97,8 @@ export async function listAnnotations(userId: string, bookId: string) {
   }
 
   return [
-    ...hl.map((row) => toRes('highlight', row)),
-    ...bm.map((row) => toRes('bookmark', row)),
+    ...hl.map((row) => ({ ...toRes('highlight', row), revisionId: row.revisionId, locationAvailable: row.relocation !== 'unresolved' && (!row.revisionId || row.revisionId === currentRevisionId) })),
+    ...bm.map((row) => ({ ...toRes('bookmark', row), revisionId: row.revisionId, locationAvailable: !row.revisionId || row.revisionId === currentRevisionId })),
     // Legacy ideas predate revision provenance (revisionId null): they remain
     // locatable via CFI, so only an explicit revision mismatch disables them.
     ...ideaRows.map((row) => {

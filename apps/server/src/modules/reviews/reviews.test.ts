@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
+import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as client from '../../db/client'
@@ -18,7 +19,11 @@ import { deleteBook, restoreBook, trashBook } from '../books/books.service'
 import { deleteCatalogBook, deleteCatalogVersion, permanentDeleteCatalogBook, restoreCatalogBook } from '../libraries/catalog.service'
 import { forkLocalBook } from '../libraries/fork.service'
 import { deleteLibrary } from '../libraries/libraries.service'
-import { getReviewBookContext, getReviewWorkContext, createReview, deleteReview, myReviews, updateReview } from './reviews.service'
+import { getReviewBookContext, getReviewWorkContext, createReview, deleteReview, myReviews, readerProfile, updateReview } from './reviews.service'
+import { noteArchive } from '../annotations/note-archive.service'
+import annotationRoutes from '../annotations/annotations.routes'
+import reviewRoutes from './reviews.routes'
+import { errorHandler } from '../../middleware/error'
 import { reviewComposerContext } from './review-access'
 import {
   createReviewComment,
@@ -102,6 +107,81 @@ describe('book reviews', () => {
   })
 
   afterEach(() => { vi.restoreAllMocks(); sqlite.close() })
+
+  it('rejects anonymous private archives and malformed pagination at the HTTP boundary', async () => {
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('*', async (c, next) => {
+      const id = c.req.header('x-test-user')
+      c.set('user', id ? { id, username: id, role: 'member', avatarKey: null } : null)
+      await next()
+    })
+    app.route('/api/v1/annotations', annotationRoutes)
+    app.route('/api/v1/reviews', reviewRoutes)
+    expect((await app.request('/api/v1/annotations/mine')).status).toBe(401)
+    expect((await app.request('/api/v1/reviews/mine')).status).toBe(401)
+    expect((await app.request('/api/v1/annotations/mine?pageSize=999', { headers: { 'x-test-user': 'author' } })).status).toBe(400)
+    expect((await app.request('/api/v1/reviews/author/author?page=-1', { headers: { 'x-test-user': 'member' } })).status).toBe(400)
+    db.insert(schema.ideas).values({ id: 'only-author', userId: 'author', bookVersionId: 'v1', cfiRange: 'txt:0', note: 'Private body', createdAt: now, updatedAt: now }).run()
+    const response = await app.request('/api/v1/annotations/mine?userId=author', { headers: { 'x-test-user': 'admin' } })
+    expect(await response.json()).toMatchObject({ data: { entries: [] } })
+  })
+
+  it('projects other profiles only through current shared work permissions', async () => {
+    const review = await createReview('author', { bookVersionId: 'v1', rating: 4, body: 'Visible', visibility: 'shared' })
+    expect((await readerProfile('member', 'author', { page: 1, pageSize: 20 })).reviews.entries.map((entry) => entry.review.id)).toEqual([review.id])
+    await updateReview('author', review.id, { visibility: 'private' })
+    for (const viewer of ['owner', 'admin', 'member', 'outsider', null]) {
+      expect((await readerProfile(viewer, 'author', { page: 1, pageSize: 20 })).reviews.entries).toEqual([])
+    }
+    expect((await readerProfile('author', 'author', { page: 1, pageSize: 20 })).reviews.entries).toHaveLength(1)
+    await updateReview('author', review.id, { visibility: 'shared' })
+    db.update(schema.libraries).set({ visibility: 'private' }).where(eq(schema.libraries.id, 'source')).run()
+    expect((await readerProfile('outsider', 'author', { page: 1, pageSize: 20 })).reviews).toEqual({ entries: [], page: 1, hasMore: false })
+    expect((await readerProfile('admin', 'author', { page: 1, pageSize: 20 })).reviews.entries).toHaveLength(1)
+    db.update(schema.libraries).set({ visibility: 'public' }).where(eq(schema.libraries.id, 'source')).run()
+    expect((await readerProfile('outsider', 'author', { page: 1, pageSize: 20 })).reviews.entries).toHaveLength(1)
+  })
+
+  it('bounds owner review archives and preserves stable newest-first pages', async () => {
+    for (let i = 0; i < 25; i++) {
+      db.insert(schema.libraryBooks).values({ id: `archive-work-${i}`, libraryId: 'privAuthor', userId: 'author', title: 'Private', createdAt: i, updatedAt: i }).run()
+      db.insert(schema.bookReviews).values({ id: `archive-review-${i}`, userId: 'author', privateLibraryBookId: `archive-work-${i}`, body: 'Private', createdAt: i, updatedAt: i }).run()
+    }
+    const first = await myReviews('author', { page: 1, pageSize: 20 })
+    const second = await myReviews('author', { page: 2, pageSize: 20 })
+    expect(first.entries).toHaveLength(20)
+    expect(first.hasMore).toBe(true)
+    expect(second.entries).toHaveLength(5)
+    expect(second.hasMore).toBe(false)
+    expect(first.entries[0].review.id).toBe('archive-review-24')
+    expect(new Set([...first.entries, ...second.entries].map((entry) => entry.review.id)).size).toBe(25)
+    expect((await readerProfile('admin', 'author', { page: 1, pageSize: 20 })).reviews.entries).toEqual([])
+  })
+
+  it('keeps global notes author-only with book filtering, pagination and honest location states', async () => {
+    for (let i = 0; i < 25; i++) {
+      db.insert(schema.highlights).values({ id: `archive-note-${i}`, userId: 'author', bookVersionId: 'v1', revisionId: 'r-v1', cfiRange: `epubcfi(/6/${i * 2 + 2})`, text: 'Private quote', createdAt: i, updatedAt: i }).run()
+    }
+    const first = await noteArchive('author', { page: 1, pageSize: 20, bookId: 'v1' })
+    expect(first.entries).toHaveLength(20)
+    expect(first.hasMore).toBe(true)
+    expect(first.entries.every((entry) => entry.locationStatus === 'available')).toBe(true)
+    expect((await noteArchive('author', { page: 2, pageSize: 20 })).entries).toHaveLength(5)
+    for (const viewer of ['owner', 'admin', 'member', 'outsider']) {
+      expect((await noteArchive(viewer, { page: 1, pageSize: 20 })).entries).toEqual([])
+    }
+    expect((await noteArchive('author', { page: 1, pageSize: 20, bookId: 'v2' })).entries).toEqual([])
+    db.update(schema.highlights).set({ revisionId: 'missing-revision' }).run()
+    expect((await noteArchive('author', { page: 1, pageSize: 20 })).entries.every((entry) => entry.locationStatus === 'position-unavailable')).toBe(true)
+    db.update(schema.libraries).set({ visibility: 'private' }).where(eq(schema.libraries.id, 'source')).run()
+    const lost = await noteArchive('author', { page: 1, pageSize: 20 })
+    expect(lost.entries.every((entry) => entry.locationStatus === 'source-unavailable' && entry.bookTitle === null)).toBe(true)
+    expect(lost.entries[0].annotation.text).toBe('Private quote')
+    db.update(schema.libraries).set({ visibility: 'public' }).where(eq(schema.libraries.id, 'source')).run()
+    db.update(schema.highlights).set({ revisionId: 'r-v1' }).run()
+    expect((await noteArchive('author', { page: 1, pageSize: 20 })).entries.every((entry) => entry.locationStatus === 'available')).toBe(true)
+  })
 
   it('stores half-star steps exactly and requires rating or body', async () => {
     const both = await createReview('author', { bookVersionId: 'v1', rating: 4.5, body: 'Great **book**', visibility: 'shared' })
@@ -223,7 +303,7 @@ describe('book reviews', () => {
     const review = await createReview('author', { bookVersionId: 'v2', rating: 4, body: 'kept', visibility: 'shared' })
     db.update(schema.libraryBooks).set({ hidden: true }).where(eq(schema.libraryBooks.id, 'w1')).run()
     const mine = await myReviews('author')
-    expect(mine.entries[0]).toMatchObject({ sourceStatus: 'ok', workTitle: null })
+    expect(mine.entries[0]).toMatchObject({ sourceStatus: 'unavailable', workTitle: null })
     const ctx = await getReviewBookContext('author', 'v2')
     expect(ctx.own?.source?.libraryName).toBeNull()
     expect(ctx.own).toMatchObject({ rating: 4, body: 'kept' })

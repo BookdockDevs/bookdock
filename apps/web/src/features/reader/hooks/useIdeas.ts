@@ -171,6 +171,7 @@ export function useIdeaAction(ideaId: string, bookId: string) {
     },
     onSettled: async () => {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['note-archive'] }),
         queryClient.invalidateQueries({ queryKey: ['idea-discussion', ideaId] }),
         queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] }),
         queryClient.invalidateQueries({ queryKey: ['annotations', bookId] }),

@@ -134,7 +134,7 @@ export interface ReviewDiscussion {
   likers: ReviewAuthor[]
 }
 
-export type ReviewSourceStatus = 'ok' | 'trashed' | 'deleted' | 'library-deleted' | 'private'
+export type ReviewSourceStatus = 'ok' | 'unavailable' | 'trashed' | 'deleted' | 'library-deleted' | 'private'
 
 export interface MyReviewEntry {
   review: Review

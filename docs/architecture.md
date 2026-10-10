@@ -52,6 +52,26 @@ govern every public read and interaction. Even removal with personal-data
 cleanup preserves source-bound ideas. Localization leaves source-bound ideas
 and discussion on the original version; only unbound private ideas follow C.
 
+### Reader profile v2
+
+The existing `/profile` page remains the owner's account and reading dashboard.
+An optional `userId` search parameter selects another reader: that projection
+exposes only their account display identity and currently readable library-visible
+reviews, never private notes, ratings, review counts or personal statistics.
+The owner's global notes archive includes existing highlights, bookmarks and
+ideas, filters by exact BookVersion and uses bounded newest-first pagination.
+It is authenticated and author-only. Notes survive source access loss according
+to existing annotation retention rules; source metadata and reading links require
+current access to the exact recorded source. Revision mismatch or missing position
+disables reading navigation without guessing or rebinding. Existing legacy CFI
+positions may be attempted by the renderer, whose resolution failure must be visible.
+
+Review archives use bounded pagination and current work ACLs before projecting
+other readers' entries or counting them. Owner archives retain phase-one lifecycle
+semantics. Detail links open the exact review; read-time version provenance is
+not a replacement work anchor. Profile and archive mutations refresh their Query
+projections; account changes remove them through existing cache cleanup.
+
 ### Book reviews (书评) v1
 
 Ratings are half-star steps from 0.5 to 5 (ten buckets, stored as integer

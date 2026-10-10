@@ -79,7 +79,7 @@ export default function ReviewCard({
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-sm font-medium text-stone-800 dark:text-stone-100">{review.author.name}</span>
+            <a href={`/profile?userId=${encodeURIComponent(review.author.id)}`} className="text-sm font-medium text-stone-800 hover:underline dark:text-stone-100">{review.author.name}</a>
             {review.own && (
               <span className="rounded bg-stone-500/15 px-1.5 py-px text-[10px] text-stone-500 dark:text-stone-400">
                 {_('review.ownBadge')}

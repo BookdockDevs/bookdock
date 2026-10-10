@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth.store'
 import i18n from '@/i18n/i18n'
 
 const mockNavigate = vi.fn()
+let profileSearch: { userId?: string; notesPage: number; reviewsPage: number } = { notesPage: 1, reviewsPage: 1 }
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to, className }: { children: React.ReactNode; to: string; className?: string }) => (
@@ -15,6 +16,7 @@ vi.mock('@tanstack/react-router', () => ({
     </a>
   ),
   useNavigate: () => mockNavigate,
+  useSearch: () => profileSearch,
   useRouter: () => ({
     history: {
       canGoBack: () => false,
@@ -92,6 +94,11 @@ const { mockMyReviews } = vi.hoisted(() => ({
 
 vi.mock('@/features/reviews/hooks/useReviews', () => ({
   useMyReviews: (...args: Array<unknown>) => mockMyReviews(...args),
+  useReaderProfile: () => ({ data: { data: { author: { id: 'reader', name: 'Other reader' }, reviews: { entries: [], page: 1, hasMore: false } } }, isPending: false }),
+}))
+
+vi.mock('@/features/profile/hooks', () => ({
+  useNoteArchive: () => ({ data: { data: { entries: [], hasMore: false } }, isPending: false }),
 }))
 
 function renderWithQuery(ui: React.ReactElement) {
@@ -117,6 +124,7 @@ describe('Profile Page', () => {
     })
     profileSettings = { showStats: true, showShowcase: true, isPublic: true }
     mockProfileMutate.mockClear()
+    profileSearch = { notesPage: 1, reviewsPage: 1 }
     mockMyReviews.mockReset()
     mockMyReviews.mockReturnValue({ data: undefined, isPending: true, isError: false })
   })
@@ -130,6 +138,17 @@ describe('Profile Page', () => {
     expect(screen.getByRole('button', { name: '主页设置' })).toBeInTheDocument()
     expect(screen.queryByText('修改密码')).not.toBeInTheDocument()
     expect(screen.queryByText('修改')).not.toBeInTheDocument()
+  })
+
+  it('renders a visitor profile without mounting private notes or account controls', () => {
+    profileSearch = { userId: 'reader', notesPage: 1, reviewsPage: 1 }
+    renderWithQuery(<Profile />)
+    expect(screen.getByRole('heading', { name: 'Other reader' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '书库可见书评' })).toBeInTheDocument()
+    expect(screen.queryByText('全局笔记档案')).not.toBeInTheDocument()
+    expect(screen.queryByText('修改密码')).not.toBeInTheDocument()
+    expect(screen.queryByText('阅读统计')).not.toBeInTheDocument()
+    expect(mockMyReviews).toHaveBeenCalledWith(false, 1)
   })
 
   it('renders reading achievements section with summary stats', () => {

@@ -2334,5 +2334,18 @@
     "sourceDeleted": "Source deleted",
     "sourceLibraryDeleted": "Library deleted",
     "sourceGoneTitle": "Source unavailable"
+  },
+  "profileArchive": {
+    "notes": "Global notes archive",
+    "privateNotes": "Only you can see this · Recently updated first",
+    "noNotes": "No notes yet",
+    "allBooks": "All books",
+    "readLocation": "Go to reading position",
+    "sourceUnavailable": "Source is currently unreadable",
+    "positionUnavailable": "Historical position unavailable",
+    "sharedReviews": "Library-visible reviews",
+    "pagination": "Archive pages",
+    "previous": "Previous",
+    "next": "Next"
   }
 }

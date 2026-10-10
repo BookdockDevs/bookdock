@@ -1,8 +1,10 @@
 import { useState } from 'react'
 
-import type { MyReviewEntry } from '@bookdock/shared'
+import type { ArchivePage, MyReviewEntry } from '@bookdock/shared'
 
 import Modal from '@/components/ui/Modal'
+import QueryErrorState from '@/components/ui/QueryErrorState'
+import ArchivePager from '@/features/profile/components/ArchivePager'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { useMyReviews } from '../hooks/useReviews'
@@ -13,6 +15,7 @@ import StarRating from './StarRating'
 function statusBadge(entry: MyReviewEntry, t: (key: string) => string) {
   const map: Record<MyReviewEntry['sourceStatus'], string> = {
     ok: t('review.sourceOk'),
+    unavailable: t('profileArchive.sourceUnavailable'),
     private: t('review.visibilityPrivate'),
     trashed: t('review.sourceTrashed'),
     deleted: t('review.sourceDeleted'),
@@ -32,14 +35,21 @@ function statusBadge(entry: MyReviewEntry, t: (key: string) => string) {
   )
 }
 
-export default function MyReviewsSection() {
+interface MyReviewsSectionProps {
+  page?: number
+  onPageChange?: (page: number) => void
+  archive?: ArchivePage<MyReviewEntry>
+  publicView?: boolean
+}
+
+export default function MyReviewsSection({ page = 1, onPageChange, archive, publicView = false }: MyReviewsSectionProps = {}) {
   const _ = useTranslation()
-  const query = useMyReviews()
+  const query = useMyReviews(!publicView, page)
   const [openId, setOpenId] = useState<string | null>(null)
-  const entries = query.data?.data.entries ?? []
+  const entries = (archive ?? query.data?.data)?.entries ?? []
   const open = entries.find((entry) => entry.review.id === openId) ?? null
 
-  if (query.isPending) {
+  if (!publicView && query.isPending) {
     return (
       <div className="animate-pulse space-y-2 rounded-2xl border border-stone-200/80 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <div className="h-4 w-32 rounded bg-stone-500/15" />
@@ -47,13 +57,12 @@ export default function MyReviewsSection() {
       </div>
     )
   }
-  if (query.isError) return null
-  if (entries.length === 0) return null
+  if (!publicView && query.isError) return <QueryErrorState isRetrying={query.isFetching} onRetry={() => void query.refetch()} />
 
   return (
-    <section aria-label={_('review.myReviews')} className="rounded-2xl border border-stone-200/80 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+    <section aria-label={_(publicView ? 'profileArchive.sharedReviews' : 'review.myReviews')} className="rounded-2xl border border-stone-200/80 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
       <h2 className="mb-3 text-sm font-semibold tracking-tight text-stone-900 sm:text-base dark:text-stone-100">
-        {_('review.myReviews')} · <span className="tabular-nums font-normal text-stone-400">{entries.length}</span>
+        {_(publicView ? 'profileArchive.sharedReviews' : 'review.myReviews')}
       </h2>
       <ul className="space-y-2">
         {entries.map((entry) => (
@@ -79,6 +88,8 @@ export default function MyReviewsSection() {
           </li>
         ))}
       </ul>
+      {entries.length === 0 && <p className="text-sm text-stone-500">{_('review.noReviews')}</p>}
+      {onPageChange && <ArchivePager page={page} hasMore={(archive ?? query.data?.data)?.hasMore ?? false} disabled={!publicView && query.isFetching} onChange={onPageChange} />}
       {open && (
         <Modal title={open.workTitle ?? _('review.sourceGoneTitle')} onClose={() => setOpenId(null)} closeLabel={_('library.close')} size="xl">
           <div className="mb-2">{statusBadge(open, _)}</div>

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import type {
+  ArchiveQuery,
   MyReviewEntry,
   Review,
   ReviewAuthor,
@@ -374,16 +375,18 @@ export async function deleteReview(userId: string, id: string) {
  * gone: the personal entry that stays reachable after a permanent source
  * delete. Private-anchored rows always report `private`.
  */
-export async function myReviews(userId: string): Promise<{ entries: MyReviewEntry[] }> {
+export async function myReviews(userId: string, query: ArchiveQuery = { page: 1, pageSize: 20 }) {
   const db = getDb()
   const rows = db
     .select()
     .from(bookReviews)
     .where(eq(bookReviews.userId, userId))
     .orderBy(desc(bookReviews.updatedAt), desc(bookReviews.id))
+    .limit(query.pageSize + 1)
+    .offset((query.page - 1) * query.pageSize)
     .all()
   const entries: MyReviewEntry[] = await Promise.all(
-    rows.map(async (row) => {
+    rows.slice(0, query.pageSize).map(async (row) => {
       if (!row.sourceLibraryId || !row.sourceLibraryBookId) {
         const work = row.privateLibraryBookId
           ? db.select().from(libraryBooks).where(eq(libraryBooks.id, row.privateLibraryBookId)).get()
@@ -418,10 +421,42 @@ export async function myReviews(userId: string): Promise<{ entries: MyReviewEntr
       }
       return {
         review: await projectReview(userId, row, false),
-        sourceStatus: work.deletedAt ? ('trashed' as const) : ('ok' as const),
+        sourceStatus: work.deletedAt ? ('trashed' as const) : workTitle === null ? ('unavailable' as const) : ('ok' as const),
         workTitle,
       }
     }),
   )
-  return { entries }
+  return { entries, page: query.page, hasMore: rows.length > query.pageSize }
+}
+
+export async function readerProfile(viewerId: string | null, authorId: string, query: ArchiveQuery) {
+  const db = getDb()
+  const author = db.select({ id: users.id, name: users.username, avatarKey: users.avatarKey })
+    .from(users).where(eq(users.id, authorId)).get()
+  if (!author) throw new AppError('REVIEW_NOT_FOUND')
+  if (viewerId === authorId) return { author, reviews: await myReviews(authorId, query) }
+  const entries: MyReviewEntry[] = []
+  const skip = (query.page - 1) * query.pageSize
+  let visible = 0
+  let offset = 0
+  // ACL filtering precedes pagination; bounded batches avoid loading the archive.
+  while (entries.length <= query.pageSize) {
+    const rows = db.select().from(bookReviews)
+      .where(and(eq(bookReviews.userId, authorId), eq(bookReviews.visibility, 'shared')))
+      .orderBy(desc(bookReviews.updatedAt), desc(bookReviews.id)).limit(50).offset(offset).all()
+    for (const row of rows) {
+      if (!row.sourceLibraryId || !row.sourceLibraryBookId) continue
+      try {
+        const read = await assertSourceWorkReadable(viewerId, row.sourceLibraryId, row.sourceLibraryBookId)
+        if (visible++ < skip) continue
+        entries.push({ review: await projectReview(viewerId, row, read.relation === 'owner' || read.relation === 'admin', { libraryName: read.library.name }), sourceStatus: 'ok', workTitle: read.work.title })
+        if (entries.length > query.pageSize) break
+      } catch (error) {
+        if (!(error instanceof AppError)) throw error
+      }
+    }
+    if (rows.length < 50) break
+    offset += rows.length
+  }
+  return { author, reviews: { entries: entries.slice(0, query.pageSize), page: query.page, hasMore: entries.length > query.pageSize } }
 }
