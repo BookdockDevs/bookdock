@@ -118,7 +118,7 @@ export default function WebDavImportBrowser({
       const cached = getCachedBrowserState()
       const cachedConn = cached.lastConnectionId ? connections.find((c) => c.id === cached.lastConnectionId) : undefined
       const currentSelectedConn = selectedConnectionId ? connections.find((c) => c.id === selectedConnectionId) : undefined
-      const defaultConn = connections.find((c) => c.isDefault) || connections[0]
+      const defaultConn = connections[0]
       const targetConn = currentSelectedConn || cachedConn || defaultConn
 
       if (!selectedConnectionId || targetConn.id !== selectedConnectionId) {

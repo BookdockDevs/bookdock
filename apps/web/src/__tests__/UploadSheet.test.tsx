@@ -360,7 +360,7 @@ describe('UploadSheet', () => {
     mockUseStorageConnections.mockReturnValue({
       data: {
         data: [
-          { id: 'conn_1', name: 'My NAS', provider: 'webdav', isDefault: true },
+          { id: 'conn_1', name: 'My NAS', provider: 'webdav' },
         ],
       },
       isLoading: false,
@@ -412,5 +412,25 @@ describe('UploadSheet', () => {
 
     expect(addFiles).toHaveBeenCalled()
     expect(localStorage.getItem('bookdock:last_upload_source')).toBe('local')
+  })
+
+  it('flips the preview to local while files hover, before any drop', () => {
+    localStorage.setItem('bookdock:last_upload_source', 'conn_1')
+    mockUseUploadBooks.mockReturnValue(uploadOverrides({}))
+    mockUseStorageConnections.mockReturnValue({
+      data: {
+        data: [
+          { id: 'conn_1', name: 'My NAS', provider: 'webdav' },
+        ],
+      },
+      isLoading: false,
+    })
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /My NAS/ })).toBeTruthy()
+
+    fireEvent.dragOver(document.body, { dataTransfer: { types: ['Files'] } })
+    expect(screen.getByRole('button', { name: /library.uploadSourceLocal/ })).toBeTruthy()
+    // Hover alone must not persist: cancelling the drag keeps the preference.
+    expect(localStorage.getItem('bookdock:last_upload_source')).toBe('conn_1')
   })
 })

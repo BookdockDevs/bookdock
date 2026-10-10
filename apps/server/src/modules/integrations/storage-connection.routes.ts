@@ -16,7 +16,6 @@ import {
   importStorageConnectionBooks,
   listStorageConnectionFiles,
   listStorageConnections,
-  setDefaultStorageConnection,
   testDirectStorageConnection,
   testStorageConnection,
   updateStorageConnection,
@@ -91,15 +90,6 @@ storageConnectionRoutes.delete('/:id', async (c) => {
   const id = c.req.param('id')
   deleteStorageConnection(user.id, id)
   return c.json({ data: { success: true } }, 200)
-})
-
-storageConnectionRoutes.post('/:id/default', async (c) => {
-  const user = c.get('user')
-  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
-
-  const id = c.req.param('id')
-  const data = setDefaultStorageConnection(user.id, id)
-  return c.json({ data }, 200)
 })
 
 storageConnectionRoutes.post('/:id/test', async (c) => {

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { migrateTestBaseWithStorage as migrate } from '../../db/migration-stage'
 import { Hono } from 'hono'
 import { rm } from 'node:fs/promises'
 import { beforeEach, describe, expect, it, vi } from 'vitest'

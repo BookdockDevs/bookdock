@@ -7,6 +7,7 @@ All notable changes to Bookdock are documented here.
 ### Added
 
 - External storage connections (WebDAV NAS, cloud drives, self-hosted servers): save multiple connections, test reachability, and browse plus batch-import EPUB/TXT directly from the upload dialog. New settings sections for connection management and an integrations roadmap. Server API under `/api/v1/integrations/storage-connections` and `/api/v1/integrations/webdav`.
+- Tiered external storage backend (owner-only): point book storage at a WebDAV connection with a bounded local cache. New books land locally and archive asynchronously; covers always stay local; evicted books stream back on first open. Settings gains a storage dashboard, one-click cache clearing, historical-book migration with pause/resume, restore-to-local with missing-file guards, and connection probing before switching. Server API under `/api/v1/integrations/storage-backend`.
 
 ### Fixed
 
@@ -16,6 +17,7 @@ All notable changes to Bookdock are documented here.
 ### Upgrade notes
 
 - Migration 0042 adds the `storage_connections` table. It applies automatically on boot and, like earlier migrations, cannot be undone in place.
+- Migration 0043 adds storage backend settings, blob storage tiers and the `storage_transfer_tasks` queue. It applies automatically on boot and cannot be undone in place. Books evicted to remote storage stream back on first open.
 
 ## [0.4.4] - 2026-10-07
 
@@ -650,6 +652,7 @@ All notable changes to Bookdock are documented here.
 #### 新增
 
 - 外部存储连接（WebDAV NAS、网盘、自建服务器）：可保存多个连接并测试连通性，直接在上传弹窗里浏览远端目录、批量导入 EPUB/TXT。设置页新增连接管理与集成路线图分区。服务端新增 `/api/v1/integrations/storage-connections` 与 `/api/v1/integrations/webdav` 接口。
+- 分层外部存储后端（仅所有者）：把书籍存储指向 WebDAV 连接，配有限本地缓存。新书先落本地再异步归档；封面常驻本地；被淘汰的书首次打开时回流。设置页新增存储仪表盘、一键清缓存、可暂停/恢复的历史迁移、带缺文件守卫的本地还原、切换前探测。服务端新增 `/api/v1/integrations/storage-backend` 接口。
 
 #### 修复
 
@@ -659,6 +662,7 @@ All notable changes to Bookdock are documented here.
 #### 升级说明
 
 - 迁移 0042 新增 `storage_connections` 表。随启动自动执行，与此前迁移一样不能原地撤销。
+- 迁移 0043 新增存储后端设置、文件存储分层和 `storage_transfer_tasks` 队列表。随启动自动执行，不能原地撤销。已淘汰到远端的书首次打开会自动回流（稍慢一次）。
 
 ### [0.4.4] - 2026-10-07
 

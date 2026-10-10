@@ -26,7 +26,6 @@ const sampleConnections = [
     endpoint: 'https://dav.jianguoyun.com/dav/',
     username: 'user1',
     basePath: '/books',
-    isDefault: true,
     hasSecrets: true,
     createdAt: 1000,
     updatedAt: 1000,
@@ -38,7 +37,6 @@ const sampleConnections = [
     endpoint: 'http://nas.local:5005',
     username: 'nasuser',
     basePath: '/',
-    isDefault: false,
     hasSecrets: true,
     createdAt: 2000,
     updatedAt: 2000,
@@ -79,15 +77,14 @@ describe('StorageConnectionsSection', () => {
     })
   })
 
-  it('renders connection list with details and badges', async () => {
+  it('renders connection list with details', async () => {
     renderSection()
 
     await waitFor(() => {
       expect(screen.getByText('坚果云')).toBeInTheDocument()
       expect(screen.getByText('家庭 NAS')).toBeInTheDocument()
     })
-    expect(screen.getByText('默认')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /设为默认/ })).toBeInTheDocument()
+    expect(screen.getByText('https://dav.jianguoyun.com/dav/')).toBeInTheDocument()
   })
 
   it('triggers connection test and shows latency', async () => {
@@ -112,21 +109,6 @@ describe('StorageConnectionsSection', () => {
         key: 'settings.storageConnectionsTestSuccess',
       }),
     )
-  })
-
-  it('sets non-default connection as default', async () => {
-    renderSection()
-
-    await waitFor(() => {
-      expect(screen.getByText('家庭 NAS')).toBeInTheDocument()
-    })
-
-    const setDefaultBtn = screen.getByRole('button', { name: /设为默认/ })
-    fireEvent.click(setDefaultBtn)
-
-    await waitFor(() => {
-      expect(apiPost).toHaveBeenCalledWith('/integrations/storage-connections/conn_2/default', {})
-    })
   })
 
   it('deletes connection upon confirmation', async () => {
@@ -194,7 +176,7 @@ describe('StorageConnectionsSection', () => {
     fireEvent.click(modalTestBtn)
 
     await waitFor(() => {
-      expect(apiPost).toHaveBeenCalledWith('/integrations/storage-connections/test', expect.objectContaining({
+      expect(apiPost).toHaveBeenCalledWith('/integrations/storage-connections/conn_1/test', expect.objectContaining({
         endpoint: 'https://dav.jianguoyun.com/dav/',
         username: 'user1',
       }))

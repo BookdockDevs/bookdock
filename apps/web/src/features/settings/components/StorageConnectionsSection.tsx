@@ -1,19 +1,19 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import type { StorageConnectionRes } from '@bookdock/shared'
 
 import {
   useCreateStorageConnection,
   useDeleteStorageConnection,
-  useSetDefaultStorageConnection,
   useStorageConnections,
   useTestDirectStorageConnection,
   useTestStorageConnection,
   useUpdateStorageConnection,
 } from '@/api/hooks/useStorageConnections'
+import { useStorageBackendConfig } from '@/api/hooks/useStorageBackend'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
-import Toggle from '@/components/ui/Toggle'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
@@ -23,15 +23,6 @@ import SettingsCard from './SettingsCard'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import SettingsFormField from './SettingsFormField'
 import { settingsFormClass, settingsInputClass } from './settingsForm'
-
-function CheckCircleIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <polyline points="16 10 11 15 8 12" />
-    </svg>
-  )
-}
 
 function EditIcon() {
   return (
@@ -49,6 +40,22 @@ function TrashIcon() {
   )
 }
 
+// Row mark per storage provider, mirroring how file managers badge each
+// service (DAV / 115 / Alist …). Only webdav exists today; adding a type
+// means adding one entry here, row structure stays untouched. Brand marks
+// with their own colors can additionally override the tile background.
+const PROVIDER_MARK: Record<string, { label: string; mark: ReactNode }> = {
+  webdav: {
+    label: 'WebDAV',
+    mark: (
+      // Italic glyphs lean right, so nudge 1px left for optical centering.
+      <span className="-translate-x-px text-[10px] font-black italic leading-none tracking-tighter text-stone-700 dark:text-stone-200">
+        DAV
+      </span>
+    ),
+  },
+}
+
 interface EditModalState {
   open: boolean
   mode: 'add' | 'edit'
@@ -61,7 +68,6 @@ export default function StorageConnectionsSection() {
   const connections = connectionsRes?.data ?? []
 
   const deleteMutation = useDeleteStorageConnection()
-  const setDefaultMutation = useSetDefaultStorageConnection()
   const testMutation = useTestStorageConnection()
 
   const [modalState, setModalState] = useState<EditModalState>({ open: false, mode: 'add' })
@@ -85,14 +91,6 @@ export default function StorageConnectionsSection() {
       notify.success({ key: 'settings.storageConnectionsDeleteSuccess' })
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'settings.storageConnectionsDeleteFailed'))
-    }
-  }
-
-  async function handleSetDefault(conn: StorageConnectionRes) {
-    try {
-      await setDefaultMutation.mutateAsync(conn.id)
-    } catch (err) {
-      notify.error(getUserErrorNotification(err, 'settings.storageConnectionsSaveFailed'))
     }
   }
 
@@ -181,19 +179,24 @@ export default function StorageConnectionsSection() {
               return (
                 <div
                   key={conn.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-stone-200/80 bg-stone-50/50 p-3 transition-colors hover:border-stone-300 dark:border-stone-800/80 dark:bg-stone-900/40 dark:hover:border-stone-700"
+                  className="group flex items-center gap-3 rounded-xl border border-stone-200/80 bg-stone-50/50 p-3 transition-colors hover:border-stone-300 dark:border-stone-800/80 dark:bg-stone-900/40 dark:hover:border-stone-700"
                 >
+                  <span
+                    title={PROVIDER_MARK[conn.provider]?.label ?? conn.provider}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400"
+                  >
+                    {PROVIDER_MARK[conn.provider]?.mark ?? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <rect width="20" height="7" x="2" y="3" rx="2" />
+                        <rect width="20" height="7" x="2" y="14" rx="2" />
+                        <line x1="6" x2="6.01" y1="6.5" y2="6.5" />
+                        <line x1="6" x2="6.01" y1="17.5" y2="17.5" />
+                      </svg>
+                    )}
+                  </span>
                   <div className="min-w-0 flex-1 space-y-0.5">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm text-stone-900 dark:text-stone-100 truncate">{conn.name}</span>
-                      <span className="inline-flex items-center rounded bg-stone-200/50 px-1.5 py-0.5 text-[10px] font-mono text-stone-500 dark:bg-stone-800/60 dark:text-stone-400">
-                        WebDAV
-                      </span>
-                      {conn.isDefault && (
-                        <span className="inline-flex items-center rounded border border-stone-200 px-1.5 py-0.5 text-[10px] text-stone-500 dark:border-stone-700 dark:text-stone-400">
-                          {_('settings.storageConnectionsDefaultBadge') || '默认'}
-                        </span>
-                      )}
+                      <span className="font-medium text-sm text-stone-900 dark:text-stone-100 truncate" title={conn.name}>{conn.name}</span>
                       {testRes?.success && (
                         <span
                           className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
@@ -215,20 +218,7 @@ export default function StorageConnectionsSection() {
                     </p>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-1">
-                    {!conn.isDefault && (
-                      <button
-                        type="button"
-                        onClick={() => void handleSetDefault(conn)}
-                        disabled={setDefaultMutation.isPending}
-                        aria-label={_('settings.storageConnectionsSetDefault') || '设为默认'}
-                        title={_('settings.storageConnectionsSetDefault') || '设为默认'}
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                      >
-                        <CheckCircleIcon />
-                      </button>
-                    )}
-
+                  <div className="flex shrink-0 items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                     <button
                       type="button"
                       onClick={() => void handleTest(conn)}
@@ -279,38 +269,69 @@ export default function StorageConnectionsSection() {
   )
 }
 
-interface StorageConnectionDialogProps {
+export interface StorageConnectionDialogProps {
   mode: 'add' | 'edit'
   connection?: StorageConnectionRes
   onClose: () => void
+  onSuccess?: (connection: StorageConnectionRes) => void
 }
 
-function StorageConnectionDialog({ mode, connection, onClose }: StorageConnectionDialogProps) {
+export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }: StorageConnectionDialogProps) {
   const _ = useTranslation()
   const createMutation = useCreateStorageConnection()
   const updateMutation = useUpdateStorageConnection()
   const directTestMutation = useTestDirectStorageConnection()
+  const byIdTestMutation = useTestStorageConnection()
 
   const [name, setName] = useState(connection?.name || '')
   const [endpoint, setEndpoint] = useState(connection?.endpoint || '')
   const [username, setUsername] = useState(connection?.username || '')
   const [password, setPassword] = useState('')
   const [basePath, setBasePath] = useState(connection?.basePath || '')
-  const [isDefault, setIsDefault] = useState(connection?.isDefault || false)
   const [testLatency, setTestLatency] = useState<number | null>(null)
 
   const isSaving = createMutation.isPending || updateMutation.isPending
-  const isTesting = directTestMutation.isPending
+  const isTesting = directTestMutation.isPending || byIdTestMutation.isPending
+
+  // Editing the connection the storage backend is actively using takes
+  // effect immediately on save — nudge toward testing when credentials changed.
+  const backendConfig = useStorageBackendConfig({
+    enabled: mode === 'edit' && !!connection,
+  }).data?.data
+  const credsChanged =
+    endpoint.trim() !== (connection?.endpoint || '') ||
+    username.trim() !== (connection?.username || '') ||
+    password !== '' ||
+    (basePath.trim() || '/') !== (connection?.basePath || '/')
+  const showActiveBackendHint =
+    mode === 'edit' &&
+    !!connection &&
+    !!backendConfig?.enabled &&
+    backendConfig.connectionId === connection.id &&
+    credsChanged
 
   async function handleTest() {
     setTestLatency(null)
     try {
-      const res = await directTestMutation.mutateAsync({
-        endpoint: endpoint.trim(),
-        username: username.trim(),
-        password: password ? password : undefined,
-        basePath: basePath.trim() || '/',
-      })
+      // Edit mode tests against the stored connection: blank password falls
+      // back to the saved secret server-side, so testing no longer forces
+      // re-entering it. Add mode has nothing stored, test the raw fields.
+      const res = mode === 'edit' && connection
+        ? await byIdTestMutation.mutateAsync({
+          id: connection.id,
+          body: {
+            endpoint: endpoint.trim(),
+            username: username.trim(),
+            ...(password ? { password } : {}),
+            basePath: basePath.trim() || '/',
+          },
+        })
+        : await directTestMutation.mutateAsync({
+          endpoint: endpoint.trim(),
+          username: username.trim(),
+          password: password ? password : undefined,
+          basePath: basePath.trim() || '/',
+        })
       const latency = res.data.latencyMs
       setTestLatency(latency)
       notify.success({
@@ -333,15 +354,15 @@ function StorageConnectionDialog({ mode, connection, onClose }: StorageConnectio
     const effectiveBasePath = basePath.trim() || '/'
     try {
       if (mode === 'add') {
-        await createMutation.mutateAsync({
+        const res = await createMutation.mutateAsync({
           name: effectiveName,
           provider: 'webdav',
           endpoint: endpoint.trim(),
           username: username.trim(),
           password: password ? password : undefined,
           basePath: effectiveBasePath,
-          isDefault,
         })
+        if (res?.data) onSuccess?.(res.data)
       } else if (connection) {
         await updateMutation.mutateAsync({
           id: connection.id,
@@ -351,7 +372,6 @@ function StorageConnectionDialog({ mode, connection, onClose }: StorageConnectio
             username: username.trim(),
             password: password ? password : undefined,
             basePath: effectiveBasePath,
-            isDefault,
           },
         })
       }
@@ -454,14 +474,25 @@ function StorageConnectionDialog({ mode, connection, onClose }: StorageConnectio
           />
         </SettingsFormField>
 
-        <div className="pt-0.5">
-          <Toggle
-            label={_('settings.storageConnectionsIsDefault') || '设为默认'}
-            checked={isDefault}
-            onChange={setIsDefault}
-            disabled={isSaving}
-          />
-        </div>
+        {showActiveBackendHint && (
+          <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 p-3.5 dark:border-amber-900/50 dark:bg-amber-950/20">
+            <div className="flex items-start gap-2 text-xs text-amber-800 dark:text-amber-300">
+              <svg className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                <line x1="12" x2="12" y1="9" y2="13" />
+                <line x1="12" x2="12.01" y1="17" y2="17" />
+              </svg>
+              <div>
+                <div className="font-semibold">
+                  {_('settings.storageConnectionActiveHintTitle') || '正在使用的存储连接'}
+                </div>
+                <div className="mt-0.5 text-xs leading-relaxed text-amber-700 dark:text-amber-300/90">
+                  {_('settings.storageConnectionActiveHintMsg') || '修改地址或账号后，建议先点地址栏右侧按钮测试连通性。'}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
           <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={isSaving}>

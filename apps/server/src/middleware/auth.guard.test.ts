@@ -9,7 +9,7 @@ vi.hoisted(() => {
 
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../db/migration-stage'
+import { migrateTestBaseWithStorage as migrate } from '../db/migration-stage'
 import { eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 

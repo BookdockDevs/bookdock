@@ -18,6 +18,7 @@ import { settings, storageConnections } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { WebDavClient } from '../../lib/webdav'
 import { AppError } from '../../middleware/error'
+import { resetStorage } from '../../storage'
 import { assertUserUploadAllowed, getInstanceSettings } from '../auth/auth.service'
 import { uploadBook, uploadCatalogBook } from '../books/books.service'
 import { isTitleNormalizeEnabled } from '../settings/settings.service'
@@ -74,7 +75,7 @@ export function listStorageConnections(userId: string): StorageConnectionRes[] {
     .select()
     .from(storageConnections)
     .where(eq(storageConnections.userId, userId))
-    .orderBy(desc(storageConnections.isDefault), desc(storageConnections.createdAt))
+    .orderBy(desc(storageConnections.createdAt))
     .all()
 
   return rows.map((row) => ({
@@ -84,7 +85,6 @@ export function listStorageConnections(userId: string): StorageConnectionRes[] {
     endpoint: row.endpoint,
     username: row.username,
     basePath: row.basePath,
-    isDefault: row.isDefault,
     hasSecrets: Boolean(row.encryptedPassword),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -110,7 +110,6 @@ export function getStorageConnection(userId: string, id: string): StorageConnect
     endpoint: row.endpoint,
     username: row.username,
     basePath: row.basePath,
-    isDefault: row.isDefault,
     hasSecrets: Boolean(row.encryptedPassword),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -119,20 +118,6 @@ export function getStorageConnection(userId: string, id: string): StorageConnect
 
 export function createStorageConnection(userId: string, req: CreateStorageConnectionReq): StorageConnectionRes {
   const db = getDb()
-  const existing = db
-    .select({ id: storageConnections.id })
-    .from(storageConnections)
-    .where(eq(storageConnections.userId, userId))
-    .all()
-
-  const shouldBeDefault = req.isDefault ?? existing.length === 0
-
-  if (shouldBeDefault && existing.length > 0) {
-    db.update(storageConnections)
-      .set({ isDefault: false })
-      .where(eq(storageConnections.userId, userId))
-      .run()
-  }
 
   const encryptedPassword = req.password && req.password.trim().length > 0
     ? encryptPassword(req.password.trim())
@@ -150,7 +135,7 @@ export function createStorageConnection(userId: string, req: CreateStorageConnec
     username: req.username.trim(),
     encryptedPassword,
     basePath: req.basePath?.trim() || '/',
-    isDefault: shouldBeDefault,
+    isDefault: false,
     createdAt: now,
     updatedAt: now,
   }).run()
@@ -170,13 +155,6 @@ export function updateStorageConnection(userId: string, id: string, req: UpdateS
     throw new AppError('STORAGE_CONNECTION_NOT_FOUND', 'Storage connection not found')
   }
 
-  if (req.isDefault) {
-    db.update(storageConnections)
-      .set({ isDefault: false })
-      .where(eq(storageConnections.userId, userId))
-      .run()
-  }
-
   let encryptedPassword = existing.encryptedPassword
   if (req.password !== undefined) {
     if (req.password.trim().length > 0) {
@@ -193,11 +171,14 @@ export function updateStorageConnection(userId: string, id: string, req: UpdateS
       username: req.username !== undefined ? req.username.trim() : existing.username,
       encryptedPassword,
       basePath: req.basePath !== undefined ? req.basePath.trim() || '/' : existing.basePath,
-      isDefault: req.isDefault !== undefined ? req.isDefault : existing.isDefault,
       updatedAt: Date.now(),
     })
     .where(and(eq(storageConnections.id, id), eq(storageConnections.userId, userId)))
     .run()
+
+  // The tiered driver caches the WebDAV client built from this row;
+  // drop the cache so the next read picks up the new endpoint/credentials.
+  resetStorage()
 
   return getStorageConnection(userId, id)
 }
@@ -218,46 +199,8 @@ export function deleteStorageConnection(userId: string, id: string): void {
     .where(and(eq(storageConnections.id, id), eq(storageConnections.userId, userId)))
     .run()
 
-  if (existing.isDefault) {
-    const nextFirst = db
-      .select({ id: storageConnections.id })
-      .from(storageConnections)
-      .where(eq(storageConnections.userId, userId))
-      .orderBy(desc(storageConnections.createdAt))
-      .get()
-
-    if (nextFirst) {
-      db.update(storageConnections)
-        .set({ isDefault: true })
-        .where(eq(storageConnections.id, nextFirst.id))
-        .run()
-    }
-  }
-}
-
-export function setDefaultStorageConnection(userId: string, id: string): StorageConnectionRes {
-  const db = getDb()
-  const existing = db
-    .select({ id: storageConnections.id })
-    .from(storageConnections)
-    .where(and(eq(storageConnections.id, id), eq(storageConnections.userId, userId)))
-    .get()
-
-  if (!existing) {
-    throw new AppError('STORAGE_CONNECTION_NOT_FOUND', 'Storage connection not found')
-  }
-
-  db.update(storageConnections)
-    .set({ isDefault: false })
-    .where(eq(storageConnections.userId, userId))
-    .run()
-
-  db.update(storageConnections)
-    .set({ isDefault: true })
-    .where(and(eq(storageConnections.id, id), eq(storageConnections.userId, userId)))
-    .run()
-
-  return getStorageConnection(userId, id)
+  // Drop the cached driver so a deleted backend connection stops being used.
+  resetStorage()
 }
 
 function getWebDavClientForConnection(userId: string, id: string, override?: TestStorageConnectionReq): WebDavClient {

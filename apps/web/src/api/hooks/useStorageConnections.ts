@@ -55,17 +55,6 @@ export function useDeleteStorageConnection() {
   })
 }
 
-export function useSetDefaultStorageConnection() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (id: string) =>
-      apiPost<{ data: StorageConnectionRes }>(`/integrations/storage-connections/${id}/default`, {}),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: STORAGE_CONNECTIONS_KEY })
-    },
-  })
-}
-
 export function useTestDirectStorageConnection() {
   return useMutation({
     mutationFn: (body: TestDirectStorageConnectionReq) =>

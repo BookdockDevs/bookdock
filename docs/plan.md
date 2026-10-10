@@ -37,8 +37,10 @@ The following are intentionally excluded from this Web milestone: brightness con
 ## Medium term
 
 - Further EPUB/TXT quality improvements after the current TTS/AI queue: vertical-writing feasibility, annotation UX, and demand-driven settings coverage
-- Library organization: shelf grouping only when a real hierarchy need appears; batch metadata editing is not planned without concrete maintenance pain
-- JSON import/export after the backup data model is defined
+- Library organization: two-level shared categories and hierarchical subtree counts delivered in v0.4.3; batch metadata editing remains demand-driven
+- Rule JSON import/export: delivered for replacement rules and TOC presets in v0.4.3
+- Structured search expressions: delivered in v0.4.4
+- Reader idea discussions: source-bound public comments, replies and likes delivered in v0.4.4
 - Browser extension after the Web library and reader are stable: first milestone is a lightweight local EPUB/TXT reader with a flat local library, plus Bookdock Instance connection, drag-to-upload, and automatic opening by `bookId`; Web-only custom fonts/themes/TOC rules, annotations, AI, TTS, and web clipping remain out of scope.
 - Open API, feed, and note-taking integrations based on real consumers
 - Additional deployment examples where operational use justifies them
@@ -58,5 +60,6 @@ FTS5 is conditional: it will be considered only if real library scale shows that
 - Online book-source engines and rule marketplaces
 - PDF/OCR, MOBI/AZW3, and CBZ/CBR support
 - Kubernetes/Helm and complex self-healing orchestration
-- Social ratings, comments, and public shared shelves
+- Full public social networks, external community ratings/reviews, and public discovery feeds (source-bound idea discussion within shared libraries is supported as of v0.4.4)
 - An in-app backup center before its data scope, consistency, security, and rollback model are designed
+

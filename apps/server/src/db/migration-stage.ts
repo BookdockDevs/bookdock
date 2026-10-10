@@ -81,3 +81,23 @@ export function migrateBeforeBookRetirementIncluding(
     (entry) => entry.when < BOOK_RETIREMENT_TIMESTAMP || include.has(entry.tag),
   )
 }
+
+/**
+ * Unit-test base for suites that touch the storage backend tables
+ * (`instance` backend columns, `blobs` tiers, `storage_connections`,
+ * `storage_transfer_tasks`). The storage migrations sit after the
+ * retirement chain in journal order, so they cannot join the time-based
+ * base without breaking the drizzle `MAX(created_at)` watermark — they are
+ * pulled in explicitly by tag instead. Suites that drive the production
+ * migration chain itself (retirement/upgrade tests) must keep the pure
+ * time-based base.
+ */
+export function migrateTestBaseWithStorage(
+  db: Parameters<typeof migrate>[0],
+  options: Parameters<typeof migrate>[1],
+) {
+  return migrateBeforeBookRetirementIncluding(db, options, [
+    '0042_storage_connections',
+    '0043_storage_backend',
+  ])
+}

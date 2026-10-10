@@ -6,8 +6,8 @@ import { normalizeUsername } from '@bookdock/shared'
 import { getDb } from '../../db/client'
 import { annotations, books, bookTags, shelves, tags } from '../../db/legacy-book-schema'
 import {
-  aiBookIndexes, aiChunkEmbeddings, aiChunks, aiThreads, blobs, bookmarks, bookStates,
-  bookVersions, contentRevisions, highlights, ideas, instance, libraries,
+  aiBookIndexes, aiChunkEmbeddings, aiChunks, aiThreads, bookmarks, bookStates,
+  bookVersions, contentRevisions, highlights, ideas, libraries,
   libraryBookTags, libraryBookVersions, libraryBooks, libraryCategories, libraryMigrationLog, libraryTags,
   readingRecords, readingSessions, textReplacementOverrides, textReplacements,
 } from '../../db/schema'
@@ -111,9 +111,9 @@ export async function migratePrivateLibraries(): Promise<LibraryMigrationReport>
             blobKey: book.filePath, size: book.size,
             wordCount, chapterCount: chapters.length, createdAt: book.createdAt,
           }).run()
-          report.blobs += Number(tx.insert(blobs).values({ key: book.filePath, size: book.size, kind: 'book', createdAt: book.createdAt }).onConflictDoNothing().run().changes)
+          report.blobs += Number(tx.run(sql`INSERT OR IGNORE INTO "blobs" ("key", "size", "kind", "created_at") VALUES (${book.filePath}, ${book.size}, 'book', ${book.createdAt})`).changes)
           if (book.coverKey && coverSize !== null) {
-            report.blobs += Number(tx.insert(blobs).values({ key: book.coverKey, size: coverSize, kind: 'cover', createdAt: book.createdAt }).onConflictDoNothing().run().changes)
+            report.blobs += Number(tx.run(sql`INSERT OR IGNORE INTO "blobs" ("key", "size", "kind", "created_at") VALUES (${book.coverKey}, ${coverSize}, 'cover', ${book.createdAt})`).changes)
           }
           tx.insert(libraryBooks).values({
             id: libraryBookId, libraryId, userId: user.id, categoryId: null,
@@ -565,12 +565,20 @@ export async function seedInstance(): Promise<InstanceSeedReport> {
   const logId = createId('mlog')
   db.insert(libraryMigrationLog).values({ id: logId, batch: 'phase2-instance', status: 'started', details: {}, startedAt }).run()
 
-  const existing = db.select().from(instance).all()
+  // The instance row is read with an explicit legacy column list: this step
+  // runs before the storage-backend migration, so `select *` through the
+  // current schema would fail on databases that predate those columns.
+  const existing = db.all<{
+    ownerUserId: string
+    allowRegistration: number
+    allowGuestAccess: number
+    uploadMaxBytes: number | null
+  }>(sql`SELECT "owner_user_id" AS "ownerUserId", "allow_registration" AS "allowRegistration", "allow_guest_access" AS "allowGuestAccess", "upload_max_bytes" AS "uploadMaxBytes" FROM "instance"`)
   if (existing.length > 0) {
     const row = existing[0]!
     const report = {
-      created: false, ownerId: row.ownerUserId, allowRegistration: row.allowRegistration,
-      allowGuestAccess: row.allowGuestAccess, uploadMaxBytes: row.uploadMaxBytes,
+      created: false, ownerId: row.ownerUserId, allowRegistration: row.allowRegistration === 1,
+      allowGuestAccess: row.allowGuestAccess === 1, uploadMaxBytes: row.uploadMaxBytes,
     }
     db.update(libraryMigrationLog).set({
       status: 'completed', finishedAt: Date.now(), details: { ...report },
@@ -594,11 +602,9 @@ export async function seedInstance(): Promise<InstanceSeedReport> {
       allowGuestAccess: settings.get('allowGuestAccess') === 'true',
       uploadMaxBytes: settings.has('uploadMaxBytes') ? Number(settings.get('uploadMaxBytes')) : null,
     }
-    db.insert(instance).values({
-      id: 'instance', ownerUserId: owners[0]!.id,
-      allowRegistration: report.allowRegistration, allowGuestAccess: report.allowGuestAccess,
-      uploadMaxBytes: report.uploadMaxBytes, createdAt: startedAt, updatedAt: startedAt,
-    }).run()
+    // Explicit legacy column list for the same reason as above; the 0029
+    // operator switches default open, matching their migration defaults.
+    db.run(sql`INSERT INTO "instance" ("id", "owner_user_id", "allow_registration", "allow_guest_access", "upload_max_bytes", "allow_user_create_library", "allow_user_upload", "created_at", "updated_at") VALUES ('instance', ${owners[0]!.id}, ${report.allowRegistration ? 1 : 0}, ${report.allowGuestAccess ? 1 : 0}, ${report.uploadMaxBytes}, 1, 1, ${startedAt}, ${startedAt})`)
     db.update(libraryMigrationLog).set({
       status: 'completed', finishedAt: Date.now(), details: { ...report },
     }).where(eq(libraryMigrationLog.id, logId)).run()
@@ -708,7 +714,7 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
   }
   check('version-references', dangling === 0, `${dangling} unbound rows with a book`)
 
-  const instanceRows = db.select().from(instance).all()
+  const instanceRows = db.all<{ id: string }>(sql`SELECT "id" FROM "instance"`)
   check('instance', instanceRows.length === 1, `${instanceRows.length} instance rows`)
 
   return { pass: checks.every((c) => c.pass), checks }

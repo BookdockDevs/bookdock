@@ -9,7 +9,6 @@ export interface StorageConnectionRes {
   endpoint: string
   username: string
   basePath: string
-  isDefault: boolean
   hasSecrets: boolean
   createdAt: number
   updatedAt: number
@@ -22,7 +21,6 @@ export const createStorageConnectionSchema = z.object({
   username: z.string().trim().min(1, 'Username is required').max(200),
   password: z.string().max(500).optional(),
   basePath: z.string().trim().max(1000).optional(),
-  isDefault: z.boolean().optional(),
 })
 export type CreateStorageConnectionReq = z.infer<typeof createStorageConnectionSchema>
 
@@ -32,7 +30,6 @@ export const updateStorageConnectionSchema = z.object({
   username: z.string().trim().min(1).max(200).optional(),
   password: z.string().max(500).optional(),
   basePath: z.string().trim().max(1000).optional(),
-  isDefault: z.boolean().optional(),
 })
 export type UpdateStorageConnectionReq = z.infer<typeof updateStorageConnectionSchema>
 

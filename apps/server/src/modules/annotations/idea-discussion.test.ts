@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 
 import Database from 'better-sqlite3'
@@ -10,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as client from '../../db/client'
 import * as schema from '../../db/schema'
 import * as storage from '../../storage'
+import type { StorageDriver } from '../../storage/driver'
 import { IDEA_DISCUSSION_TAG, migrateBeforeBookRetirement } from '../../db/migration-stage'
 import { createAnnotation, deleteAnnotation, listAnnotations, searchAnnotations, updateAnnotation } from './annotations.service'
 import { deleteBook } from '../books/books.service'
@@ -32,6 +34,29 @@ describe('idea source authorization and discussion', () => {
     db = drizzle(sqlite, { schema })
     await client.runDatabaseMigrations(db)
     vi.spyOn(client, 'getDb').mockReturnValue(db)
+    // Isolate file I/O from the developer machine: without this, getStorage()
+    // resolves the real tiered driver from the local instance settings and
+    // delete paths probe the real WebDAV on every cache miss.
+    const files = new Map<string, Buffer>()
+    const driver: StorageDriver = {
+      async put(key, data) {
+        if (Buffer.isBuffer(data)) files.set(key, data)
+        else {
+          const chunks: Buffer[] = []
+          for await (const chunk of data) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+          files.set(key, Buffer.concat(chunks))
+        }
+      },
+      async get(key) {
+        const buf = files.get(key)
+        if (!buf) throw new Error(`missing blob: ${key}`)
+        return Readable.from(buf)
+      },
+      async delete(key) { files.delete(key) },
+      async exists(key) { return files.has(key) },
+      async size(key) { return files.get(key)?.length ?? 0 },
+    }
+    vi.spyOn(storage, 'getStorage').mockReturnValue(driver)
     for (const id of ['author', 'member', 'outsider', 'manager']) db.insert(schema.users).values({ id, username: id, createdAt: now }).run()
     for (const id of ['source', 'other-library']) db.insert(schema.libraries).values({ id, userId: 'manager', type: 'shared', name: id, visibility: 'public', createdAt: now, updatedAt: now }).run()
     db.insert(schema.libraries).values({ id: 'private', userId: 'author', type: 'private', name: 'private', createdAt: now, updatedAt: now }).run()

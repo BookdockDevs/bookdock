@@ -133,6 +133,26 @@ export default function UploadSheet({
     return conn?.name || (_('library.uploadSourceLocal') || '本地文件')
   }, [selectedSource, connections, _])
 
+  const selectedSourceRef = useRef(selectedSource)
+  selectedSourceRef.current = selectedSource
+
+  // A file drag opens the sheet via the global drag listener while the saved
+  // source may still point at a remote drive. Flip the preview to local as
+  // soon as files hover, so the sheet does not sit on the drive view waiting
+  // for the drop (the drop path flips too, as a second net). Intentionally
+  // visual-only: persisting happens on drop/success so cancelling the drag
+  // keeps the saved preference.
+  useEffect(() => {
+    if (!open) return
+    const onWindowDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files') && selectedSourceRef.current !== 'local') {
+        setSelectedSource('local')
+      }
+    }
+    window.addEventListener('dragover', onWindowDragOver)
+    return () => window.removeEventListener('dragover', onWindowDragOver)
+  }, [open])
+
   const sourceAnchor = sourceMenu.btnRef.current?.getBoundingClientRect()
   const sourceMenuWidth = Math.max(160, Math.min(240, (sourceAnchor?.width ?? 120) + 40))
   const sourceMenuPosition = useMemo((): SmartPosition | null => {
@@ -313,8 +333,8 @@ export default function UploadSheet({
             aria-haspopup="listbox"
             aria-expanded={sourceMenu.open}
             className={cn(
-              'flex items-center gap-1.5 rounded-lg border border-stone-200/90 bg-stone-50/80 px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs transition-colors hover:border-stone-300 hover:bg-stone-100 focus:outline-none dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300 dark:hover:bg-stone-750',
-              sourceMenu.open && 'border-stone-400 dark:border-stone-500',
+              'flex items-center gap-1.5 rounded-lg border border-stone-200/90 bg-stone-50/80 px-2.5 py-1 text-xs font-medium text-stone-700 shadow-2xs transition-colors hover:border-stone-300 hover:bg-stone-100 focus:outline-none dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-stone-100',
+              sourceMenu.open && 'border-stone-400 bg-stone-100 dark:border-stone-500 dark:bg-stone-700 dark:text-stone-100',
             )}
           >
             {selectedSource === 'local' ? (
@@ -484,7 +504,7 @@ export default function UploadSheet({
           setDragOver(false)
         }}
         className={
-          'group flex h-60 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed text-center transition-all duration-150 ' +
+          'group flex h-80 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed text-center transition-all duration-150 ' +
           (dragOver
             ? 'border-stone-500 bg-stone-100/80 dark:border-stone-400 dark:bg-stone-800/60'
             : 'border-stone-300 hover:border-stone-400 hover:bg-stone-50/50 dark:border-stone-700 dark:hover:border-stone-600 dark:hover:bg-stone-800/30')
@@ -525,7 +545,7 @@ export default function UploadSheet({
       </div>
 
       {items.length > 0 && (
-        <ul data-toast-obstacle="" className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">
+        <ul data-toast-obstacle="" className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
           {items.map((item) => {
             const key = statusLabel(item)
             const note = item.messageKey ? _(item.messageKey) : null

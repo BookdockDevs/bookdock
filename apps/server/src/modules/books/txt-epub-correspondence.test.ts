@@ -14,7 +14,7 @@ import type { BookUploadRes } from '@bookdock/shared'
 
 import * as client from '../../db/client'
 import * as schema from '../../db/schema'
-import { migrateBeforeBookRetirement } from '../../db/migration-stage'
+import { migrateTestBaseWithStorage } from '../../db/migration-stage'
 import { EpubParser } from '../../formats/epub'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
@@ -45,7 +45,7 @@ describe('private TXT/export correspondence', () => {
     sqlite = new Database(':memory:')
     sqlite.pragma('foreign_keys = ON')
     db = drizzle(sqlite, { schema })
-    migrateBeforeBookRetirement(db, { migrationsFolder: path.join(directory, '../../db/migrations') })
+    migrateTestBaseWithStorage(db, { migrationsFolder: path.join(directory, '../../db/migrations') })
     vi.spyOn(client, 'getDb').mockReturnValue(db)
     files = new Map()
     const driver: StorageDriver = {

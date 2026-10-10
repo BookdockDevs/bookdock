@@ -686,8 +686,8 @@ handler owns them inside the iframe.
 ```ts
 export interface StorageDriver {
   put(key: string, data: Buffer | Readable): Promise<void>
-  get(key: string): Promise<Readable>
-  getRange?(key: string, start: number, end?: number): Promise<Readable>
+  // range.end is inclusive, matching HTTP byte-range semantics
+  get(key: string, range?: { start: number; end: number }): Promise<Readable>
   delete(key: string): Promise<void>
   exists(key: string): Promise<boolean>
   size(key: string): Promise<number>
@@ -695,7 +695,7 @@ export interface StorageDriver {
 }
 ```
 
-Keys like `books/{bookId}/{filename}`, `covers/{id}.{ext}`. Current impl: `LocalFsDriver` (`DATA_DIR/files/`). S3/WebDAV implement the same interface and hot-swap without service changes.
+Keys like `books/{bookId}/{filename}`, `covers/{id}.{ext}`. Current impls: `LocalFsDriver` (`DATA_DIR/files/`) and `TieredStorageDriver` (`storage/tiered.ts`), selected per boot from the `instance` row: when the owner enables the external backend, book blobs tier across local disk and WebDAV (`local` → `synced` → `remote`, tracked on `blobs.storage_tier` with `lastAccessedAt` for LRU); covers stay strictly local and are never uploaded or evicted. Reads serve locally when present and otherwise stream the remote copy into cache through an atomic temp-file pipeline; `exists()` treats a `synced`/`remote` DB tier as present because the live PROPFIND probe is too flaky to gate reads — `get()` is the source of truth. New storage = implement the interface + register, no service changes.
 
 ### 3.3 FormatRegistry
 
@@ -764,11 +764,11 @@ visibility and membership remain unavailable.
 | `library_book_versions` | id, libraryId FK, libraryBookId FK (cascade), bookVersionId FK (restrict), kind (personal\|shared\|local), status, name, nullable metadata overrides, meta?, sourceLibraryId?, sourceLibraryBookVersionId?, sourceBaseVersionId?, sourceBaseRevisionId?, userId?, pinnedRevisionId?, pinnedAt?, guestReadable, createdAt, updatedAt | null override = inherit the work default; `meta` (empty = inherit) merges over the work-level `meta` and the parsed revision bookmeta; `status` (`published\|unlisted`) is the version-level hide, surfaced in UI as 隐藏/显示; source ids are plain text (no FK) so provenance survives source deletion, including the publish-time base used for push and collect-dedup decisions; `user_id` is the link creator (uploader/collector/forker) and the only per-version content right: a member on the upload lane may change the content of the versions they uploaded and nothing else, while a deleted account simply leaves the column dangling and the version falls back to managers-only — it is plain text for that reason, not a FK; `pinnedAt` pins a private card only; `guest_readable` is the per-listing anonymous switch and only takes effect inside a public library on a guest-enabled instance — one library's value never opens another library's copy of the same version |
 | `book_versions` | id (text PK, reuses the legacy book id for migrated A entries), format, size, createdAt, updatedAt | stable content identity shared across libraries; never merged by content hash |
 | `content_revisions` | id, bookVersionId FK (cascade), revisionNo, blobKey, size, wordCount?, chapterCount, createdAt | append-only history; unique (bookVersionId, revisionNo); readers and B pins resolve through these rows; content and machine-derived changes (chapters, parsed bookmeta) always append a row reusing the blob key, while hand-filled curation (title/author/bookmeta edits, tocRuleId, coverPaletteId) and recomputable derived caches (parsed-chapters warm, cover flags) refresh in place; current = max(revisionNo), B overrides with pinnedRevisionId |
-| `blobs` | key (text PK = storage key), size, kind (book\|cover), createdAt | physical-file registry; deletion only when no revision/cover references it |
+| `blobs` | key (text PK = storage key), size, kind (book\|cover), storageTier (local\|synced\|remote, default local), lastAccessedAt?, createdAt | physical-file registry; deletion only when no revision/cover references it; tier + lastAccessedAt drive the WebDAV LRU (covers stay local, never evicted) |
 | `library_categories` | id, libraryId FK (cascade), userId, name, parentId? self-FK (SET NULL), sortOrder, pinned, hidden?, createdAt, updatedAt | hierarchy allowed; sibling-name validation lives in service code, not in a DB constraint; `hidden` hides the subtree and every work under it (see Hidden boundary) |
 | `library_tags` | id, libraryId FK (cascade), userId, name, sortOrder, pinned, hidden?, createdAt, updatedAt | unique (libraryId, name); `hidden` hides every work carrying the tag (see Hidden boundary) |
 | `library_book_tags` | libraryBookId FK (cascade), tagId FK (cascade) | composite PK, library-scoped M2M |
-| `instance` | id (text PK, single fixed row), ownerUserId FK (restrict), allowRegistration, allowGuestAccess, uploadMaxBytes?, createdAt, updatedAt | exactly one row per deployment; null uploadMaxBytes = env default; sole source of instance ownership and configuration |
+| `instance` | id (text PK, single fixed row), ownerUserId FK (restrict), allowRegistration, allowGuestAccess, uploadMaxBytes?, allowUserCreateLibrary, allowUserUpload, storageBackendEnabled, storageBackendConnectionId FK → storage_connections (set null), storageBackendBasePath, storageBackendCacheMaxMb, storageBackendStatus, storageBackendLastTestedAt?, storageBackendLatencyMs?, createdAt, updatedAt | exactly one row per deployment; null uploadMaxBytes = env default; sole source of instance ownership and configuration; the storageBackend* columns are the tiered-storage switch (owner-only API), disabled = pure local disk |
 | `sessions` | id, userId FK (cascade), tokenHash (unique), createdAt, expiresAt | server-side login sessions; raw token in the cookie only; 30-day sliding expiry refreshed inside 7 days of expiry |
 | `library_migration_log` | id, batch, status, details (json), startedAt, finishedAt? | Data-migration ledger: one row per batch, completed batches are skipped on reruns |
 | `book_states` | userId FK (cascade), bookVersionId FK (cascade), readStatus, percent, cfi?, chapter?, lastReadAt?, readRevisionId?, updatedAt | composite PK (userId, bookVersionId); intervals/speed samples stay in storage files under the same dimension |
@@ -787,7 +787,7 @@ Private trash is stored on `library_books.deleted_at` and controlled by per-user
 - All ids are nanoid strings (from `lib/id.ts`), never auto-increment ints → prevents count leaks, multi-client friendliness.
 - Timestamps uniform INTEGER unix ms.
 - Single `db/client.ts` (WAL + foreign_keys ON); migrations via drizzle-kit (committed). The 0.2.0 release intentionally starts a new database baseline and does not support upgrading 0.1.0 data. The 0.2.1 release keeps that baseline and adds one forward migration for the tag order and TOC seed metadata. The 0.3.3 release adds the additive `0007_library_sort_timestamps.sql` migration for shelf/tag membership timestamps, pin flags, tag creation timestamps, and membership-touch triggers.
-- The schema migration path is append-only and represented by Drizzle metadata through `0018_library_access.sql` (including the `0008_library_foundation.sql` library/book/blob/identity/session structure, `0009_reading_entities.sql`, and later version-reference, revision, pin, annotation, and shared-library access migrations). Fresh databases apply the baseline followed by this chain. Startup also retains narrow idempotent guards for local databases whose consolidated migration ledger is ahead of the physical schema. The private-library data backfill runs inside startup (schema repairs first, backfill second, book-id retarget last); it is idempotent and ledger-gated, fresh installs skip it, and blocked databases fail loud instead of serving empty libraries. Docker and in-panel upgrades share this boot path, so both execute the backfill automatically.
+- The schema migration path is append-only and represented by Drizzle metadata through `0018_library_access.sql` (including the `0008_library_foundation.sql` library/book/blob/identity/session structure, `0009_reading_entities.sql`, and later version-reference, revision, pin, annotation, and shared-library access migrations). Migration `0042_storage_connections.sql` adds the user-scoped `storage_connections` table, and `0043_storage_backend.sql` adds the `instance` storage-backend columns, `blobs` tier columns, and the `storage_transfer_tasks` queue. Fresh databases apply the baseline followed by this chain. Startup also retains narrow idempotent guards for local databases whose consolidated migration ledger is ahead of the physical schema. The private-library data backfill runs inside startup (schema repairs first, backfill second, book-id retarget last); it is idempotent and ledger-gated, fresh installs skip it, and blocked databases fail loud instead of serving empty libraries. Docker and in-panel upgrades share this boot path, so both execute the backfill automatically.
 - **Migrations are additive-first** (ADR-25): schema changes prefer `ADD COLUMN … DEFAULT NULL`, new tables, and new indexes so an older app version can still run against a migrated database. A destructive transform requires a documented reason and is exactly the case the pre-update snapshot (see §9) protects. Additive is the guardrail; the snapshot is the seatbelt.
 
 ---
@@ -1007,7 +1007,7 @@ Single `config.ts`, zod-validated then `Object.freeze`:
 | `FONT_UPLOAD_MAX_BYTES` | `20971520` | max font upload (20MB) |
 | `AVATAR_UPLOAD_MAX_BYTES` | `5242880` | max avatar upload (5 MiB); GIF thumbnail output has a separate fixed 2 MiB limit |
 | `AUTH_RPM` | `5` | per-client-address + username sliding-window failed login attempt limit |
-| `STORAGE_DRIVER` | `localfs` | only driver implemented today; reserved seam for a second `StorageDriver` |
+| `STORAGE_DRIVER` | `localfs` | env seam for a second `StorageDriver`; the WebDAV tier (`TieredStorageDriver`) is selected per boot from the `instance` storage-backend columns instead, and takes precedence when the owner enables it |
 | `AI_PROVIDER` | `openai` | headless default only; used when the user has no stored AI profile |
 | `AI_BASE_URL` | provider catalog default | headless default only |
 | `AI_API_KEY` | — | headless default only |

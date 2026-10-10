@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { migrateTestBaseWithStorage as migrate } from '../../db/migration-stage'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 

@@ -33,6 +33,7 @@ import tocRuleRoutes from './modules/toc-rules/toc-rules.routes'
 import ttsRoutes from './modules/tts/tts.routes'
 import aiRoutes from './modules/ai/ai.routes'
 import storageConnectionRoutes from './modules/integrations/storage-connection.routes'
+import storageBackendRoutes from './modules/integrations/storage-backend.routes'
 import webdavRoutes from './modules/integrations/webdav.routes'
 import systemRoutes from './modules/system/system.routes'
 import internalRoutes from './modules/system/internal.routes'
@@ -82,6 +83,7 @@ app.route('/api/v1/toc-rules', tocRuleRoutes)
 app.route('/api/v1/tts', ttsRoutes)
 app.route('/api/v1/ai', aiRoutes)
 app.route('/api/v1/integrations/storage-connections', storageConnectionRoutes)
+app.route('/api/v1/integrations/storage-backend', storageBackendRoutes)
 app.route('/api/v1/integrations/webdav', webdavRoutes)
 
 // Serve the built web client (apps/web/dist) in production. Skipped in dev,

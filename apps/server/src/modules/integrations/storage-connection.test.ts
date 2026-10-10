@@ -11,7 +11,6 @@ vi.mock('./storage-connection.service', () => ({
   createStorageConnection: vi.fn(),
   updateStorageConnection: vi.fn(),
   deleteStorageConnection: vi.fn(),
-  setDefaultStorageConnection: vi.fn(),
   testDirectStorageConnection: vi.fn(),
   testStorageConnection: vi.fn(),
   listStorageConnectionFiles: vi.fn(),
@@ -49,7 +48,6 @@ describe('Storage connection routes', () => {
         endpoint: 'https://dav.test.com',
         username: 'user1',
         basePath: '/books',
-        isDefault: true,
         hasSecrets: true,
         createdAt: 1000,
         updatedAt: 1000,
@@ -73,7 +71,6 @@ describe('Storage connection routes', () => {
       endpoint: 'https://dav2.test.com',
       username: 'user2',
       basePath: '/',
-      isDefault: false,
       hasSecrets: true,
       createdAt: 2000,
       updatedAt: 2000,
@@ -127,7 +124,6 @@ describe('Storage connection routes', () => {
       endpoint: 'https://dav.test.com',
       username: 'user1',
       basePath: '/',
-      isDefault: true,
       hasSecrets: true,
       createdAt: 1000,
       updatedAt: 1000,
@@ -149,7 +145,6 @@ describe('Storage connection routes', () => {
       endpoint: 'https://dav.test.com',
       username: 'user1',
       basePath: '/',
-      isDefault: true,
       hasSecrets: true,
       createdAt: 1000,
       updatedAt: 2000,
@@ -178,29 +173,6 @@ describe('Storage connection routes', () => {
 
     expect(res.status).toBe(200)
     expect(storageService.deleteStorageConnection).toHaveBeenCalledWith('u1', 'conn_1')
-  })
-
-  it('POST /:id/default sets default connection', async () => {
-    vi.mocked(storageService.setDefaultStorageConnection).mockReturnValue({
-      id: 'conn_1',
-      name: 'Default Drive',
-      provider: 'webdav',
-      endpoint: 'https://dav.test.com',
-      username: 'user1',
-      basePath: '/',
-      isDefault: true,
-      hasSecrets: true,
-      createdAt: 1000,
-      updatedAt: 2000,
-    })
-
-    const app = createApp()
-    const res = await app.request('/api/v1/integrations/storage-connections/conn_1/default', {
-      method: 'POST',
-    })
-
-    expect(res.status).toBe(200)
-    expect(storageService.setDefaultStorageConnection).toHaveBeenCalledWith('u1', 'conn_1')
   })
 
   it('POST /test calls testDirectStorageConnection', async () => {

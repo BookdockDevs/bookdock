@@ -526,6 +526,8 @@ export const blobs = sqliteTable('blobs', {
   key: text('key').primaryKey(),
   size: integer('size').notNull(),
   kind: text('kind', { enum: ['book', 'cover'] }).notNull(),
+  storageTier: text('storage_tier', { enum: ['local', 'synced', 'remote'] }).notNull().default('local'),
+  lastAccessedAt: integer('last_accessed_at'),
   createdAt: integer('created_at').notNull(),
 })
 
@@ -585,9 +587,30 @@ export const instance = sqliteTable('instance', {
   // bypasses them (see isInstanceOwner + the upload/create gates).
   allowUserCreateLibrary: integer('allow_user_create_library', { mode: 'boolean' }).notNull().default(true),
   allowUserUpload: integer('allow_user_upload', { mode: 'boolean' }).notNull().default(true),
+  storageBackendEnabled: integer('storage_backend_enabled', { mode: 'boolean' }).notNull().default(false),
+  storageBackendConnectionId: text('storage_backend_connection_id').references(() => storageConnections.id, { onDelete: 'set null' }),
+  storageBackendBasePath: text('storage_backend_base_path').notNull().default('/Bookdock/storage'),
+  storageBackendCacheMaxMb: integer('storage_backend_cache_max_mb').notNull().default(2048),
+  storageBackendStatus: text('storage_backend_status', { enum: ['active', 'disabled', 'error'] }).notNull().default('disabled'),
+  storageBackendLastTestedAt: integer('storage_backend_last_tested_at'),
+  storageBackendLatencyMs: integer('storage_backend_latency_ms'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 })
+
+export const storageTransferTasks = sqliteTable('storage_transfer_tasks', {
+  id: text('id').primaryKey(),
+  blobKey: text('blob_key').notNull(),
+  taskType: text('task_type', { enum: ['archive', 'migrate', 'restore'] }).notNull(),
+  status: text('status', { enum: ['pending', 'processing', 'completed', 'failed'] }).notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  statusIdx: index('storage_transfer_tasks_status_idx').on(table.status),
+  blobKeyIdx: index('storage_transfer_tasks_blob_key_idx').on(table.blobKey),
+}))
 
 export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),
@@ -733,6 +756,8 @@ export const storageConnections = sqliteTable('storage_connections', {
   username: text('username').notNull(),
   encryptedPassword: text('encrypted_password'),
   basePath: text('base_path').notNull().default('/'),
+  // Legacy: the default-connection concept was removed (it only ever drove
+  // list ordering). The column stays so no data migration is needed.
   isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),

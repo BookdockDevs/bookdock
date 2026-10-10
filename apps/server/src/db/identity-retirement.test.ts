@@ -54,6 +54,16 @@ function makeLegacyIdentity() {
   // later migrations stay covered without touching this file.
   const cutoff = legacyIdentityCutoff()
   db.$client.exec(`DROP TABLE IF EXISTS storage_connections;
+    DROP TABLE IF EXISTS storage_transfer_tasks;
+    ALTER TABLE blobs DROP COLUMN storage_tier;
+    ALTER TABLE blobs DROP COLUMN last_accessed_at;
+    ALTER TABLE instance DROP COLUMN storage_backend_enabled;
+    ALTER TABLE instance DROP COLUMN storage_backend_connection_id;
+    ALTER TABLE instance DROP COLUMN storage_backend_base_path;
+    ALTER TABLE instance DROP COLUMN storage_backend_cache_max_mb;
+    ALTER TABLE instance DROP COLUMN storage_backend_status;
+    ALTER TABLE instance DROP COLUMN storage_backend_last_tested_at;
+    ALTER TABLE instance DROP COLUMN storage_backend_latency_ms;
     DROP TRIGGER idea_comments_deleted_author;
     DROP TABLE idea_comment_likes; DROP TABLE idea_likes; DROP TABLE idea_comments;
     ALTER TABLE ideas DROP COLUMN source_library_book_version_id;

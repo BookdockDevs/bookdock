@@ -10,6 +10,7 @@ import { log } from './lib/logger'
 import { pruneOldContentRevisions, purgeAllExpiredTrash } from './modules/books/books.service'
 import { purgeAllLibraryTrash } from './modules/libraries/catalog.service'
 import { interruptStaleAiGenerationRuns } from './modules/ai/ai.runs.service'
+import { recoverZombieTransferTasks } from './storage/tiered'
 
 const TRASH_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000
 
@@ -40,6 +41,7 @@ async function start() {
     log('info', 'database.migration.completed', { durationMs: Date.now() - migrationStartedAt })
     const interruptedRuns = interruptStaleAiGenerationRuns()
     if (interruptedRuns > 0) log('info', 'ai.generation.stale_runs_interrupted', { meta: { count: interruptedRuns } })
+    recoverZombieTransferTasks()
   } catch (err) {
     log('error', 'database.migration.failed', { durationMs: Date.now() - migrationStartedAt, error: err })
     process.exitCode = 1
