@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@mdxeditor/editor/style.css" layer(components);
 
 @custom-variant dark (&:where(.dark, .dark *));
 

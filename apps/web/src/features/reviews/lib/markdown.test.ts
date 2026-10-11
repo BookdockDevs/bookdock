@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest'
 
+import { reviewNeedsSourceEditor } from '@bookdock/shared'
+
 import { renderReviewBody, reviewExcerpt } from './markdown'
 
 describe('review markdown', () => {
+  it('decodes entities in Markdown excerpts while preserving plain text semantics', () => {
+    expect(reviewExcerpt('A &amp; B &#x4e66;', 'markdown')).toBe('A & B 书')
+    expect(reviewExcerpt('A &amp; B', 'plain')).toBe('A &amp; B')
+  })
+  it('keeps unsafe embeds in source mode without treating examples in code as active content', () => {
+    expect(reviewNeedsSourceEditor('<iframe src="x"></iframe>')).toBe(true)
+    expect(reviewNeedsSourceEditor('[click](javascript:alert(1))')).toBe(true)
+    expect(reviewNeedsSourceEditor('![external](https://example.com/image.png)')).toBe(true)
+    expect(reviewNeedsSourceEditor('```html\n<iframe src="x"></iframe>\n```')).toBe(false)
+    expect(reviewNeedsSourceEditor('[link](https://example.com)')).toBe(false)
+  })
   it('renders the phase-1 subset with single-newline breaks', () => {
     const html = renderReviewBody('**bold** and *italic*\nsecond line\n\n> quote\n\n- a\n- b\n\n1. one\n2. two\n\n[text](https://example.com)', 'markdown')
     expect(html).toContain('<strong>bold</strong>')
@@ -51,5 +64,18 @@ describe('review markdown', () => {
     expect(excerpt.length).toBeLessThanOrEqual(21)
     const html = renderReviewBody('line one\nline two', 'markdown')
     expect(html).toContain('line one<br>line two')
+  })
+
+  it('renders headings, tables, code and managed images without accepting arbitrary embeds', () => {
+    const url = '/api/v1/content-files/cfile_abcdefghijklmnopqrstu'
+    const html = renderReviewBody(`# Heading\n\n| Name | Value |\n| --- | --- |\n| a | b |\n\n\`\`\`ts\nconst value = 1\n\`\`\`\n\n![photo](${url})\n\n[Attachment](${url})\n\n![remote](https://example.com/tracker.png)`, 'markdown')
+    expect(html).toContain('<h1>Heading</h1>')
+    expect(html).toContain('<table>')
+    expect(html).toContain('<pre><code>')
+    expect(html).toContain(`src="${url}"`)
+    expect(html).toContain(`href="${url}"`)
+    expect(html).toContain('download=""')
+    expect(html).not.toContain('https://example.com/tracker.png')
+    expect(reviewExcerpt('# Heading\n\n```ts\nlarge secret code\n```\n\n**Hello**!', 'markdown')).toBe('Heading Hello!')
   })
 })

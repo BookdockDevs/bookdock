@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { interactionRequestIdSchema } from './notification'
+import { contentDraftIdSchema } from './content-file'
+import type { ContentFile } from './content-file'
 
 /**
  * Book reviews (书评) v1 contract. Reviews anchor to works, never to file
@@ -61,6 +63,7 @@ export interface ReviewProvenance {
 }
 
 export interface Review {
+  files?: ContentFile[]
   id: string
   rating: number | null
   body: string | null
@@ -160,6 +163,8 @@ export const reviewCreateSchema = z
   .object({
     /** Private BookVersion being read; the server resolves the work anchor. */
     bookVersionId: reviewIdSchema,
+    bodyFormat: reviewBodyFormatSchema.optional(),
+    draftId: contentDraftIdSchema.optional(),
     rating: reviewRatingSchema.nullable().optional(),
     body: z.string().max(REVIEW_BODY_MAX_LENGTH).nullable().optional(),
     visibility: reviewVisibilitySchema.optional(),
@@ -173,6 +178,8 @@ export type ReviewCreateReq = z.infer<typeof reviewCreateSchema>
 
 export const reviewUpdateSchema = z
   .object({
+    bodyFormat: reviewBodyFormatSchema.optional(),
+    draftId: contentDraftIdSchema.optional(),
     rating: reviewRatingSchema.nullable().optional(),
     body: z.string().max(REVIEW_BODY_MAX_LENGTH).nullable().optional(),
     visibility: reviewVisibilitySchema.optional(),

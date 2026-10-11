@@ -11,11 +11,13 @@ import type {
   ReviewSummary,
   ReviewUpdateReq,
 } from '@bookdock/shared'
-import { reviewHalvesToRating, reviewRatingToHalves } from '@bookdock/shared'
+import { reviewFileReferences, reviewHalvesToRating, reviewRatingToHalves } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
+import { syncContentFiles } from '../../db/content-files'
 import { bookReviewComments, bookReviewLikes, bookReviews, libraries, libraryBooks, libraryBookVersions, users } from '../../db/schema'
 import { createId } from '../../lib/id'
+import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
 import { AppError, isUniqueViolation } from '../../middleware/error'
 import { assertReadableBook } from '../books/books.service'
 import {
@@ -230,7 +232,10 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
     throw new AppError('REVIEW_NOT_FOUND')
   }
   const rating = input.rating ?? null
-  const body = input.body?.trim() ? input.body.trim() : null
+  const body = input.body?.trim() ? input.body : null
+  const bodyFormat = input.bodyFormat ?? 'markdown'
+  const files = bodyFormat === 'markdown' ? reviewFileReferences(body ?? '') : { ids: [], imageIds: [], unmanagedImages: false }
+  if (files.unmanagedImages) throw new AppError('VALIDATION_ERROR', 'Review images must be uploaded through the editor')
   if (rating == null && body == null) throw new AppError('VALIDATION_ERROR', 'rating or body is required')
   if (body && body.length > 20000) throw new AppError('VALIDATION_ERROR', 'body is too long')
 
@@ -250,7 +255,7 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
       sourceLibraryBookId: null,
       ratingHalves: rating == null ? null : reviewRatingToHalves(rating),
       body,
-      bodyFormat: 'markdown' as const,
+      bodyFormat,
       visibility: 'private' as const,
       readListingId: null,
       readBookVersionId: null,
@@ -260,7 +265,10 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
       editedAt: null,
     }
     try {
-      db.insert(bookReviews).values(row).run()
+      db.transaction((tx) => {
+        tx.insert(bookReviews).values(row).run()
+        syncContentFiles(tx, { userId, domain: 'review', targetId: row.id, bookVersionId: input.bookVersionId, draftId: input.draftId, ...files })
+      })
     } catch (error) {
       if (isUniqueViolation(error)) throw new AppError('REVIEW_ALREADY_EXISTS')
       throw error
@@ -279,7 +287,7 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
     sourceLibraryBookId: work.libraryBookId,
     ratingHalves: rating == null ? null : reviewRatingToHalves(rating),
     body,
-    bodyFormat: 'markdown' as const,
+    bodyFormat,
     visibility,
     readListingId: held.link.sourceLibraryBookVersionId,
     readBookVersionId: input.bookVersionId,
@@ -289,7 +297,10 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
     editedAt: null,
   }
   try {
-    db.insert(bookReviews).values(row).run()
+    db.transaction((tx) => {
+      tx.insert(bookReviews).values(row).run()
+      syncContentFiles(tx, { userId, domain: 'review', targetId: row.id, bookVersionId: input.bookVersionId, draftId: input.draftId, ...files })
+    })
   } catch (error) {
     if (isUniqueViolation(error)) throw new AppError('REVIEW_ALREADY_EXISTS')
     throw error
@@ -309,7 +320,10 @@ export async function updateReview(userId: string, id: string, patch: ReviewUpda
     .get()
   if (!row) throw new AppError('REVIEW_NOT_FOUND')
   const rating = patch.rating !== undefined ? patch.rating : row.ratingHalves == null ? null : reviewHalvesToRating(row.ratingHalves)
-  const body = patch.body !== undefined ? (patch.body?.trim() ? patch.body.trim() : null) : row.body
+  const body = patch.body !== undefined ? (patch.body?.trim() ? patch.body : null) : row.body
+  const bodyFormat = patch.bodyFormat ?? row.bodyFormat
+  const files = bodyFormat === 'markdown' ? reviewFileReferences(body ?? '') : { ids: [], imageIds: [], unmanagedImages: false }
+  if (files.unmanagedImages && (body !== row.body || bodyFormat !== row.bodyFormat)) throw new AppError('VALIDATION_ERROR', 'Review images must be uploaded through the editor')
   if (rating == null && body == null) throw new AppError('VALIDATION_ERROR', 'rating or body is required')
   const visibility = patch.visibility ?? row.visibility
   // Only a transition INTO shared re-checks publish eligibility (work reads
@@ -330,17 +344,22 @@ export async function updateReview(userId: string, id: string, patch: ReviewUpda
     }
   }
   const now = Date.now()
-  const editedAt = patch.body !== undefined && body !== row.body ? now : row.editedAt
-  db.update(bookReviews)
-    .set({
-      ratingHalves: rating == null ? null : reviewRatingToHalves(rating),
-      body,
-      visibility,
-      updatedAt: now,
-      editedAt,
-    })
-    .where(eq(bookReviews.id, id))
-    .run()
+  const editedAt = (patch.body !== undefined && body !== row.body) || bodyFormat !== row.bodyFormat ? now : row.editedAt
+  db.transaction((tx) => {
+    tx.update(bookReviews)
+      .set({
+        ratingHalves: rating == null ? null : reviewRatingToHalves(rating),
+        body,
+        bodyFormat,
+        visibility,
+        updatedAt: now,
+        editedAt,
+      })
+      .where(eq(bookReviews.id, id))
+      .run()
+    syncContentFiles(tx, { userId, domain: 'review', targetId: id, draftId: patch.draftId, ...files })
+  })
+  await cleanContentBlobs()
   const updated = db.select().from(bookReviews).where(eq(bookReviews.id, id)).get()!
   return projectReview(userId, updated, false)
 }
@@ -367,6 +386,7 @@ export async function deleteReview(userId: string, id: string) {
   // from the source and require it to still read.
   // Dependent discussion and likes follow through FK cascades.
   db.delete(bookReviews).where(eq(bookReviews.id, id)).run()
+  await cleanContentBlobs()
   return { id }
 }
 

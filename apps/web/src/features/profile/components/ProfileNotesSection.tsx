@@ -1,5 +1,7 @@
 import { useState } from 'react'
 
+import ContentImages from '@/features/content-files/components/ContentImages'
+
 import { Button } from '@/components/ui/Button'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -44,6 +46,7 @@ export default function ProfileNotesSection({ page, bookId, onChange }: ProfileN
                   <span className={expanded === annotation.id ? 'whitespace-pre-wrap break-words' : 'line-clamp-3 whitespace-pre-wrap break-words'}>{annotation.text}</span>
                   {annotation.note && <span className={expanded === annotation.id ? 'mt-2 block whitespace-pre-wrap break-words' : 'mt-2 line-clamp-3 whitespace-pre-wrap break-words'}>{annotation.note}</span>}
                 </button>
+                {annotation.type === 'note' && locationStatus !== 'source-unavailable' && <ContentImages images={annotation.images} />}
                 {locationStatus === 'available' ? <a href={`/books/${encodeURIComponent(annotation.bookId)}?annotation=${encodeURIComponent(annotation.id)}`} className="mt-2 inline-block text-xs text-blue-600 underline dark:text-blue-400">{_('profileArchive.readLocation')}</a>
                   : <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{_(locationStatus === 'source-unavailable' ? 'profileArchive.sourceUnavailable' : 'profileArchive.positionUnavailable')}</p>}
               </article>

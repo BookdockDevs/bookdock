@@ -1,8 +1,10 @@
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 
-import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
+import type { AnnotationRes, AnnotationStyle, AnnotationUpdateReq, ContentFile } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
+import ContentImages from '@/features/content-files/components/ContentImages'
+import IdeaImageEditor from '@/features/content-files/components/IdeaImageEditor'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -194,13 +196,17 @@ function InlineEditor({
   visibilityEligible,
   sourceReadable,
   initialVisibility = 'private',
+  bookVersionId, targetId, initialImages,
 }: {
   initial: string
   placeholder: string
   allowEmpty?: boolean
   saving: boolean
   error: string | null
-  onSave: (value: string, visibility?: 'private' | 'shared') => void
+  onSave: (value: string, visibility?: 'private' | 'shared', files?: Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>) => void
+  bookVersionId?: string
+  targetId?: string
+  initialImages?: ContentFile[]
   onCancel: () => void
   visibilityEligible?: boolean
   sourceReadable?: boolean
@@ -208,6 +214,8 @@ function InlineEditor({
 }) {
   const _ = useTranslation()
   const [draft, setDraft] = useState(initial)
+  const [files, setFiles] = useState<Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>>()
+  const [uploading, setUploading] = useState(false)
   const [visibility, setVisibility] = useState(initialVisibility)
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -232,9 +240,9 @@ function InlineEditor({
   }, [onCancel, saving])
 
   function submit() {
-    if (saving) return
+    if (saving || uploading) return
     const value = draft.trim()
-    if (value) onSave(value, visibilityEligible ? visibility : undefined)
+    if (value) onSave(value, visibilityEligible ? visibility : undefined, files)
     else if (allowEmpty && initial.trim()) onSave('')
     else onCancel()
   }
@@ -265,6 +273,7 @@ function InlineEditor({
         placeholder={placeholder}
         className="w-full resize-none bg-transparent text-sm leading-relaxed text-current outline-none placeholder:text-[var(--bd-read-sub)]"
       />
+      {bookVersionId && <IdeaImageEditor bookVersionId={bookVersionId} targetId={targetId} initialImages={initialImages} disabled={saving} onChange={(next, pending) => { setFiles(next); setUploading(pending) }} />}
       {error && <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
       {visibilityEligible && <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable ?? false} disabled={saving} />}
       <div className="mt-2 flex items-center justify-end gap-2">
@@ -277,7 +286,7 @@ function InlineEditor({
         </button>
         <button
           onClick={submit}
-          disabled={saving || !canSave}
+          disabled={saving || uploading || !canSave}
           className="rounded-md bg-blue-500 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-60"
         >
           {_('annotation.save')}
@@ -542,13 +551,13 @@ export const NotesPanel = memo(function NotesPanel({
     }
   }
 
-  function saveEdit(item: AnnotationRes, value: string, visibility?: 'private' | 'shared') {
+  function saveEdit(item: AnnotationRes, value: string, visibility?: 'private' | 'shared', files?: Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>) {
     if (saveLock.current || updateAnnotation.isPending) return
     saveLock.current = true
     setEditError(null)
     updateAnnotation.mutate({
       id: item.id,
-      body: item.type === 'bookmark' ? { text: value } : { note: value, visibility },
+      body: item.type === 'bookmark' ? { text: value } : { note: value, visibility, ...files },
     }, {
       onSuccess: () => { saveLock.current = false; setEditingId(null) },
       onError: (error) => { saveLock.current = false; setEditError(getUserErrorMessage(error, _, 'annotation.editSaveFailed')) },
@@ -613,7 +622,10 @@ export const NotesPanel = memo(function NotesPanel({
             initial={a.type === 'bookmark' ? (hasCustomTitle ? a.text : '') : (a.note ?? '')}
             placeholder={a.type === 'bookmark' ? _('annotation.renamePlaceholder') : _('annotation.notePlaceholder')}
             allowEmpty={a.type === 'bookmark'}
-            onSave={(value, visibility) => saveEdit(a, value, visibility)}
+            onSave={(value, visibility, files) => saveEdit(a, value, visibility, files)}
+            bookVersionId={a.type === 'note' ? bookId : undefined}
+            targetId={a.type === 'note' ? a.id : undefined}
+            initialImages={a.images}
             initialVisibility={a.visibility ?? 'private'}
             visibilityEligible={a.type === 'note' && composer.data?.data.eligible}
             sourceReadable={composer.data?.data.sourceReadable}
@@ -723,6 +735,7 @@ export const NotesPanel = memo(function NotesPanel({
                         minLengthForToggle={60}
                         toggleClassName="z-10"
                       />
+                      <ContentImages images={a.images} />
                     </div>
                     {!selectionMode && (
                       <button

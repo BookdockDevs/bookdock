@@ -26,6 +26,7 @@ import annotationRoutes from './modules/annotations/annotations.routes'
 import ideaRoutes from './modules/annotations/idea-discussion.routes'
 import reviewRoutes from './modules/reviews/reviews.routes'
 import notificationRoutes from './modules/notifications/notifications.routes'
+import contentFileRoutes from './modules/content-files/content-files.routes'
 import librariesRoutes from './modules/libraries/libraries.routes'
 import shelvesRoutes from './modules/shelves/shelves.routes'
 import tagsRoutes from './modules/tags/tags.routes'
@@ -78,6 +79,7 @@ app.route('/api/v1/annotations', annotationRoutes)
 app.route('/api/v1/ideas', ideaRoutes)
 app.route('/api/v1/reviews', reviewRoutes)
 app.route('/api/v1/notifications', notificationRoutes)
+app.route('/api/v1/content-files', contentFileRoutes)
 app.route('/api/v1/libraries', librariesRoutes)
 app.route('/api/v1/shelves', shelvesRoutes)
 app.route('/api/v1/tags', tagsRoutes)

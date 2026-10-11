@@ -468,7 +468,7 @@ export const contentRevisions = sqliteTable('content_revisions', {
 export const blobs = sqliteTable('blobs', {
   key: text('key').primaryKey(),
   size: integer('size').notNull(),
-  kind: text('kind', { enum: ['book', 'cover'] }).notNull(),
+  kind: text('kind', { enum: ['book', 'cover', 'content'] }).notNull(),
   storageTier: text('storage_tier', { enum: ['local', 'synced', 'remote'] }).notNull().default('local'),
   lastAccessedAt: integer('last_accessed_at'),
   createdAt: integer('created_at').notNull(),
@@ -747,6 +747,40 @@ export const bookReviewCommentLikes = sqliteTable('book_review_comment_likes', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: integer('created_at').notNull(),
 }, (table) => ({ pk: primaryKey({ columns: [table.commentId, table.userId] }) }))
+
+export const contentUploadDrafts = sqliteTable('content_upload_drafts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  draftId: text('draft_id').notNull(),
+  domain: text('domain', { enum: ['idea', 'review'] }).notNull(),
+  bookVersionId: text('book_version_id').notNull(),
+  intendedTargetId: text('intended_target_id'),
+  cancelledAt: integer('cancelled_at'),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({ draftUnique: uniqueIndex('content_upload_drafts_unique').on(table.userId, table.draftId) }))
+
+export const contentFiles = sqliteTable('content_files', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  domain: text('domain', { enum: ['idea', 'review'] }).notNull(),
+  kind: text('kind', { enum: ['image', 'attachment'] }).notNull(),
+  draftId: text('draft_id').notNull(),
+  bookVersionId: text('book_version_id').notNull(),
+  intendedTargetId: text('intended_target_id'),
+  reviewId: text('review_id').references(() => bookReviews.id, { onDelete: 'cascade' }),
+  ideaId: text('idea_id').references(() => ideas.id, { onDelete: 'cascade' }),
+  blobKey: text('blob_key').notNull().references(() => blobs.key, { onDelete: 'restrict' }),
+  name: text('name').notNull(),
+  mimeType: text('mime_type').notNull(),
+  size: integer('size').notNull(),
+  ready: integer('ready', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  draftIdx: index('content_files_draft_idx').on(table.userId, table.draftId),
+  reviewIdx: index('content_files_review_idx').on(table.reviewId),
+  ideaIdx: index('content_files_idea_idx').on(table.ideaId),
+  blobIdx: index('content_files_blob_idx').on(table.blobKey),
+}))
 
 export const interactionNotifications = sqliteTable('interaction_notifications', {
   id: text('id').primaryKey(),

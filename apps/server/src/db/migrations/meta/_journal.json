@@ -330,6 +330,13 @@
       "when": 1792500000000,
       "tag": "0047_interaction_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792600000000,
+      "tag": "0048_content_files",
+      "breakpoints": true
     }
   ]
 }

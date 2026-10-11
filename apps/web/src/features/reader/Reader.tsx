@@ -208,6 +208,7 @@ export default function Reader() {
   const publicIdeas = useReaderIdeas(id, showFriendIdeas)
   const publicMarkers = useMemo(() => publicIdeas.isError || !showFriendIdeas ? [] : (publicIdeas.data?.data ?? []).filter((idea) => !idea.own && idea.locationAvailable), [publicIdeas.isError, publicIdeas.data, showFriendIdeas])
   const deepLinkHandled = useRef(false)
+  const pendingDeepLink = useRef<string | null>(null)
   const annotationClickHandledRef = useRef(false)
   const annotationClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -712,6 +713,7 @@ export default function Reader() {
     setImageViewer(null)
     setImageContextMenu(null)
     deepLinkHandled.current = false
+    pendingDeepLink.current = null
     setProgressStartOver(false)
   }, [id, setReplaceTarget])
 
@@ -929,6 +931,12 @@ export default function Reader() {
       // Do not leave the failed destination in the header or let its
       // optimistic progress look committed.
       setPendingNavChapter(null)
+      if (e.target && e.target === pendingDeepLink.current) {
+        pendingDeepLink.current = null
+        setNavError(null)
+        notify.warning(_('profileArchive.positionUnavailable'))
+        return
+      }
       setNavError({
         target: e.target,
         chapter: e.sectionIndex === undefined ? undefined : sectionTocLabels?.[e.sectionIndex],
@@ -994,7 +1002,10 @@ export default function Reader() {
     const target = deepLinkCfi || annotation?.cfiRange || annotation?.cfiAnchor
     if (!target) return
     deepLinkHandled.current = true
-    void renderer.display(target)
+    pendingDeepLink.current = target
+    void renderer.display(target).finally(() => {
+      if (pendingDeepLink.current === target) pendingDeepLink.current = null
+    })
   }, [annotations?.data, bookQuery.data?.data.revisionId, readerReady, deepLinkAnnotation, deepLinkCfi, renderer, _])
 
   // A TOC jump clicked before the renderer became available is queued in the

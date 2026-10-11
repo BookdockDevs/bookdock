@@ -9,6 +9,7 @@ const ERROR_KEYS: Record<string, string> = {
   TAG_NAME_TAKEN: 'errors.tagNameTaken',
   USER_NOT_FOUND: 'errors.notFound',
   ANNOTATION_NOT_FOUND: 'errors.notFound',
+  CONTENT_FILE_NOT_FOUND: 'contentFiles.unavailable',
   ANNOTATION_TEXT_TOO_LONG: 'annotation.selectionTooLong',
   SESSION_NOT_FOUND: 'errors.notFound',
   FONT_NOT_FOUND: 'errors.notFound',

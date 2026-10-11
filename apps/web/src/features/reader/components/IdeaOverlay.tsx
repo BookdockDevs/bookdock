@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { AnnotationRes } from '@bookdock/shared'
+import type { AnnotationRes, AnnotationUpdateReq } from '@bookdock/shared'
+
+import ContentImages from '@/features/content-files/components/ContentImages'
+import IdeaImageEditor from '@/features/content-files/components/IdeaImageEditor'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { useDialogLayout } from '@/components/ui/dialog-layout-context'
@@ -51,7 +54,7 @@ interface IdeaOverlayProps {
   onCopyQuote: () => void
   onHighlight: () => void
   onWriteNote: () => void
-  onSaveIdea?: (note: string, visibility?: 'private' | 'shared') => Promise<void>
+  onSaveIdea?: (note: string, visibility?: 'private' | 'shared', files?: Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>) => Promise<void>
   defaultVisibility?: 'private' | 'shared'
   visibilityEligible?: boolean
   sourceReadable?: boolean
@@ -134,6 +137,8 @@ export function IdeaOverlay({
 
   const user = useAuthStore((state) => state.user)
   const [sidebarDraft, setSidebarDraft] = useState('')
+  const [sidebarFiles, setSidebarFiles] = useState<Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>>()
+  const [sidebarUploading, setSidebarUploading] = useState(false)
   const [sidebarVisibility, setSidebarVisibility] = useState<'private' | 'shared'>(defaultVisibility)
   const [isSidebarFocused, setIsSidebarFocused] = useState(false)
   const [isSidebarSubmitting, setIsSidebarSubmitting] = useState(false)
@@ -186,12 +191,13 @@ export function IdeaOverlay({
   }, [detailId, expandedIdeaId, entries])
 
   async function handleSidebarSubmit() {
-    if (!sidebarDraft.trim() || isSidebarSubmitting) return
+    if (!sidebarDraft.trim() || isSidebarSubmitting || sidebarUploading) return
     if (onSaveIdea) {
       setIsSidebarSubmitting(true)
       try {
-        await onSaveIdea(sidebarDraft.trim(), sidebarVisibility)
+        await onSaveIdea(sidebarDraft.trim(), sidebarVisibility, sidebarFiles)
         setSidebarDraft('')
+        setSidebarFiles(undefined)
         setIsSidebarFocused(false)
       } finally {
         setIsSidebarSubmitting(false)
@@ -465,6 +471,7 @@ export function IdeaOverlay({
                     />
                   </div>
 
+                  <IdeaImageEditor bookVersionId={bookId} disabled={isSidebarSubmitting} onChange={(files, pending) => { setSidebarFiles(files); setSidebarUploading(pending) }} />
                   <div className="flex items-center justify-between border-t border-stone-200/40 pt-2 dark:border-stone-800/40">
                     <div className="flex items-center gap-2">
                       {visibilityEligible && (
@@ -491,7 +498,7 @@ export function IdeaOverlay({
                       </button>
                       <button
                         type="button"
-                        disabled={isSidebarSubmitting || !sidebarDraft.trim()}
+                        disabled={isSidebarSubmitting || sidebarUploading || !sidebarDraft.trim()}
                         onClick={() => void handleSidebarSubmit()}
                         className="rounded-full bg-[var(--bd-read-primary)] px-4 py-1 text-xs font-medium text-white shadow-xs transition-opacity hover:opacity-90 disabled:opacity-40 cursor-pointer"
                       >
@@ -601,6 +608,7 @@ export function IdeaOverlay({
               </div>
               <div className="px-5 pb-5 pt-3">
                 <p className="whitespace-pre-wrap text-base leading-7">{detail.annotation.note}</p>
+                <ContentImages images={detail.annotation.images} />
                 {quoteText && (
                   onJump && detail.locationAvailable !== false ? (
                     <button

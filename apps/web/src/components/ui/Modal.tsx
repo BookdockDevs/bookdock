@@ -72,6 +72,9 @@ export default function Modal({
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Portal menus can disappear before this window listener runs. The event
+      // path still identifies the editor overlay that handled the key.
+      if (e.defaultPrevented || e.composedPath().some((target) => target instanceof HTMLElement && target.classList.contains('mdxeditor-popup-container'))) return
       const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]')
       if (dialogs.length && dialogs[dialogs.length - 1] !== dialogRef.current) return
       const alertDialog = document.querySelector<HTMLElement>('[role="alertdialog"][aria-modal="true"]')

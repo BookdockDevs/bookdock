@@ -11,6 +11,7 @@ import type {
 import { REVIEW_RATINGS, REVIEW_VISIBILITY_KEY, reviewHalvesToRating } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
+import { publishedContentFiles } from '../../db/content-files'
 import {
   bookReviewComments,
   bookReviewLikes,
@@ -306,6 +307,7 @@ export async function projectReview(
     rating: row.ratingHalves == null ? null : reviewHalvesToRating(row.ratingHalves),
     body: row.body,
     bodyFormat: row.bodyFormat,
+    files: publishedContentFiles(getDb(), 'review', row.id),
     visibility: row.visibility,
     source,
     privateLibraryBookId: row.privateLibraryBookId,

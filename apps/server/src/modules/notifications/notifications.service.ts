@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import type { ArchiveQuery, InteractionNotification, NotificationPage, NotificationTarget } from '@bookdock/shared'
+import { reviewExcerpt } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { bookReviewCommentLikes, bookReviewComments, bookReviewLikes, ideaCommentLikes, ideaComments, ideaLikes, interactionNotifications, users } from '../../db/schema'
@@ -22,7 +23,7 @@ async function project(userId: string, row: NotificationRow): Promise<Interactio
       const { row: review } = await readableReview(userId, row.targetId)
       if (review.visibility !== 'shared' || !review.sourceLibraryId || !review.sourceLibraryBookId) return null
       await assertSourceWorkReadable(userId, review.sourceLibraryId, review.sourceLibraryBookId)
-      preview = review.body ?? ''
+      preview = reviewExcerpt(review.body ?? '', review.bodyFormat, 180)
     }
     if (row.commentId) {
       const table = row.domain === 'idea' ? ideaComments : bookReviewComments

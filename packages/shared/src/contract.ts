@@ -1,4 +1,5 @@
 import type { AccessTokenDuration, AccessTokenPermission } from './access-tokens'
+import type { ContentFile } from './content-file'
 import type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
 import type { BookSourceInfo, HiddenReason, HiddenVia, LibraryVersionKind } from './library'
@@ -1760,6 +1761,8 @@ export interface AppendContentPreviewRes {
 }
 
 export type AnnotationCreateReq = {
+  draftId?: string
+  imageIds?: string[]
   visibility?: 'private' | 'shared'
   revisionId?: string | null
   cfiRange: string
@@ -1775,6 +1778,8 @@ export type AnnotationCreateReq = {
 }
 
 export type AnnotationUpdateReq = {
+  draftId?: string
+  imageIds?: string[]
   visibility?: 'private' | 'shared'
   color?: string
   style?: AnnotationStyle
@@ -1783,6 +1788,7 @@ export type AnnotationUpdateReq = {
 }
 
 export interface AnnotationRes {
+  images?: ContentFile[]
   locationAvailable?: boolean
   visibility?: 'private' | 'shared'
   revisionId?: string | null

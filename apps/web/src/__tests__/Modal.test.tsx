@@ -44,6 +44,20 @@ function NestedMenuHarness() {
 }
 
 describe('Modal', () => {
+  it('leaves the modal open when Escape originates from an editor portal', () => {
+    const close = vi.fn()
+    render(<Modal title="Test modal" onClose={close}>Content</Modal>)
+    const portal = document.createElement('div')
+    portal.className = 'mdxeditor-popup-container'
+    const option = document.createElement('button')
+    portal.append(option)
+    document.body.append(portal)
+    fireEvent.keyDown(option, { key: 'Escape' })
+    expect(close).not.toHaveBeenCalled()
+    portal.remove()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(close).toHaveBeenCalledOnce()
+  })
   it('keeps the reader inset when portaled to the document body', () => {
     const { rerender } = render(
       <DialogLayoutContext.Provider value={344}>

@@ -309,6 +309,18 @@ describe('transformEpubStylesheet', () => {
 })
 
 describe('FoliateReader book-style overrides', () => {
+  it('reports an unresolved legacy TXT target without jumping to a substitute chapter', async () => {
+    const reader = new FoliateReader('')
+    const onError = vi.fn()
+    const goTo = vi.fn().mockResolvedValue(undefined)
+    reader.on('navigateError', onError)
+    ;(reader as any).view = { goTo }
+    ;(reader as any).book = { sections: [{}] }
+    await reader.display('txt:4')
+    expect(goTo).toHaveBeenCalledExactlyOnceWith('txt:4')
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ target: 'txt:4', error: expect.objectContaining({ message: 'Reading position is unavailable' }) }))
+  })
+
   it('reports an unresolved historical CFI without claiming a successful jump', async () => {
     const reader = new FoliateReader('')
     const onError = vi.fn()

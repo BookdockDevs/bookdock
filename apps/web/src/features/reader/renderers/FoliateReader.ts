@@ -2806,8 +2806,9 @@ export class FoliateReader implements BookReader {
       return renderer.goTo(resolved)
     }
 
-    // Last resort: let View.goTo handle it (silently catches errors)
-    return this.view.goTo(target)
+    // View.goTo catches unresolved locations internally. Preserve that failure
+    // for the existing navigation-error event instead of claiming a jump.
+    return Boolean(await this.view.goTo(target))
   }
 
   // Page turns only arm the indicator when they will cross a chapter

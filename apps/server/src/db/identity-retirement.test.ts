@@ -63,6 +63,8 @@ function makeLegacyIdentity() {
     }
   }
   db.$client.exec(`DROP TABLE IF EXISTS storage_connections;
+    DROP TABLE content_files;
+    DROP TABLE content_upload_drafts;
     DROP TABLE interaction_notifications;
     DROP TABLE interaction_receipts;
     DROP TABLE IF EXISTS storage_transfer_tasks;

@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import type { IdeaEntry } from './IdeaOverlay'
 
 import SmartMenu from '@/components/ui/SmartMenu'
+import ContentImages from '@/features/content-files/components/ContentImages'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
@@ -133,6 +134,7 @@ export default function IdeaCard({
         </div>
 
         <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-6">{entry.annotation.note}</p>
+        <ContentImages images={entry.annotation.images} />
         <button
           type="button"
           onClick={onOpen}

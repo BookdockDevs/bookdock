@@ -1,5 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
+import type { AnnotationUpdateReq, ContentFile } from '@bookdock/shared'
+
+import IdeaImageEditor from '@/features/content-files/components/IdeaImageEditor'
+
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
@@ -26,19 +30,24 @@ interface NoteEditorPopupProps {
   geometry?: SelectionGeometry
   initialNote: string
   saving: boolean
-  onSave: (note: string) => void
+  onSave: (note: string, files?: Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>) => void
+  bookVersionId?: string
+  targetId?: string
+  initialImages?: ContentFile[]
   onClose: () => void
   initialVisibility?: 'private' | 'shared'
   visibilityEligible?: boolean
   sourceReadable?: boolean
-  onSaveVisibility?: (note: string, visibility: 'private' | 'shared') => void
+  onSaveVisibility?: (note: string, visibility: 'private' | 'shared', files?: Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>) => void
 }
 
-export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, onClose, initialVisibility = 'private', visibilityEligible, sourceReadable = false, onSaveVisibility }: NoteEditorPopupProps) {
+export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, onClose, initialVisibility = 'private', visibilityEligible, sourceReadable = false, onSaveVisibility, bookVersionId, targetId, initialImages }: NoteEditorPopupProps) {
   const _ = useTranslation()
   const readingMode = useUiStore((s) => s.readingMode)
   const [draft, setDraft] = useState(initialNote)
   const [visibility, setVisibility] = useState(initialVisibility)
+  const [files, setFiles] = useState<Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>>()
+  const [uploading, setUploading] = useState(false)
   const [viewport, setViewport] = useState(() => ({
     width: window.visualViewport?.width ?? window.innerWidth,
     height: window.visualViewport?.height ?? window.innerHeight,
@@ -115,7 +124,7 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
   const bounds = { left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) }
   const size = {
     width: Math.max(1, Math.min(EDITOR_WIDTH, bounds.width - VIEWPORT_MARGIN * 2)),
-    height: Math.min(380, Math.max(200, contentHeight + 112)),
+    height: Math.min(bookVersionId ? 520 : 380, Math.max(bookVersionId ? 320 : 200, contentHeight + 112)),
   }
   const liveGeometry: SelectionGeometry = {
     rects: geometry?.rects ?? (rect ? [rect] : []), bounds,
@@ -126,8 +135,11 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
   const anim = ANIMATION_OFFSET[pos.placement]
 
   function submit() {
-    if (!saving && draft.trim()) {
-      if (onSaveVisibility) onSaveVisibility(draft.trim(), visibility)
+    if (!saving && !uploading && draft.trim()) {
+      if (onSaveVisibility) {
+        if (files) onSaveVisibility(draft.trim(), visibility, files)
+        else onSaveVisibility(draft.trim(), visibility)
+      } else if (files) onSave(draft.trim(), files)
       else onSave(draft.trim())
     }
   }
@@ -153,7 +165,7 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
   const publishButton = (
     <button
       onClick={submit}
-      disabled={saving || !hasDraft}
+      disabled={saving || uploading || !hasDraft}
       className={cn(
         'rounded-full px-5 py-1.5 text-sm font-medium transition-all shadow-xs',
         hasDraft && !saving
@@ -199,7 +211,9 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
             <CloseIcon />
           </button>
         </div>
-        <div className="flex min-h-0 flex-1 px-4 py-3">{textarea}</div>
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">{textarea}
+          {bookVersionId && <IdeaImageEditor bookVersionId={bookVersionId} targetId={targetId} initialImages={initialImages} disabled={saving} onChange={(next, pending) => { setFiles(next); setUploading(pending) }} />}
+        </div>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-4 pb-3.5">
           {visibilityEligible ? (
             <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable} disabled={saving} />

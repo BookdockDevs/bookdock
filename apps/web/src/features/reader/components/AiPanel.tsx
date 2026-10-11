@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { BookDetailRes } from '@bookdock/shared'
+import type { AnnotationUpdateReq, BookDetailRes } from '@bookdock/shared'
 
 import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT_PROMPT_CHARS, AI_TOOL_NAMES, getAiPromptVariables, isAiEmbeddingModel, sanitizeAiCitationMarkers } from '@bookdock/shared'
 import type { AiAssistantMode, AiChapterReference, AiChatReq, AiCitation, AiContextReceipt, AiConversationSettings, AiHistoryMessage, AiMessageEventRes, AiMessageRes, AiReadingScope, AiRetryRecipe, AiStatusRes, AiThreadRes, AiToolName } from '@bookdock/shared'
@@ -1521,13 +1521,14 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     }
   }
 
-  async function saveAssistantAsIdea(message: AiMessage, note: string, visibility?: 'private' | 'shared') {
+  async function saveAssistantAsIdea(message: AiMessage, note: string, visibility?: 'private' | 'shared', files?: Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>) {
     if (createAnnotation.isPending || message.savedAsIdea || message.aborted || !message.content.trim() || !message.ideaTarget) return
     try {
       await createAnnotation.mutateAsync({
         cfiRange: message.ideaTarget.cfiRange,
         type: 'note',
         visibility,
+        ...files,
         revisionId: message.ideaTarget.revisionId ?? null,
         style: 'underline',
         color: 'yellow',
@@ -2040,7 +2041,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         </form>
       </Modal>}
       {ideaSaveTarget && !ideaComposer.data && createPortal(<button onClick={() => void ideaComposer.refetch()} className="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-lg bg-stone-100 p-3 text-sm text-stone-700">{ideaComposer.isError ? '想法设置加载失败，点击重试' : '加载想法设置…'}</button>, document.body)}
-      {ideaSaveTarget && ideaComposer.data && createPortal(<NoteEditorPopup initialNote={ideaSaveTarget.content.trim()} saving={createAnnotation.isPending} initialVisibility={ideaComposer.data.data.defaultVisibility} visibilityEligible={ideaComposer.data.data.eligible} sourceReadable={ideaComposer.data.data.sourceReadable} onSave={(note) => void saveAssistantAsIdea(ideaSaveTarget, note)} onSaveVisibility={(note, visibility) => void saveAssistantAsIdea(ideaSaveTarget, note, visibility)} onClose={() => { if (!createAnnotation.isPending) setIdeaSaveTarget(null) }} />, document.body)}
+      {ideaSaveTarget && ideaComposer.data && createPortal(<NoteEditorPopup bookVersionId={bookId} initialNote={ideaSaveTarget.content.trim()} saving={createAnnotation.isPending} initialVisibility={ideaComposer.data.data.defaultVisibility} visibilityEligible={ideaComposer.data.data.eligible} sourceReadable={ideaComposer.data.data.sourceReadable} onSave={(note, files) => void saveAssistantAsIdea(ideaSaveTarget, note, undefined, files)} onSaveVisibility={(note, visibility, files) => void saveAssistantAsIdea(ideaSaveTarget, note, visibility, files)} onClose={() => { if (!createAnnotation.isPending) setIdeaSaveTarget(null) }} />, document.body)}
       {deleteTarget && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('reader.aiDeleteConfirm', { name: deleteTarget.title })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setDeleteTarget(null)} />}
       {assistantModeDeleteTarget && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('reader.aiModeDeleteConfirm', { name: assistantModeDeleteTarget.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDeleteAssistantMode} onClose={() => setAssistantModeDeleteTarget(null)} />}
       {assistantModeRestoreOpen && <ConfirmDialog title={_('settings.confirmRestoreTitle')} message={_('reader.aiRestoreDefaultConfirm')} confirmLabel={_('settings.confirmRestoreAction')} confirmVariant="primary" onConfirm={confirmRestoreAssistantMode} onClose={() => setAssistantModeRestoreOpen(false)} />}

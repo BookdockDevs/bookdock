@@ -9,6 +9,10 @@ import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import sharp from 'sharp'
+import { PDFDocument } from 'pdf-lib'
+
+import { CONTENT_DRAFT_TTL_MS, contentFileUrl, reviewExcerpt, reviewFileReferences } from '@bookdock/shared'
 
 import * as client from '../../db/client'
 import * as schema from '../../db/schema'
@@ -27,6 +31,11 @@ import { errorHandler } from '../../middleware/error'
 import { reviewComposerContext } from './review-access'
 import { listNotifications, markAllNotificationsRead, markNotificationRead, notificationTarget, unreadNotificationCount } from '../notifications/notifications.service'
 import notificationRoutes from '../notifications/notifications.routes'
+import contentFileRoutes from '../content-files/content-files.routes'
+import { uploadContentFile } from '../content-files/content-files.service'
+import { readableContentFile } from '../content-files/file-access'
+import { cancelContentDraft, sweepContentFiles } from '../../lib/content-file-lifecycle'
+import { createAnnotation, deleteAnnotation, updateAnnotation } from '../annotations/annotations.service'
 import { createIdeaComment, deleteIdeaComment, setIdeaLike } from '../annotations/idea-discussion.service'
 import {
   createReviewComment,
@@ -662,9 +671,202 @@ describe('book reviews', () => {
     expect(sqlite.pragma('foreign_key_check')).toEqual([])
   })
 
+  it('validates actual image/attachment bytes and retains failed upload drafts for retry', async () => {
+    const context = { domain: 'review' as const, kind: 'image' as const, bookVersionId: 'v1', draftId: 'image_draft_123456789' }
+    const bytes = await sharp({ create: { width: 8, height: 8, channels: 3, background: 'red' } }).png().toBuffer()
+    const image = new File([new Uint8Array(bytes)], 'image.png', { type: 'application/octet-stream' })
+    const driver = storage.getStorage()
+    vi.spyOn(driver, 'put').mockRejectedValueOnce(new Error('offline'))
+    await expect(uploadContentFile('author', context, image)).rejects.toThrow('offline')
+    expect(db.select().from(schema.contentFiles).all()).toHaveLength(0)
+    expect(db.select().from(schema.blobs).all()).toHaveLength(0)
+    const file = await uploadContentFile('author', context, image)
+    expect(file.mimeType).toBe('image/webp')
+    expect(file.url).toBe(contentFileUrl(file.id))
+    const malformed = new File(['<svg><script>alert(1)</script></svg>'], 'fake.png', { type: 'image/png' })
+    await expect(uploadContentFile('author', context, malformed)).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
+    await expect(uploadContentFile('author', { ...context, kind: 'attachment' }, new File(['not a PDF'], 'fake.pdf'))).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
+    await expect(uploadContentFile('author', { ...context, kind: 'attachment' }, new File([new Uint8Array([0xff, 0xfe])], 'fake.txt'))).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
+    const text = await uploadContentFile('author', { ...context, kind: 'attachment' }, new File(['中文 text'], 'readme.txt'))
+    expect(text.mimeType).toBe('text/plain; charset=utf-8')
+    const pdf = await PDFDocument.create()
+    pdf.addPage()
+    const attachment = await uploadContentFile('author', { ...context, kind: 'attachment' }, new File([new Uint8Array(await pdf.save())], 'readme.pdf'))
+    expect(attachment.mimeType).toBe('application/pdf')
+    await expect(readableContentFile('member', file.id)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+  })
+
+  it('rejects expired drafts at upload and publication before the scheduled sweep', async () => {
+    const context = { domain: 'review' as const, kind: 'attachment' as const, bookVersionId: 'v1', draftId: 'expired_draft_123456789' }
+    const file = await uploadContentFile('author', context, new File(['kept until sweep'], 'draft.txt'))
+    db.update(schema.contentUploadDrafts).set({ createdAt: Date.now() - CONTENT_DRAFT_TTL_MS - 1 }).run()
+    await expect(uploadContentFile('author', context, new File(['late'], 'late.txt'))).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    await expect(createReview('author', { bookVersionId: 'v1', body: `[File](${file.url})`, draftId: context.draftId })).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    expect(db.select().from(schema.bookReviews).all()).toHaveLength(0)
+    expect(await readableContentFile('author', file.id)).toMatchObject({ reviewId: null })
+  })
+
+  it('associates managed review files atomically and checks current ACL on every HTTP read', async () => {
+    const context = { domain: 'review' as const, kind: 'attachment' as const, bookVersionId: 'v1', draftId: 'review_draft_123456789' }
+    const file = await uploadContentFile('author', context, new File(['private attachment'], 'notes.txt'))
+    await expect(createReview('author', { bookVersionId: 'v1', body: `[File](${file.url})\n![wrong kind](${file.url})`, draftId: context.draftId })).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    expect(db.select().from(schema.bookReviews).all()).toHaveLength(0)
+    expect(await readableContentFile('author', file.id)).toMatchObject({ reviewId: null, ready: true })
+    const body = `  # Heading\n\n[Notes](${file.url})\n\n`
+    const review = await createReview('author', { bookVersionId: 'v1', body, draftId: context.draftId, visibility: 'shared' })
+    expect(review.body).toBe(body)
+    expect(review.files?.map((entry) => entry.id)).toEqual([file.id])
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('*', async (c, next) => { const id = c.req.header('x-test-user'); c.set('user', id ? { id, username: id, role: 'member', avatarKey: null } : null); await next() })
+    app.route('/api/v1/content-files', contentFileRoutes)
+    for (const viewer of ['author', 'owner', 'admin', 'member', 'outsider']) {
+      const response = await app.request(file.url, { headers: { 'x-test-user': viewer } })
+      expect(response.status).toBe(200)
+      expect(response.headers.get('cache-control')).toBe('private, no-store')
+      expect(response.headers.get('content-disposition')).toContain('attachment;')
+      expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+      expect(await response.text()).toBe('private attachment')
+    }
+    await updateReview('author', review.id, { visibility: 'private' })
+    for (const viewer of ['owner', 'admin', 'member', 'outsider']) {
+      const response = await app.request(file.url, { headers: { 'x-test-user': viewer } })
+      expect(response.status).toBe(404)
+      expect(await response.text()).not.toContain('notes.txt')
+    }
+    expect((await app.request(file.url)).status).toBe(404)
+    await updateReview('author', review.id, { visibility: 'shared' })
+    db.insert(schema.instance).values({ id: 'instance', ownerUserId: 'owner', allowGuestAccess: true, createdAt: now, updatedAt: now }).run()
+    db.update(schema.libraryBookVersions).set({ guestReadable: true }).where(eq(schema.libraryBookVersions.id, 'l1')).run()
+    expect((await app.request(file.url)).status).toBe(200)
+    db.update(schema.instance).set({ allowGuestAccess: false }).run()
+    expect((await app.request(file.url)).status).toBe(404)
+    db.update(schema.libraries).set({ visibility: 'private' }).where(eq(schema.libraries.id, 'source')).run()
+    await expect(readableContentFile('outsider', file.id)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    expect((await readableContentFile('author', file.id)).id).toBe(file.id)
+    db.update(schema.libraries).set({ visibility: 'public' }).where(eq(schema.libraries.id, 'source')).run()
+    expect((await readableContentFile('outsider', file.id)).id).toBe(file.id)
+    await cancelContentDraft('author', context.draftId)
+    expect((await readableContentFile('member', file.id)).id).toBe(file.id)
+    await updateReview('author', review.id, { body: 'File removed' })
+    expect(db.select().from(schema.contentFiles).all()).toHaveLength(0)
+    expect(db.select().from(schema.blobs).all()).toHaveLength(0)
+  })
+
+  it('keeps idea images plain-text and exact-listing scoped across edits and deletion', async () => {
+    const context = { domain: 'idea' as const, kind: 'image' as const, bookVersionId: 'v1', draftId: 'idea_draft_123456789' }
+    const bytes = await sharp({ create: { width: 8, height: 8, channels: 3, background: 'blue' } }).png().toBuffer()
+    const file = await uploadContentFile('author', context, new File([new Uint8Array(bytes)], 'image.png'))
+    const idea = await createAnnotation('author', 'v1', { type: 'note', cfiRange: 'txt:0', note: '**literal plain text**', visibility: 'shared', draftId: context.draftId, imageIds: [file.id] })
+    expect(idea.note).toBe('**literal plain text**')
+    expect(idea.images?.[0].id).toBe(file.id)
+    expect((await readableContentFile('member', file.id)).ideaId).toBe(idea.id)
+    db.update(schema.libraryBookVersions).set({ status: 'draft' }).where(eq(schema.libraryBookVersions.id, 'l1')).run()
+    for (const viewer of ['member', 'outsider', 'author']) await expect(readableContentFile(viewer, file.id)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    db.update(schema.libraryBookVersions).set({ status: 'published' }).where(eq(schema.libraryBookVersions.id, 'l1')).run()
+    expect((await readableContentFile('member', file.id)).id).toBe(file.id)
+    await updateAnnotation('author', idea.id, { visibility: 'private' })
+    await expect(readableContentFile('admin', file.id)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    expect((await readableContentFile('author', file.id)).id).toBe(file.id)
+    await deleteAnnotation('author', idea.id)
+    await expect(readableContentFile('author', file.id)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    expect(db.select().from(schema.contentFiles).all()).toHaveLength(0)
+    expect(db.select().from(schema.blobs).all()).toHaveLength(0)
+  })
+
+  it('reference-checks shared upload bytes before cancellation and expiration cleanup', async () => {
+    const context = { domain: 'review' as const, kind: 'attachment' as const, bookVersionId: 'v1', draftId: 'shared_draft_123456789' }
+    const file = new File(['same bytes'], 'shared.txt')
+    const one = await uploadContentFile('author', context, file)
+    const two = await uploadContentFile('member', context, file)
+    expect(db.select().from(schema.blobs).all()).toHaveLength(1)
+    const key = (await readableContentFile('member', two.id)).blobKey
+    await cancelContentDraft('author', context.draftId)
+    expect(await storage.getStorage().exists(key)).toBe(true)
+    await expect(readableContentFile('author', one.id)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    await expect(uploadContentFile('author', context, file)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    await sweepContentFiles(Date.now() + CONTENT_DRAFT_TTL_MS + 1)
+    expect(await storage.getStorage().exists(key)).toBe(false)
+    expect(db.select().from(schema.contentFiles).all()).toHaveLength(0)
+    expect(db.select().from(schema.blobs).all()).toHaveLength(0)
+    expect(sqlite.pragma('foreign_key_check')).toEqual([])
+  })
+
+  it('rejects upload requests before parsing bytes when identity or qualification is missing', async () => {
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('*', async (c, next) => { const id = c.req.header('x-test-user'); c.set('user', id ? { id, username: id, role: 'member', avatarKey: null } : null); await next() })
+    app.route('/api/v1/content-files', contentFileRoutes)
+    const url = '/api/v1/content-files?domain=review&kind=image&bookVersionId=v1&draftId=http_draft_123456789'
+    expect((await app.request(url, { method: 'POST', body: 'not multipart' })).status).toBe(401)
+    expect((await app.request(url, { method: 'POST', headers: { 'x-test-user': 'outsider' }, body: 'not multipart' })).status).toBe(404)
+    const body = new FormData()
+    body.append('file', new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'too-large.png', { type: 'image/png' }))
+    expect((await app.request(url, { method: 'POST', headers: { 'x-test-user': 'author' }, body })).status).toBe(413)
+    expect(db.select().from(schema.contentFiles).all()).toHaveLength(0)
+  })
+
+  it('cleans account-owned content while preserving another author sharing the same blob', async () => {
+    const context = { domain: 'review' as const, kind: 'attachment' as const, bookVersionId: 'v1', draftId: 'account_draft_123456789' }
+    const bytes = new File(['shared account bytes'], 'file.txt')
+    const one = await uploadContentFile('author', context, bytes)
+    const two = await uploadContentFile('member', context, bytes)
+    const review = await createReview('author', { bookVersionId: 'v1', body: `[File](${one.url})`, visibility: 'shared', draftId: context.draftId })
+    const key = (await readableContentFile('member', two.id)).blobKey
+    db.insert(schema.instance).values({ id: 'instance', ownerUserId: 'owner', createdAt: now, updatedAt: now }).run()
+    const { deleteUser } = await import('../users/users.service')
+    await deleteUser('owner', 'author')
+    await expect(readableContentFile('member', one.id)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    expect(db.select().from(schema.bookReviews).where(eq(schema.bookReviews.id, review.id)).get()).toBeUndefined()
+    expect(await storage.getStorage().exists(key)).toBe(true)
+    expect((await readableContentFile('member', two.id)).id).toBe(two.id)
+    await cancelContentDraft('member', context.draftId)
+    expect(await storage.getStorage().exists(key)).toBe(false)
+    expect(sqlite.pragma('foreign_key_check')).toEqual([])
+  })
+
+  it('adds file persistence to populated review/notification structures without rewriting legacy bodies', async () => {
+    const review = await createReview('author', { bookVersionId: 'v1', body: '  **literal**\n', bodyFormat: 'plain', visibility: 'shared' })
+    await createReviewComment('member', review.id, { body: 'before files', requestId: 'before_files_123456789' })
+    sqlite.exec('DROP TABLE content_files; DROP TABLE content_upload_drafts; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000')
+    await client.runDatabaseMigrations(db)
+    expect((await getReviewDiscussion('author', review.id)).review).toMatchObject({ body: '  **literal**\n', bodyFormat: 'plain', files: [] })
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+    await client.runDatabaseMigrations(db)
+    expect(sqlite.pragma('foreign_key_check')).toEqual([])
+    expect(sqlite.pragma('quick_check')).toEqual([{ quick_check: 'ok' }])
+  })
+
+  it('prevents uploads completing after cancellation from recreating draft files', async () => {
+    const context = { domain: 'review' as const, kind: 'attachment' as const, bookVersionId: 'v1', draftId: 'cancel_draft_123456789' }
+    const file = new File(['later bytes'], 'later.txt')
+    let finish!: (value: ArrayBuffer) => void
+    const buffer = await file.arrayBuffer()
+    const read = vi.spyOn(file, 'arrayBuffer').mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const upload = uploadContentFile('author', context, file)
+    const assertion = expect(upload).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    await vi.waitFor(() => expect(read).toHaveBeenCalled())
+    await cancelContentDraft('author', context.draftId)
+    finish(buffer)
+    await assertion
+    expect(db.select().from(schema.contentFiles).all()).toHaveLength(0)
+    expect(db.select().from(schema.blobs).all()).toHaveLength(0)
+  })
+
+  it('preserves Markdown/plain semantics and excludes code, markup and resource IDs from excerpts', () => {
+    const url = contentFileUrl('cfile_abcdefghijklmnopqrstu')
+    const body = `# Heading\n\n**Text**\n\n| Label | Value |\n| --- | --- |\n| item | cell |\n\n\`\`\`text\nsecret long code ${url}\n\`\`\`\n\n![Image](${url})\n\n[Notes](${url})`
+    expect(reviewFileReferences(body)).toEqual({ ids: ['cfile_abcdefghijklmnopqrstu'], imageIds: ['cfile_abcdefghijklmnopqrstu'], unmanagedImages: false })
+    const excerpt = reviewExcerpt(body, 'markdown', 500)
+    expect(excerpt).toBe('Heading Text Label Value item cell Notes')
+    expect(reviewExcerpt('**literal**', 'plain')).toBe('**literal**')
+    expect(reviewExcerpt('Hello **world**! 读**书**人', 'markdown')).toBe('Hello world! 读书人')
+    expect(reviewFileReferences(`![external](https://example.com/image.png)`).unmanagedImages).toBe(true)
+  })
+
   it('upgrades populated stage-one review structures into notification persistence', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: 'baseline', visibility: 'shared' })
-    sqlite.exec("DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; DELETE FROM __drizzle_migrations WHERE created_at = 1792500000000")
+    sqlite.exec("DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000")
     await client.runDatabaseMigrations(db)
     expect(db.select().from(schema.bookReviews).get()?.id).toBe(review.id)
     await createReviewComment('member', review.id, { body: 'upgrade event', requestId: 'upgrade_12345678901' })

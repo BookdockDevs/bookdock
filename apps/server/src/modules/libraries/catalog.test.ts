@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { and, desc, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateTestBaseWithStorage as migrate } from '../../db/migration-stage'
+import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -53,7 +53,7 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, ['0041_idea_discussion', '0042_storage_connections', '0043_storage_backend', '0044_storage_s3', '0046_book_reviews', '0048_content_files'])
   return db
 }
 

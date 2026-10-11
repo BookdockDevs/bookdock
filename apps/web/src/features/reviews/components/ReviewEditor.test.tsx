@@ -9,6 +9,15 @@ vi.mock('../hooks/useReviews', () => ({
   useSaveReview: () => ({ mutateAsync, isPending: false }),
 }))
 
+vi.mock('@/features/content-files/hooks/useContentDraft', () => ({
+  useContentDraft: () => ({ draftId: 'draft-editor-test', entries: [], add: vi.fn(), retry: vi.fn(), uploading: false }),
+}))
+vi.mock('./ReviewRichEditor', () => ({
+  default: ({ body, onChange, onUnsupported }: { body: string; onChange: (body: string) => void; onUnsupported: () => void }) => (
+    <><textarea aria-label="visual-body" value={body} onChange={(event) => onChange(event.target.value)} /><button onClick={onUnsupported}>unsupported</button></>
+  ),
+}))
+
 import ReviewEditor from './ReviewEditor'
 
 const composer: ReviewComposerContext = {
@@ -58,6 +67,8 @@ describe('ReviewEditor visibility retention', () => {
       reviewId: 'r1',
       rating: 4,
       body: 'kept',
+      bodyFormat: 'markdown',
+      draftId: 'draft-editor-test',
       visibility: undefined,
     })
   })
@@ -72,26 +83,35 @@ describe('ReviewEditor visibility retention', () => {
     )
   })
 
-  it('inserts links through the modal dialog instead of a native prompt', async () => {
-    render(<ReviewEditor bookVersionId="v1" existing={null} composer={{ ...composer, canPublishShared: true }} onClose={() => {}} />)
-    expect(screen.queryByLabelText('review.linkUrlLabel')).toBeNull()
-    fireEvent.click(screen.getByLabelText('review.formatLink'))
-    const input = screen.getByLabelText('review.linkUrlLabel') as HTMLInputElement
-    expect(document.activeElement).toBe(input)
-    fireEvent.change(input, { target: { value: 'https://example.com' } })
-    fireEvent.click(screen.getByText('review.linkConfirm'))
-    await vi.waitFor(() => {
-      const textarea = document.querySelector('textarea')
-      expect(textarea?.value).toContain('(https://example.com)')
-    })
+  it('keeps legacy plain text unchanged until explicit conversion', async () => {
+    render(<ReviewEditor bookVersionId="v1" existing={{ ...sharedReview(), body: '**literal**', bodyFormat: 'plain' }} composer={composer} onClose={() => {}} />)
+    expect((screen.getByLabelText('review.bodyLabel') as HTMLTextAreaElement).value).toBe('**literal**')
+    fireEvent.click(screen.getByText('library.save'))
+    await vi.waitFor(() => expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ body: '**literal**', bodyFormat: 'plain' })))
+    fireEvent.click(screen.getByText('review.convertMarkdown'))
+    await screen.findByLabelText('visual-body')
+    expect((screen.getByLabelText('visual-body') as HTMLTextAreaElement).value).not.toBe('**literal**')
   })
 
-  it('disables format tools while previewing', () => {
-    render(<ReviewEditor bookVersionId="v1" existing={null} composer={{ ...composer, canPublishShared: true }} onClose={() => {}} />)
-    const bold = screen.getByLabelText('review.formatBold') as HTMLButtonElement
-    expect(bold.disabled).toBe(false)
-    fireEvent.click(screen.getByText('review.preview'))
-    expect((screen.getByLabelText('review.formatBold') as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByLabelText('review.formatLink') as HTMLButtonElement).disabled).toBe(true)
+  it('retains complete source after unsupported imports and save failure', async () => {
+    const original = '# Heading\n\n<iframe src="blocked"></iframe>\n\nTail'
+    const onClose = vi.fn()
+    mutateAsync.mockRejectedValue(new Error('failed'))
+    render(<ReviewEditor bookVersionId="v1" existing={{ ...sharedReview(), body: original }} composer={composer} onClose={onClose} />)
+    expect((screen.getByLabelText('review.bodyLabel') as HTMLTextAreaElement).value).toBe(original)
+    fireEvent.click(screen.getByText('library.save'))
+    await vi.waitFor(() => expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ body: original })))
+    expect(onClose).not.toHaveBeenCalled()
+    expect((screen.getByLabelText('review.bodyLabel') as HTMLTextAreaElement).value).toBe(original)
   })
+
+  it('keeps Markdown and plain preview interpretation consistent', async () => {
+    render(<ReviewEditor bookVersionId="v1" existing={{ ...sharedReview(), body: '**literal**', bodyFormat: 'plain' }} composer={composer} onClose={() => {}} />)
+    fireEvent.click(screen.getByText('review.preview'))
+    expect(document.querySelector('.review-markdown')?.textContent).toBe('**literal**')
+    expect(document.querySelector('.review-markdown strong')).toBeNull()
+    fireEvent.click(screen.getByText('review.returnEdit'))
+    expect((screen.getByLabelText('review.bodyLabel') as HTMLTextAreaElement).value).toBe('**literal**')
+  })
+
 })

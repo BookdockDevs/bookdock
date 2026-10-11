@@ -61,6 +61,8 @@ export interface SaveReviewInput {
   reviewId?: string | null
   rating: number | null
   body: string | null
+  bodyFormat?: 'plain' | 'markdown'
+  draftId?: string
   /** Omitted on untouched edits so the server retains the stored visibility. */
   visibility?: 'private' | 'shared'
 }
@@ -69,7 +71,7 @@ export function useSaveReview() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: SaveReviewInput) => {
-      const payload = { rating: input.rating, body: input.body, visibility: input.visibility }
+      const payload = { rating: input.rating, body: input.body, bodyFormat: input.bodyFormat, draftId: input.draftId, visibility: input.visibility }
       if (input.reviewId) return apiPut<{ data: unknown }>(`/reviews/${input.reviewId}`, payload)
       return apiPost<{ data: unknown }>('/reviews', { ...payload, bookVersionId: input.bookVersionId })
     },

@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, fireEvent } from '@testing-library/react'
+import { act, render as testingRender, screen, fireEvent } from '@testing-library/react'
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
+
+function render(element: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+  return testingRender(element, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+}
 
 import type { AnnotationRes } from '@bookdock/shared'
 
@@ -404,7 +412,7 @@ describe('NotesPanel', () => {
     const textarea = screen.getByPlaceholderText('annotation.notePlaceholder')
     fireEvent.change(textarea, { target: { value: '新的想法' } })
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
-    expect(updateMutate).toHaveBeenCalledWith({ id: 'n1', body: { note: '新的想法' } }, expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }))
+    expect(updateMutate).toHaveBeenCalledWith({ id: 'n1', body: { note: '新的想法', visibility: undefined, imageIds: [], draftId: expect.any(String) } }, expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }))
   })
 
   it('retains the draft on failed save and closes only after a successful retry', () => {

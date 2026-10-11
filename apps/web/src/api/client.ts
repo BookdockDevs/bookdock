@@ -120,12 +120,39 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return request<T>(path, { method: 'DELETE' })
 }
 
-export async function apiUpload<T>(path: string, file: File | FormData, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
+export async function apiUpload<T>(path: string, file: File | FormData, method: 'POST' | 'PUT' = 'POST', options?: { signal?: AbortSignal; onProgress?: (percent: number) => void }): Promise<T> {
   const formData = file instanceof FormData ? file : new FormData()
   if (file instanceof File) formData.append('file', file)
+  if (options?.onProgress) {
+    return new Promise<T>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      const abort = () => xhr.abort()
+      const finish = () => options.signal?.removeEventListener('abort', abort)
+      xhr.open(method, `${BASE_URL}${path}`)
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) options.onProgress?.(Math.round(event.loaded / event.total * 100))
+      }
+      xhr.onload = () => {
+        finish()
+        let body: { error?: { code?: string; message?: string; details?: unknown } } & T
+        try { body = JSON.parse(xhr.responseText) } catch { reject(new ApiError('UNKNOWN', 'Invalid upload response')); return }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body)
+        else {
+          if (xhr.status === 401) handleUnauthorized(path)
+          reject(new ApiError(body.error?.code ?? 'UNKNOWN', body.error?.message ?? xhr.statusText, body.error?.details))
+        }
+      }
+      xhr.onerror = () => { finish(); reject(new ApiError('NETWORK_ERROR', 'Upload connection failed')) }
+      xhr.onabort = () => { finish(); reject(new DOMException('Upload aborted', 'AbortError')) }
+      if (options.signal?.aborted) { reject(new DOMException('Upload aborted', 'AbortError')); return }
+      options.signal?.addEventListener('abort', abort, { once: true })
+      xhr.send(formData)
+    })
+  }
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     body: formData,
+    signal: options?.signal,
   })
   if (!res.ok) {
     if (res.status === 401) handleUnauthorized(path)

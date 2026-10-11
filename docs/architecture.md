@@ -52,6 +52,75 @@ govern every public read and interaction. Even removal with personal-data
 cleanup preserves source-bound ideas. Localization leaves source-bound ideas
 and discussion on the original version; only unbound private ideas follow C.
 
+### Review Markdown editing and managed content files
+
+Markdown remains the authoritative review body. The WYSIWYG editor imports and
+exports Markdown through a mature MDAST-based editor, with headings, emphasis,
+quotes, lists, links, GFM tables and fenced code. `bodyFormat` remains explicit:
+legacy plain bodies stay plain until the author explicitly converts them.
+An unchanged import must not replace the original source with editor-normalized
+text. Unsupported syntax uses a visible source-editing fallback and retains the
+original draft; switching modes never silently drops content. Raw HTML, JSX,
+scripts, iframe and arbitrary embeds remain disabled. Comments stay plain text.
+Preview and published bodies share one sanitized Markdown renderer; excerpts
+come from parsed tokens, excluding block code, images and resource identifiers.
+Desktop layout and keyboard editing are primary; narrow screens remain supported.
+
+`content_files` owns each upload through a non-null author `userId` FK (cascade),
+domain (`review` or `idea`), kind (`image` or `attachment`), opaque draft ID,
+upload BookVersion context, optional intended content ID and readiness flag.
+A ready row either remains an author-only draft or references exactly one
+published review/idea through a cascading FK. One upload belongs to one content;
+content-addressed blob bytes may be shared by many upload rows. Published review
+resources inherit review work authorization, including author-retained reviews;
+idea resources inherit exact-listing authorization. File routes use existing
+domain access interfaces, never a replacement ACL or another domain's service.
+Sources and intended draft targets are plain identifiers, not rebindable FKs.
+`content_upload_drafts` records the author's draft context and cancellation state.
+Uploads reserve that draft before decoding; cancellation closes it permanently,
+so an upload finishing late cannot recreate a canceled draft's files. Draft
+contexts cannot change domain, version or intended target on retry.
+
+Images accept JPEG, PNG and static WebP up to 5 MiB, matching the existing default
+avatar upload bound. Sharp validates actual decoded format, rejects animation
+and caps decoded pixels at 40 million; storage uses metadata-stripped WebP fitted
+inside 2048 pixels without enlargement. SVG and active images are rejected.
+Review attachments accept structurally validated PDF or valid UTF-8 plain text
+up to 10 MiB; they download as attachments with `nosniff`, without online preview.
+Ideas accept images only. Each draft/content accepts at most 20 files. Multipart
+requests have a finite total byte limit.
+Qualification is checked before processing bytes and again before association.
+
+Managed references use `/api/v1/content-files/<opaque-id>`, never hash URLs,
+machine paths, signed credentials or external image embeds. Reads recheck the
+current content ACL, use `Cache-Control: private, no-store`, vary on identity and
+return a generic unavailable error without file metadata when access fails.
+Changing visibility or losing a source immediately changes subsequent access;
+previously downloaded bytes cannot be revoked. Authorization also precedes
+metadata projection in archives, cards and notification previews.
+
+Upload reserves a blob reference before storage writes, then marks the file ready
+only after success. Saving validates managed references and associates files in
+the content transaction; failed saves retain the body and draft files for retry.
+Removing references or deleting content removes its file rows. Cancellation
+deletes only the author's unpublished rows for that draft, never rows already
+published by a racing save. Abandoned draft rows expire after 24 hours in the
+existing startup/daily maintenance sweep. Account deletion cascades file rows.
+Physical deletion checks the common blob-reference interface, extended to include
+all ready and pending content-file references, before deleting shared bytes.
+Unreferenced content blobs are reclaimed by the same maintenance orchestration;
+no new queue or cross-module service dependency is introduced.
+Content-file blobs stay in the existing driver's local asset tier, like covers;
+they do not enter the book transfer queue or book LRU eviction. Upload and cleanup
+of a content blob serialize within the single server process so cleanup cannot
+race a new reservation of the same hash.
+
+Ideas retain their existing plain-text note and quote semantics. Their image
+IDs are an explicit shared-contract field, not Markdown conversion. Existing
+reader cards, detail and private archives display the same managed image set.
+Copy and export retain their current text scope rather than embedding private
+resource URLs or adding new export capabilities.
+
 ### Persistent interaction notifications v3
 
 The notification center is account-private server state, separate from transient
@@ -89,6 +158,11 @@ views reuse existing cards and discussions, focusing the exact comment or like
 tab. Unresolvable reading positions never substitute a source.
 
 ### Reader profile v2
+
+Archive location availability is a source/revision eligibility check; the live
+renderer must still resolve the stored position. A failed deep-link resolution,
+including an unsupported historical TXT position, reports an unavailable reading
+position and keeps the current page. It never guesses a replacement location.
 
 The existing `/profile` page remains the owner's account and reading dashboard.
 An optional `userId` search parameter selects another reader: that projection

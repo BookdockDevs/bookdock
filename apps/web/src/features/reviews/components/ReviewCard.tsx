@@ -2,10 +2,7 @@ import { useState } from 'react'
 
 import type { Review } from '@bookdock/shared'
 
-import { useQueryClient } from '@tanstack/react-query'
-
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
-import { apiDelete } from '@/api/client'
 import { ChatBubbleIcon, HeartIcon, LockIcon, PencilIcon, TrashIcon } from '@/features/reader/components/annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from '@/features/reader/components/format-relative-time'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -15,7 +12,7 @@ import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
 
-import { useReviewAction } from '../hooks/useReviews'
+import { useDeleteReview, useReviewAction } from '../hooks/useReviews'
 import { reviewExcerpt } from '../lib/markdown'
 import ReviewDiscussionPanel from './ReviewDiscussionPanel'
 import ReviewMarkdown from './ReviewMarkdown'
@@ -42,9 +39,9 @@ export default function ReviewCard({
   const [bodyOpen, setBodyOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const likeAction = useReviewAction(review.id)
+  const deleteReview = useDeleteReview()
 
   const authorAvatar = avatarUrl(review.author.avatarKey)
-  const queryClient = useQueryClient()
 
   function toggleLike() {
     if (!user || likeAction.isPending) return
@@ -58,10 +55,9 @@ export default function ReviewCard({
 
   async function remove() {
     try {
-      await apiDelete(`/reviews/${review.id}`)
+      await deleteReview.mutateAsync(review.id)
       notify.success({ key: 'review.deletedNotice' })
       setConfirmDelete(false)
-      await queryClient.invalidateQueries({ queryKey: ['reviews'] })
       onDeleted?.()
     } catch (error) {
       notify.error(getUserErrorNotification(error, 'review.deleteFailed'))
