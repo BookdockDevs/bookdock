@@ -748,6 +748,34 @@ export const bookReviewCommentLikes = sqliteTable('book_review_comment_likes', {
   createdAt: integer('created_at').notNull(),
 }, (table) => ({ pk: primaryKey({ columns: [table.commentId, table.userId] }) }))
 
+export const interactionNotifications = sqliteTable('interaction_notifications', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  actorId: text('actor_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  domain: text('domain', { enum: ['idea', 'review'] }).notNull(),
+  event: text('event', { enum: ['comment', 'reply', 'like'] }).notNull(),
+  targetId: text('target_id').notNull(),
+  interactionId: text('interaction_id').notNull(),
+  commentId: text('comment_id'),
+  createdAt: integer('created_at').notNull(),
+  readAt: integer('read_at'),
+}, (table) => ({
+  userIdx: index('interaction_notifications_user_idx').on(table.userId, table.createdAt),
+  eventUnique: uniqueIndex('interaction_notifications_event_unique').on(table.userId, table.actorId, table.domain, table.event, table.interactionId),
+}))
+
+export const interactionReceipts = sqliteTable('interaction_receipts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  domain: text('domain', { enum: ['idea', 'review'] }).notNull(),
+  requestId: text('request_id').notNull(),
+  targetId: text('target_id').notNull(),
+  payloadHash: text('payload_hash').notNull(),
+  resultId: text('result_id').notNull(),
+}, (table) => ({
+  requestUnique: uniqueIndex('interaction_receipts_request_unique').on(table.userId, table.domain, table.requestId),
+}))
+
 export const storageConnections = sqliteTable('storage_connections', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

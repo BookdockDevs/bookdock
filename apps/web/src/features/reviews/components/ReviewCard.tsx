@@ -27,14 +27,18 @@ export default function ReviewCard({
   review,
   onEdit,
   onDeleted,
+  initialDiscussionTab,
+  focusCommentId,
 }: {
   review: Review
   onEdit?: (review: Review) => void
   onDeleted?: () => void
+  initialDiscussionTab?: 'comments' | 'likes'
+  focusCommentId?: string
 }) {
   const _ = useTranslation()
   const user = useAuthStore((state) => state.user)
-  const [discussionOpen, setDiscussionOpen] = useState(false)
+  const [discussionOpen, setDiscussionOpen] = useState(Boolean(initialDiscussionTab || focusCommentId))
   const [bodyOpen, setBodyOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const likeAction = useReviewAction(review.id)
@@ -209,6 +213,8 @@ export default function ReviewCard({
           reviewAuthorId={review.author.id}
           initialCommentCount={review.commentCount}
           initialLikeCount={review.likeCount}
+          initialTab={initialDiscussionTab}
+          focusCommentId={focusCommentId}
         />
       )}
 

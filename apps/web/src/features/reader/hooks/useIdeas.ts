@@ -1,3 +1,6 @@
+import { useRef } from 'react'
+import { interactionRequestId } from '@/lib/interaction-request'
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AnnotationRes, BookDetailRes, IdeaComposerContext, IdeaDiscussion, ReaderIdea } from '@bookdock/shared'
@@ -50,14 +53,20 @@ export type IdeaAction =
 
 export function useIdeaAction(ideaId: string, bookId: string) {
   const queryClient = useQueryClient()
+  const pendingComment = useRef<{ signature: string; requestId: string } | null>(null)
   return useMutation({
     mutationFn: (action: IdeaAction) => {
       const path = `/ideas/${ideaId}`
-      if (action.type === 'comment') return apiPost(`${path}/comments`, { body: action.body, replyToId: action.replyToId })
+      if (action.type === 'comment') {
+        const signature = JSON.stringify([ideaId, action.body, action.replyToId])
+        if (pendingComment.current?.signature !== signature) pendingComment.current = { signature, requestId: interactionRequestId() }
+        return apiPost(`${path}/comments`, { body: action.body, replyToId: action.replyToId, requestId: pendingComment.current.requestId })
+      }
       if (action.type === 'edit') return apiPut(`${path}/comments/${action.commentId}`, { body: action.body })
       if (action.type === 'delete') return apiDelete(`${path}/comments/${action.commentId}`)
       return apiPut(action.commentId ? `${path}/comments/${action.commentId}/like` : `${path}/like`, { liked: action.liked })
     },
+    onSuccess: (_, action) => { if (action.type === 'comment') pendingComment.current = null },
     onMutate: async (action) => {
       if (action.type === 'like') {
         const user = useAuthStore.getState().user

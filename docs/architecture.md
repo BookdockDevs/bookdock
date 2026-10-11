@@ -52,6 +52,42 @@ govern every public read and interaction. Even removal with personal-data
 cleanup preserves source-bound ideas. Localization leaves source-bound ideas
 and discussion on the original version; only unbound private ideas follow C.
 
+### Persistent interaction notifications v3
+
+The notification center is account-private server state, separate from transient
+toasts. V1 covers only idea/review comments, replies and likes. Top-level comments
+notify the content author; replies notify only the addressed comment author;
+content/comment likes notify that target's author. Self-actions never notify.
+A like by the same actor on the same target notifies at most once over its
+lifetime, including unlike/re-like cycles.
+
+Interaction writes and notification insertion share one SQLite transaction.
+Comment POSTs require a client-generated request ID, reused for retries of the
+same draft. Account-private receipts keyed by actor, domain and request ID store
+a payload hash and result ID: identical retries return that result, conflicting
+reuse is rejected, and deleting the comment does not recreate it on retry.
+Notification uniqueness covers recipient, actor, domain, event and interaction
+ID. No queue or background worker is introduced.
+
+Notifications store references, never body/identity/source snapshots. Recipients
+own read state; recipient or actor deletion cascades. Target IDs have no FK so
+deleted targets remain unavailable without rebinding. Every list, count, preview
+and target request checks current shared visibility and exact source access with
+existing domain permission helpers. Private, deleted and inaccessible targets
+are omitted from lists and unread counts; stale links return a generic
+unavailable result without identity, body or source metadata. Restored access
+restores retained events with their existing read state. Deleted interactions do
+not resolve to a parent or a replacement. Revoked likes are also unavailable;
+re-liking restores the existing event rather than creating another. Mark-all-read covers currently readable
+events only; a recipient may mark a specific event read without exposing its
+target. Receipts belong to their actor and cascade on actor deletion.
+
+Lists paginate after authorization using bounded SQL batches and no total count.
+The signed-in global entry polls the authorized unread count every 30 seconds,
+refreshes on focus, and local writes invalidate notification projections. Target
+views reuse existing cards and discussions, focusing the exact comment or like
+tab. Unresolvable reading positions never substitute a source.
+
 ### Reader profile v2
 
 The existing `/profile` page remains the owner's account and reading dashboard.

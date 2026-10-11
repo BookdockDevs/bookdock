@@ -147,3 +147,4 @@ describe('ReaderHeader', () => {
     expect(onTtsStart).toHaveBeenCalledTimes(1)
   })
 })
+vi.mock('@/features/notifications/components/NotificationBell', () => ({ default: () => null }))

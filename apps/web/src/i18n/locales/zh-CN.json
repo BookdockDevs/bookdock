@@ -2336,5 +2336,12 @@
     "pagination": "档案分页",
     "previous": "上一页",
     "next": "下一页"
+  },
+  "notificationCenter": {
+    "title": "通知中心", "unread": "有未读通知", "readAll": "全部已读", "empty": "暂无可查看的通知",
+    "comment": "评论了你的内容", "reply": "回复了你的评论", "like": "赞了你的内容",
+    "markRead": "标为已读", "markUnread": "标为未读", "target": "互动详情",
+    "unavailable": "这条互动已不可用，内容、来源或访问权限可能已改变。",
+    "readFailed": "未能更新已读状态"
   }
 }

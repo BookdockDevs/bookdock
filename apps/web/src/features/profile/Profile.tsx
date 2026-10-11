@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import NotificationBell from '@/features/notifications/components/NotificationBell'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 
 import { useBackNavigation } from '@/hooks/useBackNavigation'
@@ -44,7 +45,7 @@ export default function Profile() {
 
   if (publicView) {
     return <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6">
-      <Link to="/" className="text-sm text-stone-500">{_('profile.back')}</Link>
+      <div className="flex items-center justify-between"><Link to="/" className="text-sm text-stone-500">{_('profile.back')}</Link><NotificationBell /></div>
       {reader.isPending ? <div role="status" className="h-24 animate-pulse rounded-2xl bg-stone-500/10" />
         : reader.isError ? <QueryErrorState isRetrying={reader.isFetching} onRetry={() => void reader.refetch()} />
         : reader.data && <>
@@ -71,7 +72,8 @@ export default function Profile() {
             <path d="m12 19-7-7 7-7" />
           </svg>
         </Link>
-        <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{_('profile.title')}</h1>
+        <h1 className="flex-1 text-xl font-bold tracking-tight sm:text-2xl">{_('profile.title')}</h1>
+        <NotificationBell />
       </header>
 
       <ProfileAccountSection onOpenSettings={() => setSettingsOpen(true)} />

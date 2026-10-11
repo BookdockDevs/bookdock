@@ -323,6 +323,13 @@
       "when": 1792400000000,
       "tag": "0046_book_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1792500000000,
+      "tag": "0047_interaction_notifications",
+      "breakpoints": true
     }
   ]
 }

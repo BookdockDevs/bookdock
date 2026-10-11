@@ -25,6 +25,9 @@ import annotationRoutes from '../annotations/annotations.routes'
 import reviewRoutes from './reviews.routes'
 import { errorHandler } from '../../middleware/error'
 import { reviewComposerContext } from './review-access'
+import { listNotifications, markAllNotificationsRead, markNotificationRead, notificationTarget, unreadNotificationCount } from '../notifications/notifications.service'
+import notificationRoutes from '../notifications/notifications.routes'
+import { createIdeaComment, deleteIdeaComment, setIdeaLike } from '../annotations/idea-discussion.service'
 import {
   createReviewComment,
   deleteReviewComment,
@@ -538,6 +541,138 @@ describe('book reviews', () => {
     expect(db.select().from(schema.bookReviewLikes).all()).toEqual([])
     expect(db.select().from(schema.bookReviewComments).all()).toEqual([])
     expect(sqlite.pragma('foreign_key_check')).toEqual([])
+  })
+
+  it('persists notifications atomically and deduplicates retry receipts and like cycles', async () => {
+    const review = await createReview('author', { bookVersionId: 'v1', body: 'visible', visibility: 'shared' })
+    const input = { body: 'comment', requestId: 'request_1234567890' }
+    const commentId = await createReviewComment('member', review.id, input)
+    expect(await createReviewComment('member', review.id, input)).toBe(commentId)
+    await expect(createReviewComment('member', review.id, { ...input, body: 'changed' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await setReviewLike('member', review.id, true)
+    await setReviewLike('member', review.id, true)
+    await setReviewLike('member', review.id, false)
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+    await setReviewLike('member', review.id, true)
+    await setReviewLike('author', review.id, true)
+    expect(db.select().from(schema.interactionNotifications).all()).toHaveLength(2)
+    await deleteReviewComment('member', review.id, commentId)
+    expect(await createReviewComment('member', review.id, input)).toBe(commentId)
+    expect(db.select().from(schema.bookReviewComments).all()).toHaveLength(0)
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+    sqlite.exec("CREATE TRIGGER fail_notification BEFORE INSERT ON interaction_notifications BEGIN SELECT RAISE(ABORT, 'test failure'); END")
+    await expect(createReviewComment('critic', review.id, { body: 'rollback', requestId: 'rollback_123456789' })).rejects.toThrow('test failure')
+    expect(db.select().from(schema.bookReviewComments).all()).toHaveLength(0)
+    expect(db.select().from(schema.interactionReceipts).all()).toHaveLength(1)
+    await expect(setReviewLike('critic', review.id, true)).rejects.toThrow('test failure')
+    expect(db.select().from(schema.bookReviewLikes).all().some((row) => row.userId === 'critic')).toBe(false)
+  })
+
+  it('notifies only the addressed reply author and protects recipient ownership over HTTP', async () => {
+    const review = await createReview('author', { bookVersionId: 'v1', body: 'visible', visibility: 'shared' })
+    const root = await createReviewComment('member', review.id, { body: 'root' })
+    const reply = await createReviewComment('critic', review.id, { body: 'reply', replyToId: root })
+    await createReviewComment('member', review.id, { body: 'self reply', replyToId: root })
+    await setReviewLike('author', review.id, true, reply)
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+    expect((await unreadNotificationCount('member')).count).toBe(1)
+    expect((await unreadNotificationCount('critic')).count).toBe(1)
+    const memberEvent = (await listNotifications('member', { page: 1, pageSize: 20 })).entries[0]
+    expect(memberEvent).toMatchObject({ event: 'reply', commentId: reply, actor: { id: 'critic' } })
+    expect(await notificationTarget('outsider', memberEvent.id)).toEqual({ available: false })
+    markNotificationRead('outsider', memberEvent.id, true)
+    expect((await unreadNotificationCount('member')).count).toBe(1)
+    const anon = new Hono().onError(errorHandler).route('/notifications', notificationRoutes)
+    expect((await anon.request('/notifications/unread')).status).toBe(401)
+    const signed = new Hono().onError(errorHandler).use('*', async (c, next) => {
+      c.set('user', { id: 'outsider' } as never); await next()
+    }).route('/notifications', notificationRoutes)
+    expect(await (await signed.request('/notifications/' + memberEvent.id + '/target')).json()).toEqual({ data: { available: false } })
+    expect((await signed.request('/notifications?pageSize=500')).status).toBe(400)
+  })
+
+  it('omits private or inaccessible notification targets and restores retained read state', async () => {
+    const review = await createReview('author', { bookVersionId: 'v1', body: 'sensitive', visibility: 'shared' })
+    await createReviewComment('outsider', review.id, { body: 'sensitive interaction' })
+    const entry = (await listNotifications('author', { page: 1, pageSize: 20 })).entries[0]
+    await updateReview('author', review.id, { visibility: 'private' })
+    expect((await listNotifications('author', { page: 1, pageSize: 20 })).entries).toEqual([])
+    expect(await notificationTarget('author', entry.id)).toEqual({ available: false })
+    await markAllNotificationsRead('author')
+    expect(db.select().from(schema.interactionNotifications).get()?.readAt).toBeNull()
+    await updateReview('author', review.id, { visibility: 'shared' })
+    db.update(schema.libraries).set({ visibility: 'private' }).where(eq(schema.libraries.id, 'source')).run()
+    expect((await unreadNotificationCount('author')).count).toBe(0)
+    expect(await notificationTarget('author', entry.id)).toEqual({ available: false })
+    db.update(schema.libraries).set({ visibility: 'public' }).where(eq(schema.libraries.id, 'source')).run()
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+    markNotificationRead('author', entry.id, true)
+    await deleteCatalogBook('owner', 'source', 'w1')
+    expect((await listNotifications('author', { page: 1, pageSize: 20 })).entries).toEqual([])
+    await restoreCatalogBook('owner', 'source', 'w1')
+    expect((await unreadNotificationCount('author')).count).toBe(0)
+    expect((await listNotifications('author', { page: 1, pageSize: 20 })).entries[0].readAt).not.toBeNull()
+    await deleteReview('author', review.id)
+    expect(await notificationTarget('author', entry.id)).toEqual({ available: false })
+  })
+
+  it('paginates authorized notifications and marks all batches without skipping unread rows', async () => {
+    const review = await createReview('author', { bookVersionId: 'v1', body: 'visible', visibility: 'shared' })
+    for (let i = 0; i < 57; i++) await createReviewComment('member', review.id, { body: String(i) })
+    const first = await listNotifications('author', { page: 1, pageSize: 20 })
+    const third = await listNotifications('author', { page: 3, pageSize: 20 })
+    expect(first.entries).toHaveLength(20)
+    expect(first.hasMore).toBe(true)
+    expect(third.entries).toHaveLength(17)
+    expect(third.hasMore).toBe(false)
+    expect(new Set([...first.entries, ...third.entries].map((entry) => entry.id)).size).toBe(37)
+    await markAllNotificationsRead('author')
+    expect((await unreadNotificationCount('author')).count).toBe(0)
+  })
+
+  it('covers idea comments, replies and likes with exact-source checks and deletion receipts', async () => {
+    db.insert(schema.ideas).values({
+      id: 'notification-idea', userId: 'author', bookVersionId: 'v1', revisionId: 'r-v1', visibility: 'shared',
+      sharedLibraryId: 'source', sourceLibraryBookVersionId: 'l1', text: 'quote', note: 'idea', createdAt: now, updatedAt: now,
+    }).run()
+    const input = { body: 'idea comment', requestId: 'idea_request_12345678' }
+    const root = await createIdeaComment('member', 'notification-idea', input)
+    expect(await createIdeaComment('member', 'notification-idea', input)).toBe(root)
+    const reply = await createIdeaComment('critic', 'notification-idea', { body: 'reply', replyToId: root })
+    await setIdeaLike('critic', 'notification-idea', true, root)
+    await setIdeaLike('member', 'notification-idea', true)
+    await setIdeaLike('member', 'notification-idea', true)
+    expect((await unreadNotificationCount('author')).count).toBe(2)
+    expect((await unreadNotificationCount('member')).count).toBe(2)
+    const memberEvents = (await listNotifications('member', { page: 1, pageSize: 20 })).entries
+    expect(memberEvents.some((entry) => entry.commentId === reply && entry.event === 'reply')).toBe(true)
+    const ownerEvent = (await listNotifications('author', { page: 1, pageSize: 20 })).entries[0]
+    db.update(schema.libraryBookVersions).set({ status: 'draft' }).where(eq(schema.libraryBookVersions.id, 'l1')).run()
+    expect(await notificationTarget('author', ownerEvent.id)).toEqual({ available: false })
+    db.update(schema.libraryBookVersions).set({ status: 'published' }).where(eq(schema.libraryBookVersions.id, 'l1')).run()
+    await deleteIdeaComment('member', 'notification-idea', root)
+    expect(await createIdeaComment('member', 'notification-idea', input)).toBe(root)
+    expect(db.select().from(schema.ideaComments).all()).toHaveLength(1)
+    db.update(schema.ideas).set({ visibility: 'private' }).where(eq(schema.ideas.id, 'notification-idea')).run()
+    expect((await unreadNotificationCount('author')).count).toBe(0)
+    db.insert(schema.instance).values({ id: 'instance', ownerUserId: 'owner', createdAt: now, updatedAt: now }).run()
+    const { deleteUser } = await import('../users/users.service')
+    await deleteUser('owner', 'member')
+    expect(db.select().from(schema.interactionReceipts).all()).toHaveLength(0)
+    expect(sqlite.pragma('foreign_key_check')).toEqual([])
+  })
+
+  it('upgrades populated stage-one review structures into notification persistence', async () => {
+    const review = await createReview('author', { bookVersionId: 'v1', body: 'baseline', visibility: 'shared' })
+    sqlite.exec("DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; DELETE FROM __drizzle_migrations WHERE created_at = 1792500000000")
+    await client.runDatabaseMigrations(db)
+    expect(db.select().from(schema.bookReviews).get()?.id).toBe(review.id)
+    await createReviewComment('member', review.id, { body: 'upgrade event', requestId: 'upgrade_12345678901' })
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+    await client.runDatabaseMigrations(db)
+    expect(db.select().from(schema.interactionNotifications).all()).toHaveLength(1)
+    expect(sqlite.pragma('foreign_key_check')).toEqual([])
+    expect(sqlite.pragma('quick_check')).toEqual([{ quick_check: 'ok' }])
   })
 
   it('upgrades a populated pre-0046 database without losing rows', async () => {

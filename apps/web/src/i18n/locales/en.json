@@ -2347,5 +2347,12 @@
     "pagination": "Archive pages",
     "previous": "Previous",
     "next": "Next"
+  },
+  "notificationCenter": {
+    "title": "Notifications", "unread": "Unread notifications", "readAll": "Mark all read", "empty": "No available notifications",
+    "comment": "commented on your content", "reply": "replied to your comment", "like": "liked your content",
+    "markRead": "Mark read", "markUnread": "Mark unread", "target": "Interaction details",
+    "unavailable": "This interaction is unavailable. Its content, source or permissions may have changed.",
+    "readFailed": "Could not update read state"
   }
 }

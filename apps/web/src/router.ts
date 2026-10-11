@@ -4,6 +4,7 @@ import { indexRoute } from './routes/index'
 import { libraryInviteRoute } from './routes/library.$token'
 import { loginRoute } from './routes/login'
 import { profileRoute } from './routes/profile'
+import { notificationsRoute } from './routes/notifications'
 import { registerRoute } from './routes/register'
 import { setupRoute } from './routes/setup'
 import { readerRoute } from './routes/books.$id'
@@ -15,6 +16,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   libraryInviteRoute,
   profileRoute,
+  notificationsRoute,
   loginRoute,
   registerRoute,
   setupRoute,

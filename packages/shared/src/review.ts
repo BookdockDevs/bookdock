@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { interactionRequestIdSchema } from './notification'
 
 /**
  * Book reviews (书评) v1 contract. Reviews anchor to works, never to file
@@ -182,6 +183,7 @@ export type ReviewUpdateReq = z.infer<typeof reviewUpdateSchema>
 
 export const reviewCommentCreateSchema = z
   .object({
+    requestId: interactionRequestIdSchema,
     body: z.string().trim().min(1).max(REVIEW_COMMENT_MAX_LENGTH),
     replyToId: z.string().min(1).optional(),
   })

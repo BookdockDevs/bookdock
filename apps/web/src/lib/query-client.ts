@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query'
+import { MutationCache, QueryClient } from '@tanstack/react-query'
 
 import { ApiError } from '@/api/client'
 import { fetchSettings, seedSettingsQuery } from '@/lib/settings-cache'
@@ -6,6 +6,16 @@ import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
 
 export const queryClient = new QueryClient({
+  mutationCache: new MutationCache({
+    onSettled: async () => {
+      // Archives and notifications also depend on source permissions and lifecycle writes.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+        queryClient.invalidateQueries({ queryKey: ['note-archive'] }),
+        queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] }),
+      ])
+    },
+  }),
   defaultOptions: {
     queries: {
       staleTime: Infinity,

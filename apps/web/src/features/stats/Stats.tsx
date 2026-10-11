@@ -1,3 +1,5 @@
+import NotificationBell from '@/features/notifications/components/NotificationBell'
+
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 
@@ -63,6 +65,7 @@ export default function Stats() {
         </Link>
         <h1 className="text-2xl font-bold">{_('stats.title')}</h1>
         <StatsSettingsButton />
+        <NotificationBell />
       </div>
 
       <SummaryCards />

@@ -224,3 +224,4 @@ describe('Stats page', () => {
     expect(screen.queryByText('stats.emptyTags')).not.toBeInTheDocument()
   })
 })
+vi.mock('@/features/notifications/components/NotificationBell', () => ({ default: () => null }))

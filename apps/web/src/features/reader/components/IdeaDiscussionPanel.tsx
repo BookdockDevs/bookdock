@@ -23,6 +23,8 @@ interface IdeaDiscussionPanelProps {
   initialLikeCount?: number
   hideTabs?: boolean
   className?: string
+  initialTab?: 'comments' | 'likes'
+  focusCommentId?: string
 }
 
 export default function IdeaDiscussionPanel({
@@ -32,13 +34,17 @@ export default function IdeaDiscussionPanel({
   initialLikeCount = 0,
   hideTabs = false,
   className,
+  initialTab = 'comments',
+  focusCommentId,
 }: IdeaDiscussionPanelProps) {
   const _ = useTranslation()
   const query = useIdeaDiscussion(ideaId, bookId)
   const action = useIdeaAction(ideaId, bookId)
   const user = useAuthStore((state) => state.user)
 
-  const [tab, setTab] = useState<'comments' | 'likes'>('comments')
+  const [tab, setTab] = useState<'comments' | 'likes'>(initialTab)
+  const focused = useRef(false)
+  const commentTarget = useRef<HTMLDivElement>(null)
   const [draft, setDraft] = useState('')
   const [replyTo, setReplyTo] = useState<IdeaComment | null>(null)
   const [editing, setEditing] = useState<IdeaComment | null>(null)
@@ -53,6 +59,12 @@ export default function IdeaDiscussionPanel({
   const touchStartPos = useRef<{ x: number; y: number } | null>(null)
 
   const data = query.data?.data
+  useEffect(() => {
+    if (!focusCommentId || !commentTarget.current || focused.current) return
+    focused.current = true
+    commentTarget.current.scrollIntoView?.({ block: 'center' })
+    commentTarget.current.focus({ preventScroll: true })
+  }, [data, focusCommentId])
   const userAvatar = user?.avatarKey ? avatarUrl(user.avatarKey) : undefined
   const isExpanded = isFocused || Boolean(draft) || Boolean(replyTo) || Boolean(editing)
 
@@ -147,12 +159,16 @@ export default function IdeaDiscussionPanel({
     return (
       <div
         key={comment.id}
+        ref={comment.id === focusCommentId ? commentTarget : undefined}
+        tabIndex={comment.id === focusCommentId ? -1 : undefined}
+        data-notification-interaction={comment.id}
         onContextMenu={(e) => handleCommentContextMenu(e, comment)}
         onTouchStart={(e) => handleTouchStart(e, comment)}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         className={cn(
           'group relative transition-colors',
+          comment.id === focusCommentId && 'rounded-lg bg-blue-500/10 ring-1 ring-blue-500/30',
           isReply
             ? 'ml-8 mt-2 border-l-2 border-stone-200/50 pl-3 dark:border-stone-800/60'
             : 'border-t border-stone-200/30 pt-3 pb-1.5 dark:border-stone-800/30 first:border-t-0',

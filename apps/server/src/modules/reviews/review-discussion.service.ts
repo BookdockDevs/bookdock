@@ -5,6 +5,7 @@ import type { ReviewComment, ReviewDiscussion } from '@bookdock/shared'
 import { getDb } from '../../db/client'
 import { bookReviewCommentLikes, bookReviewComments, bookReviewLikes } from '../../db/schema'
 import { createId } from '../../lib/id'
+import { findCommentReceipt, recordInteractionNotification, saveCommentReceipt } from '../../lib/interaction-notifications'
 import { AppError } from '../../middleware/error'
 import { projectReview, readableReview, reviewAuthor } from './review-access'
 
@@ -77,30 +78,39 @@ export async function reviewCommentLikers(userId: string | null, reviewId: strin
     .map((like) => reviewAuthor(like.userId))
 }
 
-export async function createReviewComment(userId: string, reviewId: string, input: { body: string; replyToId?: string }) {
-  await readableReview(userId, reviewId)
+export async function createReviewComment(userId: string, reviewId: string, input: { requestId?: string; body: string; replyToId?: string }) {
+  const { row } = await readableReview(userId, reviewId)
   const db = getDb()
-  const replyTo = input.replyToId
-    ? db
-        .select()
-        .from(bookReviewComments)
-        .where(and(eq(bookReviewComments.id, input.replyToId), eq(bookReviewComments.reviewId, reviewId), isNull(bookReviewComments.deletedAt)))
-        .get()
-    : null
-  if (input.replyToId && !replyTo) throw new AppError('REVIEW_NOT_FOUND')
-  // Two levels: a reply nests under its target's top-level parent and
-  // addresses the target, exactly like idea discussion.
-  const comment = {
-    id: createId('rc'),
-    reviewId,
-    userId,
-    parentId: replyTo ? replyTo.parentId ?? replyTo.id : null,
-    replyToId: replyTo?.id ?? null,
-    body: input.body,
-    createdAt: Date.now(),
-  }
-  db.insert(bookReviewComments).values(comment).run()
-  return comment.id
+  return db.transaction((tx) => {
+    const receipt = findCommentReceipt(tx, userId, 'review', reviewId, input)
+    if (receipt) return receipt
+    const replyTo = input.replyToId
+      ? db
+          .select()
+          .from(bookReviewComments)
+          .where(and(eq(bookReviewComments.id, input.replyToId), eq(bookReviewComments.reviewId, reviewId), isNull(bookReviewComments.deletedAt)))
+          .get()
+      : null
+    if (input.replyToId && !replyTo) throw new AppError('REVIEW_NOT_FOUND')
+    // Two levels: a reply nests under its target's top-level parent and
+    // addresses the target, exactly like idea discussion.
+    const comment = {
+      id: createId('rc'),
+      reviewId,
+      userId,
+      parentId: replyTo ? replyTo.parentId ?? replyTo.id : null,
+      replyToId: replyTo?.id ?? null,
+      body: input.body,
+      createdAt: Date.now(),
+    }
+    tx.insert(bookReviewComments).values(comment).run()
+    saveCommentReceipt(tx, userId, 'review', reviewId, input, comment.id)
+    recordInteractionNotification(tx, {
+      userId: replyTo ? replyTo.userId : row.userId, actorId: userId, domain: 'review',
+      event: replyTo ? 'reply' : 'comment', targetId: reviewId, interactionId: comment.id, commentId: comment.id,
+    })
+    return comment.id
+  })
 }
 
 export async function updateReviewComment(userId: string, reviewId: string, commentId: string, body: string) {
@@ -144,23 +154,27 @@ export async function deleteReviewComment(userId: string, reviewId: string, comm
 }
 
 export async function setReviewLike(userId: string, reviewId: string, liked: boolean, commentId?: string) {
-  await readableReview(userId, reviewId)
+  const { row } = await readableReview(userId, reviewId)
   const db = getDb()
-  if (commentId) {
-    const comment = db
-      .select()
-      .from(bookReviewComments)
-      .where(and(eq(bookReviewComments.id, commentId), eq(bookReviewComments.reviewId, reviewId), isNull(bookReviewComments.deletedAt)))
-      .get()
-    if (!comment) throw new AppError('REVIEW_NOT_FOUND')
-    if (liked) {
-      db.insert(bookReviewCommentLikes).values({ commentId, userId, createdAt: Date.now() }).onConflictDoNothing().run()
+  db.transaction((tx) => {
+    if (commentId) {
+      const comment = db
+        .select()
+        .from(bookReviewComments)
+        .where(and(eq(bookReviewComments.id, commentId), eq(bookReviewComments.reviewId, reviewId), isNull(bookReviewComments.deletedAt)))
+        .get()
+      if (!comment) throw new AppError('REVIEW_NOT_FOUND')
+      if (liked) {
+        const result = tx.insert(bookReviewCommentLikes).values({ commentId, userId, createdAt: Date.now() }).onConflictDoNothing().run()
+        if (result.changes) recordInteractionNotification(tx, { userId: comment.userId, actorId: userId, domain: 'review', event: 'like', targetId: reviewId, interactionId: commentId, commentId })
+      } else {
+        db.delete(bookReviewCommentLikes).where(and(eq(bookReviewCommentLikes.commentId, commentId), eq(bookReviewCommentLikes.userId, userId))).run()
+      }
+    } else if (liked) {
+      const result = tx.insert(bookReviewLikes).values({ reviewId, userId, createdAt: Date.now() }).onConflictDoNothing().run()
+      if (result.changes) recordInteractionNotification(tx, { userId: row.userId, actorId: userId, domain: 'review', event: 'like', targetId: reviewId, interactionId: reviewId })
     } else {
-      db.delete(bookReviewCommentLikes).where(and(eq(bookReviewCommentLikes.commentId, commentId), eq(bookReviewCommentLikes.userId, userId))).run()
+      db.delete(bookReviewLikes).where(and(eq(bookReviewLikes.reviewId, reviewId), eq(bookReviewLikes.userId, userId))).run()
     }
-  } else if (liked) {
-    db.insert(bookReviewLikes).values({ reviewId, userId, createdAt: Date.now() }).onConflictDoNothing().run()
-  } else {
-    db.delete(bookReviewLikes).where(and(eq(bookReviewLikes.reviewId, reviewId), eq(bookReviewLikes.userId, userId))).run()
-  }
+  })
 }

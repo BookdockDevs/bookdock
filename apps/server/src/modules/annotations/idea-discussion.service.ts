@@ -5,6 +5,7 @@ import type { IdeaAuthor, IdeaComment, IdeaDiscussion, ReaderIdea } from '@bookd
 import { getDb } from '../../db/client'
 import { ideaCommentLikes, ideaComments, ideaLikes, ideas, users } from '../../db/schema'
 import { createId } from '../../lib/id'
+import { findCommentReceipt, recordInteractionNotification, saveCommentReceipt } from '../../lib/interaction-notifications'
 import { AppError } from '../../middleware/error'
 import { assertIdeaSource, readableIdea } from './idea-access'
 import { toRes } from './annotations.service'
@@ -68,14 +69,23 @@ export async function commentLikers(userId: string | null, ideaId: string, comme
   return db.select().from(ideaCommentLikes).where(eq(ideaCommentLikes.commentId, commentId)).orderBy(asc(ideaCommentLikes.createdAt), asc(ideaCommentLikes.userId)).all().map((like) => author(like.userId))
 }
 
-export async function createIdeaComment(userId: string, ideaId: string, input: { body: string; replyToId?: string }) {
-  await readableIdea(userId, ideaId)
+export async function createIdeaComment(userId: string, ideaId: string, input: { requestId?: string; body: string; replyToId?: string }) {
+  const { row } = await readableIdea(userId, ideaId)
   const db = getDb()
-  const replyTo = input.replyToId ? db.select().from(ideaComments).where(and(eq(ideaComments.id, input.replyToId), eq(ideaComments.ideaId, ideaId), isNull(ideaComments.deletedAt))).get() : null
-  if (input.replyToId && !replyTo) throw new AppError('ANNOTATION_NOT_FOUND')
-  const comment = { id: createId('ic'), ideaId, userId, parentId: replyTo ? replyTo.parentId ?? replyTo.id : null, replyToId: replyTo?.id ?? null, body: input.body, createdAt: Date.now() }
-  db.insert(ideaComments).values(comment).run()
-  return comment.id
+  return db.transaction((tx) => {
+    const receipt = findCommentReceipt(tx, userId, 'idea', ideaId, input)
+    if (receipt) return receipt
+    const replyTo = input.replyToId ? db.select().from(ideaComments).where(and(eq(ideaComments.id, input.replyToId), eq(ideaComments.ideaId, ideaId), isNull(ideaComments.deletedAt))).get() : null
+    if (input.replyToId && !replyTo) throw new AppError('ANNOTATION_NOT_FOUND')
+    const comment = { id: createId('ic'), ideaId, userId, parentId: replyTo ? replyTo.parentId ?? replyTo.id : null, replyToId: replyTo?.id ?? null, body: input.body, createdAt: Date.now() }
+    tx.insert(ideaComments).values(comment).run()
+    saveCommentReceipt(tx, userId, 'idea', ideaId, input, comment.id)
+    recordInteractionNotification(tx, {
+      userId: replyTo ? replyTo.userId : row.userId, actorId: userId, domain: 'idea',
+      event: replyTo ? 'reply' : 'comment', targetId: ideaId, interactionId: comment.id, commentId: comment.id,
+    })
+    return comment.id
+  })
 }
 
 export async function updateIdeaComment(userId: string, ideaId: string, commentId: string, body: string) {
@@ -102,13 +112,21 @@ export async function deleteIdeaComment(userId: string, ideaId: string, commentI
 }
 
 export async function setIdeaLike(userId: string, ideaId: string, liked: boolean, commentId?: string) {
-  await readableIdea(userId, ideaId)
+  const { row } = await readableIdea(userId, ideaId)
   const db = getDb()
-  if (commentId) {
-    const comment = db.select().from(ideaComments).where(and(eq(ideaComments.id, commentId), eq(ideaComments.ideaId, ideaId), isNull(ideaComments.deletedAt))).get()
-    if (!comment) throw new AppError('ANNOTATION_NOT_FOUND')
-    if (liked) db.insert(ideaCommentLikes).values({ commentId, userId, createdAt: Date.now() }).onConflictDoNothing().run()
-    else db.delete(ideaCommentLikes).where(and(eq(ideaCommentLikes.commentId, commentId), eq(ideaCommentLikes.userId, userId))).run()
-  } else if (liked) db.insert(ideaLikes).values({ ideaId, userId, createdAt: Date.now() }).onConflictDoNothing().run()
-  else db.delete(ideaLikes).where(and(eq(ideaLikes.ideaId, ideaId), eq(ideaLikes.userId, userId))).run()
+  db.transaction((tx) => {
+    if (commentId) {
+      const comment = db.select().from(ideaComments).where(and(eq(ideaComments.id, commentId), eq(ideaComments.ideaId, ideaId), isNull(ideaComments.deletedAt))).get()
+      if (!comment) throw new AppError('ANNOTATION_NOT_FOUND')
+      if (liked) {
+        const result = tx.insert(ideaCommentLikes).values({ commentId, userId, createdAt: Date.now() }).onConflictDoNothing().run()
+        if (result.changes) recordInteractionNotification(tx, { userId: comment.userId, actorId: userId, domain: 'idea', event: 'like', targetId: ideaId, interactionId: commentId, commentId })
+      }
+      else db.delete(ideaCommentLikes).where(and(eq(ideaCommentLikes.commentId, commentId), eq(ideaCommentLikes.userId, userId))).run()
+    } else if (liked) {
+      const result = tx.insert(ideaLikes).values({ ideaId, userId, createdAt: Date.now() }).onConflictDoNothing().run()
+      if (result.changes) recordInteractionNotification(tx, { userId: row.userId, actorId: userId, domain: 'idea', event: 'like', targetId: ideaId, interactionId: ideaId })
+    }
+    else db.delete(ideaLikes).where(and(eq(ideaLikes.ideaId, ideaId), eq(ideaLikes.userId, userId))).run()
+  })
 }
