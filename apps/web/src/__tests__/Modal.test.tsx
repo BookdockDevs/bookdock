@@ -77,6 +77,19 @@ describe('Modal', () => {
     expect(backdrop).toHaveStyle({ '--reader-dialog-inset': '0px' })
   })
 
+  it('supports a centered headerless reader detail shell', () => {
+    render(
+      <Modal title="Book title" onClose={() => undefined} variant="reader" size="idea" centered hideHeader contentClassName="!p-0">
+        Content
+      </Modal>,
+    )
+
+    expect(screen.getByRole('dialog')).toHaveClass('max-w-[420px]', 'rounded-2xl')
+    expect(screen.getByRole('heading', { name: 'Book title' })).toHaveClass('sr-only')
+    expect(screen.getByRole('dialog').parentElement).toHaveClass('items-center', 'p-4')
+    expect(screen.queryByRole('button', { name: 'library.close' })).not.toBeInTheDocument()
+  })
+
   it('does not steal focus after a controlled form rerenders', () => {
     render(<FocusHarness />)
 

@@ -87,8 +87,8 @@ and caps decoded pixels at 40 million; storage uses metadata-stripped WebP fitte
 inside 2048 pixels without enlargement. SVG and active images are rejected.
 Review attachments accept structurally validated PDF or valid UTF-8 plain text
 up to 10 MiB; they download as attachments with `nosniff`, without online preview.
-Ideas accept images only. Each draft/content accepts at most 20 files. Multipart
-requests have a finite total byte limit.
+Ideas accept images only, with at most 9 images per idea; review content keeps the
+20-file limit. Multipart requests have a finite total byte limit.
 Qualification is checked before processing bytes and again before association.
 
 Managed references use `/api/v1/content-files/<opaque-id>`, never hash URLs,
@@ -116,8 +116,10 @@ of a content blob serialize within the single server process so cleanup cannot
 race a new reservation of the same hash.
 
 Ideas retain their existing plain-text note and quote semantics. Their image
-IDs are an explicit shared-contract field, not Markdown conversion. Existing
-reader cards, detail and private archives display the same managed image set.
+IDs are an explicit shared-contract field, not Markdown conversion; the ordered
+ID list is persisted through `content_files.sort_order` so gallery order survives
+save and reload. Existing reader cards, detail and private archives display the
+same managed image set.
 Copy and export retain their current text scope rather than embedding private
 resource URLs or adding new export capabilities.
 
@@ -188,6 +190,9 @@ Ratings are half-star steps from 0.5 to 5 (ten buckets, stored as integer
 halves 1–10 so no float step is lost); unrated is NULL, never zero. A review
 carries at most one optional rating plus one optional text body — at least one
 of the two is required. Comments, replies and likes never produce a rating.
+An optional short title (plain text, max 100 chars) gives long reviews their
+own heading; short reviews may leave it empty. The title shares the review's
+visibility and lifecycle and never affects statistics.
 
 A review belongs to exactly one work, never to a file version or a content
 revision. A pure private work (A/C) anchors to its private `library_books` row
@@ -239,7 +244,7 @@ under the retained choice, never by retitling, rehashing or rebinding to a new
 library. Library deletion falls back shared reviews to private (same line as
 ideas in `libraries.service.ts`), keeping provenance; the author's retained
 reviews stay reachable through the minimal personal entry (`GET
-/reviews/mine`). Author deletion removes the rating, body and dependent
+/reviews/mine`). Author deletion removes the rating, title, body and dependent
 discussion and likes; account deletion clears owned reviews through the user
 FK cascade while review comments fall back to the deleted-author handling
 below. Explicit content FKs (`reviewId`, comment `idea`-style parent linkage)

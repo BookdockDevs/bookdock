@@ -13,6 +13,7 @@ import { useUiStore } from '@/stores/ui.store'
 import type { LibrarySearch } from '@/routes/index'
 import SmartMenu from '@/components/ui/SmartMenu'
 import AccountMenu from '@/features/auth/AccountMenu'
+import NotificationBell from '@/features/notifications/components/NotificationBell'
 import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
 import { sortSidebarItems } from '../sort-modes'
 import { sortCategories } from '../taxonomy'
@@ -67,8 +68,10 @@ interface LibrarySidebarProps {
   onJoinLibrary?: (library: LibraryListItem) => void
   /** Opens the discovery dialog showing all public and password libraries. */
   onExploreLibraries?: () => void
+  onOpenNotifications?: () => void
+  notificationButtonRef?: React.RefObject<HTMLButtonElement | null>
 }
-const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries, onOpenNotifications, notificationButtonRef }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const [session, setSession] = useState(() => (sessionKey ? navigationSessions.get(sessionKey) : undefined) ?? { panel: (directory || 'categories') as 'categories' | 'tags', expanded: [] as string[], scroll: {} as Record<string, number> })
@@ -288,9 +291,16 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
           ? 'fixed inset-y-0 left-0 z-50 flex h-full w-[min(19rem,75vw)] overflow-hidden bg-stone-50 shadow-xl dark:bg-stone-950 md:shadow-none'
           : 'hidden md:flex',
       )}>
-      <div className="mb-5 flex items-center gap-2.5 px-2">
-        <BookdockLogo className="h-8 w-8 shrink-0 text-stone-900 dark:text-stone-50" />
-        <span className="font-serif text-base font-semibold tracking-wide text-stone-900 dark:text-stone-50">{_('app.name')}</span>
+      <div className="mb-5 flex items-center justify-between gap-2 px-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <BookdockLogo className="h-8 w-8 shrink-0 text-stone-900 dark:text-stone-50" />
+          <span className="truncate font-serif text-base font-semibold tracking-wide text-stone-900 dark:text-stone-50">{_('app.name')}</span>
+        </div>
+        <NotificationBell
+          buttonRef={notificationButtonRef}
+          onOpen={onOpenNotifications}
+          className="h-8 w-8"
+        />
       </div>
 
       <LibrarySection
@@ -476,7 +486,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
 
       <div className="mt-auto flex flex-col gap-0.5 pt-2.5 border-t border-stone-200/50 dark:border-stone-800/50">
         {!readOnly && <NavItem
-          label={_('stats.title')}
+          label={_('archive.title')}
           icon={
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 3v18h18" />
@@ -485,10 +495,10 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
           }
           onClick={() => {
             onMobileClose?.()
-            void navigate({ to: '/stats' })
+            void navigate({ to: '/archive' })
           }}
           onPointerEnter={() => {
-            void import('@/features/stats/Stats')
+            void import('@/features/archive/Archive')
           }}
         />}
         <NavItem

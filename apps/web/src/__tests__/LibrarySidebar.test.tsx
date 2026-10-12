@@ -51,6 +51,10 @@ vi.mock('@/features/auth/AccountMenu', () => ({
   default: () => null,
 }))
 
+vi.mock('@/features/notifications/components/NotificationBell', () => ({
+  default: () => null,
+}))
+
 
 interface ShelfItemData { id: string; name: string; bookCount: number; pinned?: boolean; hidden?: boolean }
 interface TagItemData { id: string; name: string; bookCount: number; pinned?: boolean; hidden?: boolean }

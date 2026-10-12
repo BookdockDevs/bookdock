@@ -10,13 +10,37 @@ import type { ContentUploadEntry } from '../hooks/useContentDraft'
 
 interface ContentUploadProps {
   attachments?: boolean
+  /** Icon-only triggers for editor bottom bars; pills by default. */
+  compact?: boolean
+  inline?: boolean
   disabled?: boolean
   entries: ContentUploadEntry[]
   onAdd: (file: File, kind: 'image' | 'attachment') => void
   onRetry: (entry: ContentUploadEntry) => void
 }
 
-export default function ContentUpload({ attachments = false, disabled = false, entries, onAdd, onRetry }: ContentUploadProps) {
+const compactButtonClassName =
+  'min-h-8 min-w-8 rounded-lg p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200'
+
+export function ImageIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+    </svg>
+  )
+}
+
+function AttachmentIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  )
+}
+
+export default function ContentUpload({ attachments = false, compact = false, inline = false, disabled = false, entries, onAdd, onRetry }: ContentUploadProps) {
   const _ = useTranslation()
   const imageInput = useRef<HTMLInputElement>(null)
   const attachmentInput = useRef<HTMLInputElement>(null)
@@ -32,6 +56,47 @@ export default function ContentUpload({ attachments = false, disabled = false, e
       onAdd(file, kind)
     }
   }
+  const inputs = (
+    <>
+      <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" aria-label={_('contentFiles.addImage')} onChange={(event) => { select(event.target.files, 'image'); event.target.value = '' }} />
+      {attachments && <input ref={attachmentInput} type="file" accept=".pdf,.txt" multiple className="hidden" aria-label={_('contentFiles.addAttachment')} onChange={(event) => { select(event.target.files, 'attachment'); event.target.value = '' }} />}
+    </>
+  )
+  const activeEntries = inline ? entries.filter((e) => e.status !== 'ready') : entries
+  const entryList = activeEntries.length > 0 && (
+    <div className={compact ? 'max-h-24 min-w-0 w-full basis-full overflow-y-auto' : 'min-w-0'}>
+      {activeEntries.map((entry) => (
+        <div key={entry.id} className="flex min-w-0 items-center gap-2 rounded-lg bg-stone-50 px-3 py-2 text-xs dark:bg-stone-800/50" role="status">
+          <span className="min-w-0 flex-1 truncate" title={entry.file.name}>{entry.file.name}</span>
+          {entry.status === 'uploading' ? <><progress className="h-1 w-16" max={100} value={entry.progress} aria-label={_('contentFiles.uploading')} /><span>{entry.progress === 100 ? _('contentFiles.processing') : `${entry.progress}%`}</span></> : entry.status === 'ready' ? <span className="text-stone-500">{_('contentFiles.ready')}</span> : <><span className="text-red-600 dark:text-red-400">{_('contentFiles.failed')}</span><Button variant="secondary" disabled={disabled} onClick={() => onRetry(entry)}>{_('contentFiles.retry')}</Button></>}
+        </div>
+      ))}
+    </div>
+  )
+  if (compact) {
+    return (
+      <div className={inline ? 'contents' : 'flex min-w-0 flex-col gap-1'}>
+        <div className="flex items-center gap-0.5">
+          <button type="button" disabled={disabled} onClick={() => imageInput.current?.click()} title={_('contentFiles.addImage')} aria-label={_('contentFiles.addImage')} className={compactButtonClassName}>
+            <ImageIcon />
+          </button>
+          {attachments && (
+            <button type="button" disabled={disabled} onClick={() => attachmentInput.current?.click()} title={_('contentFiles.addAttachment')} aria-label={_('contentFiles.addAttachment')} className={compactButtonClassName}>
+              <AttachmentIcon />
+            </button>
+          )}
+          {inline && activeEntries.some((e) => e.status === 'uploading') && (
+            <span className="flex items-center pl-1 text-[11px] text-stone-400" role="status" title={_('contentFiles.uploading')}>
+              <svg className="h-3.5 w-3.5 animate-spin text-stone-500" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>
+            </span>
+          )}
+          {!inline && <span className="ml-2 text-[11px] text-stone-400 dark:text-stone-500">{_(attachments ? 'contentFiles.reviewLimits' : 'contentFiles.imageLimits')}</span>}
+        </div>
+        {inputs}
+        {!inline && entryList}
+      </div>
+    )
+  }
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -39,8 +104,7 @@ export default function ContentUpload({ attachments = false, disabled = false, e
         {attachments && <Button variant="secondary" disabled={disabled} onClick={() => attachmentInput.current?.click()}>{_('contentFiles.addAttachment')}</Button>}
         <span className="text-xs text-stone-400">{_(attachments ? 'contentFiles.reviewLimits' : 'contentFiles.imageLimits')}</span>
       </div>
-      <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" aria-label={_('contentFiles.addImage')} onChange={(event) => { select(event.target.files, 'image'); event.target.value = '' }} />
-      {attachments && <input ref={attachmentInput} type="file" accept=".pdf,.txt" multiple className="hidden" aria-label={_('contentFiles.addAttachment')} onChange={(event) => { select(event.target.files, 'attachment'); event.target.value = '' }} />}
+      {inputs}
       {entries.map((entry) => (
         <div key={entry.id} className="flex min-w-0 items-center gap-2 rounded-lg bg-stone-50 px-3 py-2 text-xs dark:bg-stone-800/50" role="status">
           <span className="min-w-0 flex-1 truncate" title={entry.file.name}>{entry.file.name}</span>

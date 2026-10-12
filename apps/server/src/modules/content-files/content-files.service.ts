@@ -4,7 +4,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import { PDFDocument } from 'pdf-lib'
 import sharp from 'sharp'
 
-import { CONTENT_ATTACHMENT_MAX_BYTES, CONTENT_DRAFT_TTL_MS, CONTENT_FILES_MAX_COUNT, CONTENT_IMAGE_MAX_BYTES } from '@bookdock/shared'
+import { CONTENT_ATTACHMENT_MAX_BYTES, CONTENT_DRAFT_TTL_MS, CONTENT_FILES_MAX_COUNT, CONTENT_IMAGE_MAX_BYTES, IDEA_IMAGE_MAX_COUNT } from '@bookdock/shared'
 import type { ContentFileUpload } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
@@ -63,7 +63,8 @@ export async function uploadContentFile(userId: string, input: ContentFileUpload
       if (tx.select().from(contentUploadDrafts).where(eq(contentUploadDrafts.id, draft.id)).get()?.cancelledAt !== null) throw new AppError('CONTENT_FILE_NOT_FOUND')
       const count = tx.select({ count: sql<number>`count(*)` }).from(contentFiles)
         .where(and(eq(contentFiles.userId, userId), eq(contentFiles.draftId, input.draftId))).get()?.count ?? 0
-      if (count >= CONTENT_FILES_MAX_COUNT) throw new AppError('VALIDATION_ERROR', 'Too many files in this draft')
+      const maxCount = input.domain === 'idea' ? IDEA_IMAGE_MAX_COUNT : CONTENT_FILES_MAX_COUNT
+      if (count >= maxCount) throw new AppError('VALIDATION_ERROR', 'Too many files in this draft')
       tx.insert(blobs).values({ key, kind: 'content', size: data.length, createdAt: row.createdAt }).onConflictDoNothing().run()
       tx.insert(contentFiles).values(row).run()
     })

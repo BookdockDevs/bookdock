@@ -2,7 +2,6 @@ import { useState } from 'react'
 
 import type { Review, ReviewBookContext } from '@bookdock/shared'
 
-import QueryErrorState from '@/components/ui/QueryErrorState'
 import { GroupLabel } from '@/features/library/components/book-detail/ui'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
@@ -12,51 +11,10 @@ import ReviewCard from './ReviewCard'
 import ReviewEditor from './ReviewEditor'
 import StarRating from './StarRating'
 
-function DistributionBars({ summary }: { summary: NonNullable<ReviewBookContext['summary']> }) {
-  const _ = useTranslation()
-  const [open, setOpen] = useState(false)
-  const max = Math.max(1, ...summary.distribution.map((bucket) => bucket.count))
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex items-center gap-1.5 text-xs text-stone-400 transition-colors hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-200"
-      >
-        <span className="tabular-nums">{_('review.ratingCount', { count: summary.count })}</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={open ? 'rotate-180' : ''}>
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </button>
-      {open && (
-        <div className="mt-2 space-y-1" role="list" aria-label={_('review.distributionLabel')}>
-          {summary.distribution.map((bucket) => (
-            <div key={bucket.rating} role="listitem" className="flex items-center gap-2 text-[11px]">
-              <span className="w-7 shrink-0 tabular-nums text-stone-500 dark:text-stone-400">{bucket.rating}</span>
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-200/70 dark:bg-stone-700/70">
-                <div
-                  className="h-full rounded-full bg-amber-400"
-                  style={{ width: `${(bucket.count / max) * 100}%` }}
-                />
-              </div>
-              <span className="w-6 shrink-0 text-right tabular-nums text-stone-400 dark:text-stone-500">{bucket.count}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function ReviewSectionBody({
   context,
-  canCollect,
-  isWorkScope,
 }: {
   context: ReviewBookContext
-  canCollect?: boolean
-  isWorkScope: boolean
 }) {
   const _ = useTranslation()
   const user = useAuthStore((state) => state.user)
@@ -93,7 +51,20 @@ function ReviewSectionBody({
             <span className="text-sm font-semibold tabular-nums text-stone-800 dark:text-stone-100">
               {summary.average!.toFixed(1)}
             </span>
-            <DistributionBars summary={summary} />
+            <span className="text-xs text-stone-400 tabular-nums">
+              {_('review.ratingCount', { count: summary.count })}
+            </span>
+          </>
+        ) : !summary && own?.rating != null ? (
+          <>
+            <StarRating
+              value={own.rating}
+              size={17}
+              label={_('review.ratingValue', { value: own.rating.toFixed(1) })}
+            />
+            <span className="text-sm font-semibold tabular-nums text-stone-800 dark:text-stone-100">
+              {own.rating.toFixed(1)}
+            </span>
           </>
         ) : (
           <span className="text-xs text-stone-400 dark:text-stone-500">{_('review.noRatings')}</span>
@@ -107,18 +78,6 @@ function ReviewSectionBody({
             >
               {summary ? _('review.writeReview') : _('review.rateOrReview')}
             </button>
-          )}
-          {user && composer.eligible && editorVersionId && own && (
-            <button
-              type="button"
-              onClick={() => openEdit(own)}
-              className="rounded-full border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
-            >
-              {own.rating == null ? _('review.addRating') : _('review.editReview')}
-            </button>
-          )}
-          {user && !composer.eligible && isWorkScope && canCollect && (
-            <span className="text-[11px] text-stone-400 dark:text-stone-500">{_('review.collectToReviewHint')}</span>
           )}
         </div>
       </div>
@@ -162,7 +121,7 @@ export default function ReviewSection({
   bookVersionId,
   libraryId,
   libraryBookId,
-  canCollect,
+  canCollect: _canCollect,
 }: {
   /** Private-detail scope: the held version id. Omit for shared-work scope. */
   bookVersionId?: string | null
@@ -187,23 +146,21 @@ export default function ReviewSection({
       ? (raw as ReviewBookContext)
       : null
 
+  if (query.isPending || query.isError || !context) {
+    return null
+  }
+
+  const hasReviews = context.reviews.length > 0 || (context.summary != null && context.summary.count > 0)
+  if (!hasReviews) {
+    return null
+  }
+
   return (
     <section className="mt-5" aria-label={_('review.sectionTitle')}>
       <GroupLabel>{_('review.sectionTitle')}</GroupLabel>
-      {query.isPending ? (
-        <div className="animate-pulse space-y-2">
-          <div className="h-4 w-40 rounded bg-stone-500/15" />
-          <div className="h-16 rounded-xl bg-stone-500/10" />
-        </div>
-      ) : query.isError || !context ? (
-        <QueryErrorState isRetrying={query.isFetching} onRetry={() => void query.refetch()} />
-      ) : (
-        <ReviewSectionBody
-          context={context}
-          canCollect={canCollect}
-          isWorkScope={isWorkScope}
-        />
-      )}
+      <ReviewSectionBody
+        context={context}
+      />
     </section>
   )
 }

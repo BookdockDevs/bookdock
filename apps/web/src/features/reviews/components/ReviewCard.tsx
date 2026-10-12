@@ -132,6 +132,10 @@ export default function ReviewCard({
         )}
       </div>
 
+      {review.title && (
+        <h4 className="mt-2 text-sm font-semibold text-stone-800 dark:text-stone-100">{review.title}</h4>
+      )}
+
       {review.body && (
         <div className="mt-2.5">
           {longBody && !bodyOpen ? (

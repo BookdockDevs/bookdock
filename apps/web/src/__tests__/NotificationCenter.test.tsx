@@ -48,7 +48,7 @@ describe('notification center', () => {
     vi.mocked(api.apiPut).mockImplementation(async () => { read = true; return { data: null } })
     render(<><NotificationBell /><NotificationCenter /></>, { wrapper: wrapper() })
     expect(await screen.findByText('Visible reply')).toBeInTheDocument()
-    expect(screen.getAllByTestId('notification-unread-dot')).toHaveLength(2)
+    await waitFor(() => expect(screen.getAllByTestId('notification-unread-dot')).toHaveLength(2))
     fireEvent.click(screen.getByRole('button', { name: '标为已读' }))
     await waitFor(() => expect(screen.queryByTestId('notification-unread-dot')).not.toBeInTheDocument())
     expect(api.apiPut).toHaveBeenCalledWith('/notifications/event/read', { read: true })

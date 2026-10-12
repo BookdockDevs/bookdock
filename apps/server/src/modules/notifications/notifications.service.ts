@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 
-import type { ArchiveQuery, InteractionNotification, NotificationPage, NotificationTarget } from '@bookdock/shared'
+import type { InteractionNotification, NotificationPage, NotificationQuery, NotificationTarget } from '@bookdock/shared'
 import { reviewExcerpt } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
@@ -66,15 +66,20 @@ async function* availableNotifications(userId: string, unreadOnly = false) {
   }
 }
 
-export async function listNotifications(userId: string, query: ArchiveQuery): Promise<NotificationPage> {
+export async function listNotifications(userId: string, query: NotificationQuery): Promise<NotificationPage> {
   const entries: InteractionNotification[] = []
   let skipped = 0
-  for await (const entry of availableNotifications(userId)) {
+  for await (const entry of availableNotifications(userId, query.unread)) {
     if (skipped++ < (query.page - 1) * query.pageSize) continue
     entries.push(entry)
     if (entries.length > query.pageSize) break
   }
   return { entries: entries.slice(0, query.pageSize), page: query.page, hasMore: entries.length > query.pageSize }
+}
+
+export function deleteNotification(userId: string, id: string) {
+  getDb().delete(interactionNotifications)
+    .where(and(eq(interactionNotifications.id, id), eq(interactionNotifications.userId, userId))).run()
 }
 
 export async function unreadNotificationCount(userId: string) {

@@ -1,3 +1,5 @@
+import type { AnnotationRes } from '@bookdock/shared'
+
 const BLOCK_TAGS = new Set(['P', 'DIV', 'SECTION', 'ARTICLE', 'BLOCKQUOTE', 'LI', 'UL', 'OL', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE', 'TR', 'FIGCAPTION'])
 
 // Walk the live DOM: cloned fragments lose inherited visibility and stylesheet
@@ -132,4 +134,25 @@ export function isCustomBookmarkTitle(
     return false
   }
   return true
+}
+
+/**
+ * Clipboard text for one annotation, shared by the reader panel and the
+ * archive: ideas copy note plus quote, bookmarks copy the custom title and/or
+ * context, highlights copy the marked text.
+ */
+export function buildAnnotationCopyText(item: AnnotationRes, bookmarkLabel: string): string {
+  const parts: string[] = []
+  if (item.type === 'note') {
+    if (item.note) parts.push(item.note)
+    if (item.text) parts.push(item.text)
+  } else if (item.type === 'bookmark') {
+    const hasCustom = isCustomBookmarkTitle(item, bookmarkLabel)
+    if (hasCustom && item.text) parts.push(item.text)
+    if (item.contextText) parts.push(item.contextText)
+    else if (!hasCustom && item.text) parts.push(item.text)
+  } else if (item.text) {
+    parts.push(item.text)
+  }
+  return parts.filter(Boolean).join('\n\n')
 }

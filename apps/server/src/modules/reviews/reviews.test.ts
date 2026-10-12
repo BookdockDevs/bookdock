@@ -201,15 +201,59 @@ describe('book reviews', () => {
     expect(db.select().from(schema.bookReviews).where(eq(schema.bookReviews.id, both.id)).get()).toMatchObject({ ratingHalves: 9 })
     await expect(createReview('author', { bookVersionId: 'v3', rating: 2.5, visibility: 'private' })).resolves.toMatchObject({ rating: 2.5, body: null })
     await expect(createReview('member', { bookVersionId: 'v1', body: 'text only', visibility: 'private' })).resolves.toMatchObject({ rating: null, body: 'text only' })
-    // Unheld reads cannot publish at all: collecting comes first.
-    await expect(createReview('critic', { bookVersionId: 'v1', body: 'no card' })).rejects.toMatchObject({ code: 'REVIEW_NOT_FOUND' })
+    // Uncollected readers can publish directly if they can read the work.
+    const unheld = await createReview('outsider', { bookVersionId: 'v1', body: 'uncollected read', rating: 0.5, visibility: 'shared' })
+    expect(unheld).toMatchObject({ rating: 0.5, body: 'uncollected read', visibility: 'shared' })
     await expect(createReview('member', { bookVersionId: 'v1', body: '   ', rating: null })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-    // Ten buckets survive without float loss: 0.5 lands in its own bucket, not rounded to 1.
-    await createReview('critic', { bookVersionId: 'v2', rating: 0.5, visibility: 'shared' })
     const ctx = await getReviewWorkContext('outsider', 'source', 'w1')
     expect(ctx.summary?.distribution).toHaveLength(10)
     expect(ctx.summary?.distribution.map((bucket) => bucket.rating)).toEqual([0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5])
     expect(ctx.summary).toMatchObject({ average: 2.5, count: 2 })
+  })
+
+  it('stores an optional title without affecting statistics', async () => {
+    const titled = await createReview('author', { bookVersionId: 'v1', rating: 4, title: '  A quiet reread  ', body: 'notes', visibility: 'shared' })
+    expect(titled).toMatchObject({ title: 'A quiet reread' })
+    expect((await getReviewWorkContext('outsider', 'source', 'w1')).summary).toMatchObject({ average: 4, count: 1 })
+    const renamed = await updateReview('author', titled.id, { title: 'Second title' })
+    expect(renamed).toMatchObject({ title: 'Second title' })
+    expect(renamed.editedAt).not.toBeNull()
+    await expect(updateReview('author', titled.id, { title: 'x'.repeat(101) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(createReview('member', { bookVersionId: 'v1', title: 'Title alone', visibility: 'private' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    const cleared = await updateReview('author', titled.id, { title: null })
+    expect(cleared).toMatchObject({ title: null, rating: 4 })
+  })
+
+  it('marks edited only on real content changes and keeps publish order', async () => {
+    const review = await createReview('author', { bookVersionId: 'v1', rating: 4, body: 'Body text', visibility: 'shared' })
+    expect(review).toMatchObject({ editedAt: null })
+    const createdAt = review.createdAt
+    // Rating-only change: updatedAt moves, editedAt stays empty.
+    const rated = await updateReview('author', review.id, { rating: 5 })
+    expect(rated).toMatchObject({ rating: 5, editedAt: null, createdAt })
+    // Visibility-only change: same.
+    const privated = await updateReview('author', review.id, { visibility: 'private' })
+    expect(privated).toMatchObject({ visibility: 'private', editedAt: null, createdAt })
+    // Identical body resubmit: same.
+    const same = await updateReview('author', review.id, { body: 'Body text' })
+    expect(same.editedAt).toBeNull()
+    // Real body edit: editedAt set.
+    const edited = await updateReview('author', review.id, { body: 'Body text v2' })
+    expect(edited.editedAt).not.toBeNull()
+    // Editing an old review never reorders the archive: newest stays by createdAt.
+    const newer = await createReview('author', { bookVersionId: 'v3', rating: 3, body: 'Later work' })
+    db.update(schema.bookReviews)
+      .set({ createdAt: createdAt - 100000 })
+      .where(eq(schema.bookReviews.id, review.id))
+      .run()
+    await updateReview('author', review.id, { body: 'Body text v3' })
+    expect((await myReviews('author')).entries.map((entry) => entry.review.id)).toEqual([newer.id, review.id])
+    // Identical comment resubmit leaves editedAt empty too.
+    const commentId = await createReviewComment('member', newer.id, { body: 'same words', requestId: 'same_words_12345678' })
+    await updateReviewComment('member', newer.id, commentId, 'same words')
+    expect(db.select().from(schema.bookReviewComments).where(eq(schema.bookReviewComments.id, commentId)).get()).toMatchObject({ editedAt: null })
+    await updateReviewComment('member', newer.id, commentId, 'changed words')
+    expect(db.select().from(schema.bookReviewComments).where(eq(schema.bookReviewComments.id, commentId)).get()?.editedAt).not.toBeNull()
   })
 
   it('keeps pure private reviews author-only and cascades with their work', async () => {
@@ -255,14 +299,10 @@ describe('book reviews', () => {
   it('excludes private ratings from shared statistics while listing text-only bodies', async () => {
     await createReview('author', { bookVersionId: 'v1', rating: 5, visibility: 'shared' })
     await createReview('member', { bookVersionId: 'v1', rating: 1, visibility: 'private' })
-    await createReview('critic', { bookVersionId: 'v1', body: 'no stars from me', visibility: 'shared' }).catch(async (error) => {
-      // critic holds no card: collect-free reads cannot publish.
-      expect(error.code).toBe('REVIEW_NOT_FOUND')
-      return null
-    })
+    await createReview('outsider', { bookVersionId: 'v1', body: 'no stars from me', visibility: 'shared' })
     const ctx = await getReviewWorkContext('member', 'source', 'w1')
     expect(ctx.summary).toMatchObject({ average: 5, count: 1 })
-    expect(ctx.reviews.map((row) => row.author.name)).toEqual(['author'])
+    expect(ctx.reviews.map((row) => row.author.name)).toEqual(['author', 'outsider'])
     // The member's own private review stays visible to them only.
     expect(ctx.own?.visibility).toBe('private')
     await expect(getReviewDiscussion('author', ctx.own!.id)).rejects.toMatchObject({ code: 'REVIEW_NOT_FOUND' })
@@ -597,6 +637,7 @@ describe('book reviews', () => {
       c.set('user', { id: 'outsider' } as never); await next()
     }).route('/notifications', notificationRoutes)
     expect(await (await signed.request('/notifications/' + memberEvent.id + '/target')).json()).toEqual({ data: { available: false } })
+    expect((await signed.request('/notifications?page=1')).status).toBe(200)
     expect((await signed.request('/notifications?pageSize=500')).status).toBe(400)
   })
 
@@ -799,7 +840,8 @@ describe('book reviews', () => {
     app.route('/api/v1/content-files', contentFileRoutes)
     const url = '/api/v1/content-files?domain=review&kind=image&bookVersionId=v1&draftId=http_draft_123456789'
     expect((await app.request(url, { method: 'POST', body: 'not multipart' })).status).toBe(401)
-    expect((await app.request(url, { method: 'POST', headers: { 'x-test-user': 'outsider' }, body: 'not multipart' })).status).toBe(404)
+    const unauthUrl = '/api/v1/content-files?domain=review&kind=image&bookVersionId=va&draftId=http_draft_123456789'
+    expect((await app.request(unauthUrl, { method: 'POST', headers: { 'x-test-user': 'outsider' }, body: 'not multipart' })).status).toBe(404)
     const body = new FormData()
     body.append('file', new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'too-large.png', { type: 'image/png' }))
     expect((await app.request(url, { method: 'POST', headers: { 'x-test-user': 'author' }, body })).status).toBe(413)
@@ -828,7 +870,7 @@ describe('book reviews', () => {
   it('adds file persistence to populated review/notification structures without rewriting legacy bodies', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: '  **literal**\n', bodyFormat: 'plain', visibility: 'shared' })
     await createReviewComment('member', review.id, { body: 'before files', requestId: 'before_files_123456789' })
-    sqlite.exec('DROP TABLE content_files; DROP TABLE content_upload_drafts; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000')
+    sqlite.exec('DROP TABLE content_files; DROP TABLE content_upload_drafts; ALTER TABLE book_reviews DROP COLUMN title; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000')
     await client.runDatabaseMigrations(db)
     expect((await getReviewDiscussion('author', review.id)).review).toMatchObject({ body: '  **literal**\n', bodyFormat: 'plain', files: [] })
     expect((await unreadNotificationCount('author')).count).toBe(1)
@@ -866,7 +908,7 @@ describe('book reviews', () => {
 
   it('upgrades populated stage-one review structures into notification persistence', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: 'baseline', visibility: 'shared' })
-    sqlite.exec("DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000")
+    sqlite.exec("DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; ALTER TABLE book_reviews DROP COLUMN title; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000")
     await client.runDatabaseMigrations(db)
     expect(db.select().from(schema.bookReviews).get()?.id).toBe(review.id)
     await createReviewComment('member', review.id, { body: 'upgrade event', requestId: 'upgrade_12345678901' })

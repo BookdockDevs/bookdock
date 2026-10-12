@@ -1,5 +1,3 @@
-import NotificationBell from '@/features/notifications/components/NotificationBell'
-
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 
@@ -179,7 +177,6 @@ export default function Settings() {
           </Link>
           <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{_('settings.title')}</h1>
         </div>
-        <NotificationBell />
       </header>
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">

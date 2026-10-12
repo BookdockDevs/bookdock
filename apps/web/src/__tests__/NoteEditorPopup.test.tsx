@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+import type { ContentFile } from '@bookdock/shared'
 
 import { useUiStore } from '@/stores/ui.store'
 import { NoteEditorPopup } from '../features/reader/components/NoteEditorPopup'
@@ -10,7 +13,9 @@ function renderPopup(props?: Partial<Parameters<typeof NoteEditorPopup>[0]>) {
   const onSave = vi.fn()
   const onClose = vi.fn()
   const utils = render(
-    <NoteEditorPopup rect={RECT} initialNote="" saving={false} onSave={onSave} onClose={onClose} {...props} />,
+    <QueryClientProvider client={new QueryClient()}>
+      <NoteEditorPopup rect={RECT} initialNote="" saving={false} onSave={onSave} onClose={onClose} {...props} />
+    </QueryClientProvider>,
   )
   return { onSave, onClose, ...utils }
 }
@@ -77,6 +82,22 @@ describe('NoteEditorPopup', () => {
     fireEvent.change(textarea, { target: { value: '  新的想法  ' } })
     fireEvent.click(screen.getByRole('button', { name: 'annotation.publish' }))
     expect(onSave).toHaveBeenCalledWith('新的想法')
+  })
+
+  it('keeps the note body visible when editing an idea with images', () => {
+    const image: ContentFile = {
+      id: 'cfile_abcdefghijklmnopqrstu',
+      kind: 'image',
+      name: 'idea.png',
+      mimeType: 'image/png',
+      size: 100,
+      url: '/api/v1/content-files/cfile_abcdefghijklmnopqrstu',
+    }
+    renderPopup({ bookVersionId: 'v1', initialNote: '已有正文', initialImages: [image] })
+    const textarea = screen.getByPlaceholderText('annotation.notePlaceholder')
+    expect(textarea).toHaveValue('已有正文')
+    expect(textarea).toHaveStyle({ height: '88px' })
+    expect(screen.getByRole('img', { name: 'idea.png' })).toBeInTheDocument()
   })
 
   it('submits with Ctrl+Enter', () => {

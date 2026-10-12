@@ -9,6 +9,7 @@ import { registerRoute } from './routes/register'
 import { setupRoute } from './routes/setup'
 import { readerRoute } from './routes/books.$id'
 import { settingsRoute } from './routes/settings'
+import { archiveRoute } from './routes/archive'
 import { statsRoute } from './routes/stats'
 import { updatePreviewRoute } from './routes/update-preview'
 
@@ -22,6 +23,7 @@ const routeTree = rootRoute.addChildren([
   setupRoute,
   readerRoute,
   settingsRoute,
+  archiveRoute,
   statsRoute,
   ...(import.meta.env.DEV ? [updatePreviewRoute] : []),
 ])

@@ -140,15 +140,14 @@ describe('Profile Page', () => {
     expect(screen.queryByText('修改')).not.toBeInTheDocument()
   })
 
-  it('renders a visitor profile without mounting private notes or account controls', () => {
+  it('renders a visitor profile with only the plain homepage, no reading sections', () => {
     profileSearch = { userId: 'reader', notesPage: 1, reviewsPage: 1 }
     renderWithQuery(<Profile />)
     expect(screen.getByRole('heading', { name: 'Other reader' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '书库可见书评' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /我的书评/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '书库可见书评' })).not.toBeInTheDocument()
     expect(screen.queryByText('全局笔记档案')).not.toBeInTheDocument()
     expect(screen.queryByText('修改密码')).not.toBeInTheDocument()
-    expect(screen.queryByText('阅读统计')).not.toBeInTheDocument()
-    expect(mockMyReviews).toHaveBeenCalledWith(false, 1)
   })
 
   it('renders reading achievements section with summary stats', () => {
@@ -228,39 +227,16 @@ describe('Profile Page', () => {
     expect(screen.getByText('旧密码')).toBeInTheDocument()
   })
 
-  it('does not flash the all-hidden empty state while reviews are loading', () => {
+  it('shows the all-hidden guidance when both showcase modules are hidden', () => {
     profileSettings = { showStats: false, showShowcase: false }
-    mockMyReviews.mockReturnValue({ data: undefined, isPending: true, isError: false })
-    renderWithQuery(<Profile />)
-    expect(screen.queryByText('已在主页设置中隐藏了所有公开展示模块')).not.toBeInTheDocument()
-  })
-
-  it('hides the all-hidden empty state when the reviews list is populated', () => {
-    profileSettings = { showStats: false, showShowcase: false }
-    mockMyReviews.mockReturnValue({
-      data: {
-        data: {
-          entries: [
-            {
-              review: { id: 'r1', rating: 4, body: '好书', bodyFormat: 'markdown' },
-              sourceStatus: 'ok',
-              workTitle: '三体',
-            },
-          ],
-        },
-      },
-      isPending: false,
-      isError: false,
-    })
-    renderWithQuery(<Profile />)
-    expect(screen.queryByText('已在主页设置中隐藏了所有公开展示模块')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /我的书评/ })).toBeInTheDocument()
-  })
-
-  it('shows the all-hidden guidance when reviews fail to load', () => {
-    profileSettings = { showStats: false, showShowcase: false }
-    mockMyReviews.mockReturnValue({ data: undefined, isPending: false, isError: true })
     renderWithQuery(<Profile />)
     expect(screen.getByText('已在主页设置中隐藏了所有公开展示模块')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /我的书评/ })).not.toBeInTheDocument()
+  })
+
+  it('hides the all-hidden guidance when a showcase module is visible', () => {
+    profileSettings = { showStats: false, showShowcase: true }
+    renderWithQuery(<Profile />)
+    expect(screen.queryByText('已在主页设置中隐藏了所有公开展示模块')).not.toBeInTheDocument()
   })
 })

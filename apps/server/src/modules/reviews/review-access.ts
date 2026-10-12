@@ -65,6 +65,26 @@ export function privateReviewLink(userId: string, bookVersionId: string) {
 }
 
 /**
+ * All live shared listings across any shared library for a given BookVersion.
+ */
+export function sharedReviewLinks(bookVersionId: string) {
+  const db = getDb()
+  return db
+    .select({ link: libraryBookVersions, work: libraryBooks, library: libraries })
+    .from(libraryBookVersions)
+    .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+    .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
+    .where(
+      and(
+        eq(libraryBookVersions.bookVersionId, bookVersionId),
+        eq(libraries.type, 'shared'),
+        isNull(libraryBooks.deletedAt),
+      ),
+    )
+    .all()
+}
+
+/**
  * Resolve a collected B link to its source work. A dangling source (deleted
  * listing or library) is null, not an error: the review stays put and shared
  * access simply closes.
@@ -125,7 +145,7 @@ export async function authorHoldingReadable(
 ): Promise<boolean> {
   const db = getDb()
   const holdings = db
-    .select({ link: libraryBookVersions })
+    .select({ link: libraryBookVersions, deletedAt: libraryBooks.deletedAt })
     .from(libraryBookVersions)
     .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
     .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
@@ -135,14 +155,9 @@ export async function authorHoldingReadable(
         eq(libraries.type, 'private'),
         eq(libraryBookVersions.kind, 'shared'),
         eq(libraryBookVersions.sourceLibraryId, sourceLibraryId),
-        isNull(libraryBooks.deletedAt),
       ),
     )
     .all()
-    .map((row) => row.link)
-  if (holdings.length === 0) return false
-  // One round trip for the work's listings instead of resolving every holding
-  // to its work first; only holdings of this work pay for a verdict.
   const targets = new Set(
     db
       .select({ id: libraryBookVersions.id })
@@ -156,10 +171,12 @@ export async function authorHoldingReadable(
       .all()
       .map((row) => row.id),
   )
-  for (const link of holdings) {
-    if (!link.sourceLibraryBookVersionId || !targets.has(link.sourceLibraryBookVersionId)) continue
+  const workHoldings = holdings.filter((row) => row.link.sourceLibraryBookVersionId && targets.has(row.link.sourceLibraryBookVersionId))
+  if (workHoldings.length === 0) return true
+  for (const row of workHoldings) {
+    if (row.deletedAt) continue
     try {
-      await assertOwnListingReadable(userId, link)
+      await assertOwnListingReadable(userId, row.link)
       return true
     } catch (error) {
       if (!(error instanceof AppError)) throw error
@@ -305,6 +322,7 @@ export async function projectReview(
   return {
     id: row.id,
     rating: row.ratingHalves == null ? null : reviewHalvesToRating(row.ratingHalves),
+    title: row.title ?? null,
     body: row.body,
     bodyFormat: row.bodyFormat,
     files: publishedContentFiles(getDb(), 'review', row.id),
@@ -381,6 +399,41 @@ export function reviewReadRevision(
 export async function reviewComposerContext(userId: string, bookVersionId: string): Promise<ReviewComposerContext> {
   const held = privateReviewLink(userId, bookVersionId)
   if (!held) {
+    const sharedLinks = sharedReviewLinks(bookVersionId)
+    for (const shared of sharedLinks) {
+      try {
+        await assertSourceWorkReadable(userId, shared.library.id, shared.work.id)
+        await resolveSharedVersionRead(shared.library.id, bookVersionId, userId)
+        const db = getDb()
+        const existing = db
+          .select()
+          .from(bookReviews)
+          .where(
+            and(
+              eq(bookReviews.userId, userId),
+              eq(bookReviews.sourceLibraryId, shared.library.id),
+              eq(bookReviews.sourceLibraryBookId, shared.work.id),
+            ),
+          )
+          .get() ?? null
+        const preference = db
+          .select()
+          .from(settings)
+          .where(and(eq(settings.userId, userId), eq(settings.key, REVIEW_VISIBILITY_KEY)))
+          .get()
+        return {
+          anchor: 'source',
+          eligible: true,
+          sourceReadable: true,
+          canPublishShared: true,
+          defaultVisibility: preference?.value === 'private' ? 'private' : 'shared',
+          existing: existing ? await projectReview(userId, existing, false) : null,
+          bookVersionId,
+        }
+      } catch (error) {
+        if (!(error instanceof AppError)) throw error
+      }
+    }
     await assertReadableBook(userId, bookVersionId)
     return { anchor: null, eligible: false, sourceReadable: false, canPublishShared: false, defaultVisibility: 'private', existing: null, bookVersionId: null }
   }

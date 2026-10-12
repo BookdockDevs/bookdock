@@ -23,8 +23,9 @@ function NotificationProjections() {
 afterEach(() => { queryClient.clear(); state.deleted = false })
 
 it('refreshes notification list, unread count and open target immediately after deleting a card', async () => {
-  const review: Review = { id: 'review', body: null, bodyFormat: 'plain', rating: 4, visibility: 'private', source: null, privateLibraryBookId: 'book', provenance: null, author: { id: 'author', name: 'author', avatarKey: null }, own: true, canDelete: true, liked: false, likeCount: 0, commentCount: 0, createdAt: 1, updatedAt: 1, editedAt: null }
+  const review: Review = { id: 'review', body: null, bodyFormat: 'plain', rating: 4, title: 'Titled review', visibility: 'private', source: null, privateLibraryBookId: 'book', provenance: null, author: { id: 'author', name: 'author', avatarKey: null }, own: true, canDelete: true, liked: false, likeCount: 0, commentCount: 0, createdAt: 1, updatedAt: 1, editedAt: null }
   render(<QueryClientProvider client={queryClient}><NotificationProjections /><ReviewCard review={review} /></QueryClientProvider>)
+  expect(screen.getByText('Titled review')).toBeTruthy()
   await waitFor(() => expect(screen.getByRole('status').textContent).toBe('[["event"],1,"available"]'))
   fireEvent.click(screen.getByTitle('comment.delete'))
   fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'comment.delete', exact: true }))

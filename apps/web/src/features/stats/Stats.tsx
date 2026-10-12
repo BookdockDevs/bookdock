@@ -1,5 +1,3 @@
-import NotificationBell from '@/features/notifications/components/NotificationBell'
-
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 
@@ -18,7 +16,7 @@ import YearHeatmap from './components/YearHeatmap'
 import { periodRange, shiftPeriod } from './date-utils'
 import type { StatsPeriod } from './date-utils'
 
-export default function Stats() {
+export default function Stats({ hideHeader = false }: { hideHeader?: boolean }) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -49,7 +47,8 @@ export default function Stats() {
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-5 p-4 sm:gap-6 sm:p-6">
+    <div className={hideHeader ? 'flex flex-col gap-5 sm:gap-6' : 'mx-auto flex max-w-4xl flex-col gap-5 p-4 sm:gap-6 sm:p-6'}>
+      {!hideHeader && (
       <div className="flex items-center gap-3">
         <Link
           to="/"
@@ -65,8 +64,8 @@ export default function Stats() {
         </Link>
         <h1 className="text-2xl font-bold">{_('stats.title')}</h1>
         <StatsSettingsButton />
-        <NotificationBell />
       </div>
+      )}
 
       <SummaryCards />
 

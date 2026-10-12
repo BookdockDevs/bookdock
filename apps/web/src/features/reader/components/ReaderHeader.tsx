@@ -1,5 +1,4 @@
 import { memo } from 'react'
-import NotificationBell from '@/features/notifications/components/NotificationBell'
 import { Link } from '@tanstack/react-router'
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -90,7 +89,6 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
         <span className="min-w-0 flex-1 truncate text-sm font-medium md:max-w-md">{title}</span>
       </div>
       <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-        <NotificationBell className="h-8 w-8 text-[var(--bd-read-sub)]" />
         {estimatedMinutes !== undefined && (
           <span className="mr-1 hidden text-xs tabular-nums text-[var(--bd-read-sub)] sm:mr-2 sm:inline">
             {formatDuration(estimatedMinutes * 60, _)}

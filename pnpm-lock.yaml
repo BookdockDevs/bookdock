@@ -169,6 +169,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.7)
+      '@lexical/rich-text':
+        specifier: ^0.48.0
+        version: 0.48.0(typescript@6.0.3)
       '@mdxeditor/editor':
         specifier: ^4.3.2
         version: 4.3.2(@codemirror/language@6.13.1)(@lezer/highlight@1.2.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@6.0.3)(yjs@13.6.33)
@@ -193,6 +196,9 @@ importers:
       i18next-browser-languagedetector:
         specifier: ^8.2.1
         version: 8.2.1
+      lexical:
+        specifier: ^0.48.0
+        version: 0.48.0(typescript@6.0.3)
       marked:
         specifier: ^18.1.0
         version: 18.1.0

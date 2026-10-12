@@ -345,6 +345,8 @@ export async function updateAnnotation(userId: string, annotationId: string, dat
   }
   if (visibility === 'shared') await assertIdeaSource(userId, { ...source, bookVersionId: owned.row.bookVersionId })
   if (data.text !== undefined && data.text !== owned.row.text) throw new AppError('VALIDATION_ERROR', 'The original quotation is immutable')
+  const imageIdsChanged = data.imageIds !== undefined
+    && data.imageIds.join('\0') !== publishedContentFiles(db, 'idea', owned.row.id).map((file) => file.id).join('\0')
   const patch = {
     ...source, visibility,
     color: data.color ?? owned.row.color,
@@ -352,7 +354,7 @@ export async function updateAnnotation(userId: string, annotationId: string, dat
     text: data.text ?? owned.row.text,
     note: data.note ?? owned.row.note,
     updatedAt: now,
-    editedAt: data.note !== undefined && data.note !== owned.row.note ? now : owned.row.editedAt,
+    editedAt: (data.note !== undefined && data.note !== owned.row.note) || imageIdsChanged ? now : owned.row.editedAt,
   }
   db.transaction((tx) => {
     tx.update(ideas).set(patch).where(eq(ideas.id, owned.row.id)).run()

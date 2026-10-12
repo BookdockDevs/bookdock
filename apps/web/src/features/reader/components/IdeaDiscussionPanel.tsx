@@ -22,6 +22,7 @@ interface IdeaDiscussionPanelProps {
   initialCommentCount?: number
   initialLikeCount?: number
   hideTabs?: boolean
+  detailLayout?: boolean
   className?: string
   initialTab?: 'comments' | 'likes'
   focusCommentId?: string
@@ -33,6 +34,7 @@ export default function IdeaDiscussionPanel({
   initialCommentCount = 0,
   initialLikeCount = 0,
   hideTabs = false,
+  detailLayout = false,
   className,
   initialTab = 'comments',
   focusCommentId,
@@ -243,7 +245,7 @@ export default function IdeaDiscussionPanel({
   const menuPos = contextMenu ? computeAtPoint(contextMenu.pos, 130, 140) : null
 
   return (
-    <div className={cn('pt-1', !hideTabs && 'mt-4', className)}>
+    <div className={cn(detailLayout ? 'mt-3 px-5 pb-4' : cn('pt-1', !hideTabs && 'mt-4'), className)}>
       {/* Tabs: 评论 n 与 赞 n */}
       {!hideTabs && (
         <div className="flex items-center gap-6 border-b border-stone-200/60 pb-2.5 dark:border-stone-800/60">
@@ -284,7 +286,7 @@ export default function IdeaDiscussionPanel({
       )}
 
       {query.isPending ? (
-        <div className={cn(!hideTabs ? 'mt-3' : 'mt-1', 'space-y-3.5 animate-pulse')}>
+        <div className={cn(!hideTabs ? (detailLayout ? 'mt-2' : 'mt-3') : 'mt-1', 'space-y-3.5 animate-pulse')}>
           {(data?.idea.commentCount ?? initialCommentCount) > 0 ? (
             Array.from({ length: Math.min(data?.idea.commentCount ?? initialCommentCount, 2) }).map((_, i) => (
               <div key={i} className="flex items-start gap-2.5 pt-2">
@@ -296,13 +298,13 @@ export default function IdeaDiscussionPanel({
               </div>
             ))
           ) : (
-            <div className="flex py-4 items-center justify-center text-xs text-[var(--bd-read-sub)] opacity-50">
+            <div className={cn('flex items-center justify-center text-xs text-[var(--bd-read-sub)] opacity-50', detailLayout ? 'py-3' : 'py-4')}>
               {_('comment.noComments')}
             </div>
           )}
         </div>
       ) : query.isError || !data ? (
-        <div className={cn(hideTabs ? 'pt-1' : 'mt-3 pt-1')}>
+        <div className={cn(hideTabs ? 'pt-1' : detailLayout ? 'mt-2 pt-1' : 'mt-3 pt-1')}>
           <button
             onClick={() => void query.refetch()}
             className="py-3 text-sm text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] transition-colors cursor-pointer"
@@ -311,9 +313,9 @@ export default function IdeaDiscussionPanel({
           </button>
         </div>
       ) : !hideTabs && tab === 'likes' ? (
-        <div className="mt-3">
+        <div className={detailLayout ? 'mt-2' : 'mt-3'}>
           {data.likers.length === 0 ? (
-            <div className="flex py-6 items-center justify-center text-xs text-[var(--bd-read-sub)]">
+            <div className={cn('flex items-center justify-center text-xs text-[var(--bd-read-sub)]', detailLayout ? 'py-3' : 'py-6')}>
               {_('comment.noLikes')}
             </div>
           ) : (
@@ -340,10 +342,10 @@ export default function IdeaDiscussionPanel({
           )}
         </div>
       ) : (
-        <div className="mt-2">
+        <div className={detailLayout ? 'mt-1' : 'mt-2'}>
           <div className="space-y-1">
             {data.comments.length === 0 ? (
-              <div className="flex py-6 items-center justify-center text-xs text-[var(--bd-read-sub)]">
+              <div className={cn('flex items-center justify-center text-xs text-[var(--bd-read-sub)]', detailLayout ? 'py-3' : 'py-6')}>
                 {_('comment.noComments')}
               </div>
             ) : (
@@ -363,17 +365,19 @@ export default function IdeaDiscussionPanel({
       {/* 底部评论输入栏：收起态为极简圆角胶囊（对标微信读书），点击展开为卡片 */}
       {user && (hideTabs || tab === 'comments') && (
         <div
-              className={cn(
-                'mt-4 border border-stone-200/70 bg-stone-500/[0.04] transition-[border-color,background-color] dark:border-stone-800/70 dark:bg-stone-500/[0.06]',
-                isExpanded ? 'rounded-xl p-3' : 'rounded-full px-3.5 py-2 hover:border-stone-300 dark:hover:border-stone-700 cursor-text',
-              )}
-              onClick={() => {
-                if (!isExpanded) {
-                  setIsFocused(true)
-                  inputRef.current?.focus()
-                }
-              }}
-            >
+          className={cn(
+            detailLayout
+              ? 'sticky bottom-0 z-10 mt-3 border border-stone-200/70 bg-[var(--bd-read-bg)] pb-1 pt-1 dark:border-stone-800/70'
+              : 'mt-4 border border-stone-200/70 bg-stone-500/[0.04] transition-[border-color,background-color] dark:border-stone-800/70 dark:bg-stone-500/[0.06]',
+            isExpanded ? 'rounded-xl p-3' : 'rounded-full px-3.5 py-2 hover:border-stone-300 dark:hover:border-stone-700 cursor-text',
+          )}
+          onClick={() => {
+            if (!isExpanded) {
+              setIsFocused(true)
+              inputRef.current?.focus()
+            }
+          }}
+        >
               {(replyTo || editing) && (
                 <div className="mb-2.5 flex items-center justify-between">
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-[var(--bd-read-primary)]/10 px-2.5 py-0.5 text-xs text-[var(--bd-read-primary)]">

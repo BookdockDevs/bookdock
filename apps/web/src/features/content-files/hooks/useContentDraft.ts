@@ -72,5 +72,10 @@ export function useContentDraft(context: Omit<ContentFileUpload, 'draftId' | 'ki
     setEntries((rows) => rows.map((row) => row.id === entry.id ? { ...row, status: 'uploading', progress: 0 } : row))
     upload.mutate(entry)
   }
-  return { draftId, entries, add, retry, uploading: entries.some((row) => row.status === 'uploading') }
+  function dismiss(entryId: string) {
+    controllers.current.get(entryId)?.abort()
+    controllers.current.delete(entryId)
+    setEntries((rows) => rows.filter((row) => row.id !== entryId))
+  }
+  return { draftId, entries, add, retry, dismiss, uploading: entries.some((row) => row.status === 'uploading') }
 }

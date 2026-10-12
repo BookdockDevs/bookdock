@@ -50,12 +50,14 @@ export function computeDropdownPosition(
   anchor: AnchorRect,
   menuW: number,
   menuH: number,
+  align: 'start' | 'end' = 'start',
 ): SmartPosition {
   const { innerWidth: vw, innerHeight: vh } = window
   const below = anchor.top + anchor.height + 6
   const dir: 'down' | 'up' = below + menuH + PADDING <= vh ? 'down' : 'up'
+  const alignedLeft = align === 'end' ? anchor.left + anchor.width - menuW : anchor.left
   return {
-    left: Math.max(PADDING, Math.min(anchor.left, vw - menuW - PADDING)),
+    left: Math.max(PADDING, Math.min(alignedLeft, vw - menuW - PADDING)),
     top: dir === 'down' ? below : Math.max(PADDING, anchor.top - menuH - 6),
     dir,
   }

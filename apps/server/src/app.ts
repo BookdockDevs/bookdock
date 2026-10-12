@@ -23,6 +23,7 @@ import readingRecordsRoutes from './modules/reading-records/reading-records.rout
 import settingsRoutes from './modules/settings/settings.routes'
 import tokensRoutes from './modules/tokens/tokens.routes'
 import annotationRoutes from './modules/annotations/annotations.routes'
+import archiveRoutes from './modules/archive/archive.routes'
 import ideaRoutes from './modules/annotations/idea-discussion.routes'
 import reviewRoutes from './modules/reviews/reviews.routes'
 import notificationRoutes from './modules/notifications/notifications.routes'
@@ -76,6 +77,7 @@ app.route('/api/v1/reading-records', readingRecordsRoutes)
 app.route('/api/v1/settings', settingsRoutes)
 app.route('/api/v1/tokens', tokensRoutes)
 app.route('/api/v1/annotations', annotationRoutes)
+app.route('/api/v1/archive', archiveRoutes)
 app.route('/api/v1/ideas', ideaRoutes)
 app.route('/api/v1/reviews', reviewRoutes)
 app.route('/api/v1/notifications', notificationRoutes)

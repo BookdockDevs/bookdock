@@ -4,7 +4,7 @@ import { Marked } from 'marked'
 import { contentFileIdFromUrl } from '@bookdock/shared'
 import type { ReviewBodyFormat } from '@bookdock/shared'
 
-export { reviewExcerpt } from '@bookdock/shared'
+export { reviewExcerpt, reviewExcerptLines, reviewPlainText, reviewTextLength } from '@bookdock/shared'
 
 const parser = new Marked({ breaks: true, gfm: true })
 const purifier = createDOMPurify(window)

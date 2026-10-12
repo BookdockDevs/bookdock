@@ -3,12 +3,14 @@ import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import i18n from 'i18next'
 
-import type { CatalogBook, Library } from '@bookdock/shared'
+import type { CatalogBook, Library, Review } from '@bookdock/shared'
 
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
-import ReviewSection from '@/features/reviews/components/ReviewSection'
+import ReviewEditor from '@/features/reviews/components/ReviewEditor'
+import ReviewPreviewSection from '@/features/reviews/components/ReviewPreviewSection'
+import { useReviewWorkContext } from '@/features/reviews/hooks/useReviews'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -44,6 +46,8 @@ import CatalogUploadSheet from './CatalogUploadSheet'
 export default function WorkDetailBody({
   work, library, canManage, canCollect, canContribute = false, onClose,
   selectedVersionId, onSelectVersion, onVersionsUploaded, moreActions,
+  onOpenAllReviews,
+  onOpenReviewDetail,
 }: {
   work: CatalogBook
   library: Library
@@ -60,6 +64,8 @@ export default function WorkDetailBody({
   onSelectVersion: (versionLinkId: string) => void
   onVersionsUploaded: (versionLinkIds: string[]) => void
   moreActions?: MoreActionsMenuItem[]
+  onOpenAllReviews?: () => void
+  onOpenReviewDetail?: (review: Review) => void
   onClose: () => void
 }) {
   const _ = useTranslation()
@@ -84,6 +90,12 @@ export default function WorkDetailBody({
   const [metadataField, setMetadataField] = useState<{ field: EditableMetadataField; label: string; versionId: string } | null>(null)
   const [coverEditingId, setCoverEditingId] = useState<string | null>(null)
   const coverEditing = coverEditingId === selected?.id
+  const [reviewEditorOpen, setReviewEditorOpen] = useState(false)
+  const reviewQuery = useReviewWorkContext(library.id, work.id)
+  const reviewContext = reviewQuery.data?.data
+  const reviewComposer = reviewContext?.composer
+  const canReview = Boolean(reviewComposer?.eligible && reviewComposer.bookVersionId)
+  const ownReview = reviewContext?.own
   function metadataEdit(field: EditableMetadataField, label: string) {
     if (!canManage || !selected) return undefined
     return () => setMetadataField({ field, label, versionId: selected.id })
@@ -272,9 +284,30 @@ export default function WorkDetailBody({
     size: selected.size,
   }
 
+  const ratingSlot = reviewContext?.summary && reviewContext.summary.count > 0 ? (
+    <button
+      type="button"
+      onClick={onOpenAllReviews}
+      className="group flex flex-col items-end text-right transition-opacity hover:opacity-80"
+    >
+      <div className="flex items-center gap-1.5 text-amber-500">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+        <span className="text-2xl font-bold tabular-nums text-stone-900 dark:text-stone-100">
+          {reviewContext.summary.average!.toFixed(1)}
+        </span>
+      </div>
+      <span className="text-xs tabular-nums text-stone-400 dark:text-stone-500">
+        {_('review.ratingCount', { count: reviewContext.summary.count })}
+      </span>
+    </button>
+  ) : null
+
   return (
     <div>
       <DetailHeader
+        rating={ratingSlot}
         cover={canManage ? <DetailCoverEditor key={selected.id} book={rowCover(selectedRow)} coverPaletteId={null} active={coverEditing} onActiveChange={(active) => setCoverEditingId(active ? selected.id : null)} catalog={{ libraryId: library.id, libraryBookId: work.id, versionLinkId: selected.id, hasVersionCover: Boolean(selected.coverKey) }} /> : <BookCover book={rowCover(selectedRow)} coverSrc={selectedRow.coverSrc} />}
         coverEditing={coverEditing}
         hasCoverImage={hasCoverImage}
@@ -354,6 +387,20 @@ export default function WorkDetailBody({
                   format={selected.format}
                   versionLabel={versionTabLabel(selected.name, _('library.versionFallback', { n: versionOrdinal(work.versions, selected.id) }))}
                 />
+              )}
+              {canReview && (
+                <ActionIcon
+                  secondary
+                  className={ownReview ? 'text-amber-500 hover:text-amber-600 dark:text-amber-400' : undefined}
+                  label={ownReview ? _('review.editReview') : _('review.rateOrReview')}
+                  title={ownReview ? _('review.editReview') : _('review.rateOrReview')}
+                  onClick={() => setReviewEditorOpen(true)}
+                >
+                  <polygon
+                    points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+                    fill={ownReview ? 'currentColor' : 'none'}
+                  />
+                </ActionIcon>
               )}
               {(canManage || canContribute) && (
                 <ActionIcon
@@ -438,7 +485,19 @@ export default function WorkDetailBody({
 
       <MetaGrid rows={metaRows} />
 
-      <ReviewSection libraryId={library.id} libraryBookId={work.id} canCollect={canCollect} />
+      <ReviewPreviewSection context={reviewContext} onViewAll={() => onOpenAllReviews?.()} onOpenReview={onOpenReviewDetail} />
+
+      {reviewEditorOpen && reviewComposer?.bookVersionId && (
+        <ReviewEditor
+          bookVersionId={reviewComposer.bookVersionId}
+          existing={ownReview ?? null}
+          composer={reviewComposer}
+          onClose={() => setReviewEditorOpen(false)}
+          onSaved={() => {
+            void reviewQuery.refetch()
+          }}
+        />
+      )}
 
       {confirmUnlist && (
         <ConfirmDialog

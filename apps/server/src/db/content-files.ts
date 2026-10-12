@@ -1,6 +1,6 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 
-import { CONTENT_DRAFT_TTL_MS, CONTENT_FILES_MAX_COUNT, contentFileUrl } from '@bookdock/shared'
+import { CONTENT_DRAFT_TTL_MS, CONTENT_FILES_MAX_COUNT, IDEA_IMAGE_MAX_COUNT, contentFileUrl } from '@bookdock/shared'
 import type { ContentFile, ContentFileDomain } from '@bookdock/shared'
 
 import type { getDb } from './client'
@@ -16,7 +16,7 @@ export function contentFileProjection(row: typeof contentFiles.$inferSelect): Co
 export function publishedContentFiles(db: FileDb, domain: ContentFileDomain, id: string): ContentFile[] {
   return db.select().from(contentFiles).where(and(
     eq(domain === 'review' ? contentFiles.reviewId : contentFiles.ideaId, id), eq(contentFiles.ready, true),
-  )).all().map(contentFileProjection)
+  )).orderBy(asc(contentFiles.sortOrder), asc(contentFiles.createdAt), asc(contentFiles.id)).all().map(contentFileProjection)
 }
 
 export function syncContentFiles(db: FileDb, input: {
@@ -24,9 +24,11 @@ export function syncContentFiles(db: FileDb, input: {
   draftId?: string; ids: string[]; imageIds: string[]
 }) {
   const ids = [...new Set(input.ids)]
-  if (ids.length > CONTENT_FILES_MAX_COUNT) throw new AppError('VALIDATION_ERROR', 'Too many content files')
+  const maxCount = input.domain === 'idea' ? IDEA_IMAGE_MAX_COUNT : CONTENT_FILES_MAX_COUNT
+  if (ids.length > maxCount) throw new AppError('VALIDATION_ERROR', 'Too many content files')
   const rows = ids.length ? db.select().from(contentFiles).where(inArray(contentFiles.id, ids)).all() : []
   if (rows.length !== ids.length) throw new AppError('CONTENT_FILE_NOT_FOUND')
+  const rowsById = new Map(rows.map((row) => [row.id, row]))
   const targetColumn = input.domain === 'review' ? contentFiles.reviewId : contentFiles.ideaId
   const draft = input.draftId ? db.select().from(contentUploadDrafts).where(and(eq(contentUploadDrafts.userId, input.userId), eq(contentUploadDrafts.draftId, input.draftId))).get() : null
   for (const row of rows) {
@@ -42,6 +44,10 @@ export function syncContentFiles(db: FileDb, input: {
   }
   const previous = db.select().from(contentFiles).where(eq(targetColumn, input.targetId)).all()
   for (const row of previous) if (!ids.includes(row.id)) db.delete(contentFiles).where(eq(contentFiles.id, row.id)).run()
-  for (const row of rows) db.update(contentFiles).set(input.domain === 'review' ? { reviewId: input.targetId } : { ideaId: input.targetId })
-    .where(eq(contentFiles.id, row.id)).run()
+  for (const [sortOrder, id] of ids.entries()) {
+    const row = rowsById.get(id)
+    if (!row) throw new AppError('CONTENT_FILE_NOT_FOUND')
+    db.update(contentFiles).set(input.domain === 'review' ? { reviewId: input.targetId, sortOrder } : { ideaId: input.targetId, sortOrder })
+      .where(eq(contentFiles.id, row.id)).run()
+  }
 }

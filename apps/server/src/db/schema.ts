@@ -703,6 +703,7 @@ export const bookReviews = sqliteTable('book_reviews', {
   sourceLibraryBookId: text('source_library_book_id'),
   // Integer halves 1–10 (0.5–5 stars); null = unrated, never zero.
   ratingHalves: integer('rating_halves'),
+  title: text('title'),
   body: text('body'),
   bodyFormat: text('body_format', { enum: ['plain', 'markdown'] }).notNull().default('markdown'),
   visibility: text('visibility', { enum: ['private', 'shared'] }).notNull().default('private'),
@@ -773,6 +774,7 @@ export const contentFiles = sqliteTable('content_files', {
   name: text('name').notNull(),
   mimeType: text('mime_type').notNull(),
   size: integer('size').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
   ready: integer('ready', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull(),
 }, (table) => ({

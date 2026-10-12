@@ -1,5 +1,3 @@
-import NotificationBell from '@/features/notifications/components/NotificationBell'
-
 import type { LibrarySearchNames } from '@bookdock/shared'
 
 import LibrarySearchInput from './LibrarySearchInput'
@@ -94,7 +92,6 @@ export default function LibraryHeader({ navSearch, view, query, searchNames, sea
         </div>
 
         <div className="flex w-full min-w-0 flex-1 flex-wrap items-center justify-end gap-2 md:w-auto">
-          <NotificationBell />
           {!trash && (
             <LibrarySearchInput query={query} names={searchNames} context={searchContext} appliedError={searchError} onClear={onSearchClear} placeholder={_('library.searchPlaceholder')} onSubmit={onSearchSubmit ?? (async (source) => { navSearch({ q: source || undefined }) })} />
           )}

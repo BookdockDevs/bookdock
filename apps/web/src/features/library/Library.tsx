@@ -52,6 +52,7 @@ import EmptyLibrary from './components/EmptyLibrary'
 import JoinLibraryDialog from './components/JoinLibraryDialog'
 import LibraryDiscoveryDialog from './components/LibraryDiscoveryDialog'
 import LibraryHeader from './components/LibraryHeader'
+import NotificationDrawer from '@/features/notifications/components/NotificationDrawer'
 import LibraryPagination from './components/LibraryPagination'
 import LibrarySidebar from './components/LibrarySidebar'
 import LibraryContextBar from './components/LibraryContextBar'
@@ -166,6 +167,8 @@ export default function Library() {
   const [manageTarget, setManageTarget] = useState<LibraryListItem | null>(null)
   const [joinTarget, setJoinTarget] = useState<Library | null>(null)
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const notificationButtonRef = useRef<HTMLButtonElement>(null)
 
   const prefetchLibrary = useCallback(
     (patch: Partial<LibrarySearch>, targetLibraryId?: string | null) => {
@@ -997,6 +1000,8 @@ export default function Library() {
           onManageLibrary={setManageTarget}
           onJoinLibrary={setJoinTarget}
           onExploreLibraries={() => setDiscoveryOpen(true)}
+          onOpenNotifications={() => setNotificationsOpen((value) => !value)}
+          notificationButtonRef={notificationButtonRef}
           directory={search.directory}
         />
 
@@ -1035,6 +1040,8 @@ export default function Library() {
           bookCount={total}
           onResetMetadataFilter={metadataFilter ? () => navSearch({ author: undefined, series: undefined }) : undefined}
         />
+
+        {!isGuest && <NotificationDrawer anchorRef={notificationButtonRef} open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />}
 
         {!trash && <LibraryContextBar search={search} navSearch={navSearch} onClear={clearActiveFilters} />}
 

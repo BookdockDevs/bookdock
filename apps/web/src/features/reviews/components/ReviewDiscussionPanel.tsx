@@ -5,7 +5,7 @@ import type { ReviewComment } from '@bookdock/shared'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import SmartMenu, { readerMenuDangerItemClass, readerMenuItemClass } from '@/components/ui/SmartMenu'
 import { CloseIcon, CopyIcon, HeartIcon, PencilIcon, ReplyIcon, TrashIcon } from '@/features/reader/components/annotation-icons'
-import { formatFullDateTime, formatRelativeTime } from '@/features/reader/components/format-relative-time'
+import { formatFullDateTime } from '@/features/reader/components/format-relative-time'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
 
 import { useReviewAction, useReviewDiscussion, type ReviewAction } from '../hooks/useReviews'
+import ReviewTime from './ReviewTime'
 
 export default function ReviewDiscussionPanel({
   reviewId,
@@ -196,11 +197,10 @@ export default function ReviewDiscussionPanel({
                 </span>
               )}
               <span
-                title={formatFullDateTime(_, comment.createdAt)}
                 aria-label={formatFullDateTime(_, comment.createdAt)}
                 className="cursor-default select-none text-stone-400 dark:text-stone-500 opacity-70 hover:opacity-100 transition-opacity"
               >
-                · {formatRelativeTime(_, comment.createdAt)}
+                · <ReviewTime createdAt={comment.createdAt} editedAt={comment.editedAt} />
               </span>
             </div>
 

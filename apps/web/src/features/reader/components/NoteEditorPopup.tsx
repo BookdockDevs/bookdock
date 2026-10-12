@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
-import type { AnnotationUpdateReq, ContentFile } from '@bookdock/shared'
+import { IDEA_IMAGE_MAX_COUNT, type AnnotationUpdateReq, type ContentFile } from '@bookdock/shared'
 
-import IdeaImageEditor from '@/features/content-files/components/IdeaImageEditor'
+import IdeaImageEditor, { type IdeaImageEditorHandle } from '@/features/content-files/components/IdeaImageEditor'
+import { ImageIcon } from '@/features/content-files/components/ContentUpload'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
@@ -57,7 +58,9 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
   }))
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const imageEditorRef = useRef<IdeaImageEditorHandle>(null)
   const [contentHeight, setContentHeight] = useState(88)
+  const [imageCount, setImageCount] = useState(initialImages?.length ?? 0)
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -124,7 +127,7 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
   const bounds = { left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) }
   const size = {
     width: Math.max(1, Math.min(EDITOR_WIDTH, bounds.width - VIEWPORT_MARGIN * 2)),
-    height: Math.min(bookVersionId ? 520 : 380, Math.max(bookVersionId ? 320 : 200, contentHeight + 112)),
+    height: Math.min(bookVersionId ? 520 : 380, Math.max(bookVersionId ? 240 : 200, contentHeight + 112)),
   }
   const liveGeometry: SelectionGeometry = {
     rects: geometry?.rects ?? (rect ? [rect] : []), bounds,
@@ -135,7 +138,8 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
   const anim = ANIMATION_OFFSET[pos.placement]
 
   function submit() {
-    if (!saving && !uploading && draft.trim()) {
+    const hasImages = (files?.imageIds?.length ?? 0) > 0
+    if (!saving && !uploading && (draft.trim() || hasImages)) {
       if (onSaveVisibility) {
         if (files) onSaveVisibility(draft.trim(), visibility, files)
         else onSaveVisibility(draft.trim(), visibility)
@@ -150,6 +154,14 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
       autoFocus
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
+      onPaste={(e) => {
+        const images = Array.from(e.clipboardData?.files ?? []).filter((file) => file.type.startsWith('image/'))
+        if (images.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          imageEditorRef.current?.addFiles(images)
+        }
+      }}
       onKeyDown={(e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
           e.preventDefault()
@@ -157,11 +169,12 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
         }
       }}
       placeholder={_('annotation.notePlaceholder')}
-      className="min-h-0 w-full flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none text-[var(--bd-read-text)] placeholder:text-[var(--bd-read-sub)]"
+      style={{ height: contentHeight }}
+      className="min-h-0 w-full shrink-0 resize-none bg-transparent text-sm leading-relaxed outline-none text-[var(--bd-read-text)] placeholder:text-[var(--bd-read-sub)]"
     />
   )
 
-  const hasDraft = draft.trim().length > 0
+  const hasDraft = draft.trim().length > 0 || (files?.imageIds?.length ?? 0) > 0
   const publishButton = (
     <button
       onClick={submit}
@@ -211,15 +224,29 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
             <CloseIcon />
           </button>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">{textarea}
-          {bookVersionId && <IdeaImageEditor bookVersionId={bookVersionId} targetId={targetId} initialImages={initialImages} disabled={saving} onChange={(next, pending) => { setFiles(next); setUploading(pending) }} />}
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-3">
+          {textarea}
+          {bookVersionId && <IdeaImageEditor ref={imageEditorRef} bookVersionId={bookVersionId} targetId={targetId} initialImages={initialImages} disabled={saving} showToolbar={false} onCountChange={setImageCount} onChange={(next, pending) => { setFiles(next); setUploading(pending) }} />}
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-4 pb-3.5">
-          {visibilityEligible ? (
-            <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable} disabled={saving} />
-          ) : (
-            <div />
-          )}
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--bd-read-accent)]/25 px-4 py-2.5">
+          <div className="flex min-w-0 items-center gap-3">
+            {bookVersionId && (
+              <div className="flex items-center gap-1 text-xs text-[var(--bd-read-sub)]">
+                <button
+                  type="button"
+                  disabled={saving || uploading || imageCount >= IDEA_IMAGE_MAX_COUNT}
+                  onClick={() => imageEditorRef.current?.openFilePicker()}
+                  title={_('contentFiles.addImage')}
+                  aria-label={_('contentFiles.addImage')}
+                  className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ImageIcon />
+                </button>
+                <span className="tabular-nums">{imageCount} / {IDEA_IMAGE_MAX_COUNT}</span>
+              </div>
+            )}
+            {visibilityEligible && <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable} disabled={saving} />}
+          </div>
           <div className="flex items-center gap-2.5">
             {publishButton}
           </div>

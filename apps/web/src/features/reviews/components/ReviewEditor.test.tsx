@@ -9,8 +9,9 @@ vi.mock('../hooks/useReviews', () => ({
   useSaveReview: () => ({ mutateAsync, isPending: false }),
 }))
 
+const draftAdd = vi.fn()
 vi.mock('@/features/content-files/hooks/useContentDraft', () => ({
-  useContentDraft: () => ({ draftId: 'draft-editor-test', entries: [], add: vi.fn(), retry: vi.fn(), uploading: false }),
+  useContentDraft: () => ({ draftId: 'draft-editor-test', entries: [], add: draftAdd, retry: vi.fn(), uploading: false }),
 }))
 vi.mock('./ReviewRichEditor', () => ({
   default: ({ body, onChange, onUnsupported }: { body: string; onChange: (body: string) => void; onUnsupported: () => void }) => (
@@ -34,6 +35,7 @@ function sharedReview(): Review {
   return {
     id: 'r1',
     rating: 4,
+    title: null,
     body: 'kept',
     bodyFormat: 'markdown',
     visibility: 'shared',
@@ -66,6 +68,7 @@ describe('ReviewEditor visibility retention', () => {
       bookVersionId: 'v1',
       reviewId: 'r1',
       rating: 4,
+      title: null,
       body: 'kept',
       bodyFormat: 'markdown',
       draftId: 'draft-editor-test',
@@ -75,7 +78,7 @@ describe('ReviewEditor visibility retention', () => {
 
   it('sends an explicit private choice when the user picks it', async () => {
     render(<ReviewEditor bookVersionId="v1" existing={sharedReview()} composer={composer} onClose={() => {}} />)
-    fireEvent.click(screen.getByText('review.visibilityPrivate'))
+    fireEvent.change(screen.getByLabelText('review.visibilityLabel'), { target: { value: 'private' } })
     fireEvent.click(screen.getByText('library.save'))
     await vi.waitFor(() => expect(mutateAsync).toHaveBeenCalled())
     expect(mutateAsync).toHaveBeenCalledWith(
@@ -105,13 +108,33 @@ describe('ReviewEditor visibility retention', () => {
     expect((screen.getByLabelText('review.bodyLabel') as HTMLTextAreaElement).value).toBe(original)
   })
 
-  it('keeps Markdown and plain preview interpretation consistent', async () => {
+  it('renders plain text in textarea and allows converting to markdown', async () => {
     render(<ReviewEditor bookVersionId="v1" existing={{ ...sharedReview(), body: '**literal**', bodyFormat: 'plain' }} composer={composer} onClose={() => {}} />)
-    fireEvent.click(screen.getByText('review.preview'))
-    expect(document.querySelector('.review-markdown')?.textContent).toBe('**literal**')
-    expect(document.querySelector('.review-markdown strong')).toBeNull()
-    fireEvent.click(screen.getByText('review.returnEdit'))
     expect((screen.getByLabelText('review.bodyLabel') as HTMLTextAreaElement).value).toBe('**literal**')
+    fireEvent.click(screen.getByText('review.convertMarkdown'))
+    expect(screen.getByLabelText('visual-body')).toBeTruthy()
   })
 
+  it('hides visibility control for private library books', () => {
+    const privateComposer: ReviewComposerContext = {
+      ...composer,
+      anchor: 'private',
+      canPublishShared: false,
+    }
+    render(<ReviewEditor bookVersionId="v1" existing={null} composer={privateComposer} onClose={() => {}} />)
+    expect(screen.queryByLabelText('review.visibilityLabel')).toBeNull()
+  })
+
+  it('intercepts pasted image files and adds them to draft', () => {
+    draftAdd.mockReset()
+    render(<ReviewEditor bookVersionId="v1" existing={null} composer={composer} onClose={() => {}} />)
+    const file = new File(['dummy image'], 'screenshot.png', { type: 'image/png' })
+    const visualBody = screen.getByLabelText('visual-body')
+    fireEvent.paste(visualBody, {
+      clipboardData: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+      },
+    })
+    expect(draftAdd).toHaveBeenCalledWith(file, 'image')
+  })
 })

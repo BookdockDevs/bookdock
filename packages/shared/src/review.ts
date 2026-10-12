@@ -36,6 +36,7 @@ export function reviewHalvesToRating(halves: number): number {
 }
 
 export const REVIEW_BODY_MAX_LENGTH = 20000
+export const REVIEW_TITLE_MAX_LENGTH = 100
 export const REVIEW_COMMENT_MAX_LENGTH = 10000
 /** Independent preference key from the ideas composer (never shared). */
 export const REVIEW_VISIBILITY_KEY = 'reviews.last-created-visibility'
@@ -66,6 +67,7 @@ export interface Review {
   files?: ContentFile[]
   id: string
   rating: number | null
+  title: string | null
   body: string | null
   bodyFormat: ReviewBodyFormat
   visibility: ReviewVisibility
@@ -166,6 +168,7 @@ export const reviewCreateSchema = z
     bodyFormat: reviewBodyFormatSchema.optional(),
     draftId: contentDraftIdSchema.optional(),
     rating: reviewRatingSchema.nullable().optional(),
+    title: z.string().trim().max(REVIEW_TITLE_MAX_LENGTH).nullable().optional(),
     body: z.string().max(REVIEW_BODY_MAX_LENGTH).nullable().optional(),
     visibility: reviewVisibilitySchema.optional(),
   })
@@ -181,6 +184,7 @@ export const reviewUpdateSchema = z
     bodyFormat: reviewBodyFormatSchema.optional(),
     draftId: contentDraftIdSchema.optional(),
     rating: reviewRatingSchema.nullable().optional(),
+    title: z.string().trim().max(REVIEW_TITLE_MAX_LENGTH).nullable().optional(),
     body: z.string().max(REVIEW_BODY_MAX_LENGTH).nullable().optional(),
     visibility: reviewVisibilitySchema.optional(),
   })

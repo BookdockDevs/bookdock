@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
 
-import { archiveQuerySchema, notificationReadSchema } from '@bookdock/shared'
+import { notificationQuerySchema, notificationReadSchema } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
-import { listNotifications, markAllNotificationsRead, markNotificationRead, notificationTarget, unreadNotificationCount } from './notifications.service'
+import { deleteNotification, listNotifications, markAllNotificationsRead, markNotificationRead, notificationTarget, unreadNotificationCount } from './notifications.service'
 
 const notificationRoutes = new Hono()
 
@@ -12,7 +12,7 @@ notificationRoutes.use('*', async (c, next) => {
   await next()
 })
 notificationRoutes.get('/', async (c) => {
-  const query = archiveQuerySchema.safeParse(c.req.query())
+  const query = notificationQuerySchema.safeParse(c.req.query())
   if (!query.success) throw new AppError('VALIDATION_ERROR')
   return c.json({ data: await listNotifications(c.get('user')!.id, query.data) })
 })
@@ -26,6 +26,10 @@ notificationRoutes.put('/:id/read', async (c) => {
   const parsed = notificationReadSchema.safeParse(await c.req.json())
   if (!parsed.success) throw new AppError('VALIDATION_ERROR')
   markNotificationRead(c.get('user')!.id, c.req.param('id'), parsed.data.read)
+  return c.json({ data: null })
+})
+notificationRoutes.delete('/:id', async (c) => {
+  deleteNotification(c.get('user')!.id, c.req.param('id'))
   return c.json({ data: null })
 })
 

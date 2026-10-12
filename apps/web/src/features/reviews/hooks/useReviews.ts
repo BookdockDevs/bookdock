@@ -60,6 +60,7 @@ export interface SaveReviewInput {
   bookVersionId: string
   reviewId?: string | null
   rating: number | null
+  title?: string | null
   body: string | null
   bodyFormat?: 'plain' | 'markdown'
   draftId?: string
@@ -71,7 +72,7 @@ export function useSaveReview() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: SaveReviewInput) => {
-      const payload = { rating: input.rating, body: input.body, bodyFormat: input.bodyFormat, draftId: input.draftId, visibility: input.visibility }
+      const payload = { rating: input.rating, title: input.title, body: input.body, bodyFormat: input.bodyFormat, draftId: input.draftId, visibility: input.visibility }
       if (input.reviewId) return apiPut<{ data: unknown }>(`/reviews/${input.reviewId}`, payload)
       return apiPost<{ data: unknown }>('/reviews', { ...payload, bookVersionId: input.bookVersionId })
     },

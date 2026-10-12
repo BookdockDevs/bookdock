@@ -20,6 +20,7 @@ import { createId } from '../../lib/id'
 import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
 import { AppError, isUniqueViolation } from '../../middleware/error'
 import { assertReadableBook } from '../books/books.service'
+import { resolveSharedVersionRead } from '../libraries/library-access'
 import {
   assertSourceWorkReadable,
   authorHoldingReadable,
@@ -30,6 +31,7 @@ import {
   recordReviewVisibilityPref,
   reviewComposerContext,
   reviewReadRevision,
+  sharedReviewLinks,
   sourceWorkOf,
 } from './review-access'
 
@@ -192,8 +194,8 @@ export async function getReviewWorkContext(
         .all()
         .map((row) => row.id),
     )
-    const holding = getDb()
-      .select({ link: libraryBookVersions })
+    const privateHoldings = getDb()
+      .select({ link: libraryBookVersions, deletedAt: libraryBooks.deletedAt })
       .from(libraryBookVersions)
       .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
       .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
@@ -203,16 +205,37 @@ export async function getReviewWorkContext(
           eq(libraries.type, 'private'),
           eq(libraryBookVersions.kind, 'shared'),
           eq(libraryBookVersions.sourceLibraryId, libraryId),
-          isNull(libraryBooks.deletedAt),
         ),
       )
       .orderBy(desc(libraryBookVersions.updatedAt))
       .all()
-      .map((row) => row.link)
-      .find((link) => !!link.sourceLibraryBookVersionId && targets.has(link.sourceLibraryBookVersionId))
-    if (holding) {
-      composer = await reviewComposerContext(userId, holding.bookVersionId)
+      .filter((row) => !!row.link.sourceLibraryBookVersionId && targets.has(row.link.sourceLibraryBookVersionId))
+
+    const activeHolding = privateHoldings.find((row) => !row.deletedAt)?.link
+    const hasTrashedHolding = privateHoldings.some((row) => !!row.deletedAt)
+
+    if (activeHolding) {
+      composer = await reviewComposerContext(userId, activeHolding.bookVersionId)
       own = composer.existing
+    } else if (hasTrashedHolding) {
+      composer = GUEST_COMPOSER
+    } else {
+      const firstReadable = getDb()
+        .select()
+        .from(libraryBookVersions)
+        .where(
+          and(
+            eq(libraryBookVersions.libraryId, libraryId),
+            eq(libraryBookVersions.libraryBookId, libraryBookId),
+            inArray(libraryBookVersions.id, read.readableLinkIds),
+          ),
+        )
+        .orderBy(asc(libraryBookVersions.createdAt), asc(libraryBookVersions.id))
+        .get()
+      if (firstReadable) {
+        composer = await reviewComposerContext(userId, firstReadable.bookVersionId)
+        own = composer.existing
+      }
     }
   }
   return {
@@ -226,21 +249,35 @@ export async function getReviewWorkContext(
 export async function createReview(userId: string, input: ReviewCreateReq): Promise<Review> {
   const db = getDb()
   const held = privateReviewLink(userId, input.bookVersionId)
+  let sharedLink: ReturnType<typeof sharedReviewLinks>[number] | null = null
   if (!held) {
-    // Readable but uncollected shared versions cannot publish: first collect.
-    await assertReadableBook(userId, input.bookVersionId)
-    throw new AppError('REVIEW_NOT_FOUND')
+    const candidates = sharedReviewLinks(input.bookVersionId)
+    for (const candidate of candidates) {
+      try {
+        await assertSourceWorkReadable(userId, candidate.library.id, candidate.work.id)
+        await resolveSharedVersionRead(candidate.library.id, input.bookVersionId, userId)
+        sharedLink = candidate
+        break
+      } catch (error) {
+        if (!(error instanceof AppError)) throw error
+      }
+    }
+    if (!sharedLink) {
+      await assertReadableBook(userId, input.bookVersionId)
+      throw new AppError('REVIEW_NOT_FOUND')
+    }
   }
   const rating = input.rating ?? null
+  const title = input.title?.trim() ? input.title.trim() : null
   const body = input.body?.trim() ? input.body : null
   const bodyFormat = input.bodyFormat ?? 'markdown'
   const files = bodyFormat === 'markdown' ? reviewFileReferences(body ?? '') : { ids: [], imageIds: [], unmanagedImages: false }
   if (files.unmanagedImages) throw new AppError('VALIDATION_ERROR', 'Review images must be uploaded through the editor')
   if (rating == null && body == null) throw new AppError('VALIDATION_ERROR', 'rating or body is required')
+  if (title && title.length > 100) throw new AppError('VALIDATION_ERROR', 'title is too long')
   if (body && body.length > 20000) throw new AppError('VALIDATION_ERROR', 'body is too long')
 
-  const isSource =
-    held.link.kind === 'shared' && !!held.link.sourceLibraryId && !!held.link.sourceLibraryBookVersionId
+  const isSource = !held || (held.link.kind === 'shared' && !!held.link.sourceLibraryId && !!held.link.sourceLibraryBookVersionId)
   const composer = await reviewComposerContext(userId, input.bookVersionId)
   const visibility = input.visibility ?? composer.defaultVisibility
   const now = Date.now()
@@ -250,10 +287,11 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
     const row = {
       id: createId('review'),
       userId,
-      privateLibraryBookId: held.work.id,
+      privateLibraryBookId: held!.work.id,
       sourceLibraryId: null,
       sourceLibraryBookId: null,
       ratingHalves: rating == null ? null : reviewRatingToHalves(rating),
+      title,
       body,
       bodyFormat,
       visibility: 'private' as const,
@@ -276,9 +314,11 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
     return projectReview(userId, row, false)
   }
 
-  const work = sourceWorkOf(held.link)
+  const work = held ? sourceWorkOf(held.link) : { libraryId: sharedLink!.library.id, libraryBookId: sharedLink!.work.id }
   if (!work) throw new AppError('REVIEW_NOT_FOUND')
   if (visibility === 'shared' && !composer.canPublishShared) throw new AppError('REVIEW_NOT_FOUND')
+  const readListingId = held ? held.link.sourceLibraryBookVersionId : sharedLink!.link.id
+  const readLink = held ? held.link : sharedLink!.link
   const row = {
     id: createId('review'),
     userId,
@@ -286,12 +326,13 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
     sourceLibraryId: work.libraryId,
     sourceLibraryBookId: work.libraryBookId,
     ratingHalves: rating == null ? null : reviewRatingToHalves(rating),
+    title,
     body,
     bodyFormat,
     visibility,
-    readListingId: held.link.sourceLibraryBookVersionId,
+    readListingId,
     readBookVersionId: input.bookVersionId,
-    readRevisionId: reviewReadRevision(held.link, input.bookVersionId),
+    readRevisionId: reviewReadRevision(readLink, input.bookVersionId),
     createdAt: now,
     updatedAt: now,
     editedAt: null,
@@ -320,11 +361,13 @@ export async function updateReview(userId: string, id: string, patch: ReviewUpda
     .get()
   if (!row) throw new AppError('REVIEW_NOT_FOUND')
   const rating = patch.rating !== undefined ? patch.rating : row.ratingHalves == null ? null : reviewHalvesToRating(row.ratingHalves)
+  const title = patch.title !== undefined ? (patch.title?.trim() ? patch.title.trim() : null) : row.title
   const body = patch.body !== undefined ? (patch.body?.trim() ? patch.body : null) : row.body
   const bodyFormat = patch.bodyFormat ?? row.bodyFormat
   const files = bodyFormat === 'markdown' ? reviewFileReferences(body ?? '') : { ids: [], imageIds: [], unmanagedImages: false }
   if (files.unmanagedImages && (body !== row.body || bodyFormat !== row.bodyFormat)) throw new AppError('VALIDATION_ERROR', 'Review images must be uploaded through the editor')
   if (rating == null && body == null) throw new AppError('VALIDATION_ERROR', 'rating or body is required')
+  if (title && title.length > 100) throw new AppError('VALIDATION_ERROR', 'title is too long')
   const visibility = patch.visibility ?? row.visibility
   // Only a transition INTO shared re-checks publish eligibility (work reads
   // plus the author's own listing). Keeping an already-shared visibility while
@@ -344,11 +387,12 @@ export async function updateReview(userId: string, id: string, patch: ReviewUpda
     }
   }
   const now = Date.now()
-  const editedAt = (patch.body !== undefined && body !== row.body) || bodyFormat !== row.bodyFormat ? now : row.editedAt
+  const editedAt = (patch.body !== undefined && body !== row.body) || bodyFormat !== row.bodyFormat || (patch.title !== undefined && title !== row.title) ? now : row.editedAt
   db.transaction((tx) => {
     tx.update(bookReviews)
       .set({
         ratingHalves: rating == null ? null : reviewRatingToHalves(rating),
+        title,
         body,
         bodyFormat,
         visibility,
@@ -401,7 +445,7 @@ export async function myReviews(userId: string, query: ArchiveQuery = { page: 1,
     .select()
     .from(bookReviews)
     .where(eq(bookReviews.userId, userId))
-    .orderBy(desc(bookReviews.updatedAt), desc(bookReviews.id))
+    .orderBy(desc(bookReviews.createdAt), desc(bookReviews.id))
     .limit(query.pageSize + 1)
     .offset((query.page - 1) * query.pageSize)
     .all()
@@ -463,7 +507,7 @@ export async function readerProfile(viewerId: string | null, authorId: string, q
   while (entries.length <= query.pageSize) {
     const rows = db.select().from(bookReviews)
       .where(and(eq(bookReviews.userId, authorId), eq(bookReviews.visibility, 'shared')))
-      .orderBy(desc(bookReviews.updatedAt), desc(bookReviews.id)).limit(50).offset(offset).all()
+      .orderBy(desc(bookReviews.createdAt), desc(bookReviews.id)).limit(50).offset(offset).all()
     for (const row of rows) {
       if (!row.sourceLibraryId || !row.sourceLibraryBookId) continue
       try {
