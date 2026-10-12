@@ -51,14 +51,19 @@ interface VersionTally {
   ideas: number
   reviews: number
   lastRecordAt: number | null
+  firstRecordAt: number | null
 }
 
 function emptyTally(): VersionTally {
-  return { highlights: 0, bookmarks: 0, ideas: 0, reviews: 0, lastRecordAt: null }
+  return { highlights: 0, bookmarks: 0, ideas: 0, reviews: 0, lastRecordAt: null, firstRecordAt: null }
 }
 
 function touch(tally: VersionTally, at: number) {
   tally.lastRecordAt = tally.lastRecordAt == null ? at : Math.max(tally.lastRecordAt, at)
+}
+
+function touchFirst(tally: VersionTally, at: number) {
+  tally.firstRecordAt = tally.firstRecordAt == null ? at : Math.min(tally.firstRecordAt, at)
 }
 
 /** Version ids the user's review rows belong to, including versions that are
@@ -139,7 +144,7 @@ async function enrichBook(userId: string, versionId: string, tally: VersionTally
     bookVersionId: versionId, title, author, coverKey, format, readStatus,
     highlights: tally.highlights, bookmarks: tally.bookmarks,
     ideas: tally.ideas, reviews: tally.reviews, total,
-    lastRecordAt: tally.lastRecordAt,
+    lastRecordAt: tally.lastRecordAt, firstRecordAt: tally.firstRecordAt,
   }
 }
 
@@ -151,14 +156,14 @@ async function talliedBooks(userId: string): Promise<ArchiveBookItem[]> {
     tallies.set(versionId, entry)
     return entry
   }
-  const rows = db.all<{ bookVersionId: string; kind: 'highlight' | 'bookmark' | 'idea'; updatedAt: number }>(sql`
-    SELECT book_version_id AS bookVersionId, 'highlight' AS kind, updated_at AS updatedAt FROM ${highlights}
+  const rows = db.all<{ bookVersionId: string; kind: 'highlight' | 'bookmark' | 'idea'; updatedAt: number; createdAt: number }>(sql`
+    SELECT book_version_id AS bookVersionId, 'highlight' AS kind, updated_at AS updatedAt, created_at AS createdAt FROM ${highlights}
       WHERE user_id = ${userId} AND deleted_at IS NULL AND book_version_id IS NOT NULL
     UNION ALL
-    SELECT book_version_id AS bookVersionId, 'bookmark' AS kind, updated_at AS updatedAt FROM ${bookmarks}
+    SELECT book_version_id AS bookVersionId, 'bookmark' AS kind, updated_at AS updatedAt, created_at AS createdAt FROM ${bookmarks}
       WHERE user_id = ${userId} AND deleted_at IS NULL AND book_version_id IS NOT NULL
     UNION ALL
-    SELECT book_version_id AS bookVersionId, 'idea' AS kind, updated_at AS updatedAt FROM ${ideas}
+    SELECT book_version_id AS bookVersionId, 'idea' AS kind, updated_at AS updatedAt, created_at AS createdAt FROM ${ideas}
       WHERE user_id = ${userId} AND deleted_at IS NULL AND book_version_id IS NOT NULL
   `)
   for (const row of rows) {
@@ -167,13 +172,17 @@ async function talliedBooks(userId: string): Promise<ArchiveBookItem[]> {
     else if (row.kind === 'bookmark') entry.bookmarks += 1
     else entry.ideas += 1
     touch(entry, row.updatedAt)
+    touchFirst(entry, row.createdAt)
   }
   const reviewRows = db.select().from(bookReviews).where(eq(bookReviews.userId, userId)).all()
   const attributed = reviewVersions(userId, reviewRows)
   for (const [versionId, list] of attributed) {
     const entry = tally(versionId)
     entry.reviews += list.length
-    for (const row of list) touch(entry, row.updatedAt)
+    for (const row of list) {
+      touch(entry, row.updatedAt)
+      touchFirst(entry, row.createdAt)
+    }
   }
   const formats = new Map(
     db.select({ id: bookVersions.id, format: bookVersions.format }).from(bookVersions).all()
@@ -204,15 +213,21 @@ export async function listBooks(userId: string, query: ArchiveBooksQuery) {
     if (search && !(book.title ?? '').toLowerCase().includes(search)) return false
     return true
   })
+  const byId = (a: { bookVersionId: string }, b: { bookVersionId: string }) => a.bookVersionId.localeCompare(b.bookVersionId)
   const sorted = [...filtered].sort((a, b) => {
-    if (query.sort === 'records') return b.total - a.total || a.bookVersionId.localeCompare(b.bookVersionId)
-    if (query.sort === 'title') {
-      if (a.title == null && b.title == null) return a.bookVersionId.localeCompare(b.bookVersionId)
+    if (query.sort === 'most') return b.total - a.total || byId(a, b)
+    if (query.sort === 'fewest') return a.total - b.total || byId(a, b)
+    if (query.sort === 'earliest') return (a.firstRecordAt ?? Number.POSITIVE_INFINITY) - (b.firstRecordAt ?? Number.POSITIVE_INFINITY) || byId(a, b)
+    if (query.sort === 'title-asc' || query.sort === 'title-desc') {
+      if (a.title == null && b.title == null) return byId(a, b)
       if (a.title == null) return 1
       if (b.title == null) return -1
-      return a.title.localeCompare(b.title, 'zh') || a.bookVersionId.localeCompare(b.bookVersionId)
+      const compared = query.sort === 'title-asc'
+        ? a.title.localeCompare(b.title, 'zh')
+        : b.title.localeCompare(a.title, 'zh')
+      return compared || byId(a, b)
     }
-    return (b.lastRecordAt ?? -1) - (a.lastRecordAt ?? -1) || a.bookVersionId.localeCompare(b.bookVersionId)
+    return (b.lastRecordAt ?? -1) - (a.lastRecordAt ?? -1) || byId(a, b)
   })
   const entries = sorted.slice((query.page - 1) * query.pageSize, query.page * query.pageSize)
   return { entries, page: query.page, hasMore: sorted.length > query.page * query.pageSize }

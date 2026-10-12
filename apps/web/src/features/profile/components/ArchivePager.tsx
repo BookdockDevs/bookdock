@@ -13,7 +13,7 @@ export default function ArchivePager({ page, hasMore, disabled, onChange }: Arch
   return (
     <nav aria-label={_('profileArchive.pagination')} className="mt-4 flex items-center justify-center gap-3">
       <Button size="sm" variant="ghost" disabled={disabled || page <= 1} onClick={() => onChange(page - 1)}>{_('profileArchive.previous')}</Button>
-      <span className="text-xs tabular-nums text-stone-500">{page}</span>
+      <span className="text-xs tabular-nums text-stone-500">{hasMore ? page : `${page} / ${page}`}</span>
       <Button size="sm" variant="ghost" disabled={disabled || !hasMore} onClick={() => onChange(page + 1)}>{_('profileArchive.next')}</Button>
     </nav>
   )

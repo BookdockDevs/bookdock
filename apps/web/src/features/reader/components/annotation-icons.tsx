@@ -301,6 +301,61 @@ export function QuoteIcon({ size = 20 }: { size?: number }) {
   )
 }
 
+/** Slanted marker pen for highlight counts — line style matching BulbIcon/ChatBubbleIcon. */
+export function HighlighterIcon({
+  size = 20,
+  strokeWidth = 1.8,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4.5 19.5 6 15.8l9.8-9.8 2.7 2.7-9.3 9.3-4.7 1.5z" />
+      <path d="M12.6 9.4l2.6 2.6" />
+    </svg>
+  )
+}
+
+/** Outline bookmark — the solid BookmarkIcon stays for reader markers. */
+export function BookmarkOutlineIcon({
+  size = 20,
+  strokeWidth = 1.8,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M7 3.5h10a1.5 1.5 0 0 1 1.5 1.5v15l-6.5-4-6.5 4v-15A1.5 1.5 0 0 1 7 3.5z" />
+    </svg>
+  )
+}
+
 export function SelectedPositionIcon({ size = 20 }: { size?: number } = {}) {
   return (
     <svg className="shrink-0" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -613,6 +668,90 @@ export function DotsHorizontalIcon({
       <circle cx="12" cy="12" r="1.75" />
       <circle cx="5" cy="12" r="1.75" />
       <circle cx="19" cy="12" r="1.75" />
+    </svg>
+  )
+}
+
+/** Outline book for reading-location headers and the back-to-reading action. */
+export function BookIcon({
+  size = 18,
+  strokeWidth = 1.8,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
+    </svg>
+  )
+}
+
+/** Outline document for the review group header. */
+export function DocumentIcon({
+  size = 18,
+  strokeWidth = 1.8,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M16 13H8M16 17H8" />
+    </svg>
+  )
+}
+
+/** Up-right arrow for jump-to-full-content actions. */
+export function ArrowUpRightIcon({
+  size = 14,
+  strokeWidth = 2,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M7 17 17 7M7 7h10v10" />
     </svg>
   )
 }

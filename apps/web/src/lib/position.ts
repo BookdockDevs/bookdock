@@ -51,14 +51,15 @@ export function computeDropdownPosition(
   menuW: number,
   menuH: number,
   align: 'start' | 'end' = 'start',
+  gap = 6,
 ): SmartPosition {
   const { innerWidth: vw, innerHeight: vh } = window
-  const below = anchor.top + anchor.height + 6
+  const below = anchor.top + anchor.height + gap
   const dir: 'down' | 'up' = below + menuH + PADDING <= vh ? 'down' : 'up'
   const alignedLeft = align === 'end' ? anchor.left + anchor.width - menuW : anchor.left
   return {
     left: Math.max(PADDING, Math.min(alignedLeft, vw - menuW - PADDING)),
-    top: dir === 'down' ? below : Math.max(PADDING, anchor.top - menuH - 6),
+    top: dir === 'down' ? below : Math.max(PADDING, anchor.top - menuH - gap),
     dir,
   }
 }

@@ -8,7 +8,7 @@ export { reviewExcerpt, reviewExcerptLines, reviewPlainText, reviewTextLength } 
 
 const parser = new Marked({ breaks: true, gfm: true })
 const purifier = createDOMPurify(window)
-const ALLOWED_TAGS = ['p', 'br', 'strong', 'em', 'blockquote', 'ul', 'ol', 'li', 'a', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img']
+const ALLOWED_TAGS = ['p', 'br', 'strong', 'em', 'del', 'blockquote', 'ul', 'ol', 'li', 'a', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img']
 const ALLOWED_ATTR = ['href', 'title', 'src', 'alt', 'align']
 const SAFE_PROTOCOL = /^(https?:|mailto:|\/api\/v1\/content-files\/cfile_[A-Za-z0-9_-]{21}$)/i
 

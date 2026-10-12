@@ -145,10 +145,46 @@ describe('archive service', () => {
     const searched = await listBooks(ownerId, { search: 'two', sort: 'recent', page: 1, pageSize: 20 })
     expect(searched.entries.map((b) => b.title)).toEqual(['Book Two'])
 
-    const byRecords = await listBooks(ownerId, { sort: 'records', page: 1, pageSize: 20 })
+    const byRecords = await listBooks(ownerId, { sort: 'most', page: 1, pageSize: 20 })
     expect(byRecords.entries[0].bookVersionId).toBe(bookTwo)
 
-    const secondPage = await listBooks(ownerId, { sort: 'records', page: 2, pageSize: 1 })
+    const secondPage = await listBooks(ownerId, { sort: 'most', page: 2, pageSize: 1 })
+    expect(secondPage.entries.map((b) => b.bookVersionId)).toEqual([bookOne])
+    expect(secondPage.hasMore).toBe(false)
+  })
+
+  it('sorts by earliest creation, totals, and titles in both directions', async () => {
+    // bookOne: first record long ago, latest activity fresh.
+    seedHighlight(db, ownerId, bookOne, 100)
+    db.insert(schema.highlights).values({
+      id: createId('hl'), userId: ownerId, bookVersionId: bookOne, cfiRange: 'cfi-late',
+      text: 'late quote', chapter: 'chapter two', createdAt: 120, updatedAt: 900, deletedAt: null,
+    }).run()
+    // bookTwo: everything in between, plus one more record overall.
+    seedHighlight(db, ownerId, bookTwo, 50)
+    seedBookmark(db, ownerId, bookTwo, 60)
+    seedIdea(db, ownerId, bookTwo, 70)
+
+    const earliest = await listBooks(ownerId, { sort: 'earliest', page: 1, pageSize: 20 })
+    expect(earliest.entries.map((b) => b.bookVersionId)).toEqual([bookTwo, bookOne])
+    expect(earliest.entries[0]).toMatchObject({ firstRecordAt: 50, lastRecordAt: 70 })
+    expect(earliest.entries[1]).toMatchObject({ firstRecordAt: 100, lastRecordAt: 900 })
+
+    const recent = await listBooks(ownerId, { sort: 'recent', page: 1, pageSize: 20 })
+    expect(recent.entries.map((b) => b.bookVersionId)).toEqual([bookOne, bookTwo])
+
+    const most = await listBooks(ownerId, { sort: 'most', page: 1, pageSize: 20 })
+    expect(most.entries.map((b) => b.bookVersionId)).toEqual([bookTwo, bookOne])
+
+    const fewest = await listBooks(ownerId, { sort: 'fewest', page: 1, pageSize: 20 })
+    expect(fewest.entries.map((b) => b.bookVersionId)).toEqual([bookOne, bookTwo])
+
+    const titleAsc = await listBooks(ownerId, { sort: 'title-asc', page: 1, pageSize: 20 })
+    expect(titleAsc.entries.map((b) => b.title)).toEqual(['Book One', 'Book Two'])
+    const titleDesc = await listBooks(ownerId, { sort: 'title-desc', page: 1, pageSize: 20 })
+    expect(titleDesc.entries.map((b) => b.title)).toEqual(['Book Two', 'Book One'])
+
+    const secondPage = await listBooks(ownerId, { sort: 'earliest', page: 2, pageSize: 1 })
     expect(secondPage.entries.map((b) => b.bookVersionId)).toEqual([bookOne])
     expect(secondPage.hasMore).toBe(false)
   })

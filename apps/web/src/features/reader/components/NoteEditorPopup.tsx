@@ -230,6 +230,7 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--bd-read-accent)]/25 px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-3">
+            {visibilityEligible && <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable} disabled={saving} />}
             {bookVersionId && (
               <div className="flex items-center gap-1 text-xs text-[var(--bd-read-sub)]">
                 <button
@@ -245,7 +246,6 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
                 <span className="tabular-nums">{imageCount} / {IDEA_IMAGE_MAX_COUNT}</span>
               </div>
             )}
-            {visibilityEligible && <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable} disabled={saving} />}
           </div>
           <div className="flex items-center gap-2.5">
             {publishButton}

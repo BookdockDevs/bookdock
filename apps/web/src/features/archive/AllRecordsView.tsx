@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import type { ArchiveRecordType } from '@bookdock/shared'
+import type { ArchiveBooksQuery, ArchiveRecordType } from '@bookdock/shared'
 
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import ArchivePager from '@/features/profile/components/ArchivePager'
@@ -11,13 +11,23 @@ import type { ArchiveSearch } from '@/routes/archive'
 
 import { useArchiveBooks } from './hooks'
 import ArchiveBookRow from './components/ArchiveBookRow'
+import SortMenu from './components/SortMenu'
 
 const TYPES: Array<ArchiveRecordType | 'all'> = ['all', 'highlight', 'bookmark', 'idea', 'review']
+
+const SORTS: Array<{ value: ArchiveBooksQuery['sort']; labelKey: string }> = [
+  { value: 'recent', labelKey: 'archive.sortRecent' },
+  { value: 'earliest', labelKey: 'archive.sortEarliest' },
+  { value: 'most', labelKey: 'archive.sortMost' },
+  { value: 'fewest', labelKey: 'archive.sortFewest' },
+  { value: 'title-asc', labelKey: 'archive.sortTitleAsc' },
+  { value: 'title-desc', labelKey: 'archive.sortTitleDesc' },
+]
 
 export interface AllRecordsParams {
   q: string
   type: ArchiveRecordType | 'all'
-  sort: 'recent' | 'records' | 'title'
+  sort: ArchiveBooksQuery['sort']
   page: number
 }
 
@@ -30,6 +40,7 @@ export default function AllRecordsView({ params, baseSearch, onChange, onOpenBoo
 }) {
   const _ = useTranslation()
   const [draft, setDraft] = useState(params.q)
+  const sortOptions = SORTS.map((option) => ({ value: option.value, label: _(option.labelKey) }))
   useEffect(() => setDraft(params.q), [params.q])
   useEffect(() => {
     if (draft === params.q) return
@@ -75,8 +86,8 @@ export default function AllRecordsView({ params, baseSearch, onChange, onOpenBoo
         />
       </div>
 
-      <div className="flex flex-col gap-3">
-        <div role="tablist" aria-label={_('archive.filterByType')} className="flex items-center gap-6 px-1">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <div role="tablist" aria-label={_('archive.filterByType')} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-1 px-1">
           {TYPES.map((type) => {
             const active = params.type === type
             return (
@@ -87,7 +98,7 @@ export default function AllRecordsView({ params, baseSearch, onChange, onOpenBoo
                 aria-selected={active}
                 onClick={() => onChange({ type, page: 1 })}
                 className={cn(
-                  'pb-1 text-[15px] transition-colors',
+                  'whitespace-nowrap pb-1 text-[15px] transition-colors',
                   active ? 'font-semibold text-stone-900 dark:text-stone-50' : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300',
                 )}
               >
@@ -96,18 +107,12 @@ export default function AllRecordsView({ params, baseSearch, onChange, onOpenBoo
             )
           })}
         </div>
-        <label className="flex items-center gap-2 rounded-full border border-stone-200 bg-white px-4 py-2 dark:border-stone-700 dark:bg-stone-900">
-          <span className="sr-only">{_('archive.sortBy')}</span>
-          <select
-            value={params.sort}
-            onChange={(e) => onChange({ sort: e.target.value as AllRecordsParams['sort'], page: 1 })}
-            className="w-full bg-transparent text-sm text-stone-700 outline-none dark:text-stone-200"
-          >
-            <option value="recent">{_('archive.sortRecent')}</option>
-            <option value="records">{_('archive.sortMost')}</option>
-            <option value="title">{_('archive.sortTitle')}</option>
-          </select>
-        </label>
+        <SortMenu
+          value={params.sort}
+          options={sortOptions}
+          onChange={(sort) => onChange({ sort, page: 1 })}
+          label={_('archive.sortBy')}
+        />
       </div>
 
       {books.isPending ? (
@@ -123,7 +128,7 @@ export default function AllRecordsView({ params, baseSearch, onChange, onOpenBoo
       ) : (
         <div className="divide-y divide-stone-200/70 dark:divide-stone-800/70">
           {books.data.data.entries.map((book) => (
-            <ArchiveBookRow key={book.bookVersionId} book={book} onOpen={onOpenBook} to={{ to: '/archive', search: { ...baseSearch, view: 'book', bookId: book.bookVersionId, from: 'all' } }} />
+            <ArchiveBookRow key={book.bookVersionId} book={book} onOpen={onOpenBook} to={{ to: '/archive', search: { ...baseSearch, view: 'book', bookId: book.bookVersionId, from: 'all', bookType: params.type } }} />
           ))}
         </div>
       )}

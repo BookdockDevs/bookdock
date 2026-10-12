@@ -60,17 +60,14 @@ export default function Archive() {
               onClick={exitArchive}
               aria-label={_('archive.back')}
               title={_('archive.back')}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-300"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M19 12H5" />
                 <path d="m12 19-7-7 7-7" />
               </svg>
             </Link>
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold tracking-tight">{_('archive.title')}</h1>
-              <p className="text-sm text-stone-500 dark:text-stone-400">{_('archive.subtitle')}</p>
-            </div>
+            <h1 className="flex-1 text-xl font-bold tracking-tight sm:text-2xl">{_('archive.title')}</h1>
           </header>
 
           <nav aria-label={_('archive.title')} className="flex items-center gap-6 border-b border-stone-200/70 dark:border-stone-800/70">

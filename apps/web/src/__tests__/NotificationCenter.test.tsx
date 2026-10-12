@@ -3,10 +3,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InteractionNotification } from '@bookdock/shared'
+import type { RefObject } from 'react'
 
 import * as api from '@/api/client'
 import NotificationCenter from '@/features/notifications/NotificationCenter'
 import NotificationBell from '@/features/notifications/components/NotificationBell'
+import NotificationDrawer from '@/features/notifications/components/NotificationDrawer'
 import { useReviewAction } from '@/features/reviews/hooks/useReviews'
 import { useIdeaAction } from '@/features/reader/hooks/useIdeas'
 import i18n from '@/i18n/i18n'
@@ -19,7 +21,8 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to, search: params, ...props }: { children: React.ReactNode; to: string; search?: { id?: string } }) => <a href={to + (params?.id ? '?id=' + params.id : '')} {...props}>{children}</a>,
 }))
 vi.mock('@/api/client', () => ({ apiGet: vi.fn(), apiPut: vi.fn(), apiPost: vi.fn(), apiDelete: vi.fn() }))
-vi.mock('@/features/notifications/components/NotificationContent', () => ({ default: () => <p>Exact interaction</p> }))
+vi.mock('@/features/reader/components/IdeaDetailModal', () => ({ default: () => <p>Exact interaction</p> }))
+vi.mock('@/features/reviews/components/ReviewCard', () => ({ default: () => <p>Exact interaction</p> }))
 
 const entry: InteractionNotification = {
   id: 'event', domain: 'review', event: 'reply', targetId: 'review', commentId: 'reply',
@@ -64,6 +67,44 @@ describe('notification center', () => {
     expect(await screen.findByText(/这条互动已不可用/)).toBeInTheDocument()
     expect(screen.queryByText('Exact interaction')).not.toBeInTheDocument()
     expect(api.apiPut).not.toHaveBeenCalled()
+  })
+
+  it('resets the open detail when the drawer closes and reopens', async () => {
+    vi.mocked(api.apiGet).mockImplementation(async (path: string) => {
+      if (path.endsWith('/target')) return { data: { available: true, notification: entry } }
+      if (path.endsWith('/unread')) return { data: { count: 1 } }
+      return { data: { entries: [entry], page: 1, hasMore: false } }
+    })
+    vi.mocked(api.apiPut).mockResolvedValue({ data: null })
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    const anchorRef = { current: anchor } as RefObject<HTMLButtonElement | null>
+    try {
+      const onClose = vi.fn()
+      const { rerender } = render(<NotificationDrawer anchorRef={anchorRef} open={true} onClose={onClose} />, { wrapper: wrapper() })
+      fireEvent.click(await screen.findByRole('button', { name: /Reader/ }))
+      expect(await screen.findByText('Exact interaction')).toBeInTheDocument()
+      rerender(<NotificationDrawer anchorRef={anchorRef} open={false} onClose={onClose} />)
+      await waitFor(() => expect(screen.queryByText('Exact interaction')).not.toBeInTheDocument())
+      rerender(<NotificationDrawer anchorRef={anchorRef} open={true} onClose={onClose} />)
+      await screen.findByRole('button', { name: /Reader/ })
+      expect(screen.queryByText('Exact interaction')).not.toBeInTheDocument()
+    } finally {
+      anchor.remove()
+    }
+  })
+
+  it('distinguishes content likes from comment likes in the first row', async () => {
+    const base = { ...entry, readAt: 1 }
+    const contentLike: InteractionNotification = { ...base, id: 'like-content', domain: 'idea', event: 'like', targetId: 'idea', commentId: null, preview: 'Idea summary' }
+    const commentLike: InteractionNotification = { ...base, id: 'like-comment', domain: 'review', event: 'like', targetId: 'review', commentId: 'comment', preview: 'Liked comment body' }
+    vi.mocked(api.apiGet).mockImplementation(async (path) => path.endsWith('/unread')
+      ? { data: { count: 0 } }
+      : { data: { entries: [contentLike, commentLike], page: 1, hasMore: false } })
+    render(<NotificationCenter />, { wrapper: wrapper() })
+    expect(await screen.findByText(/赞了你的想法/)).toBeInTheDocument()
+    expect(screen.getByText(/赞了你在书评下的评论/)).toBeInTheDocument()
+    expect(screen.queryByText(/赞了你的内容/)).not.toBeInTheDocument()
   })
 
   it.each(['idea', 'review'])('reuses request IDs for failed %s comment retries and starts a new ID after success', async (domain) => {

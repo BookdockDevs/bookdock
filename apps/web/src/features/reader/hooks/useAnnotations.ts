@@ -146,6 +146,8 @@ export function useDeleteAnnotation(bookId: string) {
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
       void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
+      // Deleting a whole annotation can retire the notifications pointing at it.
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
     },
   })
 }
@@ -185,6 +187,8 @@ export function useBatchDeleteAnnotations(bookId: string) {
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
       void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
+      // Batch deletes can retire the notifications pointing at the removed items.
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
     },
   })
 }

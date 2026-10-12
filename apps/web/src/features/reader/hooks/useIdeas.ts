@@ -184,6 +184,8 @@ export function useIdeaAction(ideaId: string, bookId: string) {
         queryClient.invalidateQueries({ queryKey: ['idea-discussion', ideaId] }),
         queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] }),
         queryClient.invalidateQueries({ queryKey: ['annotations', bookId] }),
+        // Comment/like writes can retire the notifications pointing at them.
+        queryClient.invalidateQueries({ queryKey: ['notifications'] }),
       ])
     },
   })

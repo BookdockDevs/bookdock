@@ -26,12 +26,15 @@ export default function ReviewCard({
   onDeleted,
   initialDiscussionTab,
   focusCommentId,
+  hideDelete = false,
 }: {
   review: Review
   onEdit?: (review: Review) => void
   onDeleted?: () => void
   initialDiscussionTab?: 'comments' | 'likes'
   focusCommentId?: string
+  /** Notification entries show the review without management actions. */
+  hideDelete?: boolean
 }) {
   const _ = useTranslation()
   const user = useAuthStore((state) => state.user)
@@ -118,7 +121,7 @@ export default function ReviewCard({
                 <PencilIcon />
               </button>
             )}
-            {review.canDelete && (
+            {review.canDelete && !hideDelete && (
               <button
                 type="button"
                 onClick={() => setConfirmDelete(true)}

@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type UIEvent } from 'react'
 import { createPortal } from 'react-dom'
 
-import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -9,8 +8,9 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
 
-import NotificationContent from './NotificationContent'
-import { useInfiniteNotifications, useNotificationDelete, useNotificationRead, useNotificationTarget, useUnreadNotifications } from '../hooks'
+import { useInfiniteNotifications, useNotificationDelete, useNotificationRead, useUnreadNotifications } from '../hooks'
+import { notificationActionKey } from '../notification-copy'
+import NotificationDetailModal from './NotificationDetailModal'
 
 interface NotificationDrawerProps {
   anchorRef: RefObject<HTMLButtonElement | null>
@@ -18,9 +18,9 @@ interface NotificationDrawerProps {
   onClose: () => void
 }
 
-const POPOVER_WIDTH = 400
-const POPOVER_MAX_HEIGHT = 560
-const POPOVER_MARGIN = 8
+const POPOVER_WIDTH = 380
+const POPOVER_MAX_HEIGHT = 520
+const POPOVER_MARGIN = 12
 
 export default function NotificationDrawer({ anchorRef, open, onClose }: NotificationDrawerProps) {
   const _ = useTranslation()
@@ -33,7 +33,6 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
   const [position, setPosition] = useState<SmartPosition | null>(null)
   const list = useInfiniteNotifications(unreadOnly, open)
   const unread = useUnreadNotifications()
-  const target = useNotificationTarget(selectedId ?? undefined)
   const read = useNotificationRead()
   const remove = useNotificationDelete()
   const entries = useMemo(() => list.data?.pages.flatMap((page) => page.data.entries) ?? [], [list.data])
@@ -63,7 +62,8 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
         { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
         width,
         POPOVER_MAX_HEIGHT,
-        'start',
+        'end',
+        8,
       ))
     }
 
@@ -102,6 +102,13 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
     document.addEventListener('pointerdown', onPointerDown, true)
     return () => document.removeEventListener('pointerdown', onPointerDown, true)
   }, [anchorRef, onClose, open, selectedId])
+
+  useEffect(() => {
+    if (!open) {
+      setSelectedId(null)
+      setMenuId(null)
+    }
+  }, [open ])
 
   useEffect(() => {
     if (!menuId) return
@@ -143,10 +150,10 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
         ref={panelRef}
         role="dialog"
         aria-labelledby="notification-popover-title"
-        className="animate-modal-panel fixed z-50 flex max-h-[min(35rem,calc(100dvh-1rem))] flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg outline-none origin-top-left dark:border-stone-700 dark:bg-stone-900"
+        className={`animate-modal-panel fixed z-50 flex max-h-[min(60vh,520px)] flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg outline-none dark:border-stone-700 dark:bg-stone-900 ${position.dir === 'down' ? 'origin-top-right' : 'origin-bottom-right'}`}
         style={{ left: position.left, top: position.top, width: `min(${POPOVER_WIDTH}px, calc(100vw - ${POPOVER_MARGIN * 2}px))` }}
       >
-        <header className="shrink-0 border-b border-stone-100 px-4 pb-2.5 pt-3 dark:border-stone-800">
+        <header className="shrink-0 border-b border-stone-100 px-4 pb-2 pt-2.5 dark:border-stone-800">
           <div className="flex items-center gap-2">
             <h2 id="notification-popover-title" className="text-base font-medium text-stone-900 dark:text-stone-100">{_('notificationDrawer.title')}</h2>
             {unreadCount > 0 && <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs tabular-nums text-stone-600 dark:bg-stone-800 dark:text-stone-300">{unreadCount > 99 ? '99+' : unreadCount}</span>}
@@ -154,7 +161,7 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
             </button>
           </div>
-          <div className="mt-2 flex items-center gap-4">
+          <div className="mt-1.5 flex items-center gap-4">
             <div className="flex items-center gap-4 text-sm">
               <button type="button" aria-pressed={!unreadOnly} onClick={() => setUnreadOnly(false)} className={`border-b-2 pb-1 font-medium transition-colors ${!unreadOnly ? 'border-stone-900 text-stone-900 dark:border-stone-100 dark:text-stone-100' : 'border-transparent text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300'}`}>{_('notificationDrawer.all')}</button>
               <button type="button" aria-pressed={unreadOnly} onClick={() => setUnreadOnly(true)} className={`border-b-2 pb-1 font-medium transition-colors ${unreadOnly ? 'border-stone-900 text-stone-900 dark:border-stone-100 dark:text-stone-100' : 'border-transparent text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300'}`}>{_('notificationDrawer.unread')}</button>
@@ -173,9 +180,9 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
                       <div className="flex items-start gap-2.5">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-100 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300">{entry.actor.name.slice(0, 1).toUpperCase()}</span>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm text-stone-900 dark:text-stone-100"><span className="font-semibold">{entry.actor.name}</span> {_('notificationCenter.' + entry.event)}</p>
+                          <p className="text-sm text-stone-900 dark:text-stone-100"><span className="font-semibold">{entry.actor.name}</span> {_(notificationActionKey(entry))}</p>
                           <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-sm text-stone-500 dark:text-stone-400">{entry.preview}</p>
-                          <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{_(entry.domain === 'idea' ? 'notificationDrawer.idea' : 'notificationDrawer.review')} · {formatRelativeTime(_, entry.createdAt)}</p>
+                          <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{formatRelativeTime(_, entry.createdAt)}</p>
                         </div>
                       </div>
                     </button>
@@ -189,12 +196,7 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
                 </ul>}
         </div>
       </aside>
-      {selectedId && <Modal title={_('notificationCenter.target')} size="wide" onClose={() => setSelectedId(null)}>
-        {target.isPending ? <div role="status" className="h-24 animate-pulse rounded-xl bg-stone-500/10" />
-          : target.isError ? <QueryErrorState isRetrying={target.isFetching} onRetry={() => void target.refetch()} />
-            : target.data?.data.available ? <NotificationContent key={selectedId} notification={target.data.data.notification} />
-              : <p role="status" className="py-6 text-sm text-stone-500">{_('notificationCenter.unavailable')}</p>}
-      </Modal>}
+      {selectedId && <NotificationDetailModal key={selectedId} notificationId={selectedId} entry={entries.find((entry) => entry.id === selectedId)} onClose={() => setSelectedId(null)} />}
     </>,
     document.body,
   )

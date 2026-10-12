@@ -17,9 +17,10 @@ describe('review markdown', () => {
     expect(reviewNeedsSourceEditor('[link](https://example.com)')).toBe(false)
   })
   it('renders the phase-1 subset with single-newline breaks', () => {
-    const html = renderReviewBody('**bold** and *italic*\nsecond line\n\n> quote\n\n- a\n- b\n\n1. one\n2. two\n\n[text](https://example.com)', 'markdown')
+    const html = renderReviewBody('**bold** and *italic* and ~~struck~~\nsecond line\n\n> quote\n\n- a\n- b\n\n1. one\n2. two\n\n[text](https://example.com)', 'markdown')
     expect(html).toContain('<strong>bold</strong>')
     expect(html).toContain('<em>italic</em>')
+    expect(html).toContain('<del>struck</del>')
     expect(html).toContain('<br>')
     expect(html).toContain('<blockquote>')
     expect(html).toContain('<ul>')

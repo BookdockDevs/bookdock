@@ -39,7 +39,7 @@ export type ArchiveRecordType = z.infer<typeof archiveRecordTypeSchema>
 export const archiveBooksQuerySchema = z.object({
   search: z.string().trim().max(200).optional(),
   type: archiveRecordTypeSchema.optional(),
-  sort: z.enum(['recent', 'records', 'title']).default('recent'),
+  sort: z.enum(['recent', 'earliest', 'most', 'fewest', 'title-asc', 'title-desc']).default('recent'),
   page: z.coerce.number().int().min(1).max(100000).default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
 })
@@ -65,6 +65,8 @@ export interface ArchiveBookItem {
   reviews: number
   total: number
   lastRecordAt: number | null
+  /** Min created_at across the book's live annotations and owned reviews. */
+  firstRecordAt: number | null
 }
 
 export interface ArchiveOverview {

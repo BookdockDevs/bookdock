@@ -87,7 +87,11 @@ export function useDeleteReview() {
   return useMutation({
     mutationFn: (reviewId: string) => apiDelete(`/reviews/${reviewId}`),
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['reviews'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['reviews'] }),
+        // A deleted review retires the notifications pointing at it.
+        queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+      ])
     },
   })
 }
@@ -153,7 +157,11 @@ export function useReviewAction(reviewId: string) {
       }
     },
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['reviews'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['reviews'] }),
+        // Comment/like writes can retire the notifications pointing at them.
+        queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+      ])
     },
   })
 }

@@ -30,4 +30,12 @@ describe('computeDropdownPosition', () => {
     expect(position.top).toBe(82)
     expect(position.dir).toBe('down')
   })
+
+  it('honors a custom gap below and above the anchor', () => {
+    const below = computeDropdownPosition({ left: 100, top: 40, width: 36, height: 36 }, 380, 520, 'end', 8)
+
+    expect(below.left).toBe(8)
+    expect(below.top).toBe(84)
+    expect(below.dir).toBe('down')
+  })
 })

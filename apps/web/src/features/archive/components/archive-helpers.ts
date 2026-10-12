@@ -1,5 +1,17 @@
 import type { ArchiveBookItem } from '@bookdock/shared'
 
+export function archiveCountParts(
+  book: Pick<ArchiveBookItem, 'highlights' | 'bookmarks' | 'ideas' | 'reviews'>,
+  t: (key: string, options?: Record<string, string | number>) => string,
+): Array<{ key: string; label: string; value: number }> {
+  return [
+    { key: 'highlights', label: t('archive.highlights'), value: book.highlights },
+    { key: 'bookmarks', label: t('archive.bookmarks'), value: book.bookmarks },
+    { key: 'ideas', label: t('archive.ideas'), value: book.ideas },
+    { key: 'reviews', label: t('archive.reviews'), value: book.reviews },
+  ].filter((part) => part.value > 0)
+}
+
 export function formatCounts(book: Pick<ArchiveBookItem, 'highlights' | 'bookmarks' | 'ideas' | 'reviews'>, t: (key: string, options?: Record<string, string | number>) => string): string {
   const parts: string[] = []
   if (book.highlights > 0) parts.push(t('archive.highlightCount', { n: book.highlights }))
