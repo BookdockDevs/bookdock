@@ -23,6 +23,7 @@ export class ApiError extends Error {
     public code: string,
     message: string,
     public details?: unknown,
+    public status?: number,
   ) {
     super(message)
   }
@@ -65,7 +66,8 @@ function parseAiCitation(value: unknown): AiCitation | null {
 
 async function parseError(res: Response): Promise<ApiError> {
   const body = await res.json().catch(() => ({}))
-  return new ApiError(body?.error?.code ?? 'UNKNOWN', body?.error?.message ?? res.statusText, body?.error?.details)
+  const code = body?.error?.code ?? (res.status === 403 ? 'FORBIDDEN' : res.status === 401 ? 'UNAUTHORIZED' : 'UNKNOWN')
+  return new ApiError(code, body?.error?.message ?? res.statusText, body?.error?.details, res.status)
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

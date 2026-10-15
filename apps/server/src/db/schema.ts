@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 import type { AccessTokenPermission, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
+import type { ProgressFileData } from '../lib/progress-file'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -597,6 +598,8 @@ export const bookStates = sqliteTable('book_states', {
    * dangling and the row simply reads as "has an update".
    */
   readRevisionId: text('read_revision_id'),
+  progressData: text('progress_data', { mode: 'json' }).$type<ProgressFileData | null>(),
+  readFraction: real('read_fraction').notNull().default(0),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.userId, table.bookVersionId] }),

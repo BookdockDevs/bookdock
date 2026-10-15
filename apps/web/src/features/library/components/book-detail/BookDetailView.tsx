@@ -40,6 +40,7 @@ interface BookDetailViewProps {
   shelfName?: string
   currentShelfId: string | null
   shelfMembershipReady: boolean
+  shelfMembershipError?: boolean
   memberTags: Array<{ id: string; name: string }>
   isLoading?: boolean
   moreActions?: MoreActionsMenuItem[]
@@ -58,6 +59,7 @@ export default function BookDetailView({
   shelfName,
   currentShelfId,
   shelfMembershipReady,
+  shelfMembershipError = false,
   memberTags,
   isLoading,
   moreActions,
@@ -238,7 +240,7 @@ export default function BookDetailView({
               </span>
             )}
             {!readOnly && (
-              <ShelfChip bookId={book.id} shelfId={currentShelfId} shelfName={shelfName} membershipReady={shelfMembershipReady} onFilter={() => goToFilter({ shelf: currentShelfId ?? 'none' })} />
+              <ShelfChip bookId={book.id} shelfId={currentShelfId} shelfName={shelfName} membershipReady={shelfMembershipReady} membershipError={shelfMembershipError} onFilter={() => goToFilter({ shelf: currentShelfId ?? 'none' })} />
             )}
             {readOnly && shelfName && currentShelfId && (
               <FilterChip prefix="📁" label={shelfName} onClick={() => goToFilter({ shelf: currentShelfId })} />
@@ -340,22 +342,13 @@ export default function BookDetailView({
               {hasProgress ? _('library.continueReading') : _('library.startReading')}
             </Button>
             <div className="flex flex-1 items-center gap-1.5">
-              {/* Action order mirrors WorkDetailBody: flow, edit, download, maintain, hide, delete. */}
-              {!readOnly && onPublish && (
-                <ActionIcon
-                  secondary
-                  label={_('library.publish')}
-                  onClick={() => onPublish(displayBook)}
-                >
-                  <path d="M12 17V3" />
-                  <path d="m7 8 5-5 5 5" />
-                  <path d="M5 21h14" />
+              {/* Action order: edit, download, review, publish, fork, visibility, more, delete. */}
+              {!readOnly && (
+                <ActionIcon secondary label={_('library.edit')} onClick={onEdit}>
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                 </ActionIcon>
               )}
-              {!readOnly && <ActionIcon secondary label={_('library.edit')} onClick={onEdit}>
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </ActionIcon>}
               {!readOnly && (
                 <DownloadMenu bookId={book.id} title={displayBook.title} format={displayBook.format} />
               )}
@@ -367,10 +360,21 @@ export default function BookDetailView({
                   title={ownReview ? _('review.editReview') : _('review.rateOrReview')}
                   onClick={() => setReviewEditorOpen(true)}
                 >
-                  <polygon
-                    points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+                  <path
+                    d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
                     fill={ownReview ? 'currentColor' : 'none'}
                   />
+                </ActionIcon>
+              )}
+              {!readOnly && onPublish && (
+                <ActionIcon
+                  secondary
+                  label={_('library.publish')}
+                  onClick={() => onPublish(displayBook)}
+                >
+                  <path d="M12 17V3" />
+                  <path d="m7 8 5-5 5 5" />
+                  <path d="M5 21h14" />
                 </ActionIcon>
               )}
               {isPrivateB && !displayBook.sourceUnavailable && (

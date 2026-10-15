@@ -51,6 +51,14 @@ vi.mock('@/api/hooks/reading-records', () => ({
 
 const mockProfileMutate = vi.fn()
 let profileSettings: { showStats?: boolean; showShowcase?: boolean; isPublic?: boolean } = {}
+let mockProfileSettingsState: {
+  profile?: typeof profileSettings
+  isReady: boolean
+  isLoading: boolean
+  isError: boolean
+  isFetching: boolean
+  refetch: () => Promise<unknown>
+} | null = null
 
 // The showcase reads books here, and the page plus its settings dialog read and
 // write the per-user profile preferences from the same module.
@@ -76,6 +84,15 @@ vi.mock('@/features/library/hooks', () => ({
     isLoading: false,
   })),
   useProfileSettings: () => profileSettings,
+  useProfileSettingsState: () =>
+    mockProfileSettingsState ?? {
+      profile: profileSettings,
+      isReady: true,
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    },
   useUpdateProfileSettings: () => ({ mutate: mockProfileMutate }),
 }))
 
@@ -123,6 +140,7 @@ describe('Profile Page', () => {
       },
     })
     profileSettings = { showStats: true, showShowcase: true, isPublic: true }
+    mockProfileSettingsState = null
     mockProfileMutate.mockClear()
     profileSearch = { notesPage: 1, reviewsPage: 1 }
     mockMyReviews.mockReset()
@@ -148,6 +166,8 @@ describe('Profile Page', () => {
     expect(screen.queryByRole('heading', { name: '书库可见书评' })).not.toBeInTheDocument()
     expect(screen.queryByText('全局笔记档案')).not.toBeInTheDocument()
     expect(screen.queryByText('修改密码')).not.toBeInTheDocument()
+    // Explicitly labelled "返回书库": fixed destination, never history back.
+    expect(screen.getByText('返回书库').closest('a')).toHaveAttribute('href', '/')
   })
 
   it('renders reading achievements section with summary stats', () => {
@@ -238,5 +258,19 @@ describe('Profile Page', () => {
     profileSettings = { showStats: false, showShowcase: true }
     renderWithQuery(<Profile />)
     expect(screen.queryByText('已在主页设置中隐藏了所有公开展示模块')).not.toBeInTheDocument()
+  })
+
+  it('renders retry button when profile settings fail without cache', () => {
+    mockProfileSettingsState = {
+      profile: undefined,
+      isReady: false,
+      isLoading: false,
+      isError: true,
+      isFetching: false,
+      refetch: vi.fn(),
+    }
+    renderWithQuery(<Profile />)
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /我的书评/ })).not.toBeInTheDocument()
   })
 })

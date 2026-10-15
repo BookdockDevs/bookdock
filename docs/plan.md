@@ -41,6 +41,11 @@ The following are intentionally excluded from this Web milestone: brightness con
 - Rule JSON import/export: delivered for replacement rules and TOC presets in v0.4.3
 - Structured search expressions: delivered in v0.4.4
 - Reader idea discussions: source-bound public comments, replies and likes delivered in v0.4.4
+- Work-anchored book reviews: half-star ratings, optional short titles and Markdown bodies with idea-style discussion (implemented on branch, pending release)
+- Interaction notifications: persisted comment/reply/like events with idempotent writes and permission-filtered reads (implemented on branch, pending release)
+- Archive center: per-book note/review archives plus permission-projected reader profiles (implemented on branch, pending release)
+- Reading statistics: month-to-date vs previous-month comparison and single-query summary cards (implemented in worktree, pending release)
+- Progress storage cutover: SQLite-authoritative progress with one-shot file import; loading/error/empty semantics hardened across library, settings, stats, and notes (implemented in worktree, pending release)
 - External storage: WebDAV and S3-compatible browsing/import, tiered book storage with a bounded local cache, historical-book migration, and restore-to-local controls implemented for v0.5.0
 - AI retrieval: on-demand chapter search within spoiler prevention bounds replaces persistent chunk indexes in v0.5.0
 - Browser extension after the Web library and reader are stable: first milestone is a lightweight local EPUB/TXT reader with a flat local library, plus Bookdock Instance connection, drag-to-upload, and automatic opening by `bookId`; Web-only custom fonts/themes/TOC rules, annotations, AI, TTS, and web clipping remain out of scope.
@@ -62,6 +67,6 @@ FTS5 is conditional: it will be considered only if real library scale shows that
 - Online book-source engines and rule marketplaces
 - PDF/OCR, MOBI/AZW3, and CBZ/CBR support
 - Kubernetes/Helm and complex self-healing orchestration
-- Full public social networks, external community ratings/reviews, and public discovery feeds (source-bound idea discussion within shared libraries is supported as of v0.4.4)
+- Full public social networks, external community ratings/reviews, and public discovery feeds (source-bound idea discussion within shared libraries is supported as of v0.4.4; work-anchored book reviews and interaction notifications stay library-scoped with no public feed)
 - An in-app backup center before its data scope, consistency, security, and rollback model are designed
 

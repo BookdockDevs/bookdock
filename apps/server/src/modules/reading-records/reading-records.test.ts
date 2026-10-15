@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { BOOK_STATE_PROGRESS_TAG, migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import { and, eq, sql } from 'drizzle-orm'
 import { Readable } from 'node:stream'
 import path from 'node:path'
@@ -11,6 +11,8 @@ import { readingRecordCreateSchema } from '@bookdock/shared'
 
 import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
+import * as progressFile from '../../lib/progress-file'
+import { importProgressFiles } from '../progress/progress-migration'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
@@ -36,7 +38,7 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [BOOK_STATE_PROGRESS_TAG])
   return db
 }
 
@@ -74,8 +76,11 @@ function seedProgressFile(files: Map<string, Buffer>, userId: string, bookId: st
   files.set(`progress/${userId}/${bookId}.json`, Buffer.from(JSON.stringify(data), 'utf-8'))
 }
 
-function loadProgressFile(files: Map<string, Buffer>, userId: string, bookId: string): Record<string, unknown> {
-  return JSON.parse(files.get(`progress/${userId}/${bookId}.json`)!.toString('utf-8')) as Record<string, unknown>
+async function loadProgressFile(files: Map<string, Buffer>, userId: string, bookId: string): Promise<Record<string, unknown>> {
+  const data = await progressFile.readProgressFile(userId, bookId)
+  if (data) return data as Record<string, unknown>
+  const file = files.get(`progress/${userId}/${bookId}.json`)
+  return file ? (JSON.parse(file.toString('utf-8')) as Record<string, unknown>) : {}
 }
 
 // New-model rows for rewired reads: private library, version reusing the
@@ -198,6 +203,14 @@ describe('reading-records service', () => {
       monthSeconds: 650,
       prevMonthSeconds: 0,
       totalWordsRead: 0,
+      monthlyComparison: {
+        currentPeriodSeconds: 650,
+        previousPeriodSeconds: 0,
+        currentPeriodBooks: 2,
+        previousPeriodBooks: 0,
+        currentPeriodDays: 3,
+        previousPeriodDays: 0,
+      },
     })
 
     const other = await getSummary(otherId, '2026-07-31')
@@ -450,7 +463,7 @@ describe('reading-records service', () => {
       startFraction: 0.15, endFraction: 0.3,
     })
 
-    const saved = loadProgressFile(files, ownerId, bookId)
+    const saved = await loadProgressFile(files, ownerId, bookId)
     expect(saved.intervals).toEqual([[0.1, 0.3]])
     expect(saved.cfi).toBe('epubcfi(/6/4!/4/2)')
     expect(saved.percent).toBe(42)
@@ -465,7 +478,7 @@ describe('reading-records service', () => {
       bookId, date: '2026-07-30', durationSeconds: 600, startedAt: null, endedAt: 1785000600000,
       startFraction: 0.2, endFraction: 0.35,
     })
-    const saved = loadProgressFile(files, ownerId, bookId)
+    const saved = await loadProgressFile(files, ownerId, bookId)
     expect(saved.intervals).toEqual([[0.2, 0.35]])
     expect(saved.cfi).toBeNull()
     expect(saved.percent).toBe(0)
@@ -600,5 +613,83 @@ describe('reading-records service', () => {
       expect(computeStreak([], '2026-07-31')).toEqual({ current: 0, longest: 0 })
       expect(computeStreak(['2026-07-31'], '2026-07-31')).toEqual({ current: 1, longest: 1 })
     })
+  })
+
+  it('computes total words read without dropping books on different revision counts', async () => {
+    const b1 = createId('book')
+    const b2 = createId('book')
+    seedVersion(db, ownerId, b1, null, 'Book 1')
+    seedVersion(db, ownerId, b2, null, 'Book 2')
+
+    // Insert revision 2 for b1
+    db.insert(schema.contentRevisions).values({
+      id: createId('rev'), bookVersionId: b1, revisionNo: 2, blobKey: 'blobs/b1-2.txt',
+      size: 1000, wordCount: 1000, chapterCount: 1, meta: {}, createdAt: Date.now(),
+    }).run()
+
+    // Set revision 1 word count for b2
+    db.update(schema.contentRevisions).set({ wordCount: 400 })
+      .where(and(eq(schema.contentRevisions.bookVersionId, b2), eq(schema.contentRevisions.revisionNo, 1))).run()
+
+    // Set readFraction = 1.0 for both
+    db.insert(schema.bookStates).values([
+      { userId: ownerId, bookVersionId: b1, readStatus: 'reading', percent: 100, readFraction: 1.0, updatedAt: Date.now() },
+      { userId: ownerId, bookVersionId: b2, readStatus: 'reading', percent: 100, readFraction: 1.0, updatedAt: Date.now() },
+    ]).run()
+
+    const summary = await getSummary(ownerId, '2026-07-31')
+    expect(summary.totalWordsRead).toBe(1400)
+  })
+
+  it('rolls back atomically if interval merge fails in addReadingTime', async () => {
+    const b = createId('book')
+    db.insert(schema.books).values({
+      id: b,
+      userId: ownerId,
+      title: 'Atomic Book',
+      format: 'txt',
+      filePath: 'books/b/b.txt',
+      size: 100,
+      meta: {},
+      createdAt: 1,
+      updatedAt: 1,
+    }).run()
+    seedVersion(db, ownerId, b, 100, 'Atomic Book')
+
+    const spy = vi.spyOn(progressFile, 'mergeProgressIntervalInTx').mockImplementationOnce(() => {
+      throw new Error('injected interval merge failure')
+    })
+
+    await expect(addReadingTime(ownerId, {
+      bookId: b,
+      date: '2026-07-31',
+      durationSeconds: 300,
+      startFraction: 0.1,
+      endFraction: 0.2,
+    })).rejects.toThrow('injected interval merge failure')
+
+    // Neither readingRecords nor readingSessions should have been committed
+    const records = db.select().from(schema.readingRecords).where(eq(schema.readingRecords.bookId, b)).all()
+    expect(records).toHaveLength(0)
+    const sessions = db.select().from(schema.readingSessions).where(eq(schema.readingSessions.bookId, b)).all()
+    expect(sessions).toHaveLength(0)
+
+    spy.mockRestore()
+  })
+
+  it('does not touch storage.exists for unread books across repeated getSummary requests', async () => {
+    await importProgressFiles(db)
+    const unread1 = createId('book')
+    const unread2 = createId('book')
+    seedVersion(db, ownerId, unread1, 500, 'Unread 1')
+    seedVersion(db, ownerId, unread2, 500, 'Unread 2')
+
+    const spyExists = vi.spyOn(storage.getStorage(), 'exists')
+
+    await getSummary(ownerId, '2026-07-31')
+    await getSummary(ownerId, '2026-07-31')
+
+    expect(spyExists).not.toHaveBeenCalled()
+    spyExists.mockRestore()
   })
 })

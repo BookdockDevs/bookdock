@@ -30,6 +30,7 @@ const actionBtn =
   'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current'
 
 interface NotesPanelProps {
+  isLoading?: boolean
   items: AnnotationRes[]
   allItems?: AnnotationRes[]
   total?: number
@@ -50,6 +51,7 @@ interface NotesPanelProps {
 }
 
 export const NotesPanel = memo(function NotesPanel({
+  isLoading = false,
   items,
   allItems = items,
   total: _total,
@@ -608,7 +610,20 @@ export const NotesPanel = memo(function NotesPanel({
           )}
         </div>
       )}
-      {items.length === 0 ? (
+      {isLoading ? (
+        <div role="status" aria-busy="true" className="space-y-3 pt-1">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="animate-pulse rounded-xl border border-stone-200/60 bg-stone-500/5 p-3.5 space-y-2.5 dark:border-stone-800/60 motion-reduce:animate-none">
+              <div className="flex items-center justify-between">
+                <div className="h-3 w-16 rounded bg-stone-500/15" />
+                <div className="h-3 w-12 rounded bg-stone-500/10" />
+              </div>
+              <div className="h-3.5 w-4/5 rounded bg-stone-500/15" />
+              <div className="h-3 w-1/2 rounded bg-stone-500/10" />
+            </div>
+          ))}
+        </div>
+      ) : items.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center pb-24 px-4 text-center">
           <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]">
             <svg
@@ -624,9 +639,11 @@ export const NotesPanel = memo(function NotesPanel({
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
             </svg>
           </div>
-          <p className="text-base font-normal text-current">{_('reader.noNotes')}</p>
+          <p className="text-base font-normal text-current">
+            {allItems.length > 0 ? (_('reader.noMatchingNotes') || '未找到匹配的笔记') : _('reader.noNotes')}
+          </p>
           <p className="mt-1.5 text-xs text-[var(--bd-read-sub)] max-w-64 leading-relaxed">
-            {_('reader.noNotesHint')}
+            {allItems.length > 0 ? (_('reader.noMatchingNotesHint') || '请尝试调整筛选条件或搜索关键词') : _('reader.noNotesHint')}
           </p>
         </div>
       ) : isChapterSort && !chapterOrderReady ? (

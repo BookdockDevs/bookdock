@@ -60,7 +60,7 @@ export default function IdeaDetailCard({
   const subText = theme === 'reader' ? 'text-[var(--bd-read-sub)]' : 'text-stone-500 dark:text-stone-400'
   const quoteJumpRing = theme === 'reader'
     ? 'outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)]'
-    : 'outline-none focus-visible:ring-1 focus-visible:ring-blue-500'
+    : 'outline-none focus-visible:ring-1 focus-visible:ring-stone-400 dark:focus-visible:ring-stone-500'
   const surfaceBg = theme === 'reader' ? 'bg-[var(--bd-read-bg)]' : 'bg-white dark:bg-stone-900'
   const quote = quoteText ?? detail.annotation.text
   const header = (

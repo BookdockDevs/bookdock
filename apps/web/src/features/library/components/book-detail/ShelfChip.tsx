@@ -8,10 +8,11 @@ interface ShelfChipProps {
   shelfId: string | null
   shelfName?: string
   membershipReady: boolean
+  membershipError?: boolean
   onFilter: () => void
 }
 
-export default function ShelfChip({ bookId, shelfId, shelfName, membershipReady, onFilter }: ShelfChipProps) {
+export default function ShelfChip({ bookId, shelfId, shelfName, membershipReady, membershipError = false, onFilter }: ShelfChipProps) {
   const _ = useTranslation()
   const shelves = useShelves()
   const updateMembership = useUpdateBookMembership()
@@ -23,15 +24,28 @@ export default function ShelfChip({ bookId, shelfId, shelfName, membershipReady,
     options.push({ value: shelfId, label: shelfName ?? _('library.shelves') })
   }
 
+  const labelText = shelfName
+    ? shelfName
+    : shelfId
+      ? (shelfName ?? _('library.shelves'))
+      : membershipError
+        ? _('library.shelfUnavailable')
+        : membershipReady
+          ? _('library.uncategorized')
+          : _('library.shelves')
+
+  const isBusy = !membershipError && !shelves.isError && (!membershipReady || shelves.isLoading || updateMembership.isPending)
+
   return (
     <DetailFieldMenu
       key={bookId}
-      label={<><span aria-hidden="true">📁</span>{!membershipReady ? _('library.shelfUnavailable') : shelfId ? shelfName ?? _('library.shelves') : _('library.uncategorized')}</>}
+      label={<><span aria-hidden="true">📁</span>{labelText}</>}
       editLabel={_('library.editShelf')}
       value={shelfId}
       options={options}
       editable
-      disabled={!membershipReady || !shelves.data || shelves.isError || updateMembership.isPending}
+      busy={isBusy}
+      disabled={!membershipReady || !shelves.data || shelves.isError || updateMembership.isPending || membershipError}
       onFilter={onFilter}
       onSelect={(value) => updateMembership.mutate({ bookId, shelfId: value })}
     />

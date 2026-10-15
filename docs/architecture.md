@@ -169,7 +169,7 @@ position and keeps the current page. It never guesses a replacement location.
 The existing `/profile` page remains the owner's account and reading dashboard.
 An optional `userId` search parameter selects another reader: that projection
 exposes only their account display identity and currently readable library-visible
-reviews, never private notes, ratings, review counts or personal statistics.
+reviews, never private notes, private reviews, or personal statistics.
 The owner's global notes archive includes existing highlights, bookmarks and
 ideas, filters by exact BookVersion and uses bounded newest-first pagination.
 It is authenticated and author-only. Notes survive source access loss according
@@ -180,7 +180,10 @@ positions may be attempted by the renderer, whose resolution failure must be vis
 
 Review archives use bounded pagination and current work ACLs before projecting
 other readers' entries or counting them. Owner archives retain phase-one lifecycle
-semantics. Detail links open the exact review; read-time version provenance is
+semantics. The `/archive` center reuses the same note-archive and
+`myReviews`/`readerProfile` projections: per-book tallies keep orphaned
+versions as unavailable entries without leaking other readers' titles.
+Detail links open the exact review; read-time version provenance is
 not a replacement work anchor. Profile and archive mutations refresh their Query
 projections; account changes remove them through existing cache cleanup.
 
@@ -264,9 +267,10 @@ Review discussion is plain text in the first phase and follows the
 idea-discussion shape: one top-level parent per reply chain with an optional
 addressee under it, unique likes per account and target, author-only edits,
 author-or-current-source-manager deletes, and comment deletion promoting
-surviving replies to top level with no tombstone. No feed, notification
-centre, social graph, version-quality score or review-history versions are
-added.
+surviving replies to top level with no tombstone. Interaction notifications
+for review comments, replies and likes are covered by the persistent
+interaction notifications section below. No feed, social graph,
+version-quality score or review-history versions are added.
 
 ### Library search expressions v1
 
@@ -280,6 +284,54 @@ history entry and subsequent drafts replace it. Paging, sorting and changing
 the result view retain that session; sidebar filters and library changes end it.
 Its return snapshot lives in router history state, survives refresh,
 and is absent from copied links (which clear only the linked search).
+
+### Page back navigation v1
+
+Page-level back affordances (bare left arrows on reader, stats, settings and
+the private profile) return to the in-app source page when the router
+history proves one exists, otherwise they navigate to the agreed fallback
+(the library home `/` by default). The proof is TanStack Router's
+`history.canGoBack()`, i.e. `__TSR_index !== 0`: every entry since the
+document loaded was an in-app SPA navigation, so stepping back cannot leave
+the app. `document.referrer` and `window.history.length` are never used as
+return evidence: they cannot identify the previous entry's destination, and
+the router guard already covers the cases they could.
+Full-document navigation (plain `<a href>` to an in-app URL) starts a fresh
+router index and destroys that proof, so in-app jumps must use TanStack
+`Link`/`navigate` (normal entry as push, which preserves new-tab opening);
+only external links, downloads and file URLs keep native anchors. History
+state (like the search return snapshot above) survives same-tab refresh but
+is absent from direct opens, copied links and new tabs, which therefore take
+the fallback. Fallback navigation uses `replace: true` so the dead-end page
+does not stay behind the fallback as a return loop.
+The archive top bar is an explicit exit, not a single history step:
+in-archive moves (overview, single book, filters, sort) push entries, so one
+`back()` could never leave the feature. Entering from the library sidebar
+records the library search and its window scroll once in history state
+(`archiveReturn`); every in-archive navigation forwards all history state
+unchanged (navigating without `state` resets it). The top bar replaces back
+to the recorded search and hands the scroll request to the library
+(`archiveExitScroll`), which adopts it once per entry and applies it through
+its existing list-ready gate — a blind scroll at navigation time would clamp
+against skeletons, and in-library moves clear the request. Replace swaps only
+the current entry, leaving earlier archive entries behind for normal
+per-entry browser back. The exit also preserves the library search session
+snapshot when one rides along, downgrading its `back` flag — archive pushes
+broke the snapshot's one-step-back assumption, so clearing the search
+afterwards takes the explicit restore path with the original filters, page
+and scroll position. Entries without a record (direct opens, `/stats`
+redirects) fall back to `/`.
+Archive interior scroll (both desktop containers plus window) is saved by
+scroll listeners into a ref — DOM refs are already detached when unmount
+cleanups run — and restored on a same-view return with a bounded retry that
+never mistakes a static skeleton for a settled layout; retries cancel on
+unmount so they cannot scroll a page that is already gone.
+In-feature back (archive book view to list, dialog sub-views) navigates to
+the parent view with its context instead of stepping history, so it never
+exits the feature. Buttons explicitly labelled with a destination
+(`reader.back`, `profile.back`: 返回书库) always navigate to that
+destination. In-reader location back/forward and footnote return are separate
+from page back and never share its affordance.
 Name suggestions keep focus in the input: Up/Down cycles the active option,
 Enter accepts an active option (otherwise submits), Tab accepts the active or
 first option, and Escape dismisses the list. Accepting resumes live search;
@@ -987,7 +1039,7 @@ visibility and membership remain unavailable.
 | `instance` | id (text PK, single fixed row), ownerUserId FK (restrict), allowRegistration, allowGuestAccess, uploadMaxBytes?, allowUserCreateLibrary, allowUserUpload, storageBackendEnabled, storageBackendConnectionId FK → storage_connections (set null), storageBackendBasePath, storageBackendCacheMaxMb, storageBackendStatus, storageBackendLastTestedAt?, storageBackendLatencyMs?, createdAt, updatedAt | exactly one row per deployment; null uploadMaxBytes = env default; sole source of instance ownership and configuration; the storageBackend* columns are the tiered-storage switch (owner-only API), disabled = pure local disk |
 | `sessions` | id, userId FK (cascade), tokenHash (unique), createdAt, expiresAt | server-side login sessions; raw token in the cookie only; 30-day sliding expiry refreshed inside 7 days of expiry |
 | `library_migration_log` | id, batch, status, details (json), startedAt, finishedAt? | Data-migration ledger: one row per batch, completed batches are skipped on reruns |
-| `book_states` | userId FK (cascade), bookVersionId FK (cascade), readStatus, percent, cfi?, chapter?, lastReadAt?, readRevisionId?, updatedAt | composite PK (userId, bookVersionId); intervals/speed samples stay in storage files under the same dimension |
+| `book_states` | userId FK (cascade), bookVersionId FK (cascade), readStatus, percent, cfi?, chapter?, lastReadAt?, readRevisionId?, progressData? (JSON), readFraction (REAL, default 0), updatedAt | composite PK (userId, bookVersionId); SQLite is authoritative for progress payload and read coverage — legacy per-book JSON files are imported once by `importProgressFiles` and never read after the migration batch completes |
 | `highlights` | id, userId FK (cascade), bookVersionId FK (cascade), revisionId?, cfiRange, cfiAnchor?, color, style, text, chapter?, chapterHref?, relocation, createdAt, updatedAt, deletedAt? | revisionId has no FK so the anchor survives revision-row lifecycle; unresolved relocations are kept and flagged, never deleted |
 | `bookmarks` | id, userId FK (cascade), bookVersionId FK (cascade), revisionId?, cfi?, chapter?, title?, createdAt, updatedAt, deletedAt? | same revision-anchor rationale as highlights |
 | `ideas` | id, userId FK (cascade), bookVersionId? FK (cascade), revisionId?, cfiRange?, cfiAnchor?, text, note?, visibility, sharedLibraryId?, sourceLibraryBookVersionId?, chapter?, chapterHref?, editedAt?, createdAt, updatedAt, deletedAt? | source and revision IDs have no FK; library deletion makes ideas private while retaining provenance; exact source ACL gates public content |
@@ -1080,7 +1132,7 @@ Private trash is stored on `library_books.deleted_at` and controlled by per-user
 | `/api/v1/annotations` | annotations | `GET /`(?bookId=) `POST /` `PUT /:id` `DELETE /:id` |
 | `/api/v1/progress` | reading | `GET /:bookId` `PUT /:bookId` |
 
-**Progress storage**: signed-in users persist per-book JSON files at `progress/{bookId}.json`, shape `{ cfi?, chapter?, chapterIndex?, percent, fraction, intervals, updatedAt }`. `chapterIndex` is the zero-based chapter position from the current book TOC and is persisted for server-side consumers such as AI spoiler bounds; AI applies this boundary at chapter granularity, so the whole current chapter is available and later chapters are not. `fraction` is the foliate book-wide position (0–1); `intervals` is the merged union of `[start, end]` fraction ranges the user has actually read — the web reader closes the current segment when a relocate jump exceeds `JUMP_THRESHOLD` (0.02) and reports `segmentStartFraction` on PUT. GET additionally returns `readFraction` (total union length, computed server-side). Guests never read or write this server progress; their reader position uses the browser-local `bd-guest-reading-progress` namespace instead.
+**Progress storage**: SQLite (`book_states.progress_data` + `read_fraction`) is authoritative for signed-in users. Legacy per-book JSON files (`progress/{bookId}.json`, shape `{ cfi?, chapter?, chapterIndex?, percent, fraction, intervals, updatedAt }`) are imported once at startup by `importProgressFiles` (ledger batch `phase1-progress-database-migration-v2`, skips books that already have DB progress); after the batch completes there is zero file I/O. `chapterIndex` is the zero-based chapter position from the current book TOC and is persisted for server-side consumers such as AI spoiler bounds; AI applies this boundary at chapter granularity, so the whole current chapter is available and later chapters are not. `fraction` is the foliate book-wide position (0–1); `intervals` is the merged union of `[start, end]` fraction ranges the user has actually read — the web reader closes the current segment when a relocate jump exceeds `JUMP_THRESHOLD` (0.02) and reports `segmentStartFraction` on PUT. GET additionally returns `readFraction` (total union length, computed server-side). Guests never read or write this server progress; their reader position uses the browser-local `bd-guest-reading-progress` namespace instead.
 | `/api/v1/settings` | settings | `GET /` `PUT /` |
 | `/api/v1/tts` | tts | `GET /providers` `GET/POST /services` `POST /services/test` `GET/PUT/DELETE /services/:id` `GET /services/:id/voices` `POST /services/:id/test` `POST /speech` (server-side provider gateways) |
 | `/api/v1/ai` | ai | `GET /providers` `GET /status` `GET/PATCH /config`(active Chat/Embedding profiles, prompt templates, and assistant modes) `POST/PATCH/DELETE /profiles` `POST /models` `POST /test` `GET/POST /threads` `GET/PATCH/DELETE /threads/:id` `GET /runs/:id` `POST /runs/:id/cancel` `GET /retrieval/status` `POST /retrieval/index` `POST /retrieval/index/cancel` `DELETE /retrieval/index` `POST /retrieval/search` `POST /chat` (server-side multi-provider Chat LLM gateway; provider metadata includes key requirements; status exposes only the active profile's non-sensitive model options, enabled quick prompts, and assistant modes for the reader picker; model discovery/test are non-persistent draft operations; existing-profile drafts identify their profile so saved secrets are never borrowed by new profiles; retrieval status exposes user-visible lexical/embedding progress and the embedding provider/model fingerprint, and its derived index can be cancelled, rolled back, cleared, and rebuilt on demand; chat may use an allowlisted, bounded read-only tool set for the owned book, accepts bounded Reader-visible chapter references and the selected assistant-mode prompt, persists user-visible messages and bounded retry recipes by thread, and exposes only bounded generation-run/checkpoint projections) |
@@ -1188,7 +1240,7 @@ Personal reader marks use deterministic SVG ink: marker backgrounds have a singl
 - New ideas use amber independently of remembered highlight colors; existing idea colors remain intact. Idea cards use subtle amber quote treatment. All notes-list text toggles share the bookmark-style bottom-right overlay (10px text, identical chevron, background, border and shadow), visible on card hover or keyboard focus on desktop and always visible on mobile. Toggles do not reserve a separate line; temporary overlap with the last few characters is intentional. Personal idea marks use tapered dashed ink, with theme-aware opacity, without changing generic overlay defaults or annotation hit targets.
 - Lists render stored paragraph separators as distinct text blocks with a compact 0.4em gap; explicit single line breaks remain within a paragraph. Highlight decorations cover non-whitespace text lines only, never paragraph spacing. Stored text, copying, and exports retain the original separators. Lists preserve plain-text paragraph structure. Bookmark searches, copying, and Markdown/text/CSV exports include the independent context. Personal ownership and content-CFI navigation remain unchanged.
 
-- Connected readers use version-bound progress files and BookState, Highlight, Bookmark and Idea APIs.
+- Connected readers use BookState (database-backed progress payload and readFraction), Highlight, Bookmark and Idea APIs.
 - EPUB footnote references are handled by the vendored `FootnoteHandler`: explicit `epub:type`/ARIA references are preferred, conservative superscript heuristics require a note-like target, and the host renders the result in a disposable temporary `foliate-view` popup. Nested footnotes have local back history; parsing/rendering failures fall back to ordinary internal navigation and do not alter the main reader jump history.
 - Reader sidebar has three tabs: TOC, notes, and stats (数据). The stats tab shows per-book reading stats sourced from `GET /reading-records/book/:bookId` (totalSeconds + full daily records, no pagination), derived client-side by pure functions in `features/reader/stats/`; opening the tab flushes the in-progress reading timer first so the numbers include the current session. Below the daily-duration chart it also renders a 24-hour distribution module from `GET /reading-records/hourly` with the optional `bookId` filter (from = book start date, to = today), skipped when the book has no records. A "已读字数" card shows `readFraction × meta.wordCount` (from `GET /progress/:bookId` + book detail), formatted as `X.X万字` for ≥10000, with a `全书 N` sub-line; the card shows `-` when word counts are unavailable.
 - Jump history (后退/前进): browser-style session history, in-memory only and cleared on book switch. `FoliateReader.display`/`scrollToPercent` is the chokepoint — every user jump (TOC, note/bookmark, search result, progress drag) emits `willJump` with the position being left, which `Reader.tsx` pushes into `features/reader/jump-history.ts` (back/forward stacks, cap 50; a new jump clears the forward stack). Internal navigation opts out via `display(target, { internal: true })`: the initial open, saved-progress re-display, and the history back/forward buttons themselves. Page turns and scrolling never enter the history.

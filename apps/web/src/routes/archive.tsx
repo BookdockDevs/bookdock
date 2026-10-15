@@ -11,7 +11,7 @@ export interface ArchiveSearch {
   /** Which records view opened the book, so back returns to where you came from. */
   from?: 'home' | 'all'
   bookType?: ArchiveRecordType | 'all'
-  bookSort?: 'chapter' | 'recent'
+  bookSort?: 'chapter' | 'chapter-desc' | 'time-desc' | 'time-asc' | 'recent'
   q?: string
   type?: ArchiveRecordType | 'all'
   sort?: ArchiveBooksQuery['sort']
@@ -19,6 +19,7 @@ export interface ArchiveSearch {
 }
 
 const RECORD_TYPES: Array<ArchiveRecordType | 'all'> = ['all', 'highlight', 'bookmark', 'idea', 'review']
+const BOOK_SORTS = ['chapter', 'chapter-desc', 'time-desc', 'time-asc', 'recent'] as const
 
 export const archiveRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -34,6 +35,9 @@ export const archiveRoute = createRoute({
       : sortRaw === 'recent' || sortRaw === 'earliest' || sortRaw === 'most' || sortRaw === 'fewest' || sortRaw === 'title-asc' || sortRaw === 'title-desc'
         ? sortRaw
         : undefined
+    const bookSort = typeof search.bookSort === 'string' && (BOOK_SORTS as readonly string[]).includes(search.bookSort)
+      ? (search.bookSort as (typeof BOOK_SORTS)[number])
+      : undefined
     return {
       tab: search.tab === 'stats' ? 'stats' : undefined,
       view: search.view === 'all' || search.view === 'book' ? search.view : undefined,
@@ -42,7 +46,7 @@ export const archiveRoute = createRoute({
       bookType: typeof search.bookType === 'string' && (RECORD_TYPES as string[]).includes(search.bookType)
         ? (search.bookType as ArchiveRecordType | 'all')
         : undefined,
-      bookSort: search.bookSort === 'recent' ? 'recent' : undefined,
+      bookSort,
       q: typeof search.q === 'string' ? search.q : undefined,
       type,
       sort,

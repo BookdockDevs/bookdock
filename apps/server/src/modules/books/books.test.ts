@@ -18,6 +18,7 @@ import type { StorageDriver } from '../../storage/driver'
 import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
+import { readProgressFile } from '../../lib/progress-file'
 import { registerParser } from '../../formats/registry'
 import { normalizeText, TxtParser } from '../../formats/txt'
 import booksRoutes from './books.routes'
@@ -2050,18 +2051,7 @@ describe('appendTxtBookContent', () => {
       .where(and(eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, book.id))).run()
 
     const updated = await appendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
-    const stream = await store.get(progressKey)
-    const chunks: Buffer[] = []
-    for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-    const progress = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {
-      cfi: string
-      chapter: string
-      chapterIndex: number
-      percent: number
-      fraction: number
-      intervals: number[][]
-      rateSamples: Array<{ at: number; fraction: number }>
-    }
+    const progress = (await readProgressFile(ownerId, book.id))!
     const scale = preview.originalWordCount / preview.newWordCount
 
     expect(progress.cfi).toBe('chapter-0002.xhtml#epubcfi(/6/4/4)')
@@ -2245,10 +2235,7 @@ describe('reTocBook', () => {
     }), 'utf-8'))
 
     await reTocBook(ownerId, book.id, rule.id)
-    const stream = await store.get(progressKey)
-    const chunks: Buffer[] = []
-    for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-    const data = JSON.parse(Buffer.concat(chunks).toString('utf-8'))
+    const data = (await readProgressFile(ownerId, book.id))!
     expect(data.cfi).toBeNull()
     expect(data.chapter).toBeNull()
     expect(data.percent).toBe(42)
@@ -2275,10 +2262,7 @@ describe('reTocBook', () => {
     }), 'utf-8'))
 
     await reTocBook(ownerId, book.id, rule.id)
-    const stream = await store.get(progressKey)
-    const chunks: Buffer[] = []
-    for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-    const data = JSON.parse(Buffer.concat(chunks).toString('utf-8'))
+    const data = (await readProgressFile(ownerId, book.id))!
     expect(data.cfi).toBe('chapter-0001.xhtml#epubcfi(/6/4/4)')
   })
 

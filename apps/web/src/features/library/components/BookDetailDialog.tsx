@@ -674,6 +674,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
               shelfName={shelfName}
               currentShelfId={currentShelfId}
               shelfMembershipReady={memShelves.data !== undefined && !memShelves.isError}
+              shelfMembershipError={memShelves.isError}
               memberTags={memberTags}
               isLoading={detailLoading || !detail}
               moreActions={privateMenuItems}

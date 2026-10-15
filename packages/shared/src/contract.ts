@@ -1504,6 +1504,15 @@ export interface ReadingSessionUpdateReq {
   endCfi?: string
 }
 
+export interface ReadingRecordMonthlyComparison {
+  currentPeriodSeconds: number
+  previousPeriodSeconds: number
+  currentPeriodBooks: number
+  previousPeriodBooks: number
+  currentPeriodDays: number
+  previousPeriodDays: number
+}
+
 export interface ReadingRecordSummaryRes {
   totalSeconds: number
   totalBooks: number
@@ -1519,6 +1528,8 @@ export interface ReadingRecordSummaryRes {
   prevMonthSeconds: number
   /** Sum over books of readFraction × wordCount, rounded */
   totalWordsRead: number
+  /** Same-period comparison: month-to-date vs previous month to the same day-of-month */
+  monthlyComparison?: ReadingRecordMonthlyComparison
 }
 
 export interface ReadingRecordDailyItem {

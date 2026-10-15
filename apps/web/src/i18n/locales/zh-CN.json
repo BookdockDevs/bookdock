@@ -1254,7 +1254,8 @@
     "showFriendIdeas": "显示书友想法",
     "ideaDisplayMode": "想法展示方式",
     "ideaDisplaySidebar": "侧边栏",
-    "ideaDisplayModal": "居中卡片"
+    "ideaDisplayModal": "居中卡片",
+    "backToPrevious": "返回"
   },
   "theme": {
     "system": "跟随系统",
@@ -2287,8 +2288,8 @@
     "clearRating": "清除",
     "distributionLabel": "星级分布",
     "writeReview": "写书评",
-    "rateOrReview": "评分或写书评",
-    "editReview": "编辑书评",
+    "rateOrReview": "评价",
+    "editReview": "我的评价",
     "addRating": "补评分",
     "composeTitle": "发表书评",
     "editTitle": "编辑书评",
@@ -2348,7 +2349,6 @@
     "convertMarkdown": "转换为 Markdown 编辑",
     "visualEdit": "可视化编辑",
     "editorMode": "编辑模式",
-    "visualEdit": "可视化编辑",
     "sourceEdit": "Markdown 源码",
     "returnEdit": "返回编辑",
     "plainPreserved": "这篇书评仍按纯文本保存。转换后才启用格式工具和上传。",
@@ -2407,7 +2407,19 @@
     "highlightCount": "{{n}} 条划线",
     "bookmarkCount": "{{n}} 个书签",
     "ideaCount": "{{n}} 条想法",
-    "reviewCount": "{{n}} 篇书评"
+    "reviewCount": "{{n}} 篇书评",
+    "bookDuration": "本书用时",
+    "readingProgress": "阅读进度",
+    "readingDays": "阅读天数",
+    "totalNotes": "本书笔记",
+    "daysUnit": "天",
+    "notesUnit": "条",
+    "firstReadAt": "初读于 {{date}}",
+    "recentReadAt": "· 最近阅读 {{time}}",
+    "allOverview": "总览",
+    "overviewCounts": "{{books}} 本书 · {{notes}} 条记录",
+    "loadingMoreBooks": "正在加载更多书籍…",
+    "loadedAllBooks": "已加载全部书籍"
   },
   "notificationCenter": {
     "title": "通知中心",
@@ -2460,7 +2472,9 @@
     "next": "下一张"
   },
   "reviewEditor": {
-    "contentArea": { "editableMarkdown": "书评正文" },
+    "contentArea": {
+      "editableMarkdown": "书评正文"
+    },
     "toolbar": {
       "undo": "撤销 {{shortcut}}",
       "redo": "重做 {{shortcut}}",

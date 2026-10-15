@@ -216,4 +216,14 @@ describe('archive service', () => {
     expect(detail.annotations).toEqual([])
     expect(detail.reviews).toHaveLength(1)
   })
+
+  it('does not leak private titles across users during archive search', async () => {
+    const secretVersion = createId('book')
+    seedVersion(db, otherId, secretVersion, 'Top Secret Diary')
+    seedHighlight(db, ownerId, secretVersion, 100)
+
+    const searchRes = await listBooks(ownerId, { search: 'Secret', page: 1, pageSize: 20 })
+    expect(searchRes.entries).toHaveLength(0)
+    expect(searchRes.hasMore).toBe(false)
+  })
 })

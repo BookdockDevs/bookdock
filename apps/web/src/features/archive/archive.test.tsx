@@ -215,4 +215,3 @@ describe('SortMenu', () => {
     expect(onChange).toHaveBeenCalledWith('recent')
   })
 })
-

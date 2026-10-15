@@ -192,6 +192,7 @@ export type {
   ReadingProgressRes,
   RateSample,
   ReadingRecordCreateReq,
+  ReadingRecordMonthlyComparison,
   ReadingRecordSummaryRes,
   ReadingRecordDailyItem,
   ReadingRecordHourlyItem,

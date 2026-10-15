@@ -1185,8 +1185,8 @@ describe('shared library catalog', () => {
     expect(rows).toHaveLength(2)
     expect(rows[1]!.blobKey).not.toBe(rows[0]!.blobKey)
     // Actor progress rescales; the other holder keeps percent, loses the stale CFI.
-    expect(JSON.parse(files.get(ownerKey)!.toString())).toMatchObject({ chapter: null })
-    const memberProgress = JSON.parse(files.get(memberKey)!.toString())
+      expect(db.select().from(schema.bookStates).where(and(eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, created.bookVersionId))).get()!.progressData).toMatchObject({ chapter: null })
+      const memberProgress = db.select().from(schema.bookStates).where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, created.bookVersionId))).get()!.progressData!
     expect(memberProgress.cfi).toBeNull()
     expect(memberProgress.percent).toBe(30)
   })
@@ -1230,8 +1230,8 @@ describe('shared library catalog', () => {
 
     // Percent describes the right book and is kept; the exact position is
     // re-derived from the book fraction by the reader.
-    for (const key of [memberKey, plainKey]) {
-      expect(JSON.parse(files.get(key)!.toString())).toMatchObject({ cfi: null, chapter: null, percent: 30 })
+      for (const userId of [memberId, outsiderId]) {
+        expect(db.select().from(schema.bookStates).where(and(eq(schema.bookStates.userId, userId), eq(schema.bookStates.bookVersionId, created.bookVersionId))).get()!.progressData).toMatchObject({ cfi: null, chapter: null, percent: 30 })
     }
   })
 

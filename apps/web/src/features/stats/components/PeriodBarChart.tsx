@@ -1,6 +1,7 @@
 import { localDateString, useReadingDaily } from '@/api/hooks/reading-records'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
+import { isAccessRevocationError } from '@/lib/error-message'
 import { formatDuration } from '@/lib/format-duration'
 import { cn } from '@/lib/utils'
 
@@ -83,7 +84,7 @@ export default function PeriodBarChart({
     ? items.reduce((a, b) => (b.durationSeconds > a.durationSeconds ? b : a))
     : null
 
-  if (dailyQuery.isError) {
+  if (dailyQuery.isError && (!data || isAccessRevocationError(dailyQuery.error))) {
     return (
       <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
         <QueryErrorState isRetrying={dailyQuery.isFetching} onRetry={dailyQuery.refetch} />
@@ -94,7 +95,20 @@ export default function PeriodBarChart({
   const isChartLoading = dailyQuery.isLoading && !data
 
   return (
-    <section className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-xs sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-xs sm:p-6 dark:border-stone-800 dark:bg-stone-900" aria-busy={isChartLoading}>
+      {dailyQuery.isError && data && !isAccessRevocationError(dailyQuery.error) && (
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-amber-200/80 bg-amber-500/10 px-3.5 py-2 text-xs text-amber-700 dark:border-amber-800/80 dark:bg-amber-500/20 dark:text-amber-300">
+          <span>{_('stats.revalidateFailed') || '数据刷新失败，正在显示缓存数据'}</span>
+          <button
+            type="button"
+            onClick={() => dailyQuery.refetch()}
+            disabled={dailyQuery.isFetching}
+            className="font-medium underline hover:no-underline cursor-pointer"
+          >
+            {_('common.retry') || '重试'}
+          </button>
+        </div>
+      )}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
           {PERIODS.map((p) => (
@@ -136,7 +150,7 @@ export default function PeriodBarChart({
           {Array.from({ length: period === 'week' ? 7 : period === 'month' ? 30 : 12 }).map((_, i) => (
             <div key={i} className="flex h-full min-w-0 flex-1 items-end">
               <div
-                className="w-full animate-pulse rounded-t-md bg-stone-200/60 dark:bg-stone-800"
+                className="w-full animate-pulse rounded-t-md bg-stone-200/60 dark:bg-stone-800 motion-reduce:animate-none"
                 style={{
                   height: `${[35, 60, 25, 75, 45, 80, 50, 65, 40, 70, 30, 55][i % 12]}%`,
                   animationDelay: `${i * 40}ms`,
@@ -157,15 +171,15 @@ export default function PeriodBarChart({
               className="group relative flex h-full min-w-0 flex-1 items-end justify-center rounded-lg p-0.5 transition-colors hover:bg-stone-50 dark:hover:bg-stone-800/40"
             >
               {/* Background base track line */}
-              <div className="absolute inset-x-0 bottom-0.5 h-1 rounded-full bg-stone-200/60 dark:bg-stone-800" />
+              <div className="absolute inset-x-1 bottom-0.5 h-1 rounded-full bg-stone-200/50 dark:bg-stone-800/60" />
               {/* Filled bar */}
               {b.seconds > 0 && (
                 <div
                   className={cn(
-                    'relative z-10 w-full rounded-t-md transition-all',
+                    'relative z-10 w-full max-w-[28px] rounded-t-md transition-all',
                     b.selected
                       ? 'bg-amber-500 shadow-xs dark:bg-amber-400'
-                      : 'bg-stone-700 group-hover:bg-stone-900 dark:bg-stone-300 dark:group-hover:bg-stone-100',
+                      : 'bg-stone-750 group-hover:bg-stone-900 dark:bg-stone-300 dark:group-hover:bg-stone-100',
                   )}
                   style={{ height: max > 0 ? `${Math.max(6, (b.seconds / max) * 100)}%` : '0%' }}
                 />

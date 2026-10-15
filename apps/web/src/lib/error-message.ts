@@ -62,3 +62,35 @@ export function getUserErrorMessage(
 ): string {
   return translate(getUserErrorNotification(error, fallback).key)
 }
+
+/**
+ * Checks if an error represents an access revocation or permission loss (401, 403, or auth failure).
+ * Under such errors, cached data MUST NOT be retained as valid displayable content.
+ */
+export function isAccessRevocationError(error: unknown): boolean {
+  if (!error) return false
+  if (error instanceof ApiError) {
+    if (error.status === 401 || error.status === 403) return true
+    if (
+      error.code === 'UNAUTHORIZED' ||
+      error.code === 'FORBIDDEN' ||
+      error.code === 'ACCOUNT_DISABLED' ||
+      error.code === 'INVALID_LIBRARY_PASSWORD' ||
+      error.code === 'REGISTRATION_DISABLED' ||
+      error.code === 'TRASH_DISABLED'
+    ) {
+      return true
+    }
+  }
+  const err = error as { status?: number; code?: string }
+  if (err.status === 401 || err.status === 403) return true
+  if (
+    err.code === 'UNAUTHORIZED' ||
+    err.code === 'FORBIDDEN' ||
+    err.code === 'ACCOUNT_DISABLED' ||
+    err.code === 'INVALID_LIBRARY_PASSWORD'
+  ) {
+    return true
+  }
+  return false
+}

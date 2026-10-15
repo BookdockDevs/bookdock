@@ -4,18 +4,13 @@ import { useNavigate, useRouter } from '@tanstack/react-router'
 export function canNavigateBack(): boolean {
   if (typeof window === 'undefined') return false
 
-  // 1. TanStack Router maintains __TSR_index in location.state
+  // TanStack Router maintains __TSR_index in history state: nonzero means
+  // every entry since the document loaded was an in-app SPA navigation, so
+  // stepping back cannot leave the app. document.referrer and history.length
+  // are deliberately not consulted: they cannot identify the previous
+  // entry's destination. See "Page back navigation v1" in architecture.md.
   const state = window.history.state as { __TSR_index?: number } | null
-  if (state && typeof state.__TSR_index === 'number') {
-    return state.__TSR_index > 0
-  }
-
-  // 2. Check document.referrer (matches current origin) with history.length > 1
-  if (document.referrer && document.referrer.startsWith(window.location.origin) && window.history.length > 1) {
-    return true
-  }
-
-  return false
+  return !!state && typeof state.__TSR_index === 'number' && state.__TSR_index > 0
 }
 
 export function useBackNavigation(fallback = '/') {
@@ -39,7 +34,9 @@ export function useBackNavigation(fallback = '/') {
           window.history.back()
         }
       } else {
-        void navigate({ to: fallback })
+        // Replace, not push: the fallback must not leave the dead-end page
+        // behind itself as a return loop.
+        void navigate({ to: fallback, replace: true })
       }
     },
     [router, navigate, fallback],

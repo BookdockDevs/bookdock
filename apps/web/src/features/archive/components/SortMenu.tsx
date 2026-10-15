@@ -11,12 +11,20 @@ export interface SortMenuOption<T extends string> {
 }
 
 /** Compact dropdown sorter shared by the archive book list and book notes views. */
-export default function SortMenu<T extends string>({ value, options, onChange, label, menuWidth = 190 }: {
+export default function SortMenu<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+  menuWidth = 130,
+  triggerClassName,
+}: {
   value: T
   options: Array<SortMenuOption<T>>
   onChange: (next: T) => void
   label: string
   menuWidth?: number
+  triggerClassName?: string
 }) {
   const [menu, setMenu] = useState<SmartPosition | null>(null)
   const anchorRef = useRef<HTMLDivElement>(null)
@@ -49,7 +57,12 @@ export default function SortMenu<T extends string>({ value, options, onChange, l
         onClick={toggle}
         aria-haspopup="menu"
         aria-expanded={menu !== null}
-        className="flex w-[160px] items-center justify-between gap-2 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700 transition-colors hover:border-stone-300 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:hover:border-stone-600"
+        title={label}
+        className={cn(
+          'flex items-center justify-between gap-2 transition-colors',
+          triggerClassName ??
+            'w-[160px] rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700 hover:border-stone-300 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:hover:border-stone-600',
+        )}
       >
         <span className="min-w-0 truncate">{active.label}</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-stone-400">

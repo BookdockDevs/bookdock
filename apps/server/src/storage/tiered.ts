@@ -29,6 +29,10 @@ export class TieredStorageDriver implements StorageDriver {
     this.cacheMaxMb = cacheMaxMb
   }
 
+  getBaseDir(): string {
+    return this.localDriver.getBaseDir()
+  }
+
   private isLocalAsset(key: string): boolean {
     return key.startsWith('covers/') || key.startsWith('cover/') || key.startsWith('content/')
   }

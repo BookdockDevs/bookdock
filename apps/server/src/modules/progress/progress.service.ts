@@ -1,9 +1,10 @@
 import { eq, and } from 'drizzle-orm'
 import { getDb } from '../../db/client'
-import { bookStates, bookVersions } from '../../db/schema'
+import { bookStates } from '../../db/schema'
 import { assertReadableBook } from '../books/books.service'
 import { mergeInterval, unionLength, type FractionInterval } from '../../lib/intervals'
-import { readProgressFile, writeProgressFile, type ProgressFileData } from '../../lib/progress-file'
+import { readProgressFile, type ProgressFileData } from '../../lib/progress-file'
+import { isProgressMigrationCompleted } from './progress-migration'
 import type { RateSample } from '@bookdock/shared'
 
 const RATE_SAMPLE_MAX = 20
@@ -25,66 +26,81 @@ export async function upsertProgress(userId: string, bookId: string, data: { cfi
   const db = getDb()
   // Reading needs no collection, and a position is the reader's own: design
   // invariant 14 files BookState by User x BookVersion, so a library read keeps
-  // its place exactly like a collected one. The file is filed per user, which is
-  // what makes that true for two people reading one version.
+  // its place exactly like a collected one.
   await assertReadableBook(userId, bookId, showHidden)
 
+  if (!isProgressMigrationCompleted(db)) {
+    await readProgressFile(userId, bookId)
+  }
+
   const now = Date.now()
-  const existing = await readProgressFile(userId, bookId) as ProgressFileData | null
+  let payload!: ProgressFileData
 
-  let intervals = existing?.intervals ?? [[0, data.fraction ?? data.percent / 100] as FractionInterval]
-  if (data.fraction !== undefined && data.segmentStartFraction !== undefined) {
-    let start = data.segmentStartFraction
-    let end = data.fraction
-    if (start > end) [start, end] = [end, start]
-    if (end > start) intervals = mergeInterval(intervals, [start, end])
-  }
+  db.transaction((tx) => {
+    const row = tx.select({
+      progressData: bookStates.progressData,
+      percent: bookStates.percent,
+      cfi: bookStates.cfi,
+      chapter: bookStates.chapter,
+      readStatus: bookStates.readStatus,
+    }).from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
 
-  // Reading-speed samples: the client filters to continuous stretches, the
-  // server only stores the sliding window (rate computation is client-side).
-  const rateSamples = existing?.rateSamples ? [...existing.rateSamples] : []
-  if (data.sample) {
-    rateSamples.push(data.sample)
-    if (rateSamples.length > RATE_SAMPLE_MAX) rateSamples.splice(0, rateSamples.length - RATE_SAMPLE_MAX)
-  }
+    const existing = row?.progressData as ProgressFileData | null
 
-  // Write per-book progress file
-  const payload: ProgressFileData = {
-    cfi: data.cfi ?? existing?.cfi ?? null,
-    chapter: data.chapter ?? existing?.chapter ?? null,
-    chapterIndex: data.chapterIndex ?? existing?.chapterIndex ?? null,
-    percent: data.percent,
-    fraction: data.fraction ?? existing?.fraction ?? null,
-    intervals,
-    rateSamples: rateSamples.length > 0 ? rateSamples : undefined,
-    updatedAt: now,
-  }
-  await writeProgressFile(userId, bookId, payload)
+    let intervals = existing?.intervals ?? [[0, data.fraction ?? data.percent / 100] as FractionInterval]
+    if (data.fraction !== undefined && data.segmentStartFraction !== undefined) {
+      let start = data.segmentStartFraction
+      let end = data.fraction
+      if (start > end) [start, end] = [end, start]
+      if (end > start) intervals = mergeInterval(intervals, [start, end])
+    }
 
-  // Mirror the position into the version state row for library sorting;
-  // bumps lastReadAt, not the work updatedAt, so cover cache keys and
-  // metadata-edit ordering stay stable. readStatus is deliberately untouched
-  // — status changes are manual user actions only. Legacy-only rows (no
-  // version yet) keep the file as their sole truth.
-  const version = db.select({ id: bookVersions.id }).from(bookVersions).where(eq(bookVersions.id, bookId)).get()
-  if (version) {
-    const state = db.select({ userId: bookStates.userId }).from(bookStates)
-      .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
-    if (state) {
-      db.update(bookStates).set({
+    // Reading-speed samples: the client filters to continuous stretches, the
+    // server only stores the sliding window (rate computation is client-side).
+    const rateSamples = existing?.rateSamples ? [...existing.rateSamples] : []
+    if (data.sample) {
+      rateSamples.push(data.sample)
+      if (rateSamples.length > RATE_SAMPLE_MAX) rateSamples.splice(0, rateSamples.length - RATE_SAMPLE_MAX)
+    }
+
+    payload = {
+      cfi: data.cfi ?? existing?.cfi ?? null,
+      chapter: data.chapter ?? existing?.chapter ?? null,
+      chapterIndex: data.chapterIndex ?? existing?.chapterIndex ?? null,
+      percent: data.percent,
+      fraction: data.fraction ?? existing?.fraction ?? null,
+      intervals,
+      rateSamples: rateSamples.length > 0 ? rateSamples : undefined,
+      updatedAt: now,
+    }
+
+    const readFraction = unionLength(intervals)
+
+    if (row) {
+      tx.update(bookStates).set({
         percent: data.percent,
         ...(data.cfi !== undefined ? { cfi: data.cfi } : {}),
         ...(data.chapter !== undefined ? { chapter: data.chapter } : {}),
-        lastReadAt: now, updatedAt: now,
+        lastReadAt: now,
+        progressData: payload,
+        readFraction,
+        updatedAt: now,
       }).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
     } else {
-      db.insert(bookStates).values({
-        userId, bookVersionId: bookId, readStatus: 'reading', percent: data.percent,
-        cfi: data.cfi ?? null, chapter: data.chapter ?? null,
-        lastReadAt: now, updatedAt: now,
+      tx.insert(bookStates).values({
+        userId,
+        bookVersionId: bookId,
+        readStatus: 'reading',
+        percent: data.percent,
+        cfi: data.cfi ?? null,
+        chapter: data.chapter ?? null,
+        lastReadAt: now,
+        progressData: payload,
+        readFraction,
+        updatedAt: now,
       }).run()
     }
-  }
+  })
 
   return { id: `prog-${bookId}`, userId, bookId, ...payload }
 }

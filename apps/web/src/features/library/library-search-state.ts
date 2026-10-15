@@ -44,6 +44,21 @@ export function keepsSearchSession(patch: Partial<LibrarySearch>): boolean {
   return Object.keys(patch).every((key) => ['page', 'view', 'sortBy', 'sortOrder'].includes(key))
 }
 
+/**
+ * Adopt a pending archive-exit scroll request exactly once per history
+ * entry. Returns the restore snapshot for the existing gated scroll effect,
+ * or null when there is nothing to adopt (or this entry already adopted).
+ */
+export function adoptArchiveExitRestore(
+  adoptedKey: string | undefined,
+  entryKey: string | undefined,
+  want: number | undefined,
+  search: LibrarySearch,
+): { key: string; restore: { search: LibrarySearch; top: number } } | null {
+  if (want == null || entryKey === undefined || adoptedKey === entryKey) return null
+  return { key: entryKey, restore: { search, top: want } }
+}
+
 const controlFields: Partial<Record<keyof LibrarySearch, LibrarySearchField | 'text'>> = {
   shelf: 'shelf', tag: 'tag', author: 'author', format: 'format', status: 'status', q: 'text',
 }

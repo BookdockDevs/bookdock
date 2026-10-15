@@ -8,6 +8,10 @@ import { queryClient } from '@/lib/query-client'
 
 import ReviewCard from './ReviewCard'
 
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={to}>{children}</a>,
+}))
+
 const state = vi.hoisted(() => ({ deleted: false }))
 vi.mock('@/api/client', async (original) => ({ ...(await original<typeof import('@/api/client')>()), apiDelete: vi.fn(async () => { state.deleted = true }) }))
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))

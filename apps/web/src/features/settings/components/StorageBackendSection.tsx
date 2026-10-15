@@ -22,7 +22,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
-import { getUserErrorNotification } from '@/lib/error-message'
+import { getUserErrorNotification, isAccessRevocationError } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { cn, formatBytes } from '@/lib/utils'
 
@@ -172,7 +172,7 @@ export default function StorageBackendSection() {
         iconBgClass="bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400"
         title={_('settings.storageBackendTitle')}
         action={
-          config && (
+          config && !isAccessRevocationError(configQuery.error) && (
             <button
               type="button"
               disabled={isLoading || configQuery.isError}
@@ -221,7 +221,7 @@ export default function StorageBackendSection() {
         }
         bodyClassName="space-y-4 pt-4"
       >
-        {configQuery.isError ? (
+        {configQuery.isError && (!config || isAccessRevocationError(configQuery.error)) ? (
           <QueryErrorState
             className="py-4"
             isRetrying={configQuery.isFetching}
@@ -232,7 +232,7 @@ export default function StorageBackendSection() {
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className="animate-pulse rounded-xl border border-stone-200/60 bg-white p-3 dark:border-stone-800 dark:bg-stone-900"
+                className="animate-pulse rounded-xl border border-stone-200/60 bg-white p-3 dark:border-stone-800 dark:bg-stone-900 motion-reduce:animate-none"
               >
                 <div className="h-3 w-16 rounded bg-stone-200/70 dark:bg-stone-800" />
                 <div className="mt-2 h-5 w-20 rounded bg-stone-200/90 dark:bg-stone-700" />
@@ -241,6 +241,19 @@ export default function StorageBackendSection() {
           </div>
         ) : (
           <>
+            {configQuery.isError && !isAccessRevocationError(configQuery.error) && (
+              <div className="flex items-center justify-between rounded-xl border border-amber-200/80 bg-amber-500/10 px-3.5 py-2 text-xs text-amber-700 dark:border-amber-800/80 dark:bg-amber-500/20 dark:text-amber-300">
+                <span>{_('settings.storageConfigRevalidateFailed') || '存储配置刷新失败，正在显示缓存'}</span>
+                <button
+                  type="button"
+                  onClick={() => configQuery.refetch()}
+                  disabled={configQuery.isFetching}
+                  className="font-medium underline hover:no-underline cursor-pointer"
+                >
+                  {_('common.retry') || '重试'}
+                </button>
+              </div>
+            )}
             {/* Global Storage Capacity Dashboard */}
             <div
               className={cn(

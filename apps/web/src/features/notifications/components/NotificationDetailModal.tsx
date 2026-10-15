@@ -119,7 +119,7 @@ export default function NotificationDetailModal({ notificationId, entry, onClose
     }
     return (
       <Modal title="" onClose={onClose} closeLabel={_('library.close')} hideHeader>
-        <p role="status" className="py-6 text-sm text-stone-500">{_('notificationCenter.unavailable')}</p>
+        <p role="status" className="py-6 text-sm text-stone-500 dark:text-stone-400">{_('notificationCenter.unavailable')}</p>
       </Modal>
     )
   }
@@ -127,7 +127,7 @@ export default function NotificationDetailModal({ notificationId, entry, onClose
   if (target.data && !target.data.data.available) {
     return (
       <Modal title={title} onClose={onClose} closeLabel={_('library.close')}>
-        <p role="status" className="py-6 text-sm text-stone-500">{_('notificationCenter.unavailable')}</p>
+        <p role="status" className="py-6 text-sm text-stone-500 dark:text-stone-400">{_('notificationCenter.unavailable')}</p>
       </Modal>
     )
   }

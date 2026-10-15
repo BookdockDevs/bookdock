@@ -79,7 +79,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
         <Link
           to="/"
           onClick={onBack}
-          aria-label={_('reader.back')}
+          aria-label={_('reader.backToPrevious')}
           className="pointer-events-auto -ml-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
         >
           <svg width="18" height="18" viewBox="1.5 1.5 21 21" fill="none" stroke="currentColor" strokeWidth="1.17" strokeLinecap="round" strokeLinejoin="round">

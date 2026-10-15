@@ -26,7 +26,7 @@ import { useAuthStore } from '@/stores/auth.store'
 
 import { normalizeLibrarySearch, readLibrarySearchExpression } from '@bookdock/shared'
 
-import { editSearchControls, expressionDisplay, keepsSearchSession, searchExitTarget, searchProjection, searchSessionNavigation, submittedSearchPatch } from './library-search-state'
+import { adoptArchiveExitRestore, editSearchControls, expressionDisplay, keepsSearchSession, searchExitTarget, searchProjection, searchSessionNavigation, submittedSearchPatch } from './library-search-state'
 
 import { ApiError } from '@/api/client'
 import { notify } from '@/lib/notifications'
@@ -69,7 +69,7 @@ import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-r
 import { libraryUrlCorrection, pageRangeCorrection, vanishedFilterCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
 import { sortCategories } from './taxonomy'
-import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, catalogQueryParts, useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefs, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
+import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, catalogQueryParts, useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefsState, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
 
 
 function estimateDynColumns(): number {  if (typeof window === 'undefined') return 4
@@ -106,7 +106,13 @@ export default function Library() {
   const sortByPref = useUiStore((s) => s.sortBy)
   const sortOrderPref = useUiStore((s) => s.sortOrder)
   const revealHidden = useUiStore((s) => s.revealHidden)
-  const libraryPrefs = useLibraryPrefs()
+  const {
+    prefs: libraryPrefs,
+    isReady: prefsReady,
+    isError: prefsError,
+    isFetching: prefsFetching,
+    refetch: refetchPrefs,
+  } = useLibraryPrefsState()
   const { isHidden: isLibraryHidden } = useHiddenLibraries()
   // Resolution chain: explicit URL > per-user server default (N-06) > device
   // localStorage > built-in defaults. The localStorage tier is consulted for
@@ -114,12 +120,12 @@ export default function Library() {
   // reading it would inherit whatever the previous session on a shared browser
   // left behind, so a guest's sort choice would become the owner's default. A
   // linked/shared URL still controls its own view.
-  const serverBookSort = libraryPrefs?.bookSort
+  const serverBookSort = prefsReady ? libraryPrefs?.bookSort : undefined
   const defaultSortBy = serverBookSort?.field ?? (isGuest ? sortByPref : undefined)
   const defaultSortOrder = serverBookSort
     ? (serverBookSort.dir ?? BOOK_SORT_DEFAULT_DIR[serverBookSort.field])
     : (isGuest ? sortOrderPref : undefined)
-  const view = search.view ?? libraryPrefs?.view ?? (isGuest ? viewPref : 'grid')
+  const view = search.view ?? (prefsReady ? libraryPrefs?.view : undefined) ?? (isGuest ? viewPref : 'grid')
   const query = search.q ?? ''
   const currentPage = search.page ?? 1
   // Trash lives in the private library and, owner-only, inside a shared
@@ -565,17 +571,20 @@ export default function Library() {
     () => rows.map((row) => ('versions' in row ? catalogWorkRow(row) : privateBookRow(row))),
     [rows],
   )
-  const isEmpty = !isLoading && rows.length === 0
+  const listLoading = activeLibrary ? catalogQuery.isLoading : isLoading
+  const listError = activeLibrary ? catalogQuery.isError : isError
+  const listFetching = activeLibrary ? catalogQuery.isFetching : isFetching
+  const listRefetch = activeLibrary ? catalogQuery.refetch : refetch
 
   const filterKey = `${activeLibrary?.id ?? ''}:${shelfId ?? ''}:${categoryScope}:${tagId ?? ''}:${query}:${format ?? ''}:${readStatus ?? ''}:${trash}:${author ?? ''}:${series ?? ''}:${sortBy}:${sortOrder}:${pageSize}`
   const lastFilterKeyRef = useRef(filterKey)
-  const lastTotalRef = useRef(0)
-  const lastTotalSizeRef = useRef(0)
+  const lastTotalRef = useRef<number | null>(null)
+  const lastTotalSizeRef = useRef<number | null>(null)
 
   if (lastFilterKeyRef.current !== filterKey) {
     lastFilterKeyRef.current = filterKey
-    lastTotalRef.current = 0
-    lastTotalSizeRef.current = 0
+    lastTotalRef.current = null
+    lastTotalSizeRef.current = null
   }
 
   // Total comes from whichever list is in context; the private one also reports
@@ -587,13 +596,11 @@ export default function Library() {
     lastTotalSizeRef.current = data.totalSize ?? 0
   }
 
-  const total = lastTotalRef.current
-  const totalSize = lastTotalSizeRef.current
+  const hasLoadedTotal = lastTotalRef.current !== null && !listError
+  const total = lastTotalRef.current ?? 0
+  const totalSize = lastTotalSizeRef.current ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  const listLoading = activeLibrary ? catalogQuery.isLoading : isLoading
-  const listError = activeLibrary ? catalogQuery.isError : isError
-  const listFetching = activeLibrary ? catalogQuery.isFetching : isFetching
-  const listRefetch = activeLibrary ? catalogQuery.refetch : refetch
+  const isEmpty = !listLoading && !listError && rows.length === 0 && hasLoadedTotal
   // The library is gone but the URL (or a stale list cache) still names it:
   // leaving/deleting resolves in the list a beat after the catalog 403s, and
   // a resurrected ?libraryId= (back button, bookmark) never resolves at all.
@@ -765,7 +772,7 @@ export default function Library() {
       const sortPatch = nextTrash !== trash ? { sortBy: undefined, sortOrder: undefined } : null
       const filterChanged = (['expression', 'shelf', 'tag', 'q', 'format', 'status', 'trash', 'author', 'series', 'categoryScope'] as const)
         .some((key) => key in patch && patch[key] !== search[key])
-      return navigate({ to: '/', search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, state: (previous) => ({ ...previous, librarySearchReturn: keepsSearchSession(patch) ? previous.librarySearchReturn : undefined }), replace: !filterChanged && !('directory' in patch) })
+      return navigate({ to: '/', search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, state: (previous) => ({ ...previous, librarySearchReturn: keepsSearchSession(patch) ? previous.librarySearchReturn : undefined, archiveExitScroll: undefined }), replace: !filterChanged && !('directory' in patch) })
     },
     [navigate, search, trash],
   )
@@ -795,9 +802,27 @@ export default function Library() {
   }
 
   const searchScrollRestore = useRef<{ search: LibrarySearch; top: number } | undefined>(undefined)
+  // An archive exit lands here with a scroll request in history state. Adopt
+  // it once per entry into the existing gated restore below, so the position
+  // applies only after the matching list is actually rendered — a blind
+  // scrollTo at navigation time would clamp against skeletons.
+  const archiveExitAdoptedKey = useRef<string | undefined>(undefined)
+  useLayoutEffect(() => {
+    const adopted = adoptArchiveExitRestore(archiveExitAdoptedKey.current, location.state.__TSR_key, location.state.archiveExitScroll, search)
+    if (!adopted) return
+    archiveExitAdoptedKey.current = adopted.key
+    searchScrollRestore.current = adopted.restore
+  }, [location, search])
   useLayoutEffect(() => {
     const restore = searchScrollRestore.current
-    if (!restore || listLoading || (activeLibrary ? catalogQuery.isPlaceholderData : booksPlaceholder) || JSON.stringify(search) !== JSON.stringify(restore.search)) return
+    if (!restore) return
+    // A stale request (e.g. adopted, then the search moved on before the
+    // list became ready) must neither scroll nor linger for a later match.
+    if (JSON.stringify(search) !== JSON.stringify(restore.search)) {
+      searchScrollRestore.current = undefined
+      return
+    }
+    if (listLoading || (activeLibrary ? catalogQuery.isPlaceholderData : booksPlaceholder)) return
     searchScrollRestore.current = undefined
     window.scrollTo({ top: restore.top, behavior: 'instant' })
   }, [search, listLoading, activeLibrary, catalogQuery.isPlaceholderData, booksPlaceholder])
@@ -806,7 +831,7 @@ export default function Library() {
     const target = searchExitTarget(search, saved)
     searchScrollRestore.current = { search: target, top: saved?.scrollTop ?? 0 }
     if (saved?.back && router.history.canGoBack()) { router.history.back(); return }
-    void navigate({ to: '/', search: target, state: (previous) => ({ ...previous, librarySearchReturn: undefined }), replace: true, resetScroll: false })
+    void navigate({ to: '/', search: target, state: (previous) => ({ ...previous, librarySearchReturn: undefined, archiveExitScroll: undefined }), replace: true, resetScroll: false })
   }
 
   // Switching libraries leaves every filter that belonged to the previous one,
@@ -914,19 +939,19 @@ export default function Library() {
       return
     }
     // The placeholder total belongs to the previous view, not this one
-    if (listLoading) return
+    if (listLoading || !hasLoadedTotal) return
     if (uncategorizedEmptyOnEntryRef.current === null) {
       uncategorizedEmptyOnEntryRef.current = total === 0
     } else if (!uncategorizedEmptyOnEntryRef.current && total === 0) {
       uncategorizedEmptyOnEntryRef.current = null
       navSearch({ shelf: undefined })
     }
-  }, [shelfId, listLoading, total, navSearch])
+  }, [shelfId, listLoading, hasLoadedTotal, total, navSearch])
 
   const gridColumns = useUiStore((s) => s.gridColumns)
-  const recentlyReadStyle = libraryPrefs?.recentlyReadStyle ?? 'off'
-  const readingStatsEnabled = libraryPrefs?.readingStatsEnabled !== false
-  const gridCardFields = libraryPrefs?.gridCardFields
+  const recentlyReadStyle = prefsReady ? (libraryPrefs?.recentlyReadStyle ?? 'off') : 'off'
+  const readingStatsEnabled = prefsReady ? (libraryPrefs?.readingStatsEnabled !== false) : false
+  const gridCardFields = prefsReady ? libraryPrefs?.gridCardFields : undefined
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [dynColumns, setDynColumns] = useState(lastKnownDynColumns)
@@ -1003,6 +1028,7 @@ export default function Library() {
           onOpenNotifications={() => setNotificationsOpen((value) => !value)}
           notificationButtonRef={notificationButtonRef}
           directory={search.directory}
+          librarySearch={search}
         />
 
       <main className="flex min-w-0 flex-1 flex-col px-3 py-5 sm:px-4 sm:py-8 md:px-8">
@@ -1029,15 +1055,15 @@ export default function Library() {
             && libraryCategoriesQuery.data?.data.some((category) => category.id === shelfId && !category.parentId)
             && libraryCategoriesQuery.data?.data.some((category) => category.parentId === shelfId))}
           onUploadClick={canUpload ? () => setUploadOpen(true) : undefined}
-          trashCount={total}
-          bookSize={trash && !activeLibrary ? totalSize : undefined}
+          trashCount={hasLoadedTotal ? total : 0}
+          bookSize={trash && !activeLibrary ? (hasLoadedTotal ? totalSize : undefined) : undefined}
           trashCapBytes={trash ? trashCapBytes : undefined}
           onEmptyTrash={isGuest ? undefined : () => setEmptyTrashOpen(true)}
           selectionActive={selectionActive}
           onToggleSelectMode={isGuest || (activeLibrary && !isLibraryManager) ? undefined : toggleSelectionMode}
           onOpenNavigation={() => setMobileNavOpen(true)}
           title={viewTitle}
-          bookCount={total}
+          bookCount={hasLoadedTotal ? total : undefined}
           onResetMetadataFilter={metadataFilter ? () => navSearch({ author: undefined, series: undefined }) : undefined}
         />
 
@@ -1045,11 +1071,11 @@ export default function Library() {
 
         {!trash && <LibraryContextBar search={search} navSearch={navSearch} onClear={clearActiveFilters} />}
 
-        {(shelvesQuery.isError || tagsQuery.isError) && !catalogGone && (
+        {(shelvesQuery.isError || tagsQuery.isError || (prefsError && !prefsReady)) && !catalogGone && (
           <QueryErrorState
             className="py-4"
-            isRetrying={shelvesQuery.isFetching || tagsQuery.isFetching}
-            onRetry={() => Promise.all([shelvesQuery.refetch(), tagsQuery.refetch()])}
+            isRetrying={shelvesQuery.isFetching || tagsQuery.isFetching || prefsFetching}
+            onRetry={() => Promise.all([shelvesQuery.refetch(), tagsQuery.refetch(), refetchPrefs()])}
           />
         )}
 
@@ -1275,7 +1301,7 @@ export default function Library() {
           )}
         </div>
 
-        {!listError && (totalPages > 1 ? total > 0 : !listLoading) && (
+        {!listError && (totalPages > 1 ? total > 0 : !listLoading && hasLoadedTotal) && (
           <LibraryPagination
             currentPage={currentPage}
             totalPages={totalPages}

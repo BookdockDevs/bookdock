@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { InteractionNotification, NotificationPage, NotificationQuery, NotificationTarget } from '@bookdock/shared'
 import { reviewExcerpt } from '@bookdock/shared'
@@ -83,6 +83,13 @@ export function deleteNotification(userId: string, id: string) {
 }
 
 export async function unreadNotificationCount(userId: string) {
+  const db = getDb()
+  const raw = db.select({ count: sql<number>`count(*)` })
+    .from(interactionNotifications)
+    .where(and(eq(interactionNotifications.userId, userId), isNull(interactionNotifications.readAt)))
+    .get()
+  if (!raw || raw.count === 0) return { count: 0 }
+
   let count = 0
   for await (const _entry of availableNotifications(userId, true)) count += 1
   return { count }

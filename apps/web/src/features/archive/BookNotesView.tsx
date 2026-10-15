@@ -1,31 +1,36 @@
 import { useMemo, useRef, useState } from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
+import { Link, useNavigate } from '@tanstack/react-router'
 
-import type { AnnotationRes, AnnotationUpdateReq, ArchiveRecordType, Review } from '@bookdock/shared'
+import type { AnnotationRes, AnnotationStyle, AnnotationUpdateReq, ArchiveRecordType, Review } from '@bookdock/shared'
 
 import { useBookChapters } from '@/api/hooks/useBookChapters'
+import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import ContentImages from '@/features/content-files/components/ContentImages'
-import { ArrowUpRightIcon, BatchSelectIcon, BookIcon, BookmarkIcon, ChatBubbleIcon, CheckIcon, CopyIcon, DocumentExportIcon, DocumentIcon, PencilIcon, SelectionIcon, TrashIcon } from '@/features/reader/components/annotation-icons'
+import { BatchSelectIcon, BookmarkIcon, BulbIcon, ChatBubbleIcon, CheckIcon, DocumentExportIcon, HighlighterIcon, SelectionIcon, TrashIcon } from '@/features/reader/components/annotation-icons'
 import AnnotationExportDialog from '@/features/reader/components/AnnotationExportDialog'
 import AnnotationInlineEditor from '@/features/reader/components/AnnotationInlineEditor'
+import { annotationHex } from '@/features/reader/components/annotation-colors'
 import { ClampedText, HighlightQuote } from '@/features/reader/components/annotation-render'
 import { formatFullDateTime, formatRelativeTime } from '@/features/reader/components/format-relative-time'
 import IdeaDetailModal from '@/features/reader/components/IdeaDetailModal'
 import ShareCardDialog from '@/features/reader/components/share/ShareCardDialog'
 import BookCover from '@/features/library/components/BookCover'
+import BookDetailDialog from '@/features/library/components/BookDetailDialog'
 import { useBook } from '@/features/library/hooks'
 import { useDeleteAnnotation, useBatchDeleteAnnotations, useUpdateAnnotation } from '@/features/reader/hooks/useAnnotations'
 import { useIdeaComposer } from '@/features/reader/hooks/useIdeas'
-import { buildAnnotationCopyText, isCustomBookmarkTitle } from '@/features/reader/lib/annotation-text'
+import { isCustomBookmarkTitle } from '@/features/reader/lib/annotation-text'
 import { compareAnnotations, groupAnnotationsByChapter } from '@/features/reader/lib/annotation-order'
 import { buildChapterOrderLookup, type ChapterOrderItem } from '@/features/reader/lib/chapter-order'
 import { useReaderState } from '@/features/reader/state/reader-state'
 import { reviewExcerpt } from '@/features/reviews/lib/markdown'
-import ReviewCard from '@/features/reviews/components/ReviewCard'
+import ReviewDetailHeaderActions from '@/features/reviews/components/ReviewDetailHeaderActions'
+import ReviewDetailView from '@/features/reviews/components/ReviewDetailView'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
 import { useReviewBookContext } from '@/features/reviews/hooks/useReviews'
 import StarRating from '@/features/reviews/components/StarRating'
@@ -37,25 +42,26 @@ import type { ArchiveSearch } from '@/routes/archive'
 import { useAuthStore } from '@/stores/auth.store'
 
 import { useArchiveBookDetail } from './hooks'
-import { archiveCountParts, hasReadableText, readStatusLabel } from './components/archive-helpers'
+import { hasReadableText, readStatusLabel } from './components/archive-helpers'
+import BookStatsMicroCard from './components/BookStatsMicroCard'
+import HighlightFilterMenu from './components/HighlightFilterMenu'
 import SortMenu from './components/SortMenu'
 
 type BookTab = ArchiveRecordType | 'all'
-type BookSort = 'chapter' | 'recent'
+type BookSort = NonNullable<ArchiveSearch['bookSort']>
 
 const TABS: BookTab[] = ['all', 'highlight', 'bookmark', 'idea', 'review']
 
-const itemActionBtn =
-  'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-500/10 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-200'
-
-export default function BookNotesView({ bookVersionId, bookType, bookSort, onChange, onBack }: {
+export default function BookNotesView({ bookVersionId, bookType, bookSort, onChange, onBack, hideBack = false }: {
   bookVersionId: string
   bookType: BookTab
   bookSort: BookSort
   onChange: (next: Partial<Pick<ArchiveSearch, 'bookType' | 'bookSort'>>) => void
   onBack: () => void
+  hideBack?: boolean
 }) {
   const _ = useTranslation()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const setShareTarget = useReaderState((s) => s.setShareTarget)
@@ -70,8 +76,12 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectExportOpen, setSelectExportOpen] = useState(false)
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
+  const [bookDetailOpen, setBookDetailOpen] = useState(false)
+  const [colorFilter, setColorFilter] = useState<Set<string>>(new Set())
+  const [styleFilter, setStyleFilter] = useState<Set<AnnotationStyle>>(new Set())
 
   const book = useBook(bookVersionId)
+  const hasProgress = (book.data?.data.progress ?? 0) > 0
   const chapters = useBookChapters(bookVersionId)
   const detail = useArchiveBookDetail(bookVersionId)
   // Composer context for the review editor; fetched only while editing so
@@ -81,7 +91,9 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
   const deleteAnnotation = useDeleteAnnotation(bookVersionId)
   const batchDeleteMutation = useBatchDeleteAnnotations(bookVersionId)
   const batchDeleteLock = useRef(false)
-  const composer = useIdeaComposer(bookVersionId, !!user)
+  // Composer context for the note inline editor; fetched only while editing so
+  // opening a book archive stays a zero-extra-request action.
+  const composer = useIdeaComposer(bookVersionId, !!user && editingId !== null)
 
   const chapterOrder: ChapterOrderItem[] = useMemo(
     () => (chapters.data?.data ?? []).map((c) => ({ label: c.title, href: c.id })),
@@ -91,42 +103,79 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
 
   const tab = bookType
   const sort = bookSort
+  const normalizedSort: 'chapter' | 'chapter-desc' | 'time-desc' | 'time-asc' =
+    sort === 'recent' ? 'time-desc' : sort ?? 'chapter'
+  const isChapterSort = normalizedSort === 'chapter' || normalizedSort === 'chapter-desc'
 
   const filteredAnnotations = useMemo(() => {
     const items = detail.data?.data.annotations ?? []
     if (tab === 'all' || tab === 'review') return tab === 'review' ? [] : items
-    return items.filter((a) => (tab === 'idea' ? a.type === 'note' : a.type === tab))
-  }, [detail.data, tab])
+    let list = items.filter((a) => (tab === 'idea' ? a.type === 'note' : a.type === tab))
+    if (tab === 'highlight') {
+      if (colorFilter.size > 0) {
+        list = list.filter((a) => colorFilter.has(a.color ?? 'yellow'))
+      }
+      if (styleFilter.size > 0) {
+        list = list.filter((a) => styleFilter.has((a.style as AnnotationStyle) ?? 'highlight'))
+      }
+    }
+    return list
+  }, [detail.data, tab, colorFilter, styleFilter])
 
   const annotations = useMemo(() => {
+    if (!isChapterSort) return []
+    const reverse = normalizedSort === 'chapter-desc'
     const orderIndex = (g: { chapter: string; chapterHref: string | null }) => {
       const i = lookup(g.chapter, g.chapterHref)
       return i < 0 ? chapterOrder.length : i
     }
     return groupAnnotationsByChapter(filteredAnnotations, _('reader.uncategorized'))
-      .map((g) => ({ ...g, list: [...g.list].sort(compareAnnotations) }))
-      .sort((g1, g2) => orderIndex(g1) - orderIndex(g2))
-  }, [filteredAnnotations, lookup, chapterOrder.length, _])
+      .map((g) => ({
+        ...g,
+        list: [...g.list].sort((a, b) => (reverse ? -1 : 1) * compareAnnotations(a, b)),
+      }))
+      .sort((g1, g2) => {
+        const a = orderIndex(g1)
+        const b = orderIndex(g2)
+        const aUnknown = a === chapterOrder.length
+        const bUnknown = b === chapterOrder.length
+        if (aUnknown !== bUnknown) return aUnknown ? 1 : -1
+        return (reverse ? -1 : 1) * (a - b)
+      })
+  }, [filteredAnnotations, lookup, chapterOrder.length, isChapterSort, normalizedSort, _])
 
   const reviews = useMemo(() => {
     const list = detail.data?.data.reviews ?? []
     return tab === 'all' || tab === 'review' ? list : []
   }, [detail.data, tab])
-  const recentRecords = useMemo(() => [
-    ...filteredAnnotations.map((item) => ({ kind: 'annotation' as const, item })),
-    ...reviews.map((item) => ({ kind: 'review' as const, item })),
-  ].sort((a, b) => b.item.updatedAt - a.item.updatedAt || a.item.id.localeCompare(b.item.id)), [filteredAnnotations, reviews])
+
+  const timeRecords = useMemo(() => {
+    if (isChapterSort) return []
+    const list: Array<{ kind: 'annotation' | 'review'; item: AnnotationRes | Review }> = [
+      ...filteredAnnotations.map((item) => ({ kind: 'annotation' as const, item })),
+      ...reviews.map((item) => ({ kind: 'review' as const, item })),
+    ]
+    const asc = normalizedSort === 'time-asc'
+    return list.sort((a, b) => {
+      const timeA = a.item.updatedAt ?? a.item.createdAt ?? 0
+      const timeB = b.item.updatedAt ?? b.item.createdAt ?? 0
+      const diff = asc ? timeA - timeB : timeB - timeA
+      return diff || a.item.id.localeCompare(b.item.id)
+    })
+  }, [filteredAnnotations, reviews, isChapterSort, normalizedSort])
+
   const openReview = reviews.find((r) => r.id === openReviewId) ?? null
   const editingReview = reviews.find((r) => r.id === editingReviewId) ?? null
   const reviewComposer = reviewBookContext.data?.data.composer
   const allAnnotations = detail.data?.data.annotations ?? []
-  const visibleIds = useMemo(() => annotations.flatMap((g) => g.list.map((a) => a.id)), [annotations])
-  const headerCounts = {
-    highlights: allAnnotations.filter((a) => a.type === 'highlight').length,
-    bookmarks: allAnnotations.filter((a) => a.type === 'bookmark').length,
-    ideas: allAnnotations.filter((a) => a.type === 'note').length,
-    reviews: detail.data?.data.reviews.length ?? 0,
-  }
+  const visibleIds = useMemo(() => {
+    if (isChapterSort) {
+      return annotations.flatMap((g) => g.list.map((a) => a.id))
+    }
+    return timeRecords
+      .filter((r): r is { kind: 'annotation'; item: AnnotationRes } => r.kind === 'annotation')
+      .map((r) => r.item.id)
+  }, [annotations, timeRecords, isChapterSort])
   const tabCounts: Record<BookTab, number> = {
     all: allAnnotations.length + (detail.data?.data.reviews.length ?? 0),
     highlight: allAnnotations.filter((a) => a.type === 'highlight').length,
@@ -135,22 +184,15 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
     review: detail.data?.data.reviews.length ?? 0,
   }
 
-  function jumpHref(a: AnnotationRes): string | null {
+  // SPA navigation (not a native anchor): a full-document load would reset
+  // the router history index and break the reader's page-level back button.
+  function jumpLink(a: AnnotationRes): { to: '/books/$id'; params: { id: string }; search: { annotation: string } } | null {
     if (a.locationAvailable === false) return null
-    return `/books/${encodeURIComponent(bookVersionId)}?annotation=${encodeURIComponent(a.id)}`
+    return { to: '/books/$id', params: { id: bookVersionId }, search: { annotation: a.id } }
   }
 
   function refreshArchive() {
     void queryClient.invalidateQueries({ queryKey: ['archive'] })
-  }
-
-  async function copyItem(item: AnnotationRes) {
-    try {
-      await navigator.clipboard.writeText(buildAnnotationCopyText(item, _('reader.bookmark')))
-      notify.success({ key: 'reader.copied' })
-    } catch {
-      notify.error({ key: 'reader.copyFailed' })
-    }
   }
 
   function shareItem(item: AnnotationRes) {
@@ -278,73 +320,116 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
     )
   }
 
-  function renderActions(a: AnnotationRes) {
-    if (selectionMode) return null
+  function renderItemTimeMeta(timeValue: number, hasPosition = true) {
     return (
-      <span className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/archive-item:opacity-100 focus-within:opacity-100 max-md:opacity-100">
-        {a.type !== 'highlight' && (
-          <button type="button" onClick={() => startEdit(a.id)} title={a.type === 'bookmark' ? _('annotation.rename') : _('annotation.editNote')} aria-label={a.type === 'bookmark' ? _('annotation.rename') : _('annotation.editNote')} className={itemActionBtn}>
-            <PencilIcon />
-          </button>
+      <div className={cn('flex shrink-0 items-center gap-1.5 pt-0.5', selectionMode && 'pr-7')}>
+        {!hasPosition && (
+          <span className="text-xs text-amber-700 dark:text-amber-400">{_('profileArchive.positionUnavailable')}</span>
         )}
-        <button type="button" onClick={() => void copyItem(a)} title={_('annotation.copy')} aria-label={_('annotation.copy')} className={itemActionBtn}>
-          <CopyIcon />
-        </button>
-        <button
-          type="button"
-          onClick={() => deleteItem(a)}
-          title={_('annotation.deleteHighlight')}
-          aria-label={_('annotation.deleteHighlight')}
-          className={cn(itemActionBtn, 'hover:bg-red-500/10 hover:text-red-500 dark:hover:text-red-400')}
-        >
-          <TrashIcon />
-        </button>
-      </span>
-    )
-  }
-
-  function renderMeta(a: AnnotationRes) {
-    return (
-      <div className="mt-2 flex items-center gap-2">
         <span
-          title={formatFullDateTime(_, a.createdAt)}
-          aria-label={formatFullDateTime(_, a.createdAt)}
-          className="shrink-0 text-xs tabular-nums text-stone-400 dark:text-stone-500"
+          title={formatFullDateTime(_, timeValue)}
+          className="text-xs tabular-nums text-stone-400 dark:text-stone-500"
         >
-          {formatRelativeTime(_, a.createdAt)}
+          {formatRelativeTime(_, timeValue)}
         </span>
-        <span className="flex-1" />
-        {renderActions(a)}
-        {!jumpHref(a) && (
-          <span className="shrink-0 text-xs text-amber-700 dark:text-amber-400">{_('profileArchive.positionUnavailable')}</span>
-        )}
       </div>
     )
   }
 
   function renderReviewItem(review: Review) {
+    const hasTitle = Boolean(review.title && review.title.trim())
+    const hasBody = Boolean(review.body && review.body.trim())
+    const hasRating = review.rating != null
+
+    // 标题、正文、评分均为空时不展示书评卡片
+    if (!hasTitle && !hasBody && !hasRating) {
+      return null
+    }
+
+    const isRatingOnly = !hasTitle && !hasBody && hasRating
+
+    // 时间语义：
+    // - 有标题或正文的书评：显示 updatedAt
+    // - 纯评分记录：显示 createdAt
+    const timeValue = isRatingOnly ? review.createdAt : (review.updatedAt ?? review.createdAt)
+
+    if (isRatingOnly) {
+      return (
+        <li
+          key={review.id}
+          onClick={() => { if (!selectionMode) setOpenReviewId(review.id) }}
+          className={cn(
+            'group/archive-item relative rounded-xl border border-stone-200/80 bg-white p-2.5 sm:px-3.5 sm:py-2.5 shadow-2xs transition-all hover:border-stone-300 dark:border-stone-800/80 dark:bg-stone-900/60',
+            !selectionMode && 'cursor-pointer hover:shadow-xs',
+          )}
+          title={_('archive.viewFullReview')}
+          aria-label={_('archive.viewFullReview')}
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-purple-500/10 text-purple-600 dark:bg-purple-400/10 dark:text-purple-400">
+              <ChatBubbleIcon size={13} />
+            </span>
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <StarRating value={review.rating} size={14} />
+              </div>
+              {renderItemTimeMeta(timeValue)}
+            </div>
+          </div>
+        </li>
+      )
+    }
+
+    const bodyText = hasBody ? reviewExcerpt(review.body!.trim(), review.bodyFormat, 300) : null
+
     return (
-      <li key={review.id} className="border-b border-stone-200/70 pb-3 last:border-b-0 dark:border-stone-800/70">
-        <div className="flex items-center gap-2">
-          <StarRating value={review.rating} size={14} />
-          {review.rating != null && <span className="text-sm font-semibold tabular-nums">{review.rating.toFixed(1)}</span>}
-          {review.visibility === 'private' && <span className="text-[13px] text-stone-400">{_('review.visibilityPrivate')}</span>}
+      <li
+        key={review.id}
+        onClick={() => { if (!selectionMode) setOpenReviewId(review.id) }}
+        className={cn(
+          'group/archive-item relative rounded-xl border border-stone-200/80 bg-white p-3.5 shadow-2xs transition-all hover:border-stone-300 dark:border-stone-800/80 dark:bg-stone-900/60',
+          !selectionMode && 'cursor-pointer hover:shadow-xs',
+        )}
+        title={_('archive.viewFullReview')}
+        aria-label={_('archive.viewFullReview')}
+      >
+        <div className="flex items-start gap-2.5">
+          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-purple-500/10 text-purple-600 dark:bg-purple-400/10 dark:text-purple-400">
+            <ChatBubbleIcon size={13} />
+          </span>
+          <div className="min-w-0 flex-1">
+            {/* 头部信息行：评分（如有） + 标题（若无标题则正文占用首行） ↔ 最右侧时间 */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                {hasTitle ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {hasRating && <StarRating value={review.rating} size={14} />}
+                    <h4 className="min-w-0 font-semibold text-stone-900 dark:text-stone-100 text-sm break-words">
+                      {review.title!.trim()}
+                    </h4>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {hasRating && <StarRating value={review.rating} size={14} />}
+                    {bodyText && (
+                      <p className="min-w-0 text-sm font-medium leading-relaxed text-stone-800 whitespace-pre-wrap break-words line-clamp-3 dark:text-stone-200">
+                        {bodyText}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+              {renderItemTimeMeta(timeValue)}
+            </div>
+
+            {/* 内容区域：仅在有标题且有正文时，在次行全宽展开展示正文 */}
+            {hasTitle && bodyText && (
+              <p className="mt-2 text-sm leading-relaxed text-stone-700 whitespace-pre-wrap break-words line-clamp-3 dark:text-stone-300">
+                {bodyText}
+              </p>
+            )}
+          </div>
         </div>
-        {review.body && (
-          <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-stone-800 dark:text-stone-200">
-            {reviewExcerpt(review.body, review.bodyFormat, 300)}
-          </p>
-        )}
-        {!selectionMode && (
-          <button
-            type="button"
-            onClick={() => setOpenReviewId(review.id)}
-            className="mt-2 inline-flex items-center gap-1 text-sm text-stone-500 transition-colors hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200"
-          >
-            {_('archive.viewFullReview')}
-            <ArrowUpRightIcon />
-          </button>
-        )}
       </li>
     )
   }
@@ -352,14 +437,15 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
   function renderAnnotationItem(a: AnnotationRes) {
     const customBookmark = isCustomBookmarkTitle(a, _('reader.bookmark'))
     const bookmarkQuote = hasReadableText(a.contextText) ? a.contextText : hasReadableText(a.text) ? a.text : null
+    const hex = annotationHex(a.color)
     return (
       <li
         key={a.id}
         onClick={selectionMode && editingId !== a.id ? () => toggleSelected(a.id) : undefined}
         className={cn(
-          'group/archive-item relative border-b border-stone-200/70 pb-3 last:border-b-0 dark:border-stone-800/70',
+          'group/archive-item relative rounded-xl border border-stone-200/80 bg-white p-3.5 shadow-2xs transition-all hover:border-stone-300 dark:border-stone-800/80 dark:bg-stone-900/60',
           selectionMode && 'cursor-pointer',
-          selectionMode && selectedIds.has(a.id) && 'bg-stone-100/60 dark:bg-stone-800/50',
+          selectionMode && selectedIds.has(a.id) && 'border-stone-400/90 bg-stone-100/50 ring-1 ring-stone-900/5 dark:border-stone-600 dark:bg-stone-800/40 dark:ring-white/5',
         )}
       >
         {selectionMode && (
@@ -369,10 +455,10 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
             aria-pressed={selectedIds.has(a.id)}
             aria-label={_('annotation.toggleSelected')}
             className={cn(
-              'absolute top-0 right-0 z-10 flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
+              'absolute top-3 right-3 z-10 flex h-5 w-5 items-center justify-center rounded-md border transition-colors',
               selectedIds.has(a.id)
-                ? 'border-blue-600 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-400 dark:text-stone-950'
-                : 'border-stone-300 bg-transparent dark:border-stone-600',
+                ? 'border-stone-900 bg-stone-900 text-white dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900'
+                : 'border-stone-300 bg-white hover:border-stone-400 dark:border-stone-600 dark:bg-stone-800',
             )}
           >
             {selectedIds.has(a.id) && <CheckIcon size={13} strokeWidth={2.4} />}
@@ -383,142 +469,207 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
         ) : (
           <>
             {a.type === 'highlight' && hasReadableText(a.text) && (
-              <div className="border-l-[3px] border-amber-400/70 pl-4 dark:border-amber-400/50">
-                {(() => {
-                  const href = selectionMode ? null : jumpHref(a)
-                  const quote = (
-                    <HighlightQuote
-                      item={a}
-                      theme="app"
-                      expanded
-                      allowToggle={false}
-                      onToggle={() => {}}
-                      expandLabel={_('annotation.expand')}
-                      collapseLabel={_('annotation.collapse')}
-                    />
-                  )
-                  return href
-                    ? <a href={href} title={_('archive.readLocation')} className="block rounded transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 dark:focus-visible:outline-stone-500">{quote}</a>
-                    : quote
-                })()}
-                {renderMeta(a)}
+              <div className="flex items-start gap-2.5">
+                <span
+                  className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-stone-100 dark:bg-stone-800"
+                  style={{ color: hex }}
+                >
+                  <HighlighterIcon size={13} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      {(() => {
+                        const link = selectionMode ? null : jumpLink(a)
+                        const quote = (
+                          <HighlightQuote
+                            item={a}
+                            theme="app"
+                            expanded
+                            allowToggle={false}
+                            onToggle={() => {}}
+                            expandLabel={_('annotation.expand')}
+                            collapseLabel={_('annotation.collapse')}
+                          />
+                        )
+                        return link
+                          ? <Link to={link.to} params={link.params} search={link.search} title={_('archive.readLocation')} className="block rounded transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 dark:focus-visible:outline-stone-500">{quote}</Link>
+                          : quote
+                      })()}
+                    </div>
+                    {renderItemTimeMeta(a.createdAt, !!jumpLink(a))}
+                  </div>
+                </div>
               </div>
             )}
             {a.type === 'bookmark' && (() => {
-              const href = selectionMode ? null : jumpHref(a)
-              const quote = (
-                <>
-                  <div className="flex items-start gap-2">
-                    <span className="mt-0.5 text-blue-500 dark:text-blue-400"><BookmarkIcon /></span>
-                    {customBookmark ? (
-                      <ClampedText
-                        text={a.text}
-                        clampClassName="line-clamp-2"
-                        className="text-sm font-medium leading-relaxed text-stone-800 whitespace-pre-wrap break-words dark:text-stone-200"
-                        expanded
-                        allowToggle={false}
-                        onToggle={() => {}}
-                        expandLabel={_('annotation.expand')}
-                        collapseLabel={_('annotation.collapse')}
-                        minLengthForToggle={40}
-                        theme="app"
-                      />
-                    ) : bookmarkQuote ? (
-                      <ClampedText
-                        text={bookmarkQuote}
-                        clampClassName="line-clamp-4"
-                        className="text-xs leading-relaxed text-stone-600 whitespace-pre-wrap break-words dark:text-stone-300"
-                        wrapperClassName="rounded-md border-l-2 border-blue-300/40 px-2 py-1 dark:border-blue-400/25"
-                        expanded
-                        allowToggle={false}
-                        onToggle={() => {}}
-                        expandLabel={_('annotation.expand')}
-                        collapseLabel={_('annotation.collapse')}
-                        minLengthForToggle={65}
-                        theme="app"
-                      />
-                    ) : null}
-                  </div>
-                  {customBookmark && hasReadableText(a.contextText) && (
-                    <ClampedText
-                      text={a.contextText}
-                      clampClassName="line-clamp-3"
-                      className="text-xs leading-relaxed text-stone-600 whitespace-pre-wrap break-words dark:text-stone-300"
-                      wrapperClassName="ml-7 mt-2 rounded-md border-l-2 border-blue-300/40 px-2 py-1 dark:border-blue-400/25"
-                      expanded
-                      allowToggle={false}
-                      onToggle={() => {}}
-                      expandLabel={_('annotation.expand')}
-                      collapseLabel={_('annotation.collapse')}
-                      minLengthForToggle={50}
-                      theme="app"
-                    />
-                  )}
-                </>
-              )
+              const link = selectionMode ? null : jumpLink(a)
               return (
-                <div className="min-w-0">
-                  {href
-                    ? <a href={href} title={_('archive.readLocation')} className="block rounded transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 dark:focus-visible:outline-stone-500">{quote}</a>
-                    : quote}
-                  <div className="ml-7">{renderMeta(a)}</div>
-                </div>
-              )
-            })()}
-            {a.type === 'note' && (
-              <div className="min-w-0">
-                <div className="flex items-start gap-2">
-                  <span className="mt-0.5 shrink-0 text-stone-400 dark:text-stone-500"><ChatBubbleIcon size={15} /></span>
+                <div className="flex items-start gap-2.5">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400">
+                    <BookmarkIcon />
+                  </span>
                   <div className="min-w-0 flex-1">
-                    {a.note && (
-                      <button
-                        type="button"
-                        onClick={() => { if (!selectionMode) setOpenIdeaId(a.id) }}
-                        title={_('archive.viewIdeaDetail')}
-                        aria-label={_('archive.viewIdeaDetail')}
-                        className="block w-full cursor-pointer text-left"
-                      >
-                        <ClampedText
-                          text={a.note}
-                          clampClassName="line-clamp-3"
-                          className="text-sm font-medium leading-relaxed text-stone-800 whitespace-pre-wrap break-words dark:text-stone-200"
-                          expanded
-                          allowToggle={false}
-                          onToggle={() => {}}
-                          expandLabel={_('annotation.expand')}
-                          collapseLabel={_('annotation.collapse')}
-                          minLengthForToggle={60}
-                          theme="app"
-                        />
-                      </button>
-                    )}
-                    {hasReadableText(a.text) && (
-                      <div className={cn('border-l-[3px] border-amber-400/70 pl-4 dark:border-amber-400/50', a.note && 'mt-2')}>
-                        {(() => {
-                          const href = selectionMode ? null : jumpHref(a)
-                          const quote = (
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        {customBookmark ? (
+                          <ClampedText
+                            text={a.text}
+                            clampClassName="line-clamp-2"
+                            className="text-sm font-medium leading-relaxed text-stone-800 whitespace-pre-wrap break-words dark:text-stone-200"
+                            expanded
+                            allowToggle={false}
+                            onToggle={() => {}}
+                            expandLabel={_('annotation.expand')}
+                            collapseLabel={_('annotation.collapse')}
+                            minLengthForToggle={40}
+                            theme="app"
+                          />
+                        ) : bookmarkQuote ? (
+                          <div className="rounded-lg border-l-2 border-blue-300/40 bg-stone-50/50 px-2.5 py-1.5 dark:border-blue-400/25 dark:bg-stone-800/40">
+                            {link ? (
+                              <Link to={link.to} params={link.params} search={link.search} title={_('archive.readLocation')} className="block rounded transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 dark:focus-visible:outline-stone-500">
+                                <ClampedText
+                                  text={bookmarkQuote}
+                                  clampClassName="line-clamp-4"
+                                  className="text-xs leading-relaxed text-stone-600 whitespace-pre-wrap break-words dark:text-stone-300"
+                                  expanded
+                                  allowToggle={false}
+                                  onToggle={() => {}}
+                                  expandLabel={_('annotation.expand')}
+                                  collapseLabel={_('annotation.collapse')}
+                                  minLengthForToggle={65}
+                                  theme="app"
+                                />
+                              </Link>
+                            ) : (
+                              <ClampedText
+                                text={bookmarkQuote}
+                                clampClassName="line-clamp-4"
+                                className="text-xs leading-relaxed text-stone-600 whitespace-pre-wrap break-words dark:text-stone-300"
+                                expanded
+                                allowToggle={false}
+                                onToggle={() => {}}
+                                expandLabel={_('annotation.expand')}
+                                collapseLabel={_('annotation.collapse')}
+                                minLengthForToggle={65}
+                                theme="app"
+                              />
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-stone-500 dark:text-stone-400">{_('reader.bookmark')}</span>
+                        )}
+                      </div>
+                      {renderItemTimeMeta(a.createdAt, !!jumpLink(a))}
+                    </div>
+
+                    {customBookmark && hasReadableText(a.contextText) && (
+                      <div className="mt-2 rounded-lg border-l-2 border-blue-300/40 bg-stone-50/50 px-2.5 py-1.5 dark:border-blue-400/25 dark:bg-stone-800/40">
+                        {link ? (
+                          <Link to={link.to} params={link.params} search={link.search} title={_('archive.readLocation')} className="block rounded transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 dark:focus-visible:outline-stone-500">
                             <ClampedText
-                              text={a.text}
-                              clampClassName="line-clamp-2"
-                              className="text-xs leading-relaxed text-stone-500 whitespace-pre-wrap break-words dark:text-stone-400"
+                              text={a.contextText}
+                              clampClassName="line-clamp-3"
+                              className="text-xs leading-relaxed text-stone-600 whitespace-pre-wrap break-words dark:text-stone-300"
                               expanded
                               allowToggle={false}
                               onToggle={() => {}}
                               expandLabel={_('annotation.expand')}
                               collapseLabel={_('annotation.collapse')}
-                              minLengthForToggle={40}
+                              minLengthForToggle={50}
                               theme="app"
                             />
-                          )
-                          return href
-                            ? <a href={href} title={_('archive.readLocation')} className="block rounded transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 dark:focus-visible:outline-stone-500">{quote}</a>
-                            : quote
-                        })()}
+                          </Link>
+                        ) : (
+                          <ClampedText
+                            text={a.contextText}
+                            clampClassName="line-clamp-3"
+                            className="text-xs leading-relaxed text-stone-600 whitespace-pre-wrap break-words dark:text-stone-300"
+                            expanded
+                            allowToggle={false}
+                            onToggle={() => {}}
+                            expandLabel={_('annotation.expand')}
+                            collapseLabel={_('annotation.collapse')}
+                            minLengthForToggle={50}
+                            theme="app"
+                          />
+                        )}
                       </div>
                     )}
-                    <ContentImages images={a.images} />
-                    {renderMeta(a)}
                   </div>
+                </div>
+              )
+            })()}
+            {a.type === 'note' && (
+              <div className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-600 dark:bg-amber-400/10 dark:text-amber-400">
+                  <BulbIcon size={14} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      {a.note ? (
+                        <button
+                          type="button"
+                          onClick={() => { if (!selectionMode) setOpenIdeaId(a.id) }}
+                          title={_('archive.viewIdeaDetail')}
+                          aria-label={_('archive.viewIdeaDetail')}
+                          className="block w-full cursor-pointer text-left transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 dark:focus-visible:outline-stone-500"
+                        >
+                          <ClampedText
+                            text={a.note}
+                            clampClassName="line-clamp-3"
+                            className="text-sm font-medium leading-relaxed text-stone-800 whitespace-pre-wrap break-words dark:text-stone-200"
+                            expanded
+                            allowToggle={false}
+                            onToggle={() => {}}
+                            expandLabel={_('annotation.expand')}
+                            collapseLabel={_('annotation.collapse')}
+                            minLengthForToggle={60}
+                            theme="app"
+                          />
+                        </button>
+                      ) : (
+                        <span className="text-xs text-stone-400">{_('archive.idea')}</span>
+                      )}
+                    </div>
+                    {renderItemTimeMeta(a.createdAt, !!jumpLink(a))}
+                  </div>
+
+                  {a.images && a.images.length > 0 && (
+                    <div className="mt-2.5">
+                      <ContentImages images={a.images} />
+                    </div>
+                  )}
+
+                  {hasReadableText(a.text) && (
+                    <div className={cn(
+                      'rounded-lg border-l-2 border-amber-300/50 bg-stone-500/[0.03] px-2.5 py-1.5 transition-colors hover:border-amber-400 hover:bg-stone-500/[0.06] dark:border-amber-400/30 dark:bg-stone-500/[0.05] dark:hover:border-amber-400/60 dark:hover:bg-stone-500/[0.09]',
+                      (a.note || (a.images && a.images.length > 0)) && 'mt-2.5',
+                    )}>
+                      {(() => {
+                        const link = selectionMode ? null : jumpLink(a)
+                        const quote = (
+                          <ClampedText
+                            text={a.text}
+                            clampClassName="line-clamp-2"
+                            className="text-xs leading-relaxed text-stone-600 whitespace-pre-wrap break-words dark:text-stone-400"
+                            expanded
+                            allowToggle={false}
+                            onToggle={() => {}}
+                            expandLabel={_('annotation.expand')}
+                            collapseLabel={_('annotation.collapse')}
+                            minLengthForToggle={40}
+                            theme="app"
+                          />
+                        )
+                        return link
+                          ? <Link to={link.to} params={link.params} search={link.search} title={_('archive.readLocation')} className="block rounded transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 dark:focus-visible:outline-stone-500">{quote}</Link>
+                          : quote
+                      })()}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -531,22 +682,24 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
   return (
     <div className="flex w-full max-w-3xl flex-col gap-6">
       <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-3 border-b border-stone-200/70 pb-3 dark:border-stone-800/70">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-          aria-label={_('archive.back')}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 12H5" />
-            <path d="m12 19-7-7 7-7" />
-          </svg>
-        </button>
-        <h1 className="min-w-0 truncate text-xl font-bold tracking-tight text-stone-900 dark:text-stone-50">
-          {_('archive.bookNotes')}
-        </h1>
-      </div>
+        {!hideBack && (
+          <div className="flex items-center gap-2 border-b border-stone-200/70 pb-2.5 lg:hidden dark:border-stone-800/70">
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+              aria-label={_('archive.back')}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5" />
+                <path d="m12 19-7-7 7-7" />
+              </svg>
+            </button>
+            <span className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+              {_('archive.bookNotes')}
+            </span>
+          </div>
+        )}
         {book.isPending ? (
           <div role="status" className="flex gap-4">
             <div className="h-24 w-[4.5rem] animate-pulse rounded-xl bg-stone-500/10" />
@@ -559,35 +712,49 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
           <QueryErrorState isRetrying={book.isFetching} onRetry={() => void book.refetch()} />
         ) : (
           <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
-            <BookCover book={book.data.data} size="card" />
+            <div
+              onClick={() => setBookDetailOpen(true)}
+              className="group/cover shrink-0 cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.99]"
+              title={_('library.bookDetails')}
+            >
+              <BookCover book={book.data.data} size="card" />
+            </div>
             <div className="min-w-0 flex-1">
-              <h2 className="truncate text-xl font-bold tracking-tight text-stone-900 dark:text-stone-50">{book.data.data.title}</h2>
-              <p className="truncate text-sm text-stone-500 dark:text-stone-400">
+              <h2
+                onClick={() => setBookDetailOpen(true)}
+                className="cursor-pointer truncate text-xl font-bold tracking-tight text-stone-900 transition-colors hover:text-stone-600 dark:text-stone-50 dark:hover:text-stone-300"
+                title={_('library.bookDetails')}
+              >
+                {book.data.data.title}
+              </h2>
+              <p className="mt-0.5 truncate text-sm text-stone-500 dark:text-stone-400">
                 {[book.data.data.author, readStatusLabel(book.data.data.readStatus, _)].filter(Boolean).join(' · ')}
               </p>
-              <p className="mt-1 flex min-w-0 flex-wrap items-center gap-x-5 text-sm tabular-nums text-stone-500 dark:text-stone-400">
-                {archiveCountParts(headerCounts, _).map((part) => (
-                  <span key={part.key} className="whitespace-nowrap">
-                    {part.label} <span className="font-medium">{part.value}</span>
-                  </span>
-                ))}
-              </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-                <a
-                  href={`/books/${encodeURIComponent(bookVersionId)}`}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-stone-100 px-3 font-medium text-stone-700 transition-colors hover:bg-stone-200 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700 dark:hover:text-white dark:focus-visible:ring-stone-500/60"
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    void navigate({ to: '/books/$id', params: { id: bookVersionId } })
+                  }}
                 >
-                  <BookIcon size={15} />
-                  {_('archive.backToReading')}
-                </a>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                  </svg>
+                  {hasProgress ? _('library.continueReading') : _('library.startReading')}
+                </Button>
                 <button
                   type="button"
-                  onClick={() => { if (selectionMode) exitSelection(); else enterSelection() }}
-                  disabled={!selectionMode && allAnnotations.length === 0}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-stone-200 px-3 font-medium text-stone-500 transition-colors hover:border-stone-300 hover:bg-stone-100 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 disabled:cursor-not-allowed disabled:opacity-40 dark:border-stone-700 dark:text-stone-400 dark:hover:border-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-100 dark:focus-visible:ring-stone-500/60"
+                  onClick={() => setBookDetailOpen(true)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-stone-200/90 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 dark:border-stone-700/80 dark:bg-stone-900/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-100"
                 >
-                  {selectionMode ? <CheckIcon size={15} /> : <BatchSelectIcon size={15} />}
-                  {selectionMode ? _('library.done') : _('annotation.select')}
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="16" x2="12" y2="12" />
+                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                  {_('library.bookDetails')}
                 </button>
               </div>
             </div>
@@ -595,8 +762,10 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200/70 dark:border-stone-800/70">
-        <div role="tablist" aria-label={_('archive.filterByType')} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-5 gap-y-1 px-1">
+      <BookStatsMicroCard bookVersionId={bookVersionId} />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200/70 pb-2 dark:border-stone-800/70">
+        <div role="tablist" aria-label={_('archive.filterByType')} className="flex min-w-0 max-w-full flex-wrap items-center gap-1">
           {TABS.map((t) => (
             <button
               key={t}
@@ -605,26 +774,76 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
               aria-selected={tab === t}
               onClick={() => onChange({ bookType: t })}
               className={cn(
-                '-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-1 pb-2 text-[15px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60',
+                'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60',
                 tab === t
-                  ? 'border-stone-900 font-semibold text-stone-900 dark:border-stone-100 dark:text-stone-50'
-                  : 'border-transparent text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300',
+                  ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
+                  : 'text-stone-500 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
               )}
             >
-              {_(`archive.type${t[0].toUpperCase()}${t.slice(1)}`)}
-              <span className="text-xs font-normal tabular-nums text-stone-400 dark:text-stone-500">{tabCounts[t]}</span>
+              <span>{_(`archive.type${t[0].toUpperCase()}${t.slice(1)}`)}</span>
+              <span
+                className={cn(
+                  'rounded-full px-1.5 py-0.2 text-[11px] tabular-nums',
+                  tab === t
+                    ? 'bg-white/20 font-semibold text-white dark:bg-black/15 dark:text-stone-900'
+                    : 'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400',
+                )}
+              >
+                {tabCounts[t]}
+              </span>
             </button>
           ))}
         </div>
-        <SortMenu
-          value={sort}
-          options={[
-            { value: 'chapter' as const, label: _('archive.sortChapter') },
-            { value: 'recent' as const, label: _('archive.sortRecent') },
-          ]}
-          onChange={(bookSort) => onChange({ bookSort })}
-          label={_('archive.sortBy')}
-        />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => { if (selectionMode) exitSelection(); else enterSelection() }}
+            disabled={!selectionMode && allAnnotations.length === 0}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-stone-200/90 bg-white px-2.5 text-xs font-medium text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 disabled:cursor-not-allowed disabled:opacity-40 dark:border-stone-700/80 dark:bg-stone-900/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+          >
+            {selectionMode ? <CheckIcon size={13} /> : <BatchSelectIcon size={13} />}
+            {selectionMode ? _('library.done') : _('annotation.select')}
+          </button>
+          {tab === 'highlight' && (
+            <HighlightFilterMenu
+              colorFilter={colorFilter}
+              styleFilter={styleFilter}
+              onToggleColor={(c) => {
+                setColorFilter((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(c)) next.delete(c)
+                  else next.add(c)
+                  return next
+                })
+              }}
+              onToggleStyle={(s) => {
+                setStyleFilter((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(s)) next.delete(s)
+                  else next.add(s)
+                  return next
+                })
+              }}
+              onReset={() => {
+                setColorFilter(new Set())
+                setStyleFilter(new Set())
+              }}
+            />
+          )}
+          <SortMenu
+            value={normalizedSort}
+            options={[
+              { value: 'chapter' as const, label: _('reader.sortChapter') },
+              { value: 'chapter-desc' as const, label: _('reader.sortChapterReverse') },
+              { value: 'time-desc' as const, label: _('reader.sortTimeDesc') },
+              { value: 'time-asc' as const, label: _('reader.sortTimeAsc') },
+            ]}
+            onChange={(bookSort) => onChange({ bookSort })}
+            label={_('archive.sortBy')}
+            menuWidth={135}
+            triggerClassName="h-8 gap-1 rounded-lg border border-stone-200/90 bg-white px-2.5 text-xs text-stone-600 hover:border-stone-300 hover:text-stone-900 dark:border-stone-700/80 dark:bg-stone-900/80 dark:text-stone-300 dark:hover:text-stone-100"
+          />
+        </div>
       </div>
 
       {detail.isPending ? (
@@ -678,56 +897,88 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
             </div>
           )}
 
-          {sort === 'recent' ? (
-            recentRecords.length === 0 ? (
+          {isChapterSort ? (
+            <>
+              {normalizedSort === 'chapter' && reviews.length > 0 && (
+                <section aria-label={_('archive.reviews')}>
+                  <div className="mb-3 flex items-center justify-between border-b border-stone-200/60 pb-2 dark:border-stone-800/60">
+                    <h3 className="text-base font-bold text-stone-900 dark:text-stone-50">
+                      {_('archive.reviews')}
+                    </h3>
+                    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium tabular-nums text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+                      {reviews.length}
+                    </span>
+                  </div>
+                  <ul className="flex max-w-3xl flex-col gap-3">
+                    {reviews.map(renderReviewItem)}
+                  </ul>
+                </section>
+              )}
+
+              {annotations.map((group) => {
+                const firstLink = group.list.map((a) => jumpLink(a)).find((link) => link !== null) ?? null
+                return (
+                  <section key={`${group.chapterHref ?? ''}|${group.chapter}`} aria-label={group.chapter}>
+                    <div className="mb-3 flex items-center justify-between border-b border-stone-200/60 pb-2 dark:border-stone-800/60">
+                      {firstLink ? (
+                        <Link
+                          to={firstLink.to}
+                          params={firstLink.params}
+                          search={firstLink.search}
+                          className="min-w-0 text-base font-bold text-stone-900 transition-colors hover:text-stone-600 dark:text-stone-50 dark:hover:text-stone-300"
+                        >
+                          <span className="truncate">{group.chapter}</span>
+                        </Link>
+                      ) : (
+                        <h3 className="min-w-0 text-base font-bold text-stone-900 dark:text-stone-50">
+                          <span className="truncate">{group.chapter}</span>
+                        </h3>
+                      )}
+                      <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium tabular-nums text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+                        {group.list.length}
+                      </span>
+                    </div>
+                    <ul className="flex max-w-3xl flex-col gap-3">
+                      {group.list.map(renderAnnotationItem)}
+                    </ul>
+                  </section>
+                )
+              })}
+
+              {normalizedSort === 'chapter-desc' && reviews.length > 0 && (
+                <section aria-label={_('archive.reviews')}>
+                  <div className="mb-3 flex items-center justify-between border-b border-stone-200/60 pb-2 dark:border-stone-800/60">
+                    <h3 className="text-base font-bold text-stone-900 dark:text-stone-50">
+                      {_('archive.reviews')}
+                    </h3>
+                    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium tabular-nums text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+                      {reviews.length}
+                    </span>
+                  </div>
+                  <ul className="flex max-w-3xl flex-col gap-3">
+                    {reviews.map(renderReviewItem)}
+                  </ul>
+                </section>
+              )}
+
+              {reviews.length === 0 && annotations.length === 0 && (
+                <p className="py-10 text-center text-sm text-stone-500 dark:text-stone-400">{_('archive.noRecords')}</p>
+              )}
+            </>
+          ) : (
+            timeRecords.length === 0 ? (
               <p className="py-10 text-center text-sm text-stone-500 dark:text-stone-400">{_('archive.noRecords')}</p>
             ) : (
               <section aria-label={_('archive.recentRecords')}>
                 <ul className="flex max-w-3xl flex-col gap-3">
-                  {recentRecords.map((record) => record.kind === 'review' ? renderReviewItem(record.item) : renderAnnotationItem(record.item))}
+                  {timeRecords.map((record) =>
+                    record.kind === 'review'
+                      ? renderReviewItem(record.item as Review)
+                      : renderAnnotationItem(record.item as AnnotationRes),
+                  )}
                 </ul>
               </section>
             )
-          ) : (
-            <>
-          {reviews.length > 0 && (
-            <section aria-label={_('archive.reviews')}>
-              <h3 className="mb-2 flex items-center gap-2 text-lg font-bold text-stone-900 dark:text-stone-50">
-                <span className="shrink-0 text-stone-400 dark:text-stone-500"><DocumentIcon /></span>
-                {_('archive.reviews')}
-              </h3>
-              <ul className="flex max-w-3xl flex-col">
-                {reviews.map(renderReviewItem)}
-              </ul>
-            </section>
-          )}
-
-          {annotations.map((group) => {
-            const firstHref = group.list.map((a) => jumpHref(a)).find((href) => href !== null) ?? null
-            return (
-              <section key={`${group.chapterHref ?? ''}|${group.chapter}`} aria-label={group.chapter}>
-                {firstHref ? (
-                  <a href={firstHref} className="mb-2 flex items-center gap-2 text-lg font-bold text-stone-900 transition-colors hover:text-stone-600 dark:text-stone-50 dark:hover:text-stone-300">
-                    <span className="shrink-0 text-stone-400 dark:text-stone-500"><BookIcon /></span>
-                    <span className="min-w-0 truncate">{group.chapter}</span>
-                  </a>
-                ) : (
-                  <h3 className="mb-2 flex items-center gap-2 truncate text-lg font-bold text-stone-900 dark:text-stone-50">
-                    <span className="shrink-0 text-stone-400 dark:text-stone-500"><BookIcon /></span>
-                    <span className="min-w-0 truncate">{group.chapter}</span>
-                  </h3>
-                )}
-                <ul className="flex max-w-3xl flex-col gap-3">
-                  {group.list.map(renderAnnotationItem)}
-                </ul>
-              </section>
-            )
-          })}
-
-          {reviews.length === 0 && annotations.length === 0 && (
-            <p className="py-10 text-center text-sm text-stone-500 dark:text-stone-400">{_('archive.noRecords')}</p>
-          )}
-            </>
           )}
         </div>
       )}
@@ -736,21 +987,32 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
         <AnnotationExportDialog
           bookId={bookVersionId}
           annotations={allAnnotations.filter((a) => selectedIds.has(a.id))}
-          sort={sort === 'recent' ? 'time-desc' : 'chapter'}
+          sort={normalizedSort}
           chapterOrder={chapterOrder}
           onClose={() => setSelectExportOpen(false)}
         />
       )}
       {openReview && (
-        <Modal title={book.data?.data.title ?? _('review.sourceGoneTitle')} onClose={() => setOpenReviewId(null)} closeLabel={_('library.close')} size="xl">
-          <ReviewCard
-            review={openReview}
-            onEdit={(r) => setEditingReviewId(r.id)}
-            onDeleted={() => {
-              setOpenReviewId(null)
-              void detail.refetch()
-            }}
-          />
+        <Modal
+          title={book.data?.data.title ?? _('review.sourceGoneTitle')}
+          onClose={() => {
+            setOpenReviewId(null)
+            void detail.refetch()
+          }}
+          closeLabel={_('library.close')}
+          size="xl"
+          actions={
+            <ReviewDetailHeaderActions
+              review={openReview}
+              onEdit={(r) => setEditingReviewId(r.id)}
+              onDeleted={() => {
+                setOpenReviewId(null)
+                void detail.refetch()
+              }}
+            />
+          }
+        >
+          <ReviewDetailView review={openReview} />
         </Modal>
       )}
       {editingReviewId && (reviewComposer?.bookVersionId && editingReview ? (
@@ -781,6 +1043,7 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
           ideaId={openIdeaId}
           bookVersionId={bookVersionId}
           title={book.data?.data.title ?? _('review.sourceGoneTitle')}
+          theme="app"
           onClose={() => { setOpenIdeaId(null); void detail.refetch() }}
           onShare={(entry) => shareItem(entry.annotation)}
           onEdit={(entry) => { setOpenIdeaId(null); startEdit(entry.annotation.id) }}
@@ -788,6 +1051,16 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
         />
       )}
       <ShareCardDialog bookId={bookVersionId} />
+      {bookDetailOpen && book.data?.data && (
+        <BookDetailDialog
+          book={book.data.data}
+          onClose={() => setBookDetailOpen(false)}
+          onDelete={() => {
+            setBookDetailOpen(false)
+            onBack()
+          }}
+        />
+      )}
       {noteDeleteTarget && (
         <ConfirmDialog
           title={_('archive.deleteIdeaTitle')}

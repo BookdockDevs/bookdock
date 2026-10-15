@@ -153,7 +153,18 @@ export function RootComponent() {
   }
   if (isUpdatePreview) ready = true
 
-  if (!ready) return null
+  if (!ready) {
+    return (
+      <div
+        role="status"
+        aria-busy="true"
+        aria-label={_('common.loading') || '加载中…'}
+        className="flex min-h-screen items-center justify-center bg-stone-50 text-stone-400 dark:bg-stone-950 dark:text-stone-600"
+      >
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-stone-300 border-t-stone-600 dark:border-stone-700 dark:border-t-stone-400 motion-reduce:animate-none" />
+      </div>
+    )
+  }
 
   return (
     <AppShell key={authUser?.id ?? 'anonymous'}>

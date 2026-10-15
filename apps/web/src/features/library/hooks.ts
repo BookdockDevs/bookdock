@@ -42,7 +42,7 @@ import { withReveal } from '@/lib/reveal-hidden'
 import i18n from '@/i18n/i18n'
 import { getErrorKeyByCode, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { fetchSettings, writeStoredSettings } from '@/lib/settings-cache'
+import { fetchSettings, readStoredSettings, writeStoredSettings } from '@/lib/settings-cache'
 
 export interface UseBooksParams {
   page: number
@@ -363,6 +363,9 @@ function useLibraryMutation<TVars extends { libraryId?: string } | Record<string
       void queryClient.invalidateQueries({ queryKey: ['libraries'] })
       if (vars.libraryId) {
         void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId] })
+        void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+        void queryClient.invalidateQueries({ queryKey: ['reviews'] })
+        void queryClient.invalidateQueries({ queryKey: ['archive'] })
       }
     },
   })
@@ -1014,15 +1017,99 @@ export function usePublishPrivateBook() {
   })
 }
 
-/** Per-user library preferences (N-06 default sort modes, view, title normalization). */
-export function useLibraryPrefs(): SettingsRes['library'] {
+export interface LibraryPrefsState {
+  prefs: SettingsRes['library']
+  isReady: boolean
+  isLoading: boolean
+  isError: boolean
+  isFetching: boolean
+  refetch: () => Promise<unknown>
+}
+
+/**
+ * Per-user library preferences with readiness state.
+ * For guests, returns isReady: true with undefined prefs.
+ * For authenticated users, isReady is true only when matching cached
+ * or freshly fetched settings exist.
+ */
+export function useLibraryPrefsState(): LibraryPrefsState {
   const user = useAuthStore((state) => state.user)
-  const { data } = useQuery({
+  const isGuest = !user
+  const query = useQuery<{ data: SettingsRes }>({
     enabled: Boolean(user),
     queryKey: ['settings'],
     queryFn: fetchSettings,
   })
-  return data?.data.library
+
+  if (isGuest) {
+    return {
+      prefs: undefined,
+      isReady: true,
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: async () => {},
+    }
+  }
+
+  return {
+    prefs: query.data?.data.library,
+    isReady: query.data !== undefined,
+    isLoading: query.isLoading,
+    isError: query.isError,
+    isFetching: query.isFetching,
+    refetch: query.refetch,
+  }
+}
+
+/** Per-user library preferences (N-06 default sort modes, view, title normalization). */
+export function useLibraryPrefs(): SettingsRes['library'] {
+  return useLibraryPrefsState().prefs
+}
+
+export interface ProfileSettingsState {
+  profile: NonNullable<SettingsRes['profile']> | undefined
+  isReady: boolean
+  isLoading: boolean
+  isError: boolean
+  isFetching: boolean
+  refetch: () => Promise<unknown>
+}
+
+/**
+ * Per-user preferences for the owner's own profile page with readiness state.
+ */
+export function useProfileSettingsState(): ProfileSettingsState {
+  const user = useAuthStore((state) => state.user)
+  const isGuest = !user
+  const query = useQuery<{ data: SettingsRes }>({
+    enabled: Boolean(user),
+    queryKey: ['settings'],
+    queryFn: fetchSettings,
+  })
+
+  if (isGuest) {
+    return {
+      profile: undefined,
+      isReady: true,
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: async () => {},
+    }
+  }
+
+  const stored = user ? readStoredSettings(user.id) : null
+  const profile = query.data?.data.profile ?? stored?.profile
+
+  return {
+    profile,
+    isReady: profile !== undefined || query.data !== undefined,
+    isLoading: query.isLoading && profile === undefined,
+    isError: query.isError && profile === undefined,
+    isFetching: query.isFetching,
+    refetch: query.refetch,
+  }
 }
 
 /**
@@ -1031,13 +1118,7 @@ export function useLibraryPrefs(): SettingsRes['library'] {
  * not who can see them.
  */
 export function useProfileSettings(): NonNullable<SettingsRes['profile']> {
-  const user = useAuthStore((state) => state.user)
-  const { data } = useQuery({
-    enabled: Boolean(user),
-    queryKey: ['settings'],
-    queryFn: fetchSettings,
-  })
-  return data?.data.profile ?? {}
+  return useProfileSettingsState().profile ?? {}
 }
 
 /** Partial update of the profile blob, with the same optimistic merge the
@@ -1112,11 +1193,13 @@ export function useUpdateLibraryPrefs() {
  * is untouched — this only decides whether the sidebar offers it.
  */
 export function useHiddenLibraries() {
-  const hidden = useLibraryPrefs()?.hiddenLibraryIds
+  const { prefs, isReady } = useLibraryPrefsState()
+  const hidden = prefs?.hiddenLibraryIds
   const update = useUpdateLibraryPrefs()
 
   return {
     hiddenIds: hidden,
+    isReady,
     isHidden: (libraryId: string) => hidden?.includes(libraryId) ?? false,
     setHidden: (libraryId: string, next: boolean) => {
       const current = hidden ?? []

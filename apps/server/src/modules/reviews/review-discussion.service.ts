@@ -1,38 +1,13 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
-import type { ReviewComment, ReviewDiscussion } from '@bookdock/shared'
+import type { ReviewAuthor, ReviewComment, ReviewDiscussion } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookReviewCommentLikes, bookReviewComments, bookReviewLikes } from '../../db/schema'
+import { bookReviewCommentLikes, bookReviewComments, bookReviewLikes, users } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { findCommentReceipt, recordInteractionNotification, saveCommentReceipt } from '../../lib/interaction-notifications'
 import { AppError } from '../../middleware/error'
-import { projectReview, readableReview, reviewAuthor } from './review-access'
-
-function discussionComment(
-  userId: string | null,
-  rows: Array<typeof bookReviewComments.$inferSelect>,
-  comment: typeof bookReviewComments.$inferSelect,
-): ReviewComment {
-  const db = getDb()
-  const likes = db.select().from(bookReviewCommentLikes).where(eq(bookReviewCommentLikes.commentId, comment.id)).all()
-  const replyTo = rows.find((candidate) => candidate.id === comment.replyToId)
-  return {
-    id: comment.id,
-    parentId: comment.parentId,
-    replyToId: comment.replyToId,
-    replyToName: replyTo ? reviewAuthor(replyTo.userId).name : null,
-    author: reviewAuthor(comment.userId),
-    body: comment.deletedAt ? null : comment.body,
-    createdAt: comment.createdAt,
-    editedAt: comment.editedAt,
-    deletedAt: comment.deletedAt,
-    own: userId === comment.userId,
-    canDelete: userId === comment.userId,
-    liked: likes.some((like) => like.userId === userId),
-    likeCount: likes.length,
-  }
-}
+import { projectReview, readableReview } from './review-access'
 
 export async function getReviewDiscussion(userId: string | null, reviewId: string): Promise<ReviewDiscussion> {
   const { row, manager } = await readableReview(userId, reviewId)
@@ -43,20 +18,79 @@ export async function getReviewDiscussion(userId: string | null, reviewId: strin
     .where(eq(bookReviewComments.reviewId, row.id))
     .orderBy(asc(bookReviewComments.createdAt), asc(sql`rowid`))
     .all()
-  // Manager deletes mirror the idea-discussion rule: the author or a current
-  // source manager deletes; private rows are author-only through readableReview.
-  const comments: ReviewComment[] = rows.map((comment) => {
-    const projected = discussionComment(userId, rows, comment)
-    if (manager && comment.userId !== userId) projected.canDelete = true
-    return projected
-  })
-  const likers = db
+
+  const commentIds = rows.map((comment) => comment.id)
+  const likesByComment = new Map<string, Array<{ userId: string }>>()
+  if (commentIds.length > 0) {
+    const allLikes = db
+      .select({ commentId: bookReviewCommentLikes.commentId, userId: bookReviewCommentLikes.userId })
+      .from(bookReviewCommentLikes)
+      .where(inArray(bookReviewCommentLikes.commentId, commentIds))
+      .all()
+    for (const like of allLikes) {
+      const list = likesByComment.get(like.commentId) ?? []
+      list.push(like)
+      likesByComment.set(like.commentId, list)
+    }
+  }
+
+  const reviewLikes = db
     .select()
     .from(bookReviewLikes)
     .where(eq(bookReviewLikes.reviewId, row.id))
     .orderBy(asc(bookReviewLikes.createdAt), asc(bookReviewLikes.userId))
     .all()
-    .map((like) => reviewAuthor(like.userId))
+
+  const userIds = new Set<string>()
+  for (const comment of rows) {
+    if (comment.userId) userIds.add(comment.userId)
+    if (comment.replyToId) {
+      const replyTo = rows.find((candidate) => candidate.id === comment.replyToId)
+      if (replyTo?.userId) userIds.add(replyTo.userId)
+    }
+  }
+  for (const like of reviewLikes) {
+    if (like.userId) userIds.add(like.userId)
+  }
+
+  const authorsById = new Map<string, ReviewAuthor>()
+  if (userIds.size > 0) {
+    const userRows = db
+      .select({ id: users.id, name: users.username, avatarKey: users.avatarKey })
+      .from(users)
+      .where(inArray(users.id, [...userIds]))
+      .all()
+    for (const u of userRows) {
+      authorsById.set(u.id, u)
+    }
+  }
+  const resolveAuthor = (authorId: string | null): ReviewAuthor => {
+    if (!authorId) return { id: '', name: 'Deleted user', avatarKey: null }
+    return authorsById.get(authorId) ?? { id: authorId, name: 'Deleted user', avatarKey: null }
+  }
+
+  const comments: ReviewComment[] = rows.map((comment) => {
+    const likes = likesByComment.get(comment.id) ?? []
+    const replyTo = rows.find((candidate) => candidate.id === comment.replyToId)
+    const projected: ReviewComment = {
+      id: comment.id,
+      parentId: comment.parentId,
+      replyToId: comment.replyToId,
+      replyToName: replyTo ? resolveAuthor(replyTo.userId).name : null,
+      author: resolveAuthor(comment.userId),
+      body: comment.deletedAt ? null : comment.body,
+      createdAt: comment.createdAt,
+      editedAt: comment.editedAt,
+      deletedAt: comment.deletedAt,
+      own: userId === comment.userId,
+      canDelete: userId === comment.userId || (manager && comment.userId !== userId),
+      liked: likes.some((like) => like.userId === userId),
+      likeCount: likes.length,
+    }
+    return projected
+  })
+
+  const likers = reviewLikes.map((like) => resolveAuthor(like.userId))
   return { review: await projectReview(userId, row, manager), comments, likers }
 }
 
@@ -69,13 +103,23 @@ export async function reviewCommentLikers(userId: string | null, reviewId: strin
     .where(and(eq(bookReviewComments.id, commentId), eq(bookReviewComments.reviewId, reviewId), isNull(bookReviewComments.deletedAt)))
     .get()
   if (!comment) throw new AppError('REVIEW_NOT_FOUND')
-  return db
+  const likes = db
     .select()
     .from(bookReviewCommentLikes)
     .where(eq(bookReviewCommentLikes.commentId, commentId))
     .orderBy(asc(bookReviewCommentLikes.createdAt), asc(bookReviewCommentLikes.userId))
     .all()
-    .map((like) => reviewAuthor(like.userId))
+  if (likes.length === 0) return []
+  const userIds = [...new Set(likes.map((l) => l.userId))]
+  const usersById = new Map<string, ReviewAuthor>()
+  for (const u of db
+    .select({ id: users.id, name: users.username, avatarKey: users.avatarKey })
+    .from(users)
+    .where(inArray(users.id, userIds))
+    .all()) {
+    usersById.set(u.id, u)
+  }
+  return likes.map((like) => usersById.get(like.userId) ?? { id: like.userId, name: 'Deleted user', avatarKey: null })
 }
 
 export async function createReviewComment(userId: string, reviewId: string, input: { requestId?: string; body: string; replyToId?: string }) {

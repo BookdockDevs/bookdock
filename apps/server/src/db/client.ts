@@ -303,6 +303,8 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
 
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
   migrate(db, { migrationsFolder })
+  const { importProgressFiles } = await import('../modules/progress/progress-migration')
+  await importProgressFiles(db)
 }
 
 /**

@@ -26,7 +26,6 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
   const _ = useTranslation()
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [menuId, setMenuId] = useState<string | null>(null)
   const panelRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const previousActiveRef = useRef<HTMLElement | null>(null)
@@ -106,18 +105,8 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
   useEffect(() => {
     if (!open) {
       setSelectedId(null)
-      setMenuId(null)
     }
-  }, [open ])
-
-  useEffect(() => {
-    if (!menuId) return
-    const closeMenu = (event: MouseEvent) => {
-      if (!(event.target instanceof HTMLElement) || !event.target.closest('[data-notification-menu]')) setMenuId(null)
-    }
-    document.addEventListener('mousedown', closeMenu)
-    return () => document.removeEventListener('mousedown', closeMenu)
-  }, [menuId])
+  }, [open])
 
   if (!open || !position) return null
 
@@ -132,7 +121,6 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
 
   const deleteEntry = (id: string) => {
     remove.mutate(id, {
-      onSuccess: () => setMenuId(null),
       onError: (error) => notify.error(getUserErrorNotification(error, 'notificationDrawer.deleteFailed')),
     })
   }
@@ -175,23 +163,43 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
             : list.isError ? <QueryErrorState className="px-4 py-8" isRetrying={list.isFetching} onRetry={() => void list.refetch()} />
               : entries.length === 0 ? <p role="status" className="px-4 py-12 text-center text-sm text-stone-500 dark:text-stone-400">{_(unreadOnly ? 'notificationDrawer.noUnread' : 'notificationDrawer.noNotifications')}</p>
                 : <ul className="divide-y divide-stone-100 dark:divide-stone-800">
-                  {entries.map((entry) => <li key={entry.id} className={`relative px-4 py-3.5 transition-colors ${entry.readAt === null ? 'bg-stone-50/80 dark:bg-stone-800/35' : ''}`}>
-                    <button type="button" onClick={() => openNotification(entry.id, entry.readAt)} className="block w-full pr-10 text-left focus:outline-hidden focus-visible:ring-2 focus-visible:ring-stone-400">
-                      <div className="flex items-start gap-2.5">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-100 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300">{entry.actor.name.slice(0, 1).toUpperCase()}</span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm text-stone-900 dark:text-stone-100"><span className="font-semibold">{entry.actor.name}</span> {_(notificationActionKey(entry))}</p>
-                          <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-sm text-stone-500 dark:text-stone-400">{entry.preview}</p>
-                          <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{formatRelativeTime(_, entry.createdAt)}</p>
+                  {entries.map((entry) => (
+                    <li
+                      key={entry.id}
+                      className={`group relative px-4 py-3.5 transition-colors ${entry.readAt === null ? 'bg-stone-50/80 dark:bg-stone-800/35' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openNotification(entry.id, entry.readAt)}
+                        className="block w-full pr-10 text-left focus:outline-hidden focus-visible:ring-2 focus-visible:ring-stone-400"
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-100 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300">{entry.actor.name.slice(0, 1).toUpperCase()}</span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-stone-900 dark:text-stone-100"><span className="font-semibold">{entry.actor.name}</span> {_(notificationActionKey(entry))}</p>
+                            <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-sm text-stone-500 dark:text-stone-400">{entry.preview}</p>
+                            <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{formatRelativeTime(_, entry.createdAt)}</p>
+                          </div>
                         </div>
-                      </div>
-                    </button>
-                    {entry.readAt === null && <span data-testid="notification-unread-dot" aria-label={_('notificationCenter.unread')} className="pointer-events-none absolute right-11 top-5 h-2 w-2 rounded-full bg-blue-500" />}
-                    <button type="button" data-notification-menu aria-label={_('notificationDrawer.more')} title={_('notificationDrawer.more')} onClick={(event) => { event.stopPropagation(); setMenuId(menuId === entry.id ? null : entry.id) }} className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
-                    </button>
-                    {menuId === entry.id && <div data-notification-menu className="absolute right-3 top-10 z-10 min-w-24 rounded-lg border border-stone-200 bg-white p-1 shadow-lg dark:border-stone-700 dark:bg-stone-900"><button type="button" disabled={remove.isPending} onClick={() => deleteEntry(entry.id)} className="w-full rounded-md px-2.5 py-1.5 text-left text-xs text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/30">{_('notificationDrawer.delete')}</button></div>}
-                  </li>)}
+                      </button>
+                      {entry.readAt === null && <span data-testid="notification-unread-dot" aria-label={_('notificationCenter.unread')} className="pointer-events-none absolute right-11 top-5 h-2 w-2 rounded-full bg-blue-500" />}
+                      <button
+                        type="button"
+                        disabled={remove.isPending}
+                        aria-label={_('notificationDrawer.delete')}
+                        title={_('notificationDrawer.delete')}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          deleteEntry(entry.id)
+                        }}
+                        className="absolute right-3 top-3.5 flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-400 cursor-pointer max-md:opacity-100"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2 2V6h14z" />
+                        </svg>
+                      </button>
+                    </li>
+                  ))}
                   {list.isFetchingNextPage && <li role="status" className="p-4 text-center text-xs text-stone-400">{_('notificationDrawer.loadingMore')}</li>}
                 </ul>}
         </div>

@@ -10,7 +10,7 @@ export function useUnreadNotifications() {
   return useQuery({
     queryKey: ['notifications', user?.id, 'unread'],
     queryFn: () => apiGet<{ data: { count: number } }>('/notifications/unread'),
-    enabled: Boolean(user), staleTime: 0, refetchInterval: 30_000, refetchOnWindowFocus: true,
+    enabled: Boolean(user), staleTime: 10_000, refetchInterval: 30_000, refetchOnWindowFocus: true,
   })
 }
 
@@ -19,7 +19,7 @@ export function useNotifications(page: number) {
   return useQuery({
     queryKey: ['notifications', user?.id, 'page', page],
     queryFn: () => apiGet<{ data: NotificationPage }>(`/notifications?page=${page}`),
-    enabled: Boolean(user), staleTime: 0, refetchInterval: 30_000, refetchOnWindowFocus: true,
+    enabled: Boolean(user), staleTime: 30_000,
   })
 }
 
@@ -30,7 +30,7 @@ export function useInfiniteNotifications(unreadOnly: boolean, enabled = true) {
     queryFn: ({ pageParam }) => apiGet<{ data: NotificationPage }>(`/notifications?page=${pageParam}${unreadOnly ? '&unread=true' : ''}`),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.data.hasMore ? lastPage.data.page + 1 : undefined,
-    enabled: Boolean(user && enabled), staleTime: 0, refetchInterval: 30_000, refetchOnWindowFocus: true,
+    enabled: Boolean(user && enabled), staleTime: 30_000,
   })
 }
 
@@ -39,24 +39,38 @@ export function useNotificationTarget(id?: string) {
   return useQuery({
     queryKey: ['notifications', user?.id, 'target', id],
     queryFn: () => apiGet<{ data: NotificationTarget }>(`/notifications/${encodeURIComponent(id!)}/target`),
-    enabled: Boolean(user && id), staleTime: 0, refetchInterval: 30_000, refetchOnWindowFocus: true,
+    enabled: Boolean(user && id), staleTime: 60_000,
   })
 }
 
 export function useNotificationRead() {
   const client = useQueryClient()
+  const user = useAuthStore((state) => state.user)
   return useMutation({
     mutationFn: (input: { id: string; read: boolean } | { all: true }) => 'all' in input
       ? apiPut('/notifications/read-all', {})
       : apiPut(`/notifications/${encodeURIComponent(input.id)}/read`, { read: input.read }),
-    onSettled: () => client.invalidateQueries({ queryKey: ['notifications'] }),
+    onSettled: (_data, _error, input) => {
+      if ('all' in input) {
+        client.invalidateQueries({ queryKey: ['notifications', user?.id] })
+        return
+      }
+      client.invalidateQueries({ queryKey: ['notifications', user?.id, 'unread'] })
+      client.invalidateQueries({ queryKey: ['notifications', user?.id, 'page'] })
+      client.invalidateQueries({ queryKey: ['notifications', user?.id, 'drawer'] })
+    },
   })
 }
 
 export function useNotificationDelete() {
   const client = useQueryClient()
+  const user = useAuthStore((state) => state.user)
   return useMutation({
     mutationFn: (id: string) => apiDelete(`/notifications/${encodeURIComponent(id)}`),
-    onSettled: () => client.invalidateQueries({ queryKey: ['notifications'] }),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: ['notifications', user?.id, 'unread'] })
+      client.invalidateQueries({ queryKey: ['notifications', user?.id, 'page'] })
+      client.invalidateQueries({ queryKey: ['notifications', user?.id, 'drawer'] })
+    },
   })
 }

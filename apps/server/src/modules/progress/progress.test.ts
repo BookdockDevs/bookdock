@@ -2,17 +2,21 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { BOOK_STATE_PROGRESS_TAG, migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import { Readable } from 'node:stream'
 import path from 'node:path'
+import fs from 'node:fs'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
+import { LocalFsDriver } from '../../storage/localfs'
 import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
-import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
+import { deleteProgressFile, mergeProgressInterval, readProgressFile, writeProgressFile } from '../../lib/progress-file'
+import { importProgressFiles, isProgressMigrationCompleted, PROGRESS_MIGRATION_BATCH } from './progress-migration'
 import { getProgress, upsertProgress } from './progress.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -22,7 +26,7 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [BOOK_STATE_PROGRESS_TAG])
   return db
 }
 
@@ -308,5 +312,196 @@ describe('progress service', () => {
     const loaded = await getProgress(ownerId, bookId)
     expect(loaded!.fraction).toBeNull()
     expect(loaded!.readFraction).toBeCloseTo(0.3)
+  })
+
+  it('merges concurrent disjoint intervals without losing data', async () => {
+    // Concurrently submit two disjoint intervals
+    await Promise.all([
+      mergeProgressInterval(ownerId, bookId, [0, 0.1]),
+      mergeProgressInterval(ownerId, bookId, [0.5, 0.6]),
+    ])
+    const loaded = await readProgressFile(ownerId, bookId)
+    expect(loaded).not.toBeNull()
+    expect(loaded!.intervals).toEqual([
+      [0, 0.1],
+      [0.5, 0.6],
+    ])
+    const state = db.select().from(schema.bookStates)
+      .where(eq(schema.bookStates.bookVersionId, bookId)).get()!
+    expect(state.readFraction).toBeCloseTo(0.2)
+  })
+
+  it('does not probe storage for unread books after migration completes', async () => {
+    // Complete the migration checkpoint
+    await importProgressFiles(db)
+    expect(isProgressMigrationCompleted(db)).toBe(true)
+
+    const unreadBookId = createId('book')
+    const spyExists = vi.spyOn(storage.getStorage(), 'exists')
+    const result = await readProgressFile(ownerId, unreadBookId)
+    expect(result).toBeNull()
+    // Should NOT have called storage.exists
+    expect(spyExists).not.toHaveBeenCalled()
+  })
+
+  it('merges concurrent disjoint intervals in upsertProgress without losing data', async () => {
+    await Promise.all([
+      upsertProgress(ownerId, bookId, { percent: 10, fraction: 0.1, segmentStartFraction: 0 }),
+      upsertProgress(ownerId, bookId, { percent: 60, fraction: 0.6, segmentStartFraction: 0.5 }),
+    ])
+    const loaded = await readProgressFile(ownerId, bookId)
+    expect(loaded).not.toBeNull()
+    expect(loaded!.intervals).toEqual([
+      [0, 0.1],
+      [0.5, 0.6],
+    ])
+    const state = db.select({ readFraction: schema.bookStates.readFraction }).from(schema.bookStates)
+      .where(eq(schema.bookStates.bookVersionId, bookId)).get()!
+    expect(state.readFraction).toBeCloseTo(0.2)
+  })
+
+  it('does not write or mirror to storage on upsertProgress or mergeProgressInterval', async () => {
+    const memory = createMemoryStorage()
+    const spyPut = vi.spyOn(memory.driver, 'put')
+    vi.spyOn(storage, 'getStorage').mockReturnValue(memory.driver)
+
+    await upsertProgress(ownerId, bookId, { percent: 25, fraction: 0.25 })
+    await mergeProgressInterval(ownerId, bookId, [0.3, 0.4])
+
+    expect(spyPut).not.toHaveBeenCalled()
+
+    const state = db.select({
+      percent: schema.bookStates.percent,
+      readFraction: schema.bookStates.readFraction,
+    }).from(schema.bookStates).where(eq(schema.bookStates.bookVersionId, bookId)).get()!
+    expect(state.percent).toBe(25)
+    expect(state.readFraction).toBeCloseTo(0.35)
+  })
+
+  it('imports legacy progress from real LocalFsDriver storage layout without missing files', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookdock-fs-'))
+    try {
+      const driver = new LocalFsDriver(path.join(tmpDir, 'files'))
+      vi.spyOn(storage, 'getStorage').mockReturnValue(driver)
+
+      await driver.put(
+        `progress/${ownerId}/${bookId}.json`,
+        Buffer.from(JSON.stringify({ percent: 40, intervals: [[0, 0.4]], updatedAt: 1000 })),
+      )
+
+      const report = await importProgressFiles(db)
+      expect(report.scanned).toBe(1)
+      expect(report.imported).toBe(1)
+      expect(report.anomalies.length).toBe(0)
+      expect(isProgressMigrationCompleted(db)).toBe(true)
+
+      const loaded = await readProgressFile(ownerId, bookId)
+      expect(loaded).not.toBeNull()
+      expect(loaded!.percent).toBe(40)
+      expect(loaded!.intervals).toEqual([[0, 0.4]])
+
+      const state = db.select({ readFraction: schema.bookStates.readFraction }).from(schema.bookStates)
+        .where(eq(schema.bookStates.bookVersionId, bookId)).get()!
+      expect(state.readFraction).toBeCloseTo(0.4)
+
+      // Restart idempotency
+      const secondReport = await importProgressFiles(db)
+      expect(secondReport.scanned).toBe(0)
+      expect(secondReport.imported).toBe(0)
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  it('marks failed when malformed files exist via LocalFsDriver and recovers after fix', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookdock-fs-'))
+    try {
+      const driver = new LocalFsDriver(path.join(tmpDir, 'files'))
+      vi.spyOn(storage, 'getStorage').mockReturnValue(driver)
+
+      await driver.put(`progress/${ownerId}/${bookId}.json`, Buffer.from('not valid json {{{'))
+
+      const report1 = await importProgressFiles(db)
+      expect(report1.anomalies.length).toBeGreaterThan(0)
+      expect(isProgressMigrationCompleted(db)).toBe(false)
+
+      // Fix corrupted file
+      await driver.put(
+        `progress/${ownerId}/${bookId}.json`,
+        Buffer.from(JSON.stringify({ percent: 50, intervals: [[0, 0.5]], updatedAt: 2000 })),
+      )
+
+      const report2 = await importProgressFiles(db)
+      expect(report2.imported).toBe(1)
+      expect(report2.anomalies.length).toBe(0)
+      expect(isProgressMigrationCompleted(db)).toBe(true)
+
+      const loaded = await readProgressFile(ownerId, bookId)
+      expect(loaded?.percent).toBe(50)
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  it('invalidates erroneous v1 completed log and does not overwrite newer DB progress', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookdock-fs-'))
+    try {
+      const driver = new LocalFsDriver(path.join(tmpDir, 'files'))
+      vi.spyOn(storage, 'getStorage').mockReturnValue(driver)
+
+      // Insert erroneous v1 completed log
+      db.insert(schema.libraryMigrationLog).values({
+        id: createId('mlog'),
+        batch: 'phase1-progress-database-migration',
+        status: 'completed',
+        startedAt: 1,
+        finishedAt: 2,
+        details: { scanned: 0, imported: 0 },
+      }).run()
+
+      // Legacy file has older 0.4 progress
+      await driver.put(
+        `progress/${ownerId}/${bookId}.json`,
+        Buffer.from(JSON.stringify({ percent: 40, intervals: [[0, 0.4]], updatedAt: 1000 })),
+      )
+
+      // DB already has newer 0.8 progress recorded
+      db.insert(schema.bookStates).values({
+        userId: ownerId,
+        bookVersionId: bookId,
+        readStatus: 'reading',
+        percent: 80,
+        progressData: { percent: 80, intervals: [[0, 0.8]], updatedAt: 3000 },
+        readFraction: 0.8,
+        updatedAt: 3000,
+      }).run()
+
+      const report = await importProgressFiles(db)
+      expect(report.scanned).toBe(1)
+      expect(report.skipped).toBe(1)
+      expect(report.imported).toBe(0)
+      expect(isProgressMigrationCompleted(db)).toBe(true)
+
+      // DB state must be preserved
+      const state = db.select().from(schema.bookStates)
+        .where(eq(schema.bookStates.bookVersionId, bookId)).get()!
+      expect(state.readFraction).toBeCloseTo(0.8)
+      expect((state.progressData as any).percent).toBe(80)
+
+      // Erroneous v1 log should be wiped
+      const v1Logs = db.select().from(schema.libraryMigrationLog)
+        .where(eq(schema.libraryMigrationLog.batch, 'phase1-progress-database-migration')).all()
+      expect(v1Logs.length).toBe(0)
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  it('returns true when a failed log exists followed by a completed log', () => {
+    db.insert(schema.libraryMigrationLog).values([
+      { id: createId('mlog'), batch: PROGRESS_MIGRATION_BATCH, status: 'failed', startedAt: 1, finishedAt: 2, details: {} },
+      { id: createId('mlog'), batch: PROGRESS_MIGRATION_BATCH, status: 'completed', startedAt: 3, finishedAt: 4, details: {} },
+    ]).run()
+    expect(isProgressMigrationCompleted(db)).toBe(true)
   })
 })

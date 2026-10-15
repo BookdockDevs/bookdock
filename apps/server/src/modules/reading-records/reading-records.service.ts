@@ -7,6 +7,7 @@ import type {
   ReadingRecordCreateReq,
   ReadingRecordDailyItem,
   ReadingRecordHourlyItem,
+  ReadingRecordMonthlyComparison,
   ReadingRecordSummaryRes,
   ReadingRecordTagItem,
   ReadingSessionItem,
@@ -16,10 +17,10 @@ import type {
 import { getDb } from '../../db/client'
 import { bookStates, bookVersions, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryTags, readingRecords, readingSessions } from '../../db/schema'
 import { createId } from '../../lib/id'
-import { unionLength } from '../../lib/intervals'
-import { mergeProgressInterval, readProgressFile } from '../../lib/progress-file'
+import { mergeProgressIntervalInTx, readProgressFile } from '../../lib/progress-file'
 import { assertReadableBook, getBook } from '../books/books.service'
 import { loadLibraryHiddenTaxonomy } from '../libraries/library-query'
+import { isProgressMigrationCompleted } from '../progress/progress-migration'
 import { AppError } from '../../middleware/error'
 
 /**
@@ -63,40 +64,47 @@ export async function addReadingTime(userId: string, body: ReadingRecordCreateRe
   // New rows bind the version when the book already migrated; history keeps
   // flowing through bookId either way (0.3 id reuse).
   const bookVersionId = versionIdIfMigrated(body.bookId)
-  db.insert(readingRecords).values({
-    id: createId('rr'),
-    userId,
-    bookId: body.bookId,
-    bookVersionId,
-    date: body.date,
-    durationSeconds: body.durationSeconds,
-  }).onConflictDoUpdate({
-    target: [readingRecords.userId, readingRecords.bookId, readingRecords.date],
-    set: { durationSeconds: sql`${readingRecords.durationSeconds} + ${body.durationSeconds}` },
-  }).run()
-  db.insert(readingSessions).values({
-    id: createId('rs'),
-    userId,
-    bookId: body.bookId,
-    bookVersionId,
-    date: body.date,
-    // Explicit null = retroactive entry without a known start time
-    startedAt: body.startedAt === undefined ? Date.now() : body.startedAt,
-    durationSeconds: body.durationSeconds,
-    endedAt: body.endedAt,
-    startCfi: body.startCfi,
-    endCfi: body.endCfi,
-    startFraction: body.startFraction,
-    endFraction: body.endFraction,
-    startChapterIndex: body.startChapterIndex,
-    endChapterIndex: body.endChapterIndex,
-  }).run()
-  // Retroactive entries may carry an explicit read range: merge it into the
-  // book's interval union. This is a pure interval merge — the current
-  // reading position (cfi/percent/lastReadAt) stays untouched.
-  if (body.startFraction !== undefined && body.endFraction !== undefined) {
-    await mergeProgressInterval(userId, body.bookId, [body.startFraction, body.endFraction])
+
+  if (body.startFraction !== undefined && body.endFraction !== undefined && !isProgressMigrationCompleted(db)) {
+    await readProgressFile(userId, body.bookId)
   }
+
+  db.transaction((tx) => {
+    tx.insert(readingRecords).values({
+      id: createId('rr'),
+      userId,
+      bookId: body.bookId,
+      bookVersionId,
+      date: body.date,
+      durationSeconds: body.durationSeconds,
+    }).onConflictDoUpdate({
+      target: [readingRecords.userId, readingRecords.bookId, readingRecords.date],
+      set: { durationSeconds: sql`${readingRecords.durationSeconds} + ${body.durationSeconds}` },
+    }).run()
+    tx.insert(readingSessions).values({
+      id: createId('rs'),
+      userId,
+      bookId: body.bookId,
+      bookVersionId,
+      date: body.date,
+      // Explicit null = retroactive entry without a known start time
+      startedAt: body.startedAt === undefined ? Date.now() : body.startedAt,
+      durationSeconds: body.durationSeconds,
+      endedAt: body.endedAt,
+      startCfi: body.startCfi,
+      endCfi: body.endCfi,
+      startFraction: body.startFraction,
+      endFraction: body.endFraction,
+      startChapterIndex: body.startChapterIndex,
+      endChapterIndex: body.endChapterIndex,
+    }).run()
+    // Retroactive entries may carry an explicit read range: merge it into the
+    // book's interval union atomically within the same transaction.
+    if (body.startFraction !== undefined && body.endFraction !== undefined) {
+      mergeProgressIntervalInTx(tx as unknown as ReturnType<typeof getDb>, userId, body.bookId, [body.startFraction, body.endFraction])
+    }
+  })
+
   return db.select().from(readingRecords).where(and(
     eq(readingRecords.userId, userId),
     eq(readingRecords.bookId, body.bookId),
@@ -139,22 +147,68 @@ async function computeTotalWordsRead(userId: string, showHidden = false): Promis
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
   if (!library) return 0
-  const skips = showHidden ? new Set<string>() : new Set(hiddenBookVersionIds(db, userId))
-  const versions = db.select({ versionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+
+  const skips = showHidden ? [] : hiddenBookVersionIds(db, userId)
+  const skipsSet = new Set(skips)
+
+  const versionRows = db.selectDistinct({ versionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
     .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
     .where(and(eq(libraryBookVersions.libraryId, library.id), isNull(libraryBooks.deletedAt)))
     .all()
-  let total = 0
-  for (const { versionId } of versions) {
-    if (skips.has(versionId)) continue
-    const revision = db.select({ wordCount: contentRevisions.wordCount }).from(contentRevisions)
-      .where(eq(contentRevisions.bookVersionId, versionId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
-    const wordCount = revision?.wordCount
-    if (typeof wordCount !== 'number' || wordCount <= 0) continue
-    const progress = await readProgressFile(userId, versionId)
-    if (!progress?.intervals) continue
-    total += unionLength(progress.intervals) * wordCount
+
+  const eligibleVersions = versionRows
+    .map((r) => r.versionId)
+    .filter((id) => !skipsSet.has(id))
+
+  if (eligibleVersions.length === 0) return 0
+
+  // Fallback to legacy files only if migration has not yet run
+  if (!isProgressMigrationCompleted(db)) {
+    for (const vId of eligibleVersions) {
+      const state = db.select({ readFraction: bookStates.readFraction, progressData: bookStates.progressData })
+        .from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, vId))).get()
+      if (!state || state.progressData === null) {
+        await readProgressFile(userId, vId)
+      }
+    }
   }
+
+  const stateRows = db.select({
+    bookVersionId: bookStates.bookVersionId,
+    readFraction: bookStates.readFraction,
+  }).from(bookStates)
+    .where(and(
+      eq(bookStates.userId, userId),
+      inArray(bookStates.bookVersionId, eligibleVersions),
+      sql`${bookStates.readFraction} > 0`,
+    )).all()
+
+  if (stateRows.length === 0) return 0
+
+  const readVersionIds = stateRows.map((r) => r.bookVersionId)
+  const fractionMap = new Map(stateRows.map((r) => [r.bookVersionId, r.readFraction]))
+
+  const cr = contentRevisions
+  const revisionRows = db.all<{ bookVersionId: string; wordCount: number }>(sql`
+    SELECT cr.book_version_id AS bookVersionId, cr.word_count AS wordCount
+    FROM ${cr} cr
+    WHERE cr.book_version_id IN ${readVersionIds}
+      AND cr.revision_no = (
+        SELECT max(cr2.revision_no)
+        FROM ${cr} cr2
+        WHERE cr2.book_version_id = cr.book_version_id
+      )
+      AND cr.word_count > 0
+  `)
+
+  let total = 0
+  for (const rev of revisionRows) {
+    const fraction = fractionMap.get(rev.bookVersionId)
+    if (fraction && rev.wordCount) {
+      total += fraction * rev.wordCount
+    }
+  }
+
   return Math.round(total)
 }
 
@@ -199,6 +253,58 @@ export async function getSummary(userId: string, today: string, showHidden = fal
     else if (row.date >= prevWeekStart) prevWeekSeconds += row.durationSeconds
   }
 
+  // Same-period month-to-date comparison
+  const [curYear, curMonth, curDay] = today.split('-').map(Number)
+  const prevYear = curMonth === 1 ? curYear - 1 : curYear
+  const prevMonth = curMonth === 1 ? 12 : curMonth - 1
+  const thisMonthFrom = `${curYear}-${String(curMonth).padStart(2, '0')}-01`
+  const thisMonthTo = today
+  const prevMonthFrom = `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`
+  const prevMonthEndDay = new Date(Date.UTC(prevYear, prevMonth, 0)).getUTCDate()
+  const prevMonthTo = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(Math.min(curDay, prevMonthEndDay)).padStart(2, '0')}`
+
+  const comparisonRows = db.select({
+    date: readingRecords.date,
+    bookId: readingRecords.bookId,
+    durationSeconds: readingRecords.durationSeconds,
+  }).from(readingRecords)
+    .where(and(
+      eq(readingRecords.userId, userId),
+      gte(readingRecords.date, prevMonthFrom),
+      lte(readingRecords.date, thisMonthTo),
+      visibleRecords,
+    ))
+    .all()
+
+  let currentPeriodSeconds = 0
+  let previousPeriodSeconds = 0
+  const currentBooks = new Set<string>()
+  const previousBooks = new Set<string>()
+  const currentDays = new Set<string>()
+  const previousDays = new Set<string>()
+
+  for (const r of comparisonRows) {
+    if (r.date >= thisMonthFrom && r.date <= thisMonthTo) {
+      currentPeriodSeconds += r.durationSeconds
+      currentBooks.add(r.bookId)
+      currentDays.add(r.date)
+    }
+    if (r.date >= prevMonthFrom && r.date <= prevMonthTo) {
+      previousPeriodSeconds += r.durationSeconds
+      previousBooks.add(r.bookId)
+      previousDays.add(r.date)
+    }
+  }
+
+  const monthlyComparison: ReadingRecordMonthlyComparison = {
+    currentPeriodSeconds,
+    previousPeriodSeconds,
+    currentPeriodBooks: currentBooks.size,
+    previousPeriodBooks: previousBooks.size,
+    currentPeriodDays: currentDays.size,
+    previousPeriodDays: previousDays.size,
+  }
+
   const totalWordsRead = await computeTotalWordsRead(userId, showHidden)
   return {
     ...totals,
@@ -210,6 +316,7 @@ export async function getSummary(userId: string, today: string, showHidden = fal
     monthSeconds,
     prevMonthSeconds,
     totalWordsRead,
+    monthlyComparison,
   }
 }
 
@@ -271,18 +378,34 @@ export async function getByBook(userId: string, range: { from?: string; to?: str
     .groupBy(readingRecords.bookId)
     .orderBy(desc(sql`sum(${readingRecords.durationSeconds})`))
     .all()
-  // Aggregate before resolving display data: a version can appear in many
-  // libraries, but each user's seconds must be counted exactly once.
+
+  if (totals.length === 0) return []
+
+  const bookIds = totals.map((row) => row.bookId)
+  const privateCards = db.select({
+    bookVersionId: libraryBookVersions.bookVersionId,
+    title: sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title})`,
+    author: sql<string>`coalesce(${libraryBookVersions.author}, ${libraryBooks.author})`,
+    coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey})`,
+  }).from(libraryBookVersions)
+    .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
+    .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+    .where(and(
+      inArray(libraryBookVersions.bookVersionId, bookIds),
+      eq(libraries.userId, userId),
+      eq(libraries.type, 'private'),
+    )).all()
+
+  const cardMap = new Map<string, { title: string; author: string; coverKey: string | null }>()
+  for (const card of privateCards) {
+    if (!cardMap.has(card.bookVersionId)) {
+      cardMap.set(card.bookVersionId, { title: card.title, author: card.author, coverKey: card.coverKey })
+    }
+  }
+
   return Promise.all(totals.map(async (row) => {
-    const privateCard = db.select({
-      title: sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title})`,
-      author: sql<string>`coalesce(${libraryBookVersions.author}, ${libraryBooks.author})`,
-      coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey})`,
-    }).from(libraryBookVersions)
-      .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
-      .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
-      .where(and(eq(libraryBookVersions.bookVersionId, row.bookId), eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
-    if (privateCard) return { ...row, ...privateCard }
+    const cached = cardMap.get(row.bookId)
+    if (cached) return { ...row, ...cached }
     try {
       const book = await getBook(userId, row.bookId, { showHidden })
       return { ...row, title: book.title, author: book.author, coverKey: book.coverKey }

@@ -28,7 +28,8 @@ export default function ReadStatusChip({ book, readOnly, onFilter }: ReadStatusC
         icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={option.iconClass} aria-hidden="true">{option.icon}</svg>,
       }))}
       editable={!readOnly}
-      disabled={updateBook.isPending}
+      busy={updateBook.isPending}
+      disabled={readOnly || updateBook.isPending}
       onFilter={onFilter}
       onSelect={(value) => updateBook.mutate({ bookId: book.id, readStatus: value as ReadStatus })}
     />

@@ -14,7 +14,7 @@ export function useIdeaComposer(bookId: string, enabled = true) {
     queryKey: ['idea-composer', bookId],
     queryFn: () => apiGet<{ data: IdeaComposerContext }>(`/ideas/book/${bookId}/composer`),
     enabled: !!bookId && enabled,
-    staleTime: 0,
+    staleTime: 30_000,
   })
 }
 
@@ -30,7 +30,7 @@ export function useReaderIdeas(bookId: string, enabled = true) {
     queryKey: ['reader-ideas', bookId, source?.libraryId, source?.libraryBookVersionId, revisionId],
     queryFn: () => apiGet<{ data: ReaderIdea[] }>(`/ideas/book/${bookId}?${new URLSearchParams({ libraryId: source!.libraryId, listingId: source!.libraryBookVersionId!, revisionId: revisionId! })}`),
     enabled: enabled && !!source?.libraryBookVersionId && !!revisionId,
-    staleTime: 0,
+    staleTime: 30_000,
   })
 }
 
@@ -41,7 +41,7 @@ export function useIdeaDiscussion(ideaId: string | null, bookId: string) {
     queryKey: ['idea-discussion', ideaId, revisionId],
     queryFn: () => apiGet<{ data: IdeaDiscussion }>(`/ideas/${ideaId}${revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : ''}`),
     enabled: !!ideaId && !ideaId.startsWith('temp-'),
-    staleTime: 0,
+    staleTime: 30_000,
   })
 }
 

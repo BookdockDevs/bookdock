@@ -31,8 +31,23 @@
   --scrollbar-thumb-active: color-mix(in srgb, var(--color-stone-400) 64%, var(--color-stone-900));
 }
 
+html,
 body {
   margin: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 9999px;
 }
 
 /* Reader sidebar resize handle & active dragging cursor */

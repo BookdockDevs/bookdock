@@ -12,7 +12,7 @@ export function useReviewBookContext(bookVersionId: string | null, enabled = tru
     queryKey: ['reviews', 'book', bookVersionId],
     queryFn: () => apiGet<{ data: ReviewBookContext }>(`/reviews/by-book/${bookVersionId}`),
     enabled: Boolean(bookVersionId) && enabled,
-    staleTime: 0,
+    staleTime: 30_000,
   })
 }
 
@@ -24,7 +24,7 @@ export function useReviewWorkContext(libraryId: string | null, libraryBookId: st
         `/reviews/work?${new URLSearchParams({ libraryId: libraryId!, libraryBookId: libraryBookId! })}`,
       ),
     enabled: Boolean(libraryId) && Boolean(libraryBookId) && enabled,
-    staleTime: 0,
+    staleTime: 30_000,
   })
 }
 
@@ -33,7 +33,7 @@ export function useReviewDiscussion(reviewId: string | null, enabled = true) {
     queryKey: ['reviews', 'discussion', reviewId],
     queryFn: () => apiGet<{ data: ReviewDiscussion }>(`/reviews/${reviewId}`),
     enabled: Boolean(reviewId) && enabled,
-    staleTime: 0,
+    staleTime: 30_000,
   })
 }
 
@@ -42,7 +42,7 @@ export function useMyReviews(enabled = true, page = 1) {
     queryKey: ['reviews', 'mine', page],
     queryFn: () => apiGet<{ data: ArchivePage<MyReviewEntry> }>(`/reviews/mine?page=${page}`),
     enabled,
-    staleTime: 0,
+    staleTime: 30_000,
   })
 }
 
@@ -51,7 +51,7 @@ export function useReaderProfile(userId: string | undefined, page = 1) {
     queryKey: ['reviews', 'author', userId, page],
     queryFn: () => apiGet<{ data: ReaderProfile }>(`/reviews/author/${encodeURIComponent(userId!)}?page=${page}`),
     enabled: Boolean(userId),
-    staleTime: 0,
+    staleTime: 30_000,
     refetchOnWindowFocus: true,
   })
 }

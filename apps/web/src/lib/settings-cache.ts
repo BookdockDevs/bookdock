@@ -25,16 +25,17 @@ export function readStoredSettings(userId?: string | null): SettingsRes | null {
   try {
     const raw = localStorage.getItem(SETTINGS_CACHE_KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as StoredSettingsCache | SettingsRes
+    const parsed = JSON.parse(raw) as Partial<StoredSettingsCache> | SettingsRes
     if (!parsed || typeof parsed !== 'object') return null
-    if ('data' in parsed && typeof (parsed as StoredSettingsCache).data === 'object') {
-      const targetUserId = userId !== undefined ? userId : getStoredUserId()
-      if (targetUserId && parsed.userId && parsed.userId !== targetUserId) {
+    const targetUserId = userId !== undefined ? userId : getStoredUserId()
+    if (!targetUserId) return null
+    if ('data' in parsed && parsed.data && typeof parsed.data === 'object') {
+      if (parsed.userId !== targetUserId) {
         return null
       }
       return parsed.data
     }
-    return parsed as SettingsRes
+    return null
   } catch {
     return null
   }
@@ -44,6 +45,7 @@ export function writeStoredSettings(data: SettingsRes, userId?: string | null): 
   if (typeof window === 'undefined') return
   try {
     const targetUserId = userId !== undefined ? userId : getStoredUserId()
+    if (!targetUserId) return
     const payload: StoredSettingsCache = {
       userId: targetUserId,
       data,
