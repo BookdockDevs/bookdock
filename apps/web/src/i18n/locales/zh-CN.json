@@ -2455,9 +2455,7 @@
   },
   "contentFiles": {
     "addImage": "上传图片",
-    "addAttachment": "上传附件",
     "tooLarge": "文件超过大小限制，请选择较小的文件。",
-    "reviewLimits": "图片 ≤ 5 MB；PDF / TXT 附件 ≤ 10 MB",
     "imageLimits": "JPEG / PNG / WebP，单张 ≤ 5 MB",
     "uploading": "上传进度",
     "processing": "正在处理",

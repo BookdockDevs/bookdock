@@ -1,7 +1,6 @@
 import { z } from 'zod'
 
 export const CONTENT_IMAGE_MAX_BYTES = 5 * 1024 * 1024
-export const CONTENT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 export const CONTENT_FILES_MAX_COUNT = 20
 export const IDEA_IMAGE_MAX_COUNT = 9
 export const CONTENT_DRAFT_TTL_MS = 24 * 60 * 60 * 1000
@@ -10,11 +9,11 @@ export const contentFileIdSchema = z.string().regex(/^cfile_[A-Za-z0-9_-]{21}$/)
 export const contentDraftIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/)
 export const contentFileUploadSchema = z.object({
   domain: z.enum(['review', 'idea']),
-  kind: z.enum(['image', 'attachment']),
+  kind: z.literal('image'),
   draftId: contentDraftIdSchema,
   bookVersionId: z.string().min(1).max(128),
   targetId: z.string().min(1).max(128).optional(),
-}).strict().refine((value) => value.domain === 'review' || value.kind === 'image', { message: 'Ideas accept images only' })
+}).strict()
 
 export type ContentFileUpload = z.infer<typeof contentFileUploadSchema>
 export type ContentFileDomain = ContentFileUpload['domain']

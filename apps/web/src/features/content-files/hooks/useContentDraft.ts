@@ -10,7 +10,7 @@ import { interactionRequestId } from '@/lib/interaction-request'
 export interface ContentUploadEntry {
   id: string
   file: File
-  kind: 'image' | 'attachment'
+  kind: ContentFileUpload['kind']
   progress: number
   status: 'uploading' | 'ready' | 'failed'
   resource?: ContentFile

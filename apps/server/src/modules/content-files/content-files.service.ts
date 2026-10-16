@@ -1,10 +1,9 @@
 import path from 'node:path'
 
 import { and, eq, sql } from 'drizzle-orm'
-import { PDFDocument } from 'pdf-lib'
 import sharp from 'sharp'
 
-import { CONTENT_ATTACHMENT_MAX_BYTES, CONTENT_DRAFT_TTL_MS, CONTENT_FILES_MAX_COUNT, CONTENT_IMAGE_MAX_BYTES, IDEA_IMAGE_MAX_COUNT } from '@bookdock/shared'
+import { CONTENT_DRAFT_TTL_MS, CONTENT_FILES_MAX_COUNT, CONTENT_IMAGE_MAX_BYTES, IDEA_IMAGE_MAX_COUNT } from '@bookdock/shared'
 import type { ContentFileUpload } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
@@ -18,36 +17,24 @@ import { getStorage } from '../../storage'
 import { assertContentUpload } from './file-access'
 
 export async function uploadContentFile(userId: string, input: ContentFileUpload, file: File) {
+  if (input.kind !== 'image') throw new AppError('UNSUPPORTED_FORMAT')
   await assertContentUpload(userId, input)
   const db = getDb()
   db.insert(contentUploadDrafts).values({ id: createId('cdraft'), userId, draftId: input.draftId, domain: input.domain, bookVersionId: input.bookVersionId, intendedTargetId: input.targetId ?? null, createdAt: Date.now() }).onConflictDoNothing().run()
   const draft = db.select().from(contentUploadDrafts).where(and(eq(contentUploadDrafts.userId, userId), eq(contentUploadDrafts.draftId, input.draftId))).get()
   if (!draft || draft.cancelledAt !== null || draft.createdAt < Date.now() - CONTENT_DRAFT_TTL_MS || draft.domain !== input.domain || draft.bookVersionId !== input.bookVersionId || draft.intendedTargetId !== (input.targetId ?? null)) throw new AppError('CONTENT_FILE_NOT_FOUND')
-  const limit = input.kind === 'image' ? CONTENT_IMAGE_MAX_BYTES : CONTENT_ATTACHMENT_MAX_BYTES
-  if (!file.size || file.size > limit) throw new AppError('UPLOAD_TOO_LARGE')
+  if (!file.size || file.size > CONTENT_IMAGE_MAX_BYTES) throw new AppError('UPLOAD_TOO_LARGE')
   let data = Buffer.from(await file.arrayBuffer())
   let mimeType: string
   let extension: string
   try {
-    if (input.kind === 'image') {
-      const metadata = await sharp(data, { limitInputPixels: 40_000_000 }).metadata()
-      if (!['jpeg', 'png', 'webp'].includes(metadata.format ?? '') || (metadata.pages ?? 1) !== 1) throw new AppError('UNSUPPORTED_FORMAT')
-      data = await sharp(data, { limitInputPixels: 40_000_000, failOn: 'warning' })
-        .resize({ width: 2048, height: 2048, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer()
-      if (data.length > CONTENT_IMAGE_MAX_BYTES) throw new AppError('UPLOAD_TOO_LARGE')
-      mimeType = 'image/webp'
-      extension = 'webp'
-    } else if (path.extname(file.name).toLowerCase() === '.pdf') {
-      const document = await PDFDocument.load(data, { ignoreEncryption: false, throwOnInvalidObject: true })
-      if (document.getPageCount() < 1) throw new AppError('UNSUPPORTED_FORMAT')
-      mimeType = 'application/pdf'
-      extension = 'pdf'
-    } else if (path.extname(file.name).toLowerCase() === '.txt') {
-      const text = new TextDecoder('utf-8', { fatal: true }).decode(data)
-      if (Array.from(text).some((character) => character.charCodeAt(0) < 32 && !['\t', '\n', '\r'].includes(character))) throw new AppError('UNSUPPORTED_FORMAT')
-      mimeType = 'text/plain; charset=utf-8'
-      extension = 'txt'
-    } else throw new AppError('UNSUPPORTED_FORMAT')
+    const metadata = await sharp(data, { limitInputPixels: 40_000_000 }).metadata()
+    if (!['jpeg', 'png', 'webp'].includes(metadata.format ?? '') || (metadata.pages ?? 1) !== 1) throw new AppError('UNSUPPORTED_FORMAT')
+    data = await sharp(data, { limitInputPixels: 40_000_000, failOn: 'warning' })
+      .resize({ width: 2048, height: 2048, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer()
+    if (data.length > CONTENT_IMAGE_MAX_BYTES) throw new AppError('UPLOAD_TOO_LARGE')
+    mimeType = 'image/webp'
+    extension = 'webp'
   } catch (error) {
     if (error instanceof AppError) throw error
     throw new AppError('UNSUPPORTED_FORMAT', 'The file could not be validated')

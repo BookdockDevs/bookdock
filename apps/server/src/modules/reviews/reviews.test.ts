@@ -10,7 +10,6 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
-import { PDFDocument } from 'pdf-lib'
 
 import { CONTENT_DRAFT_TTL_MS, contentFileUrl, reviewExcerpt, reviewFileReferences } from '@bookdock/shared'
 
@@ -44,6 +43,11 @@ import {
   setReviewLike,
   updateReviewComment,
 } from './review-discussion.service'
+
+async function imageFile(name = 'image.png') {
+  const bytes = await sharp({ create: { width: 8, height: 8, channels: 3, background: 'red' } }).png().toBuffer()
+  return new File([new Uint8Array(bytes)], name, { type: 'image/png' })
+}
 
 describe('book reviews', () => {
   let sqlite: Database.Database
@@ -93,7 +97,6 @@ describe('book reviews', () => {
     sqlite = new Database(':memory:')
     sqlite.pragma('foreign_keys = ON')
     db = drizzle(sqlite, { schema })
-    await client.runDatabaseMigrations(db)
     vi.spyOn(client, 'getDb').mockReturnValue(db)
     const files = new Map<string, Buffer>()
     const driver: StorageDriver = {
@@ -115,6 +118,7 @@ describe('book reviews', () => {
       async size(key) { return files.get(key)?.length ?? 0 },
     }
     vi.spyOn(storage, 'getStorage').mockReturnValue(driver)
+    await client.runDatabaseMigrations(db)
     seed()
   })
 
@@ -712,7 +716,7 @@ describe('book reviews', () => {
     expect(sqlite.pragma('foreign_key_check')).toEqual([])
   })
 
-  it('validates actual image/attachment bytes and retains failed upload drafts for retry', async () => {
+  it('accepts images only and retains failed upload drafts for retry', async () => {
     const context = { domain: 'review' as const, kind: 'image' as const, bookVersionId: 'v1', draftId: 'image_draft_123456789' }
     const bytes = await sharp({ create: { width: 8, height: 8, channels: 3, background: 'red' } }).png().toBuffer()
     const image = new File([new Uint8Array(bytes)], 'image.png', { type: 'application/octet-stream' })
@@ -726,33 +730,29 @@ describe('book reviews', () => {
     expect(file.url).toBe(contentFileUrl(file.id))
     const malformed = new File(['<svg><script>alert(1)</script></svg>'], 'fake.png', { type: 'image/png' })
     await expect(uploadContentFile('author', context, malformed)).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
-    await expect(uploadContentFile('author', { ...context, kind: 'attachment' }, new File(['not a PDF'], 'fake.pdf'))).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
-    await expect(uploadContentFile('author', { ...context, kind: 'attachment' }, new File([new Uint8Array([0xff, 0xfe])], 'fake.txt'))).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
-    const text = await uploadContentFile('author', { ...context, kind: 'attachment' }, new File(['中文 text'], 'readme.txt'))
-    expect(text.mimeType).toBe('text/plain; charset=utf-8')
-    const pdf = await PDFDocument.create()
-    pdf.addPage()
-    const attachment = await uploadContentFile('author', { ...context, kind: 'attachment' }, new File([new Uint8Array(await pdf.save())], 'readme.pdf'))
-    expect(attachment.mimeType).toBe('application/pdf')
+    await expect(uploadContentFile('author', context, new File(['中文 text'], 'readme.txt', { type: 'text/plain' }))).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
+    await expect(uploadContentFile('author', context, new File(['%PDF-1.7\n%%EOF'], 'readme.pdf', { type: 'application/pdf' }))).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
     await expect(readableContentFile('member', file.id)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
   })
 
   it('rejects expired drafts at upload and publication before the scheduled sweep', async () => {
-    const context = { domain: 'review' as const, kind: 'attachment' as const, bookVersionId: 'v1', draftId: 'expired_draft_123456789' }
-    const file = await uploadContentFile('author', context, new File(['kept until sweep'], 'draft.txt'))
+    const context = { domain: 'review' as const, kind: 'image' as const, bookVersionId: 'v1', draftId: 'expired_draft_123456789' }
+    const file = await uploadContentFile('author', context, await imageFile('draft.png'))
     db.update(schema.contentUploadDrafts).set({ createdAt: Date.now() - CONTENT_DRAFT_TTL_MS - 1 }).run()
-    await expect(uploadContentFile('author', context, new File(['late'], 'late.txt'))).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    await expect(uploadContentFile('author', context, await imageFile('late.png'))).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
     await expect(createReview('author', { bookVersionId: 'v1', body: `[File](${file.url})`, draftId: context.draftId })).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
     expect(db.select().from(schema.bookReviews).all()).toHaveLength(0)
     expect(await readableContentFile('author', file.id)).toMatchObject({ reviewId: null })
   })
 
   it('associates managed review files atomically and checks current ACL on every HTTP read', async () => {
-    const context = { domain: 'review' as const, kind: 'attachment' as const, bookVersionId: 'v1', draftId: 'review_draft_123456789' }
-    const file = await uploadContentFile('author', context, new File(['private attachment'], 'notes.txt'))
+    const context = { domain: 'review' as const, kind: 'image' as const, bookVersionId: 'v1', draftId: 'review_draft_123456789' }
+    const file = await uploadContentFile('author', context, await imageFile('notes.png'))
+    db.update(schema.contentFiles).set({ kind: 'attachment' }).where(eq(schema.contentFiles.id, file.id)).run()
     await expect(createReview('author', { bookVersionId: 'v1', body: `[File](${file.url})\n![wrong kind](${file.url})`, draftId: context.draftId })).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
     expect(db.select().from(schema.bookReviews).all()).toHaveLength(0)
     expect(await readableContentFile('author', file.id)).toMatchObject({ reviewId: null, ready: true })
+    db.update(schema.contentFiles).set({ kind: 'image' }).where(eq(schema.contentFiles.id, file.id)).run()
     const body = `  # Heading\n\n[Notes](${file.url})\n\n`
     const review = await createReview('author', { bookVersionId: 'v1', body, draftId: context.draftId, visibility: 'shared' })
     expect(review.body).toBe(body)
@@ -765,15 +765,16 @@ describe('book reviews', () => {
       const response = await app.request(file.url, { headers: { 'x-test-user': viewer } })
       expect(response.status).toBe(200)
       expect(response.headers.get('cache-control')).toBe('private, no-store')
-      expect(response.headers.get('content-disposition')).toContain('attachment;')
+      expect(response.headers.get('content-disposition')).toContain('inline;')
       expect(response.headers.get('x-content-type-options')).toBe('nosniff')
-      expect(await response.text()).toBe('private attachment')
+      expect(response.headers.get('content-type')).toBe('image/webp')
+      expect((await response.arrayBuffer()).byteLength).toBe(file.size)
     }
     await updateReview('author', review.id, { visibility: 'private' })
     for (const viewer of ['owner', 'admin', 'member', 'outsider']) {
       const response = await app.request(file.url, { headers: { 'x-test-user': viewer } })
       expect(response.status).toBe(404)
-      expect(await response.text()).not.toContain('notes.txt')
+      expect(await response.text()).not.toContain('notes.png')
     }
     expect((await app.request(file.url)).status).toBe(404)
     await updateReview('author', review.id, { visibility: 'shared' })
@@ -816,8 +817,8 @@ describe('book reviews', () => {
   })
 
   it('reference-checks shared upload bytes before cancellation and expiration cleanup', async () => {
-    const context = { domain: 'review' as const, kind: 'attachment' as const, bookVersionId: 'v1', draftId: 'shared_draft_123456789' }
-    const file = new File(['same bytes'], 'shared.txt')
+    const context = { domain: 'review' as const, kind: 'image' as const, bookVersionId: 'v1', draftId: 'shared_draft_123456789' }
+    const file = await imageFile('shared.png')
     const one = await uploadContentFile('author', context, file)
     const two = await uploadContentFile('member', context, file)
     expect(db.select().from(schema.blobs).all()).toHaveLength(1)
@@ -842,6 +843,7 @@ describe('book reviews', () => {
     expect((await app.request(url, { method: 'POST', body: 'not multipart' })).status).toBe(401)
     const unauthUrl = '/api/v1/content-files?domain=review&kind=image&bookVersionId=va&draftId=http_draft_123456789'
     expect((await app.request(unauthUrl, { method: 'POST', headers: { 'x-test-user': 'outsider' }, body: 'not multipart' })).status).toBe(404)
+    expect((await app.request(url.replace('kind=image', 'kind=attachment'), { method: 'POST', headers: { 'x-test-user': 'author' }, body: 'not multipart' })).status).toBe(400)
     const body = new FormData()
     body.append('file', new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'too-large.png', { type: 'image/png' }))
     expect((await app.request(url, { method: 'POST', headers: { 'x-test-user': 'author' }, body })).status).toBe(413)
@@ -849,8 +851,8 @@ describe('book reviews', () => {
   })
 
   it('cleans account-owned content while preserving another author sharing the same blob', async () => {
-    const context = { domain: 'review' as const, kind: 'attachment' as const, bookVersionId: 'v1', draftId: 'account_draft_123456789' }
-    const bytes = new File(['shared account bytes'], 'file.txt')
+    const context = { domain: 'review' as const, kind: 'image' as const, bookVersionId: 'v1', draftId: 'account_draft_123456789' }
+    const bytes = await imageFile()
     const one = await uploadContentFile('author', context, bytes)
     const two = await uploadContentFile('member', context, bytes)
     const review = await createReview('author', { bookVersionId: 'v1', body: `[File](${one.url})`, visibility: 'shared', draftId: context.draftId })
@@ -880,8 +882,8 @@ describe('book reviews', () => {
   })
 
   it('prevents uploads completing after cancellation from recreating draft files', async () => {
-    const context = { domain: 'review' as const, kind: 'attachment' as const, bookVersionId: 'v1', draftId: 'cancel_draft_123456789' }
-    const file = new File(['later bytes'], 'later.txt')
+    const context = { domain: 'review' as const, kind: 'image' as const, bookVersionId: 'v1', draftId: 'cancel_draft_123456789' }
+    const file = await imageFile('later.png')
     let finish!: (value: ArrayBuffer) => void
     const buffer = await file.arrayBuffer()
     const read = vi.spyOn(file, 'arrayBuffer').mockReturnValue(new Promise((resolve) => { finish = resolve }))

@@ -59,9 +59,7 @@ export default function ReviewEditor({
   const isSource = source || !visualAvailable
 
   function insertFile(file: ContentFile) {
-    const node = file.kind === 'image'
-      ? { type: 'image' as const, url: file.url, alt: file.name }
-      : { type: 'link' as const, url: file.url, children: [{ type: 'text' as const, value: file.name }] }
+    const node = { type: 'image' as const, url: file.url, alt: file.name }
     const markdown = toMarkdown({ type: 'root', children: [{ type: 'paragraph', children: [node] }] }).trimEnd()
     if (!isSource && richInsert.current) richInsert.current(markdown)
     else {

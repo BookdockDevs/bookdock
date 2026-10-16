@@ -2,11 +2,11 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.6.0] - 2026-10-16
 
 ### Highlights
 
-- Rate and review books with half-star ratings, formatted text, images, and attachments; share reviews and discuss them with other readers in the source library.
+- Rate and review books with half-star ratings, formatted text, and images; share reviews and discuss them with other readers in the source library.
 - A notification center keeps comments, replies, and likes on your ideas and reviews together, with unread counts and links to the discussion.
 - A new archive brings your highlights, bookmarks, ideas, reviews, and reading statistics together, with search and browsing by book.
 
@@ -14,7 +14,7 @@ All notable changes to Bookdock are documented here.
 
 - One review per reader per work, shared across its file versions, with an optional title, a 0.5–5 rating in half-star steps, and a body; a rating or body is required. Reviews can stay private or be shared in the source library, where visible ratings contribute to the average and rating distribution.
 - A review editor with visual editing and Markdown source modes, plus comments, replies, likes, and liker lists on shared reviews.
-- Image uploads for ideas and reviews, and PDF or UTF-8 TXT attachments for reviews. Ideas support up to 9 images and reviews up to 20 files; each image can be up to 5 MiB and each attachment up to 10 MiB.
+- Image uploads for ideas and reviews: ideas support up to 9 images and reviews up to 20 images, each up to 5 MiB.
 - Saved interaction notifications with unread counts, all/unread filters, mark-all-as-read, and discussion previews. Notifications and their targets follow current access permissions.
 - An archive with a searchable book list, note-type filters, and a reading overview. Per-book views include reading time and progress, chapter/time sorting, highlight color/style filters, inline note editing, batch export/delete, and a start/continue-reading shortcut.
 - Reader profiles show the reader's name, avatar, and shared reviews you can currently access. Your own notes and private reviews remain available only to you.
@@ -36,7 +36,7 @@ All notable changes to Bookdock are documented here.
 
 - Back up the complete `DATA_DIR` before upgrading. Migrations 0046–0051 run automatically on startup and cannot be undone in place. To downgrade, restore the pre-upgrade data with the matching previous release.
 - Existing reading progress files are imported automatically into the database on the first startup after upgrading; subsequent progress is saved in the database.
-- Uploaded review attachments and idea/review images stay in local storage, even when book files use remote storage. Include these files in your `DATA_DIR` backup; clearing the book cache does not remove them.
+- Uploaded idea/review images stay in local storage, even when book files use remote storage. Include these files in your `DATA_DIR` backup; clearing the book cache does not remove them.
 
 ## [0.5.0] - 2026-10-11
 
@@ -696,11 +696,11 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [Unreleased]
+### [0.6.0] - 2026-10-16
 
 #### 主要更新
 
-- 书籍支持半星评分与书评，可使用格式化正文、图片和附件，并在来源书库内分享、参与讨论。
+- 书籍支持半星评分与书评，可使用格式化正文与图片，并在来源书库内分享、参与讨论。
 - 新增通知中心，集中查看想法与书评收到的评论、回复和点赞，支持未读计数与讨论跳转。
 - 新增归档中心，集中管理划线、书签、想法与书评，按书检索浏览，并查看阅读统计。
 
@@ -708,7 +708,7 @@ All notable changes to Bookdock are documented here.
 
 - 每人每作品可写一条书评，同一作品的不同文件版本共用书评；支持可选标题、0.5–5 分的半星评分与正文，评分和正文至少填写一项。书评可保持私密或在来源书库内分享，可见评分计入作品均分与评分分布。
 - 书评编辑器支持可视化编辑与 Markdown 源码模式；共享书评支持评论、回复、点赞和点赞者列表。
-- 想法与书评支持上传图片，书评还可附加 PDF 或 UTF-8 TXT 文件。每条想法最多 9 张图片，每条书评最多 20 个文件；单张图片不超过 5 MiB，单个附件不超过 10 MiB。
+- 想法与书评支持上传图片：每条想法最多 9 张，每条书评最多 20 张，单张图片不超过 5 MiB。
 - 互动通知可保留查看，支持未读计数、全部/未读筛选、全部标为已读与讨论预览；通知展示和跳转遵循当前访问权限。
 - 归档中心提供可搜索的书籍列表、笔记类型筛选与阅读总览。单书页面支持查看阅读时长与进度、按章节或时间排序、按划线颜色或样式筛选、直接编辑笔记、批量导出或删除，以及开始/继续阅读。
 - 他人主页展示读者昵称、头像及你当前有权查看的共享书评；自己的笔记与私密书评仍仅本人可见。
@@ -730,7 +730,7 @@ All notable changes to Bookdock are documented here.
 
 - 升级前完整备份 `DATA_DIR`。迁移 0046–0051 随启动自动执行，不能原地撤销；降级需要一起恢复升级前的数据与对应旧版本。
 - 升级后首次启动会自动将已有阅读进度文件导入数据库，之后的阅读进度统一保存在数据库中。
-- 上传的书评附件和想法/书评图片始终保存在本地，即使书籍文件使用远程存储也不例外。备份 `DATA_DIR` 时应包含这些文件；清理书籍缓存不会删除它们。
+- 上传的想法/书评图片始终保存在本地，即使书籍文件使用远程存储也不例外。备份 `DATA_DIR` 时应包含这些文件；清理书籍缓存不会删除它们。
 
 ### [0.5.0] - 2026-10-11
 

@@ -67,7 +67,7 @@ come from parsed tokens, excluding block code, images and resource identifiers.
 Desktop layout and keyboard editing are primary; narrow screens remain supported.
 
 `content_files` owns each upload through a non-null author `userId` FK (cascade),
-domain (`review` or `idea`), kind (`image` or `attachment`), opaque draft ID,
+domain (`review` or `idea`), stored kind, opaque draft ID,
 upload BookVersion context, optional intended content ID and readiness flag.
 A ready row either remains an author-only draft or references exactly one
 published review/idea through a cascading FK. One upload belongs to one content;
@@ -85,10 +85,12 @@ Images accept JPEG, PNG and static WebP up to 5 MiB, matching the existing defau
 avatar upload bound. Sharp validates actual decoded format, rejects animation
 and caps decoded pixels at 40 million; storage uses metadata-stripped WebP fitted
 inside 2048 pixels without enlargement. SVG and active images are rejected.
-Review attachments accept structurally validated PDF or valid UTF-8 plain text
-up to 10 MiB; they download as attachments with `nosniff`, without online preview.
-Ideas accept images only, with at most 9 images per idea; review content keeps the
-20-file limit. Multipart requests have a finite total byte limit.
+Ideas and reviews accept images only; PDF, TXT and other file attachments are
+rejected. Ideas allow at most 9 images and reviews allow at most 20 images.
+Multipart requests are limited to 5 MiB plus 64 KiB of form overhead.
+The upload contract accepts only `kind: image`. The stored `attachment`
+discriminator and existing file reads remain for previously saved data; this
+restriction does not delete or migrate content files.
 Qualification is checked before processing bytes and again before association.
 
 Managed references use `/api/v1/content-files/<opaque-id>`, never hash URLs,

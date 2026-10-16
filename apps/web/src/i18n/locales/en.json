@@ -2367,9 +2367,7 @@
   },
   "contentFiles": {
     "addImage": "Upload image",
-    "addAttachment": "Upload attachment",
     "tooLarge": "The file is too large.",
-    "reviewLimits": "Images ≤ 5 MB; PDF / TXT attachments ≤ 10 MB",
     "imageLimits": "JPEG / PNG / WebP, up to 5 MB each",
     "uploading": "Upload progress",
     "processing": "Processing",

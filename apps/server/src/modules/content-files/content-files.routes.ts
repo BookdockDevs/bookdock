@@ -3,7 +3,7 @@ import { Readable } from 'node:stream'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 
-import { CONTENT_ATTACHMENT_MAX_BYTES, contentDraftIdSchema, contentFileIdSchema, contentFileUploadSchema } from '@bookdock/shared'
+import { CONTENT_IMAGE_MAX_BYTES, contentDraftIdSchema, contentFileIdSchema, contentFileUploadSchema } from '@bookdock/shared'
 
 import { cancelContentDraft } from '../../lib/content-file-lifecycle'
 import { AppError } from '../../middleware/error'
@@ -26,7 +26,7 @@ contentFileRoutes.post('/', async (c, next) => {
   if (!input.success) throw new AppError('VALIDATION_ERROR')
   await assertContentUpload(user.id, input.data)
   await next()
-}, bodyLimit({ maxSize: CONTENT_ATTACHMENT_MAX_BYTES + 64 * 1024, onError: () => { throw new AppError('UPLOAD_TOO_LARGE') } }), async (c) => {
+}, bodyLimit({ maxSize: CONTENT_IMAGE_MAX_BYTES + 64 * 1024, onError: () => { throw new AppError('UPLOAD_TOO_LARGE') } }), async (c) => {
   const user = c.get('user')
   if (!user) throw new AppError('UNAUTHORIZED')
   const input = contentFileUploadSchema.safeParse(c.req.query())

@@ -3,7 +3,7 @@ import type { Review } from '@bookdock/shared'
 import { reviewExcerptLines } from './markdown'
 
 /** A review counts as having a body when its parsed text survives markup
- *  stripping, or when it carries managed files (images/attachments). */
+ *  stripping, or when it carries managed images. */
 export function hasReviewBody(review: Review): boolean {
   if ((review.files?.length ?? 0) > 0) return true
   if (!review.body) return false

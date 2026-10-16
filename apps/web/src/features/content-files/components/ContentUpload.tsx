@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 
-import { CONTENT_ATTACHMENT_MAX_BYTES, CONTENT_FILES_MAX_COUNT, CONTENT_IMAGE_MAX_BYTES } from '@bookdock/shared'
+import { CONTENT_FILES_MAX_COUNT, CONTENT_IMAGE_MAX_BYTES } from '@bookdock/shared'
+import type { ContentFileUpload } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -9,13 +10,12 @@ import { notify } from '@/lib/notifications'
 import type { ContentUploadEntry } from '../hooks/useContentDraft'
 
 interface ContentUploadProps {
-  attachments?: boolean
   /** Icon-only triggers for editor bottom bars; pills by default. */
   compact?: boolean
   inline?: boolean
   disabled?: boolean
   entries: ContentUploadEntry[]
-  onAdd: (file: File, kind: 'image' | 'attachment') => void
+  onAdd: (file: File, kind: ContentFileUpload['kind']) => void
   onRetry: (entry: ContentUploadEntry) => void
 }
 
@@ -32,35 +32,23 @@ export function ImageIcon() {
   )
 }
 
-function AttachmentIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-    </svg>
-  )
-}
-
-export default function ContentUpload({ attachments = false, compact = false, inline = false, disabled = false, entries, onAdd, onRetry }: ContentUploadProps) {
+export default function ContentUpload({ compact = false, inline = false, disabled = false, entries, onAdd, onRetry }: ContentUploadProps) {
   const _ = useTranslation()
   const imageInput = useRef<HTMLInputElement>(null)
-  const attachmentInput = useRef<HTMLInputElement>(null)
-  function select(files: FileList | null, kind: 'image' | 'attachment') {
+  function select(files: FileList | null) {
     if (!files) return
     const remaining = Math.max(0, CONTENT_FILES_MAX_COUNT - entries.length)
     if (files.length > remaining) notify.error({ key: 'contentFiles.tooMany' })
     for (const file of Array.from(files).slice(0, remaining)) {
-      if (file.size > (kind === 'image' ? CONTENT_IMAGE_MAX_BYTES : CONTENT_ATTACHMENT_MAX_BYTES)) {
+      if (file.size > CONTENT_IMAGE_MAX_BYTES) {
         notify.error({ key: 'contentFiles.tooLarge' })
         continue
       }
-      onAdd(file, kind)
+      onAdd(file, 'image')
     }
   }
   const inputs = (
-    <>
-      <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" aria-label={_('contentFiles.addImage')} onChange={(event) => { select(event.target.files, 'image'); event.target.value = '' }} />
-      {attachments && <input ref={attachmentInput} type="file" accept=".pdf,.txt" multiple className="hidden" aria-label={_('contentFiles.addAttachment')} onChange={(event) => { select(event.target.files, 'attachment'); event.target.value = '' }} />}
-    </>
+    <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" aria-label={_('contentFiles.addImage')} onChange={(event) => { select(event.target.files); event.target.value = '' }} />
   )
   const activeEntries = inline ? entries.filter((e) => e.status !== 'ready') : entries
   const entryList = activeEntries.length > 0 && (
@@ -80,17 +68,12 @@ export default function ContentUpload({ attachments = false, compact = false, in
           <button type="button" disabled={disabled} onClick={() => imageInput.current?.click()} title={_('contentFiles.addImage')} aria-label={_('contentFiles.addImage')} className={compactButtonClassName}>
             <ImageIcon />
           </button>
-          {attachments && (
-            <button type="button" disabled={disabled} onClick={() => attachmentInput.current?.click()} title={_('contentFiles.addAttachment')} aria-label={_('contentFiles.addAttachment')} className={compactButtonClassName}>
-              <AttachmentIcon />
-            </button>
-          )}
           {inline && activeEntries.some((e) => e.status === 'uploading') && (
             <span className="flex items-center pl-1 text-[11px] text-stone-400" role="status" title={_('contentFiles.uploading')}>
               <svg className="h-3.5 w-3.5 animate-spin text-stone-500" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>
             </span>
           )}
-          {!inline && <span className="ml-2 text-[11px] text-stone-400 dark:text-stone-500">{_(attachments ? 'contentFiles.reviewLimits' : 'contentFiles.imageLimits')}</span>}
+          {!inline && <span className="ml-2 text-[11px] text-stone-400 dark:text-stone-500">{_('contentFiles.imageLimits')}</span>}
         </div>
         {inputs}
         {!inline && entryList}
@@ -101,8 +84,7 @@ export default function ContentUpload({ attachments = false, compact = false, in
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="secondary" disabled={disabled} onClick={() => imageInput.current?.click()}>{_('contentFiles.addImage')}</Button>
-        {attachments && <Button variant="secondary" disabled={disabled} onClick={() => attachmentInput.current?.click()}>{_('contentFiles.addAttachment')}</Button>}
-        <span className="text-xs text-stone-400">{_(attachments ? 'contentFiles.reviewLimits' : 'contentFiles.imageLimits')}</span>
+        <span className="text-xs text-stone-400">{_('contentFiles.imageLimits')}</span>
       </div>
       {inputs}
       {entries.map((entry) => (

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 
 import i18n from '../i18n/i18n'
 import { notify } from '@/lib/notifications'
@@ -441,7 +441,9 @@ describe('WorkEditDialog', () => {
   })
 
   it('creates and selects a new category inline', async () => {
-    const createCategory = vi.fn().mockResolvedValue({ data: { id: 'cat_new', name: '科幻' } })
+    const createdCategory = { data: { id: 'cat_new', name: '科幻' } }
+    let completeCreation!: (result: typeof createdCategory) => void
+    const createCategory = vi.fn(() => new Promise<typeof createdCategory>((resolve) => { completeCreation = resolve }))
     HOOKS.useCreateLibraryCategory.mockReturnValue({ mutateAsync: createCategory, isPending: false })
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '作品信息' }))
@@ -452,6 +454,9 @@ describe('WorkEditDialog', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     await waitFor(() => expect(createCategory).toHaveBeenCalledWith({ libraryId: 'lib_city', name: '科幻' }))
+    expect(input).toBeInTheDocument()
+    await act(async () => { completeCreation(createdCategory) })
+    expect(input).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({
       patch: expect.objectContaining({ categoryId: 'cat_new' }),
@@ -459,7 +464,9 @@ describe('WorkEditDialog', () => {
   })
 
   it('creates and selects a new tag inline', async () => {
-    const createTag = vi.fn().mockResolvedValue({ data: { id: 't_new', name: '硬核' } })
+    const createdTag = { data: { id: 't_new', name: '硬核' } }
+    let completeCreation!: (result: typeof createdTag) => void
+    const createTag = vi.fn(() => new Promise<typeof createdTag>((resolve) => { completeCreation = resolve }))
     HOOKS.useCreateLibraryTag.mockReturnValue({ mutateAsync: createTag, isPending: false })
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '作品信息' }))
@@ -470,6 +477,9 @@ describe('WorkEditDialog', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     await waitFor(() => expect(createTag).toHaveBeenCalledWith({ libraryId: 'lib_city', name: '硬核' }))
+    expect(input).toBeInTheDocument()
+    await act(async () => { completeCreation(createdTag) })
+    expect(input).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({
       patch: expect.objectContaining({ tagIds: ['t1', 't_new'] }),
