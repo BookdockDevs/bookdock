@@ -1,4 +1,5 @@
 import type { AccessTokenDuration, AccessTokenPermission } from './access-tokens'
+import type { ContentFile } from './content-file'
 import type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, ReadStatus } from './constants'
 import type { ErrorCode } from './errors'
 import type { BookSourceInfo, HiddenReason, HiddenVia, LibraryVersionKind } from './library'
@@ -1503,6 +1504,15 @@ export interface ReadingSessionUpdateReq {
   endCfi?: string
 }
 
+export interface ReadingRecordMonthlyComparison {
+  currentPeriodSeconds: number
+  previousPeriodSeconds: number
+  currentPeriodBooks: number
+  previousPeriodBooks: number
+  currentPeriodDays: number
+  previousPeriodDays: number
+}
+
 export interface ReadingRecordSummaryRes {
   totalSeconds: number
   totalBooks: number
@@ -1518,6 +1528,8 @@ export interface ReadingRecordSummaryRes {
   prevMonthSeconds: number
   /** Sum over books of readFraction × wordCount, rounded */
   totalWordsRead: number
+  /** Same-period comparison: month-to-date vs previous month to the same day-of-month */
+  monthlyComparison?: ReadingRecordMonthlyComparison
 }
 
 export interface ReadingRecordDailyItem {
@@ -1760,6 +1772,8 @@ export interface AppendContentPreviewRes {
 }
 
 export type AnnotationCreateReq = {
+  draftId?: string
+  imageIds?: string[]
   visibility?: 'private' | 'shared'
   revisionId?: string | null
   cfiRange: string
@@ -1775,6 +1789,8 @@ export type AnnotationCreateReq = {
 }
 
 export type AnnotationUpdateReq = {
+  draftId?: string
+  imageIds?: string[]
   visibility?: 'private' | 'shared'
   color?: string
   style?: AnnotationStyle
@@ -1783,6 +1799,7 @@ export type AnnotationUpdateReq = {
 }
 
 export interface AnnotationRes {
+  images?: ContentFile[]
   locationAvailable?: boolean
   visibility?: 'private' | 'shared'
   revisionId?: string | null

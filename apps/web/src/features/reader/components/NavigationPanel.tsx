@@ -1,6 +1,7 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
+import { isAccessRevocationError } from '@/lib/error-message'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { READER_SESSION_ID, useReaderState } from '../state/reader-state'
@@ -1585,7 +1586,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
               {renderSubtree(rootNodes.map((n) => n.index))}
             </ul>
           )}
-        {tab === 'notes' && !guestReadOnly && annotationsQuery.isError ? (
+        {tab === 'notes' && !guestReadOnly && annotationsQuery.isError && (!annotations?.data || isAccessRevocationError(annotationsQuery.error)) ? (
           <QueryErrorState
             className="py-8 text-[var(--bd-read-sub)]"
             isRetrying={annotationsQuery.isFetching}
@@ -1593,6 +1594,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           />
         ) : tab === 'notes' && !guestReadOnly && (
           <NotesPanel
+            isLoading={annotationsQuery.isLoading && !annotations?.data}
             items={notesFilter.filtered}
             allItems={annotationItems}
             total={annotationItems.length}

@@ -5,6 +5,7 @@ import { BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, LIBRARY_SORT_MODES, RECENTLY_R
 import { ANNOTATION_MAX_TEXT_LENGTH, BOOKMARK_CONTEXT_MAX_LENGTH, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 import { authorListSchema } from './library'
+import { contentFileAssociationSchema } from './content-file'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
 
@@ -460,6 +461,7 @@ export const aiConfigTestSchema = z.object({
 }).strict()
 
 export const annotationCreateSchema = z.object({
+  ...contentFileAssociationSchema.shape,
   visibility: z.enum(['private', 'shared']).optional(),
   revisionId: z.string().min(1).nullable().optional(),
   cfiRange: z.string().min(1),
@@ -475,6 +477,7 @@ export const annotationCreateSchema = z.object({
 })
 
 export const annotationUpdateSchema = z.object({
+  ...contentFileAssociationSchema.shape,
   visibility: z.enum(['private', 'shared']).optional(),
   color: z.string().optional(),
   style: z.enum(['underline', 'squiggly', 'highlight']).optional(),

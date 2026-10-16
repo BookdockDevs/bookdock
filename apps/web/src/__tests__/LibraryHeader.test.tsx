@@ -120,3 +120,4 @@ describe('LibraryHeader', () => {
     expect(onResetMetadataFilter).toHaveBeenCalledOnce()
   })
 })
+vi.mock('@/features/notifications/components/NotificationBell', () => ({ default: () => null }))

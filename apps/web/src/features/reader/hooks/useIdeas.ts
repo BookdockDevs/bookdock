@@ -1,3 +1,6 @@
+import { useRef } from 'react'
+import { interactionRequestId } from '@/lib/interaction-request'
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AnnotationRes, BookDetailRes, IdeaComposerContext, IdeaDiscussion, ReaderIdea } from '@bookdock/shared'
@@ -11,7 +14,7 @@ export function useIdeaComposer(bookId: string, enabled = true) {
     queryKey: ['idea-composer', bookId],
     queryFn: () => apiGet<{ data: IdeaComposerContext }>(`/ideas/book/${bookId}/composer`),
     enabled: !!bookId && enabled,
-    staleTime: 0,
+    staleTime: 30_000,
   })
 }
 
@@ -27,7 +30,7 @@ export function useReaderIdeas(bookId: string, enabled = true) {
     queryKey: ['reader-ideas', bookId, source?.libraryId, source?.libraryBookVersionId, revisionId],
     queryFn: () => apiGet<{ data: ReaderIdea[] }>(`/ideas/book/${bookId}?${new URLSearchParams({ libraryId: source!.libraryId, listingId: source!.libraryBookVersionId!, revisionId: revisionId! })}`),
     enabled: enabled && !!source?.libraryBookVersionId && !!revisionId,
-    staleTime: 0,
+    staleTime: 30_000,
   })
 }
 
@@ -38,7 +41,7 @@ export function useIdeaDiscussion(ideaId: string | null, bookId: string) {
     queryKey: ['idea-discussion', ideaId, revisionId],
     queryFn: () => apiGet<{ data: IdeaDiscussion }>(`/ideas/${ideaId}${revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : ''}`),
     enabled: !!ideaId && !ideaId.startsWith('temp-'),
-    staleTime: 0,
+    staleTime: 30_000,
   })
 }
 
@@ -50,14 +53,20 @@ export type IdeaAction =
 
 export function useIdeaAction(ideaId: string, bookId: string) {
   const queryClient = useQueryClient()
+  const pendingComment = useRef<{ signature: string; requestId: string } | null>(null)
   return useMutation({
     mutationFn: (action: IdeaAction) => {
       const path = `/ideas/${ideaId}`
-      if (action.type === 'comment') return apiPost(`${path}/comments`, { body: action.body, replyToId: action.replyToId })
+      if (action.type === 'comment') {
+        const signature = JSON.stringify([ideaId, action.body, action.replyToId])
+        if (pendingComment.current?.signature !== signature) pendingComment.current = { signature, requestId: interactionRequestId() }
+        return apiPost(`${path}/comments`, { body: action.body, replyToId: action.replyToId, requestId: pendingComment.current.requestId })
+      }
       if (action.type === 'edit') return apiPut(`${path}/comments/${action.commentId}`, { body: action.body })
       if (action.type === 'delete') return apiDelete(`${path}/comments/${action.commentId}`)
       return apiPut(action.commentId ? `${path}/comments/${action.commentId}/like` : `${path}/like`, { liked: action.liked })
     },
+    onSuccess: (_, action) => { if (action.type === 'comment') pendingComment.current = null },
     onMutate: async (action) => {
       if (action.type === 'like') {
         const user = useAuthStore.getState().user
@@ -171,9 +180,12 @@ export function useIdeaAction(ideaId: string, bookId: string) {
     },
     onSettled: async () => {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['note-archive'] }),
         queryClient.invalidateQueries({ queryKey: ['idea-discussion', ideaId] }),
         queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] }),
         queryClient.invalidateQueries({ queryKey: ['annotations', bookId] }),
+        // Comment/like writes can retire the notifications pointing at them.
+        queryClient.invalidateQueries({ queryKey: ['notifications'] }),
       ])
     },
   })

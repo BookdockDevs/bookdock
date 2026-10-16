@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 
-import type { BookDetailRes, BookListItem, ReadStatus } from '@bookdock/shared'
+import type { BookDetailRes, BookListItem, ReadStatus, Review } from '@bookdock/shared'
 
 import { ApiError, apiPatch } from '@/api/client'
 import { Button } from '@/components/ui/Button'
@@ -29,6 +29,9 @@ import ReadStatusChip from './ReadStatusChip'
 import ShelfChip from './ShelfChip'
 import { isMachineIdentifier, formatLanguage, formatWordCount } from './types'
 import { ActionIcon, FilterChip, GroupLabel } from './ui'
+import ReviewEditor from '@/features/reviews/components/ReviewEditor'
+import ReviewPreviewSection from '@/features/reviews/components/ReviewPreviewSection'
+import { useReviewBookContext } from '@/features/reviews/hooks/useReviews'
 
 interface BookDetailViewProps {
   book: BookListItem
@@ -37,9 +40,12 @@ interface BookDetailViewProps {
   shelfName?: string
   currentShelfId: string | null
   shelfMembershipReady: boolean
+  shelfMembershipError?: boolean
   memberTags: Array<{ id: string; name: string }>
   isLoading?: boolean
   moreActions?: MoreActionsMenuItem[]
+  onOpenAllReviews?: () => void
+  onOpenReviewDetail?: (review: Review) => void
   onEdit: () => void
   onDelete: (book: BookListItem) => void
   onClose: () => void
@@ -53,9 +59,12 @@ export default function BookDetailView({
   shelfName,
   currentShelfId,
   shelfMembershipReady,
+  shelfMembershipError = false,
   memberTags,
   isLoading,
   moreActions,
+  onOpenAllReviews,
+  onOpenReviewDetail,
   onEdit,
   onDelete,
   onClose,
@@ -77,6 +86,12 @@ export default function BookDetailView({
   const [metadataField, setMetadataField] = useState<{ field: EditableMetadataField; label: string } | null>(null)
   const [coverEditing, setCoverEditing] = useState(false)
   const canEditBookmeta = !readOnly && !displayBook.source && Boolean(detail)
+  const [reviewEditorOpen, setReviewEditorOpen] = useState(false)
+  const reviewQuery = useReviewBookContext(book?.id ?? null)
+  const reviewContext = reviewQuery.data?.data
+  const reviewComposer = reviewContext?.composer
+  const canReview = Boolean(!readOnly && reviewComposer?.eligible && reviewComposer.bookVersionId)
+  const ownReview = reviewContext?.own
 
   function metadataEdit(field: EditableMetadataField, label: string) {
     if (readOnly || (!canEditBookmeta && field !== 'title' && field !== 'authors')) return undefined
@@ -167,9 +182,31 @@ export default function BookDetailView({
   if (detail?.meta?.fileName) {
     metaRows.push({ label: _('library.originalFile'), value: detail.meta.fileName, copyable: true, expandable: true, hint: _('library.copyFullFileName') })
   }
+
+  const ratingSlot = reviewContext?.summary && reviewContext.summary.count > 0 ? (
+    <button
+      type="button"
+      onClick={onOpenAllReviews}
+      className="group flex flex-col items-end text-right transition-opacity hover:opacity-80"
+    >
+      <div className="flex items-center gap-1.5 text-amber-500">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+        <span className="text-2xl font-bold tabular-nums text-stone-900 dark:text-stone-100">
+          {reviewContext.summary.average!.toFixed(1)}
+        </span>
+      </div>
+      <span className="text-xs tabular-nums text-stone-400 dark:text-stone-500">
+        {_('review.ratingCount', { count: reviewContext.summary.count })}
+      </span>
+    </button>
+  ) : null
+
   return (
     <div>
       <DetailHeader
+        rating={ratingSlot}
         cover={readOnly ? <BookCover book={displayBook} coverPaletteId={detail?.meta?.coverPaletteId} /> : <DetailCoverEditor key={book.id} book={displayBook} coverPaletteId={detail?.meta?.coverPaletteId ?? displayBook.coverPaletteId ?? null} active={coverEditing} onActiveChange={setCoverEditing} />}
         coverEditing={!readOnly && coverEditing}
         hasCoverImage={hasCoverImage}
@@ -203,7 +240,7 @@ export default function BookDetailView({
               </span>
             )}
             {!readOnly && (
-              <ShelfChip bookId={book.id} shelfId={currentShelfId} shelfName={shelfName} membershipReady={shelfMembershipReady} onFilter={() => goToFilter({ shelf: currentShelfId ?? 'none' })} />
+              <ShelfChip bookId={book.id} shelfId={currentShelfId} shelfName={shelfName} membershipReady={shelfMembershipReady} membershipError={shelfMembershipError} onFilter={() => goToFilter({ shelf: currentShelfId ?? 'none' })} />
             )}
             {readOnly && shelfName && currentShelfId && (
               <FilterChip prefix="📁" label={shelfName} onClick={() => goToFilter({ shelf: currentShelfId })} />
@@ -305,7 +342,30 @@ export default function BookDetailView({
               {hasProgress ? _('library.continueReading') : _('library.startReading')}
             </Button>
             <div className="flex flex-1 items-center gap-1.5">
-              {/* Action order mirrors WorkDetailBody: flow, edit, download, maintain, hide, delete. */}
+              {/* Action order: edit, download, review, publish, fork, visibility, more, delete. */}
+              {!readOnly && (
+                <ActionIcon secondary label={_('library.edit')} onClick={onEdit}>
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </ActionIcon>
+              )}
+              {!readOnly && (
+                <DownloadMenu bookId={book.id} title={displayBook.title} format={displayBook.format} />
+              )}
+              {canReview && (
+                <ActionIcon
+                  secondary
+                  className={ownReview ? 'text-amber-500 hover:text-amber-600 dark:text-amber-400' : undefined}
+                  label={ownReview ? _('review.editReview') : _('review.rateOrReview')}
+                  title={ownReview ? _('review.editReview') : _('review.rateOrReview')}
+                  onClick={() => setReviewEditorOpen(true)}
+                >
+                  <path
+                    d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                    fill={ownReview ? 'currentColor' : 'none'}
+                  />
+                </ActionIcon>
+              )}
               {!readOnly && onPublish && (
                 <ActionIcon
                   secondary
@@ -316,13 +376,6 @@ export default function BookDetailView({
                   <path d="m7 8 5-5 5 5" />
                   <path d="M5 21h14" />
                 </ActionIcon>
-              )}
-              {!readOnly && <ActionIcon secondary label={_('library.edit')} onClick={onEdit}>
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </ActionIcon>}
-              {!readOnly && (
-                <DownloadMenu bookId={book.id} title={displayBook.title} format={displayBook.format} />
               )}
               {isPrivateB && !displayBook.sourceUnavailable && (
                 <ActionIcon
@@ -395,6 +448,20 @@ export default function BookDetailView({
       )}
 
       <MetaGrid rows={metaRows} isLoading={isLoading} />
+
+      <ReviewPreviewSection context={reviewContext} onViewAll={() => onOpenAllReviews?.()} onOpenReview={onOpenReviewDetail} />
+
+      {reviewEditorOpen && reviewComposer?.bookVersionId && (
+        <ReviewEditor
+          bookVersionId={reviewComposer.bookVersionId}
+          existing={ownReview ?? null}
+          composer={reviewComposer}
+          onClose={() => setReviewEditorOpen(false)}
+          onSaved={() => {
+            void reviewQuery.refetch()
+          }}
+        />
+      )}
 
       {metadataField && !readOnly && (canEditBookmeta || metadataField.field === 'title' || metadataField.field === 'authors') && (
         <MetadataFieldDialog key={`${book.id}:${metadataField.field}`} book={displayBook} bookmeta={bookmeta} field={metadataField.field} label={metadataField.label} onClose={() => setMetadataField(null)} />

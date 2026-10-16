@@ -29,8 +29,12 @@ export class TieredStorageDriver implements StorageDriver {
     this.cacheMaxMb = cacheMaxMb
   }
 
-  private isCover(key: string): boolean {
-    return key.startsWith('covers/') || key.startsWith('cover/')
+  getBaseDir(): string {
+    return this.localDriver.getBaseDir()
+  }
+
+  private isLocalAsset(key: string): boolean {
+    return key.startsWith('covers/') || key.startsWith('cover/') || key.startsWith('content/')
   }
 
   private getRemoteFilePath(key: string): string {
@@ -40,8 +44,8 @@ export class TieredStorageDriver implements StorageDriver {
   }
 
   async put(key: string, data: Buffer | Readable): Promise<void> {
-    // Decision 1A: covers stay strictly local (never remote, zero network latency)
-    if (this.isCover(key)) {
+    // Small permission-bound assets stay local and do not enter the book transfer queue.
+    if (this.isLocalAsset(key)) {
       return this.localDriver.put(key, data)
     }
 
@@ -76,7 +80,7 @@ export class TieredStorageDriver implements StorageDriver {
   }
 
   async get(key: string, range?: { start: number; end: number }): Promise<Readable> {
-    if (this.isCover(key) || !this.remoteClient) {
+    if (this.isLocalAsset(key) || !this.remoteClient) {
       return this.localDriver.get(key, range)
     }
 
@@ -125,18 +129,22 @@ export class TieredStorageDriver implements StorageDriver {
   }
 
   async delete(key: string): Promise<void> {
+    if (key.startsWith('content/')) {
+      await this.localDriver.delete(key)
+      return
+    }
     // 1. Delete local copy
     await this.localDriver.delete(key).catch(() => {})
 
     // 2. Delete remote copy if not cover
-    if (!this.isCover(key) && this.remoteClient) {
+    if (!this.isLocalAsset(key) && this.remoteClient) {
       const remotePath = this.getRemoteFilePath(key)
       await this.remoteClient.delete(remotePath).catch(() => {})
     }
   }
 
   async exists(key: string): Promise<boolean> {
-    if (this.isCover(key)) {
+    if (this.isLocalAsset(key)) {
       return this.localDriver.exists(key)
     }
 
@@ -166,7 +174,7 @@ export class TieredStorageDriver implements StorageDriver {
   }
 
   async size(key: string): Promise<number> {
-    if (this.isCover(key)) {
+    if (this.isLocalAsset(key)) {
       return this.localDriver.size(key)
     }
 

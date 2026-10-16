@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ApiError } from '@/api/client'
-import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
+import { getUserErrorMessage, getUserErrorNotification, isAccessRevocationError } from '@/lib/error-message'
 
 const translate = (key: string) => key
 
@@ -28,5 +28,29 @@ describe('getUserErrorMessage', () => {
 
   it('keeps a caller-provided fallback for unmapped errors', () => {
     expect(getUserErrorNotification(new ApiError('AI_TIMEOUT', 'internal message'), 'reader.aiRequestFailed')).toEqual({ key: 'reader.aiRequestFailed' })
+  })
+})
+
+describe('isAccessRevocationError', () => {
+  it('identifies 401 and 403 status codes as access revocation', () => {
+    expect(isAccessRevocationError(new ApiError('ANY_ERROR', 'msg', undefined, 401))).toBe(true)
+    expect(isAccessRevocationError(new ApiError('ANY_ERROR', 'msg', undefined, 403))).toBe(true)
+    expect(isAccessRevocationError({ status: 401 })).toBe(true)
+    expect(isAccessRevocationError({ status: 403 })).toBe(true)
+  })
+
+  it('identifies permission and auth error codes', () => {
+    expect(isAccessRevocationError(new ApiError('UNAUTHORIZED', 'msg'))).toBe(true)
+    expect(isAccessRevocationError(new ApiError('FORBIDDEN', 'msg'))).toBe(true)
+    expect(isAccessRevocationError(new ApiError('ACCOUNT_DISABLED', 'msg'))).toBe(true)
+    expect(isAccessRevocationError(new ApiError('INVALID_LIBRARY_PASSWORD', 'msg'))).toBe(true)
+  })
+
+  it('returns false for transient network or business errors', () => {
+    expect(isAccessRevocationError(null)).toBe(false)
+    expect(isAccessRevocationError(undefined)).toBe(false)
+    expect(isAccessRevocationError(new TypeError('Failed to fetch'))).toBe(false)
+    expect(isAccessRevocationError(new ApiError('BOOK_NOT_FOUND', 'msg', undefined, 404))).toBe(false)
+    expect(isAccessRevocationError(new ApiError('INTERNAL_ERROR', 'msg', undefined, 500))).toBe(false)
   })
 })

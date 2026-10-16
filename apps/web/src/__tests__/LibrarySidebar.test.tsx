@@ -21,6 +21,7 @@ vi.mock('../features/library/hooks', () => ({
   useTags: vi.fn(),
   useTrashEnabled: vi.fn(),
   useLibraryPrefs: vi.fn(),
+  useLibraryPrefsState: vi.fn(),
   useHiddenLibraries: vi.fn(),
   useUpdateLibraryPrefs: vi.fn(),
   useCreateShelf: vi.fn(),
@@ -48,6 +49,10 @@ vi.mock('../features/library/hooks', () => ({
 }))
 
 vi.mock('@/features/auth/AccountMenu', () => ({
+  default: () => null,
+}))
+
+vi.mock('@/features/notifications/components/NotificationBell', () => ({
   default: () => null,
 }))
 
@@ -87,10 +92,21 @@ function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1, trashEnabl
   // Nothing hidden by default; the hide/show tests override this.
   ;(libraryHooks.useHiddenLibraries as ReturnType<typeof vi.fn>).mockReturnValue({
     hiddenIds: [],
+    isReady: true,
     isHidden: () => false,
     setHidden: vi.fn(),
   })
   ;(libraryHooks.useLibraryPrefs as ReturnType<typeof vi.fn>).mockReturnValue(undefined)
+  // Mirrors useLibraryPrefs so per-test overrides (e.g. manual library order)
+  // flow through to the component's useLibraryPrefsState() call.
+  ;(libraryHooks.useLibraryPrefsState as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+    prefs: (libraryHooks.useLibraryPrefs as ReturnType<typeof vi.fn>)(),
+    isReady: true,
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    refetch: vi.fn(),
+  }))
   // Inert library context: these tests are about the private library, and the
   // sidebar still calls the shared-library hooks on every render.
   mockLibraryHooks()
@@ -876,6 +892,7 @@ describe('LibrarySidebar', () => {
       let hiddenIds: string[] = []
       ;(libraryHooks.useHiddenLibraries as ReturnType<typeof vi.fn>).mockImplementation(() => ({
         hiddenIds,
+        isReady: true,
         isHidden: (id: string) => hiddenIds.includes(id),
         setHidden: (id: string, next: boolean) => {
           hiddenIds = next ? [...hiddenIds, id] : hiddenIds.filter((x) => x !== id)

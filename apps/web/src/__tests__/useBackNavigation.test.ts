@@ -67,7 +67,7 @@ describe('useBackNavigation & canNavigateBack', () => {
     expect(canNavigateBack()).toBe(false)
   })
 
-  it('canNavigateBack returns true when referrer matches same origin and history.length > 1', () => {
+  it('ignores document.referrer: same-origin referrer with history entries is not a return proof', () => {
     Object.defineProperty(window.history, 'state', {
       value: null,
       configurable: true,
@@ -83,7 +83,7 @@ describe('useBackNavigation & canNavigateBack', () => {
       configurable: true,
       writable: true,
     })
-    expect(canNavigateBack()).toBe(true)
+    expect(canNavigateBack()).toBe(false)
   })
 
   it('canNavigateBack returns false for external referrer', () => {
@@ -146,7 +146,9 @@ describe('useBackNavigation & canNavigateBack', () => {
     result.current(clickEvent)
     expect(clickEvent.preventDefault).toHaveBeenCalled()
     expect(mockRouterBack).not.toHaveBeenCalled()
-    expect(mockNavigate).toHaveBeenCalledWith({ to: '/' })
+    // Replace, not push: the fallback must not strand the dead-end page
+    // behind itself as a return loop.
+    expect(mockNavigate).toHaveBeenCalledWith({ to: '/', replace: true })
   })
 
   it('does not prevent default on meta/ctrl/middle click', () => {

@@ -84,7 +84,12 @@ export default function WebDavImportBrowser({
   const _ = useTranslation()
   const navigate = useNavigate()
 
-  const { data: connectionsRes, isLoading: isConnectionsLoading } = useStorageConnections()
+  const {
+    data: connectionsRes,
+    isLoading: isConnectionsLoading,
+    isError: isConnectionsError,
+    refetch: refetchConnections,
+  } = useStorageConnections()
   const connections = useMemo(() => connectionsRes?.data ?? [], [connectionsRes?.data])
   const hasConnections = connections.length > 0
 
@@ -421,10 +426,40 @@ export default function WebDavImportBrowser({
     void navigate({ to: '/books/$id', params: { id: bookVersionId } })
   }
 
-  if (isConnectionsLoading) {
+  if (isConnectionsLoading && !hasConnections) {
     return (
-      <div className="flex h-72 items-center justify-center">
+      <div className="flex h-72 items-center justify-center" role="status" aria-busy="true">
         <div className="h-6 w-6 animate-spin rounded-full border-2 border-stone-300 border-t-stone-600 dark:border-stone-700 dark:border-t-stone-300" />
+      </div>
+    )
+  }
+
+  if (isConnectionsError && !hasConnections) {
+    return (
+      <div className="flex h-72 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-stone-300 p-6 text-center dark:border-stone-700">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-600 dark:bg-red-500/20 dark:text-red-400">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-stone-800 dark:text-stone-200">
+            {_('library.storageConnectionsFailed') || '无法获取已配置的外部存储'}
+          </p>
+          <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+            {_('common.networkOrServerError') || '请检查网络或后端服务连接'}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => void refetchConnections()}
+        >
+          {_('common.retry') || '重试'}
+        </Button>
       </div>
     )
   }
@@ -637,12 +672,12 @@ export default function WebDavImportBrowser({
       </div>
 
       {/* File List Area */}
-      <div className="h-64 overflow-y-auto bg-white p-1.5 text-xs dark:bg-stone-900">
-        {isListing ? (
-          <div className="flex h-full items-center justify-center">
+      <div className="h-64 overflow-y-auto bg-white p-1.5 text-xs dark:bg-stone-900" aria-busy={isListing}>
+        {isListing && !lsRes ? (
+          <div className="flex h-full items-center justify-center" role="status">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-stone-300 border-t-stone-600 dark:border-stone-700 dark:border-t-stone-300" />
           </div>
-        ) : isError ? (
+        ) : isError && !lsRes ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-stone-500 dark:text-stone-400">
             <p>{_('library.webdavListFailed') || '无法获取目录内容'}</p>
             {lsError instanceof Error && lsError.message && (
@@ -677,7 +712,21 @@ export default function WebDavImportBrowser({
             <p>{_('library.webdavNoSearchResults') || '未找到匹配的文件'}</p>
           </div>
         ) : (
-          <ul className="space-y-0.5">
+          <div className="flex flex-col gap-1">
+            {isError && lsRes && (
+              <div className="mb-1 flex items-center justify-between rounded-lg border border-amber-200/80 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:border-amber-800/80 dark:bg-amber-500/20 dark:text-amber-300">
+                <span>{_('library.webdavRevalidateFailed') || '目录刷新失败，正在显示缓存'}</span>
+                <button
+                  type="button"
+                  onClick={() => void refetch()}
+                  disabled={isListing}
+                  className="font-medium underline hover:no-underline cursor-pointer"
+                >
+                  {_('common.retry') || '重试'}
+                </button>
+              </div>
+            )}
+            <ul className="space-y-0.5">
             {displayEntries.map((entry) => {
               if (entry.type === 'dir') {
                 return (
@@ -737,6 +786,7 @@ export default function WebDavImportBrowser({
               )
             })}
           </ul>
+          </div>
         )}
       </div>
 

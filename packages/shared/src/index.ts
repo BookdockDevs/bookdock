@@ -192,6 +192,7 @@ export type {
   ReadingProgressRes,
   RateSample,
   ReadingRecordCreateReq,
+  ReadingRecordMonthlyComparison,
   ReadingRecordSummaryRes,
   ReadingRecordDailyItem,
   ReadingRecordHourlyItem,
@@ -475,6 +476,11 @@ export {
 } from './rule-transfer'
 export * from './library-search'
 export * from './idea-discussion'
+export * from './review'
+export * from './reader-profile'
+export * from './notification'
+export * from './content-file'
+export * from './review-markdown'
 export * from './webdav'
 export * from './storage-connection'
 export * from './storage-backend'

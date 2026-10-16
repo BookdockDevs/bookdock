@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
+import type { AnnotationRes, AnnotationStyle, AnnotationUpdateReq } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -237,7 +237,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     setNoteEditing(true)
   }
 
-  async function handleSaveNote(note: string, visibility?: 'private' | 'shared') {
+  async function handleSaveNote(note: string, visibility?: 'private' | 'shared', files?: Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>) {
     if (!selection) return
     try {
       if (noteDraft) {
@@ -246,6 +246,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           cfiAnchor: selection.cfiRange,
           type: 'note',
           visibility,
+          ...files,
           revisionId: composer.data?.data.revisionId ?? undefined,
           color: DEFAULT_IDEA_COLOR,
           style: 'underline',
@@ -255,7 +256,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           note: note || undefined,
         })
       } else if (target) {
-        await update.mutateAsync({ id: target.id, body: { note: note || undefined, visibility } })
+        await update.mutateAsync({ id: target.id, body: { note: note || undefined, visibility, ...files } })
       }
       close()
     } catch (err) {
@@ -396,12 +397,15 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         rect={selection.rect}
         geometry={selection.geometry}
         initialNote={noteDraft ? '' : (target?.note ?? '')}
+        bookVersionId={bookId}
+        targetId={noteDraft ? undefined : target?.id}
+        initialImages={noteDraft ? undefined : target?.images}
         initialVisibility={noteDraft ? composer.data?.data.defaultVisibility : target?.visibility ?? 'private'}
         visibilityEligible={composer.data?.data.eligible}
         sourceReadable={composer.data?.data.sourceReadable}
         onSaveVisibility={handleSaveNote}
         saving={create.isPending || update.isPending}
-        onSave={handleSaveNote}
+        onSave={(note, files) => void handleSaveNote(note, undefined, files)}
         onClose={handleCloseNoteEditor}
       />
     )
@@ -448,13 +452,14 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         onCopyQuote={() => void copyQuoteText()}
         onHighlight={() => void highlight()}
         onWriteNote={() => void createNote()}
-        onSaveIdea={async (note, visibility) => {
+        onSaveIdea={async (note, visibility, files) => {
           if (!selection) return
           await create.mutateAsync({
             cfiRange: selection.cfiRange,
             cfiAnchor: selection.cfiRange,
             type: 'note',
             visibility,
+            ...files,
             revisionId: composer.data?.data.revisionId ?? undefined,
             color: DEFAULT_IDEA_COLOR,
             style: 'underline',

@@ -56,4 +56,18 @@ describe('settings-cache', () => {
     const state = client.getQueryState(['settings'])
     expect(state?.dataUpdatedAt).toBe(0)
   })
+
+  it('rejects legacy or unidentified cache snapshots without userId', () => {
+    localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify({ library: { view: 'list' } }))
+    expect(readStoredSettings('user-1')).toBeNull()
+
+    localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify({ userId: null, data: { library: { view: 'list' } } }))
+    expect(readStoredSettings('user-1')).toBeNull()
+  })
+
+  it('does not read or write settings when user is null or guest', () => {
+    writeStoredSettings({ library: { view: 'grid' } }, null)
+    expect(localStorage.getItem(SETTINGS_CACHE_KEY)).toBeNull()
+    expect(readStoredSettings(null)).toBeNull()
+  })
 })

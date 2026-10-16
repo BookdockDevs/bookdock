@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 
 import i18n from '../i18n/i18n'
@@ -76,6 +76,10 @@ function mockSection() {
 beforeEach(async () => {
   vi.clearAllMocks()
   await i18n.changeLanguage('zh-CN')
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('LibraryManagementSection', () => {
@@ -197,6 +201,9 @@ describe('LibraryManagementSection', () => {
     expect(screen.getByRole('button', { name: '删除书库' })).not.toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(reset).toHaveBeenCalledTimes(1)
+    // Reopening is a separate gesture after the menu's close debounce.
+    const reopenTime = Date.now() + 200
+    vi.spyOn(Date, 'now').mockReturnValue(reopenTime)
     open()
     expect(screen.getByRole('textbox')).toHaveValue('')
     expect(screen.queryByRole('alert')).toBeNull()

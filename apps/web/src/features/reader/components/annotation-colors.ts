@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react'
+
 import type { AnnotationStyle } from '@bookdock/shared'
 
 import type { PopupRect, SelectionGeometry } from '../types'
@@ -33,6 +35,37 @@ export const COLOR_LABEL_KEYS: Record<string, string> = {
 
 export function highlightHex(name: string): string | undefined {
   return HIGHLIGHT_COLORS.find((c) => c.name === name)?.hex
+}
+
+/** Hex for an annotation's color name, falling back to the default yellow. */
+export function annotationHex(color: string | null | undefined): string {
+  return highlightHex(color ?? '') ?? '#eab308'
+}
+
+/** Render the marked text the way it appears in the book: underline / wavy / tinted background */
+export function highlightDecoration(style: AnnotationStyle, hex: string): CSSProperties {
+  if (style === 'highlight') {
+    return {
+      backgroundColor: `${hex}2e`,
+      borderRadius: 2,
+      padding: '0 1px',
+      boxDecorationBreak: 'clone',
+      WebkitBoxDecorationBreak: 'clone',
+    }
+  }
+  const path = style === 'squiggly'
+    ? 'M0 1.7 Q4 0.2 8 1.7 T16 1.7 L16 2.9 Q12 4.4 8 2.9 T0 2.9 Z'
+    : 'M0 2 Q2 1.25 5 1.25 L95 1.25 Q98 1.25 100 2 Q98 2.75 95 2.75 L5 2.75 Q2 2.75 0 2 Z'
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${style === 'squiggly' ? 16 : 100} 4" preserveAspectRatio="none"><path fill="${hex}" fill-opacity="0.85" d="${path}"/></svg>`
+  return {
+    backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(svg)}")`,
+    backgroundRepeat: style === 'squiggly' ? 'repeat-x' : 'no-repeat',
+    backgroundSize: style === 'squiggly' ? '16px 4px' : '100% 4px',
+    backgroundPosition: 'left bottom',
+    paddingBottom: '4px',
+    boxDecorationBreak: 'clone',
+    WebkitBoxDecorationBreak: 'clone',
+  }
 }
 
 export const DEFAULT_HIGHLIGHT_COLOR = 'yellow'

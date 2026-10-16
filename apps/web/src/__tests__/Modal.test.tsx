@@ -44,6 +44,20 @@ function NestedMenuHarness() {
 }
 
 describe('Modal', () => {
+  it('leaves the modal open when Escape originates from an editor portal', () => {
+    const close = vi.fn()
+    render(<Modal title="Test modal" onClose={close}>Content</Modal>)
+    const portal = document.createElement('div')
+    portal.className = 'mdxeditor-popup-container'
+    const option = document.createElement('button')
+    portal.append(option)
+    document.body.append(portal)
+    fireEvent.keyDown(option, { key: 'Escape' })
+    expect(close).not.toHaveBeenCalled()
+    portal.remove()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(close).toHaveBeenCalledOnce()
+  })
   it('keeps the reader inset when portaled to the document body', () => {
     const { rerender } = render(
       <DialogLayoutContext.Provider value={344}>
@@ -61,6 +75,19 @@ describe('Modal', () => {
       </DialogLayoutContext.Provider>,
     )
     expect(backdrop).toHaveStyle({ '--reader-dialog-inset': '0px' })
+  })
+
+  it('supports a centered headerless reader detail shell', () => {
+    render(
+      <Modal title="Book title" onClose={() => undefined} variant="reader" size="idea" centered hideHeader contentClassName="!p-0">
+        Content
+      </Modal>,
+    )
+
+    expect(screen.getByRole('dialog')).toHaveClass('max-w-[420px]', 'rounded-2xl')
+    expect(screen.getByRole('heading', { name: 'Book title' })).toHaveClass('sr-only')
+    expect(screen.getByRole('dialog').parentElement).toHaveClass('items-center', 'p-4')
+    expect(screen.queryByRole('button', { name: 'library.close' })).not.toBeInTheDocument()
   })
 
   it('does not steal focus after a controlled form rerenders', () => {

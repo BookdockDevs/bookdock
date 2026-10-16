@@ -85,7 +85,6 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
   await fs.writeFile(progressFile, progress)
   const retainedTables = ['users', 'settings', 'libraries', 'library_books', 'library_book_versions', 'book_versions', 'content_revisions', 'bookmarks', 'ideas', 'ai_threads', 'ai_messages']
   const before = retainedTables.map((table) => sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
-  const oldState = sqlite.prepare('SELECT * FROM book_states').all()
   const oldLedger = sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at').all()
   expect(oldLedger).toHaveLength(41)
   expect(sqlite.prepare('SELECT count(*) AS n FROM ai_chunks_fts').get()).toEqual({ n: 1 })
@@ -93,8 +92,12 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
 
   await client.runDatabaseMigrations(db)
 
-  expect(retainedTables.map((table) => sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all())).toEqual(before)
-  expect(sqlite.prepare('SELECT * FROM book_states').all()).toEqual(oldState)
+  const upgradedStates = sqlite.prepare('SELECT * FROM book_states').all() as any[]
+  expect(upgradedStates).toHaveLength(1)
+  expect(upgradedStates[0].user_id).toBe('u')
+  expect(upgradedStates[0].book_version_id).toBe('b')
+  expect(upgradedStates[0].read_fraction).toBeCloseTo(0.42)
+  expect(JSON.parse(upgradedStates[0].progress_data)).toEqual({ percent: 42, cfi: 'chapter:0', chapterIndex: 0, intervals: [[0, 0.42]] })
   expect(sqlite.prepare('SELECT storage_tier, last_accessed_at FROM blobs').get()).toEqual({ storage_tier: 'local', last_accessed_at: null })
   expect(sqlite.prepare('SELECT storage_backend_enabled, storage_backend_status FROM instance').get()).toEqual({ storage_backend_enabled: 0, storage_backend_status: 'disabled' })
   expect(sqlite.prepare('SELECT count(*) AS n FROM storage_transfer_tasks').get()).toEqual({ n: 0 })

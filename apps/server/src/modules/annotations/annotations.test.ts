@@ -17,9 +17,9 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  // Pre-retirement base plus the idea-discussion tables, resolved by journal
+  // Pre-retirement base plus the current discussion and managed-file tables,
   // tag so later migrations cannot silently leave this schema behind.
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [IDEA_DISCUSSION_TAG])
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [IDEA_DISCUSSION_TAG, '0042_storage_connections', '0043_storage_backend', '0046_book_reviews', '0048_content_files', '0049_review_title', '0050_content_file_order'])
   return db
 }
 

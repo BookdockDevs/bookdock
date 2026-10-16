@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 
 import { Button } from '@/components/ui/Button'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useInstanceInfo } from '@/features/auth/hooks'
 import { useLibraries } from '@/features/library/hooks'
 
@@ -41,7 +42,13 @@ export default function Settings() {
   const isOwner = user?.role === 'owner'
   // Guest sessions share one anonymous identity and cannot manage tokens at all.
   const isGuest = !user
-  const { data: userLibrariesData } = useLibraries()
+  const {
+    data: userLibrariesData,
+    isLoading: isLibrariesLoading,
+    isError: isLibrariesError,
+    isFetching: isLibrariesFetching,
+    refetch: refetchLibraries,
+  } = useLibraries()
   const { data: instanceData } = useInstanceInfo()
   const userUploadAllowed = instanceData?.data.allowUserUpload !== false
   const showWebDav = !isGuest && (isOwner || userUploadAllowed)
@@ -199,9 +206,37 @@ export default function Settings() {
               {s.label}
             </button>
           ))}
+          {!isOwner && isLibrariesLoading && search.section === 'admin' && (
+            <div className="h-9 w-20 sm:w-full animate-pulse rounded-xl bg-stone-200/60 dark:bg-stone-800/60 motion-reduce:animate-none" />
+          )}
         </nav>
 
         <div className="min-w-0 flex-1">
+          {!isOwner && isLibrariesLoading && active === 'admin' && (
+            <div className="flex flex-col gap-6" role="status" aria-busy="true">
+              <div className="h-64 animate-pulse rounded-2xl border border-stone-200/80 bg-white p-6 dark:border-stone-800 dark:bg-stone-900 motion-reduce:animate-none" />
+            </div>
+          )}
+          {!isOwner && isLibrariesError && active === 'admin' && (
+            <div className="flex flex-col gap-6">
+              <QueryErrorState
+                className="rounded-2xl border border-stone-200/80 bg-white p-6 dark:border-stone-800 dark:bg-stone-900"
+                isRetrying={isLibrariesFetching}
+                onRetry={() => void refetchLibraries()}
+              />
+            </div>
+          )}
+          {!isOwner && !isLibrariesLoading && !isLibrariesError && !canAccessAdmin && active === 'admin' && (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-stone-200 bg-white p-8 text-center shadow-sm sm:p-12 dark:border-stone-800 dark:bg-stone-900">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+                </svg>
+              </div>
+              <h2 className="mt-4 text-base font-semibold text-stone-900 dark:text-stone-100">{_('errors.forbidden')}</h2>
+              <p className="mt-1.5 max-w-md text-xs leading-relaxed text-stone-500 text-pretty dark:text-stone-400">{_('settings.adminAccessDenied') || '您没有管理权限'}</p>
+            </div>
+          )}
           {visitedSections.has('general') && (
             <div className={active === 'general' ? 'flex flex-col gap-6' : 'hidden'}>
               <SettingsCard

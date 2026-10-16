@@ -1,8 +1,9 @@
-import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 
-import type { AnnotationRes, AnnotationStyle } from '@bookdock/shared'
+import type { AnnotationRes, AnnotationUpdateReq } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
+import ContentImages from '@/features/content-files/components/ContentImages'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -13,281 +14,23 @@ import { useReaderApi } from '../hooks/useReaderApi'
 import { useAuthStore } from '@/stores/auth.store'
 import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { kindOf, type NoteSort } from '../hooks/useNotesFilter'
-import { isCustomBookmarkTitle } from '../lib/annotation-text'
-import { compareCfiPosition } from '../lib/cfi-overlap'
+import { buildAnnotationCopyText, isCustomBookmarkTitle } from '../lib/annotation-text'
+import { compareAnnotations, groupAnnotationsByChapter } from '../lib/annotation-order'
 import { buildChapterOrderLookup, type ChapterOrderItem } from '../lib/chapter-order'
-import { markEscConsumed } from '../lib/esc-consumed'
 import { useReaderState } from '../state/reader-state'
 import AnnotationExportDialog from './AnnotationExportDialog'
-import IdeaVisibilityControl from './IdeaVisibilityControl'
+import AnnotationInlineEditor from './AnnotationInlineEditor'
 import { useIdeaComposer } from '../hooks/useIdeas'
-import { HIGHLIGHT_COLORS } from './annotation-colors'
+import { annotationHex } from './annotation-colors'
+import { ClampedText, HighlightQuote } from './annotation-render'
 import { BookmarkIcon, BulbIcon, CheckIcon, CloseIcon, CopyIcon, DocumentExportIcon, PencilIcon, SelectionIcon, ShareIcon, TrashIcon } from './annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from './format-relative-time'
-
-/**
- * A clamped paragraph that only offers the expand toggle when it is genuinely
- * cut off.
- *
- * A character count cannot answer that. The panel is resizable and the reader
- * picks their own font and size, so the same 80 characters take two lines on a
- * wide panel and five on a narrow one. A count-only guess showed the toggle
- * no matter what, then expanded into
- * nothing but the padding reserved for the button. Only the rendered box knows,
- * so measure it and re-measure when it resizes.
- *
- * `minLengthForToggle` is the fallback for when no layout exists to measure
- * (JSDOM), and a cheap way to skip observing paragraphs that cannot overflow.
- */
-function ClampedText({
-  text,
-  clampClassName,
-  className,
-  wrapperClassName,
-  renderText,
-  expanded,
-  onToggle,
-  expandLabel,
-  collapseLabel,
-  minLengthForToggle,
-  toggleClassName,
-}: {
-  text: string
-  clampClassName: string
-  className: string
-  /** Extra box treatment some call sites wrap the paragraph in. */
-  wrapperClassName?: string
-  /** Lets a call site decorate the text (a highlight's underline) without
-   *  giving up the plain string the length check needs. */
-  renderText?: (text: string) => ReactNode
-  expanded: boolean
-  onToggle: (e: MouseEvent) => void
-  expandLabel: string
-  collapseLabel: string
-  minLengthForToggle: number
-  /** Extra classes for the floating expand toggle (e.g. z-index above a stretched overlay button). */
-  toggleClassName?: string
-}) {
-  const ref = useRef<HTMLParagraphElement | null>(null)
-  const [clipped, setClipped] = useState(false)
-  const [measurable, setMeasurable] = useState(false)
-  const couldOverflow = text.length > minLengthForToggle || text.includes('\n')
-  const paragraphs = text.replace(/\r\n?/g, '\n').split(/\n(?:[\t ]*\n)+/)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const measure = () => {
-      // JSDOM lays nothing out, so there is no answer to give. Report that
-      // rather than claiming every box is unclipped.
-      if (el.clientHeight === 0) return
-      setMeasurable(true)
-      setClipped(el.scrollHeight - el.clientHeight > 1)
-    }
-    measure()
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [text, expanded])
-
-  const showToggle = couldOverflow && (measurable ? clipped || expanded : true)
-
-  return (
-    <div
-      className={cn(
-        'group/clamp relative min-w-0 flex-1',
-        wrapperClassName,
-      )}
-    >
-      <p ref={ref} className={cn(className, !expanded && clampClassName)}>
-        {paragraphs.map((paragraph, paragraphIndex) => {
-          const content = renderText ? paragraph.split('\n').map((line, lineIndex) => (
-            <Fragment key={lineIndex}>
-              {lineIndex > 0 && '\n'}
-              {line.trim() ? renderText(line) : line}
-            </Fragment>
-          )) : paragraph
-          return paragraphs.length === 1 ? content : (
-            <span key={paragraphIndex} className="block [&+span]:mt-[0.4em]" data-note-paragraph>
-              {content}
-            </span>
-          )
-        })}
-      </p>
-      {showToggle && (
-        <button
-          type="button"
-          onClick={onToggle}
-          className={cn(
-            'absolute bottom-1 right-1.5 inline-flex items-center gap-0.5 rounded border border-stone-200/80 bg-[var(--bd-read-bg)]/95 px-1.5 py-0.5 text-[10px] text-[var(--bd-read-sub)] shadow-xs opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 hover:text-current max-md:opacity-100 dark:border-stone-700/80',
-            toggleClassName,
-          )}
-        >
-          <span>{expanded ? collapseLabel : expandLabel}</span>
-          <svg
-            className={cn('h-2.5 w-2.5 transition-transform duration-150', expanded && 'rotate-180')}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-        </button>
-      )}
-    </div>
-  )
-}
-
-function hexOf(a: AnnotationRes): string {
-  return HIGHLIGHT_COLORS.find((c) => c.name === a.color)?.hex ?? '#eab308'
-}
-
-/** Render the marked text the way it appears in the book: underline / wavy / tinted background */
-function highlightDecoration(style: AnnotationStyle, hex: string): CSSProperties {
-  if (style === 'highlight') {
-    return {
-      backgroundColor: `${hex}2e`,
-      borderRadius: 2,
-      padding: '0 1px',
-      boxDecorationBreak: 'clone',
-      WebkitBoxDecorationBreak: 'clone',
-    }
-  }
-  const path = style === 'squiggly'
-    ? 'M0 1.7 Q4 0.2 8 1.7 T16 1.7 L16 2.9 Q12 4.4 8 2.9 T0 2.9 Z'
-    : 'M0 2 Q2 1.25 5 1.25 L95 1.25 Q98 1.25 100 2 Q98 2.75 95 2.75 L5 2.75 Q2 2.75 0 2 Z'
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${style === 'squiggly' ? 16 : 100} 4" preserveAspectRatio="none"><path fill="${hex}" fill-opacity="0.85" d="${path}"/></svg>`
-  return {
-    backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(svg)}")`,
-    backgroundRepeat: style === 'squiggly' ? 'repeat-x' : 'no-repeat',
-    backgroundSize: style === 'squiggly' ? '16px 4px' : '100% 4px',
-    backgroundPosition: 'left bottom',
-    paddingBottom: '4px',
-    boxDecorationBreak: 'clone',
-    WebkitBoxDecorationBreak: 'clone',
-  }
-}
 
 const actionBtn =
   'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current'
 
-function autoGrow(el: HTMLTextAreaElement): void {
-  el.style.height = 'auto'
-  el.style.height = `${el.scrollHeight}px`
-}
-
-/** Inline card editor replacing the prompt-based rename: auto-growing
- *  textarea, Ctrl+Enter saves, Escape / outside click cancels (mirrors the
- *  selection-toolbar NoteEditorPopup interaction) */
-function InlineEditor({
-  initial,
-  placeholder,
-  allowEmpty = false,
-  saving,
-  error,
-  onSave,
-  onCancel,
-  visibilityEligible,
-  sourceReadable,
-  initialVisibility = 'private',
-}: {
-  initial: string
-  placeholder: string
-  allowEmpty?: boolean
-  saving: boolean
-  error: string | null
-  onSave: (value: string, visibility?: 'private' | 'shared') => void
-  onCancel: () => void
-  visibilityEligible?: boolean
-  sourceReadable?: boolean
-  initialVisibility?: 'private' | 'shared'
-}) {
-  const _ = useTranslation()
-  const [draft, setDraft] = useState(initial)
-  const [visibility, setVisibility] = useState(initialVisibility)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        markEscConsumed()
-        if (!saving) onCancel()
-      }
-    }
-    function onPointerDown(e: globalThis.MouseEvent) {
-      if (!saving && rootRef.current && !rootRef.current.contains(e.target as Node)) onCancel()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('mousedown', onPointerDown)
-    textareaRef.current?.focus()
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('mousedown', onPointerDown)
-    }
-  }, [onCancel, saving])
-
-  function submit() {
-    if (saving) return
-    const value = draft.trim()
-    if (value) onSave(value, visibilityEligible ? visibility : undefined)
-    else if (allowEmpty && initial.trim()) onSave('')
-    else onCancel()
-  }
-
-  const isChanged = draft.trim() !== initial.trim() || visibility !== initialVisibility
-  const canSave = allowEmpty ? isChanged : Boolean(draft.trim())
-
-  return (
-    <div ref={rootRef} className="p-3" onContextMenu={(e) => e.stopPropagation()}>
-      <textarea
-        ref={textareaRef}
-        rows={1}
-        value={draft}
-        disabled={saving}
-        onChange={(e) => {
-          setDraft(e.target.value)
-          autoGrow(e.target)
-        }}
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-            e.preventDefault()
-            submit()
-          } else if (e.key === 'Escape') {
-            e.stopPropagation()
-            if (!saving) onCancel()
-          }
-        }}
-        placeholder={placeholder}
-        className="w-full resize-none bg-transparent text-sm leading-relaxed text-current outline-none placeholder:text-[var(--bd-read-sub)]"
-      />
-      {error && <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
-      {visibilityEligible && <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable ?? false} disabled={saving} />}
-      <div className="mt-2 flex items-center justify-end gap-2">
-        <button
-          disabled={saving}
-          onClick={onCancel}
-          className="rounded-md px-2 py-1 text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
-        >
-          {_('annotation.cancel')}
-        </button>
-        <button
-          onClick={submit}
-          disabled={saving || !canSave}
-          className="rounded-md bg-blue-500 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-60"
-        >
-          {_('annotation.save')}
-        </button>
-      </div>
-    </div>
-  )
-}
-
 interface NotesPanelProps {
+  isLoading?: boolean
   items: AnnotationRes[]
   allItems?: AnnotationRes[]
   total?: number
@@ -308,6 +51,7 @@ interface NotesPanelProps {
 }
 
 export const NotesPanel = memo(function NotesPanel({
+  isLoading = false,
   items,
   allItems = items,
   total: _total,
@@ -421,31 +165,17 @@ export const NotesPanel = memo(function NotesPanel({
   /** Grouped view: either by book chapter order or consecutive chapters in time order */
   const groups = useMemo(() => {
     if (isChapterSort) {
-      const byChapter = new Map<string, { chapter: string; chapterHref: string | null; list: AnnotationRes[] }>()
-      for (const a of items) {
-        const chapter = a.chapter || _('reader.uncategorized')
-        const chapterHref = a.chapterHref ?? null
-        const key = chapterHref ? `href:${chapterHref}` : `label:${chapter}`
-        const group = byChapter.get(key)
-        if (group) group.list.push(a)
-        else byChapter.set(key, { chapter, chapterHref, list: [a] })
-      }
+      const grouped = groupAnnotationsByChapter(items, _('reader.uncategorized'))
       const lookupChapter = buildChapterOrderLookup(chapterOrder)
       const orderIndex = (group: { chapter: string; chapterHref: string | null }) => {
         const i = lookupChapter(group.chapter, group.chapterHref)
         return i < 0 ? chapterOrder.length : i
       }
       const reverse = sort === 'chapter-desc'
-      const compareItems = (a: AnnotationRes, b: AnnotationRes) =>
-        compareCfiPosition(a.cfiRange, b.cfiRange)
-        || compareCfiPosition(a.cfiRange, b.cfiRange, true)
-        || a.createdAt - b.createdAt
-        || a.id.localeCompare(b.id)
-      return Array.from(byChapter.entries())
-        .map(([key, group]) => ({
-          key,
+      return grouped
+        .map((group) => ({
           ...group,
-          list: group.list.sort((a, b) => (reverse ? -1 : 1) * compareItems(a, b)),
+          list: [...group.list].sort((a, b) => (reverse ? -1 : 1) * compareAnnotations(a, b)),
         }))
         .sort((g1, g2) => {
           const a = orderIndex(g1)
@@ -523,32 +253,20 @@ export const NotesPanel = memo(function NotesPanel({
 
   async function copyItem(item: AnnotationRes) {
     try {
-      const parts: string[] = []
-      if (kindOf(item) === 'idea') {
-        if (item.note) parts.push(item.note)
-        if (item.text) parts.push(item.text)
-      } else if (item.type === 'bookmark') {
-        const hasCustom = isCustomBookmarkTitle(item, _('reader.bookmark'))
-        if (hasCustom && item.text) parts.push(item.text)
-        if (item.contextText) parts.push(item.contextText)
-        else if (!hasCustom && item.text) parts.push(item.text)
-      } else {
-        if (item.text) parts.push(item.text)
-      }
-      await navigator.clipboard.writeText(parts.filter(Boolean).join('\n\n'))
+      await navigator.clipboard.writeText(buildAnnotationCopyText(item, _('reader.bookmark')))
       notify.success({ key: 'reader.copied' })
     } catch {
       notify.error({ key: 'reader.copyFailed' })
     }
   }
 
-  function saveEdit(item: AnnotationRes, value: string, visibility?: 'private' | 'shared') {
+  function saveEdit(item: AnnotationRes, value: string, visibility?: 'private' | 'shared', files?: Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>) {
     if (saveLock.current || updateAnnotation.isPending) return
     saveLock.current = true
     setEditError(null)
     updateAnnotation.mutate({
       id: item.id,
-      body: item.type === 'bookmark' ? { text: value } : { note: value, visibility },
+      body: item.type === 'bookmark' ? { text: value } : { note: value, visibility, ...files },
     }, {
       onSuccess: () => { saveLock.current = false; setEditingId(null) },
       onError: (error) => { saveLock.current = false; setEditError(getUserErrorMessage(error, _, 'annotation.editSaveFailed')) },
@@ -582,7 +300,7 @@ export const NotesPanel = memo(function NotesPanel({
   }
 
   function renderCard(a: AnnotationRes) {
-    const hex = hexOf(a)
+    const hex = annotationHex(a.color)
     const kind = kindOf(a)
     const orphaned = a.locationAvailable === false || orphanedKeys.includes(`${a.cfiRange}|${a.type}`)
     const isNoteExpanded = expandedCardIds.has(a.id)
@@ -607,13 +325,16 @@ export const NotesPanel = memo(function NotesPanel({
           </span>
         )}
         {editingId === a.id ? (
-          <InlineEditor
+          <AnnotationInlineEditor
             saving={updateAnnotation.isPending}
             error={editError}
             initial={a.type === 'bookmark' ? (hasCustomTitle ? a.text : '') : (a.note ?? '')}
             placeholder={a.type === 'bookmark' ? _('annotation.renamePlaceholder') : _('annotation.notePlaceholder')}
             allowEmpty={a.type === 'bookmark'}
-            onSave={(value, visibility) => saveEdit(a, value, visibility)}
+            onSave={(value, visibility, files) => saveEdit(a, value, visibility, files)}
+            bookVersionId={a.type === 'note' ? bookId : undefined}
+            targetId={a.type === 'note' ? a.id : undefined}
+            initialImages={a.images}
             initialVisibility={a.visibility ?? 'private'}
             visibilityEligible={a.type === 'note' && composer.data?.data.eligible}
             sourceReadable={composer.data?.data.sourceReadable}
@@ -724,6 +445,9 @@ export const NotesPanel = memo(function NotesPanel({
                         toggleClassName="z-10"
                       />
                     </div>
+                    <div className="ml-[1.875rem] min-w-0">
+                      <ContentImages images={a.images} />
+                    </div>
                     {!selectionMode && (
                       <button
                         type="button"
@@ -771,16 +495,12 @@ export const NotesPanel = memo(function NotesPanel({
                       style={{ backgroundColor: hex }}
                       aria-hidden="true"
                     />
-                    <ClampedText
-                      text={a.text}
-                      clampClassName="line-clamp-4"
-                      className={cn('text-sm leading-relaxed text-current whitespace-pre-wrap break-words', a.style !== 'highlight' && 'pb-1')}
-                      renderText={(value) => <span style={highlightDecoration(a.style, hex)}>{value}</span>}
+                    <HighlightQuote
+                      item={a}
                       expanded={isNoteExpanded}
                       onToggle={(e) => toggleNoteExpand(a.id, e)}
                       expandLabel={_('annotation.expand')}
                       collapseLabel={_('annotation.collapse')}
-                      minLengthForToggle={65}
                       toggleClassName="z-10"
                     />
                   </div>
@@ -890,7 +610,20 @@ export const NotesPanel = memo(function NotesPanel({
           )}
         </div>
       )}
-      {items.length === 0 ? (
+      {isLoading ? (
+        <div role="status" aria-busy="true" className="space-y-3 pt-1">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="animate-pulse rounded-xl border border-stone-200/60 bg-stone-500/5 p-3.5 space-y-2.5 dark:border-stone-800/60 motion-reduce:animate-none">
+              <div className="flex items-center justify-between">
+                <div className="h-3 w-16 rounded bg-stone-500/15" />
+                <div className="h-3 w-12 rounded bg-stone-500/10" />
+              </div>
+              <div className="h-3.5 w-4/5 rounded bg-stone-500/15" />
+              <div className="h-3 w-1/2 rounded bg-stone-500/10" />
+            </div>
+          ))}
+        </div>
+      ) : items.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center pb-24 px-4 text-center">
           <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]">
             <svg
@@ -906,9 +639,11 @@ export const NotesPanel = memo(function NotesPanel({
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
             </svg>
           </div>
-          <p className="text-base font-normal text-current">{_('reader.noNotes')}</p>
+          <p className="text-base font-normal text-current">
+            {allItems.length > 0 ? (_('reader.noMatchingNotes') || '未找到匹配的笔记') : _('reader.noNotes')}
+          </p>
           <p className="mt-1.5 text-xs text-[var(--bd-read-sub)] max-w-64 leading-relaxed">
-            {_('reader.noNotesHint')}
+            {allItems.length > 0 ? (_('reader.noMatchingNotesHint') || '请尝试调整筛选条件或搜索关键词') : _('reader.noNotesHint')}
           </p>
         </div>
       ) : isChapterSort && !chapterOrderReady ? (

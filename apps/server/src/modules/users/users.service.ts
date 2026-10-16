@@ -5,6 +5,7 @@ import type { AdminUserRes, UpdateUserReq } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { blobKeyReferenced } from '../../db/blob-refs'
+import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
 import { avatarVariantKeys } from '../../lib/avatar'
 import { coverThumbnailKey } from '../../lib/cover'
 import { deleteProgressFile } from '../../lib/progress-file'
@@ -308,5 +309,6 @@ export async function deleteUser(actorId: string, targetId: string, password?: s
     await deleteProgressFile(targetId, versionId)
   }
   invalidateUserCache(targetId)
+  await cleanContentBlobs()
   return { id: targetId }
 }

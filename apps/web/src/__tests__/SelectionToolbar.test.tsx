@@ -1,6 +1,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render as testingRender, screen, fireEvent, waitFor, act } from '@testing-library/react'
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
+
+function render(element: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+  return testingRender(element, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+}
 
 import type { AnnotationRes } from '@bookdock/shared'
 

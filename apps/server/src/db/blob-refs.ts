@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 
 import { getDb } from './client'
-import { blobs, contentRevisions, libraryBooks, libraryBookVersions } from './schema'
+import { blobs, contentFiles, contentRevisions, libraryBooks, libraryBookVersions } from './schema'
 
 /**
  * Physical-file liveness (Phase 1.4/5.6). Content is addressed by
@@ -15,6 +15,7 @@ export function blobKeyReferenced(key: string): boolean {
   return db.select({ id: contentRevisions.id }).from(contentRevisions).where(eq(contentRevisions.blobKey, key)).get() !== undefined
     || db.select({ id: libraryBooks.id }).from(libraryBooks).where(eq(libraryBooks.coverKey, key)).get() !== undefined
     || db.select({ id: libraryBookVersions.id }).from(libraryBookVersions).where(eq(libraryBookVersions.coverKey, key)).get() !== undefined
+    || db.select({ id: contentFiles.id }).from(contentFiles).where(eq(contentFiles.blobKey, key)).get() !== undefined
 }
 
 /**

@@ -1157,7 +1157,11 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
   if (!revision) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
   // Guests create no server-side reading state; there is nothing to load.
-  const state = userId === null ? undefined : db.select().from(bookStates)
+  const state = userId === null ? undefined : db.select({
+    readStatus: bookStates.readStatus,
+    percent: bookStates.percent,
+    lastReadAt: bookStates.lastReadAt,
+  }).from(bookStates)
     .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
   const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
   const hiddenDetail = getWorkHiddenDetail(db, granted.library.id, work)
@@ -1259,7 +1263,11 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     : db.select().from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
   if (!revision) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
-  const state = db.select().from(bookStates)
+  const state = db.select({
+    readStatus: bookStates.readStatus,
+    percent: bookStates.percent,
+    lastReadAt: bookStates.lastReadAt,
+  }).from(bookStates)
     .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
   const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
   const meta = revisionMeta
@@ -2686,7 +2694,10 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
     assertMutableContent(kind)
   }
   if (data.readStatus !== undefined || data.progress !== undefined) {
-    const state = db.select().from(bookStates)
+    const state = db.select({
+      readStatus: bookStates.readStatus,
+      percent: bookStates.percent,
+    }).from(bookStates)
       .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
     if (state) {
       db.update(bookStates).set({

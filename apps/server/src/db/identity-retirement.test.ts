@@ -63,6 +63,10 @@ function makeLegacyIdentity() {
     }
   }
   db.$client.exec(`DROP TABLE IF EXISTS storage_connections;
+    DROP TABLE content_files;
+    DROP TABLE content_upload_drafts;
+    DROP TABLE interaction_notifications;
+    DROP TABLE interaction_receipts;
     DROP TABLE IF EXISTS storage_transfer_tasks;
     ALTER TABLE blobs DROP COLUMN storage_tier;
     ALTER TABLE blobs DROP COLUMN last_accessed_at;
@@ -76,8 +80,12 @@ function makeLegacyIdentity() {
     DROP TRIGGER idea_comments_deleted_author;
     DROP TABLE idea_comment_likes; DROP TABLE idea_likes; DROP TABLE idea_comments;
     ALTER TABLE ideas DROP COLUMN source_library_book_version_id;
+    DROP TRIGGER book_review_comments_deleted_author;
+    DROP TABLE book_review_comment_likes; DROP TABLE book_review_likes; DROP TABLE book_review_comments; DROP TABLE book_reviews;
     ALTER TABLE ideas DROP COLUMN revision_id;
     ALTER TABLE ideas DROP COLUMN edited_at;
+    ALTER TABLE book_states DROP COLUMN progress_data;
+    ALTER TABLE book_states DROP COLUMN read_fraction;
     DELETE FROM __drizzle_migrations WHERE created_at >= ${cutoff};`)
   db.$client.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'")
   db.$client.prepare("UPDATE users SET role = 'owner' WHERE id = ?").run(ownerId)
@@ -134,7 +142,7 @@ describe('identity/configuration retirement', () => {
     expect(db.$client.pragma('quick_check')).toEqual([{ quick_check: 'ok' }])
     await client.runDatabaseMigrations(db)
     expect(db.select().from(schema.users).all()).toEqual(beforeUsers)
-  })
+  }, 30_000)
 
   it.each(['missing-instance', 'disabled-owner', 'guest-credential', 'guest-library', 'guest-setting', 'guest-rule'])('refuses %s without deleting data or recording retirement', async (invalid) => {
     makeLegacyIdentity()

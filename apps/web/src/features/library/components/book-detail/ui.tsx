@@ -94,6 +94,7 @@ export function ActionIcon({
   disabled = false,
   onClick,
   title,
+  className,
   children,
 }: {
   label: string
@@ -104,6 +105,7 @@ export function ActionIcon({
   onClick?: () => void
   /** Hover explanation; defaults to the label. */
   title?: string
+  className?: string
   children: ReactNode
 }) {
   return (
@@ -119,7 +121,7 @@ export function ActionIcon({
           : secondary
             ? 'bg-stone-100 text-stone-600 hover:bg-stone-200 hover:text-stone-900 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100'
             : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'
-      }`}
+      }${className ? ` ${className}` : ''}`}
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         {children}

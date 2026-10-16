@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { SettingsRes } from '@bookdock/shared'
 
 import { apiPut } from '@/api/client'
 import { customThemesFromSync } from '@/lib/reading-theme'
 import { notify } from '@/lib/notifications'
-import { fetchSettings, seedSettingsQuery } from '@/lib/settings-cache'
+import { fetchSettings, readStoredSettings } from '@/lib/settings-cache'
 import { useAuthStore } from '@/stores/auth.store'
 import { PENDING_SETTINGS_STORAGE_KEY, useUiStore } from '@/stores/ui.store'
 
@@ -157,46 +157,46 @@ export function SettingsSync() {
   const userId = user?.id ?? null
   const isGuest = !user
 
+  const { data: settingsRes } = useQuery<{ data: SettingsRes }>({
+    enabled: Boolean(userId) && !isGuest,
+    queryKey: ['settings'],
+    queryFn: fetchSettings,
+  })
+
   useEffect(() => {
     if (settingsUserRef.current !== userId) {
       syncFailedRef.current = false
       settingsUserRef.current = userId
-      const cached = seedSettingsQuery(queryClient, userId)
-      if (userId && !isGuest && cached) {
+      if (userId && !isGuest) {
+        const cached = readStoredSettings(userId)
+        const pending = getPendingSettings(userId)
         suppressSyncRef.current = true
-        applySettings(cached)
+        if (pending) {
+          applySettings(pending)
+        } else if (cached) {
+          applySettings(cached)
+        }
         suppressSyncRef.current = false
+        if (pending) {
+          mutateRef.current(pending, { onSuccess: () => clearPendingSettings(userId, pending) })
+        }
       } else {
         suppressSyncRef.current = true
         useUiStore.setState({ fontPreferences: {}, fontOrder: [] })
         suppressSyncRef.current = false
       }
     }
-    if (!userId || isGuest) return
+  }, [isGuest, userId])
+
+  useEffect(() => {
+    if (!userId || isGuest || !settingsRes?.data) return
     const pending = getPendingSettings(userId)
-    if (pending) {
-      // A reload can happen before the debounced PUT completes. Keep the
-      // locally committed snapshot visible and retry it instead of allowing a
-      // stale server response to overwrite it.
-      suppressSyncRef.current = true
-      applySettings(pending)
-      suppressSyncRef.current = false
-      mutateRef.current(pending, { onSuccess: () => clearPendingSettings(userId, pending) })
-      return
-    }
-    // A server-sourced apply is not a user edit: without this the subscription
-    // below reads its own state change as one, writes a pending snapshot, and
-    // PUTs the server's own values back a second later.
+    if (pending) return
+
     suppressSyncRef.current = true
-    fetchSettings()
-      .then((res) => {
-        if (!res?.data) return
-        queryClient.setQueryData(['settings'], res)
-        applySettings(res.data)
-      })
-      .catch(() => undefined)
-      .finally(() => { suppressSyncRef.current = false })
-  }, [isGuest, queryClient, userId])
+    applySettings(settingsRes.data)
+    suppressSyncRef.current = false
+  }, [isGuest, settingsRes, userId])
 
   useEffect(() => {
     const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(SYNC_CHANNEL) : null
@@ -252,7 +252,12 @@ export function SettingsSync() {
         if (user && (settingsDirty || pending)) {
           settingsDirty = false
           const payloadToSave = pending ?? payload
-          mutateRef.current(payloadToSave, { onSuccess: () => clearPendingSettings(user.id, payloadToSave) })
+          mutateRef.current(payloadToSave, {
+            onSuccess: () => {
+              clearPendingSettings(user.id, payloadToSave)
+              void queryClient.invalidateQueries({ queryKey: ['settings'] })
+            },
+          })
         }
         bcRef.current?.postMessage({ sessionId: SESSION_ID, settings: { ...payload, activePresetId: latestState.activePresetId } })
       }, 1000)
@@ -262,7 +267,7 @@ export function SettingsSync() {
       if (timer) clearTimeout(timer)
       bcRef.current?.close()
     }
-  }, [])
+  }, [queryClient])
 
   return null
 }

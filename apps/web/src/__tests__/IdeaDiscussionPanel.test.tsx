@@ -85,4 +85,19 @@ describe('idea discussion interactions', () => {
     expect(screen.queryByRole('textbox')).toBeNull()
     expect(screen.getByText('Original comment')).toBeInTheDocument()
   })
+
+  it('uses a compact, padded detail layout when the discussion is embedded in the detail card', () => {
+    mocks.data = {
+      idea: { id: 'idea', author: { id: 'author', name: 'author', avatarKey: null }, liked: false, likeCount: 0, commentCount: 0 } as unknown as IdeaDiscussion['idea'],
+      likers: [],
+      comments: [],
+    }
+    render(<IdeaDiscussionPanel ideaId="idea" bookId="book" detailLayout />)
+
+    const tabs = screen.getByRole('button', { name: 'comment.tabComments', exact: true }).parentElement
+    expect(tabs).toHaveClass('border-b')
+    expect(tabs?.parentElement).toHaveClass('px-5')
+    expect(screen.getByText('comment.noComments').closest('.py-3')).not.toBeNull()
+    expect(screen.getByRole('textbox').parentElement?.parentElement).toHaveClass('sticky')
+  })
 })

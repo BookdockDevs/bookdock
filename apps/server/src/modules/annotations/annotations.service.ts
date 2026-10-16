@@ -1,9 +1,11 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
-import { bookmarks, highlights, ideas, ideaComments, ideaLikes, settings } from '../../db/schema'
+import { publishedContentFiles, syncContentFiles } from '../../db/content-files'
+import { bookmarks, contentFiles, highlights, ideas, ideaComments, ideaLikes, settings } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
 import { assertReadableBook } from '../books/books.service'
 import type { AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq } from '@bookdock/shared'
 import { assertIdeaSource, IDEA_VISIBILITY_KEY, ideaComposerContext, ideaRevision, privateIdeaLink, readableIdea } from './idea-access'
@@ -49,6 +51,7 @@ export function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   return {
     id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? '', cfiAnchor: row.cfiAnchor ?? null,
     type: 'note', color: row.color ?? 'yellow', style: (row.style ?? 'underline') as AnnotationRes['style'],
+    images: publishedContentFiles(getDb(), 'idea', row.id),
     visibility: row.visibility ?? 'private', revisionId: row.revisionId ?? null, editedAt: row.editedAt ?? null,
     text: row.text ?? '', note: row.note ?? null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
     createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
@@ -97,8 +100,8 @@ export async function listAnnotations(userId: string, bookId: string) {
   }
 
   return [
-    ...hl.map((row) => toRes('highlight', row)),
-    ...bm.map((row) => toRes('bookmark', row)),
+    ...hl.map((row) => ({ ...toRes('highlight', row), revisionId: row.revisionId, locationAvailable: row.relocation !== 'unresolved' && (!row.revisionId || row.revisionId === currentRevisionId) })),
+    ...bm.map((row) => ({ ...toRes('bookmark', row), revisionId: row.revisionId, locationAvailable: !row.revisionId || row.revisionId === currentRevisionId })),
     // Legacy ideas predate revision provenance (revisionId null): they remain
     // locatable via CFI, so only an explicit revision mismatch disables them.
     ...ideaRows.map((row) => {
@@ -169,6 +172,7 @@ export async function searchAnnotations(userId: string, bookId: string, query: s
 
 export async function createAnnotation(userId: string, bookId: string, data: AnnotationCreateReq, showHidden = false) {
   const db = getDb()
+  if (data.type !== 'note' && (data.imageIds !== undefined || data.draftId !== undefined)) throw new AppError('VALIDATION_ERROR', 'Only ideas accept images')
   // Reading data belongs to User x BookVersion, not to a private card: anyone
   // with read rights may annotate, with or without collecting first. Guests
   // never reach here (mutations are guest-refused at the guard).
@@ -281,6 +285,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
   }
   db.transaction((tx) => {
     tx.insert(ideas).values(row).run()
+    syncContentFiles(tx, { userId, domain: 'idea', targetId: row.id, bookVersionId: bookId, draftId: data.draftId, ids: data.imageIds ?? [], imageIds: data.imageIds ?? [] })
     if (context.eligible) {
       tx.insert(settings).values({ id: createId('setting'), userId, key: IDEA_VISIBILITY_KEY, value: visibility })
         .onConflictDoUpdate({ target: [settings.userId, settings.key], set: { value: visibility } }).run()
@@ -308,6 +313,7 @@ async function ownedAnnotation(userId: string, annotationId: string): Promise<Ow
 export async function updateAnnotation(userId: string, annotationId: string, data: AnnotationUpdateReq) {
   const db = getDb()
   const owned = await ownedAnnotation(userId, annotationId)
+  if (owned.kind !== 'idea' && (data.imageIds !== undefined || data.draftId !== undefined)) throw new AppError('VALIDATION_ERROR', 'Only ideas accept images')
   const now = Date.now()
   if (owned.kind === 'highlight') {
     db.update(highlights).set({
@@ -339,6 +345,8 @@ export async function updateAnnotation(userId: string, annotationId: string, dat
   }
   if (visibility === 'shared') await assertIdeaSource(userId, { ...source, bookVersionId: owned.row.bookVersionId })
   if (data.text !== undefined && data.text !== owned.row.text) throw new AppError('VALIDATION_ERROR', 'The original quotation is immutable')
+  const imageIdsChanged = data.imageIds !== undefined
+    && data.imageIds.join('\0') !== publishedContentFiles(db, 'idea', owned.row.id).map((file) => file.id).join('\0')
   const patch = {
     ...source, visibility,
     color: data.color ?? owned.row.color,
@@ -346,9 +354,13 @@ export async function updateAnnotation(userId: string, annotationId: string, dat
     text: data.text ?? owned.row.text,
     note: data.note ?? owned.row.note,
     updatedAt: now,
-    editedAt: data.note !== undefined && data.note !== owned.row.note ? now : owned.row.editedAt,
+    editedAt: (data.note !== undefined && data.note !== owned.row.note) || imageIdsChanged ? now : owned.row.editedAt,
   }
-  db.update(ideas).set(patch).where(eq(ideas.id, owned.row.id)).run()
+  db.transaction((tx) => {
+    tx.update(ideas).set(patch).where(eq(ideas.id, owned.row.id)).run()
+    if (data.imageIds !== undefined) syncContentFiles(tx, { userId, domain: 'idea', targetId: owned.row.id, draftId: data.draftId, ids: data.imageIds, imageIds: data.imageIds })
+  })
+  await cleanContentBlobs()
   return toRes('idea', { ...owned.row, ...patch })
 }
 
@@ -376,7 +388,9 @@ export async function deleteAnnotation(userId: string, annotationId: string) {
   db.transaction((tx) => {
     tx.delete(ideaComments).where(eq(ideaComments.ideaId, owned.row.id)).run()
     tx.delete(ideaLikes).where(eq(ideaLikes.ideaId, owned.row.id)).run()
+    tx.delete(contentFiles).where(eq(contentFiles.ideaId, owned.row.id)).run()
     tx.update(ideas).set({ deletedAt: now, updatedAt: now }).where(eq(ideas.id, owned.row.id)).run()
   })
+  await cleanContentBlobs()
   return toRes('idea', { ...owned.row, deletedAt: now, updatedAt: now })
 }

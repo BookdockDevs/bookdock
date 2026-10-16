@@ -12,6 +12,10 @@ export class LocalFsDriver implements StorageDriver {
     this.baseDir = baseDir ?? path.join(config.dataDir, 'files')
   }
 
+  getBaseDir(): string {
+    return this.baseDir
+  }
+
   private resolve(key: string): string {
     const resolved = path.join(this.baseDir, key)
     if (!resolved.startsWith(this.baseDir)) {

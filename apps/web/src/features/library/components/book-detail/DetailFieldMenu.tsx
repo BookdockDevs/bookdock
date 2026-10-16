@@ -9,12 +9,13 @@ interface DetailFieldMenuProps {
   value: string | null
   options: Array<{ value: string | null; label: string; icon?: ReactNode }>
   editable: boolean
+  busy?: boolean
   disabled?: boolean
   onFilter: () => void
   onSelect: (value: string | null) => void
 }
 
-export default function DetailFieldMenu({ label, editLabel, value, options, editable, disabled = false, onFilter, onSelect }: DetailFieldMenuProps) {
+export default function DetailFieldMenu({ label, editLabel, value, options, editable, busy = false, disabled = false, onFilter, onSelect }: DetailFieldMenuProps) {
   const id = useId()
   const [position, setPosition] = useState<SmartPosition | null>(null)
   const anchorRef = useRef<HTMLDivElement>(null)
@@ -58,7 +59,7 @@ export default function DetailFieldMenu({ label, editLabel, value, options, edit
     <div
       ref={anchorRef}
       className="inline-flex items-center rounded-md bg-stone-100 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300"
-      aria-busy={disabled || undefined}
+      aria-busy={busy || undefined}
       onContextMenu={(event) => {
         if (!editable) return
         event.preventDefault()

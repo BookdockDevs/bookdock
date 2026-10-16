@@ -27,6 +27,7 @@ interface DetailHeaderProps {
   reading?: ReactNode
   actions?: ReactNode
   footer?: ReactNode
+  rating?: ReactNode
 }
 
 export default function DetailHeader({
@@ -46,6 +47,7 @@ export default function DetailHeader({
   reading,
   actions,
   footer,
+  rating,
 }: DetailHeaderProps) {
   const _ = useTranslation()
   return (
@@ -84,10 +86,12 @@ export default function DetailHeader({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-start gap-1" onContextMenu={onEditTitle ? (event) => { event.preventDefault(); event.stopPropagation(); onEditTitle() } : undefined}>
-          <h3 className="min-w-0 font-serif text-xl font-semibold leading-snug text-stone-900 dark:text-stone-100">{title}</h3>
-        </div>
-        <div className="flex items-center gap-1" onContextMenu={onEditAuthors ? (event) => { event.preventDefault(); event.stopPropagation(); onEditAuthors() } : undefined}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start gap-1" onContextMenu={onEditTitle ? (event) => { event.preventDefault(); event.stopPropagation(); onEditTitle() } : undefined}>
+              <h3 className="min-w-0 font-serif text-xl font-semibold leading-snug text-stone-900 dark:text-stone-100">{title}</h3>
+            </div>
+            <div className="flex items-center gap-1" onContextMenu={onEditAuthors ? (event) => { event.preventDefault(); event.stopPropagation(); onEditAuthors() } : undefined}>
         {authors.length > 0 ? (
           <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-sm">
             {authors.map((name, index) => (
@@ -116,6 +120,13 @@ export default function DetailHeader({
             {_('library.unknown')}
           </p>
         )}
+        </div>
+          </div>
+          {rating && (
+            <div className="shrink-0 text-right">
+              {rating}
+            </div>
+          )}
         </div>
         {chips}
         {reading}

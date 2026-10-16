@@ -3,10 +3,31 @@ import { describe, expect, it } from 'vitest'
 
 import type { LibrarySearch } from '@/routes/index'
 
-import { keepsSearchSession, searchExitTarget, searchSessionNavigation, submittedSearchPatch } from './library-search-state'
+import { adoptArchiveExitRestore, keepsSearchSession, searchExitTarget, searchSessionNavigation, submittedSearchPatch } from './library-search-state'
 import { pageRangeCorrection } from './library-filters'
 
 const names = { shared: false, tags: [], categories: [] }
+
+describe('adoptArchiveExitRestore', () => {
+  const search: LibrarySearch = { q: 'entry', page: 2 }
+  it('adopts a pending request once per history entry', () => {
+    expect(adoptArchiveExitRestore(undefined, 'key-1', 321, search)).toEqual({
+      key: 'key-1',
+      restore: { search, top: 321 },
+    })
+    // Same entry: already adopted.
+    expect(adoptArchiveExitRestore('key-1', 'key-1', 321, search)).toBeNull()
+    // A later exit entry adopts afresh.
+    expect(adoptArchiveExitRestore('key-1', 'key-2', 100, search)).toEqual({
+      key: 'key-2',
+      restore: { search, top: 100 },
+    })
+  })
+  it('ignores missing requests and keyless entries', () => {
+    expect(adoptArchiveExitRestore(undefined, 'key-1', undefined, search)).toBeNull()
+    expect(adoptArchiveExitRestore(undefined, undefined, 321, search)).toBeNull()
+  })
+})
 
 describe('library search session navigation', () => {
   it('retains the return state while paging or sorting search results, and ends it for sidebar changes', () => {

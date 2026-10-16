@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 import type { AccessTokenPermission, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
+import type { ProgressFileData } from '../lib/progress-file'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -468,7 +469,7 @@ export const contentRevisions = sqliteTable('content_revisions', {
 export const blobs = sqliteTable('blobs', {
   key: text('key').primaryKey(),
   size: integer('size').notNull(),
-  kind: text('kind', { enum: ['book', 'cover'] }).notNull(),
+  kind: text('kind', { enum: ['book', 'cover', 'content'] }).notNull(),
   storageTier: text('storage_tier', { enum: ['local', 'synced', 'remote'] }).notNull().default('local'),
   lastAccessedAt: integer('last_accessed_at'),
   createdAt: integer('created_at').notNull(),
@@ -597,6 +598,8 @@ export const bookStates = sqliteTable('book_states', {
    * dangling and the row simply reads as "has an update".
    */
   readRevisionId: text('read_revision_id'),
+  progressData: text('progress_data', { mode: 'json' }).$type<ProgressFileData | null>(),
+  readFraction: real('read_fraction').notNull().default(0),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.userId, table.bookVersionId] }),
@@ -689,6 +692,128 @@ export const ideaCommentLikes = sqliteTable('idea_comment_likes', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   createdAt: integer('created_at').notNull(),
 }, (table) => ({ pk: primaryKey({ columns: [table.commentId, table.userId] }) }))
+
+// Book reviews (书评) v1: work-anchored, one live row per user per work.
+// A pure private work anchors to its private library_books row (FK cascade
+// with the work). A collected work anchors to its source work as plain-text
+// provenance (no FK): the row survives uncollect, fork, version deletes and
+// source deletion, and shared reads fall back to private instead of dying.
+export const bookReviews = sqliteTable('book_reviews', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  privateLibraryBookId: text('private_library_book_id').references(() => libraryBooks.id, { onDelete: 'cascade' }),
+  sourceLibraryId: text('source_library_id'),
+  sourceLibraryBookId: text('source_library_book_id'),
+  // Integer halves 1–10 (0.5–5 stars); null = unrated, never zero.
+  ratingHalves: integer('rating_halves'),
+  title: text('title'),
+  body: text('body'),
+  bodyFormat: text('body_format', { enum: ['plain', 'markdown'] }).notNull().default('markdown'),
+  visibility: text('visibility', { enum: ['private', 'shared'] }).notNull().default('private'),
+  // Read-time provenance for display only; never decides the review's home.
+  readListingId: text('read_listing_id'),
+  readBookVersionId: text('read_book_version_id'),
+  readRevisionId: text('read_revision_id'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  editedAt: integer('edited_at'),
+}, (table) => ({
+  userIdx: index('book_reviews_user_idx').on(table.userId, table.updatedAt),
+  sourceIdx: index('book_reviews_source_idx').on(table.sourceLibraryId, table.sourceLibraryBookId, table.visibility),
+  sourceUserUnique: uniqueIndex('book_reviews_source_user_unique')
+    .on(table.sourceLibraryId, table.sourceLibraryBookId, table.userId)
+    .where(sql`${table.sourceLibraryId} IS NOT NULL`),
+  privateUnique: uniqueIndex('book_reviews_private_unique')
+    .on(table.privateLibraryBookId)
+    .where(sql`${table.privateLibraryBookId} IS NOT NULL`),
+}))
+
+export const bookReviewComments = sqliteTable('book_review_comments', {
+  id: text('id').primaryKey(),
+  reviewId: text('review_id').notNull().references(() => bookReviews.id, { onDelete: 'cascade' }),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
+  parentId: text('parent_id').references((): AnySQLiteColumn => bookReviewComments.id, { onDelete: 'cascade' }),
+  replyToId: text('reply_to_id').references((): AnySQLiteColumn => bookReviewComments.id, { onDelete: 'set null' }),
+  body: text('body').notNull(),
+  createdAt: integer('created_at').notNull(),
+  editedAt: integer('edited_at'),
+  deletedAt: integer('deleted_at'),
+}, (table) => ({ reviewIdx: index('book_review_comments_review_idx').on(table.reviewId, table.createdAt) }))
+
+export const bookReviewLikes = sqliteTable('book_review_likes', {
+  reviewId: text('review_id').notNull().references(() => bookReviews.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.reviewId, table.userId] }) }))
+
+export const bookReviewCommentLikes = sqliteTable('book_review_comment_likes', {
+  commentId: text('comment_id').notNull().references(() => bookReviewComments.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.commentId, table.userId] }) }))
+
+export const contentUploadDrafts = sqliteTable('content_upload_drafts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  draftId: text('draft_id').notNull(),
+  domain: text('domain', { enum: ['idea', 'review'] }).notNull(),
+  bookVersionId: text('book_version_id').notNull(),
+  intendedTargetId: text('intended_target_id'),
+  cancelledAt: integer('cancelled_at'),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({ draftUnique: uniqueIndex('content_upload_drafts_unique').on(table.userId, table.draftId) }))
+
+export const contentFiles = sqliteTable('content_files', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  domain: text('domain', { enum: ['idea', 'review'] }).notNull(),
+  kind: text('kind', { enum: ['image', 'attachment'] }).notNull(),
+  draftId: text('draft_id').notNull(),
+  bookVersionId: text('book_version_id').notNull(),
+  intendedTargetId: text('intended_target_id'),
+  reviewId: text('review_id').references(() => bookReviews.id, { onDelete: 'cascade' }),
+  ideaId: text('idea_id').references(() => ideas.id, { onDelete: 'cascade' }),
+  blobKey: text('blob_key').notNull().references(() => blobs.key, { onDelete: 'restrict' }),
+  name: text('name').notNull(),
+  mimeType: text('mime_type').notNull(),
+  size: integer('size').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  ready: integer('ready', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  draftIdx: index('content_files_draft_idx').on(table.userId, table.draftId),
+  reviewIdx: index('content_files_review_idx').on(table.reviewId),
+  ideaIdx: index('content_files_idea_idx').on(table.ideaId),
+  blobIdx: index('content_files_blob_idx').on(table.blobKey),
+}))
+
+export const interactionNotifications = sqliteTable('interaction_notifications', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  actorId: text('actor_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  domain: text('domain', { enum: ['idea', 'review'] }).notNull(),
+  event: text('event', { enum: ['comment', 'reply', 'like'] }).notNull(),
+  targetId: text('target_id').notNull(),
+  interactionId: text('interaction_id').notNull(),
+  commentId: text('comment_id'),
+  createdAt: integer('created_at').notNull(),
+  readAt: integer('read_at'),
+}, (table) => ({
+  userIdx: index('interaction_notifications_user_idx').on(table.userId, table.createdAt),
+  eventUnique: uniqueIndex('interaction_notifications_event_unique').on(table.userId, table.actorId, table.domain, table.event, table.interactionId),
+}))
+
+export const interactionReceipts = sqliteTable('interaction_receipts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  domain: text('domain', { enum: ['idea', 'review'] }).notNull(),
+  requestId: text('request_id').notNull(),
+  targetId: text('target_id').notNull(),
+  payloadHash: text('payload_hash').notNull(),
+  resultId: text('result_id').notNull(),
+}, (table) => ({
+  requestUnique: uniqueIndex('interaction_receipts_request_unique').on(table.userId, table.domain, table.requestId),
+}))
 
 export const storageConnections = sqliteTable('storage_connections', {
   id: text('id').primaryKey(),

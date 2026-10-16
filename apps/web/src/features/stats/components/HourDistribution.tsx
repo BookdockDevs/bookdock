@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { localDateString, useReadingHourly } from '@/api/hooks/reading-records'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
+import { isAccessRevocationError } from '@/lib/error-message'
 import { formatDuration } from '@/lib/format-duration'
 import { cn } from '@/lib/utils'
 
@@ -35,7 +36,7 @@ export default function HourDistribution({ date, period, range }: HourDistributi
   const [selectedHour, setSelectedHour] = useState<number | null>(null)
   const selectedBar = selectedHour === null ? null : bars[selectedHour]
 
-  if (hourlyQuery.isError) {
+  if (hourlyQuery.isError && (!data || isAccessRevocationError(hourlyQuery.error))) {
     return (
       <section className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900">
         <QueryErrorState isRetrying={hourlyQuery.isFetching} onRetry={hourlyQuery.refetch} />
@@ -46,7 +47,20 @@ export default function HourDistribution({ date, period, range }: HourDistributi
   const isHourlyLoading = hourlyQuery.isLoading && !data
 
   return (
-    <section className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-xs sm:p-6 dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-xs sm:p-6 dark:border-stone-800 dark:bg-stone-900" aria-busy={isHourlyLoading}>
+      {hourlyQuery.isError && data && !isAccessRevocationError(hourlyQuery.error) && (
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-amber-200/80 bg-amber-500/10 px-3.5 py-2 text-xs text-amber-700 dark:border-amber-800/80 dark:bg-amber-500/20 dark:text-amber-300">
+          <span>{_('stats.revalidateFailed') || '数据刷新失败，正在显示缓存数据'}</span>
+          <button
+            type="button"
+            onClick={() => hourlyQuery.refetch()}
+            disabled={hourlyQuery.isFetching}
+            className="font-medium underline hover:no-underline cursor-pointer"
+          >
+            {_('common.retry') || '重试'}
+          </button>
+        </div>
+      )}
       <h2 className="mb-4 text-sm font-semibold text-stone-900 dark:text-stone-100">
         <span>{_('stats.hourDistribution')}</span>
         <span className="font-normal tabular-nums text-stone-400 dark:text-stone-500">
@@ -58,7 +72,7 @@ export default function HourDistribution({ date, period, range }: HourDistributi
           {Array.from({ length: 24 }).map((_, hour) => (
             <div key={hour} className="flex h-full min-w-0 flex-1 items-end">
               <div
-                className="w-full animate-pulse rounded-t-sm bg-stone-200/60 dark:bg-stone-800"
+                className="w-full animate-pulse rounded-t-sm bg-stone-200/60 dark:bg-stone-800 motion-reduce:animate-none"
                 style={{
                   height: `${[15, 10, 5, 5, 5, 10, 25, 40, 35, 50, 60, 45, 55, 70, 65, 80, 75, 90, 85, 95, 70, 60, 45, 25][hour]}%`,
                   animationDelay: `${hour * 30}ms`,
@@ -77,13 +91,13 @@ export default function HourDistribution({ date, period, range }: HourDistributi
               aria-label={`${String(b.hour).padStart(2, '0')}:00: ${formatDuration(b.seconds, _)}`}
               aria-pressed={selectedHour === b.hour}
               onClick={() => setSelectedHour((current) => (current === b.hour ? null : b.hour))}
-              className="flex h-full min-w-0 flex-1 items-end border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+              className="flex h-full min-w-0 flex-1 items-end border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 dark:focus-visible:outline-stone-500"
             >
               <div
                 className={cn(
                   'w-full rounded-t-sm transition-colors',
                   selectedHour === b.hour
-                    ? 'bg-blue-600 dark:bg-blue-400'
+                    ? 'bg-amber-500 dark:bg-amber-400'
                     : b.seconds > 0 ? 'bg-stone-700/80 dark:bg-stone-300/80' : 'bg-stone-200/70 dark:bg-stone-800',
                 )}
                 style={{ height: b.seconds > 0 && max > 0 ? `${Math.max(4, (b.seconds / max) * 100)}%` : '2px' }}

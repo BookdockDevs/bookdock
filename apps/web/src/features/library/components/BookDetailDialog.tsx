@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import type { BookListItem, CatalogBook, Library } from '@bookdock/shared'
+import type { BookListItem, CatalogBook, Library, Review } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
@@ -26,6 +26,12 @@ import type { MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
 import { draftFrom, draftToBookmetaPreserving, parseAuthorList, type MetaDraft } from './book-detail/types'
 import TocRulePicker from './TocRulePicker'
 import WorkDetailBody from './WorkDetailBody'
+import AllReviewsView from '@/features/reviews/components/AllReviewsView'
+import ReviewDetailHeaderActions from '@/features/reviews/components/ReviewDetailHeaderActions'
+import { getReviewTotalCount } from '@/features/reviews/lib/review-count'
+import ReviewDetailView from '@/features/reviews/components/ReviewDetailView'
+import ReviewEditor from '@/features/reviews/components/ReviewEditor'
+import { useReviewBookContext, useReviewWorkContext } from '@/features/reviews/hooks/useReviews'
 
 interface BookDetailDialogProps {
   book: BookListItem | null
@@ -127,6 +133,81 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     return () => URL.revokeObjectURL(url)
   }, [pendingCoverFile])
 
+  const [reviewSubView, setReviewSubView] = useState<'detail' | 'reviews' | 'review-detail'>('detail')
+  const [activeReviewId, setActiveReviewId] = useState<string | null>(null)
+  // Where the detail back button returns: the list, or straight back to the
+  // book detail when the preview entry skipped the list.
+  const [reviewDetailReturn, setReviewDetailReturn] = useState<'detail' | 'reviews'>('reviews')
+  const [dialogReviewEditorOpen, setDialogReviewEditorOpen] = useState(false)
+  const [dialogEditingReview, setDialogEditingReview] = useState<Review | null>(null)
+
+  const reviewWorkQuery = useReviewWorkContext(workContext?.library.id ?? null, workContext?.work.id ?? null, Boolean(workContext))
+  const workReviewContext = reviewWorkQuery.data?.data
+  const workReviewComposer = workReviewContext?.composer
+  const workCanReview = Boolean(workReviewComposer?.eligible && workReviewComposer.bookVersionId)
+  const workOwnReview = workReviewContext?.own ?? null
+
+  const reviewBookQuery = useReviewBookContext(!workContext && book ? book.id : null, Boolean(!workContext && book))
+  const bookReviewContext = reviewBookQuery.data?.data
+  const bookReviewComposer = bookReviewContext?.composer
+  const bookCanReview = Boolean(!readOnly && bookReviewComposer?.eligible && bookReviewComposer.bookVersionId)
+  const bookOwnReview = bookReviewContext?.own ?? null
+
+  const activeWorkReview = useMemo(() => {
+    if (!activeReviewId || !workReviewContext || !Array.isArray(workReviewContext.reviews)) return null
+    if (workReviewContext.own?.id === activeReviewId) return workReviewContext.own
+    return workReviewContext.reviews.find((r) => r.id === activeReviewId) ?? null
+  }, [activeReviewId, workReviewContext])
+
+  const activeBookReview = useMemo(() => {
+    if (!activeReviewId || !bookReviewContext || !Array.isArray(bookReviewContext.reviews)) return null
+    if (bookReviewContext.own?.id === activeReviewId) return bookReviewContext.own
+    return bookReviewContext.reviews.find((r) => r.id === activeReviewId) ?? null
+  }, [activeReviewId, bookReviewContext])
+
+  function renderModalTitle(subView: 'detail' | 'reviews' | 'review-detail', defaultTitle: React.ReactNode, reviewTotal?: number) {
+    if (subView === 'reviews') {
+      return (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setReviewSubView('detail')}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+            aria-label={_('common.back')}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+          <span>{_('review.reviewsTitle')}</span>
+          {reviewTotal != null && reviewTotal > 0 && (
+            <span className="rounded-full bg-stone-200/40 px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums text-stone-500 dark:bg-stone-800/70 dark:text-stone-400">
+              {reviewTotal}
+            </span>
+          )}
+        </div>
+      )
+    }
+    if (subView === 'review-detail') {
+      return (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setReviewSubView(reviewDetailReturn)}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+            aria-label={_('common.back')}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+          <span>{_('review.detailTitle')}</span>
+        </div>
+      )
+    }
+    return defaultTitle
+  }
+
   const discardEdit = useCallback(() => {
     setSaveError(null)
     setEditing(false)
@@ -139,6 +220,10 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const closeDialog = useCallback(() => {
     discardEdit()
     setAppendContentOpen(false)
+    setReviewSubView('detail')
+    setActiveReviewId(null)
+    setDialogReviewEditorOpen(false)
+    setDialogEditingReview(null)
     onClose()
   }, [discardEdit, onClose])
 
@@ -162,7 +247,11 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     setCoverRemovalPending(false)
     setTocRuleOpen(false)
     setAppendContentOpen(false)
-  }, [book?.id])
+    setReviewSubView('detail')
+    setActiveReviewId(null)
+    setDialogReviewEditorOpen(false)
+    setDialogEditingReview(null)
+  }, [book?.id, workContext?.work.id])
 
   const isEditLibraryOwned = Boolean(displayBook?.source)
   const editAllowedFields: DraftTextField[] = isEditLibraryOwned ? PRIVATE_B_TEXT_FIELDS : PRIVATE_ALL_TEXT_FIELDS
@@ -290,48 +379,117 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
         ]
         : []
     return (
-      <Modal
-        title={_('library.bookDetails')}
-        onClose={closeDialog}
-        closeLabel={_('library.close')}
-        size="xl"
-      >
-        {workQuery.isError ? <QueryErrorState isRetrying={workQuery.isFetching} onRetry={() => void workQuery.refetch()} /> : <WorkDetailBody
-          work={work.work}
-          library={work.library}
-          canManage={work.canManage}
-          canCollect={work.canCollect}
-          canContribute={work.canContribute}
-          selectedVersionId={workVersion?.id ?? null}
-          onSelectVersion={setWorkVersionId}
-          onVersionsUploaded={(ids) => {
-            if (ids.length > 0) pendingWorkVersionRef.current = ids
-          }}
-          moreActions={workMenuItems}
+      <>
+        <Modal
+          title={renderModalTitle(reviewSubView, _('library.bookDetails'), getReviewTotalCount(workReviewContext))}
           onClose={closeDialog}
-        />}
-        {workAppendOpen && workVersion && workCanEditContent && (
-          <AppendContentModal
-            target={{ libraryId: work.library.id, libraryBookId: work.work.id, versionLinkId: workVersion.id }}
-            onClose={() => setWorkAppendOpen(false)}
+          closeLabel={_('library.close')}
+          hideClose={reviewSubView !== 'detail'}
+          size="xl"
+          actions={reviewSubView === 'review-detail' && activeWorkReview ? (
+            <ReviewDetailHeaderActions
+              review={activeWorkReview}
+              onEdit={(r) => {
+                setDialogEditingReview(r)
+                setDialogReviewEditorOpen(true)
+              }}
+              onDeleted={() => {
+                void reviewWorkQuery.refetch()
+                setReviewSubView(reviewDetailReturn)
+                setActiveReviewId(null)
+              }}
+            />
+          ) : undefined}
+        >
+          {reviewSubView === 'detail' ? (
+            workQuery.isError ? <QueryErrorState isRetrying={workQuery.isFetching} onRetry={() => void workQuery.refetch()} /> : <WorkDetailBody
+              work={work.work}
+              library={work.library}
+              canManage={work.canManage}
+              canCollect={work.canCollect}
+              canContribute={work.canContribute}
+              selectedVersionId={workVersion?.id ?? null}
+              onSelectVersion={setWorkVersionId}
+              onVersionsUploaded={(ids) => {
+                if (ids.length > 0) pendingWorkVersionRef.current = ids
+              }}
+              moreActions={workMenuItems}
+              onOpenAllReviews={() => setReviewSubView('reviews')}
+              onOpenReviewDetail={(r) => {
+                setActiveReviewId(r.id)
+                setReviewDetailReturn('detail')
+                setReviewSubView('review-detail')
+              }}
+              onClose={closeDialog}
+            />
+          ) : (
+            <>
+              <div hidden={reviewSubView !== 'reviews'} aria-hidden={reviewSubView !== 'reviews'} className={reviewSubView === 'reviews' ? 'block' : 'hidden'}>
+                <AllReviewsView
+                  context={workReviewContext}
+                  canReview={workCanReview}
+                  onOpenCompose={() => {
+                    setDialogEditingReview(null)
+                    setDialogReviewEditorOpen(true)
+                  }}
+                  onOpenEdit={(r) => {
+                    setDialogEditingReview(r)
+                    setDialogReviewEditorOpen(true)
+                  }}
+                  onOpenReviewDetail={(r) => {
+                    setActiveReviewId(r.id)
+                    setReviewDetailReturn('reviews')
+                    setReviewSubView('review-detail')
+                  }}
+                />
+              </div>
+
+              {reviewSubView === 'review-detail' && activeWorkReview && (
+                <ReviewDetailView
+                  review={activeWorkReview}
+                />
+              )}
+            </>
+          )}
+
+          {workAppendOpen && workVersion && workCanEditContent && (
+            <AppendContentModal
+              target={{ libraryId: work.library.id, libraryBookId: work.work.id, versionLinkId: workVersion.id }}
+              onClose={() => setWorkAppendOpen(false)}
+            />
+          )}
+          {workTocOpen && workVersion && workCanEditContent && (
+            workTocState.isError
+              ? <QueryErrorState isRetrying={workTocState.isFetching} onRetry={() => void workTocState.refetch()} />
+              : workTocState.data && (
+                <TocRulePicker
+                  target={{ libraryId: work.library.id, libraryBookId: work.work.id, versionLinkId: workVersion.id }}
+                  currentRuleId={workTocState.data.data.tocRuleId ?? undefined}
+                  autoScored={workTocState.data.data.tocRuleAuto}
+                  customPatterns={workTocState.data.data.customPatterns}
+                  excludedChapterIds={workTocState.data.data.excludedChapterIds}
+                  currentChapters={workTocState.data.data.chapters}
+                  onClose={() => setWorkTocOpen(false)}
+                />
+              )
+          )}
+        </Modal>
+
+        {dialogReviewEditorOpen && workReviewComposer?.bookVersionId && (
+          <ReviewEditor
+            bookVersionId={workReviewComposer.bookVersionId}
+            existing={dialogEditingReview ?? workOwnReview}
+            composer={workReviewComposer}
+            onClose={() => {
+              setDialogReviewEditorOpen(false)
+              setDialogEditingReview(null)
+            }}
+            onSaved={() => {
+              void reviewWorkQuery.refetch()
+            }}
           />
         )}
-        {workTocOpen && workVersion && workCanEditContent && (
-          workTocState.isError
-            ? <QueryErrorState isRetrying={workTocState.isFetching} onRetry={() => void workTocState.refetch()} />
-            : workTocState.data && (
-              <TocRulePicker
-                target={{ libraryId: work.library.id, libraryBookId: work.work.id, versionLinkId: workVersion.id }}
-                currentRuleId={workTocState.data.data.tocRuleId ?? undefined}
-                autoScored={workTocState.data.data.tocRuleAuto}
-                customPatterns={workTocState.data.data.customPatterns}
-                excludedChapterIds={workTocState.data.data.excludedChapterIds}
-                currentChapters={workTocState.data.data.chapters}
-                onClose={() => setWorkTocOpen(false)}
-              />
-            )
-        )}
-      </Modal>
+      </>
     )
   }
 
@@ -396,10 +554,25 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   return (
     <>
       <Modal
-        title={editing ? _('library.editBook') : _('library.bookDetails')}
+        title={editing ? _('library.editBook') : renderModalTitle(reviewSubView, _('library.bookDetails'), getReviewTotalCount(bookReviewContext))}
         onClose={closeDialog}
         closeLabel={_('library.close')}
+        hideClose={!editing && reviewSubView !== 'detail'}
         size="xl"
+        actions={reviewSubView === 'review-detail' && activeBookReview ? (
+          <ReviewDetailHeaderActions
+            review={activeBookReview}
+            onEdit={(r) => {
+              setDialogEditingReview(r)
+              setDialogReviewEditorOpen(true)
+            }}
+            onDeleted={() => {
+              void reviewBookQuery.refetch()
+              setReviewSubView(reviewDetailReturn)
+              setActiveReviewId(null)
+            }}
+          />
+        ) : undefined}
         footer={
           editing ? (
             <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
@@ -448,7 +621,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
           ) : undefined
         }
       >
-          {editing && draft ? (
+        {reviewSubView === 'detail' ? (
+          editing && draft ? (
             <div key={draftEpoch}>
               {saveError && <p role="alert" className={`mb-4 text-sm ${saveError.key === 'library.bookUpdatePartial' ? 'text-amber-700 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
                 {_(saveError.key, saveError.params)}
@@ -500,28 +674,80 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
               shelfName={shelfName}
               currentShelfId={currentShelfId}
               shelfMembershipReady={memShelves.data !== undefined && !memShelves.isError}
+              shelfMembershipError={memShelves.isError}
               memberTags={memberTags}
               isLoading={detailLoading || !detail}
               moreActions={privateMenuItems}
               onEdit={enterEdit}
               onDelete={onDelete}
+              onOpenAllReviews={() => setReviewSubView('reviews')}
+              onOpenReviewDetail={(r) => {
+                setActiveReviewId(r.id)
+                setReviewDetailReturn('detail')
+                setReviewSubView('review-detail')
+              }}
               onClose={onClose}
               onPublish={onPublish}
             />
-          )}
+          )
+        ) : (
+          <>
+            <div hidden={reviewSubView !== 'reviews'} aria-hidden={reviewSubView !== 'reviews'} className={reviewSubView === 'reviews' ? 'block' : 'hidden'}>
+              <AllReviewsView
+                context={bookReviewContext}
+                canReview={bookCanReview}
+                onOpenCompose={() => {
+                  setDialogEditingReview(null)
+                  setDialogReviewEditorOpen(true)
+                }}
+                onOpenEdit={(r) => {
+                  setDialogEditingReview(r)
+                  setDialogReviewEditorOpen(true)
+                }}
+                onOpenReviewDetail={(r) => {
+                  setActiveReviewId(r.id)
+                  setReviewDetailReturn('reviews')
+                  setReviewSubView('review-detail')
+                }}
+              />
+            </div>
 
-          {!readOnly && !isLibraryOwned && displayBook.format === 'txt' && tocRuleOpen && (
-            <TocRulePicker
-              target={{ bookId: book.id }}
-              currentRuleId={detail?.meta?.tocRuleId}
-              autoScored={detail?.meta?.tocRuleAuto}
-              customPatterns={detail?.meta?.customTocPatterns}
-              excludedChapterIds={detail?.meta?.tocExcludedChapterIds}
-              currentChapters={chaptersData?.data}
-              onClose={() => setTocRuleOpen(false)}
-            />
+            {reviewSubView === 'review-detail' && activeBookReview && (
+              <ReviewDetailView
+                review={activeBookReview}
+              />
+            )}
+          </>
+        )}
+
+        {!readOnly && !isLibraryOwned && displayBook.format === 'txt' && tocRuleOpen && (
+          <TocRulePicker
+            target={{ bookId: book.id }}
+            currentRuleId={detail?.meta?.tocRuleId}
+            autoScored={detail?.meta?.tocRuleAuto}
+            customPatterns={detail?.meta?.customTocPatterns}
+            excludedChapterIds={detail?.meta?.tocExcludedChapterIds}
+            currentChapters={chaptersData?.data}
+            onClose={() => setTocRuleOpen(false)}
+          />
         )}
       </Modal>
+
+      {dialogReviewEditorOpen && bookReviewComposer?.bookVersionId && (
+        <ReviewEditor
+          bookVersionId={bookReviewComposer.bookVersionId}
+          existing={dialogEditingReview ?? bookOwnReview}
+          composer={bookReviewComposer}
+          onClose={() => {
+            setDialogReviewEditorOpen(false)
+            setDialogEditingReview(null)
+          }}
+          onSaved={() => {
+            void reviewBookQuery.refetch()
+          }}
+        />
+      )}
+
       {!readOnly && !isLibraryOwned && displayBook.format === 'txt' && appendContentOpen && <AppendContentModal target={{ bookId: book.id }} onClose={() => setAppendContentOpen(false)} />}
     </>
   )

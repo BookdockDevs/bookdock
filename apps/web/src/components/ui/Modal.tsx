@@ -14,10 +14,17 @@ interface ModalProps {
   footer?: ReactNode
   /** Accessible label for the close button. Defaults to library.close */
   closeLabel?: string
+  /** Keep the dialog title accessible while omitting the visible title bar. */
+  hideHeader?: boolean
+  /** Hide the top-right close button (subviews navigate with their own back). */
+  hideClose?: boolean
   /** Spread onto the backdrop (e.g. the settings-popover ignore flag) */
   containerProps?: HTMLAttributes<HTMLDivElement> & Record<string, unknown>
   variant?: 'default' | 'reader'
-  size?: 'sm' | 'default' | 'xl' | 'wide'
+  size?: 'sm' | 'default' | 'xl' | 'wide' | 'idea'
+  centered?: boolean
+  panelClassName?: string
+  contentClassName?: string
   children: ReactNode
 }
 
@@ -34,9 +41,14 @@ export default function Modal({
   actions,
   footer,
   closeLabel,
+  hideHeader = false,
+  hideClose = false,
   containerProps,
   variant = 'default',
   size = 'default',
+  centered = false,
+  panelClassName = '',
+  contentClassName = '',
   children,
 }: ModalProps) {
   const _ = useTranslation()
@@ -52,7 +64,9 @@ export default function Modal({
 
   const reader = variant === 'reader'
   const width =
-    size === 'wide' ? 'max-w-2xl' : size === 'xl' ? 'max-w-xl' : size === 'sm' ? 'max-w-sm' : 'max-w-lg'
+    size === 'wide' ? 'max-w-2xl' : size === 'xl' ? 'max-w-xl' : size === 'idea' ? 'max-w-[420px]' : size === 'sm' ? 'max-w-sm' : 'max-w-lg'
+  const placement = centered ? 'items-center p-4' : 'items-end p-0 sm:items-center sm:p-4'
+  const panelShape = centered ? 'max-h-[calc(100dvh-2rem)] rounded-2xl' : 'max-h-[calc(100dvh-1rem)] rounded-t-2xl sm:max-h-[85vh] sm:rounded-2xl'
   const btn = reader
     ? 'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-[var(--bd-read-text)]'
     : 'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'
@@ -72,6 +86,9 @@ export default function Modal({
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Portal menus can disappear before this window listener runs. The event
+      // path still identifies the editor overlay that handled the key.
+      if (e.defaultPrevented || e.composedPath().some((target) => target instanceof HTMLElement && target.classList.contains('mdxeditor-popup-container'))) return
       const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]')
       if (dialogs.length && dialogs[dialogs.length - 1] !== dialogRef.current) return
       const alertDialog = document.querySelector<HTMLElement>('[role="alertdialog"][aria-modal="true"]')
@@ -131,7 +148,7 @@ export default function Modal({
   return createPortal(
     <div
       {...containerProps}
-      className={`fixed inset-0 z-50 flex items-end justify-center overscroll-none bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
+      className={`fixed inset-0 z-50 flex justify-center overscroll-none bg-black/50 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm ${placement} ${dialogLayout.className} animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
       style={{ ...dialogLayout.style, ...containerProps?.style }}
       onClick={onClose}
       onWheel={(event) => { if (event.target === event.currentTarget) event.preventDefault() }}
@@ -142,28 +159,34 @@ export default function Modal({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`flex max-h-[calc(100dvh-1rem)] w-full ${width} flex-col overflow-hidden rounded-t-2xl shadow-xl outline-none sm:max-h-[85vh] sm:rounded-2xl ${reader ? 'bg-[var(--bd-read-bg)] text-[var(--bd-read-text)]' : 'bg-white dark:bg-stone-900'} animate-modal-panel`}
+        className={`flex w-full ${width} ${panelShape} flex-col overflow-hidden shadow-xl outline-none ${reader ? 'bg-[var(--bd-read-bg)] text-[var(--bd-read-text)]' : 'bg-white dark:bg-stone-900'} animate-modal-panel ${panelClassName}`}
         onClick={(e) => e.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
       >
-        <div className={`flex shrink-0 items-center justify-between border-b px-4 py-3 sm:px-5 ${reader ? 'border-[var(--bd-read-accent)]' : 'border-stone-100 dark:border-stone-800'}`}>
-          <h2 id={titleId} className={`truncate text-base font-semibold ${reader ? 'text-[var(--bd-read-text)]' : 'text-stone-900 dark:text-stone-100'}`}>{title}</h2>
-          <div className="flex items-center gap-1">
-            {actions}
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label={resolvedCloseLabel}
-              title={resolvedCloseLabel}
-              className={btn}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
+        {hideHeader ? (
+          <h2 id={titleId} className="sr-only">{title}</h2>
+        ) : (
+          <div className={`flex shrink-0 items-center justify-between border-b px-4 py-3 sm:px-5 ${reader ? 'border-[var(--bd-read-accent)]' : 'border-stone-100 dark:border-stone-800'}`}>
+            <h2 id={titleId} className={`truncate text-base font-semibold ${reader ? 'text-[var(--bd-read-text)]' : 'text-stone-900 dark:text-stone-100'}`}>{title}</h2>
+            <div className="flex items-center gap-1">
+              {actions}
+              {!hideClose && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label={resolvedCloseLabel}
+                  title={resolvedCloseLabel}
+                  className={btn}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-        <div className={`min-h-0 flex-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] overscroll-contain px-4 ${footer ? 'pb-4' : 'pb-[calc(1rem+env(safe-area-inset-bottom))]'} pt-4 sm:px-5`}>{children}</div>
+        )}
+        <div className={`min-h-0 flex-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] overscroll-contain px-4 ${footer ? 'pb-4' : 'pb-[calc(1rem+env(safe-area-inset-bottom))]'} pt-4 sm:px-5 ${contentClassName}`}>{children}</div>
         {footer && (
           <div data-toast-obstacle="" className={`flex shrink-0 items-center justify-between border-t px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:px-5 ${reader ? 'border-[var(--bd-read-accent)]' : 'border-stone-100 dark:border-stone-800'}`}>
             {footer}

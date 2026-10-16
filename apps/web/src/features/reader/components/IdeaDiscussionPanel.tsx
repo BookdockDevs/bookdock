@@ -22,7 +22,11 @@ interface IdeaDiscussionPanelProps {
   initialCommentCount?: number
   initialLikeCount?: number
   hideTabs?: boolean
+  detailLayout?: boolean
   className?: string
+  initialTab?: 'comments' | 'likes'
+  focusCommentId?: string
+  theme?: 'reader' | 'app'
 }
 
 export default function IdeaDiscussionPanel({
@@ -31,14 +35,23 @@ export default function IdeaDiscussionPanel({
   initialCommentCount = 0,
   initialLikeCount = 0,
   hideTabs = false,
+  detailLayout = false,
   className,
+  initialTab = 'comments',
+  focusCommentId,
+  theme = 'reader',
 }: IdeaDiscussionPanelProps) {
   const _ = useTranslation()
   const query = useIdeaDiscussion(ideaId, bookId)
   const action = useIdeaAction(ideaId, bookId)
   const user = useAuthStore((state) => state.user)
 
-  const [tab, setTab] = useState<'comments' | 'likes'>('comments')
+  const [tab, setTab] = useState<'comments' | 'likes'>(initialTab)
+  const focused = useRef(false)
+  const commentTarget = useRef<HTMLDivElement>(null)
+  // Focus highlight is transient: it marks the notified comment on open,
+  // then fades so the thread returns to its normal appearance.
+  const [focusVisible, setFocusVisible] = useState(false)
   const [draft, setDraft] = useState('')
   const [replyTo, setReplyTo] = useState<IdeaComment | null>(null)
   const [editing, setEditing] = useState<IdeaComment | null>(null)
@@ -53,8 +66,38 @@ export default function IdeaDiscussionPanel({
   const touchStartPos = useRef<{ x: number; y: number } | null>(null)
 
   const data = query.data?.data
+  useEffect(() => {
+    if (!focusCommentId || !commentTarget.current || focused.current) return
+    focused.current = true
+    commentTarget.current.scrollIntoView?.({ block: 'center' })
+    commentTarget.current.focus({ preventScroll: true })
+  }, [data, focusCommentId])
+  // Fading lives in its own effect: discussion refetches (likes, window
+  // refocus) re-run the effect above, and its cleanup must never cancel
+  // the fade timer, or the highlight gets pinned on permanently.
+  useEffect(() => {
+    if (!focusCommentId) return
+    setFocusVisible(true)
+    const timer = setTimeout(() => setFocusVisible(false), 4000)
+    return () => clearTimeout(timer)
+  }, [focusCommentId])
   const userAvatar = user?.avatarKey ? avatarUrl(user.avatarKey) : undefined
   const isExpanded = isFocused || Boolean(draft) || Boolean(replyTo) || Boolean(editing)
+
+  // 'reader' keeps the reading-theme variables; 'app' uses the stone palette
+  // shared by the archive and notification surfaces.
+  const tText = theme === 'reader' ? 'text-[var(--bd-read-text)]' : 'text-stone-800 dark:text-stone-200'
+  const tSub = theme === 'reader' ? 'text-[var(--bd-read-sub)]' : 'text-stone-500 dark:text-stone-400'
+  const tTextHover = theme === 'reader' ? 'hover:text-[var(--bd-read-text)]' : 'hover:text-stone-900 dark:hover:text-stone-100'
+  const tPrimaryBg = theme === 'reader' ? 'bg-[var(--bd-read-primary)]' : 'bg-stone-900 dark:bg-stone-100'
+  const tPrimaryFg = theme === 'reader' ? 'text-white' : 'text-white dark:text-stone-900'
+  const tPrimaryTint = theme === 'reader'
+    ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]'
+    : 'bg-stone-500/10 text-stone-700 dark:text-stone-200'
+  const tComposerBg = theme === 'reader' ? 'bg-[var(--bd-read-bg)]' : 'bg-white dark:bg-stone-900'
+  const tPlaceholder = theme === 'reader'
+    ? 'placeholder-[var(--bd-read-sub)]/50'
+    : 'placeholder-stone-400 dark:placeholder-stone-500'
 
   useLayoutEffect(() => {
     const el = inputRef.current
@@ -147,12 +190,16 @@ export default function IdeaDiscussionPanel({
     return (
       <div
         key={comment.id}
+        ref={comment.id === focusCommentId ? commentTarget : undefined}
+        tabIndex={comment.id === focusCommentId ? -1 : undefined}
+        data-notification-interaction={comment.id}
         onContextMenu={(e) => handleCommentContextMenu(e, comment)}
         onTouchStart={(e) => handleTouchStart(e, comment)}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         className={cn(
           'group relative transition-colors',
+          comment.id === focusCommentId && focusVisible && 'rounded-lg bg-blue-500/10 ring-1 ring-blue-500/30',
           isReply
             ? 'ml-8 mt-2 border-l-2 border-stone-200/50 pl-3 dark:border-stone-800/60'
             : 'border-t border-stone-200/30 pt-3 pb-1.5 dark:border-stone-800/30 first:border-t-0',
@@ -162,7 +209,7 @@ export default function IdeaDiscussionPanel({
           {authorAvatar ? (
             <img src={authorAvatar} alt="" className={cn('rounded-full object-cover shrink-0', isReply ? 'h-6 w-6' : 'h-7 w-7')} />
           ) : (
-            <span className={cn('flex items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)] shrink-0 font-medium', isReply ? 'h-6 w-6 text-[10px]' : 'h-7 w-7 text-xs')}>
+            <span className={cn('flex items-center justify-center rounded-full bg-stone-500/10 shrink-0 font-medium', tSub, isReply ? 'h-6 w-6 text-[10px]' : 'h-7 w-7 text-xs')}>
               {comment.author.name.slice(0, 1)}
             </span>
           )}
@@ -177,24 +224,24 @@ export default function IdeaDiscussionPanel({
             }}
           >
             <div className="flex items-center gap-1.5 flex-wrap text-xs">
-              <span className="font-medium text-[var(--bd-read-text)]">{comment.author.name}</span>
+              <span className={cn('font-medium', tText)}>{comment.author.name}</span>
               {isAuthor && (
-                <span className="rounded bg-stone-500/15 px-1 py-0.2 text-[10px] text-[var(--bd-read-sub)] font-normal">
+                <span className={cn('rounded bg-stone-500/15 px-1 py-0.2 text-[10px] font-normal', tSub)}>
                   {_('comment.hostBadge')}
                 </span>
               )}
               <span
                 title={formatFullDateTime(_, comment.createdAt)}
                 aria-label={formatFullDateTime(_, comment.createdAt)}
-                className="cursor-default select-none text-[var(--bd-read-sub)] opacity-70 hover:opacity-100 transition-opacity"
+                className={cn('cursor-default select-none opacity-70 hover:opacity-100 transition-opacity', tSub)}
               >
                 · {formatRelativeTime(_, comment.createdAt)}
               </span>
             </div>
 
-            <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-[var(--bd-read-text)]">
+            <p className={cn('mt-1 whitespace-pre-wrap text-sm leading-relaxed', tText)}>
               {comment.replyToName && (
-                <span className="text-[var(--bd-read-sub)]">
+                <span className={tSub}>
                   {_('comment.replyTo', { name: comment.replyToName })}：
                 </span>
               )}
@@ -211,7 +258,7 @@ export default function IdeaDiscussionPanel({
             }}
             className={cn(
               'flex items-center gap-1 text-xs shrink-0 pt-0.5 transition-colors',
-              comment.liked ? 'text-red-500 font-medium' : 'text-[var(--bd-read-sub)] hover:text-red-500',
+              comment.liked ? 'text-red-500 font-medium' : cn(tSub, 'hover:text-red-500'),
               !user && 'cursor-default opacity-80',
             )}
             title={comment.liked ? _('comment.unlike') : _('comment.like')}
@@ -227,7 +274,7 @@ export default function IdeaDiscussionPanel({
   const menuPos = contextMenu ? computeAtPoint(contextMenu.pos, 130, 140) : null
 
   return (
-    <div className={cn('pt-1', !hideTabs && 'mt-4', className)}>
+    <div className={cn(detailLayout ? 'mt-3 px-5 pb-4' : cn('pt-1', !hideTabs && 'mt-4'), className)}>
       {/* Tabs: 评论 n 与 赞 n */}
       {!hideTabs && (
         <div className="flex items-center gap-6 border-b border-stone-200/60 pb-2.5 dark:border-stone-800/60">
@@ -238,13 +285,13 @@ export default function IdeaDiscussionPanel({
             className={cn(
               'relative pb-1 text-sm transition-colors',
               tab === 'comments'
-                ? 'font-bold text-[var(--bd-read-text)]'
-                : 'text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)]',
+                ? cn('font-bold', tText)
+                : cn(tSub, tTextHover),
             )}
           >
             {_('comment.tabComments', { count: data?.idea.commentCount ?? initialCommentCount })}
             {tab === 'comments' && (
-              <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-[var(--bd-read-primary)]" />
+              <span className={cn('absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full', tPrimaryBg)} />
             )}
           </button>
 
@@ -255,20 +302,20 @@ export default function IdeaDiscussionPanel({
             className={cn(
               'relative pb-1 text-sm transition-colors',
               tab === 'likes'
-                ? 'font-bold text-[var(--bd-read-text)]'
-                : 'text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)]',
+                ? cn('font-bold', tText)
+                : cn(tSub, tTextHover),
             )}
           >
             {_('comment.tabLikes', { count: data?.idea.likeCount ?? initialLikeCount })}
             {tab === 'likes' && (
-              <span className="absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full bg-[var(--bd-read-primary)]" />
+              <span className={cn('absolute -bottom-2.5 left-0 right-0 h-0.5 rounded-full', tPrimaryBg)} />
             )}
           </button>
         </div>
       )}
 
       {query.isPending ? (
-        <div className={cn(!hideTabs ? 'mt-3' : 'mt-1', 'space-y-3.5 animate-pulse')}>
+        <div className={cn(!hideTabs ? (detailLayout ? 'mt-2' : 'mt-3') : 'mt-1', 'space-y-3.5 animate-pulse')}>
           {(data?.idea.commentCount ?? initialCommentCount) > 0 ? (
             Array.from({ length: Math.min(data?.idea.commentCount ?? initialCommentCount, 2) }).map((_, i) => (
               <div key={i} className="flex items-start gap-2.5 pt-2">
@@ -280,24 +327,24 @@ export default function IdeaDiscussionPanel({
               </div>
             ))
           ) : (
-            <div className="flex py-4 items-center justify-center text-xs text-[var(--bd-read-sub)] opacity-50">
+            <div className={cn('flex items-center justify-center text-xs opacity-50', tSub, detailLayout ? 'py-3' : 'py-4')}>
               {_('comment.noComments')}
             </div>
           )}
         </div>
       ) : query.isError || !data ? (
-        <div className={cn(hideTabs ? 'pt-1' : 'mt-3 pt-1')}>
+        <div className={cn(hideTabs ? 'pt-1' : detailLayout ? 'mt-2 pt-1' : 'mt-3 pt-1')}>
           <button
             onClick={() => void query.refetch()}
-            className="py-3 text-sm text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] transition-colors cursor-pointer"
+            className={cn('py-3 text-sm transition-colors cursor-pointer', tSub, tTextHover)}
           >
             讨论加载失败，点击重试
           </button>
         </div>
       ) : !hideTabs && tab === 'likes' ? (
-        <div className="mt-3">
+        <div className={detailLayout ? 'mt-2' : 'mt-3'}>
           {data.likers.length === 0 ? (
-            <div className="flex py-6 items-center justify-center text-xs text-[var(--bd-read-sub)]">
+            <div className={cn('flex items-center justify-center text-xs', tSub, detailLayout ? 'py-3' : 'py-6')}>
               {_('comment.noLikes')}
             </div>
           ) : (
@@ -307,7 +354,7 @@ export default function IdeaDiscussionPanel({
                 return (
                   <div
                     key={liker.id}
-                    className="flex items-center gap-2 rounded-full border border-stone-200/70 bg-stone-500/5 px-2.5 py-1 text-xs text-[var(--bd-read-text)] dark:border-stone-800/70"
+                    className={cn('flex items-center gap-2 rounded-full border border-stone-200/70 bg-stone-500/5 px-2.5 py-1 text-xs dark:border-stone-800/70', tText)}
                   >
                     {avatar ? (
                       <img src={avatar} alt="" decoding="async" className="h-4 w-4 rounded-full object-cover" />
@@ -324,10 +371,10 @@ export default function IdeaDiscussionPanel({
           )}
         </div>
       ) : (
-        <div className="mt-2">
+        <div className={detailLayout ? 'mt-1' : 'mt-2'}>
           <div className="space-y-1">
             {data.comments.length === 0 ? (
-              <div className="flex py-6 items-center justify-center text-xs text-[var(--bd-read-sub)]">
+              <div className={cn('flex items-center justify-center text-xs', tSub, detailLayout ? 'py-3' : 'py-6')}>
                 {_('comment.noComments')}
               </div>
             ) : (
@@ -347,20 +394,22 @@ export default function IdeaDiscussionPanel({
       {/* 底部评论输入栏：收起态为极简圆角胶囊（对标微信读书），点击展开为卡片 */}
       {user && (hideTabs || tab === 'comments') && (
         <div
-              className={cn(
-                'mt-4 border border-stone-200/70 bg-stone-500/[0.04] transition-[border-color,background-color] dark:border-stone-800/70 dark:bg-stone-500/[0.06]',
-                isExpanded ? 'rounded-xl p-3' : 'rounded-full px-3.5 py-2 hover:border-stone-300 dark:hover:border-stone-700 cursor-text',
-              )}
-              onClick={() => {
-                if (!isExpanded) {
-                  setIsFocused(true)
-                  inputRef.current?.focus()
-                }
-              }}
-            >
+          className={cn(
+            detailLayout
+              ? cn('sticky bottom-0 z-10 mt-3 border border-stone-200/70 pb-1 pt-1 dark:border-stone-800/70', tComposerBg)
+              : 'mt-4 border border-stone-200/70 bg-stone-500/[0.04] transition-[border-color,background-color] dark:border-stone-800/70 dark:bg-stone-500/[0.06]',
+            isExpanded ? 'rounded-xl p-3' : 'rounded-full px-3.5 py-2 hover:border-stone-300 dark:hover:border-stone-700 cursor-text',
+          )}
+          onClick={() => {
+            if (!isExpanded) {
+              setIsFocused(true)
+              inputRef.current?.focus()
+            }
+          }}
+        >
               {(replyTo || editing) && (
-                <div className="mb-2.5 flex items-center justify-between">
-                  <div className="inline-flex items-center gap-1.5 rounded-full bg-[var(--bd-read-primary)]/10 px-2.5 py-0.5 text-xs text-[var(--bd-read-primary)]">
+                  <div className={cn('mb-2.5 flex items-center justify-between')}>
+                    <div className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs', tPrimaryTint)}>
                     <span className="font-medium">
                       {editing ? _('comment.editTitle') : _('comment.replyTo', { name: replyTo?.author.name ?? '' })}
                     </span>
@@ -394,7 +443,8 @@ export default function IdeaDiscussionPanel({
                 ) : (
                   <span
                     className={cn(
-                      'flex shrink-0 items-center justify-center rounded-full bg-stone-400/20 text-[10px] font-medium text-[var(--bd-read-sub)]',
+                      'flex shrink-0 items-center justify-center rounded-full bg-stone-400/20 text-[10px] font-medium',
+                      tSub,
                       isExpanded ? 'mt-0.5 h-6 w-6' : 'h-5 w-5',
                     )}
                   >
@@ -433,10 +483,12 @@ export default function IdeaDiscussionPanel({
                   disabled={action.isPending}
                   maxLength={10000}
                   className={cn(
-                    'min-w-0 flex-1 resize-none bg-transparent leading-relaxed text-[var(--bd-read-text)] placeholder-[var(--bd-read-sub)]/50 focus:outline-hidden',
+                    'min-w-0 flex-1 resize-none bg-transparent leading-relaxed focus:outline-hidden',
+                    tText,
+                    tPlaceholder,
                     isExpanded
                       ? 'min-h-[52px] max-h-40 text-sm'
-                      : '!h-5 max-h-5 py-0 text-xs placeholder-[var(--bd-read-sub)]/70 overflow-hidden cursor-text leading-5',
+                      : '!h-5 max-h-5 py-0 text-xs overflow-hidden cursor-text leading-5',
                   )}
                 />
               </div>
@@ -452,7 +504,7 @@ export default function IdeaDiscussionPanel({
                       setEditing(null)
                       if (!editing) setDraft('')
                     }}
-                    className="px-2.5 py-1 text-xs text-[var(--bd-read-sub)] hover:text-[var(--bd-read-text)] transition-colors cursor-pointer"
+                    className={cn('px-2.5 py-1 text-xs transition-colors cursor-pointer', tSub, tTextHover)}
                   >
                     {_('comment.cancel')}
                   </button>
@@ -463,7 +515,7 @@ export default function IdeaDiscussionPanel({
                       e.stopPropagation()
                       void submit()
                     }}
-                    className="rounded-full bg-[var(--bd-read-primary)] px-4 py-1.5 text-xs font-medium text-white shadow-xs transition-opacity hover:opacity-90 disabled:opacity-40 cursor-pointer"
+                    className={cn('rounded-full px-4 py-1.5 text-xs font-medium shadow-xs transition-opacity hover:opacity-90 disabled:opacity-40 cursor-pointer', tPrimaryBg, tPrimaryFg)}
                   >
                     {editing ? _('comment.save') : _('comment.submit')}
                   </button>
@@ -477,7 +529,7 @@ export default function IdeaDiscussionPanel({
         <SmartMenu
           id="idea-comment-context-menu"
           innerRef={menuRef}
-          variant="reader"
+          variant={theme === 'reader' ? 'reader' : 'default'}
           position={menuPos}
           onClose={() => setContextMenu(null)}
           width={130}
@@ -493,7 +545,7 @@ export default function IdeaDiscussionPanel({
               }}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10 cursor-pointer"
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5">
+              <span className={cn(tSub, '[&>svg]:h-3.5 [&>svg]:w-3.5')}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="9 17 4 12 9 7" />
                   <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
@@ -513,7 +565,7 @@ export default function IdeaDiscussionPanel({
               }}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10 cursor-pointer"
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5">
+              <span className={cn(tSub, '[&>svg]:h-3.5 [&>svg]:w-3.5')}>
                 <CopyIcon />
               </span>
               {_('annotation.copy')}
@@ -531,7 +583,7 @@ export default function IdeaDiscussionPanel({
               }}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10 cursor-pointer"
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5">
+              <span className={cn(tSub, '[&>svg]:h-3.5 [&>svg]:w-3.5')}>
                 <PencilIcon />
               </span>
               {_('comment.edit')}

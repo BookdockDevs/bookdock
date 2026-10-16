@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { useQuery } from '@tanstack/react-query'
@@ -156,7 +157,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   if (!shareTarget) return null
 
   if (bookQuery.isError) {
-    return (
+    return createPortal(
       <div
         className={`fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop`}
         style={dialogLayout.style}
@@ -178,7 +179,8 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
           </div>
           <QueryErrorState className="px-6 pb-6 pt-2" isRetrying={bookQuery.isFetching} onRetry={bookQuery.refetch} />
         </div>
-      </div>
+      </div>,
+      document.body,
     )
   }
 
@@ -241,7 +243,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     }
   }
 
-  return (
+  return createPortal(
     <div
       className={`fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop`}
       style={dialogLayout.style}
@@ -468,6 +470,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

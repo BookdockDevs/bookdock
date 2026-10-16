@@ -286,7 +286,7 @@ export async function migrateReadingStates(): Promise<ReadingStatesMigrationRepo
         report.anomalies.push({ bookId: book.id, reason: 'book has no migrated version' })
         continue
       }
-      const existing = db.select().from(bookStates)
+      const existing = db.select({ userId: bookStates.userId }).from(bookStates)
         .where(and(eq(bookStates.userId, book.userId), eq(bookStates.bookVersionId, book.id))).get()
       if (existing) {
         report.statesSkipped += 1
@@ -307,16 +307,10 @@ export async function migrateReadingStates(): Promise<ReadingStatesMigrationRepo
       } catch {
         report.anomalies.push({ bookId: book.id, reason: 'unreadable progress file, fell back to books row' })
       }
-      db.insert(bookStates).values({
-        userId: book.userId,
-        bookVersionId: book.id,
-        readStatus: book.readStatus,
-        percent: typeof file?.percent === 'number' ? file.percent : book.progress,
-        cfi: typeof file?.cfi === 'string' ? file.cfi : null,
-        chapter: typeof file?.chapter === 'string' ? file.chapter : null,
-        lastReadAt: book.lastReadAt,
-        updatedAt: typeof file?.updatedAt === 'number' ? Math.max(file.updatedAt, book.updatedAt) : book.updatedAt,
-      }).run()
+      db.run(sql`INSERT INTO book_states (user_id, book_version_id, read_status, percent, cfi, chapter, last_read_at, updated_at)
+        VALUES (${book.userId}, ${book.id}, ${book.readStatus}, ${typeof file?.percent === 'number' ? file.percent : book.progress},
+        ${typeof file?.cfi === 'string' ? file.cfi : null}, ${typeof file?.chapter === 'string' ? file.chapter : null},
+        ${book.lastReadAt}, ${typeof file?.updatedAt === 'number' ? Math.max(file.updatedAt, book.updatedAt) : book.updatedAt})`)
       report.statesMigrated += 1
     }
     db.update(libraryMigrationLog).set({
@@ -688,7 +682,7 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
   const libraryTagRows = db.select().from(libraryTags).all()
   check('tags', tagRows.every((t) => libraryTagRows.some((l) => l.id === t.id)), `${libraryTagRows.length}/${tagRows.length}`)
 
-  const states = db.select().from(bookStates).all()
+  const states = db.select({ userId: bookStates.userId, bookVersionId: bookStates.bookVersionId }).from(bookStates).all()
   check('reading-states', verifiableBooks.every((b) => states.some((s) => s.userId === b.userId && s.bookVersionId === b.id)),
     `${states.length}/${verifiableBooks.length}`)
 

@@ -4,10 +4,12 @@ import { indexRoute } from './routes/index'
 import { libraryInviteRoute } from './routes/library.$token'
 import { loginRoute } from './routes/login'
 import { profileRoute } from './routes/profile'
+import { notificationsRoute } from './routes/notifications'
 import { registerRoute } from './routes/register'
 import { setupRoute } from './routes/setup'
 import { readerRoute } from './routes/books.$id'
 import { settingsRoute } from './routes/settings'
+import { archiveRoute } from './routes/archive'
 import { statsRoute } from './routes/stats'
 import { updatePreviewRoute } from './routes/update-preview'
 
@@ -15,11 +17,13 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   libraryInviteRoute,
   profileRoute,
+  notificationsRoute,
   loginRoute,
   registerRoute,
   setupRoute,
   readerRoute,
   settingsRoute,
+  archiveRoute,
   statsRoute,
   ...(import.meta.env.DEV ? [updatePreviewRoute] : []),
 ])

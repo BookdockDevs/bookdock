@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { AnnotationRes } from '@bookdock/shared'
+import type { AnnotationRes, AnnotationUpdateReq } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { useDialogLayout } from '@/components/ui/dialog-layout-context'
@@ -12,9 +12,10 @@ import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
 
 import { getLastHighlightStyle } from './annotation-colors'
-import { AiSparkleIcon, BulbIcon, ChevronDownIcon, ChevronLeftIcon, CloseIcon, CopyIcon, ExcerptShareIcon, HeartIcon, PencilIcon, QuoteLeftIcon, SearchIcon, ShareIcon, StyleGlyph, TrashIcon } from './annotation-icons'
-import { formatFullDateTime } from './format-relative-time'
+import { AiSparkleIcon, BulbIcon, ChevronDownIcon, CloseIcon, CopyIcon, ExcerptShareIcon, PencilIcon, QuoteLeftIcon, SearchIcon, StyleGlyph } from './annotation-icons'
+import IdeaImageEditor, { type IdeaImageEditorHandle } from '@/features/content-files/components/IdeaImageEditor'
 import IdeaCard from './IdeaCard'
+import IdeaDetailCard from './IdeaDetailCard'
 import IdeaDiscussionPanel from './IdeaDiscussionPanel'
 import IdeaVisibilityControl from './IdeaVisibilityControl'
 import { markEscConsumed } from '../lib/esc-consumed'
@@ -51,7 +52,7 @@ interface IdeaOverlayProps {
   onCopyQuote: () => void
   onHighlight: () => void
   onWriteNote: () => void
-  onSaveIdea?: (note: string, visibility?: 'private' | 'shared') => Promise<void>
+  onSaveIdea?: (note: string, visibility?: 'private' | 'shared', files?: Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>) => Promise<void>
   defaultVisibility?: 'private' | 'shared'
   visibilityEligible?: boolean
   sourceReadable?: boolean
@@ -68,8 +69,6 @@ interface IdeaOverlayProps {
 const card = 'rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] text-[var(--bd-read-text)] shadow-xl'
 const iconBtn =
   'flex h-10 w-10 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current'
-const detailActionBtn =
-  'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current'
 
 /**
  * Android-WeChat-style floating overlay for ideas: a dimmed backdrop with a
@@ -134,10 +133,13 @@ export function IdeaOverlay({
 
   const user = useAuthStore((state) => state.user)
   const [sidebarDraft, setSidebarDraft] = useState('')
+  const [sidebarFiles, setSidebarFiles] = useState<Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>>()
+  const [sidebarUploading, setSidebarUploading] = useState(false)
   const [sidebarVisibility, setSidebarVisibility] = useState<'private' | 'shared'>(defaultVisibility)
   const [isSidebarFocused, setIsSidebarFocused] = useState(false)
   const [isSidebarSubmitting, setIsSidebarSubmitting] = useState(false)
   const sidebarInputRef = useRef<HTMLTextAreaElement>(null)
+  const sidebarImageEditorRef = useRef<IdeaImageEditorHandle>(null)
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -186,12 +188,14 @@ export function IdeaOverlay({
   }, [detailId, expandedIdeaId, entries])
 
   async function handleSidebarSubmit() {
-    if (!sidebarDraft.trim() || isSidebarSubmitting) return
+    const hasImages = (sidebarFiles?.imageIds?.length ?? 0) > 0
+    if ((!sidebarDraft.trim() && !hasImages) || isSidebarSubmitting || sidebarUploading) return
     if (onSaveIdea) {
       setIsSidebarSubmitting(true)
       try {
-        await onSaveIdea(sidebarDraft.trim(), sidebarVisibility)
+        await onSaveIdea(sidebarDraft.trim(), sidebarVisibility, sidebarFiles)
         setSidebarDraft('')
+        setSidebarFiles(undefined)
         setIsSidebarFocused(false)
       } finally {
         setIsSidebarSubmitting(false)
@@ -216,8 +220,6 @@ export function IdeaOverlay({
     { key: 'search', title: _('reader.search'), icon: <SearchIcon />, onClick: onSearch },
     { key: 'share', title: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, onClick: onShareQuote },
   ]
-  const detailAvatarUrl = detail ? avatarUrl(detail.authorAvatarKey) : undefined
-
   const storedWidth = useUiStore((s) => s.ideaSidebarWidth)
   const setStoredWidth = useUiStore((s) => s.setIdeaSidebarWidth)
   const IDEA_SIDEBAR_MIN = 280
@@ -448,6 +450,10 @@ export function IdeaOverlay({
                       placeholder={_('annotation.notePlaceholder')}
                       value={sidebarDraft}
                       onChange={(e) => setSidebarDraft(e.target.value)}
+                      onPaste={(e) => {
+                        const files = Array.from(e.clipboardData.files).filter((file) => file.type.startsWith('image/'))
+                        if (files.length > 0) { e.preventDefault(); e.stopPropagation(); sidebarImageEditorRef.current?.addFiles(files) }
+                      }}
                       onKeyDown={(e) => {
                         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                           e.preventDefault()
@@ -465,6 +471,7 @@ export function IdeaOverlay({
                     />
                   </div>
 
+                  <IdeaImageEditor ref={sidebarImageEditorRef} bookVersionId={bookId} disabled={isSidebarSubmitting} onChange={(files, pending) => { setSidebarFiles(files); setSidebarUploading(pending) }} />
                   <div className="flex items-center justify-between border-t border-stone-200/40 pt-2 dark:border-stone-800/40">
                     <div className="flex items-center gap-2">
                       {visibilityEligible && (
@@ -491,7 +498,7 @@ export function IdeaOverlay({
                       </button>
                       <button
                         type="button"
-                        disabled={isSidebarSubmitting || !sidebarDraft.trim()}
+                        disabled={isSidebarSubmitting || sidebarUploading || (!sidebarDraft.trim() && !(sidebarFiles?.imageIds?.length ?? 0))}
                         onClick={() => void handleSidebarSubmit()}
                         className="rounded-full bg-[var(--bd-read-primary)] px-4 py-1 text-xs font-medium text-white shadow-xs transition-opacity hover:opacity-90 disabled:opacity-40 cursor-pointer"
                       >
@@ -545,115 +552,30 @@ export function IdeaOverlay({
           }}
         >
           {detail ? (
-            <div className={`${card} w-full max-w-[420px] overflow-hidden`}>
-              <div className="flex items-center justify-between px-3 pt-3 pb-2 border-b border-stone-200/40 dark:border-stone-800/40">
-                <div className="flex items-center gap-2 min-w-0">
-                  <button
-                    onClick={() => setDetailId(null)}
-                    title={_('annotation.cancel')}
-                    className="-ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
-                  >
-                    <ChevronLeftIcon />
-                  </button>
-                  {detailAvatarUrl ? (
-                    <img src={detailAvatarUrl} alt="" decoding="async" className="h-7 w-7 shrink-0 rounded-full object-cover" />
-                  ) : (
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]">
-                      <BulbIcon size={15} />
-                    </span>
-                  )}
-                  <span className="truncate text-sm font-medium">{detail.authorName ?? _('annotation.myNote')}</span>
-                </div>
-                <div className="flex items-center gap-0.5 shrink-0 text-xs text-[var(--bd-read-sub)]">
-                  {onToggleLike && (
-                    <button
-                      onClick={() => onToggleLike({ ...detail, liked: isDetailLiked })}
-                      title={isDetailLiked ? _('comment.unlike') : _('comment.like')}
-                      className={cn(detailActionBtn, isDetailLiked && 'text-red-500')}
-                    >
-                      <HeartIcon filled={isDetailLiked} size={15} />
-                    </button>
-                  )}
-                  <button onClick={() => onShareNote(detail)} title={_('annotation.share')} className={detailActionBtn}>
-                    <ShareIcon size={16} />
-                  </button>
-                  <button onClick={() => onCopyNote(detail)} title={_('annotation.copy')} className={detailActionBtn}>
-                    <CopyIcon />
-                  </button>
-                  {(detail.own || detail.canDelete) && (
-                    <div className="mx-0.5 h-3 w-px bg-stone-300/60 dark:bg-stone-700/60" />
-                  )}
-                  {detail.own && (
-                    <button onClick={() => onEdit(detail)} title={_('annotation.editNote')} className={detailActionBtn}>
-                      <PencilIcon />
-                    </button>
-                  )}
-                  {(detail.own || detail.canDelete) && (
-                    <button
-                      onClick={() => onDelete(detail)}
-                      title={_('annotation.deleteAnnotation')}
-                      className={`${detailActionBtn} hover:bg-red-500/10 hover:text-red-500`}
-                    >
-                      <TrashIcon />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="px-5 pb-5 pt-3">
-                <p className="whitespace-pre-wrap text-base leading-7">{detail.annotation.note}</p>
-                {quoteText && (
-                  onJump && detail.locationAvailable !== false ? (
-                    <button
-                      type="button"
-                      onClick={() => onJump(detail)}
-                      title={_('annotation.jumpToSource')}
-                      aria-label={_('annotation.jumpToSource')}
-                      className="mt-4 w-full cursor-pointer rounded-xl border border-stone-200/50 bg-stone-500/[0.04] p-3 transition-colors text-left hover:bg-stone-500/10 hover:border-stone-300 dark:border-stone-800/50 dark:bg-stone-500/[0.08] dark:hover:border-stone-700 outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)]"
-                    >
-                      <span className="flex items-center gap-1.5 text-[var(--bd-read-sub)]">
-                        <QuoteLeftIcon height={13} />
-                      </span>
-                      <span
-                        className="mt-1.5 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-[var(--bd-read-sub)]"
-                        style={fontStack ? { fontFamily: fontStack } : undefined}
-                      >
-                        {quoteText}
-                      </span>
-                    </button>
-                  ) : (
-                    <div
-                      title={detail.locationAvailable === false ? _('annotation.locationUnavailable') : undefined}
-                      className={cn(
-                        'mt-4 rounded-xl border border-stone-200/50 bg-stone-500/[0.04] p-3 text-left dark:border-stone-800/50 dark:bg-stone-500/[0.08]',
-                        detail.locationAvailable === false && 'opacity-60',
-                      )}
-                    >
-                      <div className="flex items-center gap-1.5 text-[var(--bd-read-sub)]">
-                        <QuoteLeftIcon height={13} />
-                      </div>
-                      <p
-                        className="mt-1.5 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-[var(--bd-read-sub)]"
-                        style={fontStack ? { fontFamily: fontStack } : undefined}
-                      >
-                        {quoteText}
-                      </p>
-                    </div>
-                  )
-                )}
-                <div className="flex items-center gap-2 pt-3 text-xs text-[var(--bd-read-sub)]">
-                  <span>
-                    {_('annotation.publishedAt')} {formatFullDateTime(_, detail.annotation.createdAt)}
-                  </span>
-                  {detail.annotation.editedAt && <span>· {_('annotation.edited')}</span>}
-                </div>
+            <div className={`${card} flex min-h-0 max-h-[calc(100dvh-2rem)] w-full max-w-[420px] flex-col overflow-hidden`}>
+              <IdeaDetailCard
+                detail={detail}
+                quoteText={quoteText}
+                fontStack={fontStack}
+                surface
+                liked={isDetailLiked}
+                onBack={() => setDetailId(null)}
+                onJump={onJump}
+                onToggleLike={onToggleLike}
+                onShare={onShareNote}
+                onCopy={onCopyNote}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              >
                 <IdeaDiscussionPanel
                   key={detail.annotation.id}
                   ideaId={detail.annotation.id}
                   bookId={bookId}
+                  detailLayout
                   initialCommentCount={detail.commentCount}
                   initialLikeCount={detail.likeCount}
                 />
-              </div>
+              </IdeaDetailCard>
             </div>
           ) : (
             <div className="w-full max-w-[420px]">

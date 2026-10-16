@@ -12,13 +12,16 @@ import { useUiStore } from '@/stores/ui.store'
 
 import type { LibrarySearch } from '@/routes/index'
 import SmartMenu from '@/components/ui/SmartMenu'
+import { archiveEntryState } from '@/features/archive/archive-return'
 import AccountMenu from '@/features/auth/AccountMenu'
+import NotificationBell from '@/features/notifications/components/NotificationBell'
 import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
 import { sortSidebarItems } from '../sort-modes'
 import { sortCategories } from '../taxonomy'
-import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleShelfHidden, useToggleTagPin, useToggleTagHidden, useTrashEnabled, useLibraryPrefs, useHiddenLibraries, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
+import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleShelfHidden, useToggleTagPin, useToggleTagHidden, useTrashEnabled, useLibraryPrefs, useLibraryPrefsState, useHiddenLibraries, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import TaxonomyEntry from './TaxonomyEntry'
+import TaxonomyIcon from './TaxonomyIcon'
 import { MenuHeader } from './RowMenuChrome'
 import LibraryDetailsDialog from './LibraryDetailsDialog'
 import ShelfDialog from './ShelfDialog'
@@ -67,8 +70,43 @@ interface LibrarySidebarProps {
   onJoinLibrary?: (library: LibraryListItem) => void
   /** Opens the discovery dialog showing all public and password libraries. */
   onExploreLibraries?: () => void
+  onOpenNotifications?: () => void
+  notificationButtonRef?: React.RefObject<HTMLButtonElement | null>
+  /**
+   * Current library search, used once when entering the archive: the archive
+   * top bar exits back to this exact state. Optional so older call sites keep
+   * the previous plain navigation.
+   */
+  librarySearch?: LibrarySearch
 }
-const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries }: LibrarySidebarProps) {
+
+interface TaxonomyEmptyStateProps {
+  type: 'categories' | 'tags'
+  inLibrary: boolean
+}
+
+function TaxonomyEmptyState({ type, inLibrary }: TaxonomyEmptyStateProps) {
+  const _ = useTranslation()
+  const label = _(inLibrary ? 'library.noCategories' : type === 'tags' ? 'library.noTags' : 'library.noShelves')
+
+  return (
+    <div className="flex flex-col items-center justify-center py-8 px-2 text-center select-none">
+      <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-stone-500/5 text-stone-400 dark:bg-stone-500/10 dark:text-stone-500">
+        {type === 'tags' ? (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.42 0l8.58-8.58a1 1 0 0 0 0-1.42z" />
+            <circle cx="7" cy="7" r="1" />
+          </svg>
+        ) : (
+          <TaxonomyIcon kind={inLibrary ? 'category' : 'shelf'} size={15} />
+        )}
+      </div>
+      <p className="text-xs font-medium text-stone-500 dark:text-stone-400">{label}</p>
+    </div>
+  )
+}
+
+const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries, onOpenNotifications, notificationButtonRef, librarySearch }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const [session, setSession] = useState(() => (sessionKey ? navigationSessions.get(sessionKey) : undefined) ?? { panel: (directory || 'categories') as 'categories' | 'tags', expanded: [] as string[], scroll: {} as Record<string, number> })
@@ -288,9 +326,16 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
           ? 'fixed inset-y-0 left-0 z-50 flex h-full w-[min(19rem,75vw)] overflow-hidden bg-stone-50 shadow-xl dark:bg-stone-950 md:shadow-none'
           : 'hidden md:flex',
       )}>
-      <div className="mb-5 flex items-center gap-2.5 px-2">
-        <BookdockLogo className="h-8 w-8 shrink-0 text-stone-900 dark:text-stone-50" />
-        <span className="font-serif text-base font-semibold tracking-wide text-stone-900 dark:text-stone-50">{_('app.name')}</span>
+      <div className="mb-5 flex items-center justify-between gap-2 px-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <BookdockLogo className="h-8 w-8 shrink-0 text-stone-900 dark:text-stone-50" />
+          <span className="truncate font-serif text-base font-semibold tracking-wide text-stone-900 dark:text-stone-50">{_('app.name')}</span>
+        </div>
+        <NotificationBell
+          buttonRef={notificationButtonRef}
+          onOpen={onOpenNotifications}
+          className="h-8 w-8"
+        />
       </div>
 
       <LibrarySection
@@ -458,7 +503,12 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
                   />
                 )
               })}
-              {shelves.length === 0 && <p className="px-3 py-2 text-xs text-stone-400">{_(inLibrary ? 'library.noCategories' : 'library.noShelves')}</p>}
+              {shelves.length === 0 && (
+                <TaxonomyEmptyState
+                  type="categories"
+                  inLibrary={inLibrary}
+                />
+              )}
             </SortableContext>
           ) : <SortableContext items={tags.map((tag) => tag.id)} strategy={verticalListSortingStrategy}>
             {tags.map((tag) => <TaxonomyEntry isTag key={tag.id} row={tag} settling={settleTagId === tag.id} readOnly={!canEditTags} active={!trash && tagId === tag.id}
@@ -466,7 +516,12 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
               onEdit={() => setTagDialog({ tagId: tag.id, initialName: tag.name })} onDelete={() => setDeleteTagTarget(tag)}
               onTogglePin={() => activeLibraryId ? updateLibraryTag.mutate({ libraryId: activeLibraryId, tagId: tag.id, patch: { pinned: !tag.pinned } }) : toggleTagPin.mutate({ id: tag.id, pinned: !tag.pinned })}
               onToggleHidden={() => activeLibraryId ? updateLibraryTag.mutate({ libraryId: activeLibraryId, tagId: tag.id, patch: { hidden: !tag.hidden } }) : toggleTagHidden.mutate({ id: tag.id, hidden: !tag.hidden })} />)}
-            {tags.length === 0 && <p className="px-3 py-2 text-xs text-stone-400">{_('library.noTags')}</p>}
+            {tags.length === 0 && (
+              <TaxonomyEmptyState
+                type="tags"
+                inLibrary={inLibrary}
+              />
+            )}
           </SortableContext>}
           {(inLibrary ? categoriesQuery.isError || libraryTagsQuery.isError : shelvesError || tagsError) &&
             <button type="button" onClick={() => inLibrary ? Promise.all([categoriesQuery.refetch(), libraryTagsQuery.refetch()]) : Promise.all([refetchShelves(), refetchTags()])} className="px-3 py-2 text-xs text-stone-500">{_('library.retryNavigation')}</button>}
@@ -476,7 +531,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
 
       <div className="mt-auto flex flex-col gap-0.5 pt-2.5 border-t border-stone-200/50 dark:border-stone-800/50">
         {!readOnly && <NavItem
-          label={_('stats.title')}
+          label={_('archive.title')}
           icon={
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 3v18h18" />
@@ -485,10 +540,16 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
           }
           onClick={() => {
             onMobileClose?.()
-            void navigate({ to: '/stats' })
+            // Record the entry source once: the archive top bar exits back to
+            // it no matter how far the reader navigates inside the archive.
+            if (librarySearch) {
+              void navigate({ to: '/archive', state: (previous) => ({ ...previous, ...archiveEntryState(librarySearch, window.scrollY, previous.archiveReturn) }) })
+            } else {
+              void navigate({ to: '/archive' })
+            }
           }}
           onPointerEnter={() => {
-            void import('@/features/stats/Stats')
+            void import('@/features/archive/Archive')
           }}
         />}
         <NavItem
@@ -688,15 +749,18 @@ function LibrarySection({
   // Only libraries the reader belongs to are listed here: discoverable but
   // unjoined libraries live in the settings library list's future discovery
   // home, not in the daily switching rows.
-  const prefs = useLibraryPrefs()
-  const { isHidden } = useHiddenLibraries()
+  const { prefs } = useLibraryPrefsState()
+  const { isHidden, isReady: hiddenReady } = useHiddenLibraries()
   const [detailsTarget, setDetailsTarget] = useState<LibraryListItem | null>(null)
-  const shared = useMemo(() => applyLibraryOrder(
-    libraries.filter((library) => library.type === 'shared'
-      && (library.relation === 'owner' || library.relation === 'admin' || library.relation === 'member')
-      && !isHidden(library.id)),
-    prefs?.libraryOrder,
-  ), [libraries, isHidden, prefs?.libraryOrder])
+  const shared = useMemo(() => {
+    if (!hiddenReady) return []
+    return applyLibraryOrder(
+      libraries.filter((library) => library.type === 'shared'
+        && (library.relation === 'owner' || library.relation === 'admin' || library.relation === 'member')
+        && !isHidden(library.id)),
+      prefs?.libraryOrder,
+    )
+  }, [libraries, isHidden, prefs?.libraryOrder, hiddenReady])
   const privateLibrary = libraries.find((library) => library.type === 'private')
   
   const privateActive = activeLibraryId === null
@@ -773,7 +837,11 @@ function LibrarySection({
                 </span>
               </button>
             )}
-            {shared.length > 1 ? (
+            {!hiddenReady ? (
+              <div className="flex flex-col gap-1 p-1">
+                <div className="h-9 w-full animate-pulse rounded-lg bg-stone-100 dark:bg-stone-800/60 motion-reduce:animate-none" />
+              </div>
+            ) : shared.length > 1 ? (
               <SortableContext items={shared.map((library) => library.id)} strategy={verticalListSortingStrategy}>
                 {shared.map((library) => {
                   const isActive = activeLibraryId === library.id

@@ -87,6 +87,7 @@ export function useCreateAnnotation(bookId: string) {
     // Not awaited on purpose: mutateAsync resolves as soon as the POST does,
     // the refetch resyncs the cache (including overlap deletes) in the background
     onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['idea-composer', bookId] })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
@@ -117,6 +118,7 @@ export function useUpdateAnnotation(bookId: string) {
     },
     // Not awaited on purpose: the refetch resyncs the cache in the background
     onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
@@ -140,9 +142,12 @@ export function useDeleteAnnotation(bookId: string) {
       if (context?.previous) queryClient.setQueryData(key, context.previous)
     },
     onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
       void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
+      // Deleting a whole annotation can retire the notifications pointing at it.
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
     },
   })
 }
@@ -178,9 +183,12 @@ export function useBatchDeleteAnnotations(bookId: string) {
       }
     },
     onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
       void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
+      // Batch deletes can retire the notifications pointing at the removed items.
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
     },
   })
 }

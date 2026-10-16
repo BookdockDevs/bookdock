@@ -122,7 +122,7 @@ describe('ShareCardDialog', () => {
   })
 
   it('loads builtin stylesheets when the share card dialog opens', async () => {
-    const { container } = renderDialog()
+    renderDialog()
 
     const fontRow = (await screen.findByText('字体', { selector: 'span' })).parentElement!
     const wenkaiChip = Array.from(fontRow.querySelectorAll('button')).find((b) => b.textContent === '霞鹜文楷')!
@@ -131,7 +131,7 @@ describe('ShareCardDialog', () => {
 
     fireEvent.click(wenkaiChip)
     expect(loadShareCardPrefs().font).toBe('lxgw-wenkai')
-    expect(container.querySelector('.animate-spin')).toBeTruthy()
+    expect(document.body.querySelector('.animate-spin')).toBeTruthy()
     // System and uploaded chips never carry a builtin loading status icon.
     const chipByName = (name: string) => Array.from(fontRow.querySelectorAll('button')).find((b) => b.textContent === name)!
     expect(chipByName('宋体').querySelector('svg')).toBeNull()
@@ -148,5 +148,16 @@ describe('ShareCardDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '书坞' }))
     expect(loadShareCardPrefs().brand).toBe('zh')
+  })
+
+  it('mounts its overlay outside the application root for modal stacking order', async () => {
+    const { container } = renderDialog()
+
+    const saveButton = await screen.findByRole('button', { name: '保存图片' })
+    const overlay = saveButton.closest('[class*="fixed"]')
+
+    expect(overlay).not.toBeNull()
+    expect(container.contains(overlay)).toBe(false)
+    expect(document.body.contains(overlay)).toBe(true)
   })
 })

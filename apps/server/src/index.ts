@@ -7,6 +7,7 @@ import app from './app'
 import { config } from './config'
 import { runMigrations } from './db/client'
 import { log } from './lib/logger'
+import { sweepContentFiles } from './lib/content-file-lifecycle'
 import { pruneOldContentRevisions, purgeAllExpiredTrash } from './modules/books/books.service'
 import { purgeAllLibraryTrash } from './modules/libraries/catalog.service'
 import { interruptStaleAiGenerationRuns } from './modules/ai/ai.runs.service'
@@ -19,6 +20,7 @@ async function runTrashSweep() {
   try {
     await purgeAllExpiredTrash()
     await purgeAllLibraryTrash()
+    await sweepContentFiles()
     const pruned = await pruneOldContentRevisions()
     if (pruned.prunedRevisions > 0 || pruned.deletedBlobs > 0) {
       log('info', 'books.revision_prune.completed', { durationMs: Date.now() - startedAt, meta: { ...pruned } })

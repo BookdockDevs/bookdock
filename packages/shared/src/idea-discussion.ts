@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { interactionRequestIdSchema } from './notification'
 
 import type { AnnotationRes } from './contract'
 
@@ -49,6 +50,7 @@ export interface IdeaComposerContext {
 }
 
 export const ideaCommentCreateSchema = z.object({
+  requestId: interactionRequestIdSchema,
   body: z.string().trim().min(1).max(10000),
   replyToId: z.string().min(1).optional(),
 }).strict()
