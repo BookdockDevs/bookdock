@@ -375,11 +375,10 @@ describe('UI Loading States Regression Tests', () => {
 
     it('does not invalidate interaction projections for an unrelated settled mutation', async () => {
       const { queryClient: appQueryClient } = await import('@/lib/query-client')
-      const suffix = Date.now()
       const keys = [
-        ['test-unrelated-notifications', suffix],
-        ['test-unrelated-note-archive', suffix],
-        ['test-unrelated-author-reviews', suffix],
+        ['notifications'],
+        ['note-archive'],
+        ['reviews', 'author'],
       ]
       for (const key of keys) appQueryClient.setQueryData(key, { data: [] })
 

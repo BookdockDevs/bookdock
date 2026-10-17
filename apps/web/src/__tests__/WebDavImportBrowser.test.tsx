@@ -210,8 +210,15 @@ describe('WebDavImportBrowser', () => {
     await waitFor(() => expect(calls).toBe(1))
 
     fireEvent.click(screen.getByRole('button', { name: /取消上传/ }))
+    // While the aborted in-flight request is still pending, controls must stay locked
     expect(screen.getByRole('button', { name: /取消上传/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /重试全部失败/ })).not.toBeInTheDocument()
+    expect(calls).toBe(1)
+
+    // Now settle the aborted in-flight request
+    rejectFirst?.(new DOMException('Aborted', 'AbortError'))
     await waitFor(() => expect(screen.getAllByText(/已取消/).length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.queryByRole('button', { name: /取消上传/ })).not.toBeInTheDocument())
     expect(calls).toBe(1)
   })
 
