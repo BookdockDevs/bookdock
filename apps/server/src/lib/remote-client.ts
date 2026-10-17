@@ -24,6 +24,10 @@ export async function readRemoteRange(response: Response, range: { start: number
     return null
   }
   const expected = end - start + 1
+  if (expected > 32 * 1024 * 1024) {
+    await response.body?.cancel()
+    return null
+  }
   const reader = response.body?.getReader()
   if (!reader) return null
   const chunks: Uint8Array[] = []

@@ -147,8 +147,12 @@ export function useReaderRenderer({
   const fontsQuery = useFonts()
   const fontsData = fontsQuery.data
   const preparedUrlRef = useRef('')
-  if (url && ready && fontsData) preparedUrlRef.current = url
-  const canMount = Boolean(url) && preparedUrlRef.current === url
+  if (!url || !ready) {
+    preparedUrlRef.current = ''
+  } else if (fontsData) {
+    preparedUrlRef.current = url
+  }
+  const canMount = Boolean(url) && ready && preparedUrlRef.current === url
   const resolvedFont = resolveDualFont(fontFamily, cjkFontFamily, fontsData?.data ?? [], fontPreferences, fontOrder)
   const fontStack = resolvedFont.stack
   const fontCss = resolvedFont.css

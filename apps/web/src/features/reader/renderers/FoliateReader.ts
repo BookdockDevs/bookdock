@@ -1197,7 +1197,11 @@ export async function openZipFromWholeFile(url: string, foliate: any) {
     if (!res.ok) throw new Error(`fetch epub failed: ${res.status} ${res.statusText}`)
     file = await res.blob()
     const expected = res.headers.get('content-length')
-    if (expected !== null && file.size !== Number(expected)) throw new Error('Incomplete EPUB response')
+    const encoding = res.headers.get('content-encoding')
+    const isEncoded = encoding !== null && encoding !== '' && encoding.toLowerCase() !== 'identity'
+    if (!isEncoded && expected !== null && file.size !== Number(expected)) {
+      throw new Error('Incomplete EPUB response')
+    }
   } finally {
     clearTimeout(timeoutId)
   }
