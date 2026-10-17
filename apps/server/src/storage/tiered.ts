@@ -23,8 +23,9 @@ export class TieredStorageDriver implements StorageDriver {
   private cacheMaxMb: number = 2048
   private cacheFills = new Map<string, Promise<void>>()
   private remoteSizes = new Map<string, { size: number; expires: number }>()
-  private rangeRetryAt = 0
+  private rangeRetryAt = new Map<string, number>()
   private metadataRetryAt = 0
+  private cancelledFills = new Set<string>()
 
   constructor(client: RemoteTierClient, remoteBasePath: string, cacheMaxMb: number) {
     this.localDriver = new LocalFsDriver(path.join(config.dataDir, 'files'))
@@ -95,7 +96,8 @@ export class TieredStorageDriver implements StorageDriver {
       return this.localDriver.get(key, range)
     }
 
-    if (range && !this.cacheFills.has(key) && this.remoteClient.getRange && Date.now() >= this.rangeRetryAt) {
+    const rangeCooldown = this.rangeRetryAt.get(key) ?? 0
+    if (range && !this.cacheFills.has(key) && this.remoteClient.getRange && Date.now() >= rangeCooldown) {
       const started = Date.now()
       try {
         const result = await this.remoteClient.getRange(this.getRemoteFilePath(key), range)
@@ -110,7 +112,7 @@ export class TieredStorageDriver implements StorageDriver {
       } catch {
         // Transient failures also fall back to the shared full-file path.
       }
-      this.rangeRetryAt = Date.now() + 30000
+      this.rangeRetryAt.set(key, Date.now() + 30000)
     }
 
     await this.ensureCached(key)
@@ -142,6 +144,11 @@ export class TieredStorageDriver implements StorageDriver {
         throw new Error('Downloaded cache file has an unexpected size')
       }
 
+      if (this.cancelledFills.has(key)) {
+        await fs.unlink(tmpPath).catch(() => {})
+        return
+      }
+
       await fs.rename(tmpPath, localTarget)
 
       // Update DB status to synced
@@ -161,10 +168,15 @@ export class TieredStorageDriver implements StorageDriver {
       this.remoteSizes.delete(key)
       await fs.unlink(tmpPath).catch(() => {})
       throw err
+    } finally {
+      this.cancelledFills.delete(key)
     }
   }
 
   async delete(key: string): Promise<void> {
+    if (this.cacheFills.has(key)) {
+      this.cancelledFills.add(key)
+    }
     if (key.startsWith('content/')) {
       await this.localDriver.delete(key)
       return
