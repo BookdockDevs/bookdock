@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import SmartMenu from '@/components/ui/SmartMenu'
 import LibraryCreateDialog from '@/features/library/components/LibraryCreateDialog'
 import LibraryManageDialog from '@/features/library/components/LibraryManageDialog'
@@ -108,7 +109,9 @@ export default function LibraryManagementSection() {
             <QueryErrorState isRetrying={isFetching} onRetry={refetch} />
           </div>
         ) : memberships.length === 0 ? (
-          <p className="px-4 py-6 text-center text-xs text-stone-400 sm:px-6 dark:text-stone-500">{_('library.noJoinedLibraries')}</p>
+          <div className="p-4 sm:p-6">
+            <SettingsEmptyState>{_('library.noJoinedLibraries')}</SettingsEmptyState>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[34rem] text-left text-sm sm:min-w-full">
